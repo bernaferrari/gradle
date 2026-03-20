@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit;
  * gRPC client for communicating with the Rust substrate daemon.
  * Connects via Unix domain socket.
  *
- * <p>Provides blocking stubs for all 22 substrate services.
+ * <p>Provides blocking stubs for all 24 substrate services.
  * When the substrate is disabled (noop mode), all stub getters
  * throw {@link SubstrateException}.</p>
  */
@@ -66,6 +66,10 @@ public class SubstrateClient implements Closeable {
     private final WorkerProcessServiceGrpc.WorkerProcessServiceBlockingStub workerProcessStub;
     // Phase 26: Build layout / project model
     private final BuildLayoutServiceGrpc.BuildLayoutServiceBlockingStub buildLayoutStub;
+    // Phase 28: Build result reporting
+    private final BuildResultServiceGrpc.BuildResultServiceBlockingStub buildResultStub;
+    // Phase 29: Problem / diagnostic reporting
+    private final ProblemReportingServiceGrpc.ProblemReportingServiceBlockingStub problemReportingStub;
 
     private SubstrateClient(ManagedChannel channel, boolean noop) {
         this.channel = channel;
@@ -93,6 +97,8 @@ public class SubstrateClient implements Closeable {
             this.buildEventStreamStub = null;
             this.workerProcessStub = null;
             this.buildLayoutStub = null;
+            this.buildResultStub = null;
+            this.problemReportingStub = null;
         } else {
             this.controlStub = ControlServiceGrpc.newBlockingStub(channel);
             this.hashStub = HashServiceGrpc.newBlockingStub(channel);
@@ -116,6 +122,8 @@ public class SubstrateClient implements Closeable {
             this.buildEventStreamStub = BuildEventStreamServiceGrpc.newBlockingStub(channel);
             this.workerProcessStub = WorkerProcessServiceGrpc.newBlockingStub(channel);
             this.buildLayoutStub = BuildLayoutServiceGrpc.newBlockingStub(channel);
+            this.buildResultStub = BuildResultServiceGrpc.newBlockingStub(channel);
+            this.problemReportingStub = ProblemReportingServiceGrpc.newBlockingStub(channel);
         }
     }
 
@@ -251,6 +259,16 @@ public class SubstrateClient implements Closeable {
     public BuildLayoutServiceGrpc.BuildLayoutServiceBlockingStub getBuildLayoutStub() {
         throwIfNoop();
         return buildLayoutStub;
+    }
+
+    public BuildResultServiceGrpc.BuildResultServiceBlockingStub getBuildResultStub() {
+        throwIfNoop();
+        return buildResultStub;
+    }
+
+    public ProblemReportingServiceGrpc.ProblemReportingServiceBlockingStub getProblemReportingStub() {
+        throwIfNoop();
+        return problemReportingStub;
     }
 
     private void throwIfNoop() {

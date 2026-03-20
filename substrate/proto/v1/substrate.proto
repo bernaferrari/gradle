@@ -1345,3 +1345,154 @@ message ListProjectsResponse {
   repeated string project_paths = 1;
   repeated string project_dirs = 2;
 }
+
+// -- Build Result Reporting Service (Phase 28) --
+
+// Aggregates build outcomes, task results, and build metadata.
+// Replaces Gradle's BuildResult model with a more efficient Rust
+// implementation. Provides structured build reports for CI/CD
+// integration and build scans.
+service BuildResultService {
+  // Report a task execution result.
+  rpc ReportTaskResult(ReportTaskResultRequest) returns (ReportTaskResultResponse);
+  // Report a build failure.
+  rpc ReportBuildFailure(ReportBuildFailureRequest) returns (ReportBuildFailureResponse);
+  // Get the aggregated build result.
+  rpc GetBuildResult(GetBuildResultRequest) returns (GetBuildResultResponse);
+  // Get a summary of all tasks in the build.
+  rpc GetTaskSummary(GetTaskSummaryRequest) returns (GetTaskSummaryResponse);
+}
+
+message TaskResult {
+  string task_path = 1;            // e.g. ":app:compileJava"
+  string outcome = 2;              // "SUCCESS", "UP_TO_DATE", "FROM_CACHE", "FAILED", "SKIPPED"
+  int64 duration_ms = 3;           // execution time
+  bool did_work = 4;               // whether the task actually did any work
+  string cache_key = 5;            // build cache key (if applicable)
+  int64 start_time_ms = 6;
+  int64 end_time_ms = 7;
+  string failure_message = 8;      // set if outcome == FAILED
+  int32 execution_reason = 9;      // 0=incremental, 1=full, 2=no-source
+}
+
+message ReportTaskResultRequest {
+  string build_id = 1;
+  TaskResult result = 2;
+}
+
+message ReportTaskResultResponse {
+  bool accepted = 1;
+}
+
+message ReportBuildFailureRequest {
+  string build_id = 1;
+  string failure_type = 2;         // "build_failed", "configuration_error", "assertion_error"
+  string failure_message = 3;
+  repeated string failed_task_paths = 4;
+}
+
+message ReportBuildFailureResponse {
+  bool accepted = 1;
+}
+
+message BuildOutcome {
+  string build_id = 1;
+  string overall_result = 2;       // "SUCCESS", "FAILED"
+  int64 total_duration_ms = 3;
+  int32 tasks_total = 4;
+  int32 tasks_executed = 5;
+  int32 tasks_from_cache = 6;
+  int32 tasks_up_to_date = 7;
+  int32 tasks_failed = 8;
+  int32 tasks_skipped = 9;
+}
+
+message GetBuildResultRequest {
+  string build_id = 1;
+}
+
+message GetBuildResultResponse {
+  BuildOutcome outcome = 1;
+  repeated TaskResult task_results = 2;
+}
+
+message GetTaskSummaryRequest {
+  string build_id = 1;
+}
+
+message TaskSummaryEntry {
+  string task_path = 1;
+  string outcome = 2;
+  int64 duration_ms = 3;
+}
+
+message GetTaskSummaryResponse {
+  repeated TaskSummaryEntry tasks = 1;
+  int64 total_duration_ms = 2;
+}
+
+// -- Problem / Diagnostic Reporting Service (Phase 29) --
+
+// Collects and manages build problems, warnings, and deprecations.
+// Replaces Gradle's ProblemReporting infrastructure with a Rust
+// implementation that provides structured diagnostics for IDEs
+// and CI dashboards.
+service ProblemReportingService {
+  // Report a problem (warning, error, deprecation, etc.).
+  rpc ReportProblem(ReportProblemRequest) returns (ReportProblemResponse);
+  // Get all problems for a build.
+  rpc GetProblems(GetProblemsRequest) returns (GetProblemsResponse);
+  // Get problems by severity.
+  rpc GetProblemsBySeverity(GetProblemsBySeverityRequest) returns (GetProblemsResponse);
+  // Clear problems for a build.
+  rpc ClearProblems(ClearProblemsRequest) returns (ClearProblemsResponse);
+}
+
+message ProblemDetails {
+  string problem_id = 1;
+  string severity = 2;             // "warning", "error", "info", "deprecation"
+  string category = 3;             // "deprecated_feature", "property_override", "dependency", "compile", "lint"
+  string message = 4;
+  string details = 5;              // optional: longer description
+  string file_path = 6;            // optional: source file
+  int32 line_number = 7;           // optional: line in file
+  int32 column = 8;                // optional: column in file
+  string contextual_label = 9;     // e.g. "org.gradle.java", "compileKotlin"
+  string documentation_url = 10;   // link to docs about the problem
+  string additional_data = 11;     // JSON blob for extra info
+  int64 timestamp_ms = 12;
+}
+
+message ReportProblemRequest {
+  string build_id = 1;
+  ProblemDetails problem = 2;
+}
+
+message ReportProblemResponse {
+  bool accepted = 1;
+}
+
+message GetProblemsRequest {
+  string build_id = 1;
+}
+
+message GetProblemsBySeverityRequest {
+  string build_id = 1;
+  string severity = 2;
+}
+
+message GetProblemsResponse {
+  repeated ProblemDetails problems = 1;
+  int32 total = 2;
+  int32 warning_count = 3;
+  int32 error_count = 4;
+  int32 deprecation_count = 5;
+}
+
+message ClearProblemsRequest {
+  string build_id = 1;
+}
+
+message ClearProblemsResponse {
+  int32 cleared = 1;
+}

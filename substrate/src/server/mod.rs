@@ -20,3 +20,5 @@ pub mod toolchain;
 pub mod build_event_stream;
 pub mod worker_process;
 pub mod build_layout;
+pub mod build_result;
+pub mod problem_reporting;

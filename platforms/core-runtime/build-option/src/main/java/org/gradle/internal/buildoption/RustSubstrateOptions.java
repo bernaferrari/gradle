@@ -213,6 +213,22 @@ public class RustSubstrateOptions {
     public static final InternalFlag ENABLE_RUST_BUILD_LAYOUT =
         new InternalFlag("org.gradle.rust.substrate.buildlayout.enabled", false);
 
+    /**
+     * Enable Phase 28: Rust-native build result reporting.
+     * Property: org.gradle.rust.substrate.buildresult.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_BUILD_RESULT =
+        new InternalFlag("org.gradle.rust.substrate.buildresult.enabled", false);
+
+    /**
+     * Enable Phase 29: Rust-native problem/diagnostic reporting.
+     * Property: org.gradle.rust.substrate.problems.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_PROBLEMS =
+        new InternalFlag("org.gradle.rust.substrate.problems.enabled", false);
+
     private RustSubstrateOptions() {
         // utility class
     }
