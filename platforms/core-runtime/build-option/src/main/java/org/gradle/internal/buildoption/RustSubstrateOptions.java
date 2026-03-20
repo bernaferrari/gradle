@@ -70,6 +70,24 @@ public class RustSubstrateOptions {
     public static final InternalFlag REPORT_MISMATCHES =
         new InternalFlag("org.gradle.rust.substrate.shadow.report-mismatches", true);
 
+    /**
+     * Enable Phase 5: Advisory ExecutionEngine.
+     * Rust predicts outcomes, Java remains authoritative.
+     * Property: org.gradle.rust.substrate.execution.advisory
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_ADVISORY_EXECUTION =
+        new InternalFlag("org.gradle.rust.substrate.execution.advisory", false);
+
+    /**
+     * Enable Phase 6: Authoritative ExecutionEngine.
+     * Rust drives work identity, caching, and up-to-date decisions.
+     * Property: org.gradle.rust.substrate.execution.authoritative
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_AUTHORITATIVE_EXECUTION =
+        new InternalFlag("org.gradle.rust.substrate.execution.authoritative", false);
+
     private RustSubstrateOptions() {
         // utility class
     }
