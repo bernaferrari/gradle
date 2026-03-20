@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit;
  * gRPC client for communicating with the Rust substrate daemon.
  * Connects via Unix domain socket.
  *
- * <p>Provides blocking stubs for all 29 substrate services.
+ * <p>Provides blocking stubs for all 31 substrate services.
  * When the substrate is disabled (noop mode), all stub getters
  * throw {@link SubstrateException}.</p>
  */
@@ -80,6 +80,10 @@ public class SubstrateClient implements Closeable {
     private final TestExecutionServiceGrpc.TestExecutionServiceBlockingStub testExecutionStub;
     // Phase 34: Artifact publishing
     private final ArtifactPublishingServiceGrpc.ArtifactPublishingServiceBlockingStub artifactPublishingStub;
+    // Phase 35: Build initialization
+    private final BuildInitServiceGrpc.BuildInitServiceBlockingStub buildInitStub;
+    // Phase 36: Incremental compilation
+    private final IncrementalCompilationServiceGrpc.IncrementalCompilationServiceBlockingStub incrementalCompilationStub;
 
     private SubstrateClient(ManagedChannel channel, boolean noop) {
         this.channel = channel;
@@ -114,6 +118,8 @@ public class SubstrateClient implements Closeable {
             this.consoleStub = null;
             this.testExecutionStub = null;
             this.artifactPublishingStub = null;
+            this.buildInitStub = null;
+            this.incrementalCompilationStub = null;
         } else {
             this.controlStub = ControlServiceGrpc.newBlockingStub(channel);
             this.hashStub = HashServiceGrpc.newBlockingStub(channel);
@@ -144,6 +150,8 @@ public class SubstrateClient implements Closeable {
             this.consoleStub = ConsoleServiceGrpc.newBlockingStub(channel);
             this.testExecutionStub = TestExecutionServiceGrpc.newBlockingStub(channel);
             this.artifactPublishingStub = ArtifactPublishingServiceGrpc.newBlockingStub(channel);
+            this.buildInitStub = BuildInitServiceGrpc.newBlockingStub(channel);
+            this.incrementalCompilationStub = IncrementalCompilationServiceGrpc.newBlockingStub(channel);
         }
     }
 
@@ -314,6 +322,16 @@ public class SubstrateClient implements Closeable {
     public ArtifactPublishingServiceGrpc.ArtifactPublishingServiceBlockingStub getArtifactPublishingStub() {
         throwIfNoop();
         return artifactPublishingStub;
+    }
+
+    public BuildInitServiceGrpc.BuildInitServiceBlockingStub getBuildInitStub() {
+        throwIfNoop();
+        return buildInitStub;
+    }
+
+    public IncrementalCompilationServiceGrpc.IncrementalCompilationServiceBlockingStub getIncrementalCompilationStub() {
+        throwIfNoop();
+        return incrementalCompilationStub;
     }
 
     private void throwIfNoop() {
