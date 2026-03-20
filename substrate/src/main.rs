@@ -12,12 +12,15 @@ use gradle_substrate_daemon::{
         build_cache_orchestration_service_server::BuildCacheOrchestrationServiceServer,
         build_operations_service_server::BuildOperationsServiceServer,
         cache_service_server::CacheServiceServer,
+        configuration_cache_service_server::ConfigurationCacheServiceServer,
         configuration_service_server::ConfigurationServiceServer,
         control_service_server::ControlServiceServer,
+        dependency_resolution_service_server::DependencyResolutionServiceServer,
         execution_history_service_server::ExecutionHistoryServiceServer,
         execution_plan_service_server::ExecutionPlanServiceServer,
         exec_service_server::ExecServiceServer,
         file_fingerprint_service_server::FileFingerprintServiceServer,
+        file_watch_service_server::FileWatchServiceServer,
         hash_service_server::HashServiceServer,
         plugin_service_server::PluginServiceServer,
         task_graph_service_server::TaskGraphServiceServer,
@@ -27,11 +30,13 @@ use gradle_substrate_daemon::{
     server::{
         bootstrap::BootstrapServiceImpl, build_operations::BuildOperationsServiceImpl,
         cache::CacheServiceImpl, cache_orchestration::BuildCacheOrchestrationServiceImpl,
-        configuration::ConfigurationServiceImpl, control::ControlServiceImpl,
+        config_cache::ConfigurationCacheServiceImpl, configuration::ConfigurationServiceImpl,
+        control::ControlServiceImpl, dependency_resolution::DependencyResolutionServiceImpl,
         execution_history::ExecutionHistoryServiceImpl, execution_plan::ExecutionPlanServiceImpl,
-        exec::ExecServiceImpl, file_fingerprint::FileFingerprintServiceImpl, hash::HashServiceImpl,
-        plugin::PluginServiceImpl, task_graph::TaskGraphServiceImpl,
-        value_snapshot::ValueSnapshotServiceImpl, work::WorkServiceImpl,
+        exec::ExecServiceImpl, file_fingerprint::FileFingerprintServiceImpl,
+        file_watch::FileWatchServiceImpl, hash::HashServiceImpl, plugin::PluginServiceImpl,
+        task_graph::TaskGraphServiceImpl, value_snapshot::ValueSnapshotServiceImpl,
+        work::WorkServiceImpl,
     },
     PROTOCOL_VERSION,
 };
@@ -60,6 +65,10 @@ struct Args {
     /// Path to the execution history directory
     #[arg(long, default_value = "/tmp/gradle-substrate-history")]
     history_dir: String,
+
+    /// Path to the configuration cache directory
+    #[arg(long, default_value = "/tmp/gradle-substrate-config-cache")]
+    config_cache_dir: String,
 }
 
 fn init_logging(level: &str) {
@@ -169,12 +178,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 15: Bootstrap
     let bootstrap = BootstrapServiceImpl::new();
 
+    // Phase 18: Dependency resolution
+    let dependency_resolution = DependencyResolutionServiceImpl::new();
+
+    // Phase 19: File watching
+    let file_watch = FileWatchServiceImpl::new();
+
+    // Phase 20: Configuration cache
+    let config_cache_dir = PathBuf::from(&args.config_cache_dir);
+    let config_cache = ConfigurationCacheServiceImpl::new(config_cache_dir);
+
     let listener = UnixListener::bind(&socket_path)?;
 
     println!("Gradle Substrate Daemon v{}", env!("CARGO_PKG_VERSION"));
     println!("Protocol version: {}", PROTOCOL_VERSION);
     println!("Listening on: {}", args.socket_path);
-    println!("Services: control, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap");
+    println!("Services: control, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache");
 
     Server::builder()
         .add_service(ControlServiceServer::new(control))
@@ -192,6 +211,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(PluginServiceServer::new(plugin))
         .add_service(BuildOperationsServiceServer::new(build_operations))
         .add_service(BootstrapServiceServer::new(bootstrap))
+        .add_service(DependencyResolutionServiceServer::new(dependency_resolution))
+        .add_service(FileWatchServiceServer::new(file_watch))
+        .add_service(ConfigurationCacheServiceServer::new(config_cache))
         .serve_with_incoming_shutdown(tokio_stream::wrappers::UnixListenerStream::new(listener), shutdown_signal())
         .await?;
 

@@ -23,6 +23,7 @@ tokio-stream = "0.1"
 num_cpus = "1"
 bincode = "1"
 serde = { version = "1", features = ["derive"] }
+async-stream = "0.3"
 
 [build-dependencies]
 tonic-build = "0.12"

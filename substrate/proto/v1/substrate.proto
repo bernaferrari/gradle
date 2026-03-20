@@ -813,3 +813,225 @@ message GetSubstrateInfoResponse {
   repeated SubstrateServiceInfo services = 2;
   int64 total_requests = 3;
 }
+
+// -- Dependency Resolution Service (Phase 18) --
+
+// Resolves dependency graphs and manages artifact downloads.
+service DependencyResolutionService {
+  // Resolve a dependency graph.
+  rpc ResolveDependencies(ResolveDependenciesRequest) returns (ResolveDependenciesResponse);
+  // Check if an artifact is in the local cache.
+  rpc CheckArtifactCache(CheckArtifactCacheRequest) returns (CheckArtifactCacheResponse);
+  // Download an artifact.
+  rpc DownloadArtifact(DownloadArtifactRequest) returns (stream DownloadArtifactChunk);
+  // Report resolution result for tracking.
+  rpc RecordResolution(RecordResolutionRequest) returns (RecordResolutionResponse);
+}
+
+message DependencyDescriptor {
+  string group = 1;
+  string name = 2;
+  string version = 3;
+  string classifier = 4; // e.g. "sources", "javadoc"
+  string extension = 5;  // e.g. "jar", "aar", "pom"
+  bool transitive = 6;
+}
+
+message RepositoryDescriptor {
+  string id = 1;
+  string url = 2;
+  bool m2compatible = 3;
+  bool allow_insecure_protocol = 4;
+  map<string, string> credentials = 5;
+}
+
+message ResolveDependenciesRequest {
+  string configuration_name = 1;
+  repeated DependencyDescriptor dependencies = 2;
+  repeated RepositoryDescriptor repositories = 3;
+  repeated string attributes = 4;
+  bool lenient = 5;
+}
+
+message ResolvedDependency {
+  string group = 1;
+  string name = 2;
+  string version = 3;
+  string selected_version = 4; // after conflict resolution
+  repeated ResolvedDependency dependencies = 5;
+  bool resolved = 6;
+  string failure_reason = 7;
+  string artifact_url = 8;
+  int64 artifact_size = 9;
+  string artifact_sha256 = 10;
+}
+
+message ResolveDependenciesResponse {
+  bool success = 1;
+  repeated ResolvedDependency resolved_dependencies = 2;
+  string error_message = 3;
+  int64 resolution_time_ms = 4;
+  int32 total_artifacts = 5;
+  int64 total_download_size = 6;
+}
+
+message CheckArtifactCacheRequest {
+  string group = 1;
+  string name = 2;
+  string version = 3;
+  string classifier = 4;
+  string extension = 5;
+  string sha256 = 6;
+}
+
+message CheckArtifactCacheResponse {
+  bool cached = 1;
+  string local_path = 2;
+  int64 cached_size = 3;
+}
+
+message DownloadArtifactRequest {
+  string url = 1;
+  string group = 2;
+  string name = 3;
+  string version = 4;
+  string classifier = 5;
+  string extension = 6;
+  repeated RepositoryDescriptor repositories = 7;
+}
+
+message DownloadArtifactChunk {
+  bytes data = 1;
+  int64 offset = 2;
+  int64 total_size = 3;
+  bool is_last = 4;
+  string error_message = 5;
+}
+
+message RecordResolutionRequest {
+  string configuration_name = 1;
+  int32 dependency_count = 2;
+  int64 resolution_time_ms = 3;
+  bool success = 4;
+  int64 cache_hits = 5;
+}
+
+message RecordResolutionResponse {
+  bool acknowledged = 1;
+}
+
+// -- File System Watch Service (Phase 19) --
+
+// Watches file system changes for incremental builds.
+service FileWatchService {
+  // Start watching a directory tree.
+  rpc StartWatching(StartWatchingRequest) returns (StartWatchingResponse);
+  // Stop watching a directory tree.
+  rpc StopWatching(StopWatchingRequest) returns (StopWatchingResponse);
+  // Poll for changes since last poll (server-streaming).
+  rpc PollChanges(PollChangesRequest) returns (stream FileChangeEvent);
+  // Get watch statistics.
+  rpc GetWatchStats(GetWatchStatsRequest) returns (GetWatchStatsResponse);
+}
+
+message StartWatchingRequest {
+  string root_path = 1;
+  repeated string include_patterns = 2;
+  repeated string exclude_patterns = 3;
+}
+
+message StartWatchingResponse {
+  bool watching = 1;
+  string watch_id = 2;
+  int64 files_watched = 3;
+}
+
+message StopWatchingRequest {
+  string watch_id = 1;
+}
+
+message StopWatchingResponse {
+  bool stopped = 1;
+}
+
+message PollChangesRequest {
+  string watch_id = 1;
+  int64 since_timestamp_ms = 2;
+}
+
+message FileChangeEvent {
+  string path = 1;
+  string change_type = 2; // CREATED, MODIFIED, DELETED
+  int64 timestamp_ms = 3;
+  int64 file_size = 4;
+  bool is_directory = 5;
+}
+
+message GetWatchStatsRequest {
+  string watch_id = 1;
+}
+
+message GetWatchStatsResponse {
+  int64 files_watched = 1;
+  int64 changes_detected = 2;
+  int64 last_poll_time_ms = 3;
+  int64 watch_start_time_ms = 4;
+}
+
+// -- Configuration Cache Service (Phase 20) --
+
+// Stores and retrieves serialized build configuration.
+service ConfigurationCacheService {
+  // Store a configuration cache entry.
+  rpc StoreConfigCache(StoreConfigCacheRequest) returns (StoreConfigCacheResponse);
+  // Load a configuration cache entry.
+  rpc LoadConfigCache(LoadConfigCacheRequest) returns (LoadConfigCacheResponse);
+  // Validate a configuration cache entry.
+  rpc ValidateConfig(ValidateConfigRequest) returns (ValidateConfigResponse);
+  // Clean stale cache entries.
+  rpc CleanConfigCache(CleanConfigCacheRequest) returns (CleanConfigCacheResponse);
+}
+
+message StoreConfigCacheRequest {
+  string cache_key = 1;
+  bytes serialized_config = 2;
+  int64 entry_count = 3;
+  repeated string input_hashes = 4;
+  int64 timestamp_ms = 5;
+}
+
+message StoreConfigCacheResponse {
+  bool stored = 1;
+  int64 storage_time_ms = 2;
+}
+
+message LoadConfigCacheRequest {
+  string cache_key = 1;
+}
+
+message LoadConfigCacheResponse {
+  bool found = 2;
+  bytes serialized_config = 3;
+  int64 entry_count = 4;
+  int64 timestamp_ms = 5;
+}
+
+message ValidateConfigRequest {
+  string cache_key = 1;
+  repeated string input_hashes = 2;
+}
+
+message ValidateConfigResponse {
+  bool valid = 1;
+  string reason = 2;
+}
+
+message CleanConfigCacheRequest {
+  int64 max_age_ms = 1;
+  int32 max_entries = 2;
+}
+
+message CleanConfigCacheResponse {
+  int32 entries_removed = 1;
+  int64 space_recovered_bytes = 2;
+}

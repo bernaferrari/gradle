@@ -157,6 +157,30 @@ public class RustSubstrateOptions {
     public static final InternalFlag ENABLE_RUST_BOOTSTRAP =
         new InternalFlag("org.gradle.rust.substrate.bootstrap.enabled", false);
 
+    /**
+     * Enable Phase 18: Rust-native dependency resolution.
+     * Property: org.gradle.rust.substrate.dependency.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_DEPENDENCY_RESOLUTION =
+        new InternalFlag("org.gradle.rust.substrate.dependency.enabled", false);
+
+    /**
+     * Enable Phase 19: Rust-native file system watching.
+     * Property: org.gradle.rust.substrate.filewatch.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_FILE_WATCH =
+        new InternalFlag("org.gradle.rust.substrate.filewatch.enabled", false);
+
+    /**
+     * Enable Phase 20: Rust-native configuration cache.
+     * Property: org.gradle.rust.substrate.configcache.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_CONFIG_CACHE =
+        new InternalFlag("org.gradle.rust.substrate.configcache.enabled", false);
+
     private RustSubstrateOptions() {
         // utility class
     }
