@@ -3,9 +3,14 @@ package org.gradle.internal.rustbridge;
 import org.gradle.internal.buildoption.InternalOptions;
 import org.gradle.internal.buildoption.RustSubstrateOptions;
 import org.gradle.internal.rustbridge.cache.RustBuildCacheServiceFactory;
+import org.gradle.internal.rustbridge.cache.RustRemoteBuildCacheServiceFactory;
+import org.gradle.internal.rustbridge.configuration.RustConfigurationClient;
 import org.gradle.internal.rustbridge.execution.ExecutionPlanClient;
 import org.gradle.internal.rustbridge.fingerprint.RustFileFingerprintClient;
 import org.gradle.internal.rustbridge.history.RustExecutionHistoryClient;
+import org.gradle.internal.rustbridge.snapshot.RustValueSnapshotClient;
+import org.gradle.internal.rustbridge.taskgraph.RustTaskGraphClient;
+import org.gradle.internal.rustbridge.watch.RustFileWatchClient;
 import org.gradle.internal.rustbridge.work.WorkerSchedulerClient;
 import org.gradle.internal.service.ServiceRegistration;
 import org.gradle.internal.service.scopes.AbstractGradleModuleServices;
@@ -94,6 +99,12 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
         }
 
         @Provides
+        @org.gradle.internal.service.scopes.PrivateService
+        RustRemoteBuildCacheServiceFactory createRustRemoteBuildCacheServiceFactory(SubstrateClient client) {
+            return new RustRemoteBuildCacheServiceFactory(client);
+        }
+
+        @Provides
         ExecutionPlanClient createExecutionPlanClient(SubstrateClient client) {
             return new ExecutionPlanClient(client);
         }
@@ -106,6 +117,26 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
         @Provides
         RustExecutionHistoryClient createRustExecutionHistoryClient(SubstrateClient client) {
             return new RustExecutionHistoryClient(client);
+        }
+
+        @Provides
+        RustValueSnapshotClient createRustValueSnapshotClient(SubstrateClient client) {
+            return new RustValueSnapshotClient(client);
+        }
+
+        @Provides
+        RustTaskGraphClient createRustTaskGraphClient(SubstrateClient client) {
+            return new RustTaskGraphClient(client);
+        }
+
+        @Provides
+        RustConfigurationClient createRustConfigurationClient(SubstrateClient client) {
+            return new RustConfigurationClient(client);
+        }
+
+        @Provides
+        RustFileWatchClient createRustFileWatchClient(SubstrateClient client) {
+            return new RustFileWatchClient(client);
         }
     }
 }

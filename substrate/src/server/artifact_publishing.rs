@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::time::Duration;
 
 use dashmap::DashMap;
 use md5::Digest as _;
@@ -21,13 +22,22 @@ struct TrackedArtifact {
     error_message: String,
 }
 
+/// Repository credentials.
+struct RepoCredentials {
+    username: String,
+    password: String,
+}
+
 /// Rust-native artifact publishing service.
 /// Manages artifact upload to Maven/Ivy repositories with checksums.
+/// Supports real HTTP PUT uploads with authentication.
 pub struct ArtifactPublishingServiceImpl {
     artifacts: DashMap<String, TrackedArtifact>,
     build_artifacts: DashMap<String, Vec<String>>, // build_id -> [artifact_id]
     artifacts_registered: AtomicI64,
     uploads_completed: AtomicI64,
+    repos: DashMap<String, RepoCredentials>,
+    http_client: reqwest::Client,
 }
 
 impl ArtifactPublishingServiceImpl {
@@ -37,8 +47,129 @@ impl ArtifactPublishingServiceImpl {
             build_artifacts: DashMap::new(),
             artifacts_registered: AtomicI64::new(0),
             uploads_completed: AtomicI64::new(0),
+            repos: DashMap::new(),
+            http_client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(300))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
         }
     }
+
+    /// Register repository credentials for authenticated uploads.
+    pub fn register_repo(&self, repo_id: String, username: String, password: String) {
+        self.repos.insert(repo_id, RepoCredentials { username, password });
+    }
+
+    /// Build the Maven repository URL for an artifact.
+    fn artifact_url(&self, descriptor: &ArtifactDescriptor) -> String {
+        let group_path = descriptor.group.replace('.', "/");
+        let classifier = if descriptor.classifier.is_empty() {
+            String::new()
+        } else {
+            format!("-{}", descriptor.classifier)
+        };
+        format!(
+            "{}/{}/{}/{}/{}-{}{}.{}",
+            descriptor.repository_id,
+            group_path,
+            descriptor.name,
+            descriptor.version,
+            descriptor.name,
+            descriptor.version,
+            classifier,
+            descriptor.extension
+        )
+    }
+
+    /// Perform an actual HTTP PUT upload of an artifact to a Maven repository.
+    async fn perform_upload(
+        &self,
+        descriptor: &ArtifactDescriptor,
+    ) -> Result<i64, String> {
+        let file_path = &descriptor.file_path;
+        if file_path.is_empty() || !std::path::Path::new(file_path).exists() {
+            return Err("Artifact file does not exist".to_string());
+        }
+
+        let data = std::fs::read(file_path)
+            .map_err(|e| format!("Failed to read artifact file: {}", e))?;
+
+        let base_url = self.artifact_url(descriptor);
+        let start = std::time::Instant::now();
+
+        // Build the request with optional auth
+        let mut request = self.http_client
+            .put(&base_url)
+            .header("Content-Type", "application/octet-stream")
+            .body(data.clone());
+
+        if let Some(creds) = self.repos.get(&descriptor.repository_id) {
+            use std::io::Write;
+            let mut buf = Vec::new();
+            write!(buf, "{}:{}", creds.username, creds.password).unwrap();
+            let auth = base64_encode(&buf);
+            request = request.header("Authorization", format!("Basic {}", auth));
+        }
+
+        let response = request.send().await
+            .map_err(|e| format!("Upload request failed: {}", e))?;
+
+        let status = response.status().as_u16();
+        if !(200..=299).contains(&status) {
+            return Err(format!("Upload returned HTTP {}", status));
+        }
+
+        // Upload checksum files
+        let checksum_uploads = [
+            (format!("{}.md5", base_url), format!("{:x}", md5::Md5::digest(&data))),
+            (format!("{}.sha1", base_url), format!("{:x}", sha1::Sha1::digest(&data))),
+            (format!("{}.sha256", base_url), format!("{:x}", sha2::Sha256::digest(&data))),
+        ];
+
+        for (url, checksum) in &checksum_uploads {
+            let mut req = self.http_client
+                .put(url)
+                .body(checksum.clone());
+            if let Some(creds) = self.repos.get(&descriptor.repository_id) {
+                use std::io::Write;
+                let mut buf = Vec::new();
+                write!(buf, "{}:{}", creds.username, creds.password).unwrap();
+                let auth = base64_encode(&buf);
+                req = req.header("Authorization", format!("Basic {}", auth));
+            }
+            if let Err(e) = req.send().await {
+                tracing::warn!(url = %url, error = %e, "Failed to upload checksum file");
+            }
+        }
+
+        let duration = start.elapsed().as_millis() as i64;
+        Ok(duration)
+    }
+}
+
+fn base64_encode(data: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::new();
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+
+        result.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);
+        result.push(CHARS[((triple >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            result.push(CHARS[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+        if chunk.len() > 2 {
+            result.push(CHARS[(triple & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+    }
+    result
 }
 
 #[tonic::async_trait]
@@ -329,7 +460,6 @@ mod tests {
             .unwrap()
             .into_inner();
 
-        // No file path set, so checksums should be empty
         assert!(checksums.md5.is_empty());
     }
 
@@ -362,5 +492,48 @@ mod tests {
         assert!(!checksums.md5.is_empty());
         assert!(!checksums.sha1.is_empty());
         assert!(!checksums.sha256.is_empty());
+    }
+
+    #[test]
+    fn test_artifact_url() {
+        let svc = ArtifactPublishingServiceImpl::new();
+        let desc = ArtifactDescriptor {
+            artifact_id: "test".to_string(),
+            group: "com.example".to_string(),
+            name: "my-lib".to_string(),
+            version: "1.0.0".to_string(),
+            classifier: String::new(),
+            extension: "jar".to_string(),
+            file_path: String::new(),
+            file_size_bytes: 0,
+            repository_id: "https://repo.example.com/maven2".to_string(),
+        };
+        let url = svc.artifact_url(&desc);
+        assert_eq!(url, "https://repo.example.com/maven2/com/example/my-lib/1.0.0/my-lib-1.0.0.jar");
+    }
+
+    #[test]
+    fn test_artifact_url_with_classifier() {
+        let svc = ArtifactPublishingServiceImpl::new();
+        let desc = ArtifactDescriptor {
+            artifact_id: "test".to_string(),
+            group: "com.example".to_string(),
+            name: "my-lib".to_string(),
+            version: "1.0.0".to_string(),
+            classifier: "sources".to_string(),
+            extension: "jar".to_string(),
+            file_path: String::new(),
+            file_size_bytes: 0,
+            repository_id: "https://repo.example.com/maven2".to_string(),
+        };
+        let url = svc.artifact_url(&desc);
+        assert_eq!(url, "https://repo.example.com/maven2/com/example/my-lib/1.0.0/my-lib-1.0.0-sources.jar");
+    }
+
+    #[test]
+    fn test_repo_credentials() {
+        let svc = ArtifactPublishingServiceImpl::new();
+        svc.register_repo("my-repo".to_string(), "user".to_string(), "pass".to_string());
+        assert!(svc.repos.contains_key("my-repo"));
     }
 }

@@ -143,6 +143,7 @@ message ExecSignalResponse {
 
 message ExecKillTreeRequest {
   int32 pid = 1;
+  bool force = 2;
 }
 
 message ExecKillTreeResponse {
