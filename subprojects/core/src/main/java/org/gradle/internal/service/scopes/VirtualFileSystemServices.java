@@ -46,6 +46,11 @@ import org.gradle.initialization.RootBuildLifecycleListener;
 import org.gradle.internal.build.BuildAddedListener;
 import org.gradle.internal.buildoption.InternalOption;
 import org.gradle.internal.buildoption.InternalOptions;
+import org.gradle.internal.buildoption.RustSubstrateOptions;
+import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.rustbridge.hash.RustGrpcFileHasher;
+import org.gradle.internal.rustbridge.hash.ShadowingFileHasher;
+import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
 import org.gradle.internal.classloader.ClasspathHasher;
 import org.gradle.internal.event.ListenerManager;
 import org.gradle.internal.execution.FileCollectionFingerprinterRegistry;
@@ -168,11 +173,33 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
             FileSystem fileSystem,
             GradleUserHomeScopeFileTimeStampInspector fileTimeStampInspector,
             StreamHasher streamHasher,
-            StringInterner stringInterner
+            StringInterner stringInterner,
+            InternalOptions options,
+            @Nullable SubstrateClient substrateClient
         ) {
-            CachingFileHasher fileHasher = new CachingFileHasher(new DefaultFileHasher(streamHasher), fileStore, stringInterner, fileTimeStampInspector, "fileHashes", fileSystem, FILE_HASHER_MEMORY_CACHE_SIZE, statisticsCollector);
+            FileHasher delegate = createDelegate(streamHasher, options, substrateClient);
+            CachingFileHasher fileHasher = new CachingFileHasher(delegate, fileStore, stringInterner, fileTimeStampInspector, "fileHashes", fileSystem, FILE_HASHER_MEMORY_CACHE_SIZE, statisticsCollector);
             fileTimeStampInspector.attach(fileHasher);
             return fileHasher;
+        }
+
+        private static FileHasher createDelegate(StreamHasher streamHasher, InternalOptions options, @Nullable SubstrateClient substrateClient) {
+            if (!options.getOption(RustSubstrateOptions.ENABLE_RUST_HASHING).get()) {
+                return new DefaultFileHasher(streamHasher);
+            }
+            if (substrateClient == null || substrateClient.isNoop()) {
+                return new DefaultFileHasher(streamHasher);
+            }
+            FileHasher javaHasher = new DefaultFileHasher(streamHasher);
+            RustGrpcFileHasher rustHasher = new RustGrpcFileHasher(substrateClient);
+            if (options.getOption(RustSubstrateOptions.SHADOW_HASHING).get()) {
+                return new ShadowingFileHasher(
+                    javaHasher,
+                    rustHasher,
+                    new HashMismatchReporter(options.getOption(RustSubstrateOptions.REPORT_MISMATCHES).get())
+                );
+            }
+            return rustHasher;
         }
 
         @Provides
@@ -334,9 +361,28 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
             FileSystem fileSystem,
             StreamHasher streamHasher,
             StringInterner stringInterner,
-            FileHasherStatistics.Collector statisticsCollector
+            FileHasherStatistics.Collector statisticsCollector,
+            InternalOptions options,
+            @Nullable SubstrateClient substrateClient
         ) {
-            CachingFileHasher localHasher = new CachingFileHasher(new DefaultFileHasher(streamHasher), cacheAccess, stringInterner, fileTimeStampInspector, "fileHashes", fileSystem, FILE_HASHER_MEMORY_CACHE_SIZE, statisticsCollector);
+            FileHasher localDelegate;
+            if (!options.getOption(RustSubstrateOptions.ENABLE_RUST_HASHING).get()
+                || substrateClient == null || substrateClient.isNoop()) {
+                localDelegate = new DefaultFileHasher(streamHasher);
+            } else {
+                FileHasher javaHasher = new DefaultFileHasher(streamHasher);
+                RustGrpcFileHasher rustHasher = new RustGrpcFileHasher(substrateClient);
+                if (options.getOption(RustSubstrateOptions.SHADOW_HASHING).get()) {
+                    localDelegate = new ShadowingFileHasher(
+                        javaHasher,
+                        rustHasher,
+                        new HashMismatchReporter(options.getOption(RustSubstrateOptions.REPORT_MISMATCHES).get())
+                    );
+                } else {
+                    localDelegate = rustHasher;
+                }
+            }
+            CachingFileHasher localHasher = new CachingFileHasher(localDelegate, cacheAccess, stringInterner, fileTimeStampInspector, "fileHashes", fileSystem, FILE_HASHER_MEMORY_CACHE_SIZE, statisticsCollector);
             return new SplitFileHasher(globalHasher, localHasher, globalCacheLocations);
         }
 

@@ -1,0 +1,187 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+// -- Control Service --
+
+service ControlService {
+  rpc Handshake(HandshakeRequest) returns (HandshakeResponse);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+}
+
+message HandshakeRequest {
+  string client_version = 1;
+  string protocol_version = 2;
+  int32 client_pid = 3;
+}
+
+message HandshakeResponse {
+  bool accepted = 1;
+  string server_version = 2;
+  string protocol_version = 3;
+  string error_message = 4;
+}
+
+message ShutdownRequest {
+  bool force = 1;
+}
+
+message ShutdownResponse {
+  bool acknowledged = 1;
+}
+
+// -- Hash Service --
+
+service HashService {
+  rpc HashBatch(HashBatchRequest) returns (HashBatchResponse);
+}
+
+message FileToHash {
+  string absolute_path = 1;
+  int64 length = 2;
+  int64 last_modified = 3;
+}
+
+message HashResult {
+  string absolute_path = 1;
+  bytes hash_bytes = 2;
+  bool error = 3;
+  string error_message = 4;
+}
+
+message HashBatchRequest {
+  repeated FileToHash files = 1;
+  string algorithm = 2;
+}
+
+message HashBatchResponse {
+  repeated HashResult results = 1;
+}
+
+// -- Cache Service --
+
+service CacheService {
+  rpc LoadEntry(CacheLoadRequest) returns (stream CacheLoadChunk);
+  rpc StoreEntry(stream CacheStoreChunk) returns (CacheStoreResponse);
+}
+
+message CacheLoadRequest {
+  bytes key = 1;
+}
+
+message CacheLoadChunk {
+  oneof payload {
+    CacheEntryMetadata metadata = 1;
+    bytes data = 2;
+  }
+}
+
+message CacheEntryMetadata {
+  int64 size = 1;
+  string content_type = 2;
+}
+
+message CacheStoreChunk {
+  oneof payload {
+    CacheStoreInit init = 1;
+    bytes data = 2;
+  }
+}
+
+message CacheStoreInit {
+  bytes key = 1;
+  int64 total_size = 2;
+}
+
+message CacheStoreResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+// -- Exec Service --
+
+service ExecService {
+  rpc Spawn(ExecSpawnRequest) returns (ExecSpawnResponse);
+  rpc Wait(ExecWaitRequest) returns (ExecWaitResponse);
+  rpc Signal(ExecSignalRequest) returns (ExecSignalResponse);
+  rpc KillTree(ExecKillTreeRequest) returns (ExecKillTreeResponse);
+  rpc SubscribeOutput(ExecOutputRequest) returns (stream ExecOutputChunk);
+}
+
+message ExecSpawnRequest {
+  string command = 1;
+  repeated string args = 2;
+  map<string, string> environment = 3;
+  string working_dir = 4;
+  bool redirect_error_stream = 5;
+}
+
+message ExecSpawnResponse {
+  int32 pid = 1;
+  bool success = 2;
+  string error_message = 3;
+}
+
+message ExecWaitRequest {
+  int32 pid = 1;
+}
+
+message ExecWaitResponse {
+  int32 exit_code = 1;
+  string error_message = 2;
+}
+
+message ExecSignalRequest {
+  int32 pid = 1;
+  int32 signal = 2;
+}
+
+message ExecSignalResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+message ExecKillTreeRequest {
+  int32 pid = 1;
+}
+
+message ExecKillTreeResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+message ExecOutputRequest {
+  int32 pid = 1;
+}
+
+message ExecOutputChunk {
+  bytes data = 1;
+  bool is_stderr = 2;
+}
+
+// -- Work Service (advisory only) --
+
+service WorkService {
+  rpc Evaluate(WorkEvaluateRequest) returns (WorkEvaluateResponse);
+  rpc RecordExecution(WorkRecordRequest) returns (WorkRecordResponse);
+}
+
+message WorkEvaluateRequest {
+  string task_path = 1;
+  map<string, string> input_properties = 2;
+}
+
+message WorkEvaluateResponse {
+  bool should_execute = 1;
+  string reason = 2;
+}
+
+message WorkRecordRequest {
+  string task_path = 1;
+  int64 duration_ms = 2;
+  bool success = 3;
+}
+
+message WorkRecordResponse {
+  bool acknowledged = 1;
+}

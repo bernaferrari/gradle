@@ -124,3 +124,7 @@ atlassian-ide-plugin.xml
 .claude/settings.local.json
 .claude/worktrees
 
+
+# Rust
+# ----
+/target

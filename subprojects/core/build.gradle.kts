@@ -111,6 +111,7 @@ dependencies {
     implementation(projects.modelGroovy)
     implementation(projects.problemsRendering)
     implementation(projects.processMemoryServices)
+    implementation(projects.rustBridge)
     implementation(projects.serviceRegistryBuilder)
     implementation(projects.coreFlowServicesApi) {
         because("DefaultBuildServicesRegistry has ordering dependency with FlowScope")

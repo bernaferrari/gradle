@@ -155,6 +155,7 @@ val core = platform("core") {
         subproject("build-cache-local")
         subproject("build-cache-packaging")
         subproject("build-cache-spi")
+        subproject("rust-bridge")
         subproject("daemon-server-worker")
         subproject("execution")
         subproject("execution-e2e-tests")
