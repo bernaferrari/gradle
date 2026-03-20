@@ -10,6 +10,7 @@ use gradle_substrate_daemon::{
     proto::{
         bootstrap_service_server::BootstrapServiceServer,
         build_cache_orchestration_service_server::BuildCacheOrchestrationServiceServer,
+        build_comparison_service_server::BuildComparisonServiceServer,
         build_event_stream_service_server::BuildEventStreamServiceServer,
         build_layout_service_server::BuildLayoutServiceServer,
         build_operations_service_server::BuildOperationsServiceServer,
@@ -17,6 +18,7 @@ use gradle_substrate_daemon::{
         cache_service_server::CacheServiceServer,
         configuration_cache_service_server::ConfigurationCacheServiceServer,
         configuration_service_server::ConfigurationServiceServer,
+        console_service_server::ConsoleServiceServer,
         control_service_server::ControlServiceServer,
         dependency_resolution_service_server::DependencyResolutionServiceServer,
         execution_history_service_server::ExecutionHistoryServiceServer,
@@ -27,6 +29,7 @@ use gradle_substrate_daemon::{
         hash_service_server::HashServiceServer,
         plugin_service_server::PluginServiceServer,
         problem_reporting_service_server::ProblemReportingServiceServer,
+        resource_management_service_server::ResourceManagementServiceServer,
         task_graph_service_server::TaskGraphServiceServer,
         toolchain_service_server::ToolchainServiceServer,
         value_snapshot_service_server::ValueSnapshotServiceServer,
@@ -34,18 +37,20 @@ use gradle_substrate_daemon::{
         work_service_server::WorkServiceServer,
     },
     server::{
-        bootstrap::BootstrapServiceImpl, build_event_stream::BuildEventStreamServiceImpl,
-        build_layout::BuildLayoutServiceImpl, build_operations::BuildOperationsServiceImpl,
-        build_result::BuildResultServiceImpl, cache::CacheServiceImpl,
-        cache_orchestration::BuildCacheOrchestrationServiceImpl,
+        bootstrap::BootstrapServiceImpl, build_comparison::BuildComparisonServiceImpl,
+        build_event_stream::BuildEventStreamServiceImpl, build_layout::BuildLayoutServiceImpl,
+        build_operations::BuildOperationsServiceImpl, build_result::BuildResultServiceImpl,
+        cache::CacheServiceImpl, cache_orchestration::BuildCacheOrchestrationServiceImpl,
         config_cache::ConfigurationCacheServiceImpl, configuration::ConfigurationServiceImpl,
-        control::ControlServiceImpl, dependency_resolution::DependencyResolutionServiceImpl,
+        console::ConsoleServiceImpl, control::ControlServiceImpl,
+        dependency_resolution::DependencyResolutionServiceImpl,
         execution_history::ExecutionHistoryServiceImpl, execution_plan::ExecutionPlanServiceImpl,
         exec::ExecServiceImpl, file_fingerprint::FileFingerprintServiceImpl,
         file_watch::FileWatchServiceImpl, hash::HashServiceImpl, plugin::PluginServiceImpl,
-        problem_reporting::ProblemReportingServiceImpl, task_graph::TaskGraphServiceImpl,
-        toolchain::ToolchainServiceImpl, value_snapshot::ValueSnapshotServiceImpl,
-        worker_process::WorkerProcessServiceImpl, work::WorkServiceImpl,
+        problem_reporting::ProblemReportingServiceImpl, resource_management::ResourceManagementServiceImpl,
+        task_graph::TaskGraphServiceImpl, toolchain::ToolchainServiceImpl,
+        value_snapshot::ValueSnapshotServiceImpl, worker_process::WorkerProcessServiceImpl,
+        work::WorkServiceImpl,
     },
     PROTOCOL_VERSION,
 };
@@ -220,12 +225,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 29: Problem / diagnostic reporting
     let problem_reporting = ProblemReportingServiceImpl::new();
 
+    // Phase 30: Resource management
+    let resource_management = ResourceManagementServiceImpl::new();
+
+    // Phase 31: Build comparison
+    let build_comparison = BuildComparisonServiceImpl::new();
+
+    // Phase 32: Console / rich output
+    let console = ConsoleServiceImpl::new();
+
     let listener = UnixListener::bind(&socket_path)?;
 
     println!("Gradle Substrate Daemon v{}", env!("CARGO_PKG_VERSION"));
     println!("Protocol version: {}", PROTOCOL_VERSION);
     println!("Listening on: {}", args.socket_path);
-    println!("Services: control, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting");
+    println!("Services: control, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console");
 
     Server::builder()
         .add_service(ControlServiceServer::new(control))
@@ -252,6 +266,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(BuildLayoutServiceServer::new(build_layout))
         .add_service(BuildResultServiceServer::new(build_result))
         .add_service(ProblemReportingServiceServer::new(problem_reporting))
+        .add_service(ResourceManagementServiceServer::new(resource_management))
+        .add_service(BuildComparisonServiceServer::new(build_comparison))
+        .add_service(ConsoleServiceServer::new(console))
         .serve_with_incoming_shutdown(tokio_stream::wrappers::UnixListenerStream::new(listener), shutdown_signal())
         .await?;
 

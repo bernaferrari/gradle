@@ -1496,3 +1496,236 @@ message ClearProblemsRequest {
 message ClearProblemsResponse {
   int32 cleared = 1;
 }
+
+// -- Resource Management Service (Phase 30) --
+
+// Tracks and limits build resources (memory, CPU, file descriptors).
+// Replaces Gradle's resource reservation system with a more efficient
+// Rust implementation. Provides real-time resource monitoring.
+service ResourceManagementService {
+  // Reserve resources for a task execution.
+  rpc ReserveResources(ReserveResourcesRequest) returns (ReserveResourcesResponse);
+  // Release resources after task execution.
+  rpc ReleaseResources(ReleaseResourcesRequest) returns (ReleaseResourcesResponse);
+  // Get current resource usage.
+  rpc GetResourceUsage(GetResourceUsageRequest) returns (GetResourceUsageResponse);
+  // Get resource limits configuration.
+  rpc GetResourceLimits(GetResourceLimitsRequest) returns (GetResourceLimitsResponse);
+  // Update resource limits.
+  rpc SetResourceLimits(SetResourceLimitsRequest) returns (SetResourceLimitsResponse);
+}
+
+message ResourceRequest {
+  string resource_type = 1;       // "memory_mb", "cpu_cores", "file_descriptors", "threads"
+  int64 amount = 2;               // requested amount
+  string requester_id = 3;        // task or component requesting the resource
+}
+
+message ReserveResourcesRequest {
+  string build_id = 1;
+  repeated ResourceRequest resources = 2;
+  int64 timeout_ms = 3;           // max time to wait for resources
+}
+
+message ReserveResourcesResponse {
+  bool granted = 1;
+  string reservation_id = 2;      // unique reservation ID
+  string denial_reason = 3;       // why the reservation was denied
+}
+
+message ReleaseResourcesRequest {
+  string reservation_id = 1;
+}
+
+message ReleaseResourcesResponse {
+  bool released = 1;
+}
+
+message ResourceUsageEntry {
+  string resource_type = 1;
+  int64 total_capacity = 2;
+  int64 used = 3;
+  int64 reserved = 4;
+  int64 available = 5;
+  int32 waiters = 6;              // number of pending reservation requests
+}
+
+message GetResourceUsageRequest {
+  string build_id = 1;
+}
+
+message GetResourceUsageResponse {
+  repeated ResourceUsageEntry usage = 1;
+  int64 total_memory_bytes = 2;   // system memory
+  int64 used_memory_bytes = 3;
+  double cpu_usage_percent = 4;
+  int32 active_threads = 5;
+}
+
+message ResourceLimit {
+  string resource_type = 1;
+  int64 max_amount = 2;
+  int64 soft_limit = 3;           // warning threshold
+}
+
+message GetResourceLimitsRequest {
+  string build_id = 1;
+}
+
+message GetResourceLimitsResponse {
+  repeated ResourceLimit limits = 1;
+}
+
+message SetResourceLimitsRequest {
+  string build_id = 1;
+  repeated ResourceLimit limits = 2;
+}
+
+message SetResourceLimitsResponse {
+  bool applied = 1;
+}
+
+// -- Build Comparison Service (Phase 31) --
+
+// Compares two build executions to identify differences in outputs,
+// task graph, and execution times. Used for build analysis and
+// flaky test detection.
+service BuildComparisonService {
+  // Start a build comparison.
+  rpc StartComparison(StartComparisonRequest) returns (StartComparisonResponse);
+  // Record a build's data for comparison.
+  rpc RecordBuildData(RecordBuildDataRequest) returns (RecordBuildDataResponse);
+  // Get the comparison result.
+  rpc GetComparisonResult(GetComparisonResultRequest) returns (GetComparisonResultResponse);
+}
+
+message BuildDataSnapshot {
+  string build_id = 1;
+  int64 start_time_ms = 2;
+  int64 end_time_ms = 3;
+  map<string, int64> task_durations = 4;   // task_path -> duration_ms
+  map<string, string> task_outcomes = 5;   // task_path -> outcome
+  repeated string task_order = 6;          // execution order
+  string root_dir = 7;
+  repeated string input_properties = 8;    // serialized build inputs hash
+}
+
+message StartComparisonRequest {
+  string baseline_build_id = 1;
+  string candidate_build_id = 2;
+}
+
+message StartComparisonResponse {
+  string comparison_id = 1;
+  bool started = 2;
+}
+
+message RecordBuildDataRequest {
+  BuildDataSnapshot snapshot = 1;
+}
+
+message RecordBuildDataResponse {
+  bool accepted = 1;
+}
+
+message TaskComparison {
+  string task_path = 1;
+  string baseline_outcome = 2;
+  string candidate_outcome = 3;
+  int64 baseline_duration_ms = 4;
+  int64 candidate_duration_ms = 5;
+  int64 duration_diff_ms = 6;
+  double duration_ratio = 7;              // candidate/baseline
+  bool outcome_changed = 8;
+}
+
+message ComparisonSummary {
+  string comparison_id = 1;
+  string baseline_build_id = 2;
+  string candidate_build_id = 3;
+  int64 baseline_total_ms = 4;
+  int64 candidate_total_ms = 5;
+  int64 total_diff_ms = 6;
+  int32 tasks_only_in_baseline = 7;
+  int32 tasks_only_in_candidate = 8;
+  int32 tasks_with_changed_outcome = 9;
+  int32 tasks_with_regression = 10;       // slower in candidate
+  int32 tasks_with_improvement = 11;      // faster in candidate
+}
+
+message GetComparisonResultRequest {
+  string comparison_id = 1;
+}
+
+message GetComparisonResultResponse {
+  ComparisonSummary summary = 1;
+  repeated TaskComparison task_comparisons = 2;
+}
+
+// -- Console / Rich Output Service (Phase 32) --
+
+// Manages console output, progress rendering, and status lines.
+// Provides a unified output interface for the daemon that the JVM
+// can use instead of directly writing to stdout/stderr.
+service ConsoleService {
+  // Log a message at a given level.
+  rpc LogMessage(LogMessageRequest) returns (LogMessageResponse);
+  // Update a progress bar or status line.
+  rpc UpdateProgress(UpdateProgressRequest) returns (UpdateProgressResponse);
+  // Request user input (for interactive builds).
+  rpc RequestInput(RequestInputRequest) returns (RequestInputResponse);
+  // Set the build description (shown in title bar / CI).
+  rpc SetBuildDescription(SetBuildDescriptionRequest) returns (SetBuildDescriptionResponse);
+}
+
+message LogMessageRequest {
+  string build_id = 1;
+  string level = 2;               // "lifecycle", "quiet", "warn", "error", "info", "debug"
+  string category = 3;            // e.g. "org.gradle.api", "org.gradle.workers"
+  string message = 4;
+  string throwable = 5;           // optional: stack trace
+}
+
+message LogMessageResponse {
+  bool accepted = 1;
+}
+
+message ProgressOperation {
+  string operation_id = 1;
+  string description = 2;         // e.g. "Compiling Java sources"
+  string status = 3;              // "running", "succeeded", "failed"
+  int64 total_work = 4;           // total units of work
+  int64 completed_work = 5;       // completed units
+  int64 start_time_ms = 6;
+  int64 end_time_ms = 7;
+  string header = 8;              // e.g. ":compileJava"
+}
+
+message UpdateProgressRequest {
+  string build_id = 1;
+  repeated ProgressOperation operations = 2;
+}
+
+message UpdateProgressResponse {
+  bool accepted = 1;
+}
+
+message RequestInputRequest {
+  string build_id = 1;
+  string prompt = 2;              // e.g. "Do you want to continue? [y,n]"
+  string default_value = 3;
+  string input_id = 4;
+}
+
+message RequestInputResponse {
+  string value = 1;
+}
+
+message SetBuildDescriptionRequest {
+  string build_id = 1;
+  string description = 2;         // e.g. "Building my-app (42 tasks)"
+}
+
+message SetBuildDescriptionResponse {
+  bool accepted = 1;
+}

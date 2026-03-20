@@ -229,6 +229,30 @@ public class RustSubstrateOptions {
     public static final InternalFlag ENABLE_RUST_PROBLEMS =
         new InternalFlag("org.gradle.rust.substrate.problems.enabled", false);
 
+    /**
+     * Enable Phase 30: Rust-native resource management.
+     * Property: org.gradle.rust.substrate.resources.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_RESOURCES =
+        new InternalFlag("org.gradle.rust.substrate.resources.enabled", false);
+
+    /**
+     * Enable Phase 31: Rust-native build comparison.
+     * Property: org.gradle.rust.substrate.comparison.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_COMPARISON =
+        new InternalFlag("org.gradle.rust.substrate.comparison.enabled", false);
+
+    /**
+     * Enable Phase 32: Rust-native console / rich output.
+     * Property: org.gradle.rust.substrate.console.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_CONSOLE =
+        new InternalFlag("org.gradle.rust.substrate.console.enabled", false);
+
     private RustSubstrateOptions() {
         // utility class
     }
