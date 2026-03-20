@@ -117,6 +117,46 @@ public class RustSubstrateOptions {
     public static final InternalFlag ENABLE_RUST_SNAPSHOTTING =
         new InternalFlag("org.gradle.rust.substrate.snapshot.enabled", false);
 
+    /**
+     * Enable Phase 11: Rust-native task graph management.
+     * Property: org.gradle.rust.substrate.taskgraph.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_TASK_GRAPH =
+        new InternalFlag("org.gradle.rust.substrate.taskgraph.enabled", false);
+
+    /**
+     * Enable Phase 12: Rust-native configuration model.
+     * Property: org.gradle.rust.substrate.configuration.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_CONFIGURATION =
+        new InternalFlag("org.gradle.rust.substrate.configuration.enabled", false);
+
+    /**
+     * Enable Phase 13: Rust-native plugin system.
+     * Property: org.gradle.rust.substrate.plugin.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_PLUGIN =
+        new InternalFlag("org.gradle.rust.substrate.plugin.enabled", false);
+
+    /**
+     * Enable Phase 14: Rust-native build operations.
+     * Property: org.gradle.rust.substrate.buildops.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_BUILD_OPS =
+        new InternalFlag("org.gradle.rust.substrate.buildops.enabled", false);
+
+    /**
+     * Enable Phase 15: Rust-native bootstrap (build session lifecycle).
+     * Property: org.gradle.rust.substrate.bootstrap.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_BOOTSTRAP =
+        new InternalFlag("org.gradle.rust.substrate.bootstrap.enabled", false);
+
     private RustSubstrateOptions() {
         // utility class
     }

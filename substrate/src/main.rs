@@ -8,22 +8,29 @@ use tonic::transport::Server;
 
 use gradle_substrate_daemon::{
     proto::{
+        bootstrap_service_server::BootstrapServiceServer,
         build_cache_orchestration_service_server::BuildCacheOrchestrationServiceServer,
+        build_operations_service_server::BuildOperationsServiceServer,
         cache_service_server::CacheServiceServer,
+        configuration_service_server::ConfigurationServiceServer,
         control_service_server::ControlServiceServer,
         execution_history_service_server::ExecutionHistoryServiceServer,
         execution_plan_service_server::ExecutionPlanServiceServer,
         exec_service_server::ExecServiceServer,
         file_fingerprint_service_server::FileFingerprintServiceServer,
         hash_service_server::HashServiceServer,
+        plugin_service_server::PluginServiceServer,
+        task_graph_service_server::TaskGraphServiceServer,
         value_snapshot_service_server::ValueSnapshotServiceServer,
         work_service_server::WorkServiceServer,
     },
     server::{
+        bootstrap::BootstrapServiceImpl, build_operations::BuildOperationsServiceImpl,
         cache::CacheServiceImpl, cache_orchestration::BuildCacheOrchestrationServiceImpl,
-        control::ControlServiceImpl, execution_history::ExecutionHistoryServiceImpl,
-        execution_plan::ExecutionPlanServiceImpl, exec::ExecServiceImpl,
-        file_fingerprint::FileFingerprintServiceImpl, hash::HashServiceImpl,
+        configuration::ConfigurationServiceImpl, control::ControlServiceImpl,
+        execution_history::ExecutionHistoryServiceImpl, execution_plan::ExecutionPlanServiceImpl,
+        exec::ExecServiceImpl, file_fingerprint::FileFingerprintServiceImpl, hash::HashServiceImpl,
+        plugin::PluginServiceImpl, task_graph::TaskGraphServiceImpl,
         value_snapshot::ValueSnapshotServiceImpl, work::WorkServiceImpl,
     },
     PROTOCOL_VERSION,
@@ -147,12 +154,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 10: Value snapshotting
     let value_snapshot = ValueSnapshotServiceImpl::new();
 
+    // Phase 11: Task graph
+    let task_graph = TaskGraphServiceImpl::new();
+
+    // Phase 12: Configuration
+    let configuration = ConfigurationServiceImpl::new();
+
+    // Phase 13: Plugin management
+    let plugin = PluginServiceImpl::new();
+
+    // Phase 14: Build operations
+    let build_operations = BuildOperationsServiceImpl::new();
+
+    // Phase 15: Bootstrap
+    let bootstrap = BootstrapServiceImpl::new();
+
     let listener = UnixListener::bind(&socket_path)?;
 
     println!("Gradle Substrate Daemon v{}", env!("CARGO_PKG_VERSION"));
     println!("Protocol version: {}", PROTOCOL_VERSION);
     println!("Listening on: {}", args.socket_path);
-    println!("Services: control, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot");
+    println!("Services: control, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap");
 
     Server::builder()
         .add_service(ControlServiceServer::new(control))
@@ -165,6 +187,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(BuildCacheOrchestrationServiceServer::new(cache_orchestration))
         .add_service(FileFingerprintServiceServer::new(file_fingerprint))
         .add_service(ValueSnapshotServiceServer::new(value_snapshot))
+        .add_service(TaskGraphServiceServer::new(task_graph))
+        .add_service(ConfigurationServiceServer::new(configuration))
+        .add_service(PluginServiceServer::new(plugin))
+        .add_service(BuildOperationsServiceServer::new(build_operations))
+        .add_service(BootstrapServiceServer::new(bootstrap))
         .serve_with_incoming_shutdown(tokio_stream::wrappers::UnixListenerStream::new(listener), shutdown_signal())
         .await?;
 

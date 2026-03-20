@@ -8,3 +8,8 @@ pub mod execution_history;
 pub mod file_fingerprint;
 pub mod value_snapshot;
 pub mod cache_orchestration;
+pub mod task_graph;
+pub mod configuration;
+pub mod plugin;
+pub mod build_operations;
+pub mod bootstrap;
