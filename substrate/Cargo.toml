@@ -25,6 +25,8 @@ bincode = "1"
 serde = { version = "1", features = ["derive"] }
 async-stream = "0.3"
 futures-util = "0.3"
+sha1 = "0.10"
+sha2 = "0.10"
 
 [build-dependencies]
 tonic-build = "0.12"
