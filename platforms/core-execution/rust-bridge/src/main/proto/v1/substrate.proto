@@ -1917,3 +1917,170 @@ message GetArtifactChecksumsResponse {
   string sha1 = 2;
   string sha256 = 3;
 }
+
+// -- Build Initialization Service (Phase 35) --
+
+// Manages build initialization, settings processing, and init scripts.
+// Replaces Gradle's SettingsProcessor and InitScriptHandler with a Rust
+// implementation for faster build startup.
+service BuildInitService {
+  // Initialize a build with settings.
+  rpc InitBuildSettings(InitBuildSettingsRequest) returns (InitBuildSettingsResponse);
+  // Record a settings detail (included projects, plugin management, etc.).
+  rpc RecordSettingsDetail(RecordSettingsDetailRequest) returns (RecordSettingsDetailResponse);
+  // Get the build initialization status.
+  rpc GetBuildInitStatus(GetBuildInitStatusRequest) returns (GetBuildInitStatusResponse);
+  // Record an init script execution.
+  rpc RecordInitScript(RecordInitScriptRequest) returns (RecordInitScriptResponse);
+}
+
+message InitBuildSettingsRequest {
+  string build_id = 1;
+  string root_dir = 2;
+  string settings_file = 3;
+  string gradle_user_home = 4;
+  repeated string init_scripts = 5;
+  repeated string requested_build_features = 6;
+  string current_dir = 7;           // directory where gradle was invoked
+}
+
+message InitBuildSettingsResponse {
+  string build_id = 1;
+  bool initialized = 2;
+  int64 init_duration_ms = 3;
+  string error_message = 4;
+}
+
+message SettingsDetailEntry {
+  string key = 1;                   // e.g. "rootProjectName", "includedProjects"
+  string value = 2;
+}
+
+message RecordSettingsDetailRequest {
+  string build_id = 1;
+  SettingsDetailEntry detail = 2;
+}
+
+message RecordSettingsDetailResponse {
+  bool accepted = 1;
+}
+
+message GetBuildInitStatusRequest {
+  string build_id = 1;
+}
+
+message BuildInitStatus {
+  string build_id = 1;
+  string root_dir = 2;
+  bool initialized = 3;
+  int64 init_duration_ms = 4;
+  repeated SettingsDetailEntry settings_details = 5;
+  repeated string executed_init_scripts = 6;
+  repeated string included_projects = 7;
+}
+
+message GetBuildInitStatusResponse {
+  BuildInitStatus status = 1;
+}
+
+message RecordInitScriptRequest {
+  string build_id = 1;
+  string script_path = 2;
+  bool success = 3;
+  string error_message = 4;
+  int64 duration_ms = 5;
+}
+
+message RecordInitScriptResponse {
+  bool accepted = 1;
+}
+
+// -- Incremental Compilation Service (Phase 36) --
+
+// Tracks source file changes and computes incremental compilation decisions.
+// Replaces Gradle's incremental compilation infrastructure with a more
+// efficient Rust implementation that uses file system watching + hashing.
+service IncrementalCompilationService {
+  // Register a source set for incremental tracking.
+  rpc RegisterSourceSet(RegisterSourceSetRequest) returns (RegisterSourceSetResponse);
+  // Record a compilation unit's inputs and outputs.
+  rpc RecordCompilation(RecordCompilationRequest) returns (RecordCompilationResponse);
+  // Query which compilation units need rebuilding.
+  rpc GetRebuildSet(GetRebuildSetRequest) returns (GetRebuildSetResponse);
+  // Get the incremental compilation state.
+  rpc GetIncrementalState(GetIncrementalStateRequest) returns (GetIncrementalStateResponse);
+}
+
+message SourceSetDescriptor {
+  string source_set_id = 1;
+  string name = 2;                  // e.g. "main", "test"
+  repeated string source_dirs = 3;
+  repeated string output_dirs = 4;
+  string classpath_hash = 5;
+}
+
+message RegisterSourceSetRequest {
+  string build_id = 1;
+  SourceSetDescriptor source_set = 2;
+}
+
+message RegisterSourceSetResponse {
+  bool accepted = 1;
+}
+
+message CompilationUnit {
+  string source_set_id = 1;
+  string source_file = 2;           // relative path
+  string output_class = 3;          // relative path of compiled class
+  string source_hash = 4;           // hash of source content
+  string class_hash = 5;            // hash of compiled output
+  repeated string dependencies = 6; // other source files this depends on
+  int64 compile_duration_ms = 7;
+}
+
+message RecordCompilationRequest {
+  string build_id = 1;
+  CompilationUnit unit = 2;
+}
+
+message RecordCompilationResponse {
+  bool accepted = 1;
+  bool changed = 2;                 // whether this was a recompilation
+}
+
+message GetRebuildSetRequest {
+  string build_id = 1;
+  string source_set_id = 2;
+  repeated string changed_files = 3; // files that have changed since last compile
+}
+
+message RebuildDecision {
+  string source_file = 1;
+  string reason = 2;                // "source_changed", "dependency_changed", "classpath_changed"
+  bool must_recompile = 3;
+}
+
+message GetRebuildSetResponse {
+  repeated RebuildDecision decisions = 3;
+  int32 total_sources = 4;
+  int32 must_recompile_count = 5;
+  int32 up_to_date_count = 6;
+}
+
+message GetIncrementalStateRequest {
+  string build_id = 1;
+  string source_set_id = 2;
+}
+
+message IncrementalState {
+  string source_set_id = 1;
+  int32 total_compiled = 2;
+  int32 incrementally_compiled = 3;
+  int32 fully_recompiled = 4;
+  int64 total_compile_time_ms = 5;
+  repeated CompilationUnit units = 6;
+}
+
+message GetIncrementalStateResponse {
+  IncrementalState state = 1;
+}

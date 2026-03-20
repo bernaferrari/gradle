@@ -13,6 +13,7 @@ use gradle_substrate_daemon::{
         build_cache_orchestration_service_server::BuildCacheOrchestrationServiceServer,
         build_comparison_service_server::BuildComparisonServiceServer,
         build_event_stream_service_server::BuildEventStreamServiceServer,
+        build_init_service_server::BuildInitServiceServer,
         build_layout_service_server::BuildLayoutServiceServer,
         build_operations_service_server::BuildOperationsServiceServer,
         build_result_service_server::BuildResultServiceServer,
@@ -28,6 +29,7 @@ use gradle_substrate_daemon::{
         file_fingerprint_service_server::FileFingerprintServiceServer,
         file_watch_service_server::FileWatchServiceServer,
         hash_service_server::HashServiceServer,
+        incremental_compilation_service_server::IncrementalCompilationServiceServer,
         plugin_service_server::PluginServiceServer,
         problem_reporting_service_server::ProblemReportingServiceServer,
         resource_management_service_server::ResourceManagementServiceServer,
@@ -41,15 +43,17 @@ use gradle_substrate_daemon::{
     server::{
         artifact_publishing::ArtifactPublishingServiceImpl,
         bootstrap::BootstrapServiceImpl, build_comparison::BuildComparisonServiceImpl,
-        build_event_stream::BuildEventStreamServiceImpl, build_layout::BuildLayoutServiceImpl,
-        build_operations::BuildOperationsServiceImpl, build_result::BuildResultServiceImpl,
-        cache::CacheServiceImpl, cache_orchestration::BuildCacheOrchestrationServiceImpl,
+        build_event_stream::BuildEventStreamServiceImpl, build_init::BuildInitServiceImpl,
+        build_layout::BuildLayoutServiceImpl, build_operations::BuildOperationsServiceImpl,
+        build_result::BuildResultServiceImpl, cache::CacheServiceImpl,
+        cache_orchestration::BuildCacheOrchestrationServiceImpl,
         config_cache::ConfigurationCacheServiceImpl, configuration::ConfigurationServiceImpl,
         console::ConsoleServiceImpl, control::ControlServiceImpl,
         dependency_resolution::DependencyResolutionServiceImpl,
         execution_history::ExecutionHistoryServiceImpl, execution_plan::ExecutionPlanServiceImpl,
         exec::ExecServiceImpl, file_fingerprint::FileFingerprintServiceImpl,
-        file_watch::FileWatchServiceImpl, hash::HashServiceImpl, plugin::PluginServiceImpl,
+        file_watch::FileWatchServiceImpl, hash::HashServiceImpl,
+        incremental_compilation::IncrementalCompilationServiceImpl, plugin::PluginServiceImpl,
         problem_reporting::ProblemReportingServiceImpl, resource_management::ResourceManagementServiceImpl,
         task_graph::TaskGraphServiceImpl, test_execution::TestExecutionServiceImpl,
         toolchain::ToolchainServiceImpl, value_snapshot::ValueSnapshotServiceImpl,
@@ -243,12 +247,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 34: Artifact publishing
     let artifact_publishing = ArtifactPublishingServiceImpl::new();
 
+    // Phase 35: Build initialization
+    let build_init = BuildInitServiceImpl::new();
+
+    // Phase 36: Incremental compilation
+    let incremental_compilation = IncrementalCompilationServiceImpl::new();
+
     let listener = UnixListener::bind(&socket_path)?;
 
     println!("Gradle Substrate Daemon v{}", env!("CARGO_PKG_VERSION"));
     println!("Protocol version: {}", PROTOCOL_VERSION);
     println!("Listening on: {}", args.socket_path);
-    println!("Services: control, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console, test-execution, artifact-publishing");
+    println!("Services: control, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console, test-execution, artifact-publishing, build-init, incremental-compilation");
 
     Server::builder()
         .add_service(ControlServiceServer::new(control))
@@ -280,6 +290,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(ConsoleServiceServer::new(console))
         .add_service(TestExecutionServiceServer::new(test_execution))
         .add_service(ArtifactPublishingServiceServer::new(artifact_publishing))
+        .add_service(BuildInitServiceServer::new(build_init))
+        .add_service(IncrementalCompilationServiceServer::new(incremental_compilation))
         .serve_with_incoming_shutdown(tokio_stream::wrappers::UnixListenerStream::new(listener), shutdown_signal())
         .await?;
 
