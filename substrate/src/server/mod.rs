@@ -22,3 +22,6 @@ pub mod worker_process;
 pub mod build_layout;
 pub mod build_result;
 pub mod problem_reporting;
+pub mod resource_management;
+pub mod build_comparison;
+pub mod console;
