@@ -13,6 +13,7 @@ use gradle_substrate_daemon::{
         build_event_stream_service_server::BuildEventStreamServiceServer,
         build_layout_service_server::BuildLayoutServiceServer,
         build_operations_service_server::BuildOperationsServiceServer,
+        build_result_service_server::BuildResultServiceServer,
         cache_service_server::CacheServiceServer,
         configuration_cache_service_server::ConfigurationCacheServiceServer,
         configuration_service_server::ConfigurationServiceServer,
@@ -25,6 +26,7 @@ use gradle_substrate_daemon::{
         file_watch_service_server::FileWatchServiceServer,
         hash_service_server::HashServiceServer,
         plugin_service_server::PluginServiceServer,
+        problem_reporting_service_server::ProblemReportingServiceServer,
         task_graph_service_server::TaskGraphServiceServer,
         toolchain_service_server::ToolchainServiceServer,
         value_snapshot_service_server::ValueSnapshotServiceServer,
@@ -34,15 +36,16 @@ use gradle_substrate_daemon::{
     server::{
         bootstrap::BootstrapServiceImpl, build_event_stream::BuildEventStreamServiceImpl,
         build_layout::BuildLayoutServiceImpl, build_operations::BuildOperationsServiceImpl,
-        cache::CacheServiceImpl, cache_orchestration::BuildCacheOrchestrationServiceImpl,
+        build_result::BuildResultServiceImpl, cache::CacheServiceImpl,
+        cache_orchestration::BuildCacheOrchestrationServiceImpl,
         config_cache::ConfigurationCacheServiceImpl, configuration::ConfigurationServiceImpl,
         control::ControlServiceImpl, dependency_resolution::DependencyResolutionServiceImpl,
         execution_history::ExecutionHistoryServiceImpl, execution_plan::ExecutionPlanServiceImpl,
         exec::ExecServiceImpl, file_fingerprint::FileFingerprintServiceImpl,
         file_watch::FileWatchServiceImpl, hash::HashServiceImpl, plugin::PluginServiceImpl,
-        task_graph::TaskGraphServiceImpl, toolchain::ToolchainServiceImpl,
-        value_snapshot::ValueSnapshotServiceImpl, worker_process::WorkerProcessServiceImpl,
-        work::WorkServiceImpl,
+        problem_reporting::ProblemReportingServiceImpl, task_graph::TaskGraphServiceImpl,
+        toolchain::ToolchainServiceImpl, value_snapshot::ValueSnapshotServiceImpl,
+        worker_process::WorkerProcessServiceImpl, work::WorkServiceImpl,
     },
     PROTOCOL_VERSION,
 };
@@ -211,12 +214,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 26: Build layout / project model
     let build_layout = BuildLayoutServiceImpl::new();
 
+    // Phase 28: Build result reporting
+    let build_result = BuildResultServiceImpl::new();
+
+    // Phase 29: Problem / diagnostic reporting
+    let problem_reporting = ProblemReportingServiceImpl::new();
+
     let listener = UnixListener::bind(&socket_path)?;
 
     println!("Gradle Substrate Daemon v{}", env!("CARGO_PKG_VERSION"));
     println!("Protocol version: {}", PROTOCOL_VERSION);
     println!("Listening on: {}", args.socket_path);
-    println!("Services: control, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout");
+    println!("Services: control, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting");
 
     Server::builder()
         .add_service(ControlServiceServer::new(control))
@@ -241,6 +250,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(BuildEventStreamServiceServer::new(build_event_stream))
         .add_service(WorkerProcessServiceServer::new(worker_process))
         .add_service(BuildLayoutServiceServer::new(build_layout))
+        .add_service(BuildResultServiceServer::new(build_result))
+        .add_service(ProblemReportingServiceServer::new(problem_reporting))
         .serve_with_incoming_shutdown(tokio_stream::wrappers::UnixListenerStream::new(listener), shutdown_signal())
         .await?;
 
