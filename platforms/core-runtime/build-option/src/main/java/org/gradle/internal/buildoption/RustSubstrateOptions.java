@@ -11,6 +11,11 @@ package org.gradle.internal.buildoption;
  *   -Dorg.gradle.rust.substrate.exec.enabled=true
  *   -Dorg.gradle.rust.substrate.daemon.path=/path/to/daemon
  *   -Dorg.gradle.rust.substrate.shadow.report-mismatches=true
+ *   -Dorg.gradle.rust.substrate.execution.advisory=true
+ *   -Dorg.gradle.rust.substrate.execution.authoritative=true
+ *   -Dorg.gradle.rust.substrate.history.enabled=true
+ *   -Dorg.gradle.rust.substrate.fingerprint.enabled=true
+ *   -Dorg.gradle.rust.substrate.snapshot.enabled=true
  */
 public class RustSubstrateOptions {
 
@@ -87,6 +92,30 @@ public class RustSubstrateOptions {
      */
     public static final InternalFlag ENABLE_AUTHORITATIVE_EXECUTION =
         new InternalFlag("org.gradle.rust.substrate.execution.authoritative", false);
+
+    /**
+     * Enable Phase 7: Rust-native execution history storage.
+     * Property: org.gradle.rust.substrate.history.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_HISTORY =
+        new InternalFlag("org.gradle.rust.substrate.history.enabled", false);
+
+    /**
+     * Enable Phase 9: Rust-native file fingerprinting.
+     * Property: org.gradle.rust.substrate.fingerprint.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_FINGERPRINTING =
+        new InternalFlag("org.gradle.rust.substrate.fingerprint.enabled", false);
+
+    /**
+     * Enable Phase 10: Rust-native value snapshotting.
+     * Property: org.gradle.rust.substrate.snapshot.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_SNAPSHOTTING =
+        new InternalFlag("org.gradle.rust.substrate.snapshot.enabled", false);
 
     private RustSubstrateOptions() {
         // utility class

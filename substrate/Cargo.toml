@@ -21,6 +21,8 @@ clap = { version = "4", features = ["derive", "env"] }
 tower = "0.4"
 tokio-stream = "0.1"
 num_cpus = "1"
+bincode = "1"
+serde = { version = "1", features = ["derive"] }
 
 [build-dependencies]
 tonic-build = "0.12"
