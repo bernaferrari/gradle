@@ -25,6 +25,8 @@ import org.gradle.cache.internal.InMemoryCacheDecoratorFactory;
 import org.gradle.cache.scopes.BuildScopedCacheBuilderFactory;
 import org.gradle.caching.internal.controller.BuildCacheController;
 import org.gradle.initialization.BuildCancellationToken;
+import org.gradle.internal.buildoption.InternalOptions;
+import org.gradle.internal.buildoption.RustSubstrateOptions;
 import org.gradle.internal.event.ListenerManager;
 import org.gradle.internal.execution.BuildOutputCleanupRegistry;
 import org.gradle.internal.execution.ExecutionEngine;
@@ -83,6 +85,9 @@ import org.gradle.internal.id.UniqueId;
 import org.gradle.internal.operations.BuildOperationProgressEventEmitter;
 import org.gradle.internal.operations.BuildOperationRunner;
 import org.gradle.internal.operations.CurrentBuildOperationRef;
+import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.rustbridge.execution.ExecutionPlanClient;
+import org.gradle.internal.rustbridge.execution.SubstrateAdvisoryStep;
 import org.gradle.internal.scopeids.id.BuildInvocationScopeId;
 import org.gradle.internal.service.Provides;
 import org.gradle.internal.service.ServiceRegistrationProvider;
@@ -90,6 +95,7 @@ import org.gradle.internal.vfs.FileSystemAccess;
 import org.gradle.internal.vfs.VirtualFileSystem;
 import org.gradle.internal.work.WorkerLeaseService;
 import org.gradle.util.GradleVersion;
+import org.jspecify.annotations.Nullable;
 
 import java.util.Collections;
 import java.util.function.Supplier;
@@ -160,11 +166,20 @@ public class ExecutionBuildServices implements ServiceRegistrationProvider {
         StartParameter startParameter,
         TimeoutHandler timeoutHandler,
         InternalProblems problems,
-        WorkerLeaseService workerLeaseService
+        WorkerLeaseService workerLeaseService,
+        InternalOptions options,
+        @Nullable SubstrateClient substrateClient
     ) {
         UniqueId buildId = buildInvocationScopeId.getId();
         Supplier<OutputsCleaner> skipEmptyWorkOutputsCleanerSupplier = () -> new OutputsCleaner(deleter, buildOutputCleanupRegistry::isOutputOwnedByBuild, buildOutputCleanupRegistry::isOutputOwnedByBuild);
         boolean emitBuildCacheDebugLogging = startParameter.isBuildCacheDebugLogging();
+
+        boolean advisoryEnabled = options.getOption(RustSubstrateOptions.ENABLE_ADVISORY_EXECUTION).get();
+        boolean authoritativeEnabled = options.getOption(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION).get();
+        ExecutionPlanClient planClient = null;
+        if ((advisoryEnabled || authoritativeEnabled) && substrateClient != null && !substrateClient.isNoop()) {
+            planClient = new ExecutionPlanClient(substrateClient);
+        }
 
         // @formatter:off
         // CHECKSTYLE:OFF
@@ -196,7 +211,7 @@ public class ExecutionBuildServices implements ServiceRegistrationProvider {
             new ResolveChangesStep<>(changeDetector,
             new ResolveMutableCachingStateStep<>(buildCacheController, emitBuildCacheDebugLogging,
             new MarkSnapshottingInputsFinishedStep<>(
-            new SkipUpToDateStep<>(
+            createSkipStep(planClient, authoritativeEnabled,
             new StoreExecutionStateStep<>(
             new BuildCacheStep<>(buildCacheController, deleter, fileSystemAccess, outputChangeListener,
             new ResolveInputChangesStep<>(
@@ -219,5 +234,18 @@ public class ExecutionBuildServices implements ServiceRegistrationProvider {
         )))), problems);
         // CHECKSTYLE:ON
         // @formatter:on
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static <C extends org.gradle.internal.execution.steps.MutableChangesContext>
+    Step<C, org.gradle.internal.execution.steps.UpToDateResult> createSkipStep(
+        @Nullable ExecutionPlanClient planClient,
+        boolean authoritative,
+        Step<? super C, ? extends org.gradle.internal.execution.steps.AfterExecutionResult> delegate
+    ) {
+        if (planClient != null) {
+            return new SubstrateAdvisoryStep(delegate, planClient, authoritative);
+        }
+        return new SkipUpToDateStep<>(delegate);
     }
 }

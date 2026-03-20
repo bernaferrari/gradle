@@ -185,3 +185,94 @@ message WorkRecordRequest {
 message WorkRecordResponse {
   bool acknowledged = 1;
 }
+
+// -- Execution Plan Service --
+
+// Provides advisory and authoritative execution planning.
+// Phase 5 (advisory): Rust predicts the outcome, Java remains authoritative.
+// Phase 6 (authoritative): Rust drives work identity, caching, and up-to-date decisions.
+service ExecutionPlanService {
+  // Phase 5: Predict execution outcome without side effects.
+  rpc PredictOutcome(PredictOutcomeRequest) returns (PredictOutcomeResponse);
+
+  // Phase 6: Resolve the execution plan authoritatively.
+  rpc ResolvePlan(ResolvePlanRequest) returns (ResolvePlanResponse);
+
+  // Record the actual outcome after execution (for shadow mode comparison).
+  rpc RecordOutcome(RecordOutcomeRequest) returns (RecordOutcomeResponse);
+}
+
+// Metadata about a unit of work sent from the JVM.
+message WorkMetadata {
+  // Unique identity string for the work unit.
+  string work_identity = 1;
+  // Display name (e.g. task path).
+  string display_name = 2;
+  // Implementation class name.
+  string implementation_class = 3;
+  // All scalar input properties (name -> serialized value snapshot).
+  map<string, string> input_properties = 4;
+  // All input file fingerprints (name -> fingerprint hash).
+  map<string, string> input_file_fingerprints = 5;
+  // Whether caching is enabled for this work.
+  bool caching_enabled = 6;
+  // Whether loading from cache is allowed.
+  bool can_load_from_cache = 7;
+  // Whether the work has previous execution state.
+  bool has_previous_execution_state = 8;
+  // Rebuild reasons if the work needs re-execution.
+  repeated string rebuild_reasons = 9;
+}
+
+enum PredictedOutcome {
+  PREDICTED_UNKNOWN = 0;
+  PREDICTED_EXECUTE = 1;
+  PREDICTED_UP_TO_DATE = 2;
+  PREDICTED_FROM_CACHE = 3;
+  PREDICTED_SHORT_CIRCUITED = 4;
+}
+
+message PredictOutcomeRequest {
+  WorkMetadata work = 1;
+}
+
+message PredictOutcomeResponse {
+  PredictedOutcome predicted_outcome = 1;
+  string reasoning = 2;
+  // Confidence score 0.0-1.0 for the prediction.
+  float confidence = 3;
+}
+
+// Authoritative plan resolution for Phase 6.
+enum PlanAction {
+  PLAN_ACTION_UNKNOWN = 0;
+  PLAN_ACTION_EXECUTE = 1;
+  PLAN_ACTION_SKIP_UP_TO_DATE = 2;
+  PLAN_ACTION_LOAD_FROM_CACHE = 3;
+  PLAN_ACTION_SHORT_CIRCUIT = 4;
+}
+
+message ResolvePlanRequest {
+  WorkMetadata work = 1;
+  // Mode: advisory (shadow) or authoritative.
+  bool authoritative = 2;
+}
+
+message ResolvePlanResponse {
+  PlanAction action = 1;
+  string reasoning = 2;
+  // Cache key to use if action is LOAD_FROM_CACHE.
+  string cache_key_hint = 3;
+}
+
+message RecordOutcomeRequest {
+  string work_identity = 1;
+  PredictedOutcome predicted_outcome = 2;
+  string actual_outcome = 3;
+  bool prediction_correct = 4;
+  int64 duration_ms = 5;
+}
+
+message RecordOutcomeResponse {
+  bool acknowledged = 1;
+}
