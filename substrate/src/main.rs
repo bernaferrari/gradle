@@ -8,14 +8,24 @@ use tonic::transport::Server;
 
 use gradle_substrate_daemon::{
     proto::{
+        build_cache_orchestration_service_server::BuildCacheOrchestrationServiceServer,
         cache_service_server::CacheServiceServer,
         control_service_server::ControlServiceServer,
+        execution_history_service_server::ExecutionHistoryServiceServer,
         execution_plan_service_server::ExecutionPlanServiceServer,
         exec_service_server::ExecServiceServer,
+        file_fingerprint_service_server::FileFingerprintServiceServer,
         hash_service_server::HashServiceServer,
+        value_snapshot_service_server::ValueSnapshotServiceServer,
         work_service_server::WorkServiceServer,
     },
-    server::{cache::CacheServiceImpl, control::ControlServiceImpl, exec::ExecServiceImpl, execution_plan::ExecutionPlanServiceImpl, hash::HashServiceImpl, work::WorkServiceImpl},
+    server::{
+        cache::CacheServiceImpl, cache_orchestration::BuildCacheOrchestrationServiceImpl,
+        control::ControlServiceImpl, execution_history::ExecutionHistoryServiceImpl,
+        execution_plan::ExecutionPlanServiceImpl, exec::ExecServiceImpl,
+        file_fingerprint::FileFingerprintServiceImpl, hash::HashServiceImpl,
+        value_snapshot::ValueSnapshotServiceImpl, work::WorkServiceImpl,
+    },
     PROTOCOL_VERSION,
 };
 
@@ -39,6 +49,10 @@ struct Args {
     /// Path to the build cache directory
     #[arg(long, default_value = "/tmp/gradle-substrate-cache")]
     cache_dir: String,
+
+    /// Path to the execution history directory
+    #[arg(long, default_value = "/tmp/gradle-substrate-history")]
+    history_dir: String,
 }
 
 fn init_logging(level: &str) {
@@ -97,23 +111,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(1);
 
+    // Phase 0: Control
     let control = ControlServiceImpl::new(shutdown_tx.clone());
+
+    // Phase 1: Hashing
     let hash = HashServiceImpl;
+
+    // Phase 2: Build cache
     let cache_dir = PathBuf::from(&args.cache_dir);
     std::fs::create_dir_all(&cache_dir)?;
     let cache = CacheServiceImpl::new(cache_dir);
+
+    // Phase 3: Process execution
     let exec = ExecServiceImpl::new();
-    let work_scheduler = Arc::new(gradle_substrate_daemon::server::work::WorkerScheduler::new(
-        num_cpus::get(),
-    ));
+
+    // Phase 4: Work scheduling
+    let work_scheduler = Arc::new(gradle_substrate_daemon::server::work::WorkerScheduler::new(num_cpus::get()));
     let work = WorkServiceImpl::new(work_scheduler.clone());
+
+    // Phase 5-6: Execution planning
     let execution_plan = ExecutionPlanServiceImpl::new(work_scheduler);
+
+    // Phase 7: Execution history
+    let history_dir = PathBuf::from(&args.history_dir);
+    let execution_history = ExecutionHistoryServiceImpl::new(history_dir);
+    let history_count = execution_history.load_from_disk().await?;
+    tracing::info!("Loaded {} execution history entries", history_count);
+
+    // Phase 8: Build cache orchestration
+    let cache_orchestration = BuildCacheOrchestrationServiceImpl::new();
+
+    // Phase 9: File fingerprinting
+    let file_fingerprint = FileFingerprintServiceImpl::new();
+
+    // Phase 10: Value snapshotting
+    let value_snapshot = ValueSnapshotServiceImpl::new();
 
     let listener = UnixListener::bind(&socket_path)?;
 
     println!("Gradle Substrate Daemon v{}", env!("CARGO_PKG_VERSION"));
     println!("Protocol version: {}", PROTOCOL_VERSION);
     println!("Listening on: {}", args.socket_path);
+    println!("Services: control, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot");
 
     Server::builder()
         .add_service(ControlServiceServer::new(control))
@@ -122,6 +161,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(ExecServiceServer::new(exec))
         .add_service(WorkServiceServer::new(work))
         .add_service(ExecutionPlanServiceServer::new(execution_plan))
+        .add_service(ExecutionHistoryServiceServer::new(execution_history))
+        .add_service(BuildCacheOrchestrationServiceServer::new(cache_orchestration))
+        .add_service(FileFingerprintServiceServer::new(file_fingerprint))
+        .add_service(ValueSnapshotServiceServer::new(value_snapshot))
         .serve_with_incoming_shutdown(tokio_stream::wrappers::UnixListenerStream::new(listener), shutdown_signal())
         .await?;
 

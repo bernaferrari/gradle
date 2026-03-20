@@ -318,6 +318,132 @@ public final class Substrate extends com.google.protobuf.GeneratedFile {
     // @@protoc_insertion_point(enum_scope:gradle.substrate.v1.PlanAction)
   }
 
+  /**
+   * Protobuf enum {@code gradle.substrate.v1.FingerprintType}
+   */
+  public enum FingerprintType
+      implements com.google.protobuf.ProtocolMessageEnum {
+    /**
+     * <code>FINGERPRINT_FILE = 0;</code>
+     */
+    FINGERPRINT_FILE(0),
+    /**
+     * <code>FINGERPRINT_DIRECTORY = 1;</code>
+     */
+    FINGERPRINT_DIRECTORY(1),
+    /**
+     * <code>FINGERPRINT_ROOT = 2;</code>
+     */
+    FINGERPRINT_ROOT(2),
+    UNRECOGNIZED(-1),
+    ;
+
+    static {
+      com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
+        com.google.protobuf.RuntimeVersion.RuntimeDomain.PUBLIC,
+        /* major= */ 4,
+        /* minor= */ 34,
+        /* patch= */ 0,
+        /* suffix= */ "",
+        "FingerprintType");
+    }
+    /**
+     * <code>FINGERPRINT_FILE = 0;</code>
+     */
+    public static final int FINGERPRINT_FILE_VALUE = 0;
+    /**
+     * <code>FINGERPRINT_DIRECTORY = 1;</code>
+     */
+    public static final int FINGERPRINT_DIRECTORY_VALUE = 1;
+    /**
+     * <code>FINGERPRINT_ROOT = 2;</code>
+     */
+    public static final int FINGERPRINT_ROOT_VALUE = 2;
+
+
+    public final int getNumber() {
+      if (this == UNRECOGNIZED) {
+        throw new java.lang.IllegalArgumentException(
+            "Can't get the number of an unknown enum value.");
+      }
+      return value;
+    }
+
+    /**
+     * @param value The numeric wire value of the corresponding enum entry.
+     * @return The enum associated with the given numeric wire value.
+     * @deprecated Use {@link #forNumber(int)} instead.
+     */
+    @java.lang.Deprecated
+    public static FingerprintType valueOf(int value) {
+      return forNumber(value);
+    }
+
+    /**
+     * @param value The numeric wire value of the corresponding enum entry.
+     * @return The enum associated with the given numeric wire value.
+     */
+    public static FingerprintType forNumber(int value) {
+      switch (value) {
+        case 0: return FINGERPRINT_FILE;
+        case 1: return FINGERPRINT_DIRECTORY;
+        case 2: return FINGERPRINT_ROOT;
+        default: return null;
+      }
+    }
+
+    public static com.google.protobuf.Internal.EnumLiteMap<FingerprintType>
+        internalGetValueMap() {
+      return internalValueMap;
+    }
+    private static final com.google.protobuf.Internal.EnumLiteMap<
+        FingerprintType> internalValueMap =
+          new com.google.protobuf.Internal.EnumLiteMap<FingerprintType>() {
+            public FingerprintType findValueByNumber(int number) {
+              return FingerprintType.forNumber(number);
+            }
+          };
+
+    public final com.google.protobuf.Descriptors.EnumValueDescriptor
+        getValueDescriptor() {
+      if (this == UNRECOGNIZED) {
+        throw new java.lang.IllegalStateException(
+            "Can't get the descriptor of an unrecognized enum value.");
+      }
+      return getDescriptor().getValue(ordinal());
+    }
+    public final com.google.protobuf.Descriptors.EnumDescriptor
+        getDescriptorForType() {
+      return getDescriptor();
+    }
+    public static com.google.protobuf.Descriptors.EnumDescriptor
+        getDescriptor() {
+      return gradle.substrate.v1.Substrate.getDescriptor().getEnumType(2);
+    }
+
+    private static final FingerprintType[] VALUES = values();
+
+    public static FingerprintType valueOf(
+        com.google.protobuf.Descriptors.EnumValueDescriptor desc) {
+      if (desc.getType() != getDescriptor()) {
+        throw new java.lang.IllegalArgumentException(
+          "EnumValueDescriptor is not for this type.");
+      }
+      if (desc.getIndex() == -1) {
+        return UNRECOGNIZED;
+      }
+      return VALUES[desc.getIndex()];
+    }
+
+    private final int value;
+
+    private FingerprintType(int value) {
+      this.value = value;
+    }
+
+    // @@protoc_insertion_point(enum_scope:gradle.substrate.v1.FingerprintType)
+  }
+
   public interface HandshakeRequestOrBuilder extends
       // @@protoc_insertion_point(interface_extends:gradle.substrate.v1.HandshakeRequest)
       com.google.protobuf.MessageOrBuilder {
@@ -24470,6 +24596,15684 @@ java.lang.String defaultValue) {
 
   }
 
+  public interface LoadHistoryRequestOrBuilder extends
+      // @@protoc_insertion_point(interface_extends:gradle.substrate.v1.LoadHistoryRequest)
+      com.google.protobuf.MessageOrBuilder {
+
+    /**
+     * <code>string work_identity = 1;</code>
+     * @return The workIdentity.
+     */
+    java.lang.String getWorkIdentity();
+    /**
+     * <code>string work_identity = 1;</code>
+     * @return The bytes for workIdentity.
+     */
+    com.google.protobuf.ByteString
+        getWorkIdentityBytes();
+  }
+  /**
+   * Protobuf type {@code gradle.substrate.v1.LoadHistoryRequest}
+   */
+  public static final class LoadHistoryRequest extends
+      com.google.protobuf.GeneratedMessage implements
+      // @@protoc_insertion_point(message_implements:gradle.substrate.v1.LoadHistoryRequest)
+      LoadHistoryRequestOrBuilder {
+  private static final long serialVersionUID = 0L;
+    static {
+      com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
+        com.google.protobuf.RuntimeVersion.RuntimeDomain.PUBLIC,
+        /* major= */ 4,
+        /* minor= */ 34,
+        /* patch= */ 0,
+        /* suffix= */ "",
+        "LoadHistoryRequest");
+    }
+    // Use LoadHistoryRequest.newBuilder() to construct.
+    private LoadHistoryRequest(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      super(builder);
+    }
+    private LoadHistoryRequest() {
+      workIdentity_ = "";
+    }
+
+    public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_LoadHistoryRequest_descriptor;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Descriptors.Descriptor getDescriptorForType() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_LoadHistoryRequest_descriptor;
+    }
+
+    @java.lang.Override
+    protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_LoadHistoryRequest_fieldAccessorTable
+          .ensureFieldAccessorsInitialized(
+              gradle.substrate.v1.Substrate.LoadHistoryRequest.class, gradle.substrate.v1.Substrate.LoadHistoryRequest.Builder.class);
+    }
+
+    public static final int WORK_IDENTITY_FIELD_NUMBER = 1;
+    @SuppressWarnings("serial")
+    private volatile java.lang.Object workIdentity_ = "";
+    /**
+     * <code>string work_identity = 1;</code>
+     * @return The workIdentity.
+     */
+    @java.lang.Override
+    public java.lang.String getWorkIdentity() {
+      java.lang.Object ref = workIdentity_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        workIdentity_ = s;
+        return s;
+      }
+    }
+    /**
+     * <code>string work_identity = 1;</code>
+     * @return The bytes for workIdentity.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getWorkIdentityBytes() {
+      java.lang.Object ref = workIdentity_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        workIdentity_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    private byte memoizedIsInitialized = -1;
+    @java.lang.Override
+    public final boolean isInitialized() {
+      byte isInitialized = memoizedIsInitialized;
+      if (isInitialized == 1) return true;
+      if (isInitialized == 0) return false;
+
+      memoizedIsInitialized = 1;
+      return true;
+    }
+
+    @java.lang.Override
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+                        throws java.io.IOException {
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(workIdentity_)) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 1, workIdentity_);
+      }
+      getUnknownFields().writeTo(output);
+    }
+
+    @java.lang.Override
+    public int getSerializedSize() {
+      int size = memoizedSize;
+      if (size != -1) return size;
+
+      size = 0;
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(workIdentity_)) {
+        size += com.google.protobuf.GeneratedMessage.computeStringSize(1, workIdentity_);
+      }
+      size += getUnknownFields().getSerializedSize();
+      memoizedSize = size;
+      return size;
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+      if (obj == this) {
+       return true;
+      }
+      if (!(obj instanceof gradle.substrate.v1.Substrate.LoadHistoryRequest)) {
+        return super.equals(obj);
+      }
+      gradle.substrate.v1.Substrate.LoadHistoryRequest other = (gradle.substrate.v1.Substrate.LoadHistoryRequest) obj;
+
+      if (!getWorkIdentity()
+          .equals(other.getWorkIdentity())) return false;
+      if (!getUnknownFields().equals(other.getUnknownFields())) return false;
+      return true;
+    }
+
+    @java.lang.Override
+    public int hashCode() {
+      if (memoizedHashCode != 0) {
+        return memoizedHashCode;
+      }
+      int hash = 41;
+      hash = (19 * hash) + getDescriptor().hashCode();
+      hash = (37 * hash) + WORK_IDENTITY_FIELD_NUMBER;
+      hash = (53 * hash) + getWorkIdentity().hashCode();
+      hash = (29 * hash) + getUnknownFields().hashCode();
+      memoizedHashCode = hash;
+      return hash;
+    }
+
+    public static gradle.substrate.v1.Substrate.LoadHistoryRequest parseFrom(
+        java.nio.ByteBuffer data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.LoadHistoryRequest parseFrom(
+        java.nio.ByteBuffer data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.LoadHistoryRequest parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.LoadHistoryRequest parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.LoadHistoryRequest parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.LoadHistoryRequest parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.LoadHistoryRequest parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.LoadHistoryRequest parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static gradle.substrate.v1.Substrate.LoadHistoryRequest parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input);
+    }
+
+    public static gradle.substrate.v1.Substrate.LoadHistoryRequest parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.LoadHistoryRequest parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.LoadHistoryRequest parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    @java.lang.Override
+    public Builder newBuilderForType() { return newBuilder(); }
+    public static Builder newBuilder() {
+      return DEFAULT_INSTANCE.toBuilder();
+    }
+    public static Builder newBuilder(gradle.substrate.v1.Substrate.LoadHistoryRequest prototype) {
+      return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
+    }
+    @java.lang.Override
+    public Builder toBuilder() {
+      return this == DEFAULT_INSTANCE
+          ? new Builder() : new Builder().mergeFrom(this);
+    }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+      Builder builder = new Builder(parent);
+      return builder;
+    }
+    /**
+     * Protobuf type {@code gradle.substrate.v1.LoadHistoryRequest}
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessage.Builder<Builder> implements
+        // @@protoc_insertion_point(builder_implements:gradle.substrate.v1.LoadHistoryRequest)
+        gradle.substrate.v1.Substrate.LoadHistoryRequestOrBuilder {
+      public static final com.google.protobuf.Descriptors.Descriptor
+          getDescriptor() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_LoadHistoryRequest_descriptor;
+      }
+
+      @java.lang.Override
+      protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+          internalGetFieldAccessorTable() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_LoadHistoryRequest_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                gradle.substrate.v1.Substrate.LoadHistoryRequest.class, gradle.substrate.v1.Substrate.LoadHistoryRequest.Builder.class);
+      }
+
+      // Construct using gradle.substrate.v1.Substrate.LoadHistoryRequest.newBuilder()
+      private Builder() {
+
+      }
+
+      private Builder(
+          com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+        super(parent);
+
+      }
+      @java.lang.Override
+      public Builder clear() {
+        super.clear();
+        bitField0_ = 0;
+        workIdentity_ = "";
+        return this;
+      }
+
+      @java.lang.Override
+      public com.google.protobuf.Descriptors.Descriptor
+          getDescriptorForType() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_LoadHistoryRequest_descriptor;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.LoadHistoryRequest getDefaultInstanceForType() {
+        return gradle.substrate.v1.Substrate.LoadHistoryRequest.getDefaultInstance();
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.LoadHistoryRequest build() {
+        gradle.substrate.v1.Substrate.LoadHistoryRequest result = buildPartial();
+        if (!result.isInitialized()) {
+          throw newUninitializedMessageException(result);
+        }
+        return result;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.LoadHistoryRequest buildPartial() {
+        gradle.substrate.v1.Substrate.LoadHistoryRequest result = new gradle.substrate.v1.Substrate.LoadHistoryRequest(this);
+        if (bitField0_ != 0) { buildPartial0(result); }
+        onBuilt();
+        return result;
+      }
+
+      private void buildPartial0(gradle.substrate.v1.Substrate.LoadHistoryRequest result) {
+        int from_bitField0_ = bitField0_;
+        if (((from_bitField0_ & 0x00000001) != 0)) {
+          result.workIdentity_ = workIdentity_;
+        }
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(com.google.protobuf.Message other) {
+        if (other instanceof gradle.substrate.v1.Substrate.LoadHistoryRequest) {
+          return mergeFrom((gradle.substrate.v1.Substrate.LoadHistoryRequest)other);
+        } else {
+          super.mergeFrom(other);
+          return this;
+        }
+      }
+
+      public Builder mergeFrom(gradle.substrate.v1.Substrate.LoadHistoryRequest other) {
+        if (other == gradle.substrate.v1.Substrate.LoadHistoryRequest.getDefaultInstance()) return this;
+        if (!other.getWorkIdentity().isEmpty()) {
+          workIdentity_ = other.workIdentity_;
+          bitField0_ |= 0x00000001;
+          onChanged();
+        }
+        this.mergeUnknownFields(other.getUnknownFields());
+        onChanged();
+        return this;
+      }
+
+      @java.lang.Override
+      public final boolean isInitialized() {
+        return true;
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws java.io.IOException {
+        if (extensionRegistry == null) {
+          throw new java.lang.NullPointerException();
+        }
+        try {
+          boolean done = false;
+          while (!done) {
+            int tag = input.readTag();
+            switch (tag) {
+              case 0:
+                done = true;
+                break;
+              case 10: {
+                workIdentity_ = input.readStringRequireUtf8();
+                bitField0_ |= 0x00000001;
+                break;
+              } // case 10
+              default: {
+                if (!super.parseUnknownField(input, extensionRegistry, tag)) {
+                  done = true; // was an endgroup tag
+                }
+                break;
+              } // default:
+            } // switch (tag)
+          } // while (!done)
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.unwrapIOException();
+        } finally {
+          onChanged();
+        } // finally
+        return this;
+      }
+      private int bitField0_;
+
+      private java.lang.Object workIdentity_ = "";
+      /**
+       * <code>string work_identity = 1;</code>
+       * @return The workIdentity.
+       */
+      public java.lang.String getWorkIdentity() {
+        java.lang.Object ref = workIdentity_;
+        if (!(ref instanceof java.lang.String)) {
+          com.google.protobuf.ByteString bs =
+              (com.google.protobuf.ByteString) ref;
+          java.lang.String s = bs.toStringUtf8();
+          workIdentity_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <code>string work_identity = 1;</code>
+       * @return The bytes for workIdentity.
+       */
+      public com.google.protobuf.ByteString
+          getWorkIdentityBytes() {
+        java.lang.Object ref = workIdentity_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          workIdentity_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <code>string work_identity = 1;</code>
+       * @param value The workIdentity to set.
+       * @return This builder for chaining.
+       */
+      public Builder setWorkIdentity(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        workIdentity_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string work_identity = 1;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearWorkIdentity() {
+        workIdentity_ = getDefaultInstance().getWorkIdentity();
+        bitField0_ = (bitField0_ & ~0x00000001);
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string work_identity = 1;</code>
+       * @param value The bytes for workIdentity to set.
+       * @return This builder for chaining.
+       */
+      public Builder setWorkIdentityBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        workIdentity_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+
+      // @@protoc_insertion_point(builder_scope:gradle.substrate.v1.LoadHistoryRequest)
+    }
+
+    // @@protoc_insertion_point(class_scope:gradle.substrate.v1.LoadHistoryRequest)
+    private static final gradle.substrate.v1.Substrate.LoadHistoryRequest DEFAULT_INSTANCE;
+    static {
+      DEFAULT_INSTANCE = new gradle.substrate.v1.Substrate.LoadHistoryRequest();
+    }
+
+    public static gradle.substrate.v1.Substrate.LoadHistoryRequest getDefaultInstance() {
+      return DEFAULT_INSTANCE;
+    }
+
+    private static final com.google.protobuf.Parser<LoadHistoryRequest>
+        PARSER = new com.google.protobuf.AbstractParser<LoadHistoryRequest>() {
+      @java.lang.Override
+      public LoadHistoryRequest parsePartialFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws com.google.protobuf.InvalidProtocolBufferException {
+        Builder builder = newBuilder();
+        try {
+          builder.mergeFrom(input, extensionRegistry);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.setUnfinishedMessage(builder.buildPartial());
+        } catch (com.google.protobuf.UninitializedMessageException e) {
+          throw e.asInvalidProtocolBufferException().setUnfinishedMessage(builder.buildPartial());
+        } catch (java.io.IOException e) {
+          throw new com.google.protobuf.InvalidProtocolBufferException(e)
+              .setUnfinishedMessage(builder.buildPartial());
+        }
+        return builder.buildPartial();
+      }
+    };
+
+    public static com.google.protobuf.Parser<LoadHistoryRequest> parser() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<LoadHistoryRequest> getParserForType() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.LoadHistoryRequest getDefaultInstanceForType() {
+      return DEFAULT_INSTANCE;
+    }
+
+  }
+
+  public interface LoadHistoryResponseOrBuilder extends
+      // @@protoc_insertion_point(interface_extends:gradle.substrate.v1.LoadHistoryResponse)
+      com.google.protobuf.MessageOrBuilder {
+
+    /**
+     * <code>bool found = 1;</code>
+     * @return The found.
+     */
+    boolean getFound();
+
+    /**
+     * <pre>
+     * Serialized execution state (input fingerprints, output snapshots, etc.).
+     * </pre>
+     *
+     * <code>bytes state = 2;</code>
+     * @return The state.
+     */
+    com.google.protobuf.ByteString getState();
+
+    /**
+     * <pre>
+     * Timestamp of when this state was stored.
+     * </pre>
+     *
+     * <code>int64 timestamp_ms = 3;</code>
+     * @return The timestampMs.
+     */
+    long getTimestampMs();
+  }
+  /**
+   * Protobuf type {@code gradle.substrate.v1.LoadHistoryResponse}
+   */
+  public static final class LoadHistoryResponse extends
+      com.google.protobuf.GeneratedMessage implements
+      // @@protoc_insertion_point(message_implements:gradle.substrate.v1.LoadHistoryResponse)
+      LoadHistoryResponseOrBuilder {
+  private static final long serialVersionUID = 0L;
+    static {
+      com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
+        com.google.protobuf.RuntimeVersion.RuntimeDomain.PUBLIC,
+        /* major= */ 4,
+        /* minor= */ 34,
+        /* patch= */ 0,
+        /* suffix= */ "",
+        "LoadHistoryResponse");
+    }
+    // Use LoadHistoryResponse.newBuilder() to construct.
+    private LoadHistoryResponse(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      super(builder);
+    }
+    private LoadHistoryResponse() {
+      state_ = com.google.protobuf.ByteString.EMPTY;
+    }
+
+    public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_LoadHistoryResponse_descriptor;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Descriptors.Descriptor getDescriptorForType() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_LoadHistoryResponse_descriptor;
+    }
+
+    @java.lang.Override
+    protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_LoadHistoryResponse_fieldAccessorTable
+          .ensureFieldAccessorsInitialized(
+              gradle.substrate.v1.Substrate.LoadHistoryResponse.class, gradle.substrate.v1.Substrate.LoadHistoryResponse.Builder.class);
+    }
+
+    public static final int FOUND_FIELD_NUMBER = 1;
+    private boolean found_ = false;
+    /**
+     * <code>bool found = 1;</code>
+     * @return The found.
+     */
+    @java.lang.Override
+    public boolean getFound() {
+      return found_;
+    }
+
+    public static final int STATE_FIELD_NUMBER = 2;
+    private com.google.protobuf.ByteString state_ = com.google.protobuf.ByteString.EMPTY;
+    /**
+     * <pre>
+     * Serialized execution state (input fingerprints, output snapshots, etc.).
+     * </pre>
+     *
+     * <code>bytes state = 2;</code>
+     * @return The state.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString getState() {
+      return state_;
+    }
+
+    public static final int TIMESTAMP_MS_FIELD_NUMBER = 3;
+    private long timestampMs_ = 0L;
+    /**
+     * <pre>
+     * Timestamp of when this state was stored.
+     * </pre>
+     *
+     * <code>int64 timestamp_ms = 3;</code>
+     * @return The timestampMs.
+     */
+    @java.lang.Override
+    public long getTimestampMs() {
+      return timestampMs_;
+    }
+
+    private byte memoizedIsInitialized = -1;
+    @java.lang.Override
+    public final boolean isInitialized() {
+      byte isInitialized = memoizedIsInitialized;
+      if (isInitialized == 1) return true;
+      if (isInitialized == 0) return false;
+
+      memoizedIsInitialized = 1;
+      return true;
+    }
+
+    @java.lang.Override
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+                        throws java.io.IOException {
+      if (found_ != false) {
+        output.writeBool(1, found_);
+      }
+      if (!state_.isEmpty()) {
+        output.writeBytes(2, state_);
+      }
+      if (timestampMs_ != 0L) {
+        output.writeInt64(3, timestampMs_);
+      }
+      getUnknownFields().writeTo(output);
+    }
+
+    @java.lang.Override
+    public int getSerializedSize() {
+      int size = memoizedSize;
+      if (size != -1) return size;
+
+      size = 0;
+      if (found_ != false) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBoolSize(1, found_);
+      }
+      if (!state_.isEmpty()) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBytesSize(2, state_);
+      }
+      if (timestampMs_ != 0L) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeInt64Size(3, timestampMs_);
+      }
+      size += getUnknownFields().getSerializedSize();
+      memoizedSize = size;
+      return size;
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+      if (obj == this) {
+       return true;
+      }
+      if (!(obj instanceof gradle.substrate.v1.Substrate.LoadHistoryResponse)) {
+        return super.equals(obj);
+      }
+      gradle.substrate.v1.Substrate.LoadHistoryResponse other = (gradle.substrate.v1.Substrate.LoadHistoryResponse) obj;
+
+      if (getFound()
+          != other.getFound()) return false;
+      if (!getState()
+          .equals(other.getState())) return false;
+      if (getTimestampMs()
+          != other.getTimestampMs()) return false;
+      if (!getUnknownFields().equals(other.getUnknownFields())) return false;
+      return true;
+    }
+
+    @java.lang.Override
+    public int hashCode() {
+      if (memoizedHashCode != 0) {
+        return memoizedHashCode;
+      }
+      int hash = 41;
+      hash = (19 * hash) + getDescriptor().hashCode();
+      hash = (37 * hash) + FOUND_FIELD_NUMBER;
+      hash = (53 * hash) + com.google.protobuf.Internal.hashBoolean(
+          getFound());
+      hash = (37 * hash) + STATE_FIELD_NUMBER;
+      hash = (53 * hash) + getState().hashCode();
+      hash = (37 * hash) + TIMESTAMP_MS_FIELD_NUMBER;
+      hash = (53 * hash) + com.google.protobuf.Internal.hashLong(
+          getTimestampMs());
+      hash = (29 * hash) + getUnknownFields().hashCode();
+      memoizedHashCode = hash;
+      return hash;
+    }
+
+    public static gradle.substrate.v1.Substrate.LoadHistoryResponse parseFrom(
+        java.nio.ByteBuffer data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.LoadHistoryResponse parseFrom(
+        java.nio.ByteBuffer data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.LoadHistoryResponse parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.LoadHistoryResponse parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.LoadHistoryResponse parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.LoadHistoryResponse parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.LoadHistoryResponse parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.LoadHistoryResponse parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static gradle.substrate.v1.Substrate.LoadHistoryResponse parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input);
+    }
+
+    public static gradle.substrate.v1.Substrate.LoadHistoryResponse parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.LoadHistoryResponse parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.LoadHistoryResponse parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    @java.lang.Override
+    public Builder newBuilderForType() { return newBuilder(); }
+    public static Builder newBuilder() {
+      return DEFAULT_INSTANCE.toBuilder();
+    }
+    public static Builder newBuilder(gradle.substrate.v1.Substrate.LoadHistoryResponse prototype) {
+      return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
+    }
+    @java.lang.Override
+    public Builder toBuilder() {
+      return this == DEFAULT_INSTANCE
+          ? new Builder() : new Builder().mergeFrom(this);
+    }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+      Builder builder = new Builder(parent);
+      return builder;
+    }
+    /**
+     * Protobuf type {@code gradle.substrate.v1.LoadHistoryResponse}
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessage.Builder<Builder> implements
+        // @@protoc_insertion_point(builder_implements:gradle.substrate.v1.LoadHistoryResponse)
+        gradle.substrate.v1.Substrate.LoadHistoryResponseOrBuilder {
+      public static final com.google.protobuf.Descriptors.Descriptor
+          getDescriptor() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_LoadHistoryResponse_descriptor;
+      }
+
+      @java.lang.Override
+      protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+          internalGetFieldAccessorTable() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_LoadHistoryResponse_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                gradle.substrate.v1.Substrate.LoadHistoryResponse.class, gradle.substrate.v1.Substrate.LoadHistoryResponse.Builder.class);
+      }
+
+      // Construct using gradle.substrate.v1.Substrate.LoadHistoryResponse.newBuilder()
+      private Builder() {
+
+      }
+
+      private Builder(
+          com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+        super(parent);
+
+      }
+      @java.lang.Override
+      public Builder clear() {
+        super.clear();
+        bitField0_ = 0;
+        found_ = false;
+        state_ = com.google.protobuf.ByteString.EMPTY;
+        timestampMs_ = 0L;
+        return this;
+      }
+
+      @java.lang.Override
+      public com.google.protobuf.Descriptors.Descriptor
+          getDescriptorForType() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_LoadHistoryResponse_descriptor;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.LoadHistoryResponse getDefaultInstanceForType() {
+        return gradle.substrate.v1.Substrate.LoadHistoryResponse.getDefaultInstance();
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.LoadHistoryResponse build() {
+        gradle.substrate.v1.Substrate.LoadHistoryResponse result = buildPartial();
+        if (!result.isInitialized()) {
+          throw newUninitializedMessageException(result);
+        }
+        return result;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.LoadHistoryResponse buildPartial() {
+        gradle.substrate.v1.Substrate.LoadHistoryResponse result = new gradle.substrate.v1.Substrate.LoadHistoryResponse(this);
+        if (bitField0_ != 0) { buildPartial0(result); }
+        onBuilt();
+        return result;
+      }
+
+      private void buildPartial0(gradle.substrate.v1.Substrate.LoadHistoryResponse result) {
+        int from_bitField0_ = bitField0_;
+        if (((from_bitField0_ & 0x00000001) != 0)) {
+          result.found_ = found_;
+        }
+        if (((from_bitField0_ & 0x00000002) != 0)) {
+          result.state_ = state_;
+        }
+        if (((from_bitField0_ & 0x00000004) != 0)) {
+          result.timestampMs_ = timestampMs_;
+        }
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(com.google.protobuf.Message other) {
+        if (other instanceof gradle.substrate.v1.Substrate.LoadHistoryResponse) {
+          return mergeFrom((gradle.substrate.v1.Substrate.LoadHistoryResponse)other);
+        } else {
+          super.mergeFrom(other);
+          return this;
+        }
+      }
+
+      public Builder mergeFrom(gradle.substrate.v1.Substrate.LoadHistoryResponse other) {
+        if (other == gradle.substrate.v1.Substrate.LoadHistoryResponse.getDefaultInstance()) return this;
+        if (other.getFound() != false) {
+          setFound(other.getFound());
+        }
+        if (!other.getState().isEmpty()) {
+          setState(other.getState());
+        }
+        if (other.getTimestampMs() != 0L) {
+          setTimestampMs(other.getTimestampMs());
+        }
+        this.mergeUnknownFields(other.getUnknownFields());
+        onChanged();
+        return this;
+      }
+
+      @java.lang.Override
+      public final boolean isInitialized() {
+        return true;
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws java.io.IOException {
+        if (extensionRegistry == null) {
+          throw new java.lang.NullPointerException();
+        }
+        try {
+          boolean done = false;
+          while (!done) {
+            int tag = input.readTag();
+            switch (tag) {
+              case 0:
+                done = true;
+                break;
+              case 8: {
+                found_ = input.readBool();
+                bitField0_ |= 0x00000001;
+                break;
+              } // case 8
+              case 18: {
+                state_ = input.readBytes();
+                bitField0_ |= 0x00000002;
+                break;
+              } // case 18
+              case 24: {
+                timestampMs_ = input.readInt64();
+                bitField0_ |= 0x00000004;
+                break;
+              } // case 24
+              default: {
+                if (!super.parseUnknownField(input, extensionRegistry, tag)) {
+                  done = true; // was an endgroup tag
+                }
+                break;
+              } // default:
+            } // switch (tag)
+          } // while (!done)
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.unwrapIOException();
+        } finally {
+          onChanged();
+        } // finally
+        return this;
+      }
+      private int bitField0_;
+
+      private boolean found_ ;
+      /**
+       * <code>bool found = 1;</code>
+       * @return The found.
+       */
+      @java.lang.Override
+      public boolean getFound() {
+        return found_;
+      }
+      /**
+       * <code>bool found = 1;</code>
+       * @param value The found to set.
+       * @return This builder for chaining.
+       */
+      public Builder setFound(boolean value) {
+
+        found_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>bool found = 1;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearFound() {
+        bitField0_ = (bitField0_ & ~0x00000001);
+        found_ = false;
+        onChanged();
+        return this;
+      }
+
+      private com.google.protobuf.ByteString state_ = com.google.protobuf.ByteString.EMPTY;
+      /**
+       * <pre>
+       * Serialized execution state (input fingerprints, output snapshots, etc.).
+       * </pre>
+       *
+       * <code>bytes state = 2;</code>
+       * @return The state.
+       */
+      @java.lang.Override
+      public com.google.protobuf.ByteString getState() {
+        return state_;
+      }
+      /**
+       * <pre>
+       * Serialized execution state (input fingerprints, output snapshots, etc.).
+       * </pre>
+       *
+       * <code>bytes state = 2;</code>
+       * @param value The state to set.
+       * @return This builder for chaining.
+       */
+      public Builder setState(com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        state_ = value;
+        bitField0_ |= 0x00000002;
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * Serialized execution state (input fingerprints, output snapshots, etc.).
+       * </pre>
+       *
+       * <code>bytes state = 2;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearState() {
+        bitField0_ = (bitField0_ & ~0x00000002);
+        state_ = getDefaultInstance().getState();
+        onChanged();
+        return this;
+      }
+
+      private long timestampMs_ ;
+      /**
+       * <pre>
+       * Timestamp of when this state was stored.
+       * </pre>
+       *
+       * <code>int64 timestamp_ms = 3;</code>
+       * @return The timestampMs.
+       */
+      @java.lang.Override
+      public long getTimestampMs() {
+        return timestampMs_;
+      }
+      /**
+       * <pre>
+       * Timestamp of when this state was stored.
+       * </pre>
+       *
+       * <code>int64 timestamp_ms = 3;</code>
+       * @param value The timestampMs to set.
+       * @return This builder for chaining.
+       */
+      public Builder setTimestampMs(long value) {
+
+        timestampMs_ = value;
+        bitField0_ |= 0x00000004;
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * Timestamp of when this state was stored.
+       * </pre>
+       *
+       * <code>int64 timestamp_ms = 3;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearTimestampMs() {
+        bitField0_ = (bitField0_ & ~0x00000004);
+        timestampMs_ = 0L;
+        onChanged();
+        return this;
+      }
+
+      // @@protoc_insertion_point(builder_scope:gradle.substrate.v1.LoadHistoryResponse)
+    }
+
+    // @@protoc_insertion_point(class_scope:gradle.substrate.v1.LoadHistoryResponse)
+    private static final gradle.substrate.v1.Substrate.LoadHistoryResponse DEFAULT_INSTANCE;
+    static {
+      DEFAULT_INSTANCE = new gradle.substrate.v1.Substrate.LoadHistoryResponse();
+    }
+
+    public static gradle.substrate.v1.Substrate.LoadHistoryResponse getDefaultInstance() {
+      return DEFAULT_INSTANCE;
+    }
+
+    private static final com.google.protobuf.Parser<LoadHistoryResponse>
+        PARSER = new com.google.protobuf.AbstractParser<LoadHistoryResponse>() {
+      @java.lang.Override
+      public LoadHistoryResponse parsePartialFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws com.google.protobuf.InvalidProtocolBufferException {
+        Builder builder = newBuilder();
+        try {
+          builder.mergeFrom(input, extensionRegistry);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.setUnfinishedMessage(builder.buildPartial());
+        } catch (com.google.protobuf.UninitializedMessageException e) {
+          throw e.asInvalidProtocolBufferException().setUnfinishedMessage(builder.buildPartial());
+        } catch (java.io.IOException e) {
+          throw new com.google.protobuf.InvalidProtocolBufferException(e)
+              .setUnfinishedMessage(builder.buildPartial());
+        }
+        return builder.buildPartial();
+      }
+    };
+
+    public static com.google.protobuf.Parser<LoadHistoryResponse> parser() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<LoadHistoryResponse> getParserForType() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.LoadHistoryResponse getDefaultInstanceForType() {
+      return DEFAULT_INSTANCE;
+    }
+
+  }
+
+  public interface StoreHistoryRequestOrBuilder extends
+      // @@protoc_insertion_point(interface_extends:gradle.substrate.v1.StoreHistoryRequest)
+      com.google.protobuf.MessageOrBuilder {
+
+    /**
+     * <code>string work_identity = 1;</code>
+     * @return The workIdentity.
+     */
+    java.lang.String getWorkIdentity();
+    /**
+     * <code>string work_identity = 1;</code>
+     * @return The bytes for workIdentity.
+     */
+    com.google.protobuf.ByteString
+        getWorkIdentityBytes();
+
+    /**
+     * <pre>
+     * Serialized execution state.
+     * </pre>
+     *
+     * <code>bytes state = 2;</code>
+     * @return The state.
+     */
+    com.google.protobuf.ByteString getState();
+
+    /**
+     * <code>int64 timestamp_ms = 3;</code>
+     * @return The timestampMs.
+     */
+    long getTimestampMs();
+  }
+  /**
+   * Protobuf type {@code gradle.substrate.v1.StoreHistoryRequest}
+   */
+  public static final class StoreHistoryRequest extends
+      com.google.protobuf.GeneratedMessage implements
+      // @@protoc_insertion_point(message_implements:gradle.substrate.v1.StoreHistoryRequest)
+      StoreHistoryRequestOrBuilder {
+  private static final long serialVersionUID = 0L;
+    static {
+      com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
+        com.google.protobuf.RuntimeVersion.RuntimeDomain.PUBLIC,
+        /* major= */ 4,
+        /* minor= */ 34,
+        /* patch= */ 0,
+        /* suffix= */ "",
+        "StoreHistoryRequest");
+    }
+    // Use StoreHistoryRequest.newBuilder() to construct.
+    private StoreHistoryRequest(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      super(builder);
+    }
+    private StoreHistoryRequest() {
+      workIdentity_ = "";
+      state_ = com.google.protobuf.ByteString.EMPTY;
+    }
+
+    public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreHistoryRequest_descriptor;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Descriptors.Descriptor getDescriptorForType() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreHistoryRequest_descriptor;
+    }
+
+    @java.lang.Override
+    protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreHistoryRequest_fieldAccessorTable
+          .ensureFieldAccessorsInitialized(
+              gradle.substrate.v1.Substrate.StoreHistoryRequest.class, gradle.substrate.v1.Substrate.StoreHistoryRequest.Builder.class);
+    }
+
+    public static final int WORK_IDENTITY_FIELD_NUMBER = 1;
+    @SuppressWarnings("serial")
+    private volatile java.lang.Object workIdentity_ = "";
+    /**
+     * <code>string work_identity = 1;</code>
+     * @return The workIdentity.
+     */
+    @java.lang.Override
+    public java.lang.String getWorkIdentity() {
+      java.lang.Object ref = workIdentity_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        workIdentity_ = s;
+        return s;
+      }
+    }
+    /**
+     * <code>string work_identity = 1;</code>
+     * @return The bytes for workIdentity.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getWorkIdentityBytes() {
+      java.lang.Object ref = workIdentity_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        workIdentity_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    public static final int STATE_FIELD_NUMBER = 2;
+    private com.google.protobuf.ByteString state_ = com.google.protobuf.ByteString.EMPTY;
+    /**
+     * <pre>
+     * Serialized execution state.
+     * </pre>
+     *
+     * <code>bytes state = 2;</code>
+     * @return The state.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString getState() {
+      return state_;
+    }
+
+    public static final int TIMESTAMP_MS_FIELD_NUMBER = 3;
+    private long timestampMs_ = 0L;
+    /**
+     * <code>int64 timestamp_ms = 3;</code>
+     * @return The timestampMs.
+     */
+    @java.lang.Override
+    public long getTimestampMs() {
+      return timestampMs_;
+    }
+
+    private byte memoizedIsInitialized = -1;
+    @java.lang.Override
+    public final boolean isInitialized() {
+      byte isInitialized = memoizedIsInitialized;
+      if (isInitialized == 1) return true;
+      if (isInitialized == 0) return false;
+
+      memoizedIsInitialized = 1;
+      return true;
+    }
+
+    @java.lang.Override
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+                        throws java.io.IOException {
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(workIdentity_)) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 1, workIdentity_);
+      }
+      if (!state_.isEmpty()) {
+        output.writeBytes(2, state_);
+      }
+      if (timestampMs_ != 0L) {
+        output.writeInt64(3, timestampMs_);
+      }
+      getUnknownFields().writeTo(output);
+    }
+
+    @java.lang.Override
+    public int getSerializedSize() {
+      int size = memoizedSize;
+      if (size != -1) return size;
+
+      size = 0;
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(workIdentity_)) {
+        size += com.google.protobuf.GeneratedMessage.computeStringSize(1, workIdentity_);
+      }
+      if (!state_.isEmpty()) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBytesSize(2, state_);
+      }
+      if (timestampMs_ != 0L) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeInt64Size(3, timestampMs_);
+      }
+      size += getUnknownFields().getSerializedSize();
+      memoizedSize = size;
+      return size;
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+      if (obj == this) {
+       return true;
+      }
+      if (!(obj instanceof gradle.substrate.v1.Substrate.StoreHistoryRequest)) {
+        return super.equals(obj);
+      }
+      gradle.substrate.v1.Substrate.StoreHistoryRequest other = (gradle.substrate.v1.Substrate.StoreHistoryRequest) obj;
+
+      if (!getWorkIdentity()
+          .equals(other.getWorkIdentity())) return false;
+      if (!getState()
+          .equals(other.getState())) return false;
+      if (getTimestampMs()
+          != other.getTimestampMs()) return false;
+      if (!getUnknownFields().equals(other.getUnknownFields())) return false;
+      return true;
+    }
+
+    @java.lang.Override
+    public int hashCode() {
+      if (memoizedHashCode != 0) {
+        return memoizedHashCode;
+      }
+      int hash = 41;
+      hash = (19 * hash) + getDescriptor().hashCode();
+      hash = (37 * hash) + WORK_IDENTITY_FIELD_NUMBER;
+      hash = (53 * hash) + getWorkIdentity().hashCode();
+      hash = (37 * hash) + STATE_FIELD_NUMBER;
+      hash = (53 * hash) + getState().hashCode();
+      hash = (37 * hash) + TIMESTAMP_MS_FIELD_NUMBER;
+      hash = (53 * hash) + com.google.protobuf.Internal.hashLong(
+          getTimestampMs());
+      hash = (29 * hash) + getUnknownFields().hashCode();
+      memoizedHashCode = hash;
+      return hash;
+    }
+
+    public static gradle.substrate.v1.Substrate.StoreHistoryRequest parseFrom(
+        java.nio.ByteBuffer data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.StoreHistoryRequest parseFrom(
+        java.nio.ByteBuffer data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.StoreHistoryRequest parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.StoreHistoryRequest parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.StoreHistoryRequest parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.StoreHistoryRequest parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.StoreHistoryRequest parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.StoreHistoryRequest parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static gradle.substrate.v1.Substrate.StoreHistoryRequest parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input);
+    }
+
+    public static gradle.substrate.v1.Substrate.StoreHistoryRequest parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.StoreHistoryRequest parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.StoreHistoryRequest parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    @java.lang.Override
+    public Builder newBuilderForType() { return newBuilder(); }
+    public static Builder newBuilder() {
+      return DEFAULT_INSTANCE.toBuilder();
+    }
+    public static Builder newBuilder(gradle.substrate.v1.Substrate.StoreHistoryRequest prototype) {
+      return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
+    }
+    @java.lang.Override
+    public Builder toBuilder() {
+      return this == DEFAULT_INSTANCE
+          ? new Builder() : new Builder().mergeFrom(this);
+    }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+      Builder builder = new Builder(parent);
+      return builder;
+    }
+    /**
+     * Protobuf type {@code gradle.substrate.v1.StoreHistoryRequest}
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessage.Builder<Builder> implements
+        // @@protoc_insertion_point(builder_implements:gradle.substrate.v1.StoreHistoryRequest)
+        gradle.substrate.v1.Substrate.StoreHistoryRequestOrBuilder {
+      public static final com.google.protobuf.Descriptors.Descriptor
+          getDescriptor() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreHistoryRequest_descriptor;
+      }
+
+      @java.lang.Override
+      protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+          internalGetFieldAccessorTable() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreHistoryRequest_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                gradle.substrate.v1.Substrate.StoreHistoryRequest.class, gradle.substrate.v1.Substrate.StoreHistoryRequest.Builder.class);
+      }
+
+      // Construct using gradle.substrate.v1.Substrate.StoreHistoryRequest.newBuilder()
+      private Builder() {
+
+      }
+
+      private Builder(
+          com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+        super(parent);
+
+      }
+      @java.lang.Override
+      public Builder clear() {
+        super.clear();
+        bitField0_ = 0;
+        workIdentity_ = "";
+        state_ = com.google.protobuf.ByteString.EMPTY;
+        timestampMs_ = 0L;
+        return this;
+      }
+
+      @java.lang.Override
+      public com.google.protobuf.Descriptors.Descriptor
+          getDescriptorForType() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreHistoryRequest_descriptor;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.StoreHistoryRequest getDefaultInstanceForType() {
+        return gradle.substrate.v1.Substrate.StoreHistoryRequest.getDefaultInstance();
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.StoreHistoryRequest build() {
+        gradle.substrate.v1.Substrate.StoreHistoryRequest result = buildPartial();
+        if (!result.isInitialized()) {
+          throw newUninitializedMessageException(result);
+        }
+        return result;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.StoreHistoryRequest buildPartial() {
+        gradle.substrate.v1.Substrate.StoreHistoryRequest result = new gradle.substrate.v1.Substrate.StoreHistoryRequest(this);
+        if (bitField0_ != 0) { buildPartial0(result); }
+        onBuilt();
+        return result;
+      }
+
+      private void buildPartial0(gradle.substrate.v1.Substrate.StoreHistoryRequest result) {
+        int from_bitField0_ = bitField0_;
+        if (((from_bitField0_ & 0x00000001) != 0)) {
+          result.workIdentity_ = workIdentity_;
+        }
+        if (((from_bitField0_ & 0x00000002) != 0)) {
+          result.state_ = state_;
+        }
+        if (((from_bitField0_ & 0x00000004) != 0)) {
+          result.timestampMs_ = timestampMs_;
+        }
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(com.google.protobuf.Message other) {
+        if (other instanceof gradle.substrate.v1.Substrate.StoreHistoryRequest) {
+          return mergeFrom((gradle.substrate.v1.Substrate.StoreHistoryRequest)other);
+        } else {
+          super.mergeFrom(other);
+          return this;
+        }
+      }
+
+      public Builder mergeFrom(gradle.substrate.v1.Substrate.StoreHistoryRequest other) {
+        if (other == gradle.substrate.v1.Substrate.StoreHistoryRequest.getDefaultInstance()) return this;
+        if (!other.getWorkIdentity().isEmpty()) {
+          workIdentity_ = other.workIdentity_;
+          bitField0_ |= 0x00000001;
+          onChanged();
+        }
+        if (!other.getState().isEmpty()) {
+          setState(other.getState());
+        }
+        if (other.getTimestampMs() != 0L) {
+          setTimestampMs(other.getTimestampMs());
+        }
+        this.mergeUnknownFields(other.getUnknownFields());
+        onChanged();
+        return this;
+      }
+
+      @java.lang.Override
+      public final boolean isInitialized() {
+        return true;
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws java.io.IOException {
+        if (extensionRegistry == null) {
+          throw new java.lang.NullPointerException();
+        }
+        try {
+          boolean done = false;
+          while (!done) {
+            int tag = input.readTag();
+            switch (tag) {
+              case 0:
+                done = true;
+                break;
+              case 10: {
+                workIdentity_ = input.readStringRequireUtf8();
+                bitField0_ |= 0x00000001;
+                break;
+              } // case 10
+              case 18: {
+                state_ = input.readBytes();
+                bitField0_ |= 0x00000002;
+                break;
+              } // case 18
+              case 24: {
+                timestampMs_ = input.readInt64();
+                bitField0_ |= 0x00000004;
+                break;
+              } // case 24
+              default: {
+                if (!super.parseUnknownField(input, extensionRegistry, tag)) {
+                  done = true; // was an endgroup tag
+                }
+                break;
+              } // default:
+            } // switch (tag)
+          } // while (!done)
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.unwrapIOException();
+        } finally {
+          onChanged();
+        } // finally
+        return this;
+      }
+      private int bitField0_;
+
+      private java.lang.Object workIdentity_ = "";
+      /**
+       * <code>string work_identity = 1;</code>
+       * @return The workIdentity.
+       */
+      public java.lang.String getWorkIdentity() {
+        java.lang.Object ref = workIdentity_;
+        if (!(ref instanceof java.lang.String)) {
+          com.google.protobuf.ByteString bs =
+              (com.google.protobuf.ByteString) ref;
+          java.lang.String s = bs.toStringUtf8();
+          workIdentity_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <code>string work_identity = 1;</code>
+       * @return The bytes for workIdentity.
+       */
+      public com.google.protobuf.ByteString
+          getWorkIdentityBytes() {
+        java.lang.Object ref = workIdentity_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          workIdentity_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <code>string work_identity = 1;</code>
+       * @param value The workIdentity to set.
+       * @return This builder for chaining.
+       */
+      public Builder setWorkIdentity(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        workIdentity_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string work_identity = 1;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearWorkIdentity() {
+        workIdentity_ = getDefaultInstance().getWorkIdentity();
+        bitField0_ = (bitField0_ & ~0x00000001);
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string work_identity = 1;</code>
+       * @param value The bytes for workIdentity to set.
+       * @return This builder for chaining.
+       */
+      public Builder setWorkIdentityBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        workIdentity_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+
+      private com.google.protobuf.ByteString state_ = com.google.protobuf.ByteString.EMPTY;
+      /**
+       * <pre>
+       * Serialized execution state.
+       * </pre>
+       *
+       * <code>bytes state = 2;</code>
+       * @return The state.
+       */
+      @java.lang.Override
+      public com.google.protobuf.ByteString getState() {
+        return state_;
+      }
+      /**
+       * <pre>
+       * Serialized execution state.
+       * </pre>
+       *
+       * <code>bytes state = 2;</code>
+       * @param value The state to set.
+       * @return This builder for chaining.
+       */
+      public Builder setState(com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        state_ = value;
+        bitField0_ |= 0x00000002;
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * Serialized execution state.
+       * </pre>
+       *
+       * <code>bytes state = 2;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearState() {
+        bitField0_ = (bitField0_ & ~0x00000002);
+        state_ = getDefaultInstance().getState();
+        onChanged();
+        return this;
+      }
+
+      private long timestampMs_ ;
+      /**
+       * <code>int64 timestamp_ms = 3;</code>
+       * @return The timestampMs.
+       */
+      @java.lang.Override
+      public long getTimestampMs() {
+        return timestampMs_;
+      }
+      /**
+       * <code>int64 timestamp_ms = 3;</code>
+       * @param value The timestampMs to set.
+       * @return This builder for chaining.
+       */
+      public Builder setTimestampMs(long value) {
+
+        timestampMs_ = value;
+        bitField0_ |= 0x00000004;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>int64 timestamp_ms = 3;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearTimestampMs() {
+        bitField0_ = (bitField0_ & ~0x00000004);
+        timestampMs_ = 0L;
+        onChanged();
+        return this;
+      }
+
+      // @@protoc_insertion_point(builder_scope:gradle.substrate.v1.StoreHistoryRequest)
+    }
+
+    // @@protoc_insertion_point(class_scope:gradle.substrate.v1.StoreHistoryRequest)
+    private static final gradle.substrate.v1.Substrate.StoreHistoryRequest DEFAULT_INSTANCE;
+    static {
+      DEFAULT_INSTANCE = new gradle.substrate.v1.Substrate.StoreHistoryRequest();
+    }
+
+    public static gradle.substrate.v1.Substrate.StoreHistoryRequest getDefaultInstance() {
+      return DEFAULT_INSTANCE;
+    }
+
+    private static final com.google.protobuf.Parser<StoreHistoryRequest>
+        PARSER = new com.google.protobuf.AbstractParser<StoreHistoryRequest>() {
+      @java.lang.Override
+      public StoreHistoryRequest parsePartialFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws com.google.protobuf.InvalidProtocolBufferException {
+        Builder builder = newBuilder();
+        try {
+          builder.mergeFrom(input, extensionRegistry);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.setUnfinishedMessage(builder.buildPartial());
+        } catch (com.google.protobuf.UninitializedMessageException e) {
+          throw e.asInvalidProtocolBufferException().setUnfinishedMessage(builder.buildPartial());
+        } catch (java.io.IOException e) {
+          throw new com.google.protobuf.InvalidProtocolBufferException(e)
+              .setUnfinishedMessage(builder.buildPartial());
+        }
+        return builder.buildPartial();
+      }
+    };
+
+    public static com.google.protobuf.Parser<StoreHistoryRequest> parser() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<StoreHistoryRequest> getParserForType() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.StoreHistoryRequest getDefaultInstanceForType() {
+      return DEFAULT_INSTANCE;
+    }
+
+  }
+
+  public interface StoreHistoryResponseOrBuilder extends
+      // @@protoc_insertion_point(interface_extends:gradle.substrate.v1.StoreHistoryResponse)
+      com.google.protobuf.MessageOrBuilder {
+
+    /**
+     * <code>bool success = 1;</code>
+     * @return The success.
+     */
+    boolean getSuccess();
+  }
+  /**
+   * Protobuf type {@code gradle.substrate.v1.StoreHistoryResponse}
+   */
+  public static final class StoreHistoryResponse extends
+      com.google.protobuf.GeneratedMessage implements
+      // @@protoc_insertion_point(message_implements:gradle.substrate.v1.StoreHistoryResponse)
+      StoreHistoryResponseOrBuilder {
+  private static final long serialVersionUID = 0L;
+    static {
+      com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
+        com.google.protobuf.RuntimeVersion.RuntimeDomain.PUBLIC,
+        /* major= */ 4,
+        /* minor= */ 34,
+        /* patch= */ 0,
+        /* suffix= */ "",
+        "StoreHistoryResponse");
+    }
+    // Use StoreHistoryResponse.newBuilder() to construct.
+    private StoreHistoryResponse(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      super(builder);
+    }
+    private StoreHistoryResponse() {
+    }
+
+    public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreHistoryResponse_descriptor;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Descriptors.Descriptor getDescriptorForType() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreHistoryResponse_descriptor;
+    }
+
+    @java.lang.Override
+    protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreHistoryResponse_fieldAccessorTable
+          .ensureFieldAccessorsInitialized(
+              gradle.substrate.v1.Substrate.StoreHistoryResponse.class, gradle.substrate.v1.Substrate.StoreHistoryResponse.Builder.class);
+    }
+
+    public static final int SUCCESS_FIELD_NUMBER = 1;
+    private boolean success_ = false;
+    /**
+     * <code>bool success = 1;</code>
+     * @return The success.
+     */
+    @java.lang.Override
+    public boolean getSuccess() {
+      return success_;
+    }
+
+    private byte memoizedIsInitialized = -1;
+    @java.lang.Override
+    public final boolean isInitialized() {
+      byte isInitialized = memoizedIsInitialized;
+      if (isInitialized == 1) return true;
+      if (isInitialized == 0) return false;
+
+      memoizedIsInitialized = 1;
+      return true;
+    }
+
+    @java.lang.Override
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+                        throws java.io.IOException {
+      if (success_ != false) {
+        output.writeBool(1, success_);
+      }
+      getUnknownFields().writeTo(output);
+    }
+
+    @java.lang.Override
+    public int getSerializedSize() {
+      int size = memoizedSize;
+      if (size != -1) return size;
+
+      size = 0;
+      if (success_ != false) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBoolSize(1, success_);
+      }
+      size += getUnknownFields().getSerializedSize();
+      memoizedSize = size;
+      return size;
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+      if (obj == this) {
+       return true;
+      }
+      if (!(obj instanceof gradle.substrate.v1.Substrate.StoreHistoryResponse)) {
+        return super.equals(obj);
+      }
+      gradle.substrate.v1.Substrate.StoreHistoryResponse other = (gradle.substrate.v1.Substrate.StoreHistoryResponse) obj;
+
+      if (getSuccess()
+          != other.getSuccess()) return false;
+      if (!getUnknownFields().equals(other.getUnknownFields())) return false;
+      return true;
+    }
+
+    @java.lang.Override
+    public int hashCode() {
+      if (memoizedHashCode != 0) {
+        return memoizedHashCode;
+      }
+      int hash = 41;
+      hash = (19 * hash) + getDescriptor().hashCode();
+      hash = (37 * hash) + SUCCESS_FIELD_NUMBER;
+      hash = (53 * hash) + com.google.protobuf.Internal.hashBoolean(
+          getSuccess());
+      hash = (29 * hash) + getUnknownFields().hashCode();
+      memoizedHashCode = hash;
+      return hash;
+    }
+
+    public static gradle.substrate.v1.Substrate.StoreHistoryResponse parseFrom(
+        java.nio.ByteBuffer data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.StoreHistoryResponse parseFrom(
+        java.nio.ByteBuffer data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.StoreHistoryResponse parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.StoreHistoryResponse parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.StoreHistoryResponse parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.StoreHistoryResponse parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.StoreHistoryResponse parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.StoreHistoryResponse parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static gradle.substrate.v1.Substrate.StoreHistoryResponse parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input);
+    }
+
+    public static gradle.substrate.v1.Substrate.StoreHistoryResponse parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.StoreHistoryResponse parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.StoreHistoryResponse parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    @java.lang.Override
+    public Builder newBuilderForType() { return newBuilder(); }
+    public static Builder newBuilder() {
+      return DEFAULT_INSTANCE.toBuilder();
+    }
+    public static Builder newBuilder(gradle.substrate.v1.Substrate.StoreHistoryResponse prototype) {
+      return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
+    }
+    @java.lang.Override
+    public Builder toBuilder() {
+      return this == DEFAULT_INSTANCE
+          ? new Builder() : new Builder().mergeFrom(this);
+    }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+      Builder builder = new Builder(parent);
+      return builder;
+    }
+    /**
+     * Protobuf type {@code gradle.substrate.v1.StoreHistoryResponse}
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessage.Builder<Builder> implements
+        // @@protoc_insertion_point(builder_implements:gradle.substrate.v1.StoreHistoryResponse)
+        gradle.substrate.v1.Substrate.StoreHistoryResponseOrBuilder {
+      public static final com.google.protobuf.Descriptors.Descriptor
+          getDescriptor() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreHistoryResponse_descriptor;
+      }
+
+      @java.lang.Override
+      protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+          internalGetFieldAccessorTable() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreHistoryResponse_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                gradle.substrate.v1.Substrate.StoreHistoryResponse.class, gradle.substrate.v1.Substrate.StoreHistoryResponse.Builder.class);
+      }
+
+      // Construct using gradle.substrate.v1.Substrate.StoreHistoryResponse.newBuilder()
+      private Builder() {
+
+      }
+
+      private Builder(
+          com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+        super(parent);
+
+      }
+      @java.lang.Override
+      public Builder clear() {
+        super.clear();
+        bitField0_ = 0;
+        success_ = false;
+        return this;
+      }
+
+      @java.lang.Override
+      public com.google.protobuf.Descriptors.Descriptor
+          getDescriptorForType() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreHistoryResponse_descriptor;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.StoreHistoryResponse getDefaultInstanceForType() {
+        return gradle.substrate.v1.Substrate.StoreHistoryResponse.getDefaultInstance();
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.StoreHistoryResponse build() {
+        gradle.substrate.v1.Substrate.StoreHistoryResponse result = buildPartial();
+        if (!result.isInitialized()) {
+          throw newUninitializedMessageException(result);
+        }
+        return result;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.StoreHistoryResponse buildPartial() {
+        gradle.substrate.v1.Substrate.StoreHistoryResponse result = new gradle.substrate.v1.Substrate.StoreHistoryResponse(this);
+        if (bitField0_ != 0) { buildPartial0(result); }
+        onBuilt();
+        return result;
+      }
+
+      private void buildPartial0(gradle.substrate.v1.Substrate.StoreHistoryResponse result) {
+        int from_bitField0_ = bitField0_;
+        if (((from_bitField0_ & 0x00000001) != 0)) {
+          result.success_ = success_;
+        }
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(com.google.protobuf.Message other) {
+        if (other instanceof gradle.substrate.v1.Substrate.StoreHistoryResponse) {
+          return mergeFrom((gradle.substrate.v1.Substrate.StoreHistoryResponse)other);
+        } else {
+          super.mergeFrom(other);
+          return this;
+        }
+      }
+
+      public Builder mergeFrom(gradle.substrate.v1.Substrate.StoreHistoryResponse other) {
+        if (other == gradle.substrate.v1.Substrate.StoreHistoryResponse.getDefaultInstance()) return this;
+        if (other.getSuccess() != false) {
+          setSuccess(other.getSuccess());
+        }
+        this.mergeUnknownFields(other.getUnknownFields());
+        onChanged();
+        return this;
+      }
+
+      @java.lang.Override
+      public final boolean isInitialized() {
+        return true;
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws java.io.IOException {
+        if (extensionRegistry == null) {
+          throw new java.lang.NullPointerException();
+        }
+        try {
+          boolean done = false;
+          while (!done) {
+            int tag = input.readTag();
+            switch (tag) {
+              case 0:
+                done = true;
+                break;
+              case 8: {
+                success_ = input.readBool();
+                bitField0_ |= 0x00000001;
+                break;
+              } // case 8
+              default: {
+                if (!super.parseUnknownField(input, extensionRegistry, tag)) {
+                  done = true; // was an endgroup tag
+                }
+                break;
+              } // default:
+            } // switch (tag)
+          } // while (!done)
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.unwrapIOException();
+        } finally {
+          onChanged();
+        } // finally
+        return this;
+      }
+      private int bitField0_;
+
+      private boolean success_ ;
+      /**
+       * <code>bool success = 1;</code>
+       * @return The success.
+       */
+      @java.lang.Override
+      public boolean getSuccess() {
+        return success_;
+      }
+      /**
+       * <code>bool success = 1;</code>
+       * @param value The success to set.
+       * @return This builder for chaining.
+       */
+      public Builder setSuccess(boolean value) {
+
+        success_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>bool success = 1;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearSuccess() {
+        bitField0_ = (bitField0_ & ~0x00000001);
+        success_ = false;
+        onChanged();
+        return this;
+      }
+
+      // @@protoc_insertion_point(builder_scope:gradle.substrate.v1.StoreHistoryResponse)
+    }
+
+    // @@protoc_insertion_point(class_scope:gradle.substrate.v1.StoreHistoryResponse)
+    private static final gradle.substrate.v1.Substrate.StoreHistoryResponse DEFAULT_INSTANCE;
+    static {
+      DEFAULT_INSTANCE = new gradle.substrate.v1.Substrate.StoreHistoryResponse();
+    }
+
+    public static gradle.substrate.v1.Substrate.StoreHistoryResponse getDefaultInstance() {
+      return DEFAULT_INSTANCE;
+    }
+
+    private static final com.google.protobuf.Parser<StoreHistoryResponse>
+        PARSER = new com.google.protobuf.AbstractParser<StoreHistoryResponse>() {
+      @java.lang.Override
+      public StoreHistoryResponse parsePartialFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws com.google.protobuf.InvalidProtocolBufferException {
+        Builder builder = newBuilder();
+        try {
+          builder.mergeFrom(input, extensionRegistry);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.setUnfinishedMessage(builder.buildPartial());
+        } catch (com.google.protobuf.UninitializedMessageException e) {
+          throw e.asInvalidProtocolBufferException().setUnfinishedMessage(builder.buildPartial());
+        } catch (java.io.IOException e) {
+          throw new com.google.protobuf.InvalidProtocolBufferException(e)
+              .setUnfinishedMessage(builder.buildPartial());
+        }
+        return builder.buildPartial();
+      }
+    };
+
+    public static com.google.protobuf.Parser<StoreHistoryResponse> parser() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<StoreHistoryResponse> getParserForType() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.StoreHistoryResponse getDefaultInstanceForType() {
+      return DEFAULT_INSTANCE;
+    }
+
+  }
+
+  public interface RemoveHistoryRequestOrBuilder extends
+      // @@protoc_insertion_point(interface_extends:gradle.substrate.v1.RemoveHistoryRequest)
+      com.google.protobuf.MessageOrBuilder {
+
+    /**
+     * <code>string work_identity = 1;</code>
+     * @return The workIdentity.
+     */
+    java.lang.String getWorkIdentity();
+    /**
+     * <code>string work_identity = 1;</code>
+     * @return The bytes for workIdentity.
+     */
+    com.google.protobuf.ByteString
+        getWorkIdentityBytes();
+  }
+  /**
+   * Protobuf type {@code gradle.substrate.v1.RemoveHistoryRequest}
+   */
+  public static final class RemoveHistoryRequest extends
+      com.google.protobuf.GeneratedMessage implements
+      // @@protoc_insertion_point(message_implements:gradle.substrate.v1.RemoveHistoryRequest)
+      RemoveHistoryRequestOrBuilder {
+  private static final long serialVersionUID = 0L;
+    static {
+      com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
+        com.google.protobuf.RuntimeVersion.RuntimeDomain.PUBLIC,
+        /* major= */ 4,
+        /* minor= */ 34,
+        /* patch= */ 0,
+        /* suffix= */ "",
+        "RemoveHistoryRequest");
+    }
+    // Use RemoveHistoryRequest.newBuilder() to construct.
+    private RemoveHistoryRequest(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      super(builder);
+    }
+    private RemoveHistoryRequest() {
+      workIdentity_ = "";
+    }
+
+    public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_RemoveHistoryRequest_descriptor;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Descriptors.Descriptor getDescriptorForType() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_RemoveHistoryRequest_descriptor;
+    }
+
+    @java.lang.Override
+    protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_RemoveHistoryRequest_fieldAccessorTable
+          .ensureFieldAccessorsInitialized(
+              gradle.substrate.v1.Substrate.RemoveHistoryRequest.class, gradle.substrate.v1.Substrate.RemoveHistoryRequest.Builder.class);
+    }
+
+    public static final int WORK_IDENTITY_FIELD_NUMBER = 1;
+    @SuppressWarnings("serial")
+    private volatile java.lang.Object workIdentity_ = "";
+    /**
+     * <code>string work_identity = 1;</code>
+     * @return The workIdentity.
+     */
+    @java.lang.Override
+    public java.lang.String getWorkIdentity() {
+      java.lang.Object ref = workIdentity_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        workIdentity_ = s;
+        return s;
+      }
+    }
+    /**
+     * <code>string work_identity = 1;</code>
+     * @return The bytes for workIdentity.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getWorkIdentityBytes() {
+      java.lang.Object ref = workIdentity_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        workIdentity_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    private byte memoizedIsInitialized = -1;
+    @java.lang.Override
+    public final boolean isInitialized() {
+      byte isInitialized = memoizedIsInitialized;
+      if (isInitialized == 1) return true;
+      if (isInitialized == 0) return false;
+
+      memoizedIsInitialized = 1;
+      return true;
+    }
+
+    @java.lang.Override
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+                        throws java.io.IOException {
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(workIdentity_)) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 1, workIdentity_);
+      }
+      getUnknownFields().writeTo(output);
+    }
+
+    @java.lang.Override
+    public int getSerializedSize() {
+      int size = memoizedSize;
+      if (size != -1) return size;
+
+      size = 0;
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(workIdentity_)) {
+        size += com.google.protobuf.GeneratedMessage.computeStringSize(1, workIdentity_);
+      }
+      size += getUnknownFields().getSerializedSize();
+      memoizedSize = size;
+      return size;
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+      if (obj == this) {
+       return true;
+      }
+      if (!(obj instanceof gradle.substrate.v1.Substrate.RemoveHistoryRequest)) {
+        return super.equals(obj);
+      }
+      gradle.substrate.v1.Substrate.RemoveHistoryRequest other = (gradle.substrate.v1.Substrate.RemoveHistoryRequest) obj;
+
+      if (!getWorkIdentity()
+          .equals(other.getWorkIdentity())) return false;
+      if (!getUnknownFields().equals(other.getUnknownFields())) return false;
+      return true;
+    }
+
+    @java.lang.Override
+    public int hashCode() {
+      if (memoizedHashCode != 0) {
+        return memoizedHashCode;
+      }
+      int hash = 41;
+      hash = (19 * hash) + getDescriptor().hashCode();
+      hash = (37 * hash) + WORK_IDENTITY_FIELD_NUMBER;
+      hash = (53 * hash) + getWorkIdentity().hashCode();
+      hash = (29 * hash) + getUnknownFields().hashCode();
+      memoizedHashCode = hash;
+      return hash;
+    }
+
+    public static gradle.substrate.v1.Substrate.RemoveHistoryRequest parseFrom(
+        java.nio.ByteBuffer data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.RemoveHistoryRequest parseFrom(
+        java.nio.ByteBuffer data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.RemoveHistoryRequest parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.RemoveHistoryRequest parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.RemoveHistoryRequest parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.RemoveHistoryRequest parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.RemoveHistoryRequest parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.RemoveHistoryRequest parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static gradle.substrate.v1.Substrate.RemoveHistoryRequest parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input);
+    }
+
+    public static gradle.substrate.v1.Substrate.RemoveHistoryRequest parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.RemoveHistoryRequest parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.RemoveHistoryRequest parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    @java.lang.Override
+    public Builder newBuilderForType() { return newBuilder(); }
+    public static Builder newBuilder() {
+      return DEFAULT_INSTANCE.toBuilder();
+    }
+    public static Builder newBuilder(gradle.substrate.v1.Substrate.RemoveHistoryRequest prototype) {
+      return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
+    }
+    @java.lang.Override
+    public Builder toBuilder() {
+      return this == DEFAULT_INSTANCE
+          ? new Builder() : new Builder().mergeFrom(this);
+    }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+      Builder builder = new Builder(parent);
+      return builder;
+    }
+    /**
+     * Protobuf type {@code gradle.substrate.v1.RemoveHistoryRequest}
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessage.Builder<Builder> implements
+        // @@protoc_insertion_point(builder_implements:gradle.substrate.v1.RemoveHistoryRequest)
+        gradle.substrate.v1.Substrate.RemoveHistoryRequestOrBuilder {
+      public static final com.google.protobuf.Descriptors.Descriptor
+          getDescriptor() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_RemoveHistoryRequest_descriptor;
+      }
+
+      @java.lang.Override
+      protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+          internalGetFieldAccessorTable() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_RemoveHistoryRequest_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                gradle.substrate.v1.Substrate.RemoveHistoryRequest.class, gradle.substrate.v1.Substrate.RemoveHistoryRequest.Builder.class);
+      }
+
+      // Construct using gradle.substrate.v1.Substrate.RemoveHistoryRequest.newBuilder()
+      private Builder() {
+
+      }
+
+      private Builder(
+          com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+        super(parent);
+
+      }
+      @java.lang.Override
+      public Builder clear() {
+        super.clear();
+        bitField0_ = 0;
+        workIdentity_ = "";
+        return this;
+      }
+
+      @java.lang.Override
+      public com.google.protobuf.Descriptors.Descriptor
+          getDescriptorForType() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_RemoveHistoryRequest_descriptor;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.RemoveHistoryRequest getDefaultInstanceForType() {
+        return gradle.substrate.v1.Substrate.RemoveHistoryRequest.getDefaultInstance();
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.RemoveHistoryRequest build() {
+        gradle.substrate.v1.Substrate.RemoveHistoryRequest result = buildPartial();
+        if (!result.isInitialized()) {
+          throw newUninitializedMessageException(result);
+        }
+        return result;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.RemoveHistoryRequest buildPartial() {
+        gradle.substrate.v1.Substrate.RemoveHistoryRequest result = new gradle.substrate.v1.Substrate.RemoveHistoryRequest(this);
+        if (bitField0_ != 0) { buildPartial0(result); }
+        onBuilt();
+        return result;
+      }
+
+      private void buildPartial0(gradle.substrate.v1.Substrate.RemoveHistoryRequest result) {
+        int from_bitField0_ = bitField0_;
+        if (((from_bitField0_ & 0x00000001) != 0)) {
+          result.workIdentity_ = workIdentity_;
+        }
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(com.google.protobuf.Message other) {
+        if (other instanceof gradle.substrate.v1.Substrate.RemoveHistoryRequest) {
+          return mergeFrom((gradle.substrate.v1.Substrate.RemoveHistoryRequest)other);
+        } else {
+          super.mergeFrom(other);
+          return this;
+        }
+      }
+
+      public Builder mergeFrom(gradle.substrate.v1.Substrate.RemoveHistoryRequest other) {
+        if (other == gradle.substrate.v1.Substrate.RemoveHistoryRequest.getDefaultInstance()) return this;
+        if (!other.getWorkIdentity().isEmpty()) {
+          workIdentity_ = other.workIdentity_;
+          bitField0_ |= 0x00000001;
+          onChanged();
+        }
+        this.mergeUnknownFields(other.getUnknownFields());
+        onChanged();
+        return this;
+      }
+
+      @java.lang.Override
+      public final boolean isInitialized() {
+        return true;
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws java.io.IOException {
+        if (extensionRegistry == null) {
+          throw new java.lang.NullPointerException();
+        }
+        try {
+          boolean done = false;
+          while (!done) {
+            int tag = input.readTag();
+            switch (tag) {
+              case 0:
+                done = true;
+                break;
+              case 10: {
+                workIdentity_ = input.readStringRequireUtf8();
+                bitField0_ |= 0x00000001;
+                break;
+              } // case 10
+              default: {
+                if (!super.parseUnknownField(input, extensionRegistry, tag)) {
+                  done = true; // was an endgroup tag
+                }
+                break;
+              } // default:
+            } // switch (tag)
+          } // while (!done)
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.unwrapIOException();
+        } finally {
+          onChanged();
+        } // finally
+        return this;
+      }
+      private int bitField0_;
+
+      private java.lang.Object workIdentity_ = "";
+      /**
+       * <code>string work_identity = 1;</code>
+       * @return The workIdentity.
+       */
+      public java.lang.String getWorkIdentity() {
+        java.lang.Object ref = workIdentity_;
+        if (!(ref instanceof java.lang.String)) {
+          com.google.protobuf.ByteString bs =
+              (com.google.protobuf.ByteString) ref;
+          java.lang.String s = bs.toStringUtf8();
+          workIdentity_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <code>string work_identity = 1;</code>
+       * @return The bytes for workIdentity.
+       */
+      public com.google.protobuf.ByteString
+          getWorkIdentityBytes() {
+        java.lang.Object ref = workIdentity_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          workIdentity_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <code>string work_identity = 1;</code>
+       * @param value The workIdentity to set.
+       * @return This builder for chaining.
+       */
+      public Builder setWorkIdentity(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        workIdentity_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string work_identity = 1;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearWorkIdentity() {
+        workIdentity_ = getDefaultInstance().getWorkIdentity();
+        bitField0_ = (bitField0_ & ~0x00000001);
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string work_identity = 1;</code>
+       * @param value The bytes for workIdentity to set.
+       * @return This builder for chaining.
+       */
+      public Builder setWorkIdentityBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        workIdentity_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+
+      // @@protoc_insertion_point(builder_scope:gradle.substrate.v1.RemoveHistoryRequest)
+    }
+
+    // @@protoc_insertion_point(class_scope:gradle.substrate.v1.RemoveHistoryRequest)
+    private static final gradle.substrate.v1.Substrate.RemoveHistoryRequest DEFAULT_INSTANCE;
+    static {
+      DEFAULT_INSTANCE = new gradle.substrate.v1.Substrate.RemoveHistoryRequest();
+    }
+
+    public static gradle.substrate.v1.Substrate.RemoveHistoryRequest getDefaultInstance() {
+      return DEFAULT_INSTANCE;
+    }
+
+    private static final com.google.protobuf.Parser<RemoveHistoryRequest>
+        PARSER = new com.google.protobuf.AbstractParser<RemoveHistoryRequest>() {
+      @java.lang.Override
+      public RemoveHistoryRequest parsePartialFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws com.google.protobuf.InvalidProtocolBufferException {
+        Builder builder = newBuilder();
+        try {
+          builder.mergeFrom(input, extensionRegistry);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.setUnfinishedMessage(builder.buildPartial());
+        } catch (com.google.protobuf.UninitializedMessageException e) {
+          throw e.asInvalidProtocolBufferException().setUnfinishedMessage(builder.buildPartial());
+        } catch (java.io.IOException e) {
+          throw new com.google.protobuf.InvalidProtocolBufferException(e)
+              .setUnfinishedMessage(builder.buildPartial());
+        }
+        return builder.buildPartial();
+      }
+    };
+
+    public static com.google.protobuf.Parser<RemoveHistoryRequest> parser() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<RemoveHistoryRequest> getParserForType() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.RemoveHistoryRequest getDefaultInstanceForType() {
+      return DEFAULT_INSTANCE;
+    }
+
+  }
+
+  public interface RemoveHistoryResponseOrBuilder extends
+      // @@protoc_insertion_point(interface_extends:gradle.substrate.v1.RemoveHistoryResponse)
+      com.google.protobuf.MessageOrBuilder {
+
+    /**
+     * <code>bool success = 1;</code>
+     * @return The success.
+     */
+    boolean getSuccess();
+  }
+  /**
+   * Protobuf type {@code gradle.substrate.v1.RemoveHistoryResponse}
+   */
+  public static final class RemoveHistoryResponse extends
+      com.google.protobuf.GeneratedMessage implements
+      // @@protoc_insertion_point(message_implements:gradle.substrate.v1.RemoveHistoryResponse)
+      RemoveHistoryResponseOrBuilder {
+  private static final long serialVersionUID = 0L;
+    static {
+      com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
+        com.google.protobuf.RuntimeVersion.RuntimeDomain.PUBLIC,
+        /* major= */ 4,
+        /* minor= */ 34,
+        /* patch= */ 0,
+        /* suffix= */ "",
+        "RemoveHistoryResponse");
+    }
+    // Use RemoveHistoryResponse.newBuilder() to construct.
+    private RemoveHistoryResponse(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      super(builder);
+    }
+    private RemoveHistoryResponse() {
+    }
+
+    public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_RemoveHistoryResponse_descriptor;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Descriptors.Descriptor getDescriptorForType() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_RemoveHistoryResponse_descriptor;
+    }
+
+    @java.lang.Override
+    protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_RemoveHistoryResponse_fieldAccessorTable
+          .ensureFieldAccessorsInitialized(
+              gradle.substrate.v1.Substrate.RemoveHistoryResponse.class, gradle.substrate.v1.Substrate.RemoveHistoryResponse.Builder.class);
+    }
+
+    public static final int SUCCESS_FIELD_NUMBER = 1;
+    private boolean success_ = false;
+    /**
+     * <code>bool success = 1;</code>
+     * @return The success.
+     */
+    @java.lang.Override
+    public boolean getSuccess() {
+      return success_;
+    }
+
+    private byte memoizedIsInitialized = -1;
+    @java.lang.Override
+    public final boolean isInitialized() {
+      byte isInitialized = memoizedIsInitialized;
+      if (isInitialized == 1) return true;
+      if (isInitialized == 0) return false;
+
+      memoizedIsInitialized = 1;
+      return true;
+    }
+
+    @java.lang.Override
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+                        throws java.io.IOException {
+      if (success_ != false) {
+        output.writeBool(1, success_);
+      }
+      getUnknownFields().writeTo(output);
+    }
+
+    @java.lang.Override
+    public int getSerializedSize() {
+      int size = memoizedSize;
+      if (size != -1) return size;
+
+      size = 0;
+      if (success_ != false) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBoolSize(1, success_);
+      }
+      size += getUnknownFields().getSerializedSize();
+      memoizedSize = size;
+      return size;
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+      if (obj == this) {
+       return true;
+      }
+      if (!(obj instanceof gradle.substrate.v1.Substrate.RemoveHistoryResponse)) {
+        return super.equals(obj);
+      }
+      gradle.substrate.v1.Substrate.RemoveHistoryResponse other = (gradle.substrate.v1.Substrate.RemoveHistoryResponse) obj;
+
+      if (getSuccess()
+          != other.getSuccess()) return false;
+      if (!getUnknownFields().equals(other.getUnknownFields())) return false;
+      return true;
+    }
+
+    @java.lang.Override
+    public int hashCode() {
+      if (memoizedHashCode != 0) {
+        return memoizedHashCode;
+      }
+      int hash = 41;
+      hash = (19 * hash) + getDescriptor().hashCode();
+      hash = (37 * hash) + SUCCESS_FIELD_NUMBER;
+      hash = (53 * hash) + com.google.protobuf.Internal.hashBoolean(
+          getSuccess());
+      hash = (29 * hash) + getUnknownFields().hashCode();
+      memoizedHashCode = hash;
+      return hash;
+    }
+
+    public static gradle.substrate.v1.Substrate.RemoveHistoryResponse parseFrom(
+        java.nio.ByteBuffer data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.RemoveHistoryResponse parseFrom(
+        java.nio.ByteBuffer data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.RemoveHistoryResponse parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.RemoveHistoryResponse parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.RemoveHistoryResponse parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.RemoveHistoryResponse parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.RemoveHistoryResponse parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.RemoveHistoryResponse parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static gradle.substrate.v1.Substrate.RemoveHistoryResponse parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input);
+    }
+
+    public static gradle.substrate.v1.Substrate.RemoveHistoryResponse parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.RemoveHistoryResponse parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.RemoveHistoryResponse parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    @java.lang.Override
+    public Builder newBuilderForType() { return newBuilder(); }
+    public static Builder newBuilder() {
+      return DEFAULT_INSTANCE.toBuilder();
+    }
+    public static Builder newBuilder(gradle.substrate.v1.Substrate.RemoveHistoryResponse prototype) {
+      return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
+    }
+    @java.lang.Override
+    public Builder toBuilder() {
+      return this == DEFAULT_INSTANCE
+          ? new Builder() : new Builder().mergeFrom(this);
+    }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+      Builder builder = new Builder(parent);
+      return builder;
+    }
+    /**
+     * Protobuf type {@code gradle.substrate.v1.RemoveHistoryResponse}
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessage.Builder<Builder> implements
+        // @@protoc_insertion_point(builder_implements:gradle.substrate.v1.RemoveHistoryResponse)
+        gradle.substrate.v1.Substrate.RemoveHistoryResponseOrBuilder {
+      public static final com.google.protobuf.Descriptors.Descriptor
+          getDescriptor() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_RemoveHistoryResponse_descriptor;
+      }
+
+      @java.lang.Override
+      protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+          internalGetFieldAccessorTable() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_RemoveHistoryResponse_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                gradle.substrate.v1.Substrate.RemoveHistoryResponse.class, gradle.substrate.v1.Substrate.RemoveHistoryResponse.Builder.class);
+      }
+
+      // Construct using gradle.substrate.v1.Substrate.RemoveHistoryResponse.newBuilder()
+      private Builder() {
+
+      }
+
+      private Builder(
+          com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+        super(parent);
+
+      }
+      @java.lang.Override
+      public Builder clear() {
+        super.clear();
+        bitField0_ = 0;
+        success_ = false;
+        return this;
+      }
+
+      @java.lang.Override
+      public com.google.protobuf.Descriptors.Descriptor
+          getDescriptorForType() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_RemoveHistoryResponse_descriptor;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.RemoveHistoryResponse getDefaultInstanceForType() {
+        return gradle.substrate.v1.Substrate.RemoveHistoryResponse.getDefaultInstance();
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.RemoveHistoryResponse build() {
+        gradle.substrate.v1.Substrate.RemoveHistoryResponse result = buildPartial();
+        if (!result.isInitialized()) {
+          throw newUninitializedMessageException(result);
+        }
+        return result;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.RemoveHistoryResponse buildPartial() {
+        gradle.substrate.v1.Substrate.RemoveHistoryResponse result = new gradle.substrate.v1.Substrate.RemoveHistoryResponse(this);
+        if (bitField0_ != 0) { buildPartial0(result); }
+        onBuilt();
+        return result;
+      }
+
+      private void buildPartial0(gradle.substrate.v1.Substrate.RemoveHistoryResponse result) {
+        int from_bitField0_ = bitField0_;
+        if (((from_bitField0_ & 0x00000001) != 0)) {
+          result.success_ = success_;
+        }
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(com.google.protobuf.Message other) {
+        if (other instanceof gradle.substrate.v1.Substrate.RemoveHistoryResponse) {
+          return mergeFrom((gradle.substrate.v1.Substrate.RemoveHistoryResponse)other);
+        } else {
+          super.mergeFrom(other);
+          return this;
+        }
+      }
+
+      public Builder mergeFrom(gradle.substrate.v1.Substrate.RemoveHistoryResponse other) {
+        if (other == gradle.substrate.v1.Substrate.RemoveHistoryResponse.getDefaultInstance()) return this;
+        if (other.getSuccess() != false) {
+          setSuccess(other.getSuccess());
+        }
+        this.mergeUnknownFields(other.getUnknownFields());
+        onChanged();
+        return this;
+      }
+
+      @java.lang.Override
+      public final boolean isInitialized() {
+        return true;
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws java.io.IOException {
+        if (extensionRegistry == null) {
+          throw new java.lang.NullPointerException();
+        }
+        try {
+          boolean done = false;
+          while (!done) {
+            int tag = input.readTag();
+            switch (tag) {
+              case 0:
+                done = true;
+                break;
+              case 8: {
+                success_ = input.readBool();
+                bitField0_ |= 0x00000001;
+                break;
+              } // case 8
+              default: {
+                if (!super.parseUnknownField(input, extensionRegistry, tag)) {
+                  done = true; // was an endgroup tag
+                }
+                break;
+              } // default:
+            } // switch (tag)
+          } // while (!done)
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.unwrapIOException();
+        } finally {
+          onChanged();
+        } // finally
+        return this;
+      }
+      private int bitField0_;
+
+      private boolean success_ ;
+      /**
+       * <code>bool success = 1;</code>
+       * @return The success.
+       */
+      @java.lang.Override
+      public boolean getSuccess() {
+        return success_;
+      }
+      /**
+       * <code>bool success = 1;</code>
+       * @param value The success to set.
+       * @return This builder for chaining.
+       */
+      public Builder setSuccess(boolean value) {
+
+        success_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>bool success = 1;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearSuccess() {
+        bitField0_ = (bitField0_ & ~0x00000001);
+        success_ = false;
+        onChanged();
+        return this;
+      }
+
+      // @@protoc_insertion_point(builder_scope:gradle.substrate.v1.RemoveHistoryResponse)
+    }
+
+    // @@protoc_insertion_point(class_scope:gradle.substrate.v1.RemoveHistoryResponse)
+    private static final gradle.substrate.v1.Substrate.RemoveHistoryResponse DEFAULT_INSTANCE;
+    static {
+      DEFAULT_INSTANCE = new gradle.substrate.v1.Substrate.RemoveHistoryResponse();
+    }
+
+    public static gradle.substrate.v1.Substrate.RemoveHistoryResponse getDefaultInstance() {
+      return DEFAULT_INSTANCE;
+    }
+
+    private static final com.google.protobuf.Parser<RemoveHistoryResponse>
+        PARSER = new com.google.protobuf.AbstractParser<RemoveHistoryResponse>() {
+      @java.lang.Override
+      public RemoveHistoryResponse parsePartialFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws com.google.protobuf.InvalidProtocolBufferException {
+        Builder builder = newBuilder();
+        try {
+          builder.mergeFrom(input, extensionRegistry);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.setUnfinishedMessage(builder.buildPartial());
+        } catch (com.google.protobuf.UninitializedMessageException e) {
+          throw e.asInvalidProtocolBufferException().setUnfinishedMessage(builder.buildPartial());
+        } catch (java.io.IOException e) {
+          throw new com.google.protobuf.InvalidProtocolBufferException(e)
+              .setUnfinishedMessage(builder.buildPartial());
+        }
+        return builder.buildPartial();
+      }
+    };
+
+    public static com.google.protobuf.Parser<RemoveHistoryResponse> parser() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<RemoveHistoryResponse> getParserForType() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.RemoveHistoryResponse getDefaultInstanceForType() {
+      return DEFAULT_INSTANCE;
+    }
+
+  }
+
+  public interface FileToFingerprintOrBuilder extends
+      // @@protoc_insertion_point(interface_extends:gradle.substrate.v1.FileToFingerprint)
+      com.google.protobuf.MessageOrBuilder {
+
+    /**
+     * <code>string absolute_path = 1;</code>
+     * @return The absolutePath.
+     */
+    java.lang.String getAbsolutePath();
+    /**
+     * <code>string absolute_path = 1;</code>
+     * @return The bytes for absolutePath.
+     */
+    com.google.protobuf.ByteString
+        getAbsolutePathBytes();
+
+    /**
+     * <pre>
+     * How to handle this entry: FILE, DIRECTORY, or ROOT.
+     * </pre>
+     *
+     * <code>.gradle.substrate.v1.FingerprintType type = 2;</code>
+     * @return The enum numeric value on the wire for type.
+     */
+    int getTypeValue();
+    /**
+     * <pre>
+     * How to handle this entry: FILE, DIRECTORY, or ROOT.
+     * </pre>
+     *
+     * <code>.gradle.substrate.v1.FingerprintType type = 2;</code>
+     * @return The type.
+     */
+    gradle.substrate.v1.Substrate.FingerprintType getType();
+  }
+  /**
+   * Protobuf type {@code gradle.substrate.v1.FileToFingerprint}
+   */
+  public static final class FileToFingerprint extends
+      com.google.protobuf.GeneratedMessage implements
+      // @@protoc_insertion_point(message_implements:gradle.substrate.v1.FileToFingerprint)
+      FileToFingerprintOrBuilder {
+  private static final long serialVersionUID = 0L;
+    static {
+      com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
+        com.google.protobuf.RuntimeVersion.RuntimeDomain.PUBLIC,
+        /* major= */ 4,
+        /* minor= */ 34,
+        /* patch= */ 0,
+        /* suffix= */ "",
+        "FileToFingerprint");
+    }
+    // Use FileToFingerprint.newBuilder() to construct.
+    private FileToFingerprint(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      super(builder);
+    }
+    private FileToFingerprint() {
+      absolutePath_ = "";
+      type_ = 0;
+    }
+
+    public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FileToFingerprint_descriptor;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Descriptors.Descriptor getDescriptorForType() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FileToFingerprint_descriptor;
+    }
+
+    @java.lang.Override
+    protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FileToFingerprint_fieldAccessorTable
+          .ensureFieldAccessorsInitialized(
+              gradle.substrate.v1.Substrate.FileToFingerprint.class, gradle.substrate.v1.Substrate.FileToFingerprint.Builder.class);
+    }
+
+    public static final int ABSOLUTE_PATH_FIELD_NUMBER = 1;
+    @SuppressWarnings("serial")
+    private volatile java.lang.Object absolutePath_ = "";
+    /**
+     * <code>string absolute_path = 1;</code>
+     * @return The absolutePath.
+     */
+    @java.lang.Override
+    public java.lang.String getAbsolutePath() {
+      java.lang.Object ref = absolutePath_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        absolutePath_ = s;
+        return s;
+      }
+    }
+    /**
+     * <code>string absolute_path = 1;</code>
+     * @return The bytes for absolutePath.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getAbsolutePathBytes() {
+      java.lang.Object ref = absolutePath_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        absolutePath_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    public static final int TYPE_FIELD_NUMBER = 2;
+    private int type_ = 0;
+    /**
+     * <pre>
+     * How to handle this entry: FILE, DIRECTORY, or ROOT.
+     * </pre>
+     *
+     * <code>.gradle.substrate.v1.FingerprintType type = 2;</code>
+     * @return The enum numeric value on the wire for type.
+     */
+    @java.lang.Override public int getTypeValue() {
+      return type_;
+    }
+    /**
+     * <pre>
+     * How to handle this entry: FILE, DIRECTORY, or ROOT.
+     * </pre>
+     *
+     * <code>.gradle.substrate.v1.FingerprintType type = 2;</code>
+     * @return The type.
+     */
+    @java.lang.Override public gradle.substrate.v1.Substrate.FingerprintType getType() {
+      gradle.substrate.v1.Substrate.FingerprintType result = gradle.substrate.v1.Substrate.FingerprintType.forNumber(type_);
+      return result == null ? gradle.substrate.v1.Substrate.FingerprintType.UNRECOGNIZED : result;
+    }
+
+    private byte memoizedIsInitialized = -1;
+    @java.lang.Override
+    public final boolean isInitialized() {
+      byte isInitialized = memoizedIsInitialized;
+      if (isInitialized == 1) return true;
+      if (isInitialized == 0) return false;
+
+      memoizedIsInitialized = 1;
+      return true;
+    }
+
+    @java.lang.Override
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+                        throws java.io.IOException {
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(absolutePath_)) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 1, absolutePath_);
+      }
+      if (type_ != gradle.substrate.v1.Substrate.FingerprintType.FINGERPRINT_FILE.getNumber()) {
+        output.writeEnum(2, type_);
+      }
+      getUnknownFields().writeTo(output);
+    }
+
+    @java.lang.Override
+    public int getSerializedSize() {
+      int size = memoizedSize;
+      if (size != -1) return size;
+
+      size = 0;
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(absolutePath_)) {
+        size += com.google.protobuf.GeneratedMessage.computeStringSize(1, absolutePath_);
+      }
+      if (type_ != gradle.substrate.v1.Substrate.FingerprintType.FINGERPRINT_FILE.getNumber()) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeEnumSize(2, type_);
+      }
+      size += getUnknownFields().getSerializedSize();
+      memoizedSize = size;
+      return size;
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+      if (obj == this) {
+       return true;
+      }
+      if (!(obj instanceof gradle.substrate.v1.Substrate.FileToFingerprint)) {
+        return super.equals(obj);
+      }
+      gradle.substrate.v1.Substrate.FileToFingerprint other = (gradle.substrate.v1.Substrate.FileToFingerprint) obj;
+
+      if (!getAbsolutePath()
+          .equals(other.getAbsolutePath())) return false;
+      if (type_ != other.type_) return false;
+      if (!getUnknownFields().equals(other.getUnknownFields())) return false;
+      return true;
+    }
+
+    @java.lang.Override
+    public int hashCode() {
+      if (memoizedHashCode != 0) {
+        return memoizedHashCode;
+      }
+      int hash = 41;
+      hash = (19 * hash) + getDescriptor().hashCode();
+      hash = (37 * hash) + ABSOLUTE_PATH_FIELD_NUMBER;
+      hash = (53 * hash) + getAbsolutePath().hashCode();
+      hash = (37 * hash) + TYPE_FIELD_NUMBER;
+      hash = (53 * hash) + type_;
+      hash = (29 * hash) + getUnknownFields().hashCode();
+      memoizedHashCode = hash;
+      return hash;
+    }
+
+    public static gradle.substrate.v1.Substrate.FileToFingerprint parseFrom(
+        java.nio.ByteBuffer data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.FileToFingerprint parseFrom(
+        java.nio.ByteBuffer data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.FileToFingerprint parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.FileToFingerprint parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.FileToFingerprint parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.FileToFingerprint parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.FileToFingerprint parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.FileToFingerprint parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static gradle.substrate.v1.Substrate.FileToFingerprint parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input);
+    }
+
+    public static gradle.substrate.v1.Substrate.FileToFingerprint parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.FileToFingerprint parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.FileToFingerprint parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    @java.lang.Override
+    public Builder newBuilderForType() { return newBuilder(); }
+    public static Builder newBuilder() {
+      return DEFAULT_INSTANCE.toBuilder();
+    }
+    public static Builder newBuilder(gradle.substrate.v1.Substrate.FileToFingerprint prototype) {
+      return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
+    }
+    @java.lang.Override
+    public Builder toBuilder() {
+      return this == DEFAULT_INSTANCE
+          ? new Builder() : new Builder().mergeFrom(this);
+    }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+      Builder builder = new Builder(parent);
+      return builder;
+    }
+    /**
+     * Protobuf type {@code gradle.substrate.v1.FileToFingerprint}
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessage.Builder<Builder> implements
+        // @@protoc_insertion_point(builder_implements:gradle.substrate.v1.FileToFingerprint)
+        gradle.substrate.v1.Substrate.FileToFingerprintOrBuilder {
+      public static final com.google.protobuf.Descriptors.Descriptor
+          getDescriptor() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FileToFingerprint_descriptor;
+      }
+
+      @java.lang.Override
+      protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+          internalGetFieldAccessorTable() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FileToFingerprint_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                gradle.substrate.v1.Substrate.FileToFingerprint.class, gradle.substrate.v1.Substrate.FileToFingerprint.Builder.class);
+      }
+
+      // Construct using gradle.substrate.v1.Substrate.FileToFingerprint.newBuilder()
+      private Builder() {
+
+      }
+
+      private Builder(
+          com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+        super(parent);
+
+      }
+      @java.lang.Override
+      public Builder clear() {
+        super.clear();
+        bitField0_ = 0;
+        absolutePath_ = "";
+        type_ = 0;
+        return this;
+      }
+
+      @java.lang.Override
+      public com.google.protobuf.Descriptors.Descriptor
+          getDescriptorForType() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FileToFingerprint_descriptor;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.FileToFingerprint getDefaultInstanceForType() {
+        return gradle.substrate.v1.Substrate.FileToFingerprint.getDefaultInstance();
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.FileToFingerprint build() {
+        gradle.substrate.v1.Substrate.FileToFingerprint result = buildPartial();
+        if (!result.isInitialized()) {
+          throw newUninitializedMessageException(result);
+        }
+        return result;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.FileToFingerprint buildPartial() {
+        gradle.substrate.v1.Substrate.FileToFingerprint result = new gradle.substrate.v1.Substrate.FileToFingerprint(this);
+        if (bitField0_ != 0) { buildPartial0(result); }
+        onBuilt();
+        return result;
+      }
+
+      private void buildPartial0(gradle.substrate.v1.Substrate.FileToFingerprint result) {
+        int from_bitField0_ = bitField0_;
+        if (((from_bitField0_ & 0x00000001) != 0)) {
+          result.absolutePath_ = absolutePath_;
+        }
+        if (((from_bitField0_ & 0x00000002) != 0)) {
+          result.type_ = type_;
+        }
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(com.google.protobuf.Message other) {
+        if (other instanceof gradle.substrate.v1.Substrate.FileToFingerprint) {
+          return mergeFrom((gradle.substrate.v1.Substrate.FileToFingerprint)other);
+        } else {
+          super.mergeFrom(other);
+          return this;
+        }
+      }
+
+      public Builder mergeFrom(gradle.substrate.v1.Substrate.FileToFingerprint other) {
+        if (other == gradle.substrate.v1.Substrate.FileToFingerprint.getDefaultInstance()) return this;
+        if (!other.getAbsolutePath().isEmpty()) {
+          absolutePath_ = other.absolutePath_;
+          bitField0_ |= 0x00000001;
+          onChanged();
+        }
+        if (other.type_ != 0) {
+          setTypeValue(other.getTypeValue());
+        }
+        this.mergeUnknownFields(other.getUnknownFields());
+        onChanged();
+        return this;
+      }
+
+      @java.lang.Override
+      public final boolean isInitialized() {
+        return true;
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws java.io.IOException {
+        if (extensionRegistry == null) {
+          throw new java.lang.NullPointerException();
+        }
+        try {
+          boolean done = false;
+          while (!done) {
+            int tag = input.readTag();
+            switch (tag) {
+              case 0:
+                done = true;
+                break;
+              case 10: {
+                absolutePath_ = input.readStringRequireUtf8();
+                bitField0_ |= 0x00000001;
+                break;
+              } // case 10
+              case 16: {
+                type_ = input.readEnum();
+                bitField0_ |= 0x00000002;
+                break;
+              } // case 16
+              default: {
+                if (!super.parseUnknownField(input, extensionRegistry, tag)) {
+                  done = true; // was an endgroup tag
+                }
+                break;
+              } // default:
+            } // switch (tag)
+          } // while (!done)
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.unwrapIOException();
+        } finally {
+          onChanged();
+        } // finally
+        return this;
+      }
+      private int bitField0_;
+
+      private java.lang.Object absolutePath_ = "";
+      /**
+       * <code>string absolute_path = 1;</code>
+       * @return The absolutePath.
+       */
+      public java.lang.String getAbsolutePath() {
+        java.lang.Object ref = absolutePath_;
+        if (!(ref instanceof java.lang.String)) {
+          com.google.protobuf.ByteString bs =
+              (com.google.protobuf.ByteString) ref;
+          java.lang.String s = bs.toStringUtf8();
+          absolutePath_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <code>string absolute_path = 1;</code>
+       * @return The bytes for absolutePath.
+       */
+      public com.google.protobuf.ByteString
+          getAbsolutePathBytes() {
+        java.lang.Object ref = absolutePath_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          absolutePath_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <code>string absolute_path = 1;</code>
+       * @param value The absolutePath to set.
+       * @return This builder for chaining.
+       */
+      public Builder setAbsolutePath(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        absolutePath_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string absolute_path = 1;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearAbsolutePath() {
+        absolutePath_ = getDefaultInstance().getAbsolutePath();
+        bitField0_ = (bitField0_ & ~0x00000001);
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string absolute_path = 1;</code>
+       * @param value The bytes for absolutePath to set.
+       * @return This builder for chaining.
+       */
+      public Builder setAbsolutePathBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        absolutePath_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+
+      private int type_ = 0;
+      /**
+       * <pre>
+       * How to handle this entry: FILE, DIRECTORY, or ROOT.
+       * </pre>
+       *
+       * <code>.gradle.substrate.v1.FingerprintType type = 2;</code>
+       * @return The enum numeric value on the wire for type.
+       */
+      @java.lang.Override public int getTypeValue() {
+        return type_;
+      }
+      /**
+       * <pre>
+       * How to handle this entry: FILE, DIRECTORY, or ROOT.
+       * </pre>
+       *
+       * <code>.gradle.substrate.v1.FingerprintType type = 2;</code>
+       * @param value The enum numeric value on the wire for type to set.
+       * @throws IllegalArgumentException if UNRECOGNIZED is provided.
+       * @return This builder for chaining.
+       */
+      public Builder setTypeValue(int value) {
+        type_ = value;
+        bitField0_ |= 0x00000002;
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * How to handle this entry: FILE, DIRECTORY, or ROOT.
+       * </pre>
+       *
+       * <code>.gradle.substrate.v1.FingerprintType type = 2;</code>
+       * @return The type.
+       */
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.FingerprintType getType() {
+        gradle.substrate.v1.Substrate.FingerprintType result = gradle.substrate.v1.Substrate.FingerprintType.forNumber(type_);
+        return result == null ? gradle.substrate.v1.Substrate.FingerprintType.UNRECOGNIZED : result;
+      }
+      /**
+       * <pre>
+       * How to handle this entry: FILE, DIRECTORY, or ROOT.
+       * </pre>
+       *
+       * <code>.gradle.substrate.v1.FingerprintType type = 2;</code>
+       * @param value The type to set.
+       * @return This builder for chaining.
+       */
+      public Builder setType(gradle.substrate.v1.Substrate.FingerprintType value) {
+        if (value == null) { throw new NullPointerException(); }
+        bitField0_ |= 0x00000002;
+        type_ = value.getNumber();
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * How to handle this entry: FILE, DIRECTORY, or ROOT.
+       * </pre>
+       *
+       * <code>.gradle.substrate.v1.FingerprintType type = 2;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearType() {
+        bitField0_ = (bitField0_ & ~0x00000002);
+        type_ = 0;
+        onChanged();
+        return this;
+      }
+
+      // @@protoc_insertion_point(builder_scope:gradle.substrate.v1.FileToFingerprint)
+    }
+
+    // @@protoc_insertion_point(class_scope:gradle.substrate.v1.FileToFingerprint)
+    private static final gradle.substrate.v1.Substrate.FileToFingerprint DEFAULT_INSTANCE;
+    static {
+      DEFAULT_INSTANCE = new gradle.substrate.v1.Substrate.FileToFingerprint();
+    }
+
+    public static gradle.substrate.v1.Substrate.FileToFingerprint getDefaultInstance() {
+      return DEFAULT_INSTANCE;
+    }
+
+    private static final com.google.protobuf.Parser<FileToFingerprint>
+        PARSER = new com.google.protobuf.AbstractParser<FileToFingerprint>() {
+      @java.lang.Override
+      public FileToFingerprint parsePartialFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws com.google.protobuf.InvalidProtocolBufferException {
+        Builder builder = newBuilder();
+        try {
+          builder.mergeFrom(input, extensionRegistry);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.setUnfinishedMessage(builder.buildPartial());
+        } catch (com.google.protobuf.UninitializedMessageException e) {
+          throw e.asInvalidProtocolBufferException().setUnfinishedMessage(builder.buildPartial());
+        } catch (java.io.IOException e) {
+          throw new com.google.protobuf.InvalidProtocolBufferException(e)
+              .setUnfinishedMessage(builder.buildPartial());
+        }
+        return builder.buildPartial();
+      }
+    };
+
+    public static com.google.protobuf.Parser<FileToFingerprint> parser() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<FileToFingerprint> getParserForType() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.FileToFingerprint getDefaultInstanceForType() {
+      return DEFAULT_INSTANCE;
+    }
+
+  }
+
+  public interface FingerprintFilesRequestOrBuilder extends
+      // @@protoc_insertion_point(interface_extends:gradle.substrate.v1.FingerprintFilesRequest)
+      com.google.protobuf.MessageOrBuilder {
+
+    /**
+     * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+     */
+    java.util.List<gradle.substrate.v1.Substrate.FileToFingerprint> 
+        getFilesList();
+    /**
+     * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+     */
+    gradle.substrate.v1.Substrate.FileToFingerprint getFiles(int index);
+    /**
+     * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+     */
+    int getFilesCount();
+    /**
+     * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+     */
+    java.util.List<? extends gradle.substrate.v1.Substrate.FileToFingerprintOrBuilder> 
+        getFilesOrBuilderList();
+    /**
+     * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+     */
+    gradle.substrate.v1.Substrate.FileToFingerprintOrBuilder getFilesOrBuilder(
+        int index);
+
+    /**
+     * <pre>
+     * Normalization strategy: ABSOLUTE_PATH, RELATIVE_PATH, NAME_ONLY, HASH.
+     * </pre>
+     *
+     * <code>string normalization_strategy = 2;</code>
+     * @return The normalizationStrategy.
+     */
+    java.lang.String getNormalizationStrategy();
+    /**
+     * <pre>
+     * Normalization strategy: ABSOLUTE_PATH, RELATIVE_PATH, NAME_ONLY, HASH.
+     * </pre>
+     *
+     * <code>string normalization_strategy = 2;</code>
+     * @return The bytes for normalizationStrategy.
+     */
+    com.google.protobuf.ByteString
+        getNormalizationStrategyBytes();
+
+    /**
+     * <pre>
+     * Ignore changes to this pattern (e.g. ".DS_Store").
+     * </pre>
+     *
+     * <code>repeated string ignore_patterns = 3;</code>
+     * @return A list containing the ignorePatterns.
+     */
+    java.util.List<java.lang.String>
+        getIgnorePatternsList();
+    /**
+     * <pre>
+     * Ignore changes to this pattern (e.g. ".DS_Store").
+     * </pre>
+     *
+     * <code>repeated string ignore_patterns = 3;</code>
+     * @return The count of ignorePatterns.
+     */
+    int getIgnorePatternsCount();
+    /**
+     * <pre>
+     * Ignore changes to this pattern (e.g. ".DS_Store").
+     * </pre>
+     *
+     * <code>repeated string ignore_patterns = 3;</code>
+     * @param index The index of the element to return.
+     * @return The ignorePatterns at the given index.
+     */
+    java.lang.String getIgnorePatterns(int index);
+    /**
+     * <pre>
+     * Ignore changes to this pattern (e.g. ".DS_Store").
+     * </pre>
+     *
+     * <code>repeated string ignore_patterns = 3;</code>
+     * @param index The index of the value to return.
+     * @return The bytes of the ignorePatterns at the given index.
+     */
+    com.google.protobuf.ByteString
+        getIgnorePatternsBytes(int index);
+  }
+  /**
+   * Protobuf type {@code gradle.substrate.v1.FingerprintFilesRequest}
+   */
+  public static final class FingerprintFilesRequest extends
+      com.google.protobuf.GeneratedMessage implements
+      // @@protoc_insertion_point(message_implements:gradle.substrate.v1.FingerprintFilesRequest)
+      FingerprintFilesRequestOrBuilder {
+  private static final long serialVersionUID = 0L;
+    static {
+      com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
+        com.google.protobuf.RuntimeVersion.RuntimeDomain.PUBLIC,
+        /* major= */ 4,
+        /* minor= */ 34,
+        /* patch= */ 0,
+        /* suffix= */ "",
+        "FingerprintFilesRequest");
+    }
+    // Use FingerprintFilesRequest.newBuilder() to construct.
+    private FingerprintFilesRequest(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      super(builder);
+    }
+    private FingerprintFilesRequest() {
+      files_ = java.util.Collections.emptyList();
+      normalizationStrategy_ = "";
+      ignorePatterns_ =
+          com.google.protobuf.LazyStringArrayList.emptyList();
+    }
+
+    public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FingerprintFilesRequest_descriptor;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Descriptors.Descriptor getDescriptorForType() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FingerprintFilesRequest_descriptor;
+    }
+
+    @java.lang.Override
+    protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FingerprintFilesRequest_fieldAccessorTable
+          .ensureFieldAccessorsInitialized(
+              gradle.substrate.v1.Substrate.FingerprintFilesRequest.class, gradle.substrate.v1.Substrate.FingerprintFilesRequest.Builder.class);
+    }
+
+    public static final int FILES_FIELD_NUMBER = 1;
+    @SuppressWarnings("serial")
+    private java.util.List<gradle.substrate.v1.Substrate.FileToFingerprint> files_;
+    /**
+     * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+     */
+    @java.lang.Override
+    public java.util.List<gradle.substrate.v1.Substrate.FileToFingerprint> getFilesList() {
+      return files_;
+    }
+    /**
+     * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+     */
+    @java.lang.Override
+    public java.util.List<? extends gradle.substrate.v1.Substrate.FileToFingerprintOrBuilder> 
+        getFilesOrBuilderList() {
+      return files_;
+    }
+    /**
+     * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+     */
+    @java.lang.Override
+    public int getFilesCount() {
+      return files_.size();
+    }
+    /**
+     * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+     */
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.FileToFingerprint getFiles(int index) {
+      return files_.get(index);
+    }
+    /**
+     * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+     */
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.FileToFingerprintOrBuilder getFilesOrBuilder(
+        int index) {
+      return files_.get(index);
+    }
+
+    public static final int NORMALIZATION_STRATEGY_FIELD_NUMBER = 2;
+    @SuppressWarnings("serial")
+    private volatile java.lang.Object normalizationStrategy_ = "";
+    /**
+     * <pre>
+     * Normalization strategy: ABSOLUTE_PATH, RELATIVE_PATH, NAME_ONLY, HASH.
+     * </pre>
+     *
+     * <code>string normalization_strategy = 2;</code>
+     * @return The normalizationStrategy.
+     */
+    @java.lang.Override
+    public java.lang.String getNormalizationStrategy() {
+      java.lang.Object ref = normalizationStrategy_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        normalizationStrategy_ = s;
+        return s;
+      }
+    }
+    /**
+     * <pre>
+     * Normalization strategy: ABSOLUTE_PATH, RELATIVE_PATH, NAME_ONLY, HASH.
+     * </pre>
+     *
+     * <code>string normalization_strategy = 2;</code>
+     * @return The bytes for normalizationStrategy.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getNormalizationStrategyBytes() {
+      java.lang.Object ref = normalizationStrategy_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        normalizationStrategy_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    public static final int IGNORE_PATTERNS_FIELD_NUMBER = 3;
+    @SuppressWarnings("serial")
+    private com.google.protobuf.LazyStringArrayList ignorePatterns_ =
+        com.google.protobuf.LazyStringArrayList.emptyList();
+    /**
+     * <pre>
+     * Ignore changes to this pattern (e.g. ".DS_Store").
+     * </pre>
+     *
+     * <code>repeated string ignore_patterns = 3;</code>
+     * @return A list containing the ignorePatterns.
+     */
+    public com.google.protobuf.ProtocolStringList
+        getIgnorePatternsList() {
+      return ignorePatterns_;
+    }
+    /**
+     * <pre>
+     * Ignore changes to this pattern (e.g. ".DS_Store").
+     * </pre>
+     *
+     * <code>repeated string ignore_patterns = 3;</code>
+     * @return The count of ignorePatterns.
+     */
+    public int getIgnorePatternsCount() {
+      return ignorePatterns_.size();
+    }
+    /**
+     * <pre>
+     * Ignore changes to this pattern (e.g. ".DS_Store").
+     * </pre>
+     *
+     * <code>repeated string ignore_patterns = 3;</code>
+     * @param index The index of the element to return.
+     * @return The ignorePatterns at the given index.
+     */
+    public java.lang.String getIgnorePatterns(int index) {
+      return ignorePatterns_.get(index);
+    }
+    /**
+     * <pre>
+     * Ignore changes to this pattern (e.g. ".DS_Store").
+     * </pre>
+     *
+     * <code>repeated string ignore_patterns = 3;</code>
+     * @param index The index of the value to return.
+     * @return The bytes of the ignorePatterns at the given index.
+     */
+    public com.google.protobuf.ByteString
+        getIgnorePatternsBytes(int index) {
+      return ignorePatterns_.getByteString(index);
+    }
+
+    private byte memoizedIsInitialized = -1;
+    @java.lang.Override
+    public final boolean isInitialized() {
+      byte isInitialized = memoizedIsInitialized;
+      if (isInitialized == 1) return true;
+      if (isInitialized == 0) return false;
+
+      memoizedIsInitialized = 1;
+      return true;
+    }
+
+    @java.lang.Override
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+                        throws java.io.IOException {
+      for (int i = 0; i < files_.size(); i++) {
+        output.writeMessage(1, files_.get(i));
+      }
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(normalizationStrategy_)) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 2, normalizationStrategy_);
+      }
+      for (int i = 0; i < ignorePatterns_.size(); i++) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 3, ignorePatterns_.getRaw(i));
+      }
+      getUnknownFields().writeTo(output);
+    }
+
+    @java.lang.Override
+    public int getSerializedSize() {
+      int size = memoizedSize;
+      if (size != -1) return size;
+
+      size = 0;
+
+          {
+            final int count = files_.size();
+            for (int i = 0; i < count; i++) {
+              size += com.google.protobuf.CodedOutputStream
+                .computeMessageSizeNoTag(files_.get(i));
+            }
+            size += 1 * count;
+          }
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(normalizationStrategy_)) {
+        size += com.google.protobuf.GeneratedMessage.computeStringSize(2, normalizationStrategy_);
+      }
+      {
+        int dataSize = 0;
+        for (int i = 0; i < ignorePatterns_.size(); i++) {
+          dataSize += computeStringSizeNoTag(ignorePatterns_.getRaw(i));
+        }
+        size += dataSize;
+        size += 1 * getIgnorePatternsList().size();
+      }
+      size += getUnknownFields().getSerializedSize();
+      memoizedSize = size;
+      return size;
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+      if (obj == this) {
+       return true;
+      }
+      if (!(obj instanceof gradle.substrate.v1.Substrate.FingerprintFilesRequest)) {
+        return super.equals(obj);
+      }
+      gradle.substrate.v1.Substrate.FingerprintFilesRequest other = (gradle.substrate.v1.Substrate.FingerprintFilesRequest) obj;
+
+      if (!getFilesList()
+          .equals(other.getFilesList())) return false;
+      if (!getNormalizationStrategy()
+          .equals(other.getNormalizationStrategy())) return false;
+      if (!getIgnorePatternsList()
+          .equals(other.getIgnorePatternsList())) return false;
+      if (!getUnknownFields().equals(other.getUnknownFields())) return false;
+      return true;
+    }
+
+    @java.lang.Override
+    public int hashCode() {
+      if (memoizedHashCode != 0) {
+        return memoizedHashCode;
+      }
+      int hash = 41;
+      hash = (19 * hash) + getDescriptor().hashCode();
+      if (getFilesCount() > 0) {
+        hash = (37 * hash) + FILES_FIELD_NUMBER;
+        hash = (53 * hash) + getFilesList().hashCode();
+      }
+      hash = (37 * hash) + NORMALIZATION_STRATEGY_FIELD_NUMBER;
+      hash = (53 * hash) + getNormalizationStrategy().hashCode();
+      if (getIgnorePatternsCount() > 0) {
+        hash = (37 * hash) + IGNORE_PATTERNS_FIELD_NUMBER;
+        hash = (53 * hash) + getIgnorePatternsList().hashCode();
+      }
+      hash = (29 * hash) + getUnknownFields().hashCode();
+      memoizedHashCode = hash;
+      return hash;
+    }
+
+    public static gradle.substrate.v1.Substrate.FingerprintFilesRequest parseFrom(
+        java.nio.ByteBuffer data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.FingerprintFilesRequest parseFrom(
+        java.nio.ByteBuffer data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.FingerprintFilesRequest parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.FingerprintFilesRequest parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.FingerprintFilesRequest parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.FingerprintFilesRequest parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.FingerprintFilesRequest parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.FingerprintFilesRequest parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static gradle.substrate.v1.Substrate.FingerprintFilesRequest parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input);
+    }
+
+    public static gradle.substrate.v1.Substrate.FingerprintFilesRequest parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.FingerprintFilesRequest parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.FingerprintFilesRequest parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    @java.lang.Override
+    public Builder newBuilderForType() { return newBuilder(); }
+    public static Builder newBuilder() {
+      return DEFAULT_INSTANCE.toBuilder();
+    }
+    public static Builder newBuilder(gradle.substrate.v1.Substrate.FingerprintFilesRequest prototype) {
+      return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
+    }
+    @java.lang.Override
+    public Builder toBuilder() {
+      return this == DEFAULT_INSTANCE
+          ? new Builder() : new Builder().mergeFrom(this);
+    }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+      Builder builder = new Builder(parent);
+      return builder;
+    }
+    /**
+     * Protobuf type {@code gradle.substrate.v1.FingerprintFilesRequest}
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessage.Builder<Builder> implements
+        // @@protoc_insertion_point(builder_implements:gradle.substrate.v1.FingerprintFilesRequest)
+        gradle.substrate.v1.Substrate.FingerprintFilesRequestOrBuilder {
+      public static final com.google.protobuf.Descriptors.Descriptor
+          getDescriptor() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FingerprintFilesRequest_descriptor;
+      }
+
+      @java.lang.Override
+      protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+          internalGetFieldAccessorTable() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FingerprintFilesRequest_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                gradle.substrate.v1.Substrate.FingerprintFilesRequest.class, gradle.substrate.v1.Substrate.FingerprintFilesRequest.Builder.class);
+      }
+
+      // Construct using gradle.substrate.v1.Substrate.FingerprintFilesRequest.newBuilder()
+      private Builder() {
+
+      }
+
+      private Builder(
+          com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+        super(parent);
+
+      }
+      @java.lang.Override
+      public Builder clear() {
+        super.clear();
+        bitField0_ = 0;
+        if (filesBuilder_ == null) {
+          files_ = java.util.Collections.emptyList();
+        } else {
+          files_ = null;
+          filesBuilder_.clear();
+        }
+        bitField0_ = (bitField0_ & ~0x00000001);
+        normalizationStrategy_ = "";
+        ignorePatterns_ =
+            com.google.protobuf.LazyStringArrayList.emptyList();
+        return this;
+      }
+
+      @java.lang.Override
+      public com.google.protobuf.Descriptors.Descriptor
+          getDescriptorForType() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FingerprintFilesRequest_descriptor;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.FingerprintFilesRequest getDefaultInstanceForType() {
+        return gradle.substrate.v1.Substrate.FingerprintFilesRequest.getDefaultInstance();
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.FingerprintFilesRequest build() {
+        gradle.substrate.v1.Substrate.FingerprintFilesRequest result = buildPartial();
+        if (!result.isInitialized()) {
+          throw newUninitializedMessageException(result);
+        }
+        return result;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.FingerprintFilesRequest buildPartial() {
+        gradle.substrate.v1.Substrate.FingerprintFilesRequest result = new gradle.substrate.v1.Substrate.FingerprintFilesRequest(this);
+        buildPartialRepeatedFields(result);
+        if (bitField0_ != 0) { buildPartial0(result); }
+        onBuilt();
+        return result;
+      }
+
+      private void buildPartialRepeatedFields(gradle.substrate.v1.Substrate.FingerprintFilesRequest result) {
+        if (filesBuilder_ == null) {
+          if (((bitField0_ & 0x00000001) != 0)) {
+            files_ = java.util.Collections.unmodifiableList(files_);
+            bitField0_ = (bitField0_ & ~0x00000001);
+          }
+          result.files_ = files_;
+        } else {
+          result.files_ = filesBuilder_.build();
+        }
+      }
+
+      private void buildPartial0(gradle.substrate.v1.Substrate.FingerprintFilesRequest result) {
+        int from_bitField0_ = bitField0_;
+        if (((from_bitField0_ & 0x00000002) != 0)) {
+          result.normalizationStrategy_ = normalizationStrategy_;
+        }
+        if (((from_bitField0_ & 0x00000004) != 0)) {
+          ignorePatterns_.makeImmutable();
+          result.ignorePatterns_ = ignorePatterns_;
+        }
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(com.google.protobuf.Message other) {
+        if (other instanceof gradle.substrate.v1.Substrate.FingerprintFilesRequest) {
+          return mergeFrom((gradle.substrate.v1.Substrate.FingerprintFilesRequest)other);
+        } else {
+          super.mergeFrom(other);
+          return this;
+        }
+      }
+
+      public Builder mergeFrom(gradle.substrate.v1.Substrate.FingerprintFilesRequest other) {
+        if (other == gradle.substrate.v1.Substrate.FingerprintFilesRequest.getDefaultInstance()) return this;
+        if (filesBuilder_ == null) {
+          if (!other.files_.isEmpty()) {
+            if (files_.isEmpty()) {
+              files_ = other.files_;
+              bitField0_ = (bitField0_ & ~0x00000001);
+            } else {
+              ensureFilesIsMutable();
+              files_.addAll(other.files_);
+            }
+            onChanged();
+          }
+        } else {
+          if (!other.files_.isEmpty()) {
+            if (filesBuilder_.isEmpty()) {
+              filesBuilder_.dispose();
+              filesBuilder_ = null;
+              files_ = other.files_;
+              bitField0_ = (bitField0_ & ~0x00000001);
+              filesBuilder_ = 
+                com.google.protobuf.GeneratedMessage.alwaysUseFieldBuilders ?
+                   internalGetFilesFieldBuilder() : null;
+            } else {
+              filesBuilder_.addAllMessages(other.files_);
+            }
+          }
+        }
+        if (!other.getNormalizationStrategy().isEmpty()) {
+          normalizationStrategy_ = other.normalizationStrategy_;
+          bitField0_ |= 0x00000002;
+          onChanged();
+        }
+        if (!other.ignorePatterns_.isEmpty()) {
+          if (ignorePatterns_.isEmpty()) {
+            ignorePatterns_ = other.ignorePatterns_;
+            bitField0_ |= 0x00000004;
+          } else {
+            ensureIgnorePatternsIsMutable();
+            ignorePatterns_.addAll(other.ignorePatterns_);
+          }
+          onChanged();
+        }
+        this.mergeUnknownFields(other.getUnknownFields());
+        onChanged();
+        return this;
+      }
+
+      @java.lang.Override
+      public final boolean isInitialized() {
+        return true;
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws java.io.IOException {
+        if (extensionRegistry == null) {
+          throw new java.lang.NullPointerException();
+        }
+        try {
+          boolean done = false;
+          while (!done) {
+            int tag = input.readTag();
+            switch (tag) {
+              case 0:
+                done = true;
+                break;
+              case 10: {
+                gradle.substrate.v1.Substrate.FileToFingerprint m =
+                    input.readMessage(
+                        gradle.substrate.v1.Substrate.FileToFingerprint.parser(),
+                        extensionRegistry);
+                if (filesBuilder_ == null) {
+                  ensureFilesIsMutable();
+                  files_.add(m);
+                } else {
+                  filesBuilder_.addMessage(m);
+                }
+                break;
+              } // case 10
+              case 18: {
+                normalizationStrategy_ = input.readStringRequireUtf8();
+                bitField0_ |= 0x00000002;
+                break;
+              } // case 18
+              case 26: {
+                ensureIgnorePatternsIsMutable();
+                ignorePatterns_.add(input.readStringRequireUtf8());
+                break;
+              } // case 26
+              default: {
+                if (!super.parseUnknownField(input, extensionRegistry, tag)) {
+                  done = true; // was an endgroup tag
+                }
+                break;
+              } // default:
+            } // switch (tag)
+          } // while (!done)
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.unwrapIOException();
+        } finally {
+          onChanged();
+        } // finally
+        return this;
+      }
+      private int bitField0_;
+
+      private java.util.List<gradle.substrate.v1.Substrate.FileToFingerprint> files_ =
+        java.util.Collections.emptyList();
+      private void ensureFilesIsMutable() {
+        if (!((bitField0_ & 0x00000001) != 0)) {
+          files_ = new java.util.ArrayList<gradle.substrate.v1.Substrate.FileToFingerprint>(files_);
+          bitField0_ |= 0x00000001;
+         }
+      }
+
+      private com.google.protobuf.RepeatedFieldBuilder<
+          gradle.substrate.v1.Substrate.FileToFingerprint, gradle.substrate.v1.Substrate.FileToFingerprint.Builder, gradle.substrate.v1.Substrate.FileToFingerprintOrBuilder> filesBuilder_;
+
+      /**
+       * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+       */
+      public java.util.List<gradle.substrate.v1.Substrate.FileToFingerprint> getFilesList() {
+        if (filesBuilder_ == null) {
+          return java.util.Collections.unmodifiableList(files_);
+        } else {
+          return filesBuilder_.getMessageList();
+        }
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+       */
+      public int getFilesCount() {
+        if (filesBuilder_ == null) {
+          return files_.size();
+        } else {
+          return filesBuilder_.getCount();
+        }
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+       */
+      public gradle.substrate.v1.Substrate.FileToFingerprint getFiles(int index) {
+        if (filesBuilder_ == null) {
+          return files_.get(index);
+        } else {
+          return filesBuilder_.getMessage(index);
+        }
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+       */
+      public Builder setFiles(
+          int index, gradle.substrate.v1.Substrate.FileToFingerprint value) {
+        if (filesBuilder_ == null) {
+          if (value == null) {
+            throw new NullPointerException();
+          }
+          ensureFilesIsMutable();
+          files_.set(index, value);
+          onChanged();
+        } else {
+          filesBuilder_.setMessage(index, value);
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+       */
+      public Builder setFiles(
+          int index, gradle.substrate.v1.Substrate.FileToFingerprint.Builder builderForValue) {
+        if (filesBuilder_ == null) {
+          ensureFilesIsMutable();
+          files_.set(index, builderForValue.build());
+          onChanged();
+        } else {
+          filesBuilder_.setMessage(index, builderForValue.build());
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+       */
+      public Builder addFiles(gradle.substrate.v1.Substrate.FileToFingerprint value) {
+        if (filesBuilder_ == null) {
+          if (value == null) {
+            throw new NullPointerException();
+          }
+          ensureFilesIsMutable();
+          files_.add(value);
+          onChanged();
+        } else {
+          filesBuilder_.addMessage(value);
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+       */
+      public Builder addFiles(
+          int index, gradle.substrate.v1.Substrate.FileToFingerprint value) {
+        if (filesBuilder_ == null) {
+          if (value == null) {
+            throw new NullPointerException();
+          }
+          ensureFilesIsMutable();
+          files_.add(index, value);
+          onChanged();
+        } else {
+          filesBuilder_.addMessage(index, value);
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+       */
+      public Builder addFiles(
+          gradle.substrate.v1.Substrate.FileToFingerprint.Builder builderForValue) {
+        if (filesBuilder_ == null) {
+          ensureFilesIsMutable();
+          files_.add(builderForValue.build());
+          onChanged();
+        } else {
+          filesBuilder_.addMessage(builderForValue.build());
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+       */
+      public Builder addFiles(
+          int index, gradle.substrate.v1.Substrate.FileToFingerprint.Builder builderForValue) {
+        if (filesBuilder_ == null) {
+          ensureFilesIsMutable();
+          files_.add(index, builderForValue.build());
+          onChanged();
+        } else {
+          filesBuilder_.addMessage(index, builderForValue.build());
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+       */
+      public Builder addAllFiles(
+          java.lang.Iterable<? extends gradle.substrate.v1.Substrate.FileToFingerprint> values) {
+        if (filesBuilder_ == null) {
+          ensureFilesIsMutable();
+          com.google.protobuf.AbstractMessageLite.Builder.addAll(
+              values, files_);
+          onChanged();
+        } else {
+          filesBuilder_.addAllMessages(values);
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+       */
+      public Builder clearFiles() {
+        if (filesBuilder_ == null) {
+          files_ = java.util.Collections.emptyList();
+          bitField0_ = (bitField0_ & ~0x00000001);
+          onChanged();
+        } else {
+          filesBuilder_.clear();
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+       */
+      public Builder removeFiles(int index) {
+        if (filesBuilder_ == null) {
+          ensureFilesIsMutable();
+          files_.remove(index);
+          onChanged();
+        } else {
+          filesBuilder_.remove(index);
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+       */
+      public gradle.substrate.v1.Substrate.FileToFingerprint.Builder getFilesBuilder(
+          int index) {
+        return internalGetFilesFieldBuilder().getBuilder(index);
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+       */
+      public gradle.substrate.v1.Substrate.FileToFingerprintOrBuilder getFilesOrBuilder(
+          int index) {
+        if (filesBuilder_ == null) {
+          return files_.get(index);  } else {
+          return filesBuilder_.getMessageOrBuilder(index);
+        }
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+       */
+      public java.util.List<? extends gradle.substrate.v1.Substrate.FileToFingerprintOrBuilder> 
+           getFilesOrBuilderList() {
+        if (filesBuilder_ != null) {
+          return filesBuilder_.getMessageOrBuilderList();
+        } else {
+          return java.util.Collections.unmodifiableList(files_);
+        }
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+       */
+      public gradle.substrate.v1.Substrate.FileToFingerprint.Builder addFilesBuilder() {
+        return internalGetFilesFieldBuilder().addBuilder(
+            gradle.substrate.v1.Substrate.FileToFingerprint.getDefaultInstance());
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+       */
+      public gradle.substrate.v1.Substrate.FileToFingerprint.Builder addFilesBuilder(
+          int index) {
+        return internalGetFilesFieldBuilder().addBuilder(
+            index, gradle.substrate.v1.Substrate.FileToFingerprint.getDefaultInstance());
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.FileToFingerprint files = 1;</code>
+       */
+      public java.util.List<gradle.substrate.v1.Substrate.FileToFingerprint.Builder> 
+           getFilesBuilderList() {
+        return internalGetFilesFieldBuilder().getBuilderList();
+      }
+      private com.google.protobuf.RepeatedFieldBuilder<
+          gradle.substrate.v1.Substrate.FileToFingerprint, gradle.substrate.v1.Substrate.FileToFingerprint.Builder, gradle.substrate.v1.Substrate.FileToFingerprintOrBuilder> 
+          internalGetFilesFieldBuilder() {
+        if (filesBuilder_ == null) {
+          filesBuilder_ = new com.google.protobuf.RepeatedFieldBuilder<
+              gradle.substrate.v1.Substrate.FileToFingerprint, gradle.substrate.v1.Substrate.FileToFingerprint.Builder, gradle.substrate.v1.Substrate.FileToFingerprintOrBuilder>(
+                  files_,
+                  ((bitField0_ & 0x00000001) != 0),
+                  getParentForChildren(),
+                  isClean());
+          files_ = null;
+        }
+        return filesBuilder_;
+      }
+
+      private java.lang.Object normalizationStrategy_ = "";
+      /**
+       * <pre>
+       * Normalization strategy: ABSOLUTE_PATH, RELATIVE_PATH, NAME_ONLY, HASH.
+       * </pre>
+       *
+       * <code>string normalization_strategy = 2;</code>
+       * @return The normalizationStrategy.
+       */
+      public java.lang.String getNormalizationStrategy() {
+        java.lang.Object ref = normalizationStrategy_;
+        if (!(ref instanceof java.lang.String)) {
+          com.google.protobuf.ByteString bs =
+              (com.google.protobuf.ByteString) ref;
+          java.lang.String s = bs.toStringUtf8();
+          normalizationStrategy_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <pre>
+       * Normalization strategy: ABSOLUTE_PATH, RELATIVE_PATH, NAME_ONLY, HASH.
+       * </pre>
+       *
+       * <code>string normalization_strategy = 2;</code>
+       * @return The bytes for normalizationStrategy.
+       */
+      public com.google.protobuf.ByteString
+          getNormalizationStrategyBytes() {
+        java.lang.Object ref = normalizationStrategy_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          normalizationStrategy_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <pre>
+       * Normalization strategy: ABSOLUTE_PATH, RELATIVE_PATH, NAME_ONLY, HASH.
+       * </pre>
+       *
+       * <code>string normalization_strategy = 2;</code>
+       * @param value The normalizationStrategy to set.
+       * @return This builder for chaining.
+       */
+      public Builder setNormalizationStrategy(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        normalizationStrategy_ = value;
+        bitField0_ |= 0x00000002;
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * Normalization strategy: ABSOLUTE_PATH, RELATIVE_PATH, NAME_ONLY, HASH.
+       * </pre>
+       *
+       * <code>string normalization_strategy = 2;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearNormalizationStrategy() {
+        normalizationStrategy_ = getDefaultInstance().getNormalizationStrategy();
+        bitField0_ = (bitField0_ & ~0x00000002);
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * Normalization strategy: ABSOLUTE_PATH, RELATIVE_PATH, NAME_ONLY, HASH.
+       * </pre>
+       *
+       * <code>string normalization_strategy = 2;</code>
+       * @param value The bytes for normalizationStrategy to set.
+       * @return This builder for chaining.
+       */
+      public Builder setNormalizationStrategyBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        normalizationStrategy_ = value;
+        bitField0_ |= 0x00000002;
+        onChanged();
+        return this;
+      }
+
+      private com.google.protobuf.LazyStringArrayList ignorePatterns_ =
+          com.google.protobuf.LazyStringArrayList.emptyList();
+      private void ensureIgnorePatternsIsMutable() {
+        if (!ignorePatterns_.isModifiable()) {
+          ignorePatterns_ = new com.google.protobuf.LazyStringArrayList(ignorePatterns_);
+        }
+        bitField0_ |= 0x00000004;
+      }
+      /**
+       * <pre>
+       * Ignore changes to this pattern (e.g. ".DS_Store").
+       * </pre>
+       *
+       * <code>repeated string ignore_patterns = 3;</code>
+       * @return A list containing the ignorePatterns.
+       */
+      public com.google.protobuf.ProtocolStringList
+          getIgnorePatternsList() {
+        ignorePatterns_.makeImmutable();
+        return ignorePatterns_;
+      }
+      /**
+       * <pre>
+       * Ignore changes to this pattern (e.g. ".DS_Store").
+       * </pre>
+       *
+       * <code>repeated string ignore_patterns = 3;</code>
+       * @return The count of ignorePatterns.
+       */
+      public int getIgnorePatternsCount() {
+        return ignorePatterns_.size();
+      }
+      /**
+       * <pre>
+       * Ignore changes to this pattern (e.g. ".DS_Store").
+       * </pre>
+       *
+       * <code>repeated string ignore_patterns = 3;</code>
+       * @param index The index of the element to return.
+       * @return The ignorePatterns at the given index.
+       */
+      public java.lang.String getIgnorePatterns(int index) {
+        return ignorePatterns_.get(index);
+      }
+      /**
+       * <pre>
+       * Ignore changes to this pattern (e.g. ".DS_Store").
+       * </pre>
+       *
+       * <code>repeated string ignore_patterns = 3;</code>
+       * @param index The index of the value to return.
+       * @return The bytes of the ignorePatterns at the given index.
+       */
+      public com.google.protobuf.ByteString
+          getIgnorePatternsBytes(int index) {
+        return ignorePatterns_.getByteString(index);
+      }
+      /**
+       * <pre>
+       * Ignore changes to this pattern (e.g. ".DS_Store").
+       * </pre>
+       *
+       * <code>repeated string ignore_patterns = 3;</code>
+       * @param index The index to set the value at.
+       * @param value The ignorePatterns to set.
+       * @return This builder for chaining.
+       */
+      public Builder setIgnorePatterns(
+          int index, java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        ensureIgnorePatternsIsMutable();
+        ignorePatterns_.set(index, value);
+        bitField0_ |= 0x00000004;
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * Ignore changes to this pattern (e.g. ".DS_Store").
+       * </pre>
+       *
+       * <code>repeated string ignore_patterns = 3;</code>
+       * @param value The ignorePatterns to add.
+       * @return This builder for chaining.
+       */
+      public Builder addIgnorePatterns(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        ensureIgnorePatternsIsMutable();
+        ignorePatterns_.add(value);
+        bitField0_ |= 0x00000004;
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * Ignore changes to this pattern (e.g. ".DS_Store").
+       * </pre>
+       *
+       * <code>repeated string ignore_patterns = 3;</code>
+       * @param values The ignorePatterns to add.
+       * @return This builder for chaining.
+       */
+      public Builder addAllIgnorePatterns(
+          java.lang.Iterable<java.lang.String> values) {
+        ensureIgnorePatternsIsMutable();
+        com.google.protobuf.AbstractMessageLite.Builder.addAll(
+            values, ignorePatterns_);
+        bitField0_ |= 0x00000004;
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * Ignore changes to this pattern (e.g. ".DS_Store").
+       * </pre>
+       *
+       * <code>repeated string ignore_patterns = 3;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearIgnorePatterns() {
+        ignorePatterns_ =
+          com.google.protobuf.LazyStringArrayList.emptyList();
+        bitField0_ = (bitField0_ & ~0x00000004);;
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * Ignore changes to this pattern (e.g. ".DS_Store").
+       * </pre>
+       *
+       * <code>repeated string ignore_patterns = 3;</code>
+       * @param value The bytes of the ignorePatterns to add.
+       * @return This builder for chaining.
+       */
+      public Builder addIgnorePatternsBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        ensureIgnorePatternsIsMutable();
+        ignorePatterns_.add(value);
+        bitField0_ |= 0x00000004;
+        onChanged();
+        return this;
+      }
+
+      // @@protoc_insertion_point(builder_scope:gradle.substrate.v1.FingerprintFilesRequest)
+    }
+
+    // @@protoc_insertion_point(class_scope:gradle.substrate.v1.FingerprintFilesRequest)
+    private static final gradle.substrate.v1.Substrate.FingerprintFilesRequest DEFAULT_INSTANCE;
+    static {
+      DEFAULT_INSTANCE = new gradle.substrate.v1.Substrate.FingerprintFilesRequest();
+    }
+
+    public static gradle.substrate.v1.Substrate.FingerprintFilesRequest getDefaultInstance() {
+      return DEFAULT_INSTANCE;
+    }
+
+    private static final com.google.protobuf.Parser<FingerprintFilesRequest>
+        PARSER = new com.google.protobuf.AbstractParser<FingerprintFilesRequest>() {
+      @java.lang.Override
+      public FingerprintFilesRequest parsePartialFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws com.google.protobuf.InvalidProtocolBufferException {
+        Builder builder = newBuilder();
+        try {
+          builder.mergeFrom(input, extensionRegistry);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.setUnfinishedMessage(builder.buildPartial());
+        } catch (com.google.protobuf.UninitializedMessageException e) {
+          throw e.asInvalidProtocolBufferException().setUnfinishedMessage(builder.buildPartial());
+        } catch (java.io.IOException e) {
+          throw new com.google.protobuf.InvalidProtocolBufferException(e)
+              .setUnfinishedMessage(builder.buildPartial());
+        }
+        return builder.buildPartial();
+      }
+    };
+
+    public static com.google.protobuf.Parser<FingerprintFilesRequest> parser() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<FingerprintFilesRequest> getParserForType() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.FingerprintFilesRequest getDefaultInstanceForType() {
+      return DEFAULT_INSTANCE;
+    }
+
+  }
+
+  public interface FileFingerprintEntryOrBuilder extends
+      // @@protoc_insertion_point(interface_extends:gradle.substrate.v1.FileFingerprintEntry)
+      com.google.protobuf.MessageOrBuilder {
+
+    /**
+     * <code>string path = 1;</code>
+     * @return The path.
+     */
+    java.lang.String getPath();
+    /**
+     * <code>string path = 1;</code>
+     * @return The bytes for path.
+     */
+    com.google.protobuf.ByteString
+        getPathBytes();
+
+    /**
+     * <code>bytes hash = 2;</code>
+     * @return The hash.
+     */
+    com.google.protobuf.ByteString getHash();
+
+    /**
+     * <code>int64 size = 3;</code>
+     * @return The size.
+     */
+    long getSize();
+
+    /**
+     * <code>int64 last_modified = 4;</code>
+     * @return The lastModified.
+     */
+    long getLastModified();
+
+    /**
+     * <code>bool is_directory = 5;</code>
+     * @return The isDirectory.
+     */
+    boolean getIsDirectory();
+  }
+  /**
+   * Protobuf type {@code gradle.substrate.v1.FileFingerprintEntry}
+   */
+  public static final class FileFingerprintEntry extends
+      com.google.protobuf.GeneratedMessage implements
+      // @@protoc_insertion_point(message_implements:gradle.substrate.v1.FileFingerprintEntry)
+      FileFingerprintEntryOrBuilder {
+  private static final long serialVersionUID = 0L;
+    static {
+      com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
+        com.google.protobuf.RuntimeVersion.RuntimeDomain.PUBLIC,
+        /* major= */ 4,
+        /* minor= */ 34,
+        /* patch= */ 0,
+        /* suffix= */ "",
+        "FileFingerprintEntry");
+    }
+    // Use FileFingerprintEntry.newBuilder() to construct.
+    private FileFingerprintEntry(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      super(builder);
+    }
+    private FileFingerprintEntry() {
+      path_ = "";
+      hash_ = com.google.protobuf.ByteString.EMPTY;
+    }
+
+    public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FileFingerprintEntry_descriptor;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Descriptors.Descriptor getDescriptorForType() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FileFingerprintEntry_descriptor;
+    }
+
+    @java.lang.Override
+    protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FileFingerprintEntry_fieldAccessorTable
+          .ensureFieldAccessorsInitialized(
+              gradle.substrate.v1.Substrate.FileFingerprintEntry.class, gradle.substrate.v1.Substrate.FileFingerprintEntry.Builder.class);
+    }
+
+    public static final int PATH_FIELD_NUMBER = 1;
+    @SuppressWarnings("serial")
+    private volatile java.lang.Object path_ = "";
+    /**
+     * <code>string path = 1;</code>
+     * @return The path.
+     */
+    @java.lang.Override
+    public java.lang.String getPath() {
+      java.lang.Object ref = path_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        path_ = s;
+        return s;
+      }
+    }
+    /**
+     * <code>string path = 1;</code>
+     * @return The bytes for path.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getPathBytes() {
+      java.lang.Object ref = path_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        path_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    public static final int HASH_FIELD_NUMBER = 2;
+    private com.google.protobuf.ByteString hash_ = com.google.protobuf.ByteString.EMPTY;
+    /**
+     * <code>bytes hash = 2;</code>
+     * @return The hash.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString getHash() {
+      return hash_;
+    }
+
+    public static final int SIZE_FIELD_NUMBER = 3;
+    private long size_ = 0L;
+    /**
+     * <code>int64 size = 3;</code>
+     * @return The size.
+     */
+    @java.lang.Override
+    public long getSize() {
+      return size_;
+    }
+
+    public static final int LAST_MODIFIED_FIELD_NUMBER = 4;
+    private long lastModified_ = 0L;
+    /**
+     * <code>int64 last_modified = 4;</code>
+     * @return The lastModified.
+     */
+    @java.lang.Override
+    public long getLastModified() {
+      return lastModified_;
+    }
+
+    public static final int IS_DIRECTORY_FIELD_NUMBER = 5;
+    private boolean isDirectory_ = false;
+    /**
+     * <code>bool is_directory = 5;</code>
+     * @return The isDirectory.
+     */
+    @java.lang.Override
+    public boolean getIsDirectory() {
+      return isDirectory_;
+    }
+
+    private byte memoizedIsInitialized = -1;
+    @java.lang.Override
+    public final boolean isInitialized() {
+      byte isInitialized = memoizedIsInitialized;
+      if (isInitialized == 1) return true;
+      if (isInitialized == 0) return false;
+
+      memoizedIsInitialized = 1;
+      return true;
+    }
+
+    @java.lang.Override
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+                        throws java.io.IOException {
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(path_)) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 1, path_);
+      }
+      if (!hash_.isEmpty()) {
+        output.writeBytes(2, hash_);
+      }
+      if (size_ != 0L) {
+        output.writeInt64(3, size_);
+      }
+      if (lastModified_ != 0L) {
+        output.writeInt64(4, lastModified_);
+      }
+      if (isDirectory_ != false) {
+        output.writeBool(5, isDirectory_);
+      }
+      getUnknownFields().writeTo(output);
+    }
+
+    @java.lang.Override
+    public int getSerializedSize() {
+      int size = memoizedSize;
+      if (size != -1) return size;
+
+      size = 0;
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(path_)) {
+        size += com.google.protobuf.GeneratedMessage.computeStringSize(1, path_);
+      }
+      if (!hash_.isEmpty()) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBytesSize(2, hash_);
+      }
+      if (size_ != 0L) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeInt64Size(3, size_);
+      }
+      if (lastModified_ != 0L) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeInt64Size(4, lastModified_);
+      }
+      if (isDirectory_ != false) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBoolSize(5, isDirectory_);
+      }
+      size += getUnknownFields().getSerializedSize();
+      memoizedSize = size;
+      return size;
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+      if (obj == this) {
+       return true;
+      }
+      if (!(obj instanceof gradle.substrate.v1.Substrate.FileFingerprintEntry)) {
+        return super.equals(obj);
+      }
+      gradle.substrate.v1.Substrate.FileFingerprintEntry other = (gradle.substrate.v1.Substrate.FileFingerprintEntry) obj;
+
+      if (!getPath()
+          .equals(other.getPath())) return false;
+      if (!getHash()
+          .equals(other.getHash())) return false;
+      if (getSize()
+          != other.getSize()) return false;
+      if (getLastModified()
+          != other.getLastModified()) return false;
+      if (getIsDirectory()
+          != other.getIsDirectory()) return false;
+      if (!getUnknownFields().equals(other.getUnknownFields())) return false;
+      return true;
+    }
+
+    @java.lang.Override
+    public int hashCode() {
+      if (memoizedHashCode != 0) {
+        return memoizedHashCode;
+      }
+      int hash = 41;
+      hash = (19 * hash) + getDescriptor().hashCode();
+      hash = (37 * hash) + PATH_FIELD_NUMBER;
+      hash = (53 * hash) + getPath().hashCode();
+      hash = (37 * hash) + HASH_FIELD_NUMBER;
+      hash = (53 * hash) + getHash().hashCode();
+      hash = (37 * hash) + SIZE_FIELD_NUMBER;
+      hash = (53 * hash) + com.google.protobuf.Internal.hashLong(
+          getSize());
+      hash = (37 * hash) + LAST_MODIFIED_FIELD_NUMBER;
+      hash = (53 * hash) + com.google.protobuf.Internal.hashLong(
+          getLastModified());
+      hash = (37 * hash) + IS_DIRECTORY_FIELD_NUMBER;
+      hash = (53 * hash) + com.google.protobuf.Internal.hashBoolean(
+          getIsDirectory());
+      hash = (29 * hash) + getUnknownFields().hashCode();
+      memoizedHashCode = hash;
+      return hash;
+    }
+
+    public static gradle.substrate.v1.Substrate.FileFingerprintEntry parseFrom(
+        java.nio.ByteBuffer data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.FileFingerprintEntry parseFrom(
+        java.nio.ByteBuffer data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.FileFingerprintEntry parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.FileFingerprintEntry parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.FileFingerprintEntry parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.FileFingerprintEntry parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.FileFingerprintEntry parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.FileFingerprintEntry parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static gradle.substrate.v1.Substrate.FileFingerprintEntry parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input);
+    }
+
+    public static gradle.substrate.v1.Substrate.FileFingerprintEntry parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.FileFingerprintEntry parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.FileFingerprintEntry parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    @java.lang.Override
+    public Builder newBuilderForType() { return newBuilder(); }
+    public static Builder newBuilder() {
+      return DEFAULT_INSTANCE.toBuilder();
+    }
+    public static Builder newBuilder(gradle.substrate.v1.Substrate.FileFingerprintEntry prototype) {
+      return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
+    }
+    @java.lang.Override
+    public Builder toBuilder() {
+      return this == DEFAULT_INSTANCE
+          ? new Builder() : new Builder().mergeFrom(this);
+    }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+      Builder builder = new Builder(parent);
+      return builder;
+    }
+    /**
+     * Protobuf type {@code gradle.substrate.v1.FileFingerprintEntry}
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessage.Builder<Builder> implements
+        // @@protoc_insertion_point(builder_implements:gradle.substrate.v1.FileFingerprintEntry)
+        gradle.substrate.v1.Substrate.FileFingerprintEntryOrBuilder {
+      public static final com.google.protobuf.Descriptors.Descriptor
+          getDescriptor() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FileFingerprintEntry_descriptor;
+      }
+
+      @java.lang.Override
+      protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+          internalGetFieldAccessorTable() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FileFingerprintEntry_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                gradle.substrate.v1.Substrate.FileFingerprintEntry.class, gradle.substrate.v1.Substrate.FileFingerprintEntry.Builder.class);
+      }
+
+      // Construct using gradle.substrate.v1.Substrate.FileFingerprintEntry.newBuilder()
+      private Builder() {
+
+      }
+
+      private Builder(
+          com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+        super(parent);
+
+      }
+      @java.lang.Override
+      public Builder clear() {
+        super.clear();
+        bitField0_ = 0;
+        path_ = "";
+        hash_ = com.google.protobuf.ByteString.EMPTY;
+        size_ = 0L;
+        lastModified_ = 0L;
+        isDirectory_ = false;
+        return this;
+      }
+
+      @java.lang.Override
+      public com.google.protobuf.Descriptors.Descriptor
+          getDescriptorForType() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FileFingerprintEntry_descriptor;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.FileFingerprintEntry getDefaultInstanceForType() {
+        return gradle.substrate.v1.Substrate.FileFingerprintEntry.getDefaultInstance();
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.FileFingerprintEntry build() {
+        gradle.substrate.v1.Substrate.FileFingerprintEntry result = buildPartial();
+        if (!result.isInitialized()) {
+          throw newUninitializedMessageException(result);
+        }
+        return result;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.FileFingerprintEntry buildPartial() {
+        gradle.substrate.v1.Substrate.FileFingerprintEntry result = new gradle.substrate.v1.Substrate.FileFingerprintEntry(this);
+        if (bitField0_ != 0) { buildPartial0(result); }
+        onBuilt();
+        return result;
+      }
+
+      private void buildPartial0(gradle.substrate.v1.Substrate.FileFingerprintEntry result) {
+        int from_bitField0_ = bitField0_;
+        if (((from_bitField0_ & 0x00000001) != 0)) {
+          result.path_ = path_;
+        }
+        if (((from_bitField0_ & 0x00000002) != 0)) {
+          result.hash_ = hash_;
+        }
+        if (((from_bitField0_ & 0x00000004) != 0)) {
+          result.size_ = size_;
+        }
+        if (((from_bitField0_ & 0x00000008) != 0)) {
+          result.lastModified_ = lastModified_;
+        }
+        if (((from_bitField0_ & 0x00000010) != 0)) {
+          result.isDirectory_ = isDirectory_;
+        }
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(com.google.protobuf.Message other) {
+        if (other instanceof gradle.substrate.v1.Substrate.FileFingerprintEntry) {
+          return mergeFrom((gradle.substrate.v1.Substrate.FileFingerprintEntry)other);
+        } else {
+          super.mergeFrom(other);
+          return this;
+        }
+      }
+
+      public Builder mergeFrom(gradle.substrate.v1.Substrate.FileFingerprintEntry other) {
+        if (other == gradle.substrate.v1.Substrate.FileFingerprintEntry.getDefaultInstance()) return this;
+        if (!other.getPath().isEmpty()) {
+          path_ = other.path_;
+          bitField0_ |= 0x00000001;
+          onChanged();
+        }
+        if (!other.getHash().isEmpty()) {
+          setHash(other.getHash());
+        }
+        if (other.getSize() != 0L) {
+          setSize(other.getSize());
+        }
+        if (other.getLastModified() != 0L) {
+          setLastModified(other.getLastModified());
+        }
+        if (other.getIsDirectory() != false) {
+          setIsDirectory(other.getIsDirectory());
+        }
+        this.mergeUnknownFields(other.getUnknownFields());
+        onChanged();
+        return this;
+      }
+
+      @java.lang.Override
+      public final boolean isInitialized() {
+        return true;
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws java.io.IOException {
+        if (extensionRegistry == null) {
+          throw new java.lang.NullPointerException();
+        }
+        try {
+          boolean done = false;
+          while (!done) {
+            int tag = input.readTag();
+            switch (tag) {
+              case 0:
+                done = true;
+                break;
+              case 10: {
+                path_ = input.readStringRequireUtf8();
+                bitField0_ |= 0x00000001;
+                break;
+              } // case 10
+              case 18: {
+                hash_ = input.readBytes();
+                bitField0_ |= 0x00000002;
+                break;
+              } // case 18
+              case 24: {
+                size_ = input.readInt64();
+                bitField0_ |= 0x00000004;
+                break;
+              } // case 24
+              case 32: {
+                lastModified_ = input.readInt64();
+                bitField0_ |= 0x00000008;
+                break;
+              } // case 32
+              case 40: {
+                isDirectory_ = input.readBool();
+                bitField0_ |= 0x00000010;
+                break;
+              } // case 40
+              default: {
+                if (!super.parseUnknownField(input, extensionRegistry, tag)) {
+                  done = true; // was an endgroup tag
+                }
+                break;
+              } // default:
+            } // switch (tag)
+          } // while (!done)
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.unwrapIOException();
+        } finally {
+          onChanged();
+        } // finally
+        return this;
+      }
+      private int bitField0_;
+
+      private java.lang.Object path_ = "";
+      /**
+       * <code>string path = 1;</code>
+       * @return The path.
+       */
+      public java.lang.String getPath() {
+        java.lang.Object ref = path_;
+        if (!(ref instanceof java.lang.String)) {
+          com.google.protobuf.ByteString bs =
+              (com.google.protobuf.ByteString) ref;
+          java.lang.String s = bs.toStringUtf8();
+          path_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <code>string path = 1;</code>
+       * @return The bytes for path.
+       */
+      public com.google.protobuf.ByteString
+          getPathBytes() {
+        java.lang.Object ref = path_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          path_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <code>string path = 1;</code>
+       * @param value The path to set.
+       * @return This builder for chaining.
+       */
+      public Builder setPath(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        path_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string path = 1;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearPath() {
+        path_ = getDefaultInstance().getPath();
+        bitField0_ = (bitField0_ & ~0x00000001);
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string path = 1;</code>
+       * @param value The bytes for path to set.
+       * @return This builder for chaining.
+       */
+      public Builder setPathBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        path_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+
+      private com.google.protobuf.ByteString hash_ = com.google.protobuf.ByteString.EMPTY;
+      /**
+       * <code>bytes hash = 2;</code>
+       * @return The hash.
+       */
+      @java.lang.Override
+      public com.google.protobuf.ByteString getHash() {
+        return hash_;
+      }
+      /**
+       * <code>bytes hash = 2;</code>
+       * @param value The hash to set.
+       * @return This builder for chaining.
+       */
+      public Builder setHash(com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        hash_ = value;
+        bitField0_ |= 0x00000002;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>bytes hash = 2;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearHash() {
+        bitField0_ = (bitField0_ & ~0x00000002);
+        hash_ = getDefaultInstance().getHash();
+        onChanged();
+        return this;
+      }
+
+      private long size_ ;
+      /**
+       * <code>int64 size = 3;</code>
+       * @return The size.
+       */
+      @java.lang.Override
+      public long getSize() {
+        return size_;
+      }
+      /**
+       * <code>int64 size = 3;</code>
+       * @param value The size to set.
+       * @return This builder for chaining.
+       */
+      public Builder setSize(long value) {
+
+        size_ = value;
+        bitField0_ |= 0x00000004;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>int64 size = 3;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearSize() {
+        bitField0_ = (bitField0_ & ~0x00000004);
+        size_ = 0L;
+        onChanged();
+        return this;
+      }
+
+      private long lastModified_ ;
+      /**
+       * <code>int64 last_modified = 4;</code>
+       * @return The lastModified.
+       */
+      @java.lang.Override
+      public long getLastModified() {
+        return lastModified_;
+      }
+      /**
+       * <code>int64 last_modified = 4;</code>
+       * @param value The lastModified to set.
+       * @return This builder for chaining.
+       */
+      public Builder setLastModified(long value) {
+
+        lastModified_ = value;
+        bitField0_ |= 0x00000008;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>int64 last_modified = 4;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearLastModified() {
+        bitField0_ = (bitField0_ & ~0x00000008);
+        lastModified_ = 0L;
+        onChanged();
+        return this;
+      }
+
+      private boolean isDirectory_ ;
+      /**
+       * <code>bool is_directory = 5;</code>
+       * @return The isDirectory.
+       */
+      @java.lang.Override
+      public boolean getIsDirectory() {
+        return isDirectory_;
+      }
+      /**
+       * <code>bool is_directory = 5;</code>
+       * @param value The isDirectory to set.
+       * @return This builder for chaining.
+       */
+      public Builder setIsDirectory(boolean value) {
+
+        isDirectory_ = value;
+        bitField0_ |= 0x00000010;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>bool is_directory = 5;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearIsDirectory() {
+        bitField0_ = (bitField0_ & ~0x00000010);
+        isDirectory_ = false;
+        onChanged();
+        return this;
+      }
+
+      // @@protoc_insertion_point(builder_scope:gradle.substrate.v1.FileFingerprintEntry)
+    }
+
+    // @@protoc_insertion_point(class_scope:gradle.substrate.v1.FileFingerprintEntry)
+    private static final gradle.substrate.v1.Substrate.FileFingerprintEntry DEFAULT_INSTANCE;
+    static {
+      DEFAULT_INSTANCE = new gradle.substrate.v1.Substrate.FileFingerprintEntry();
+    }
+
+    public static gradle.substrate.v1.Substrate.FileFingerprintEntry getDefaultInstance() {
+      return DEFAULT_INSTANCE;
+    }
+
+    private static final com.google.protobuf.Parser<FileFingerprintEntry>
+        PARSER = new com.google.protobuf.AbstractParser<FileFingerprintEntry>() {
+      @java.lang.Override
+      public FileFingerprintEntry parsePartialFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws com.google.protobuf.InvalidProtocolBufferException {
+        Builder builder = newBuilder();
+        try {
+          builder.mergeFrom(input, extensionRegistry);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.setUnfinishedMessage(builder.buildPartial());
+        } catch (com.google.protobuf.UninitializedMessageException e) {
+          throw e.asInvalidProtocolBufferException().setUnfinishedMessage(builder.buildPartial());
+        } catch (java.io.IOException e) {
+          throw new com.google.protobuf.InvalidProtocolBufferException(e)
+              .setUnfinishedMessage(builder.buildPartial());
+        }
+        return builder.buildPartial();
+      }
+    };
+
+    public static com.google.protobuf.Parser<FileFingerprintEntry> parser() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<FileFingerprintEntry> getParserForType() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.FileFingerprintEntry getDefaultInstanceForType() {
+      return DEFAULT_INSTANCE;
+    }
+
+  }
+
+  public interface FingerprintFilesResponseOrBuilder extends
+      // @@protoc_insertion_point(interface_extends:gradle.substrate.v1.FingerprintFilesResponse)
+      com.google.protobuf.MessageOrBuilder {
+
+    /**
+     * <pre>
+     * Fingerprinted entries.
+     * </pre>
+     *
+     * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+     */
+    java.util.List<gradle.substrate.v1.Substrate.FileFingerprintEntry> 
+        getEntriesList();
+    /**
+     * <pre>
+     * Fingerprinted entries.
+     * </pre>
+     *
+     * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+     */
+    gradle.substrate.v1.Substrate.FileFingerprintEntry getEntries(int index);
+    /**
+     * <pre>
+     * Fingerprinted entries.
+     * </pre>
+     *
+     * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+     */
+    int getEntriesCount();
+    /**
+     * <pre>
+     * Fingerprinted entries.
+     * </pre>
+     *
+     * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+     */
+    java.util.List<? extends gradle.substrate.v1.Substrate.FileFingerprintEntryOrBuilder> 
+        getEntriesOrBuilderList();
+    /**
+     * <pre>
+     * Fingerprinted entries.
+     * </pre>
+     *
+     * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+     */
+    gradle.substrate.v1.Substrate.FileFingerprintEntryOrBuilder getEntriesOrBuilder(
+        int index);
+
+    /**
+     * <pre>
+     * Overall hash of the entire file collection.
+     * </pre>
+     *
+     * <code>bytes collection_hash = 2;</code>
+     * @return The collectionHash.
+     */
+    com.google.protobuf.ByteString getCollectionHash();
+
+    /**
+     * <pre>
+     * Error message if fingerprinting failed.
+     * </pre>
+     *
+     * <code>string error_message = 3;</code>
+     * @return The errorMessage.
+     */
+    java.lang.String getErrorMessage();
+    /**
+     * <pre>
+     * Error message if fingerprinting failed.
+     * </pre>
+     *
+     * <code>string error_message = 3;</code>
+     * @return The bytes for errorMessage.
+     */
+    com.google.protobuf.ByteString
+        getErrorMessageBytes();
+
+    /**
+     * <code>bool success = 4;</code>
+     * @return The success.
+     */
+    boolean getSuccess();
+  }
+  /**
+   * Protobuf type {@code gradle.substrate.v1.FingerprintFilesResponse}
+   */
+  public static final class FingerprintFilesResponse extends
+      com.google.protobuf.GeneratedMessage implements
+      // @@protoc_insertion_point(message_implements:gradle.substrate.v1.FingerprintFilesResponse)
+      FingerprintFilesResponseOrBuilder {
+  private static final long serialVersionUID = 0L;
+    static {
+      com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
+        com.google.protobuf.RuntimeVersion.RuntimeDomain.PUBLIC,
+        /* major= */ 4,
+        /* minor= */ 34,
+        /* patch= */ 0,
+        /* suffix= */ "",
+        "FingerprintFilesResponse");
+    }
+    // Use FingerprintFilesResponse.newBuilder() to construct.
+    private FingerprintFilesResponse(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      super(builder);
+    }
+    private FingerprintFilesResponse() {
+      entries_ = java.util.Collections.emptyList();
+      collectionHash_ = com.google.protobuf.ByteString.EMPTY;
+      errorMessage_ = "";
+    }
+
+    public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FingerprintFilesResponse_descriptor;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Descriptors.Descriptor getDescriptorForType() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FingerprintFilesResponse_descriptor;
+    }
+
+    @java.lang.Override
+    protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FingerprintFilesResponse_fieldAccessorTable
+          .ensureFieldAccessorsInitialized(
+              gradle.substrate.v1.Substrate.FingerprintFilesResponse.class, gradle.substrate.v1.Substrate.FingerprintFilesResponse.Builder.class);
+    }
+
+    public static final int ENTRIES_FIELD_NUMBER = 1;
+    @SuppressWarnings("serial")
+    private java.util.List<gradle.substrate.v1.Substrate.FileFingerprintEntry> entries_;
+    /**
+     * <pre>
+     * Fingerprinted entries.
+     * </pre>
+     *
+     * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+     */
+    @java.lang.Override
+    public java.util.List<gradle.substrate.v1.Substrate.FileFingerprintEntry> getEntriesList() {
+      return entries_;
+    }
+    /**
+     * <pre>
+     * Fingerprinted entries.
+     * </pre>
+     *
+     * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+     */
+    @java.lang.Override
+    public java.util.List<? extends gradle.substrate.v1.Substrate.FileFingerprintEntryOrBuilder> 
+        getEntriesOrBuilderList() {
+      return entries_;
+    }
+    /**
+     * <pre>
+     * Fingerprinted entries.
+     * </pre>
+     *
+     * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+     */
+    @java.lang.Override
+    public int getEntriesCount() {
+      return entries_.size();
+    }
+    /**
+     * <pre>
+     * Fingerprinted entries.
+     * </pre>
+     *
+     * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+     */
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.FileFingerprintEntry getEntries(int index) {
+      return entries_.get(index);
+    }
+    /**
+     * <pre>
+     * Fingerprinted entries.
+     * </pre>
+     *
+     * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+     */
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.FileFingerprintEntryOrBuilder getEntriesOrBuilder(
+        int index) {
+      return entries_.get(index);
+    }
+
+    public static final int COLLECTION_HASH_FIELD_NUMBER = 2;
+    private com.google.protobuf.ByteString collectionHash_ = com.google.protobuf.ByteString.EMPTY;
+    /**
+     * <pre>
+     * Overall hash of the entire file collection.
+     * </pre>
+     *
+     * <code>bytes collection_hash = 2;</code>
+     * @return The collectionHash.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString getCollectionHash() {
+      return collectionHash_;
+    }
+
+    public static final int ERROR_MESSAGE_FIELD_NUMBER = 3;
+    @SuppressWarnings("serial")
+    private volatile java.lang.Object errorMessage_ = "";
+    /**
+     * <pre>
+     * Error message if fingerprinting failed.
+     * </pre>
+     *
+     * <code>string error_message = 3;</code>
+     * @return The errorMessage.
+     */
+    @java.lang.Override
+    public java.lang.String getErrorMessage() {
+      java.lang.Object ref = errorMessage_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        errorMessage_ = s;
+        return s;
+      }
+    }
+    /**
+     * <pre>
+     * Error message if fingerprinting failed.
+     * </pre>
+     *
+     * <code>string error_message = 3;</code>
+     * @return The bytes for errorMessage.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getErrorMessageBytes() {
+      java.lang.Object ref = errorMessage_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        errorMessage_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    public static final int SUCCESS_FIELD_NUMBER = 4;
+    private boolean success_ = false;
+    /**
+     * <code>bool success = 4;</code>
+     * @return The success.
+     */
+    @java.lang.Override
+    public boolean getSuccess() {
+      return success_;
+    }
+
+    private byte memoizedIsInitialized = -1;
+    @java.lang.Override
+    public final boolean isInitialized() {
+      byte isInitialized = memoizedIsInitialized;
+      if (isInitialized == 1) return true;
+      if (isInitialized == 0) return false;
+
+      memoizedIsInitialized = 1;
+      return true;
+    }
+
+    @java.lang.Override
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+                        throws java.io.IOException {
+      for (int i = 0; i < entries_.size(); i++) {
+        output.writeMessage(1, entries_.get(i));
+      }
+      if (!collectionHash_.isEmpty()) {
+        output.writeBytes(2, collectionHash_);
+      }
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(errorMessage_)) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 3, errorMessage_);
+      }
+      if (success_ != false) {
+        output.writeBool(4, success_);
+      }
+      getUnknownFields().writeTo(output);
+    }
+
+    @java.lang.Override
+    public int getSerializedSize() {
+      int size = memoizedSize;
+      if (size != -1) return size;
+
+      size = 0;
+
+          {
+            final int count = entries_.size();
+            for (int i = 0; i < count; i++) {
+              size += com.google.protobuf.CodedOutputStream
+                .computeMessageSizeNoTag(entries_.get(i));
+            }
+            size += 1 * count;
+          }
+      if (!collectionHash_.isEmpty()) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBytesSize(2, collectionHash_);
+      }
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(errorMessage_)) {
+        size += com.google.protobuf.GeneratedMessage.computeStringSize(3, errorMessage_);
+      }
+      if (success_ != false) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBoolSize(4, success_);
+      }
+      size += getUnknownFields().getSerializedSize();
+      memoizedSize = size;
+      return size;
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+      if (obj == this) {
+       return true;
+      }
+      if (!(obj instanceof gradle.substrate.v1.Substrate.FingerprintFilesResponse)) {
+        return super.equals(obj);
+      }
+      gradle.substrate.v1.Substrate.FingerprintFilesResponse other = (gradle.substrate.v1.Substrate.FingerprintFilesResponse) obj;
+
+      if (!getEntriesList()
+          .equals(other.getEntriesList())) return false;
+      if (!getCollectionHash()
+          .equals(other.getCollectionHash())) return false;
+      if (!getErrorMessage()
+          .equals(other.getErrorMessage())) return false;
+      if (getSuccess()
+          != other.getSuccess()) return false;
+      if (!getUnknownFields().equals(other.getUnknownFields())) return false;
+      return true;
+    }
+
+    @java.lang.Override
+    public int hashCode() {
+      if (memoizedHashCode != 0) {
+        return memoizedHashCode;
+      }
+      int hash = 41;
+      hash = (19 * hash) + getDescriptor().hashCode();
+      if (getEntriesCount() > 0) {
+        hash = (37 * hash) + ENTRIES_FIELD_NUMBER;
+        hash = (53 * hash) + getEntriesList().hashCode();
+      }
+      hash = (37 * hash) + COLLECTION_HASH_FIELD_NUMBER;
+      hash = (53 * hash) + getCollectionHash().hashCode();
+      hash = (37 * hash) + ERROR_MESSAGE_FIELD_NUMBER;
+      hash = (53 * hash) + getErrorMessage().hashCode();
+      hash = (37 * hash) + SUCCESS_FIELD_NUMBER;
+      hash = (53 * hash) + com.google.protobuf.Internal.hashBoolean(
+          getSuccess());
+      hash = (29 * hash) + getUnknownFields().hashCode();
+      memoizedHashCode = hash;
+      return hash;
+    }
+
+    public static gradle.substrate.v1.Substrate.FingerprintFilesResponse parseFrom(
+        java.nio.ByteBuffer data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.FingerprintFilesResponse parseFrom(
+        java.nio.ByteBuffer data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.FingerprintFilesResponse parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.FingerprintFilesResponse parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.FingerprintFilesResponse parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.FingerprintFilesResponse parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.FingerprintFilesResponse parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.FingerprintFilesResponse parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static gradle.substrate.v1.Substrate.FingerprintFilesResponse parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input);
+    }
+
+    public static gradle.substrate.v1.Substrate.FingerprintFilesResponse parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.FingerprintFilesResponse parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.FingerprintFilesResponse parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    @java.lang.Override
+    public Builder newBuilderForType() { return newBuilder(); }
+    public static Builder newBuilder() {
+      return DEFAULT_INSTANCE.toBuilder();
+    }
+    public static Builder newBuilder(gradle.substrate.v1.Substrate.FingerprintFilesResponse prototype) {
+      return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
+    }
+    @java.lang.Override
+    public Builder toBuilder() {
+      return this == DEFAULT_INSTANCE
+          ? new Builder() : new Builder().mergeFrom(this);
+    }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+      Builder builder = new Builder(parent);
+      return builder;
+    }
+    /**
+     * Protobuf type {@code gradle.substrate.v1.FingerprintFilesResponse}
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessage.Builder<Builder> implements
+        // @@protoc_insertion_point(builder_implements:gradle.substrate.v1.FingerprintFilesResponse)
+        gradle.substrate.v1.Substrate.FingerprintFilesResponseOrBuilder {
+      public static final com.google.protobuf.Descriptors.Descriptor
+          getDescriptor() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FingerprintFilesResponse_descriptor;
+      }
+
+      @java.lang.Override
+      protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+          internalGetFieldAccessorTable() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FingerprintFilesResponse_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                gradle.substrate.v1.Substrate.FingerprintFilesResponse.class, gradle.substrate.v1.Substrate.FingerprintFilesResponse.Builder.class);
+      }
+
+      // Construct using gradle.substrate.v1.Substrate.FingerprintFilesResponse.newBuilder()
+      private Builder() {
+
+      }
+
+      private Builder(
+          com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+        super(parent);
+
+      }
+      @java.lang.Override
+      public Builder clear() {
+        super.clear();
+        bitField0_ = 0;
+        if (entriesBuilder_ == null) {
+          entries_ = java.util.Collections.emptyList();
+        } else {
+          entries_ = null;
+          entriesBuilder_.clear();
+        }
+        bitField0_ = (bitField0_ & ~0x00000001);
+        collectionHash_ = com.google.protobuf.ByteString.EMPTY;
+        errorMessage_ = "";
+        success_ = false;
+        return this;
+      }
+
+      @java.lang.Override
+      public com.google.protobuf.Descriptors.Descriptor
+          getDescriptorForType() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_FingerprintFilesResponse_descriptor;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.FingerprintFilesResponse getDefaultInstanceForType() {
+        return gradle.substrate.v1.Substrate.FingerprintFilesResponse.getDefaultInstance();
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.FingerprintFilesResponse build() {
+        gradle.substrate.v1.Substrate.FingerprintFilesResponse result = buildPartial();
+        if (!result.isInitialized()) {
+          throw newUninitializedMessageException(result);
+        }
+        return result;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.FingerprintFilesResponse buildPartial() {
+        gradle.substrate.v1.Substrate.FingerprintFilesResponse result = new gradle.substrate.v1.Substrate.FingerprintFilesResponse(this);
+        buildPartialRepeatedFields(result);
+        if (bitField0_ != 0) { buildPartial0(result); }
+        onBuilt();
+        return result;
+      }
+
+      private void buildPartialRepeatedFields(gradle.substrate.v1.Substrate.FingerprintFilesResponse result) {
+        if (entriesBuilder_ == null) {
+          if (((bitField0_ & 0x00000001) != 0)) {
+            entries_ = java.util.Collections.unmodifiableList(entries_);
+            bitField0_ = (bitField0_ & ~0x00000001);
+          }
+          result.entries_ = entries_;
+        } else {
+          result.entries_ = entriesBuilder_.build();
+        }
+      }
+
+      private void buildPartial0(gradle.substrate.v1.Substrate.FingerprintFilesResponse result) {
+        int from_bitField0_ = bitField0_;
+        if (((from_bitField0_ & 0x00000002) != 0)) {
+          result.collectionHash_ = collectionHash_;
+        }
+        if (((from_bitField0_ & 0x00000004) != 0)) {
+          result.errorMessage_ = errorMessage_;
+        }
+        if (((from_bitField0_ & 0x00000008) != 0)) {
+          result.success_ = success_;
+        }
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(com.google.protobuf.Message other) {
+        if (other instanceof gradle.substrate.v1.Substrate.FingerprintFilesResponse) {
+          return mergeFrom((gradle.substrate.v1.Substrate.FingerprintFilesResponse)other);
+        } else {
+          super.mergeFrom(other);
+          return this;
+        }
+      }
+
+      public Builder mergeFrom(gradle.substrate.v1.Substrate.FingerprintFilesResponse other) {
+        if (other == gradle.substrate.v1.Substrate.FingerprintFilesResponse.getDefaultInstance()) return this;
+        if (entriesBuilder_ == null) {
+          if (!other.entries_.isEmpty()) {
+            if (entries_.isEmpty()) {
+              entries_ = other.entries_;
+              bitField0_ = (bitField0_ & ~0x00000001);
+            } else {
+              ensureEntriesIsMutable();
+              entries_.addAll(other.entries_);
+            }
+            onChanged();
+          }
+        } else {
+          if (!other.entries_.isEmpty()) {
+            if (entriesBuilder_.isEmpty()) {
+              entriesBuilder_.dispose();
+              entriesBuilder_ = null;
+              entries_ = other.entries_;
+              bitField0_ = (bitField0_ & ~0x00000001);
+              entriesBuilder_ = 
+                com.google.protobuf.GeneratedMessage.alwaysUseFieldBuilders ?
+                   internalGetEntriesFieldBuilder() : null;
+            } else {
+              entriesBuilder_.addAllMessages(other.entries_);
+            }
+          }
+        }
+        if (!other.getCollectionHash().isEmpty()) {
+          setCollectionHash(other.getCollectionHash());
+        }
+        if (!other.getErrorMessage().isEmpty()) {
+          errorMessage_ = other.errorMessage_;
+          bitField0_ |= 0x00000004;
+          onChanged();
+        }
+        if (other.getSuccess() != false) {
+          setSuccess(other.getSuccess());
+        }
+        this.mergeUnknownFields(other.getUnknownFields());
+        onChanged();
+        return this;
+      }
+
+      @java.lang.Override
+      public final boolean isInitialized() {
+        return true;
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws java.io.IOException {
+        if (extensionRegistry == null) {
+          throw new java.lang.NullPointerException();
+        }
+        try {
+          boolean done = false;
+          while (!done) {
+            int tag = input.readTag();
+            switch (tag) {
+              case 0:
+                done = true;
+                break;
+              case 10: {
+                gradle.substrate.v1.Substrate.FileFingerprintEntry m =
+                    input.readMessage(
+                        gradle.substrate.v1.Substrate.FileFingerprintEntry.parser(),
+                        extensionRegistry);
+                if (entriesBuilder_ == null) {
+                  ensureEntriesIsMutable();
+                  entries_.add(m);
+                } else {
+                  entriesBuilder_.addMessage(m);
+                }
+                break;
+              } // case 10
+              case 18: {
+                collectionHash_ = input.readBytes();
+                bitField0_ |= 0x00000002;
+                break;
+              } // case 18
+              case 26: {
+                errorMessage_ = input.readStringRequireUtf8();
+                bitField0_ |= 0x00000004;
+                break;
+              } // case 26
+              case 32: {
+                success_ = input.readBool();
+                bitField0_ |= 0x00000008;
+                break;
+              } // case 32
+              default: {
+                if (!super.parseUnknownField(input, extensionRegistry, tag)) {
+                  done = true; // was an endgroup tag
+                }
+                break;
+              } // default:
+            } // switch (tag)
+          } // while (!done)
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.unwrapIOException();
+        } finally {
+          onChanged();
+        } // finally
+        return this;
+      }
+      private int bitField0_;
+
+      private java.util.List<gradle.substrate.v1.Substrate.FileFingerprintEntry> entries_ =
+        java.util.Collections.emptyList();
+      private void ensureEntriesIsMutable() {
+        if (!((bitField0_ & 0x00000001) != 0)) {
+          entries_ = new java.util.ArrayList<gradle.substrate.v1.Substrate.FileFingerprintEntry>(entries_);
+          bitField0_ |= 0x00000001;
+         }
+      }
+
+      private com.google.protobuf.RepeatedFieldBuilder<
+          gradle.substrate.v1.Substrate.FileFingerprintEntry, gradle.substrate.v1.Substrate.FileFingerprintEntry.Builder, gradle.substrate.v1.Substrate.FileFingerprintEntryOrBuilder> entriesBuilder_;
+
+      /**
+       * <pre>
+       * Fingerprinted entries.
+       * </pre>
+       *
+       * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+       */
+      public java.util.List<gradle.substrate.v1.Substrate.FileFingerprintEntry> getEntriesList() {
+        if (entriesBuilder_ == null) {
+          return java.util.Collections.unmodifiableList(entries_);
+        } else {
+          return entriesBuilder_.getMessageList();
+        }
+      }
+      /**
+       * <pre>
+       * Fingerprinted entries.
+       * </pre>
+       *
+       * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+       */
+      public int getEntriesCount() {
+        if (entriesBuilder_ == null) {
+          return entries_.size();
+        } else {
+          return entriesBuilder_.getCount();
+        }
+      }
+      /**
+       * <pre>
+       * Fingerprinted entries.
+       * </pre>
+       *
+       * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+       */
+      public gradle.substrate.v1.Substrate.FileFingerprintEntry getEntries(int index) {
+        if (entriesBuilder_ == null) {
+          return entries_.get(index);
+        } else {
+          return entriesBuilder_.getMessage(index);
+        }
+      }
+      /**
+       * <pre>
+       * Fingerprinted entries.
+       * </pre>
+       *
+       * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+       */
+      public Builder setEntries(
+          int index, gradle.substrate.v1.Substrate.FileFingerprintEntry value) {
+        if (entriesBuilder_ == null) {
+          if (value == null) {
+            throw new NullPointerException();
+          }
+          ensureEntriesIsMutable();
+          entries_.set(index, value);
+          onChanged();
+        } else {
+          entriesBuilder_.setMessage(index, value);
+        }
+        return this;
+      }
+      /**
+       * <pre>
+       * Fingerprinted entries.
+       * </pre>
+       *
+       * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+       */
+      public Builder setEntries(
+          int index, gradle.substrate.v1.Substrate.FileFingerprintEntry.Builder builderForValue) {
+        if (entriesBuilder_ == null) {
+          ensureEntriesIsMutable();
+          entries_.set(index, builderForValue.build());
+          onChanged();
+        } else {
+          entriesBuilder_.setMessage(index, builderForValue.build());
+        }
+        return this;
+      }
+      /**
+       * <pre>
+       * Fingerprinted entries.
+       * </pre>
+       *
+       * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+       */
+      public Builder addEntries(gradle.substrate.v1.Substrate.FileFingerprintEntry value) {
+        if (entriesBuilder_ == null) {
+          if (value == null) {
+            throw new NullPointerException();
+          }
+          ensureEntriesIsMutable();
+          entries_.add(value);
+          onChanged();
+        } else {
+          entriesBuilder_.addMessage(value);
+        }
+        return this;
+      }
+      /**
+       * <pre>
+       * Fingerprinted entries.
+       * </pre>
+       *
+       * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+       */
+      public Builder addEntries(
+          int index, gradle.substrate.v1.Substrate.FileFingerprintEntry value) {
+        if (entriesBuilder_ == null) {
+          if (value == null) {
+            throw new NullPointerException();
+          }
+          ensureEntriesIsMutable();
+          entries_.add(index, value);
+          onChanged();
+        } else {
+          entriesBuilder_.addMessage(index, value);
+        }
+        return this;
+      }
+      /**
+       * <pre>
+       * Fingerprinted entries.
+       * </pre>
+       *
+       * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+       */
+      public Builder addEntries(
+          gradle.substrate.v1.Substrate.FileFingerprintEntry.Builder builderForValue) {
+        if (entriesBuilder_ == null) {
+          ensureEntriesIsMutable();
+          entries_.add(builderForValue.build());
+          onChanged();
+        } else {
+          entriesBuilder_.addMessage(builderForValue.build());
+        }
+        return this;
+      }
+      /**
+       * <pre>
+       * Fingerprinted entries.
+       * </pre>
+       *
+       * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+       */
+      public Builder addEntries(
+          int index, gradle.substrate.v1.Substrate.FileFingerprintEntry.Builder builderForValue) {
+        if (entriesBuilder_ == null) {
+          ensureEntriesIsMutable();
+          entries_.add(index, builderForValue.build());
+          onChanged();
+        } else {
+          entriesBuilder_.addMessage(index, builderForValue.build());
+        }
+        return this;
+      }
+      /**
+       * <pre>
+       * Fingerprinted entries.
+       * </pre>
+       *
+       * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+       */
+      public Builder addAllEntries(
+          java.lang.Iterable<? extends gradle.substrate.v1.Substrate.FileFingerprintEntry> values) {
+        if (entriesBuilder_ == null) {
+          ensureEntriesIsMutable();
+          com.google.protobuf.AbstractMessageLite.Builder.addAll(
+              values, entries_);
+          onChanged();
+        } else {
+          entriesBuilder_.addAllMessages(values);
+        }
+        return this;
+      }
+      /**
+       * <pre>
+       * Fingerprinted entries.
+       * </pre>
+       *
+       * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+       */
+      public Builder clearEntries() {
+        if (entriesBuilder_ == null) {
+          entries_ = java.util.Collections.emptyList();
+          bitField0_ = (bitField0_ & ~0x00000001);
+          onChanged();
+        } else {
+          entriesBuilder_.clear();
+        }
+        return this;
+      }
+      /**
+       * <pre>
+       * Fingerprinted entries.
+       * </pre>
+       *
+       * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+       */
+      public Builder removeEntries(int index) {
+        if (entriesBuilder_ == null) {
+          ensureEntriesIsMutable();
+          entries_.remove(index);
+          onChanged();
+        } else {
+          entriesBuilder_.remove(index);
+        }
+        return this;
+      }
+      /**
+       * <pre>
+       * Fingerprinted entries.
+       * </pre>
+       *
+       * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+       */
+      public gradle.substrate.v1.Substrate.FileFingerprintEntry.Builder getEntriesBuilder(
+          int index) {
+        return internalGetEntriesFieldBuilder().getBuilder(index);
+      }
+      /**
+       * <pre>
+       * Fingerprinted entries.
+       * </pre>
+       *
+       * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+       */
+      public gradle.substrate.v1.Substrate.FileFingerprintEntryOrBuilder getEntriesOrBuilder(
+          int index) {
+        if (entriesBuilder_ == null) {
+          return entries_.get(index);  } else {
+          return entriesBuilder_.getMessageOrBuilder(index);
+        }
+      }
+      /**
+       * <pre>
+       * Fingerprinted entries.
+       * </pre>
+       *
+       * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+       */
+      public java.util.List<? extends gradle.substrate.v1.Substrate.FileFingerprintEntryOrBuilder> 
+           getEntriesOrBuilderList() {
+        if (entriesBuilder_ != null) {
+          return entriesBuilder_.getMessageOrBuilderList();
+        } else {
+          return java.util.Collections.unmodifiableList(entries_);
+        }
+      }
+      /**
+       * <pre>
+       * Fingerprinted entries.
+       * </pre>
+       *
+       * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+       */
+      public gradle.substrate.v1.Substrate.FileFingerprintEntry.Builder addEntriesBuilder() {
+        return internalGetEntriesFieldBuilder().addBuilder(
+            gradle.substrate.v1.Substrate.FileFingerprintEntry.getDefaultInstance());
+      }
+      /**
+       * <pre>
+       * Fingerprinted entries.
+       * </pre>
+       *
+       * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+       */
+      public gradle.substrate.v1.Substrate.FileFingerprintEntry.Builder addEntriesBuilder(
+          int index) {
+        return internalGetEntriesFieldBuilder().addBuilder(
+            index, gradle.substrate.v1.Substrate.FileFingerprintEntry.getDefaultInstance());
+      }
+      /**
+       * <pre>
+       * Fingerprinted entries.
+       * </pre>
+       *
+       * <code>repeated .gradle.substrate.v1.FileFingerprintEntry entries = 1;</code>
+       */
+      public java.util.List<gradle.substrate.v1.Substrate.FileFingerprintEntry.Builder> 
+           getEntriesBuilderList() {
+        return internalGetEntriesFieldBuilder().getBuilderList();
+      }
+      private com.google.protobuf.RepeatedFieldBuilder<
+          gradle.substrate.v1.Substrate.FileFingerprintEntry, gradle.substrate.v1.Substrate.FileFingerprintEntry.Builder, gradle.substrate.v1.Substrate.FileFingerprintEntryOrBuilder> 
+          internalGetEntriesFieldBuilder() {
+        if (entriesBuilder_ == null) {
+          entriesBuilder_ = new com.google.protobuf.RepeatedFieldBuilder<
+              gradle.substrate.v1.Substrate.FileFingerprintEntry, gradle.substrate.v1.Substrate.FileFingerprintEntry.Builder, gradle.substrate.v1.Substrate.FileFingerprintEntryOrBuilder>(
+                  entries_,
+                  ((bitField0_ & 0x00000001) != 0),
+                  getParentForChildren(),
+                  isClean());
+          entries_ = null;
+        }
+        return entriesBuilder_;
+      }
+
+      private com.google.protobuf.ByteString collectionHash_ = com.google.protobuf.ByteString.EMPTY;
+      /**
+       * <pre>
+       * Overall hash of the entire file collection.
+       * </pre>
+       *
+       * <code>bytes collection_hash = 2;</code>
+       * @return The collectionHash.
+       */
+      @java.lang.Override
+      public com.google.protobuf.ByteString getCollectionHash() {
+        return collectionHash_;
+      }
+      /**
+       * <pre>
+       * Overall hash of the entire file collection.
+       * </pre>
+       *
+       * <code>bytes collection_hash = 2;</code>
+       * @param value The collectionHash to set.
+       * @return This builder for chaining.
+       */
+      public Builder setCollectionHash(com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        collectionHash_ = value;
+        bitField0_ |= 0x00000002;
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * Overall hash of the entire file collection.
+       * </pre>
+       *
+       * <code>bytes collection_hash = 2;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearCollectionHash() {
+        bitField0_ = (bitField0_ & ~0x00000002);
+        collectionHash_ = getDefaultInstance().getCollectionHash();
+        onChanged();
+        return this;
+      }
+
+      private java.lang.Object errorMessage_ = "";
+      /**
+       * <pre>
+       * Error message if fingerprinting failed.
+       * </pre>
+       *
+       * <code>string error_message = 3;</code>
+       * @return The errorMessage.
+       */
+      public java.lang.String getErrorMessage() {
+        java.lang.Object ref = errorMessage_;
+        if (!(ref instanceof java.lang.String)) {
+          com.google.protobuf.ByteString bs =
+              (com.google.protobuf.ByteString) ref;
+          java.lang.String s = bs.toStringUtf8();
+          errorMessage_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <pre>
+       * Error message if fingerprinting failed.
+       * </pre>
+       *
+       * <code>string error_message = 3;</code>
+       * @return The bytes for errorMessage.
+       */
+      public com.google.protobuf.ByteString
+          getErrorMessageBytes() {
+        java.lang.Object ref = errorMessage_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          errorMessage_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <pre>
+       * Error message if fingerprinting failed.
+       * </pre>
+       *
+       * <code>string error_message = 3;</code>
+       * @param value The errorMessage to set.
+       * @return This builder for chaining.
+       */
+      public Builder setErrorMessage(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        errorMessage_ = value;
+        bitField0_ |= 0x00000004;
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * Error message if fingerprinting failed.
+       * </pre>
+       *
+       * <code>string error_message = 3;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearErrorMessage() {
+        errorMessage_ = getDefaultInstance().getErrorMessage();
+        bitField0_ = (bitField0_ & ~0x00000004);
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * Error message if fingerprinting failed.
+       * </pre>
+       *
+       * <code>string error_message = 3;</code>
+       * @param value The bytes for errorMessage to set.
+       * @return This builder for chaining.
+       */
+      public Builder setErrorMessageBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        errorMessage_ = value;
+        bitField0_ |= 0x00000004;
+        onChanged();
+        return this;
+      }
+
+      private boolean success_ ;
+      /**
+       * <code>bool success = 4;</code>
+       * @return The success.
+       */
+      @java.lang.Override
+      public boolean getSuccess() {
+        return success_;
+      }
+      /**
+       * <code>bool success = 4;</code>
+       * @param value The success to set.
+       * @return This builder for chaining.
+       */
+      public Builder setSuccess(boolean value) {
+
+        success_ = value;
+        bitField0_ |= 0x00000008;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>bool success = 4;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearSuccess() {
+        bitField0_ = (bitField0_ & ~0x00000008);
+        success_ = false;
+        onChanged();
+        return this;
+      }
+
+      // @@protoc_insertion_point(builder_scope:gradle.substrate.v1.FingerprintFilesResponse)
+    }
+
+    // @@protoc_insertion_point(class_scope:gradle.substrate.v1.FingerprintFilesResponse)
+    private static final gradle.substrate.v1.Substrate.FingerprintFilesResponse DEFAULT_INSTANCE;
+    static {
+      DEFAULT_INSTANCE = new gradle.substrate.v1.Substrate.FingerprintFilesResponse();
+    }
+
+    public static gradle.substrate.v1.Substrate.FingerprintFilesResponse getDefaultInstance() {
+      return DEFAULT_INSTANCE;
+    }
+
+    private static final com.google.protobuf.Parser<FingerprintFilesResponse>
+        PARSER = new com.google.protobuf.AbstractParser<FingerprintFilesResponse>() {
+      @java.lang.Override
+      public FingerprintFilesResponse parsePartialFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws com.google.protobuf.InvalidProtocolBufferException {
+        Builder builder = newBuilder();
+        try {
+          builder.mergeFrom(input, extensionRegistry);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.setUnfinishedMessage(builder.buildPartial());
+        } catch (com.google.protobuf.UninitializedMessageException e) {
+          throw e.asInvalidProtocolBufferException().setUnfinishedMessage(builder.buildPartial());
+        } catch (java.io.IOException e) {
+          throw new com.google.protobuf.InvalidProtocolBufferException(e)
+              .setUnfinishedMessage(builder.buildPartial());
+        }
+        return builder.buildPartial();
+      }
+    };
+
+    public static com.google.protobuf.Parser<FingerprintFilesResponse> parser() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<FingerprintFilesResponse> getParserForType() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.FingerprintFilesResponse getDefaultInstanceForType() {
+      return DEFAULT_INSTANCE;
+    }
+
+  }
+
+  public interface PropertyValueOrBuilder extends
+      // @@protoc_insertion_point(interface_extends:gradle.substrate.v1.PropertyValue)
+      com.google.protobuf.MessageOrBuilder {
+
+    /**
+     * <code>string name = 1;</code>
+     * @return The name.
+     */
+    java.lang.String getName();
+    /**
+     * <code>string name = 1;</code>
+     * @return The bytes for name.
+     */
+    com.google.protobuf.ByteString
+        getNameBytes();
+
+    /**
+     * <code>string string_value = 2;</code>
+     * @return Whether the stringValue field is set.
+     */
+    boolean hasStringValue();
+    /**
+     * <code>string string_value = 2;</code>
+     * @return The stringValue.
+     */
+    java.lang.String getStringValue();
+    /**
+     * <code>string string_value = 2;</code>
+     * @return The bytes for stringValue.
+     */
+    com.google.protobuf.ByteString
+        getStringValueBytes();
+
+    /**
+     * <code>int64 long_value = 3;</code>
+     * @return Whether the longValue field is set.
+     */
+    boolean hasLongValue();
+    /**
+     * <code>int64 long_value = 3;</code>
+     * @return The longValue.
+     */
+    long getLongValue();
+
+    /**
+     * <code>bool bool_value = 4;</code>
+     * @return Whether the boolValue field is set.
+     */
+    boolean hasBoolValue();
+    /**
+     * <code>bool bool_value = 4;</code>
+     * @return The boolValue.
+     */
+    boolean getBoolValue();
+
+    /**
+     * <code>bytes binary_value = 5;</code>
+     * @return Whether the binaryValue field is set.
+     */
+    boolean hasBinaryValue();
+    /**
+     * <code>bytes binary_value = 5;</code>
+     * @return The binaryValue.
+     */
+    com.google.protobuf.ByteString getBinaryValue();
+
+    /**
+     * <pre>
+     * For collection types, a semicolon-separated list.
+     * </pre>
+     *
+     * <code>string list_value = 6;</code>
+     * @return Whether the listValue field is set.
+     */
+    boolean hasListValue();
+    /**
+     * <pre>
+     * For collection types, a semicolon-separated list.
+     * </pre>
+     *
+     * <code>string list_value = 6;</code>
+     * @return The listValue.
+     */
+    java.lang.String getListValue();
+    /**
+     * <pre>
+     * For collection types, a semicolon-separated list.
+     * </pre>
+     *
+     * <code>string list_value = 6;</code>
+     * @return The bytes for listValue.
+     */
+    com.google.protobuf.ByteString
+        getListValueBytes();
+
+    /**
+     * <pre>
+     * For map types, key=value pairs separated by newlines.
+     * </pre>
+     *
+     * <code>string map_value = 7;</code>
+     * @return Whether the mapValue field is set.
+     */
+    boolean hasMapValue();
+    /**
+     * <pre>
+     * For map types, key=value pairs separated by newlines.
+     * </pre>
+     *
+     * <code>string map_value = 7;</code>
+     * @return The mapValue.
+     */
+    java.lang.String getMapValue();
+    /**
+     * <pre>
+     * For map types, key=value pairs separated by newlines.
+     * </pre>
+     *
+     * <code>string map_value = 7;</code>
+     * @return The bytes for mapValue.
+     */
+    com.google.protobuf.ByteString
+        getMapValueBytes();
+
+    /**
+     * <pre>
+     * Type name for the value (e.g. "java.lang.String", "java.io.File").
+     * </pre>
+     *
+     * <code>string type_name = 8;</code>
+     * @return The typeName.
+     */
+    java.lang.String getTypeName();
+    /**
+     * <pre>
+     * Type name for the value (e.g. "java.lang.String", "java.io.File").
+     * </pre>
+     *
+     * <code>string type_name = 8;</code>
+     * @return The bytes for typeName.
+     */
+    com.google.protobuf.ByteString
+        getTypeNameBytes();
+
+    gradle.substrate.v1.Substrate.PropertyValue.ValueCase getValueCase();
+  }
+  /**
+   * Protobuf type {@code gradle.substrate.v1.PropertyValue}
+   */
+  public static final class PropertyValue extends
+      com.google.protobuf.GeneratedMessage implements
+      // @@protoc_insertion_point(message_implements:gradle.substrate.v1.PropertyValue)
+      PropertyValueOrBuilder {
+  private static final long serialVersionUID = 0L;
+    static {
+      com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
+        com.google.protobuf.RuntimeVersion.RuntimeDomain.PUBLIC,
+        /* major= */ 4,
+        /* minor= */ 34,
+        /* patch= */ 0,
+        /* suffix= */ "",
+        "PropertyValue");
+    }
+    // Use PropertyValue.newBuilder() to construct.
+    private PropertyValue(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      super(builder);
+    }
+    private PropertyValue() {
+      name_ = "";
+      typeName_ = "";
+    }
+
+    public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_PropertyValue_descriptor;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Descriptors.Descriptor getDescriptorForType() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_PropertyValue_descriptor;
+    }
+
+    @java.lang.Override
+    protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_PropertyValue_fieldAccessorTable
+          .ensureFieldAccessorsInitialized(
+              gradle.substrate.v1.Substrate.PropertyValue.class, gradle.substrate.v1.Substrate.PropertyValue.Builder.class);
+    }
+
+    private int valueCase_ = 0;
+    @SuppressWarnings("serial")
+    private java.lang.Object value_;
+    public enum ValueCase
+        implements com.google.protobuf.Internal.EnumLite,
+            com.google.protobuf.AbstractMessage.InternalOneOfEnum {
+      STRING_VALUE(2),
+      LONG_VALUE(3),
+      BOOL_VALUE(4),
+      BINARY_VALUE(5),
+      LIST_VALUE(6),
+      MAP_VALUE(7),
+      VALUE_NOT_SET(0);
+      private final int value;
+      private ValueCase(int value) {
+        this.value = value;
+      }
+      /**
+       * @param value The number of the enum to look for.
+       * @return The enum associated with the given number.
+       * @deprecated Use {@link #forNumber(int)} instead.
+       */
+      @java.lang.Deprecated
+      public static ValueCase valueOf(int value) {
+        return forNumber(value);
+      }
+
+      public static ValueCase forNumber(int value) {
+        switch (value) {
+          case 2: return STRING_VALUE;
+          case 3: return LONG_VALUE;
+          case 4: return BOOL_VALUE;
+          case 5: return BINARY_VALUE;
+          case 6: return LIST_VALUE;
+          case 7: return MAP_VALUE;
+          case 0: return VALUE_NOT_SET;
+          default: return null;
+        }
+      }
+      public int getNumber() {
+        return this.value;
+      }
+    };
+
+    public ValueCase
+    getValueCase() {
+      return ValueCase.forNumber(
+          valueCase_);
+    }
+
+    public static final int NAME_FIELD_NUMBER = 1;
+    @SuppressWarnings("serial")
+    private volatile java.lang.Object name_ = "";
+    /**
+     * <code>string name = 1;</code>
+     * @return The name.
+     */
+    @java.lang.Override
+    public java.lang.String getName() {
+      java.lang.Object ref = name_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        name_ = s;
+        return s;
+      }
+    }
+    /**
+     * <code>string name = 1;</code>
+     * @return The bytes for name.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getNameBytes() {
+      java.lang.Object ref = name_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        name_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    public static final int STRING_VALUE_FIELD_NUMBER = 2;
+    /**
+     * <code>string string_value = 2;</code>
+     * @return Whether the stringValue field is set.
+     */
+    public boolean hasStringValue() {
+      return valueCase_ == 2;
+    }
+    /**
+     * <code>string string_value = 2;</code>
+     * @return The stringValue.
+     */
+    public java.lang.String getStringValue() {
+      if (valueCase_ != 2) {
+        return "";
+      }
+      java.lang.Object ref = value_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        value_ = s;
+        return s;
+      }
+    }
+    /**
+     * <code>string string_value = 2;</code>
+     * @return The bytes for stringValue.
+     */
+    public com.google.protobuf.ByteString
+        getStringValueBytes() {
+      if (valueCase_ != 2) {
+        return com.google.protobuf.ByteString.copyFromUtf8("");
+      }
+      java.lang.Object ref = value_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        value_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    public static final int LONG_VALUE_FIELD_NUMBER = 3;
+    /**
+     * <code>int64 long_value = 3;</code>
+     * @return Whether the longValue field is set.
+     */
+    @java.lang.Override
+    public boolean hasLongValue() {
+      return valueCase_ == 3;
+    }
+    /**
+     * <code>int64 long_value = 3;</code>
+     * @return The longValue.
+     */
+    @java.lang.Override
+    public long getLongValue() {
+      if (valueCase_ == 3) {
+        return (java.lang.Long) value_;
+      }
+      return 0L;
+    }
+
+    public static final int BOOL_VALUE_FIELD_NUMBER = 4;
+    /**
+     * <code>bool bool_value = 4;</code>
+     * @return Whether the boolValue field is set.
+     */
+    @java.lang.Override
+    public boolean hasBoolValue() {
+      return valueCase_ == 4;
+    }
+    /**
+     * <code>bool bool_value = 4;</code>
+     * @return The boolValue.
+     */
+    @java.lang.Override
+    public boolean getBoolValue() {
+      if (valueCase_ == 4) {
+        return (java.lang.Boolean) value_;
+      }
+      return false;
+    }
+
+    public static final int BINARY_VALUE_FIELD_NUMBER = 5;
+    /**
+     * <code>bytes binary_value = 5;</code>
+     * @return Whether the binaryValue field is set.
+     */
+    @java.lang.Override
+    public boolean hasBinaryValue() {
+      return valueCase_ == 5;
+    }
+    /**
+     * <code>bytes binary_value = 5;</code>
+     * @return The binaryValue.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString getBinaryValue() {
+      if (valueCase_ == 5) {
+        return (com.google.protobuf.ByteString) value_;
+      }
+      return com.google.protobuf.ByteString.EMPTY;
+    }
+
+    public static final int LIST_VALUE_FIELD_NUMBER = 6;
+    /**
+     * <pre>
+     * For collection types, a semicolon-separated list.
+     * </pre>
+     *
+     * <code>string list_value = 6;</code>
+     * @return Whether the listValue field is set.
+     */
+    public boolean hasListValue() {
+      return valueCase_ == 6;
+    }
+    /**
+     * <pre>
+     * For collection types, a semicolon-separated list.
+     * </pre>
+     *
+     * <code>string list_value = 6;</code>
+     * @return The listValue.
+     */
+    public java.lang.String getListValue() {
+      if (valueCase_ != 6) {
+        return "";
+      }
+      java.lang.Object ref = value_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        value_ = s;
+        return s;
+      }
+    }
+    /**
+     * <pre>
+     * For collection types, a semicolon-separated list.
+     * </pre>
+     *
+     * <code>string list_value = 6;</code>
+     * @return The bytes for listValue.
+     */
+    public com.google.protobuf.ByteString
+        getListValueBytes() {
+      if (valueCase_ != 6) {
+        return com.google.protobuf.ByteString.copyFromUtf8("");
+      }
+      java.lang.Object ref = value_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        value_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    public static final int MAP_VALUE_FIELD_NUMBER = 7;
+    /**
+     * <pre>
+     * For map types, key=value pairs separated by newlines.
+     * </pre>
+     *
+     * <code>string map_value = 7;</code>
+     * @return Whether the mapValue field is set.
+     */
+    public boolean hasMapValue() {
+      return valueCase_ == 7;
+    }
+    /**
+     * <pre>
+     * For map types, key=value pairs separated by newlines.
+     * </pre>
+     *
+     * <code>string map_value = 7;</code>
+     * @return The mapValue.
+     */
+    public java.lang.String getMapValue() {
+      if (valueCase_ != 7) {
+        return "";
+      }
+      java.lang.Object ref = value_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        value_ = s;
+        return s;
+      }
+    }
+    /**
+     * <pre>
+     * For map types, key=value pairs separated by newlines.
+     * </pre>
+     *
+     * <code>string map_value = 7;</code>
+     * @return The bytes for mapValue.
+     */
+    public com.google.protobuf.ByteString
+        getMapValueBytes() {
+      if (valueCase_ != 7) {
+        return com.google.protobuf.ByteString.copyFromUtf8("");
+      }
+      java.lang.Object ref = value_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        value_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    public static final int TYPE_NAME_FIELD_NUMBER = 8;
+    @SuppressWarnings("serial")
+    private volatile java.lang.Object typeName_ = "";
+    /**
+     * <pre>
+     * Type name for the value (e.g. "java.lang.String", "java.io.File").
+     * </pre>
+     *
+     * <code>string type_name = 8;</code>
+     * @return The typeName.
+     */
+    @java.lang.Override
+    public java.lang.String getTypeName() {
+      java.lang.Object ref = typeName_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        typeName_ = s;
+        return s;
+      }
+    }
+    /**
+     * <pre>
+     * Type name for the value (e.g. "java.lang.String", "java.io.File").
+     * </pre>
+     *
+     * <code>string type_name = 8;</code>
+     * @return The bytes for typeName.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getTypeNameBytes() {
+      java.lang.Object ref = typeName_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        typeName_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    private byte memoizedIsInitialized = -1;
+    @java.lang.Override
+    public final boolean isInitialized() {
+      byte isInitialized = memoizedIsInitialized;
+      if (isInitialized == 1) return true;
+      if (isInitialized == 0) return false;
+
+      memoizedIsInitialized = 1;
+      return true;
+    }
+
+    @java.lang.Override
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+                        throws java.io.IOException {
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(name_)) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 1, name_);
+      }
+      if (valueCase_ == 2) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 2, value_);
+      }
+      if (valueCase_ == 3) {
+        output.writeInt64(
+            3, (long)((java.lang.Long) value_));
+      }
+      if (valueCase_ == 4) {
+        output.writeBool(
+            4, (boolean)((java.lang.Boolean) value_));
+      }
+      if (valueCase_ == 5) {
+        output.writeBytes(
+            5, (com.google.protobuf.ByteString) value_);
+      }
+      if (valueCase_ == 6) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 6, value_);
+      }
+      if (valueCase_ == 7) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 7, value_);
+      }
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(typeName_)) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 8, typeName_);
+      }
+      getUnknownFields().writeTo(output);
+    }
+
+    @java.lang.Override
+    public int getSerializedSize() {
+      int size = memoizedSize;
+      if (size != -1) return size;
+
+      size = 0;
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(name_)) {
+        size += com.google.protobuf.GeneratedMessage.computeStringSize(1, name_);
+      }
+      if (valueCase_ == 2) {
+        size += com.google.protobuf.GeneratedMessage.computeStringSize(2, value_);
+      }
+      if (valueCase_ == 3) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeInt64Size(
+              3, (long)((java.lang.Long) value_));
+      }
+      if (valueCase_ == 4) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBoolSize(
+              4, (boolean)((java.lang.Boolean) value_));
+      }
+      if (valueCase_ == 5) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBytesSize(
+              5, (com.google.protobuf.ByteString) value_);
+      }
+      if (valueCase_ == 6) {
+        size += com.google.protobuf.GeneratedMessage.computeStringSize(6, value_);
+      }
+      if (valueCase_ == 7) {
+        size += com.google.protobuf.GeneratedMessage.computeStringSize(7, value_);
+      }
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(typeName_)) {
+        size += com.google.protobuf.GeneratedMessage.computeStringSize(8, typeName_);
+      }
+      size += getUnknownFields().getSerializedSize();
+      memoizedSize = size;
+      return size;
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+      if (obj == this) {
+       return true;
+      }
+      if (!(obj instanceof gradle.substrate.v1.Substrate.PropertyValue)) {
+        return super.equals(obj);
+      }
+      gradle.substrate.v1.Substrate.PropertyValue other = (gradle.substrate.v1.Substrate.PropertyValue) obj;
+
+      if (!getName()
+          .equals(other.getName())) return false;
+      if (!getTypeName()
+          .equals(other.getTypeName())) return false;
+      if (!getValueCase().equals(other.getValueCase())) return false;
+      switch (valueCase_) {
+        case 2:
+          if (!getStringValue()
+              .equals(other.getStringValue())) return false;
+          break;
+        case 3:
+          if (getLongValue()
+              != other.getLongValue()) return false;
+          break;
+        case 4:
+          if (getBoolValue()
+              != other.getBoolValue()) return false;
+          break;
+        case 5:
+          if (!getBinaryValue()
+              .equals(other.getBinaryValue())) return false;
+          break;
+        case 6:
+          if (!getListValue()
+              .equals(other.getListValue())) return false;
+          break;
+        case 7:
+          if (!getMapValue()
+              .equals(other.getMapValue())) return false;
+          break;
+        case 0:
+        default:
+      }
+      if (!getUnknownFields().equals(other.getUnknownFields())) return false;
+      return true;
+    }
+
+    @java.lang.Override
+    public int hashCode() {
+      if (memoizedHashCode != 0) {
+        return memoizedHashCode;
+      }
+      int hash = 41;
+      hash = (19 * hash) + getDescriptor().hashCode();
+      hash = (37 * hash) + NAME_FIELD_NUMBER;
+      hash = (53 * hash) + getName().hashCode();
+      hash = (37 * hash) + TYPE_NAME_FIELD_NUMBER;
+      hash = (53 * hash) + getTypeName().hashCode();
+      switch (valueCase_) {
+        case 2:
+          hash = (37 * hash) + STRING_VALUE_FIELD_NUMBER;
+          hash = (53 * hash) + getStringValue().hashCode();
+          break;
+        case 3:
+          hash = (37 * hash) + LONG_VALUE_FIELD_NUMBER;
+          hash = (53 * hash) + com.google.protobuf.Internal.hashLong(
+              getLongValue());
+          break;
+        case 4:
+          hash = (37 * hash) + BOOL_VALUE_FIELD_NUMBER;
+          hash = (53 * hash) + com.google.protobuf.Internal.hashBoolean(
+              getBoolValue());
+          break;
+        case 5:
+          hash = (37 * hash) + BINARY_VALUE_FIELD_NUMBER;
+          hash = (53 * hash) + getBinaryValue().hashCode();
+          break;
+        case 6:
+          hash = (37 * hash) + LIST_VALUE_FIELD_NUMBER;
+          hash = (53 * hash) + getListValue().hashCode();
+          break;
+        case 7:
+          hash = (37 * hash) + MAP_VALUE_FIELD_NUMBER;
+          hash = (53 * hash) + getMapValue().hashCode();
+          break;
+        case 0:
+        default:
+      }
+      hash = (29 * hash) + getUnknownFields().hashCode();
+      memoizedHashCode = hash;
+      return hash;
+    }
+
+    public static gradle.substrate.v1.Substrate.PropertyValue parseFrom(
+        java.nio.ByteBuffer data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.PropertyValue parseFrom(
+        java.nio.ByteBuffer data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.PropertyValue parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.PropertyValue parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.PropertyValue parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.PropertyValue parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.PropertyValue parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.PropertyValue parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static gradle.substrate.v1.Substrate.PropertyValue parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input);
+    }
+
+    public static gradle.substrate.v1.Substrate.PropertyValue parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.PropertyValue parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.PropertyValue parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    @java.lang.Override
+    public Builder newBuilderForType() { return newBuilder(); }
+    public static Builder newBuilder() {
+      return DEFAULT_INSTANCE.toBuilder();
+    }
+    public static Builder newBuilder(gradle.substrate.v1.Substrate.PropertyValue prototype) {
+      return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
+    }
+    @java.lang.Override
+    public Builder toBuilder() {
+      return this == DEFAULT_INSTANCE
+          ? new Builder() : new Builder().mergeFrom(this);
+    }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+      Builder builder = new Builder(parent);
+      return builder;
+    }
+    /**
+     * Protobuf type {@code gradle.substrate.v1.PropertyValue}
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessage.Builder<Builder> implements
+        // @@protoc_insertion_point(builder_implements:gradle.substrate.v1.PropertyValue)
+        gradle.substrate.v1.Substrate.PropertyValueOrBuilder {
+      public static final com.google.protobuf.Descriptors.Descriptor
+          getDescriptor() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_PropertyValue_descriptor;
+      }
+
+      @java.lang.Override
+      protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+          internalGetFieldAccessorTable() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_PropertyValue_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                gradle.substrate.v1.Substrate.PropertyValue.class, gradle.substrate.v1.Substrate.PropertyValue.Builder.class);
+      }
+
+      // Construct using gradle.substrate.v1.Substrate.PropertyValue.newBuilder()
+      private Builder() {
+
+      }
+
+      private Builder(
+          com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+        super(parent);
+
+      }
+      @java.lang.Override
+      public Builder clear() {
+        super.clear();
+        bitField0_ = 0;
+        name_ = "";
+        typeName_ = "";
+        valueCase_ = 0;
+        value_ = null;
+        return this;
+      }
+
+      @java.lang.Override
+      public com.google.protobuf.Descriptors.Descriptor
+          getDescriptorForType() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_PropertyValue_descriptor;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.PropertyValue getDefaultInstanceForType() {
+        return gradle.substrate.v1.Substrate.PropertyValue.getDefaultInstance();
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.PropertyValue build() {
+        gradle.substrate.v1.Substrate.PropertyValue result = buildPartial();
+        if (!result.isInitialized()) {
+          throw newUninitializedMessageException(result);
+        }
+        return result;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.PropertyValue buildPartial() {
+        gradle.substrate.v1.Substrate.PropertyValue result = new gradle.substrate.v1.Substrate.PropertyValue(this);
+        if (bitField0_ != 0) { buildPartial0(result); }
+        buildPartialOneofs(result);
+        onBuilt();
+        return result;
+      }
+
+      private void buildPartial0(gradle.substrate.v1.Substrate.PropertyValue result) {
+        int from_bitField0_ = bitField0_;
+        if (((from_bitField0_ & 0x00000001) != 0)) {
+          result.name_ = name_;
+        }
+        if (((from_bitField0_ & 0x00000080) != 0)) {
+          result.typeName_ = typeName_;
+        }
+      }
+
+      private void buildPartialOneofs(gradle.substrate.v1.Substrate.PropertyValue result) {
+        result.valueCase_ = valueCase_;
+        result.value_ = this.value_;
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(com.google.protobuf.Message other) {
+        if (other instanceof gradle.substrate.v1.Substrate.PropertyValue) {
+          return mergeFrom((gradle.substrate.v1.Substrate.PropertyValue)other);
+        } else {
+          super.mergeFrom(other);
+          return this;
+        }
+      }
+
+      public Builder mergeFrom(gradle.substrate.v1.Substrate.PropertyValue other) {
+        if (other == gradle.substrate.v1.Substrate.PropertyValue.getDefaultInstance()) return this;
+        if (!other.getName().isEmpty()) {
+          name_ = other.name_;
+          bitField0_ |= 0x00000001;
+          onChanged();
+        }
+        if (!other.getTypeName().isEmpty()) {
+          typeName_ = other.typeName_;
+          bitField0_ |= 0x00000080;
+          onChanged();
+        }
+        switch (other.getValueCase()) {
+          case STRING_VALUE: {
+            valueCase_ = 2;
+            value_ = other.value_;
+            onChanged();
+            break;
+          }
+          case LONG_VALUE: {
+            setLongValue(other.getLongValue());
+            break;
+          }
+          case BOOL_VALUE: {
+            setBoolValue(other.getBoolValue());
+            break;
+          }
+          case BINARY_VALUE: {
+            setBinaryValue(other.getBinaryValue());
+            break;
+          }
+          case LIST_VALUE: {
+            valueCase_ = 6;
+            value_ = other.value_;
+            onChanged();
+            break;
+          }
+          case MAP_VALUE: {
+            valueCase_ = 7;
+            value_ = other.value_;
+            onChanged();
+            break;
+          }
+          case VALUE_NOT_SET: {
+            break;
+          }
+        }
+        this.mergeUnknownFields(other.getUnknownFields());
+        onChanged();
+        return this;
+      }
+
+      @java.lang.Override
+      public final boolean isInitialized() {
+        return true;
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws java.io.IOException {
+        if (extensionRegistry == null) {
+          throw new java.lang.NullPointerException();
+        }
+        try {
+          boolean done = false;
+          while (!done) {
+            int tag = input.readTag();
+            switch (tag) {
+              case 0:
+                done = true;
+                break;
+              case 10: {
+                name_ = input.readStringRequireUtf8();
+                bitField0_ |= 0x00000001;
+                break;
+              } // case 10
+              case 18: {
+                valueCase_ = 2;
+                value_ = input.readStringRequireUtf8();
+                break;
+              } // case 18
+              case 24: {
+                value_ = input.readInt64();
+                valueCase_ = 3;
+                break;
+              } // case 24
+              case 32: {
+                value_ = input.readBool();
+                valueCase_ = 4;
+                break;
+              } // case 32
+              case 42: {
+                value_ = input.readBytes();
+                valueCase_ = 5;
+                break;
+              } // case 42
+              case 50: {
+                valueCase_ = 6;
+                value_ = input.readStringRequireUtf8();
+                break;
+              } // case 50
+              case 58: {
+                valueCase_ = 7;
+                value_ = input.readStringRequireUtf8();
+                break;
+              } // case 58
+              case 66: {
+                typeName_ = input.readStringRequireUtf8();
+                bitField0_ |= 0x00000080;
+                break;
+              } // case 66
+              default: {
+                if (!super.parseUnknownField(input, extensionRegistry, tag)) {
+                  done = true; // was an endgroup tag
+                }
+                break;
+              } // default:
+            } // switch (tag)
+          } // while (!done)
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.unwrapIOException();
+        } finally {
+          onChanged();
+        } // finally
+        return this;
+      }
+      private int valueCase_ = 0;
+      private java.lang.Object value_;
+      public ValueCase
+          getValueCase() {
+        return ValueCase.forNumber(
+            valueCase_);
+      }
+
+      public Builder clearValue() {
+        valueCase_ = 0;
+        value_ = null;
+        onChanged();
+        return this;
+      }
+
+      private int bitField0_;
+
+      private java.lang.Object name_ = "";
+      /**
+       * <code>string name = 1;</code>
+       * @return The name.
+       */
+      public java.lang.String getName() {
+        java.lang.Object ref = name_;
+        if (!(ref instanceof java.lang.String)) {
+          com.google.protobuf.ByteString bs =
+              (com.google.protobuf.ByteString) ref;
+          java.lang.String s = bs.toStringUtf8();
+          name_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <code>string name = 1;</code>
+       * @return The bytes for name.
+       */
+      public com.google.protobuf.ByteString
+          getNameBytes() {
+        java.lang.Object ref = name_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          name_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <code>string name = 1;</code>
+       * @param value The name to set.
+       * @return This builder for chaining.
+       */
+      public Builder setName(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        name_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string name = 1;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearName() {
+        name_ = getDefaultInstance().getName();
+        bitField0_ = (bitField0_ & ~0x00000001);
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string name = 1;</code>
+       * @param value The bytes for name to set.
+       * @return This builder for chaining.
+       */
+      public Builder setNameBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        name_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+
+      /**
+       * <code>string string_value = 2;</code>
+       * @return Whether the stringValue field is set.
+       */
+      @java.lang.Override
+      public boolean hasStringValue() {
+        return valueCase_ == 2;
+      }
+      /**
+       * <code>string string_value = 2;</code>
+       * @return The stringValue.
+       */
+      @java.lang.Override
+      public java.lang.String getStringValue() {
+        if (valueCase_ != 2) {
+          return "";
+        }
+        java.lang.Object ref = value_;
+        if (!(ref instanceof java.lang.String)) {
+          com.google.protobuf.ByteString bs =
+              (com.google.protobuf.ByteString) ref;
+          java.lang.String s = bs.toStringUtf8();
+            value_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <code>string string_value = 2;</code>
+       * @return The bytes for stringValue.
+       */
+      @java.lang.Override
+      public com.google.protobuf.ByteString
+          getStringValueBytes() {
+        if (valueCase_ != 2) {
+          return com.google.protobuf.ByteString.copyFromUtf8(        "");
+        }
+        java.lang.Object ref = value_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          value_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <code>string string_value = 2;</code>
+       * @param value The stringValue to set.
+       * @return This builder for chaining.
+       */
+      public Builder setStringValue(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        valueCase_ = 2;
+        value_ = value;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string string_value = 2;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearStringValue() {
+        if (valueCase_ == 2) {
+          valueCase_ = 0;
+          value_ = null;
+          onChanged();
+        }
+        return this;
+      }
+      /**
+       * <code>string string_value = 2;</code>
+       * @param value The bytes for stringValue to set.
+       * @return This builder for chaining.
+       */
+      public Builder setStringValueBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        valueCase_ = 2;
+        value_ = value;
+        onChanged();
+        return this;
+      }
+
+      /**
+       * <code>int64 long_value = 3;</code>
+       * @return Whether the longValue field is set.
+       */
+      public boolean hasLongValue() {
+        return valueCase_ == 3;
+      }
+      /**
+       * <code>int64 long_value = 3;</code>
+       * @return The longValue.
+       */
+      public long getLongValue() {
+        if (valueCase_ == 3) {
+          return (java.lang.Long) value_;
+        }
+        return 0L;
+      }
+      /**
+       * <code>int64 long_value = 3;</code>
+       * @param value The longValue to set.
+       * @return This builder for chaining.
+       */
+      public Builder setLongValue(long value) {
+
+        valueCase_ = 3;
+        value_ = value;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>int64 long_value = 3;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearLongValue() {
+        if (valueCase_ == 3) {
+          valueCase_ = 0;
+          value_ = null;
+          onChanged();
+        }
+        return this;
+      }
+
+      /**
+       * <code>bool bool_value = 4;</code>
+       * @return Whether the boolValue field is set.
+       */
+      public boolean hasBoolValue() {
+        return valueCase_ == 4;
+      }
+      /**
+       * <code>bool bool_value = 4;</code>
+       * @return The boolValue.
+       */
+      public boolean getBoolValue() {
+        if (valueCase_ == 4) {
+          return (java.lang.Boolean) value_;
+        }
+        return false;
+      }
+      /**
+       * <code>bool bool_value = 4;</code>
+       * @param value The boolValue to set.
+       * @return This builder for chaining.
+       */
+      public Builder setBoolValue(boolean value) {
+
+        valueCase_ = 4;
+        value_ = value;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>bool bool_value = 4;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearBoolValue() {
+        if (valueCase_ == 4) {
+          valueCase_ = 0;
+          value_ = null;
+          onChanged();
+        }
+        return this;
+      }
+
+      /**
+       * <code>bytes binary_value = 5;</code>
+       * @return Whether the binaryValue field is set.
+       */
+      public boolean hasBinaryValue() {
+        return valueCase_ == 5;
+      }
+      /**
+       * <code>bytes binary_value = 5;</code>
+       * @return The binaryValue.
+       */
+      public com.google.protobuf.ByteString getBinaryValue() {
+        if (valueCase_ == 5) {
+          return (com.google.protobuf.ByteString) value_;
+        }
+        return com.google.protobuf.ByteString.EMPTY;
+      }
+      /**
+       * <code>bytes binary_value = 5;</code>
+       * @param value The binaryValue to set.
+       * @return This builder for chaining.
+       */
+      public Builder setBinaryValue(com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        valueCase_ = 5;
+        value_ = value;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>bytes binary_value = 5;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearBinaryValue() {
+        if (valueCase_ == 5) {
+          valueCase_ = 0;
+          value_ = null;
+          onChanged();
+        }
+        return this;
+      }
+
+      /**
+       * <pre>
+       * For collection types, a semicolon-separated list.
+       * </pre>
+       *
+       * <code>string list_value = 6;</code>
+       * @return Whether the listValue field is set.
+       */
+      @java.lang.Override
+      public boolean hasListValue() {
+        return valueCase_ == 6;
+      }
+      /**
+       * <pre>
+       * For collection types, a semicolon-separated list.
+       * </pre>
+       *
+       * <code>string list_value = 6;</code>
+       * @return The listValue.
+       */
+      @java.lang.Override
+      public java.lang.String getListValue() {
+        if (valueCase_ != 6) {
+          return "";
+        }
+        java.lang.Object ref = value_;
+        if (!(ref instanceof java.lang.String)) {
+          com.google.protobuf.ByteString bs =
+              (com.google.protobuf.ByteString) ref;
+          java.lang.String s = bs.toStringUtf8();
+            value_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <pre>
+       * For collection types, a semicolon-separated list.
+       * </pre>
+       *
+       * <code>string list_value = 6;</code>
+       * @return The bytes for listValue.
+       */
+      @java.lang.Override
+      public com.google.protobuf.ByteString
+          getListValueBytes() {
+        if (valueCase_ != 6) {
+          return com.google.protobuf.ByteString.copyFromUtf8(        "");
+        }
+        java.lang.Object ref = value_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          value_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <pre>
+       * For collection types, a semicolon-separated list.
+       * </pre>
+       *
+       * <code>string list_value = 6;</code>
+       * @param value The listValue to set.
+       * @return This builder for chaining.
+       */
+      public Builder setListValue(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        valueCase_ = 6;
+        value_ = value;
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * For collection types, a semicolon-separated list.
+       * </pre>
+       *
+       * <code>string list_value = 6;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearListValue() {
+        if (valueCase_ == 6) {
+          valueCase_ = 0;
+          value_ = null;
+          onChanged();
+        }
+        return this;
+      }
+      /**
+       * <pre>
+       * For collection types, a semicolon-separated list.
+       * </pre>
+       *
+       * <code>string list_value = 6;</code>
+       * @param value The bytes for listValue to set.
+       * @return This builder for chaining.
+       */
+      public Builder setListValueBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        valueCase_ = 6;
+        value_ = value;
+        onChanged();
+        return this;
+      }
+
+      /**
+       * <pre>
+       * For map types, key=value pairs separated by newlines.
+       * </pre>
+       *
+       * <code>string map_value = 7;</code>
+       * @return Whether the mapValue field is set.
+       */
+      @java.lang.Override
+      public boolean hasMapValue() {
+        return valueCase_ == 7;
+      }
+      /**
+       * <pre>
+       * For map types, key=value pairs separated by newlines.
+       * </pre>
+       *
+       * <code>string map_value = 7;</code>
+       * @return The mapValue.
+       */
+      @java.lang.Override
+      public java.lang.String getMapValue() {
+        if (valueCase_ != 7) {
+          return "";
+        }
+        java.lang.Object ref = value_;
+        if (!(ref instanceof java.lang.String)) {
+          com.google.protobuf.ByteString bs =
+              (com.google.protobuf.ByteString) ref;
+          java.lang.String s = bs.toStringUtf8();
+            value_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <pre>
+       * For map types, key=value pairs separated by newlines.
+       * </pre>
+       *
+       * <code>string map_value = 7;</code>
+       * @return The bytes for mapValue.
+       */
+      @java.lang.Override
+      public com.google.protobuf.ByteString
+          getMapValueBytes() {
+        if (valueCase_ != 7) {
+          return com.google.protobuf.ByteString.copyFromUtf8(        "");
+        }
+        java.lang.Object ref = value_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          value_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <pre>
+       * For map types, key=value pairs separated by newlines.
+       * </pre>
+       *
+       * <code>string map_value = 7;</code>
+       * @param value The mapValue to set.
+       * @return This builder for chaining.
+       */
+      public Builder setMapValue(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        valueCase_ = 7;
+        value_ = value;
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * For map types, key=value pairs separated by newlines.
+       * </pre>
+       *
+       * <code>string map_value = 7;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearMapValue() {
+        if (valueCase_ == 7) {
+          valueCase_ = 0;
+          value_ = null;
+          onChanged();
+        }
+        return this;
+      }
+      /**
+       * <pre>
+       * For map types, key=value pairs separated by newlines.
+       * </pre>
+       *
+       * <code>string map_value = 7;</code>
+       * @param value The bytes for mapValue to set.
+       * @return This builder for chaining.
+       */
+      public Builder setMapValueBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        valueCase_ = 7;
+        value_ = value;
+        onChanged();
+        return this;
+      }
+
+      private java.lang.Object typeName_ = "";
+      /**
+       * <pre>
+       * Type name for the value (e.g. "java.lang.String", "java.io.File").
+       * </pre>
+       *
+       * <code>string type_name = 8;</code>
+       * @return The typeName.
+       */
+      public java.lang.String getTypeName() {
+        java.lang.Object ref = typeName_;
+        if (!(ref instanceof java.lang.String)) {
+          com.google.protobuf.ByteString bs =
+              (com.google.protobuf.ByteString) ref;
+          java.lang.String s = bs.toStringUtf8();
+          typeName_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <pre>
+       * Type name for the value (e.g. "java.lang.String", "java.io.File").
+       * </pre>
+       *
+       * <code>string type_name = 8;</code>
+       * @return The bytes for typeName.
+       */
+      public com.google.protobuf.ByteString
+          getTypeNameBytes() {
+        java.lang.Object ref = typeName_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          typeName_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <pre>
+       * Type name for the value (e.g. "java.lang.String", "java.io.File").
+       * </pre>
+       *
+       * <code>string type_name = 8;</code>
+       * @param value The typeName to set.
+       * @return This builder for chaining.
+       */
+      public Builder setTypeName(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        typeName_ = value;
+        bitField0_ |= 0x00000080;
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * Type name for the value (e.g. "java.lang.String", "java.io.File").
+       * </pre>
+       *
+       * <code>string type_name = 8;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearTypeName() {
+        typeName_ = getDefaultInstance().getTypeName();
+        bitField0_ = (bitField0_ & ~0x00000080);
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * Type name for the value (e.g. "java.lang.String", "java.io.File").
+       * </pre>
+       *
+       * <code>string type_name = 8;</code>
+       * @param value The bytes for typeName to set.
+       * @return This builder for chaining.
+       */
+      public Builder setTypeNameBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        typeName_ = value;
+        bitField0_ |= 0x00000080;
+        onChanged();
+        return this;
+      }
+
+      // @@protoc_insertion_point(builder_scope:gradle.substrate.v1.PropertyValue)
+    }
+
+    // @@protoc_insertion_point(class_scope:gradle.substrate.v1.PropertyValue)
+    private static final gradle.substrate.v1.Substrate.PropertyValue DEFAULT_INSTANCE;
+    static {
+      DEFAULT_INSTANCE = new gradle.substrate.v1.Substrate.PropertyValue();
+    }
+
+    public static gradle.substrate.v1.Substrate.PropertyValue getDefaultInstance() {
+      return DEFAULT_INSTANCE;
+    }
+
+    private static final com.google.protobuf.Parser<PropertyValue>
+        PARSER = new com.google.protobuf.AbstractParser<PropertyValue>() {
+      @java.lang.Override
+      public PropertyValue parsePartialFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws com.google.protobuf.InvalidProtocolBufferException {
+        Builder builder = newBuilder();
+        try {
+          builder.mergeFrom(input, extensionRegistry);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.setUnfinishedMessage(builder.buildPartial());
+        } catch (com.google.protobuf.UninitializedMessageException e) {
+          throw e.asInvalidProtocolBufferException().setUnfinishedMessage(builder.buildPartial());
+        } catch (java.io.IOException e) {
+          throw new com.google.protobuf.InvalidProtocolBufferException(e)
+              .setUnfinishedMessage(builder.buildPartial());
+        }
+        return builder.buildPartial();
+      }
+    };
+
+    public static com.google.protobuf.Parser<PropertyValue> parser() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<PropertyValue> getParserForType() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.PropertyValue getDefaultInstanceForType() {
+      return DEFAULT_INSTANCE;
+    }
+
+  }
+
+  public interface SnapshotValuesRequestOrBuilder extends
+      // @@protoc_insertion_point(interface_extends:gradle.substrate.v1.SnapshotValuesRequest)
+      com.google.protobuf.MessageOrBuilder {
+
+    /**
+     * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+     */
+    java.util.List<gradle.substrate.v1.Substrate.PropertyValue> 
+        getValuesList();
+    /**
+     * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+     */
+    gradle.substrate.v1.Substrate.PropertyValue getValues(int index);
+    /**
+     * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+     */
+    int getValuesCount();
+    /**
+     * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+     */
+    java.util.List<? extends gradle.substrate.v1.Substrate.PropertyValueOrBuilder> 
+        getValuesOrBuilderList();
+    /**
+     * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+     */
+    gradle.substrate.v1.Substrate.PropertyValueOrBuilder getValuesOrBuilder(
+        int index);
+
+    /**
+     * <pre>
+     * Implementation fingerprint for the work unit.
+     * </pre>
+     *
+     * <code>string implementation_fingerprint = 2;</code>
+     * @return The implementationFingerprint.
+     */
+    java.lang.String getImplementationFingerprint();
+    /**
+     * <pre>
+     * Implementation fingerprint for the work unit.
+     * </pre>
+     *
+     * <code>string implementation_fingerprint = 2;</code>
+     * @return The bytes for implementationFingerprint.
+     */
+    com.google.protobuf.ByteString
+        getImplementationFingerprintBytes();
+  }
+  /**
+   * Protobuf type {@code gradle.substrate.v1.SnapshotValuesRequest}
+   */
+  public static final class SnapshotValuesRequest extends
+      com.google.protobuf.GeneratedMessage implements
+      // @@protoc_insertion_point(message_implements:gradle.substrate.v1.SnapshotValuesRequest)
+      SnapshotValuesRequestOrBuilder {
+  private static final long serialVersionUID = 0L;
+    static {
+      com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
+        com.google.protobuf.RuntimeVersion.RuntimeDomain.PUBLIC,
+        /* major= */ 4,
+        /* minor= */ 34,
+        /* patch= */ 0,
+        /* suffix= */ "",
+        "SnapshotValuesRequest");
+    }
+    // Use SnapshotValuesRequest.newBuilder() to construct.
+    private SnapshotValuesRequest(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      super(builder);
+    }
+    private SnapshotValuesRequest() {
+      values_ = java.util.Collections.emptyList();
+      implementationFingerprint_ = "";
+    }
+
+    public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_SnapshotValuesRequest_descriptor;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Descriptors.Descriptor getDescriptorForType() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_SnapshotValuesRequest_descriptor;
+    }
+
+    @java.lang.Override
+    protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_SnapshotValuesRequest_fieldAccessorTable
+          .ensureFieldAccessorsInitialized(
+              gradle.substrate.v1.Substrate.SnapshotValuesRequest.class, gradle.substrate.v1.Substrate.SnapshotValuesRequest.Builder.class);
+    }
+
+    public static final int VALUES_FIELD_NUMBER = 1;
+    @SuppressWarnings("serial")
+    private java.util.List<gradle.substrate.v1.Substrate.PropertyValue> values_;
+    /**
+     * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+     */
+    @java.lang.Override
+    public java.util.List<gradle.substrate.v1.Substrate.PropertyValue> getValuesList() {
+      return values_;
+    }
+    /**
+     * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+     */
+    @java.lang.Override
+    public java.util.List<? extends gradle.substrate.v1.Substrate.PropertyValueOrBuilder> 
+        getValuesOrBuilderList() {
+      return values_;
+    }
+    /**
+     * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+     */
+    @java.lang.Override
+    public int getValuesCount() {
+      return values_.size();
+    }
+    /**
+     * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+     */
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.PropertyValue getValues(int index) {
+      return values_.get(index);
+    }
+    /**
+     * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+     */
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.PropertyValueOrBuilder getValuesOrBuilder(
+        int index) {
+      return values_.get(index);
+    }
+
+    public static final int IMPLEMENTATION_FINGERPRINT_FIELD_NUMBER = 2;
+    @SuppressWarnings("serial")
+    private volatile java.lang.Object implementationFingerprint_ = "";
+    /**
+     * <pre>
+     * Implementation fingerprint for the work unit.
+     * </pre>
+     *
+     * <code>string implementation_fingerprint = 2;</code>
+     * @return The implementationFingerprint.
+     */
+    @java.lang.Override
+    public java.lang.String getImplementationFingerprint() {
+      java.lang.Object ref = implementationFingerprint_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        implementationFingerprint_ = s;
+        return s;
+      }
+    }
+    /**
+     * <pre>
+     * Implementation fingerprint for the work unit.
+     * </pre>
+     *
+     * <code>string implementation_fingerprint = 2;</code>
+     * @return The bytes for implementationFingerprint.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getImplementationFingerprintBytes() {
+      java.lang.Object ref = implementationFingerprint_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        implementationFingerprint_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    private byte memoizedIsInitialized = -1;
+    @java.lang.Override
+    public final boolean isInitialized() {
+      byte isInitialized = memoizedIsInitialized;
+      if (isInitialized == 1) return true;
+      if (isInitialized == 0) return false;
+
+      memoizedIsInitialized = 1;
+      return true;
+    }
+
+    @java.lang.Override
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+                        throws java.io.IOException {
+      for (int i = 0; i < values_.size(); i++) {
+        output.writeMessage(1, values_.get(i));
+      }
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(implementationFingerprint_)) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 2, implementationFingerprint_);
+      }
+      getUnknownFields().writeTo(output);
+    }
+
+    @java.lang.Override
+    public int getSerializedSize() {
+      int size = memoizedSize;
+      if (size != -1) return size;
+
+      size = 0;
+
+          {
+            final int count = values_.size();
+            for (int i = 0; i < count; i++) {
+              size += com.google.protobuf.CodedOutputStream
+                .computeMessageSizeNoTag(values_.get(i));
+            }
+            size += 1 * count;
+          }
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(implementationFingerprint_)) {
+        size += com.google.protobuf.GeneratedMessage.computeStringSize(2, implementationFingerprint_);
+      }
+      size += getUnknownFields().getSerializedSize();
+      memoizedSize = size;
+      return size;
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+      if (obj == this) {
+       return true;
+      }
+      if (!(obj instanceof gradle.substrate.v1.Substrate.SnapshotValuesRequest)) {
+        return super.equals(obj);
+      }
+      gradle.substrate.v1.Substrate.SnapshotValuesRequest other = (gradle.substrate.v1.Substrate.SnapshotValuesRequest) obj;
+
+      if (!getValuesList()
+          .equals(other.getValuesList())) return false;
+      if (!getImplementationFingerprint()
+          .equals(other.getImplementationFingerprint())) return false;
+      if (!getUnknownFields().equals(other.getUnknownFields())) return false;
+      return true;
+    }
+
+    @java.lang.Override
+    public int hashCode() {
+      if (memoizedHashCode != 0) {
+        return memoizedHashCode;
+      }
+      int hash = 41;
+      hash = (19 * hash) + getDescriptor().hashCode();
+      if (getValuesCount() > 0) {
+        hash = (37 * hash) + VALUES_FIELD_NUMBER;
+        hash = (53 * hash) + getValuesList().hashCode();
+      }
+      hash = (37 * hash) + IMPLEMENTATION_FINGERPRINT_FIELD_NUMBER;
+      hash = (53 * hash) + getImplementationFingerprint().hashCode();
+      hash = (29 * hash) + getUnknownFields().hashCode();
+      memoizedHashCode = hash;
+      return hash;
+    }
+
+    public static gradle.substrate.v1.Substrate.SnapshotValuesRequest parseFrom(
+        java.nio.ByteBuffer data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.SnapshotValuesRequest parseFrom(
+        java.nio.ByteBuffer data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.SnapshotValuesRequest parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.SnapshotValuesRequest parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.SnapshotValuesRequest parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.SnapshotValuesRequest parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.SnapshotValuesRequest parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.SnapshotValuesRequest parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static gradle.substrate.v1.Substrate.SnapshotValuesRequest parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input);
+    }
+
+    public static gradle.substrate.v1.Substrate.SnapshotValuesRequest parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.SnapshotValuesRequest parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.SnapshotValuesRequest parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    @java.lang.Override
+    public Builder newBuilderForType() { return newBuilder(); }
+    public static Builder newBuilder() {
+      return DEFAULT_INSTANCE.toBuilder();
+    }
+    public static Builder newBuilder(gradle.substrate.v1.Substrate.SnapshotValuesRequest prototype) {
+      return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
+    }
+    @java.lang.Override
+    public Builder toBuilder() {
+      return this == DEFAULT_INSTANCE
+          ? new Builder() : new Builder().mergeFrom(this);
+    }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+      Builder builder = new Builder(parent);
+      return builder;
+    }
+    /**
+     * Protobuf type {@code gradle.substrate.v1.SnapshotValuesRequest}
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessage.Builder<Builder> implements
+        // @@protoc_insertion_point(builder_implements:gradle.substrate.v1.SnapshotValuesRequest)
+        gradle.substrate.v1.Substrate.SnapshotValuesRequestOrBuilder {
+      public static final com.google.protobuf.Descriptors.Descriptor
+          getDescriptor() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_SnapshotValuesRequest_descriptor;
+      }
+
+      @java.lang.Override
+      protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+          internalGetFieldAccessorTable() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_SnapshotValuesRequest_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                gradle.substrate.v1.Substrate.SnapshotValuesRequest.class, gradle.substrate.v1.Substrate.SnapshotValuesRequest.Builder.class);
+      }
+
+      // Construct using gradle.substrate.v1.Substrate.SnapshotValuesRequest.newBuilder()
+      private Builder() {
+
+      }
+
+      private Builder(
+          com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+        super(parent);
+
+      }
+      @java.lang.Override
+      public Builder clear() {
+        super.clear();
+        bitField0_ = 0;
+        if (valuesBuilder_ == null) {
+          values_ = java.util.Collections.emptyList();
+        } else {
+          values_ = null;
+          valuesBuilder_.clear();
+        }
+        bitField0_ = (bitField0_ & ~0x00000001);
+        implementationFingerprint_ = "";
+        return this;
+      }
+
+      @java.lang.Override
+      public com.google.protobuf.Descriptors.Descriptor
+          getDescriptorForType() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_SnapshotValuesRequest_descriptor;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.SnapshotValuesRequest getDefaultInstanceForType() {
+        return gradle.substrate.v1.Substrate.SnapshotValuesRequest.getDefaultInstance();
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.SnapshotValuesRequest build() {
+        gradle.substrate.v1.Substrate.SnapshotValuesRequest result = buildPartial();
+        if (!result.isInitialized()) {
+          throw newUninitializedMessageException(result);
+        }
+        return result;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.SnapshotValuesRequest buildPartial() {
+        gradle.substrate.v1.Substrate.SnapshotValuesRequest result = new gradle.substrate.v1.Substrate.SnapshotValuesRequest(this);
+        buildPartialRepeatedFields(result);
+        if (bitField0_ != 0) { buildPartial0(result); }
+        onBuilt();
+        return result;
+      }
+
+      private void buildPartialRepeatedFields(gradle.substrate.v1.Substrate.SnapshotValuesRequest result) {
+        if (valuesBuilder_ == null) {
+          if (((bitField0_ & 0x00000001) != 0)) {
+            values_ = java.util.Collections.unmodifiableList(values_);
+            bitField0_ = (bitField0_ & ~0x00000001);
+          }
+          result.values_ = values_;
+        } else {
+          result.values_ = valuesBuilder_.build();
+        }
+      }
+
+      private void buildPartial0(gradle.substrate.v1.Substrate.SnapshotValuesRequest result) {
+        int from_bitField0_ = bitField0_;
+        if (((from_bitField0_ & 0x00000002) != 0)) {
+          result.implementationFingerprint_ = implementationFingerprint_;
+        }
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(com.google.protobuf.Message other) {
+        if (other instanceof gradle.substrate.v1.Substrate.SnapshotValuesRequest) {
+          return mergeFrom((gradle.substrate.v1.Substrate.SnapshotValuesRequest)other);
+        } else {
+          super.mergeFrom(other);
+          return this;
+        }
+      }
+
+      public Builder mergeFrom(gradle.substrate.v1.Substrate.SnapshotValuesRequest other) {
+        if (other == gradle.substrate.v1.Substrate.SnapshotValuesRequest.getDefaultInstance()) return this;
+        if (valuesBuilder_ == null) {
+          if (!other.values_.isEmpty()) {
+            if (values_.isEmpty()) {
+              values_ = other.values_;
+              bitField0_ = (bitField0_ & ~0x00000001);
+            } else {
+              ensureValuesIsMutable();
+              values_.addAll(other.values_);
+            }
+            onChanged();
+          }
+        } else {
+          if (!other.values_.isEmpty()) {
+            if (valuesBuilder_.isEmpty()) {
+              valuesBuilder_.dispose();
+              valuesBuilder_ = null;
+              values_ = other.values_;
+              bitField0_ = (bitField0_ & ~0x00000001);
+              valuesBuilder_ = 
+                com.google.protobuf.GeneratedMessage.alwaysUseFieldBuilders ?
+                   internalGetValuesFieldBuilder() : null;
+            } else {
+              valuesBuilder_.addAllMessages(other.values_);
+            }
+          }
+        }
+        if (!other.getImplementationFingerprint().isEmpty()) {
+          implementationFingerprint_ = other.implementationFingerprint_;
+          bitField0_ |= 0x00000002;
+          onChanged();
+        }
+        this.mergeUnknownFields(other.getUnknownFields());
+        onChanged();
+        return this;
+      }
+
+      @java.lang.Override
+      public final boolean isInitialized() {
+        return true;
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws java.io.IOException {
+        if (extensionRegistry == null) {
+          throw new java.lang.NullPointerException();
+        }
+        try {
+          boolean done = false;
+          while (!done) {
+            int tag = input.readTag();
+            switch (tag) {
+              case 0:
+                done = true;
+                break;
+              case 10: {
+                gradle.substrate.v1.Substrate.PropertyValue m =
+                    input.readMessage(
+                        gradle.substrate.v1.Substrate.PropertyValue.parser(),
+                        extensionRegistry);
+                if (valuesBuilder_ == null) {
+                  ensureValuesIsMutable();
+                  values_.add(m);
+                } else {
+                  valuesBuilder_.addMessage(m);
+                }
+                break;
+              } // case 10
+              case 18: {
+                implementationFingerprint_ = input.readStringRequireUtf8();
+                bitField0_ |= 0x00000002;
+                break;
+              } // case 18
+              default: {
+                if (!super.parseUnknownField(input, extensionRegistry, tag)) {
+                  done = true; // was an endgroup tag
+                }
+                break;
+              } // default:
+            } // switch (tag)
+          } // while (!done)
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.unwrapIOException();
+        } finally {
+          onChanged();
+        } // finally
+        return this;
+      }
+      private int bitField0_;
+
+      private java.util.List<gradle.substrate.v1.Substrate.PropertyValue> values_ =
+        java.util.Collections.emptyList();
+      private void ensureValuesIsMutable() {
+        if (!((bitField0_ & 0x00000001) != 0)) {
+          values_ = new java.util.ArrayList<gradle.substrate.v1.Substrate.PropertyValue>(values_);
+          bitField0_ |= 0x00000001;
+         }
+      }
+
+      private com.google.protobuf.RepeatedFieldBuilder<
+          gradle.substrate.v1.Substrate.PropertyValue, gradle.substrate.v1.Substrate.PropertyValue.Builder, gradle.substrate.v1.Substrate.PropertyValueOrBuilder> valuesBuilder_;
+
+      /**
+       * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+       */
+      public java.util.List<gradle.substrate.v1.Substrate.PropertyValue> getValuesList() {
+        if (valuesBuilder_ == null) {
+          return java.util.Collections.unmodifiableList(values_);
+        } else {
+          return valuesBuilder_.getMessageList();
+        }
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+       */
+      public int getValuesCount() {
+        if (valuesBuilder_ == null) {
+          return values_.size();
+        } else {
+          return valuesBuilder_.getCount();
+        }
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+       */
+      public gradle.substrate.v1.Substrate.PropertyValue getValues(int index) {
+        if (valuesBuilder_ == null) {
+          return values_.get(index);
+        } else {
+          return valuesBuilder_.getMessage(index);
+        }
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+       */
+      public Builder setValues(
+          int index, gradle.substrate.v1.Substrate.PropertyValue value) {
+        if (valuesBuilder_ == null) {
+          if (value == null) {
+            throw new NullPointerException();
+          }
+          ensureValuesIsMutable();
+          values_.set(index, value);
+          onChanged();
+        } else {
+          valuesBuilder_.setMessage(index, value);
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+       */
+      public Builder setValues(
+          int index, gradle.substrate.v1.Substrate.PropertyValue.Builder builderForValue) {
+        if (valuesBuilder_ == null) {
+          ensureValuesIsMutable();
+          values_.set(index, builderForValue.build());
+          onChanged();
+        } else {
+          valuesBuilder_.setMessage(index, builderForValue.build());
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+       */
+      public Builder addValues(gradle.substrate.v1.Substrate.PropertyValue value) {
+        if (valuesBuilder_ == null) {
+          if (value == null) {
+            throw new NullPointerException();
+          }
+          ensureValuesIsMutable();
+          values_.add(value);
+          onChanged();
+        } else {
+          valuesBuilder_.addMessage(value);
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+       */
+      public Builder addValues(
+          int index, gradle.substrate.v1.Substrate.PropertyValue value) {
+        if (valuesBuilder_ == null) {
+          if (value == null) {
+            throw new NullPointerException();
+          }
+          ensureValuesIsMutable();
+          values_.add(index, value);
+          onChanged();
+        } else {
+          valuesBuilder_.addMessage(index, value);
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+       */
+      public Builder addValues(
+          gradle.substrate.v1.Substrate.PropertyValue.Builder builderForValue) {
+        if (valuesBuilder_ == null) {
+          ensureValuesIsMutable();
+          values_.add(builderForValue.build());
+          onChanged();
+        } else {
+          valuesBuilder_.addMessage(builderForValue.build());
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+       */
+      public Builder addValues(
+          int index, gradle.substrate.v1.Substrate.PropertyValue.Builder builderForValue) {
+        if (valuesBuilder_ == null) {
+          ensureValuesIsMutable();
+          values_.add(index, builderForValue.build());
+          onChanged();
+        } else {
+          valuesBuilder_.addMessage(index, builderForValue.build());
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+       */
+      public Builder addAllValues(
+          java.lang.Iterable<? extends gradle.substrate.v1.Substrate.PropertyValue> values) {
+        if (valuesBuilder_ == null) {
+          ensureValuesIsMutable();
+          com.google.protobuf.AbstractMessageLite.Builder.addAll(
+              values, values_);
+          onChanged();
+        } else {
+          valuesBuilder_.addAllMessages(values);
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+       */
+      public Builder clearValues() {
+        if (valuesBuilder_ == null) {
+          values_ = java.util.Collections.emptyList();
+          bitField0_ = (bitField0_ & ~0x00000001);
+          onChanged();
+        } else {
+          valuesBuilder_.clear();
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+       */
+      public Builder removeValues(int index) {
+        if (valuesBuilder_ == null) {
+          ensureValuesIsMutable();
+          values_.remove(index);
+          onChanged();
+        } else {
+          valuesBuilder_.remove(index);
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+       */
+      public gradle.substrate.v1.Substrate.PropertyValue.Builder getValuesBuilder(
+          int index) {
+        return internalGetValuesFieldBuilder().getBuilder(index);
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+       */
+      public gradle.substrate.v1.Substrate.PropertyValueOrBuilder getValuesOrBuilder(
+          int index) {
+        if (valuesBuilder_ == null) {
+          return values_.get(index);  } else {
+          return valuesBuilder_.getMessageOrBuilder(index);
+        }
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+       */
+      public java.util.List<? extends gradle.substrate.v1.Substrate.PropertyValueOrBuilder> 
+           getValuesOrBuilderList() {
+        if (valuesBuilder_ != null) {
+          return valuesBuilder_.getMessageOrBuilderList();
+        } else {
+          return java.util.Collections.unmodifiableList(values_);
+        }
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+       */
+      public gradle.substrate.v1.Substrate.PropertyValue.Builder addValuesBuilder() {
+        return internalGetValuesFieldBuilder().addBuilder(
+            gradle.substrate.v1.Substrate.PropertyValue.getDefaultInstance());
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+       */
+      public gradle.substrate.v1.Substrate.PropertyValue.Builder addValuesBuilder(
+          int index) {
+        return internalGetValuesFieldBuilder().addBuilder(
+            index, gradle.substrate.v1.Substrate.PropertyValue.getDefaultInstance());
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.PropertyValue values = 1;</code>
+       */
+      public java.util.List<gradle.substrate.v1.Substrate.PropertyValue.Builder> 
+           getValuesBuilderList() {
+        return internalGetValuesFieldBuilder().getBuilderList();
+      }
+      private com.google.protobuf.RepeatedFieldBuilder<
+          gradle.substrate.v1.Substrate.PropertyValue, gradle.substrate.v1.Substrate.PropertyValue.Builder, gradle.substrate.v1.Substrate.PropertyValueOrBuilder> 
+          internalGetValuesFieldBuilder() {
+        if (valuesBuilder_ == null) {
+          valuesBuilder_ = new com.google.protobuf.RepeatedFieldBuilder<
+              gradle.substrate.v1.Substrate.PropertyValue, gradle.substrate.v1.Substrate.PropertyValue.Builder, gradle.substrate.v1.Substrate.PropertyValueOrBuilder>(
+                  values_,
+                  ((bitField0_ & 0x00000001) != 0),
+                  getParentForChildren(),
+                  isClean());
+          values_ = null;
+        }
+        return valuesBuilder_;
+      }
+
+      private java.lang.Object implementationFingerprint_ = "";
+      /**
+       * <pre>
+       * Implementation fingerprint for the work unit.
+       * </pre>
+       *
+       * <code>string implementation_fingerprint = 2;</code>
+       * @return The implementationFingerprint.
+       */
+      public java.lang.String getImplementationFingerprint() {
+        java.lang.Object ref = implementationFingerprint_;
+        if (!(ref instanceof java.lang.String)) {
+          com.google.protobuf.ByteString bs =
+              (com.google.protobuf.ByteString) ref;
+          java.lang.String s = bs.toStringUtf8();
+          implementationFingerprint_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <pre>
+       * Implementation fingerprint for the work unit.
+       * </pre>
+       *
+       * <code>string implementation_fingerprint = 2;</code>
+       * @return The bytes for implementationFingerprint.
+       */
+      public com.google.protobuf.ByteString
+          getImplementationFingerprintBytes() {
+        java.lang.Object ref = implementationFingerprint_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          implementationFingerprint_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <pre>
+       * Implementation fingerprint for the work unit.
+       * </pre>
+       *
+       * <code>string implementation_fingerprint = 2;</code>
+       * @param value The implementationFingerprint to set.
+       * @return This builder for chaining.
+       */
+      public Builder setImplementationFingerprint(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        implementationFingerprint_ = value;
+        bitField0_ |= 0x00000002;
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * Implementation fingerprint for the work unit.
+       * </pre>
+       *
+       * <code>string implementation_fingerprint = 2;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearImplementationFingerprint() {
+        implementationFingerprint_ = getDefaultInstance().getImplementationFingerprint();
+        bitField0_ = (bitField0_ & ~0x00000002);
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * Implementation fingerprint for the work unit.
+       * </pre>
+       *
+       * <code>string implementation_fingerprint = 2;</code>
+       * @param value The bytes for implementationFingerprint to set.
+       * @return This builder for chaining.
+       */
+      public Builder setImplementationFingerprintBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        implementationFingerprint_ = value;
+        bitField0_ |= 0x00000002;
+        onChanged();
+        return this;
+      }
+
+      // @@protoc_insertion_point(builder_scope:gradle.substrate.v1.SnapshotValuesRequest)
+    }
+
+    // @@protoc_insertion_point(class_scope:gradle.substrate.v1.SnapshotValuesRequest)
+    private static final gradle.substrate.v1.Substrate.SnapshotValuesRequest DEFAULT_INSTANCE;
+    static {
+      DEFAULT_INSTANCE = new gradle.substrate.v1.Substrate.SnapshotValuesRequest();
+    }
+
+    public static gradle.substrate.v1.Substrate.SnapshotValuesRequest getDefaultInstance() {
+      return DEFAULT_INSTANCE;
+    }
+
+    private static final com.google.protobuf.Parser<SnapshotValuesRequest>
+        PARSER = new com.google.protobuf.AbstractParser<SnapshotValuesRequest>() {
+      @java.lang.Override
+      public SnapshotValuesRequest parsePartialFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws com.google.protobuf.InvalidProtocolBufferException {
+        Builder builder = newBuilder();
+        try {
+          builder.mergeFrom(input, extensionRegistry);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.setUnfinishedMessage(builder.buildPartial());
+        } catch (com.google.protobuf.UninitializedMessageException e) {
+          throw e.asInvalidProtocolBufferException().setUnfinishedMessage(builder.buildPartial());
+        } catch (java.io.IOException e) {
+          throw new com.google.protobuf.InvalidProtocolBufferException(e)
+              .setUnfinishedMessage(builder.buildPartial());
+        }
+        return builder.buildPartial();
+      }
+    };
+
+    public static com.google.protobuf.Parser<SnapshotValuesRequest> parser() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<SnapshotValuesRequest> getParserForType() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.SnapshotValuesRequest getDefaultInstanceForType() {
+      return DEFAULT_INSTANCE;
+    }
+
+  }
+
+  public interface ValueSnapshotResultOrBuilder extends
+      // @@protoc_insertion_point(interface_extends:gradle.substrate.v1.ValueSnapshotResult)
+      com.google.protobuf.MessageOrBuilder {
+
+    /**
+     * <code>string name = 1;</code>
+     * @return The name.
+     */
+    java.lang.String getName();
+    /**
+     * <code>string name = 1;</code>
+     * @return The bytes for name.
+     */
+    com.google.protobuf.ByteString
+        getNameBytes();
+
+    /**
+     * <code>bytes fingerprint = 2;</code>
+     * @return The fingerprint.
+     */
+    com.google.protobuf.ByteString getFingerprint();
+  }
+  /**
+   * Protobuf type {@code gradle.substrate.v1.ValueSnapshotResult}
+   */
+  public static final class ValueSnapshotResult extends
+      com.google.protobuf.GeneratedMessage implements
+      // @@protoc_insertion_point(message_implements:gradle.substrate.v1.ValueSnapshotResult)
+      ValueSnapshotResultOrBuilder {
+  private static final long serialVersionUID = 0L;
+    static {
+      com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
+        com.google.protobuf.RuntimeVersion.RuntimeDomain.PUBLIC,
+        /* major= */ 4,
+        /* minor= */ 34,
+        /* patch= */ 0,
+        /* suffix= */ "",
+        "ValueSnapshotResult");
+    }
+    // Use ValueSnapshotResult.newBuilder() to construct.
+    private ValueSnapshotResult(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      super(builder);
+    }
+    private ValueSnapshotResult() {
+      name_ = "";
+      fingerprint_ = com.google.protobuf.ByteString.EMPTY;
+    }
+
+    public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ValueSnapshotResult_descriptor;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Descriptors.Descriptor getDescriptorForType() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ValueSnapshotResult_descriptor;
+    }
+
+    @java.lang.Override
+    protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ValueSnapshotResult_fieldAccessorTable
+          .ensureFieldAccessorsInitialized(
+              gradle.substrate.v1.Substrate.ValueSnapshotResult.class, gradle.substrate.v1.Substrate.ValueSnapshotResult.Builder.class);
+    }
+
+    public static final int NAME_FIELD_NUMBER = 1;
+    @SuppressWarnings("serial")
+    private volatile java.lang.Object name_ = "";
+    /**
+     * <code>string name = 1;</code>
+     * @return The name.
+     */
+    @java.lang.Override
+    public java.lang.String getName() {
+      java.lang.Object ref = name_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        name_ = s;
+        return s;
+      }
+    }
+    /**
+     * <code>string name = 1;</code>
+     * @return The bytes for name.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getNameBytes() {
+      java.lang.Object ref = name_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        name_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    public static final int FINGERPRINT_FIELD_NUMBER = 2;
+    private com.google.protobuf.ByteString fingerprint_ = com.google.protobuf.ByteString.EMPTY;
+    /**
+     * <code>bytes fingerprint = 2;</code>
+     * @return The fingerprint.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString getFingerprint() {
+      return fingerprint_;
+    }
+
+    private byte memoizedIsInitialized = -1;
+    @java.lang.Override
+    public final boolean isInitialized() {
+      byte isInitialized = memoizedIsInitialized;
+      if (isInitialized == 1) return true;
+      if (isInitialized == 0) return false;
+
+      memoizedIsInitialized = 1;
+      return true;
+    }
+
+    @java.lang.Override
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+                        throws java.io.IOException {
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(name_)) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 1, name_);
+      }
+      if (!fingerprint_.isEmpty()) {
+        output.writeBytes(2, fingerprint_);
+      }
+      getUnknownFields().writeTo(output);
+    }
+
+    @java.lang.Override
+    public int getSerializedSize() {
+      int size = memoizedSize;
+      if (size != -1) return size;
+
+      size = 0;
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(name_)) {
+        size += com.google.protobuf.GeneratedMessage.computeStringSize(1, name_);
+      }
+      if (!fingerprint_.isEmpty()) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBytesSize(2, fingerprint_);
+      }
+      size += getUnknownFields().getSerializedSize();
+      memoizedSize = size;
+      return size;
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+      if (obj == this) {
+       return true;
+      }
+      if (!(obj instanceof gradle.substrate.v1.Substrate.ValueSnapshotResult)) {
+        return super.equals(obj);
+      }
+      gradle.substrate.v1.Substrate.ValueSnapshotResult other = (gradle.substrate.v1.Substrate.ValueSnapshotResult) obj;
+
+      if (!getName()
+          .equals(other.getName())) return false;
+      if (!getFingerprint()
+          .equals(other.getFingerprint())) return false;
+      if (!getUnknownFields().equals(other.getUnknownFields())) return false;
+      return true;
+    }
+
+    @java.lang.Override
+    public int hashCode() {
+      if (memoizedHashCode != 0) {
+        return memoizedHashCode;
+      }
+      int hash = 41;
+      hash = (19 * hash) + getDescriptor().hashCode();
+      hash = (37 * hash) + NAME_FIELD_NUMBER;
+      hash = (53 * hash) + getName().hashCode();
+      hash = (37 * hash) + FINGERPRINT_FIELD_NUMBER;
+      hash = (53 * hash) + getFingerprint().hashCode();
+      hash = (29 * hash) + getUnknownFields().hashCode();
+      memoizedHashCode = hash;
+      return hash;
+    }
+
+    public static gradle.substrate.v1.Substrate.ValueSnapshotResult parseFrom(
+        java.nio.ByteBuffer data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.ValueSnapshotResult parseFrom(
+        java.nio.ByteBuffer data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.ValueSnapshotResult parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.ValueSnapshotResult parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.ValueSnapshotResult parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.ValueSnapshotResult parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.ValueSnapshotResult parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.ValueSnapshotResult parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static gradle.substrate.v1.Substrate.ValueSnapshotResult parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input);
+    }
+
+    public static gradle.substrate.v1.Substrate.ValueSnapshotResult parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.ValueSnapshotResult parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.ValueSnapshotResult parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    @java.lang.Override
+    public Builder newBuilderForType() { return newBuilder(); }
+    public static Builder newBuilder() {
+      return DEFAULT_INSTANCE.toBuilder();
+    }
+    public static Builder newBuilder(gradle.substrate.v1.Substrate.ValueSnapshotResult prototype) {
+      return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
+    }
+    @java.lang.Override
+    public Builder toBuilder() {
+      return this == DEFAULT_INSTANCE
+          ? new Builder() : new Builder().mergeFrom(this);
+    }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+      Builder builder = new Builder(parent);
+      return builder;
+    }
+    /**
+     * Protobuf type {@code gradle.substrate.v1.ValueSnapshotResult}
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessage.Builder<Builder> implements
+        // @@protoc_insertion_point(builder_implements:gradle.substrate.v1.ValueSnapshotResult)
+        gradle.substrate.v1.Substrate.ValueSnapshotResultOrBuilder {
+      public static final com.google.protobuf.Descriptors.Descriptor
+          getDescriptor() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ValueSnapshotResult_descriptor;
+      }
+
+      @java.lang.Override
+      protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+          internalGetFieldAccessorTable() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ValueSnapshotResult_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                gradle.substrate.v1.Substrate.ValueSnapshotResult.class, gradle.substrate.v1.Substrate.ValueSnapshotResult.Builder.class);
+      }
+
+      // Construct using gradle.substrate.v1.Substrate.ValueSnapshotResult.newBuilder()
+      private Builder() {
+
+      }
+
+      private Builder(
+          com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+        super(parent);
+
+      }
+      @java.lang.Override
+      public Builder clear() {
+        super.clear();
+        bitField0_ = 0;
+        name_ = "";
+        fingerprint_ = com.google.protobuf.ByteString.EMPTY;
+        return this;
+      }
+
+      @java.lang.Override
+      public com.google.protobuf.Descriptors.Descriptor
+          getDescriptorForType() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ValueSnapshotResult_descriptor;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.ValueSnapshotResult getDefaultInstanceForType() {
+        return gradle.substrate.v1.Substrate.ValueSnapshotResult.getDefaultInstance();
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.ValueSnapshotResult build() {
+        gradle.substrate.v1.Substrate.ValueSnapshotResult result = buildPartial();
+        if (!result.isInitialized()) {
+          throw newUninitializedMessageException(result);
+        }
+        return result;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.ValueSnapshotResult buildPartial() {
+        gradle.substrate.v1.Substrate.ValueSnapshotResult result = new gradle.substrate.v1.Substrate.ValueSnapshotResult(this);
+        if (bitField0_ != 0) { buildPartial0(result); }
+        onBuilt();
+        return result;
+      }
+
+      private void buildPartial0(gradle.substrate.v1.Substrate.ValueSnapshotResult result) {
+        int from_bitField0_ = bitField0_;
+        if (((from_bitField0_ & 0x00000001) != 0)) {
+          result.name_ = name_;
+        }
+        if (((from_bitField0_ & 0x00000002) != 0)) {
+          result.fingerprint_ = fingerprint_;
+        }
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(com.google.protobuf.Message other) {
+        if (other instanceof gradle.substrate.v1.Substrate.ValueSnapshotResult) {
+          return mergeFrom((gradle.substrate.v1.Substrate.ValueSnapshotResult)other);
+        } else {
+          super.mergeFrom(other);
+          return this;
+        }
+      }
+
+      public Builder mergeFrom(gradle.substrate.v1.Substrate.ValueSnapshotResult other) {
+        if (other == gradle.substrate.v1.Substrate.ValueSnapshotResult.getDefaultInstance()) return this;
+        if (!other.getName().isEmpty()) {
+          name_ = other.name_;
+          bitField0_ |= 0x00000001;
+          onChanged();
+        }
+        if (!other.getFingerprint().isEmpty()) {
+          setFingerprint(other.getFingerprint());
+        }
+        this.mergeUnknownFields(other.getUnknownFields());
+        onChanged();
+        return this;
+      }
+
+      @java.lang.Override
+      public final boolean isInitialized() {
+        return true;
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws java.io.IOException {
+        if (extensionRegistry == null) {
+          throw new java.lang.NullPointerException();
+        }
+        try {
+          boolean done = false;
+          while (!done) {
+            int tag = input.readTag();
+            switch (tag) {
+              case 0:
+                done = true;
+                break;
+              case 10: {
+                name_ = input.readStringRequireUtf8();
+                bitField0_ |= 0x00000001;
+                break;
+              } // case 10
+              case 18: {
+                fingerprint_ = input.readBytes();
+                bitField0_ |= 0x00000002;
+                break;
+              } // case 18
+              default: {
+                if (!super.parseUnknownField(input, extensionRegistry, tag)) {
+                  done = true; // was an endgroup tag
+                }
+                break;
+              } // default:
+            } // switch (tag)
+          } // while (!done)
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.unwrapIOException();
+        } finally {
+          onChanged();
+        } // finally
+        return this;
+      }
+      private int bitField0_;
+
+      private java.lang.Object name_ = "";
+      /**
+       * <code>string name = 1;</code>
+       * @return The name.
+       */
+      public java.lang.String getName() {
+        java.lang.Object ref = name_;
+        if (!(ref instanceof java.lang.String)) {
+          com.google.protobuf.ByteString bs =
+              (com.google.protobuf.ByteString) ref;
+          java.lang.String s = bs.toStringUtf8();
+          name_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <code>string name = 1;</code>
+       * @return The bytes for name.
+       */
+      public com.google.protobuf.ByteString
+          getNameBytes() {
+        java.lang.Object ref = name_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          name_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <code>string name = 1;</code>
+       * @param value The name to set.
+       * @return This builder for chaining.
+       */
+      public Builder setName(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        name_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string name = 1;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearName() {
+        name_ = getDefaultInstance().getName();
+        bitField0_ = (bitField0_ & ~0x00000001);
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string name = 1;</code>
+       * @param value The bytes for name to set.
+       * @return This builder for chaining.
+       */
+      public Builder setNameBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        name_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+
+      private com.google.protobuf.ByteString fingerprint_ = com.google.protobuf.ByteString.EMPTY;
+      /**
+       * <code>bytes fingerprint = 2;</code>
+       * @return The fingerprint.
+       */
+      @java.lang.Override
+      public com.google.protobuf.ByteString getFingerprint() {
+        return fingerprint_;
+      }
+      /**
+       * <code>bytes fingerprint = 2;</code>
+       * @param value The fingerprint to set.
+       * @return This builder for chaining.
+       */
+      public Builder setFingerprint(com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        fingerprint_ = value;
+        bitField0_ |= 0x00000002;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>bytes fingerprint = 2;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearFingerprint() {
+        bitField0_ = (bitField0_ & ~0x00000002);
+        fingerprint_ = getDefaultInstance().getFingerprint();
+        onChanged();
+        return this;
+      }
+
+      // @@protoc_insertion_point(builder_scope:gradle.substrate.v1.ValueSnapshotResult)
+    }
+
+    // @@protoc_insertion_point(class_scope:gradle.substrate.v1.ValueSnapshotResult)
+    private static final gradle.substrate.v1.Substrate.ValueSnapshotResult DEFAULT_INSTANCE;
+    static {
+      DEFAULT_INSTANCE = new gradle.substrate.v1.Substrate.ValueSnapshotResult();
+    }
+
+    public static gradle.substrate.v1.Substrate.ValueSnapshotResult getDefaultInstance() {
+      return DEFAULT_INSTANCE;
+    }
+
+    private static final com.google.protobuf.Parser<ValueSnapshotResult>
+        PARSER = new com.google.protobuf.AbstractParser<ValueSnapshotResult>() {
+      @java.lang.Override
+      public ValueSnapshotResult parsePartialFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws com.google.protobuf.InvalidProtocolBufferException {
+        Builder builder = newBuilder();
+        try {
+          builder.mergeFrom(input, extensionRegistry);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.setUnfinishedMessage(builder.buildPartial());
+        } catch (com.google.protobuf.UninitializedMessageException e) {
+          throw e.asInvalidProtocolBufferException().setUnfinishedMessage(builder.buildPartial());
+        } catch (java.io.IOException e) {
+          throw new com.google.protobuf.InvalidProtocolBufferException(e)
+              .setUnfinishedMessage(builder.buildPartial());
+        }
+        return builder.buildPartial();
+      }
+    };
+
+    public static com.google.protobuf.Parser<ValueSnapshotResult> parser() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<ValueSnapshotResult> getParserForType() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.ValueSnapshotResult getDefaultInstanceForType() {
+      return DEFAULT_INSTANCE;
+    }
+
+  }
+
+  public interface SnapshotValuesResponseOrBuilder extends
+      // @@protoc_insertion_point(interface_extends:gradle.substrate.v1.SnapshotValuesResponse)
+      com.google.protobuf.MessageOrBuilder {
+
+    /**
+     * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+     */
+    java.util.List<gradle.substrate.v1.Substrate.ValueSnapshotResult> 
+        getResultsList();
+    /**
+     * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+     */
+    gradle.substrate.v1.Substrate.ValueSnapshotResult getResults(int index);
+    /**
+     * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+     */
+    int getResultsCount();
+    /**
+     * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+     */
+    java.util.List<? extends gradle.substrate.v1.Substrate.ValueSnapshotResultOrBuilder> 
+        getResultsOrBuilderList();
+    /**
+     * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+     */
+    gradle.substrate.v1.Substrate.ValueSnapshotResultOrBuilder getResultsOrBuilder(
+        int index);
+
+    /**
+     * <pre>
+     * Composite hash of all input values.
+     * </pre>
+     *
+     * <code>bytes composite_hash = 2;</code>
+     * @return The compositeHash.
+     */
+    com.google.protobuf.ByteString getCompositeHash();
+
+    /**
+     * <pre>
+     * Error message if snapshotting failed.
+     * </pre>
+     *
+     * <code>string error_message = 3;</code>
+     * @return The errorMessage.
+     */
+    java.lang.String getErrorMessage();
+    /**
+     * <pre>
+     * Error message if snapshotting failed.
+     * </pre>
+     *
+     * <code>string error_message = 3;</code>
+     * @return The bytes for errorMessage.
+     */
+    com.google.protobuf.ByteString
+        getErrorMessageBytes();
+
+    /**
+     * <code>bool success = 4;</code>
+     * @return The success.
+     */
+    boolean getSuccess();
+  }
+  /**
+   * Protobuf type {@code gradle.substrate.v1.SnapshotValuesResponse}
+   */
+  public static final class SnapshotValuesResponse extends
+      com.google.protobuf.GeneratedMessage implements
+      // @@protoc_insertion_point(message_implements:gradle.substrate.v1.SnapshotValuesResponse)
+      SnapshotValuesResponseOrBuilder {
+  private static final long serialVersionUID = 0L;
+    static {
+      com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
+        com.google.protobuf.RuntimeVersion.RuntimeDomain.PUBLIC,
+        /* major= */ 4,
+        /* minor= */ 34,
+        /* patch= */ 0,
+        /* suffix= */ "",
+        "SnapshotValuesResponse");
+    }
+    // Use SnapshotValuesResponse.newBuilder() to construct.
+    private SnapshotValuesResponse(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      super(builder);
+    }
+    private SnapshotValuesResponse() {
+      results_ = java.util.Collections.emptyList();
+      compositeHash_ = com.google.protobuf.ByteString.EMPTY;
+      errorMessage_ = "";
+    }
+
+    public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_SnapshotValuesResponse_descriptor;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Descriptors.Descriptor getDescriptorForType() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_SnapshotValuesResponse_descriptor;
+    }
+
+    @java.lang.Override
+    protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_SnapshotValuesResponse_fieldAccessorTable
+          .ensureFieldAccessorsInitialized(
+              gradle.substrate.v1.Substrate.SnapshotValuesResponse.class, gradle.substrate.v1.Substrate.SnapshotValuesResponse.Builder.class);
+    }
+
+    public static final int RESULTS_FIELD_NUMBER = 1;
+    @SuppressWarnings("serial")
+    private java.util.List<gradle.substrate.v1.Substrate.ValueSnapshotResult> results_;
+    /**
+     * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+     */
+    @java.lang.Override
+    public java.util.List<gradle.substrate.v1.Substrate.ValueSnapshotResult> getResultsList() {
+      return results_;
+    }
+    /**
+     * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+     */
+    @java.lang.Override
+    public java.util.List<? extends gradle.substrate.v1.Substrate.ValueSnapshotResultOrBuilder> 
+        getResultsOrBuilderList() {
+      return results_;
+    }
+    /**
+     * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+     */
+    @java.lang.Override
+    public int getResultsCount() {
+      return results_.size();
+    }
+    /**
+     * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+     */
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.ValueSnapshotResult getResults(int index) {
+      return results_.get(index);
+    }
+    /**
+     * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+     */
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.ValueSnapshotResultOrBuilder getResultsOrBuilder(
+        int index) {
+      return results_.get(index);
+    }
+
+    public static final int COMPOSITE_HASH_FIELD_NUMBER = 2;
+    private com.google.protobuf.ByteString compositeHash_ = com.google.protobuf.ByteString.EMPTY;
+    /**
+     * <pre>
+     * Composite hash of all input values.
+     * </pre>
+     *
+     * <code>bytes composite_hash = 2;</code>
+     * @return The compositeHash.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString getCompositeHash() {
+      return compositeHash_;
+    }
+
+    public static final int ERROR_MESSAGE_FIELD_NUMBER = 3;
+    @SuppressWarnings("serial")
+    private volatile java.lang.Object errorMessage_ = "";
+    /**
+     * <pre>
+     * Error message if snapshotting failed.
+     * </pre>
+     *
+     * <code>string error_message = 3;</code>
+     * @return The errorMessage.
+     */
+    @java.lang.Override
+    public java.lang.String getErrorMessage() {
+      java.lang.Object ref = errorMessage_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        errorMessage_ = s;
+        return s;
+      }
+    }
+    /**
+     * <pre>
+     * Error message if snapshotting failed.
+     * </pre>
+     *
+     * <code>string error_message = 3;</code>
+     * @return The bytes for errorMessage.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getErrorMessageBytes() {
+      java.lang.Object ref = errorMessage_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        errorMessage_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    public static final int SUCCESS_FIELD_NUMBER = 4;
+    private boolean success_ = false;
+    /**
+     * <code>bool success = 4;</code>
+     * @return The success.
+     */
+    @java.lang.Override
+    public boolean getSuccess() {
+      return success_;
+    }
+
+    private byte memoizedIsInitialized = -1;
+    @java.lang.Override
+    public final boolean isInitialized() {
+      byte isInitialized = memoizedIsInitialized;
+      if (isInitialized == 1) return true;
+      if (isInitialized == 0) return false;
+
+      memoizedIsInitialized = 1;
+      return true;
+    }
+
+    @java.lang.Override
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+                        throws java.io.IOException {
+      for (int i = 0; i < results_.size(); i++) {
+        output.writeMessage(1, results_.get(i));
+      }
+      if (!compositeHash_.isEmpty()) {
+        output.writeBytes(2, compositeHash_);
+      }
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(errorMessage_)) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 3, errorMessage_);
+      }
+      if (success_ != false) {
+        output.writeBool(4, success_);
+      }
+      getUnknownFields().writeTo(output);
+    }
+
+    @java.lang.Override
+    public int getSerializedSize() {
+      int size = memoizedSize;
+      if (size != -1) return size;
+
+      size = 0;
+
+          {
+            final int count = results_.size();
+            for (int i = 0; i < count; i++) {
+              size += com.google.protobuf.CodedOutputStream
+                .computeMessageSizeNoTag(results_.get(i));
+            }
+            size += 1 * count;
+          }
+      if (!compositeHash_.isEmpty()) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBytesSize(2, compositeHash_);
+      }
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(errorMessage_)) {
+        size += com.google.protobuf.GeneratedMessage.computeStringSize(3, errorMessage_);
+      }
+      if (success_ != false) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBoolSize(4, success_);
+      }
+      size += getUnknownFields().getSerializedSize();
+      memoizedSize = size;
+      return size;
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+      if (obj == this) {
+       return true;
+      }
+      if (!(obj instanceof gradle.substrate.v1.Substrate.SnapshotValuesResponse)) {
+        return super.equals(obj);
+      }
+      gradle.substrate.v1.Substrate.SnapshotValuesResponse other = (gradle.substrate.v1.Substrate.SnapshotValuesResponse) obj;
+
+      if (!getResultsList()
+          .equals(other.getResultsList())) return false;
+      if (!getCompositeHash()
+          .equals(other.getCompositeHash())) return false;
+      if (!getErrorMessage()
+          .equals(other.getErrorMessage())) return false;
+      if (getSuccess()
+          != other.getSuccess()) return false;
+      if (!getUnknownFields().equals(other.getUnknownFields())) return false;
+      return true;
+    }
+
+    @java.lang.Override
+    public int hashCode() {
+      if (memoizedHashCode != 0) {
+        return memoizedHashCode;
+      }
+      int hash = 41;
+      hash = (19 * hash) + getDescriptor().hashCode();
+      if (getResultsCount() > 0) {
+        hash = (37 * hash) + RESULTS_FIELD_NUMBER;
+        hash = (53 * hash) + getResultsList().hashCode();
+      }
+      hash = (37 * hash) + COMPOSITE_HASH_FIELD_NUMBER;
+      hash = (53 * hash) + getCompositeHash().hashCode();
+      hash = (37 * hash) + ERROR_MESSAGE_FIELD_NUMBER;
+      hash = (53 * hash) + getErrorMessage().hashCode();
+      hash = (37 * hash) + SUCCESS_FIELD_NUMBER;
+      hash = (53 * hash) + com.google.protobuf.Internal.hashBoolean(
+          getSuccess());
+      hash = (29 * hash) + getUnknownFields().hashCode();
+      memoizedHashCode = hash;
+      return hash;
+    }
+
+    public static gradle.substrate.v1.Substrate.SnapshotValuesResponse parseFrom(
+        java.nio.ByteBuffer data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.SnapshotValuesResponse parseFrom(
+        java.nio.ByteBuffer data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.SnapshotValuesResponse parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.SnapshotValuesResponse parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.SnapshotValuesResponse parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.SnapshotValuesResponse parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.SnapshotValuesResponse parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.SnapshotValuesResponse parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static gradle.substrate.v1.Substrate.SnapshotValuesResponse parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input);
+    }
+
+    public static gradle.substrate.v1.Substrate.SnapshotValuesResponse parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.SnapshotValuesResponse parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.SnapshotValuesResponse parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    @java.lang.Override
+    public Builder newBuilderForType() { return newBuilder(); }
+    public static Builder newBuilder() {
+      return DEFAULT_INSTANCE.toBuilder();
+    }
+    public static Builder newBuilder(gradle.substrate.v1.Substrate.SnapshotValuesResponse prototype) {
+      return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
+    }
+    @java.lang.Override
+    public Builder toBuilder() {
+      return this == DEFAULT_INSTANCE
+          ? new Builder() : new Builder().mergeFrom(this);
+    }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+      Builder builder = new Builder(parent);
+      return builder;
+    }
+    /**
+     * Protobuf type {@code gradle.substrate.v1.SnapshotValuesResponse}
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessage.Builder<Builder> implements
+        // @@protoc_insertion_point(builder_implements:gradle.substrate.v1.SnapshotValuesResponse)
+        gradle.substrate.v1.Substrate.SnapshotValuesResponseOrBuilder {
+      public static final com.google.protobuf.Descriptors.Descriptor
+          getDescriptor() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_SnapshotValuesResponse_descriptor;
+      }
+
+      @java.lang.Override
+      protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+          internalGetFieldAccessorTable() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_SnapshotValuesResponse_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                gradle.substrate.v1.Substrate.SnapshotValuesResponse.class, gradle.substrate.v1.Substrate.SnapshotValuesResponse.Builder.class);
+      }
+
+      // Construct using gradle.substrate.v1.Substrate.SnapshotValuesResponse.newBuilder()
+      private Builder() {
+
+      }
+
+      private Builder(
+          com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+        super(parent);
+
+      }
+      @java.lang.Override
+      public Builder clear() {
+        super.clear();
+        bitField0_ = 0;
+        if (resultsBuilder_ == null) {
+          results_ = java.util.Collections.emptyList();
+        } else {
+          results_ = null;
+          resultsBuilder_.clear();
+        }
+        bitField0_ = (bitField0_ & ~0x00000001);
+        compositeHash_ = com.google.protobuf.ByteString.EMPTY;
+        errorMessage_ = "";
+        success_ = false;
+        return this;
+      }
+
+      @java.lang.Override
+      public com.google.protobuf.Descriptors.Descriptor
+          getDescriptorForType() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_SnapshotValuesResponse_descriptor;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.SnapshotValuesResponse getDefaultInstanceForType() {
+        return gradle.substrate.v1.Substrate.SnapshotValuesResponse.getDefaultInstance();
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.SnapshotValuesResponse build() {
+        gradle.substrate.v1.Substrate.SnapshotValuesResponse result = buildPartial();
+        if (!result.isInitialized()) {
+          throw newUninitializedMessageException(result);
+        }
+        return result;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.SnapshotValuesResponse buildPartial() {
+        gradle.substrate.v1.Substrate.SnapshotValuesResponse result = new gradle.substrate.v1.Substrate.SnapshotValuesResponse(this);
+        buildPartialRepeatedFields(result);
+        if (bitField0_ != 0) { buildPartial0(result); }
+        onBuilt();
+        return result;
+      }
+
+      private void buildPartialRepeatedFields(gradle.substrate.v1.Substrate.SnapshotValuesResponse result) {
+        if (resultsBuilder_ == null) {
+          if (((bitField0_ & 0x00000001) != 0)) {
+            results_ = java.util.Collections.unmodifiableList(results_);
+            bitField0_ = (bitField0_ & ~0x00000001);
+          }
+          result.results_ = results_;
+        } else {
+          result.results_ = resultsBuilder_.build();
+        }
+      }
+
+      private void buildPartial0(gradle.substrate.v1.Substrate.SnapshotValuesResponse result) {
+        int from_bitField0_ = bitField0_;
+        if (((from_bitField0_ & 0x00000002) != 0)) {
+          result.compositeHash_ = compositeHash_;
+        }
+        if (((from_bitField0_ & 0x00000004) != 0)) {
+          result.errorMessage_ = errorMessage_;
+        }
+        if (((from_bitField0_ & 0x00000008) != 0)) {
+          result.success_ = success_;
+        }
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(com.google.protobuf.Message other) {
+        if (other instanceof gradle.substrate.v1.Substrate.SnapshotValuesResponse) {
+          return mergeFrom((gradle.substrate.v1.Substrate.SnapshotValuesResponse)other);
+        } else {
+          super.mergeFrom(other);
+          return this;
+        }
+      }
+
+      public Builder mergeFrom(gradle.substrate.v1.Substrate.SnapshotValuesResponse other) {
+        if (other == gradle.substrate.v1.Substrate.SnapshotValuesResponse.getDefaultInstance()) return this;
+        if (resultsBuilder_ == null) {
+          if (!other.results_.isEmpty()) {
+            if (results_.isEmpty()) {
+              results_ = other.results_;
+              bitField0_ = (bitField0_ & ~0x00000001);
+            } else {
+              ensureResultsIsMutable();
+              results_.addAll(other.results_);
+            }
+            onChanged();
+          }
+        } else {
+          if (!other.results_.isEmpty()) {
+            if (resultsBuilder_.isEmpty()) {
+              resultsBuilder_.dispose();
+              resultsBuilder_ = null;
+              results_ = other.results_;
+              bitField0_ = (bitField0_ & ~0x00000001);
+              resultsBuilder_ = 
+                com.google.protobuf.GeneratedMessage.alwaysUseFieldBuilders ?
+                   internalGetResultsFieldBuilder() : null;
+            } else {
+              resultsBuilder_.addAllMessages(other.results_);
+            }
+          }
+        }
+        if (!other.getCompositeHash().isEmpty()) {
+          setCompositeHash(other.getCompositeHash());
+        }
+        if (!other.getErrorMessage().isEmpty()) {
+          errorMessage_ = other.errorMessage_;
+          bitField0_ |= 0x00000004;
+          onChanged();
+        }
+        if (other.getSuccess() != false) {
+          setSuccess(other.getSuccess());
+        }
+        this.mergeUnknownFields(other.getUnknownFields());
+        onChanged();
+        return this;
+      }
+
+      @java.lang.Override
+      public final boolean isInitialized() {
+        return true;
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws java.io.IOException {
+        if (extensionRegistry == null) {
+          throw new java.lang.NullPointerException();
+        }
+        try {
+          boolean done = false;
+          while (!done) {
+            int tag = input.readTag();
+            switch (tag) {
+              case 0:
+                done = true;
+                break;
+              case 10: {
+                gradle.substrate.v1.Substrate.ValueSnapshotResult m =
+                    input.readMessage(
+                        gradle.substrate.v1.Substrate.ValueSnapshotResult.parser(),
+                        extensionRegistry);
+                if (resultsBuilder_ == null) {
+                  ensureResultsIsMutable();
+                  results_.add(m);
+                } else {
+                  resultsBuilder_.addMessage(m);
+                }
+                break;
+              } // case 10
+              case 18: {
+                compositeHash_ = input.readBytes();
+                bitField0_ |= 0x00000002;
+                break;
+              } // case 18
+              case 26: {
+                errorMessage_ = input.readStringRequireUtf8();
+                bitField0_ |= 0x00000004;
+                break;
+              } // case 26
+              case 32: {
+                success_ = input.readBool();
+                bitField0_ |= 0x00000008;
+                break;
+              } // case 32
+              default: {
+                if (!super.parseUnknownField(input, extensionRegistry, tag)) {
+                  done = true; // was an endgroup tag
+                }
+                break;
+              } // default:
+            } // switch (tag)
+          } // while (!done)
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.unwrapIOException();
+        } finally {
+          onChanged();
+        } // finally
+        return this;
+      }
+      private int bitField0_;
+
+      private java.util.List<gradle.substrate.v1.Substrate.ValueSnapshotResult> results_ =
+        java.util.Collections.emptyList();
+      private void ensureResultsIsMutable() {
+        if (!((bitField0_ & 0x00000001) != 0)) {
+          results_ = new java.util.ArrayList<gradle.substrate.v1.Substrate.ValueSnapshotResult>(results_);
+          bitField0_ |= 0x00000001;
+         }
+      }
+
+      private com.google.protobuf.RepeatedFieldBuilder<
+          gradle.substrate.v1.Substrate.ValueSnapshotResult, gradle.substrate.v1.Substrate.ValueSnapshotResult.Builder, gradle.substrate.v1.Substrate.ValueSnapshotResultOrBuilder> resultsBuilder_;
+
+      /**
+       * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+       */
+      public java.util.List<gradle.substrate.v1.Substrate.ValueSnapshotResult> getResultsList() {
+        if (resultsBuilder_ == null) {
+          return java.util.Collections.unmodifiableList(results_);
+        } else {
+          return resultsBuilder_.getMessageList();
+        }
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+       */
+      public int getResultsCount() {
+        if (resultsBuilder_ == null) {
+          return results_.size();
+        } else {
+          return resultsBuilder_.getCount();
+        }
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+       */
+      public gradle.substrate.v1.Substrate.ValueSnapshotResult getResults(int index) {
+        if (resultsBuilder_ == null) {
+          return results_.get(index);
+        } else {
+          return resultsBuilder_.getMessage(index);
+        }
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+       */
+      public Builder setResults(
+          int index, gradle.substrate.v1.Substrate.ValueSnapshotResult value) {
+        if (resultsBuilder_ == null) {
+          if (value == null) {
+            throw new NullPointerException();
+          }
+          ensureResultsIsMutable();
+          results_.set(index, value);
+          onChanged();
+        } else {
+          resultsBuilder_.setMessage(index, value);
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+       */
+      public Builder setResults(
+          int index, gradle.substrate.v1.Substrate.ValueSnapshotResult.Builder builderForValue) {
+        if (resultsBuilder_ == null) {
+          ensureResultsIsMutable();
+          results_.set(index, builderForValue.build());
+          onChanged();
+        } else {
+          resultsBuilder_.setMessage(index, builderForValue.build());
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+       */
+      public Builder addResults(gradle.substrate.v1.Substrate.ValueSnapshotResult value) {
+        if (resultsBuilder_ == null) {
+          if (value == null) {
+            throw new NullPointerException();
+          }
+          ensureResultsIsMutable();
+          results_.add(value);
+          onChanged();
+        } else {
+          resultsBuilder_.addMessage(value);
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+       */
+      public Builder addResults(
+          int index, gradle.substrate.v1.Substrate.ValueSnapshotResult value) {
+        if (resultsBuilder_ == null) {
+          if (value == null) {
+            throw new NullPointerException();
+          }
+          ensureResultsIsMutable();
+          results_.add(index, value);
+          onChanged();
+        } else {
+          resultsBuilder_.addMessage(index, value);
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+       */
+      public Builder addResults(
+          gradle.substrate.v1.Substrate.ValueSnapshotResult.Builder builderForValue) {
+        if (resultsBuilder_ == null) {
+          ensureResultsIsMutable();
+          results_.add(builderForValue.build());
+          onChanged();
+        } else {
+          resultsBuilder_.addMessage(builderForValue.build());
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+       */
+      public Builder addResults(
+          int index, gradle.substrate.v1.Substrate.ValueSnapshotResult.Builder builderForValue) {
+        if (resultsBuilder_ == null) {
+          ensureResultsIsMutable();
+          results_.add(index, builderForValue.build());
+          onChanged();
+        } else {
+          resultsBuilder_.addMessage(index, builderForValue.build());
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+       */
+      public Builder addAllResults(
+          java.lang.Iterable<? extends gradle.substrate.v1.Substrate.ValueSnapshotResult> values) {
+        if (resultsBuilder_ == null) {
+          ensureResultsIsMutable();
+          com.google.protobuf.AbstractMessageLite.Builder.addAll(
+              values, results_);
+          onChanged();
+        } else {
+          resultsBuilder_.addAllMessages(values);
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+       */
+      public Builder clearResults() {
+        if (resultsBuilder_ == null) {
+          results_ = java.util.Collections.emptyList();
+          bitField0_ = (bitField0_ & ~0x00000001);
+          onChanged();
+        } else {
+          resultsBuilder_.clear();
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+       */
+      public Builder removeResults(int index) {
+        if (resultsBuilder_ == null) {
+          ensureResultsIsMutable();
+          results_.remove(index);
+          onChanged();
+        } else {
+          resultsBuilder_.remove(index);
+        }
+        return this;
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+       */
+      public gradle.substrate.v1.Substrate.ValueSnapshotResult.Builder getResultsBuilder(
+          int index) {
+        return internalGetResultsFieldBuilder().getBuilder(index);
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+       */
+      public gradle.substrate.v1.Substrate.ValueSnapshotResultOrBuilder getResultsOrBuilder(
+          int index) {
+        if (resultsBuilder_ == null) {
+          return results_.get(index);  } else {
+          return resultsBuilder_.getMessageOrBuilder(index);
+        }
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+       */
+      public java.util.List<? extends gradle.substrate.v1.Substrate.ValueSnapshotResultOrBuilder> 
+           getResultsOrBuilderList() {
+        if (resultsBuilder_ != null) {
+          return resultsBuilder_.getMessageOrBuilderList();
+        } else {
+          return java.util.Collections.unmodifiableList(results_);
+        }
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+       */
+      public gradle.substrate.v1.Substrate.ValueSnapshotResult.Builder addResultsBuilder() {
+        return internalGetResultsFieldBuilder().addBuilder(
+            gradle.substrate.v1.Substrate.ValueSnapshotResult.getDefaultInstance());
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+       */
+      public gradle.substrate.v1.Substrate.ValueSnapshotResult.Builder addResultsBuilder(
+          int index) {
+        return internalGetResultsFieldBuilder().addBuilder(
+            index, gradle.substrate.v1.Substrate.ValueSnapshotResult.getDefaultInstance());
+      }
+      /**
+       * <code>repeated .gradle.substrate.v1.ValueSnapshotResult results = 1;</code>
+       */
+      public java.util.List<gradle.substrate.v1.Substrate.ValueSnapshotResult.Builder> 
+           getResultsBuilderList() {
+        return internalGetResultsFieldBuilder().getBuilderList();
+      }
+      private com.google.protobuf.RepeatedFieldBuilder<
+          gradle.substrate.v1.Substrate.ValueSnapshotResult, gradle.substrate.v1.Substrate.ValueSnapshotResult.Builder, gradle.substrate.v1.Substrate.ValueSnapshotResultOrBuilder> 
+          internalGetResultsFieldBuilder() {
+        if (resultsBuilder_ == null) {
+          resultsBuilder_ = new com.google.protobuf.RepeatedFieldBuilder<
+              gradle.substrate.v1.Substrate.ValueSnapshotResult, gradle.substrate.v1.Substrate.ValueSnapshotResult.Builder, gradle.substrate.v1.Substrate.ValueSnapshotResultOrBuilder>(
+                  results_,
+                  ((bitField0_ & 0x00000001) != 0),
+                  getParentForChildren(),
+                  isClean());
+          results_ = null;
+        }
+        return resultsBuilder_;
+      }
+
+      private com.google.protobuf.ByteString compositeHash_ = com.google.protobuf.ByteString.EMPTY;
+      /**
+       * <pre>
+       * Composite hash of all input values.
+       * </pre>
+       *
+       * <code>bytes composite_hash = 2;</code>
+       * @return The compositeHash.
+       */
+      @java.lang.Override
+      public com.google.protobuf.ByteString getCompositeHash() {
+        return compositeHash_;
+      }
+      /**
+       * <pre>
+       * Composite hash of all input values.
+       * </pre>
+       *
+       * <code>bytes composite_hash = 2;</code>
+       * @param value The compositeHash to set.
+       * @return This builder for chaining.
+       */
+      public Builder setCompositeHash(com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        compositeHash_ = value;
+        bitField0_ |= 0x00000002;
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * Composite hash of all input values.
+       * </pre>
+       *
+       * <code>bytes composite_hash = 2;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearCompositeHash() {
+        bitField0_ = (bitField0_ & ~0x00000002);
+        compositeHash_ = getDefaultInstance().getCompositeHash();
+        onChanged();
+        return this;
+      }
+
+      private java.lang.Object errorMessage_ = "";
+      /**
+       * <pre>
+       * Error message if snapshotting failed.
+       * </pre>
+       *
+       * <code>string error_message = 3;</code>
+       * @return The errorMessage.
+       */
+      public java.lang.String getErrorMessage() {
+        java.lang.Object ref = errorMessage_;
+        if (!(ref instanceof java.lang.String)) {
+          com.google.protobuf.ByteString bs =
+              (com.google.protobuf.ByteString) ref;
+          java.lang.String s = bs.toStringUtf8();
+          errorMessage_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <pre>
+       * Error message if snapshotting failed.
+       * </pre>
+       *
+       * <code>string error_message = 3;</code>
+       * @return The bytes for errorMessage.
+       */
+      public com.google.protobuf.ByteString
+          getErrorMessageBytes() {
+        java.lang.Object ref = errorMessage_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          errorMessage_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <pre>
+       * Error message if snapshotting failed.
+       * </pre>
+       *
+       * <code>string error_message = 3;</code>
+       * @param value The errorMessage to set.
+       * @return This builder for chaining.
+       */
+      public Builder setErrorMessage(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        errorMessage_ = value;
+        bitField0_ |= 0x00000004;
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * Error message if snapshotting failed.
+       * </pre>
+       *
+       * <code>string error_message = 3;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearErrorMessage() {
+        errorMessage_ = getDefaultInstance().getErrorMessage();
+        bitField0_ = (bitField0_ & ~0x00000004);
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * Error message if snapshotting failed.
+       * </pre>
+       *
+       * <code>string error_message = 3;</code>
+       * @param value The bytes for errorMessage to set.
+       * @return This builder for chaining.
+       */
+      public Builder setErrorMessageBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        errorMessage_ = value;
+        bitField0_ |= 0x00000004;
+        onChanged();
+        return this;
+      }
+
+      private boolean success_ ;
+      /**
+       * <code>bool success = 4;</code>
+       * @return The success.
+       */
+      @java.lang.Override
+      public boolean getSuccess() {
+        return success_;
+      }
+      /**
+       * <code>bool success = 4;</code>
+       * @param value The success to set.
+       * @return This builder for chaining.
+       */
+      public Builder setSuccess(boolean value) {
+
+        success_ = value;
+        bitField0_ |= 0x00000008;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>bool success = 4;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearSuccess() {
+        bitField0_ = (bitField0_ & ~0x00000008);
+        success_ = false;
+        onChanged();
+        return this;
+      }
+
+      // @@protoc_insertion_point(builder_scope:gradle.substrate.v1.SnapshotValuesResponse)
+    }
+
+    // @@protoc_insertion_point(class_scope:gradle.substrate.v1.SnapshotValuesResponse)
+    private static final gradle.substrate.v1.Substrate.SnapshotValuesResponse DEFAULT_INSTANCE;
+    static {
+      DEFAULT_INSTANCE = new gradle.substrate.v1.Substrate.SnapshotValuesResponse();
+    }
+
+    public static gradle.substrate.v1.Substrate.SnapshotValuesResponse getDefaultInstance() {
+      return DEFAULT_INSTANCE;
+    }
+
+    private static final com.google.protobuf.Parser<SnapshotValuesResponse>
+        PARSER = new com.google.protobuf.AbstractParser<SnapshotValuesResponse>() {
+      @java.lang.Override
+      public SnapshotValuesResponse parsePartialFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws com.google.protobuf.InvalidProtocolBufferException {
+        Builder builder = newBuilder();
+        try {
+          builder.mergeFrom(input, extensionRegistry);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.setUnfinishedMessage(builder.buildPartial());
+        } catch (com.google.protobuf.UninitializedMessageException e) {
+          throw e.asInvalidProtocolBufferException().setUnfinishedMessage(builder.buildPartial());
+        } catch (java.io.IOException e) {
+          throw new com.google.protobuf.InvalidProtocolBufferException(e)
+              .setUnfinishedMessage(builder.buildPartial());
+        }
+        return builder.buildPartial();
+      }
+    };
+
+    public static com.google.protobuf.Parser<SnapshotValuesResponse> parser() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<SnapshotValuesResponse> getParserForType() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.SnapshotValuesResponse getDefaultInstanceForType() {
+      return DEFAULT_INSTANCE;
+    }
+
+  }
+
+  public interface ComputeCacheKeyRequestOrBuilder extends
+      // @@protoc_insertion_point(interface_extends:gradle.substrate.v1.ComputeCacheKeyRequest)
+      com.google.protobuf.MessageOrBuilder {
+
+    /**
+     * <code>string work_identity = 1;</code>
+     * @return The workIdentity.
+     */
+    java.lang.String getWorkIdentity();
+    /**
+     * <code>string work_identity = 1;</code>
+     * @return The bytes for workIdentity.
+     */
+    com.google.protobuf.ByteString
+        getWorkIdentityBytes();
+
+    /**
+     * <code>string implementation_hash = 2;</code>
+     * @return The implementationHash.
+     */
+    java.lang.String getImplementationHash();
+    /**
+     * <code>string implementation_hash = 2;</code>
+     * @return The bytes for implementationHash.
+     */
+    com.google.protobuf.ByteString
+        getImplementationHashBytes();
+
+    /**
+     * <code>map&lt;string, string&gt; input_property_hashes = 3;</code>
+     */
+    int getInputPropertyHashesCount();
+    /**
+     * <code>map&lt;string, string&gt; input_property_hashes = 3;</code>
+     */
+    boolean containsInputPropertyHashes(
+        java.lang.String key);
+    /**
+     * Use {@link #getInputPropertyHashesMap()} instead.
+     */
+    @java.lang.Deprecated
+    java.util.Map<java.lang.String, java.lang.String>
+    getInputPropertyHashes();
+    /**
+     * <code>map&lt;string, string&gt; input_property_hashes = 3;</code>
+     */
+    java.util.Map<java.lang.String, java.lang.String>
+    getInputPropertyHashesMap();
+    /**
+     * <code>map&lt;string, string&gt; input_property_hashes = 3;</code>
+     */
+    /* nullable */
+java.lang.String getInputPropertyHashesOrDefault(
+        java.lang.String key,
+        /* nullable */
+java.lang.String defaultValue);
+    /**
+     * <code>map&lt;string, string&gt; input_property_hashes = 3;</code>
+     */
+    java.lang.String getInputPropertyHashesOrThrow(
+        java.lang.String key);
+
+    /**
+     * <code>map&lt;string, string&gt; input_file_hashes = 4;</code>
+     */
+    int getInputFileHashesCount();
+    /**
+     * <code>map&lt;string, string&gt; input_file_hashes = 4;</code>
+     */
+    boolean containsInputFileHashes(
+        java.lang.String key);
+    /**
+     * Use {@link #getInputFileHashesMap()} instead.
+     */
+    @java.lang.Deprecated
+    java.util.Map<java.lang.String, java.lang.String>
+    getInputFileHashes();
+    /**
+     * <code>map&lt;string, string&gt; input_file_hashes = 4;</code>
+     */
+    java.util.Map<java.lang.String, java.lang.String>
+    getInputFileHashesMap();
+    /**
+     * <code>map&lt;string, string&gt; input_file_hashes = 4;</code>
+     */
+    /* nullable */
+java.lang.String getInputFileHashesOrDefault(
+        java.lang.String key,
+        /* nullable */
+java.lang.String defaultValue);
+    /**
+     * <code>map&lt;string, string&gt; input_file_hashes = 4;</code>
+     */
+    java.lang.String getInputFileHashesOrThrow(
+        java.lang.String key);
+
+    /**
+     * <code>repeated string output_property_names = 5;</code>
+     * @return A list containing the outputPropertyNames.
+     */
+    java.util.List<java.lang.String>
+        getOutputPropertyNamesList();
+    /**
+     * <code>repeated string output_property_names = 5;</code>
+     * @return The count of outputPropertyNames.
+     */
+    int getOutputPropertyNamesCount();
+    /**
+     * <code>repeated string output_property_names = 5;</code>
+     * @param index The index of the element to return.
+     * @return The outputPropertyNames at the given index.
+     */
+    java.lang.String getOutputPropertyNames(int index);
+    /**
+     * <code>repeated string output_property_names = 5;</code>
+     * @param index The index of the value to return.
+     * @return The bytes of the outputPropertyNames at the given index.
+     */
+    com.google.protobuf.ByteString
+        getOutputPropertyNamesBytes(int index);
+  }
+  /**
+   * Protobuf type {@code gradle.substrate.v1.ComputeCacheKeyRequest}
+   */
+  public static final class ComputeCacheKeyRequest extends
+      com.google.protobuf.GeneratedMessage implements
+      // @@protoc_insertion_point(message_implements:gradle.substrate.v1.ComputeCacheKeyRequest)
+      ComputeCacheKeyRequestOrBuilder {
+  private static final long serialVersionUID = 0L;
+    static {
+      com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
+        com.google.protobuf.RuntimeVersion.RuntimeDomain.PUBLIC,
+        /* major= */ 4,
+        /* minor= */ 34,
+        /* patch= */ 0,
+        /* suffix= */ "",
+        "ComputeCacheKeyRequest");
+    }
+    // Use ComputeCacheKeyRequest.newBuilder() to construct.
+    private ComputeCacheKeyRequest(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      super(builder);
+    }
+    private ComputeCacheKeyRequest() {
+      workIdentity_ = "";
+      implementationHash_ = "";
+      outputPropertyNames_ =
+          com.google.protobuf.LazyStringArrayList.emptyList();
+    }
+
+    public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_descriptor;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Descriptors.Descriptor getDescriptorForType() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_descriptor;
+    }
+
+    @SuppressWarnings({"rawtypes"})
+    @java.lang.Override
+    protected com.google.protobuf.MapFieldReflectionAccessor internalGetMapFieldReflection(
+        int number) {
+      switch (number) {
+        case 3:
+          return internalGetInputPropertyHashes();
+        case 4:
+          return internalGetInputFileHashes();
+        default:
+          throw new RuntimeException(
+              "Invalid map field number: " + number);
+      }
+    }
+    @java.lang.Override
+    protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_fieldAccessorTable
+          .ensureFieldAccessorsInitialized(
+              gradle.substrate.v1.Substrate.ComputeCacheKeyRequest.class, gradle.substrate.v1.Substrate.ComputeCacheKeyRequest.Builder.class);
+    }
+
+    public static final int WORK_IDENTITY_FIELD_NUMBER = 1;
+    @SuppressWarnings("serial")
+    private volatile java.lang.Object workIdentity_ = "";
+    /**
+     * <code>string work_identity = 1;</code>
+     * @return The workIdentity.
+     */
+    @java.lang.Override
+    public java.lang.String getWorkIdentity() {
+      java.lang.Object ref = workIdentity_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        workIdentity_ = s;
+        return s;
+      }
+    }
+    /**
+     * <code>string work_identity = 1;</code>
+     * @return The bytes for workIdentity.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getWorkIdentityBytes() {
+      java.lang.Object ref = workIdentity_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        workIdentity_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    public static final int IMPLEMENTATION_HASH_FIELD_NUMBER = 2;
+    @SuppressWarnings("serial")
+    private volatile java.lang.Object implementationHash_ = "";
+    /**
+     * <code>string implementation_hash = 2;</code>
+     * @return The implementationHash.
+     */
+    @java.lang.Override
+    public java.lang.String getImplementationHash() {
+      java.lang.Object ref = implementationHash_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        implementationHash_ = s;
+        return s;
+      }
+    }
+    /**
+     * <code>string implementation_hash = 2;</code>
+     * @return The bytes for implementationHash.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getImplementationHashBytes() {
+      java.lang.Object ref = implementationHash_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        implementationHash_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    public static final int INPUT_PROPERTY_HASHES_FIELD_NUMBER = 3;
+    private static final class InputPropertyHashesDefaultEntryHolder {
+      static final com.google.protobuf.MapEntry<
+          java.lang.String, java.lang.String> defaultEntry =
+              com.google.protobuf.MapEntry
+              .<java.lang.String, java.lang.String>newDefaultInstance(
+                  gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_InputPropertyHashesEntry_descriptor, 
+                  com.google.protobuf.WireFormat.FieldType.STRING,
+                  "",
+                  com.google.protobuf.WireFormat.FieldType.STRING,
+                  "");
+    }
+    @SuppressWarnings("serial")
+    private com.google.protobuf.MapField<
+        java.lang.String, java.lang.String> inputPropertyHashes_;
+    private com.google.protobuf.MapField<java.lang.String, java.lang.String>
+    internalGetInputPropertyHashes() {
+      if (inputPropertyHashes_ == null) {
+        return com.google.protobuf.MapField.emptyMapField(
+            InputPropertyHashesDefaultEntryHolder.defaultEntry);
+      }
+      return inputPropertyHashes_;
+    }
+    public int getInputPropertyHashesCount() {
+      return internalGetInputPropertyHashes().getMap().size();
+    }
+    /**
+     * <code>map&lt;string, string&gt; input_property_hashes = 3;</code>
+     */
+    @java.lang.Override
+    public boolean containsInputPropertyHashes(
+        java.lang.String key) {
+      if (key == null) { throw new NullPointerException("map key"); }
+      return internalGetInputPropertyHashes().getMap().containsKey(key);
+    }
+    /**
+     * Use {@link #getInputPropertyHashesMap()} instead.
+     */
+    @java.lang.Override
+    @java.lang.Deprecated
+    public java.util.Map<java.lang.String, java.lang.String> getInputPropertyHashes() {
+      return getInputPropertyHashesMap();
+    }
+    /**
+     * <code>map&lt;string, string&gt; input_property_hashes = 3;</code>
+     */
+    @java.lang.Override
+    public java.util.Map<java.lang.String, java.lang.String> getInputPropertyHashesMap() {
+      return internalGetInputPropertyHashes().getMap();
+    }
+    /**
+     * <code>map&lt;string, string&gt; input_property_hashes = 3;</code>
+     */
+    @java.lang.Override
+    public /* nullable */
+java.lang.String getInputPropertyHashesOrDefault(
+        java.lang.String key,
+        /* nullable */
+java.lang.String defaultValue) {
+      if (key == null) { throw new NullPointerException("map key"); }
+      java.util.Map<java.lang.String, java.lang.String> map =
+          internalGetInputPropertyHashes().getMap();
+      return map.containsKey(key) ? map.get(key) : defaultValue;
+    }
+    /**
+     * <code>map&lt;string, string&gt; input_property_hashes = 3;</code>
+     */
+    @java.lang.Override
+    public java.lang.String getInputPropertyHashesOrThrow(
+        java.lang.String key) {
+      if (key == null) { throw new NullPointerException("map key"); }
+      java.util.Map<java.lang.String, java.lang.String> map =
+          internalGetInputPropertyHashes().getMap();
+      if (!map.containsKey(key)) {
+        throw new java.lang.IllegalArgumentException();
+      }
+      return map.get(key);
+    }
+
+    public static final int INPUT_FILE_HASHES_FIELD_NUMBER = 4;
+    private static final class InputFileHashesDefaultEntryHolder {
+      static final com.google.protobuf.MapEntry<
+          java.lang.String, java.lang.String> defaultEntry =
+              com.google.protobuf.MapEntry
+              .<java.lang.String, java.lang.String>newDefaultInstance(
+                  gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_InputFileHashesEntry_descriptor, 
+                  com.google.protobuf.WireFormat.FieldType.STRING,
+                  "",
+                  com.google.protobuf.WireFormat.FieldType.STRING,
+                  "");
+    }
+    @SuppressWarnings("serial")
+    private com.google.protobuf.MapField<
+        java.lang.String, java.lang.String> inputFileHashes_;
+    private com.google.protobuf.MapField<java.lang.String, java.lang.String>
+    internalGetInputFileHashes() {
+      if (inputFileHashes_ == null) {
+        return com.google.protobuf.MapField.emptyMapField(
+            InputFileHashesDefaultEntryHolder.defaultEntry);
+      }
+      return inputFileHashes_;
+    }
+    public int getInputFileHashesCount() {
+      return internalGetInputFileHashes().getMap().size();
+    }
+    /**
+     * <code>map&lt;string, string&gt; input_file_hashes = 4;</code>
+     */
+    @java.lang.Override
+    public boolean containsInputFileHashes(
+        java.lang.String key) {
+      if (key == null) { throw new NullPointerException("map key"); }
+      return internalGetInputFileHashes().getMap().containsKey(key);
+    }
+    /**
+     * Use {@link #getInputFileHashesMap()} instead.
+     */
+    @java.lang.Override
+    @java.lang.Deprecated
+    public java.util.Map<java.lang.String, java.lang.String> getInputFileHashes() {
+      return getInputFileHashesMap();
+    }
+    /**
+     * <code>map&lt;string, string&gt; input_file_hashes = 4;</code>
+     */
+    @java.lang.Override
+    public java.util.Map<java.lang.String, java.lang.String> getInputFileHashesMap() {
+      return internalGetInputFileHashes().getMap();
+    }
+    /**
+     * <code>map&lt;string, string&gt; input_file_hashes = 4;</code>
+     */
+    @java.lang.Override
+    public /* nullable */
+java.lang.String getInputFileHashesOrDefault(
+        java.lang.String key,
+        /* nullable */
+java.lang.String defaultValue) {
+      if (key == null) { throw new NullPointerException("map key"); }
+      java.util.Map<java.lang.String, java.lang.String> map =
+          internalGetInputFileHashes().getMap();
+      return map.containsKey(key) ? map.get(key) : defaultValue;
+    }
+    /**
+     * <code>map&lt;string, string&gt; input_file_hashes = 4;</code>
+     */
+    @java.lang.Override
+    public java.lang.String getInputFileHashesOrThrow(
+        java.lang.String key) {
+      if (key == null) { throw new NullPointerException("map key"); }
+      java.util.Map<java.lang.String, java.lang.String> map =
+          internalGetInputFileHashes().getMap();
+      if (!map.containsKey(key)) {
+        throw new java.lang.IllegalArgumentException();
+      }
+      return map.get(key);
+    }
+
+    public static final int OUTPUT_PROPERTY_NAMES_FIELD_NUMBER = 5;
+    @SuppressWarnings("serial")
+    private com.google.protobuf.LazyStringArrayList outputPropertyNames_ =
+        com.google.protobuf.LazyStringArrayList.emptyList();
+    /**
+     * <code>repeated string output_property_names = 5;</code>
+     * @return A list containing the outputPropertyNames.
+     */
+    public com.google.protobuf.ProtocolStringList
+        getOutputPropertyNamesList() {
+      return outputPropertyNames_;
+    }
+    /**
+     * <code>repeated string output_property_names = 5;</code>
+     * @return The count of outputPropertyNames.
+     */
+    public int getOutputPropertyNamesCount() {
+      return outputPropertyNames_.size();
+    }
+    /**
+     * <code>repeated string output_property_names = 5;</code>
+     * @param index The index of the element to return.
+     * @return The outputPropertyNames at the given index.
+     */
+    public java.lang.String getOutputPropertyNames(int index) {
+      return outputPropertyNames_.get(index);
+    }
+    /**
+     * <code>repeated string output_property_names = 5;</code>
+     * @param index The index of the value to return.
+     * @return The bytes of the outputPropertyNames at the given index.
+     */
+    public com.google.protobuf.ByteString
+        getOutputPropertyNamesBytes(int index) {
+      return outputPropertyNames_.getByteString(index);
+    }
+
+    private byte memoizedIsInitialized = -1;
+    @java.lang.Override
+    public final boolean isInitialized() {
+      byte isInitialized = memoizedIsInitialized;
+      if (isInitialized == 1) return true;
+      if (isInitialized == 0) return false;
+
+      memoizedIsInitialized = 1;
+      return true;
+    }
+
+    @java.lang.Override
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+                        throws java.io.IOException {
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(workIdentity_)) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 1, workIdentity_);
+      }
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(implementationHash_)) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 2, implementationHash_);
+      }
+      com.google.protobuf.GeneratedMessage
+        .serializeStringMapTo(
+          output,
+          internalGetInputPropertyHashes(),
+          InputPropertyHashesDefaultEntryHolder.defaultEntry,
+          3);
+      com.google.protobuf.GeneratedMessage
+        .serializeStringMapTo(
+          output,
+          internalGetInputFileHashes(),
+          InputFileHashesDefaultEntryHolder.defaultEntry,
+          4);
+      for (int i = 0; i < outputPropertyNames_.size(); i++) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 5, outputPropertyNames_.getRaw(i));
+      }
+      getUnknownFields().writeTo(output);
+    }
+
+    @java.lang.Override
+    public int getSerializedSize() {
+      int size = memoizedSize;
+      if (size != -1) return size;
+
+      size = 0;
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(workIdentity_)) {
+        size += com.google.protobuf.GeneratedMessage.computeStringSize(1, workIdentity_);
+      }
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(implementationHash_)) {
+        size += com.google.protobuf.GeneratedMessage.computeStringSize(2, implementationHash_);
+      }
+      for (java.util.Map.Entry<java.lang.String, java.lang.String> entry
+           : internalGetInputPropertyHashes().getMap().entrySet()) {
+        com.google.protobuf.MapEntry<java.lang.String, java.lang.String>
+        inputPropertyHashes__ = InputPropertyHashesDefaultEntryHolder.defaultEntry.newBuilderForType()
+            .setKey(entry.getKey())
+            .setValue(entry.getValue())
+            .buildPartial();
+        size += com.google.protobuf.CodedOutputStream
+            .computeMessageSize(3, inputPropertyHashes__);
+      }
+      for (java.util.Map.Entry<java.lang.String, java.lang.String> entry
+           : internalGetInputFileHashes().getMap().entrySet()) {
+        com.google.protobuf.MapEntry<java.lang.String, java.lang.String>
+        inputFileHashes__ = InputFileHashesDefaultEntryHolder.defaultEntry.newBuilderForType()
+            .setKey(entry.getKey())
+            .setValue(entry.getValue())
+            .buildPartial();
+        size += com.google.protobuf.CodedOutputStream
+            .computeMessageSize(4, inputFileHashes__);
+      }
+      {
+        int dataSize = 0;
+        for (int i = 0; i < outputPropertyNames_.size(); i++) {
+          dataSize += computeStringSizeNoTag(outputPropertyNames_.getRaw(i));
+        }
+        size += dataSize;
+        size += 1 * getOutputPropertyNamesList().size();
+      }
+      size += getUnknownFields().getSerializedSize();
+      memoizedSize = size;
+      return size;
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+      if (obj == this) {
+       return true;
+      }
+      if (!(obj instanceof gradle.substrate.v1.Substrate.ComputeCacheKeyRequest)) {
+        return super.equals(obj);
+      }
+      gradle.substrate.v1.Substrate.ComputeCacheKeyRequest other = (gradle.substrate.v1.Substrate.ComputeCacheKeyRequest) obj;
+
+      if (!getWorkIdentity()
+          .equals(other.getWorkIdentity())) return false;
+      if (!getImplementationHash()
+          .equals(other.getImplementationHash())) return false;
+      if (!internalGetInputPropertyHashes().equals(
+          other.internalGetInputPropertyHashes())) return false;
+      if (!internalGetInputFileHashes().equals(
+          other.internalGetInputFileHashes())) return false;
+      if (!getOutputPropertyNamesList()
+          .equals(other.getOutputPropertyNamesList())) return false;
+      if (!getUnknownFields().equals(other.getUnknownFields())) return false;
+      return true;
+    }
+
+    @java.lang.Override
+    public int hashCode() {
+      if (memoizedHashCode != 0) {
+        return memoizedHashCode;
+      }
+      int hash = 41;
+      hash = (19 * hash) + getDescriptor().hashCode();
+      hash = (37 * hash) + WORK_IDENTITY_FIELD_NUMBER;
+      hash = (53 * hash) + getWorkIdentity().hashCode();
+      hash = (37 * hash) + IMPLEMENTATION_HASH_FIELD_NUMBER;
+      hash = (53 * hash) + getImplementationHash().hashCode();
+      if (!internalGetInputPropertyHashes().getMap().isEmpty()) {
+        hash = (37 * hash) + INPUT_PROPERTY_HASHES_FIELD_NUMBER;
+        hash = (53 * hash) + internalGetInputPropertyHashes().hashCode();
+      }
+      if (!internalGetInputFileHashes().getMap().isEmpty()) {
+        hash = (37 * hash) + INPUT_FILE_HASHES_FIELD_NUMBER;
+        hash = (53 * hash) + internalGetInputFileHashes().hashCode();
+      }
+      if (getOutputPropertyNamesCount() > 0) {
+        hash = (37 * hash) + OUTPUT_PROPERTY_NAMES_FIELD_NUMBER;
+        hash = (53 * hash) + getOutputPropertyNamesList().hashCode();
+      }
+      hash = (29 * hash) + getUnknownFields().hashCode();
+      memoizedHashCode = hash;
+      return hash;
+    }
+
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyRequest parseFrom(
+        java.nio.ByteBuffer data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyRequest parseFrom(
+        java.nio.ByteBuffer data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyRequest parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyRequest parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyRequest parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyRequest parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyRequest parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyRequest parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyRequest parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input);
+    }
+
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyRequest parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyRequest parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyRequest parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    @java.lang.Override
+    public Builder newBuilderForType() { return newBuilder(); }
+    public static Builder newBuilder() {
+      return DEFAULT_INSTANCE.toBuilder();
+    }
+    public static Builder newBuilder(gradle.substrate.v1.Substrate.ComputeCacheKeyRequest prototype) {
+      return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
+    }
+    @java.lang.Override
+    public Builder toBuilder() {
+      return this == DEFAULT_INSTANCE
+          ? new Builder() : new Builder().mergeFrom(this);
+    }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+      Builder builder = new Builder(parent);
+      return builder;
+    }
+    /**
+     * Protobuf type {@code gradle.substrate.v1.ComputeCacheKeyRequest}
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessage.Builder<Builder> implements
+        // @@protoc_insertion_point(builder_implements:gradle.substrate.v1.ComputeCacheKeyRequest)
+        gradle.substrate.v1.Substrate.ComputeCacheKeyRequestOrBuilder {
+      public static final com.google.protobuf.Descriptors.Descriptor
+          getDescriptor() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_descriptor;
+      }
+
+      @SuppressWarnings({"rawtypes"})
+      protected com.google.protobuf.MapFieldReflectionAccessor internalGetMapFieldReflection(
+          int number) {
+        switch (number) {
+          case 3:
+            return internalGetInputPropertyHashes();
+          case 4:
+            return internalGetInputFileHashes();
+          default:
+            throw new RuntimeException(
+                "Invalid map field number: " + number);
+        }
+      }
+      @SuppressWarnings({"rawtypes"})
+      protected com.google.protobuf.MapFieldReflectionAccessor internalGetMutableMapFieldReflection(
+          int number) {
+        switch (number) {
+          case 3:
+            return internalGetMutableInputPropertyHashes();
+          case 4:
+            return internalGetMutableInputFileHashes();
+          default:
+            throw new RuntimeException(
+                "Invalid map field number: " + number);
+        }
+      }
+      @java.lang.Override
+      protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+          internalGetFieldAccessorTable() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                gradle.substrate.v1.Substrate.ComputeCacheKeyRequest.class, gradle.substrate.v1.Substrate.ComputeCacheKeyRequest.Builder.class);
+      }
+
+      // Construct using gradle.substrate.v1.Substrate.ComputeCacheKeyRequest.newBuilder()
+      private Builder() {
+
+      }
+
+      private Builder(
+          com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+        super(parent);
+
+      }
+      @java.lang.Override
+      public Builder clear() {
+        super.clear();
+        bitField0_ = 0;
+        workIdentity_ = "";
+        implementationHash_ = "";
+        internalGetMutableInputPropertyHashes().clear();
+        internalGetMutableInputFileHashes().clear();
+        outputPropertyNames_ =
+            com.google.protobuf.LazyStringArrayList.emptyList();
+        return this;
+      }
+
+      @java.lang.Override
+      public com.google.protobuf.Descriptors.Descriptor
+          getDescriptorForType() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_descriptor;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.ComputeCacheKeyRequest getDefaultInstanceForType() {
+        return gradle.substrate.v1.Substrate.ComputeCacheKeyRequest.getDefaultInstance();
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.ComputeCacheKeyRequest build() {
+        gradle.substrate.v1.Substrate.ComputeCacheKeyRequest result = buildPartial();
+        if (!result.isInitialized()) {
+          throw newUninitializedMessageException(result);
+        }
+        return result;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.ComputeCacheKeyRequest buildPartial() {
+        gradle.substrate.v1.Substrate.ComputeCacheKeyRequest result = new gradle.substrate.v1.Substrate.ComputeCacheKeyRequest(this);
+        if (bitField0_ != 0) { buildPartial0(result); }
+        onBuilt();
+        return result;
+      }
+
+      private void buildPartial0(gradle.substrate.v1.Substrate.ComputeCacheKeyRequest result) {
+        int from_bitField0_ = bitField0_;
+        if (((from_bitField0_ & 0x00000001) != 0)) {
+          result.workIdentity_ = workIdentity_;
+        }
+        if (((from_bitField0_ & 0x00000002) != 0)) {
+          result.implementationHash_ = implementationHash_;
+        }
+        if (((from_bitField0_ & 0x00000004) != 0)) {
+          result.inputPropertyHashes_ = internalGetInputPropertyHashes();
+          result.inputPropertyHashes_.makeImmutable();
+        }
+        if (((from_bitField0_ & 0x00000008) != 0)) {
+          result.inputFileHashes_ = internalGetInputFileHashes();
+          result.inputFileHashes_.makeImmutable();
+        }
+        if (((from_bitField0_ & 0x00000010) != 0)) {
+          outputPropertyNames_.makeImmutable();
+          result.outputPropertyNames_ = outputPropertyNames_;
+        }
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(com.google.protobuf.Message other) {
+        if (other instanceof gradle.substrate.v1.Substrate.ComputeCacheKeyRequest) {
+          return mergeFrom((gradle.substrate.v1.Substrate.ComputeCacheKeyRequest)other);
+        } else {
+          super.mergeFrom(other);
+          return this;
+        }
+      }
+
+      public Builder mergeFrom(gradle.substrate.v1.Substrate.ComputeCacheKeyRequest other) {
+        if (other == gradle.substrate.v1.Substrate.ComputeCacheKeyRequest.getDefaultInstance()) return this;
+        if (!other.getWorkIdentity().isEmpty()) {
+          workIdentity_ = other.workIdentity_;
+          bitField0_ |= 0x00000001;
+          onChanged();
+        }
+        if (!other.getImplementationHash().isEmpty()) {
+          implementationHash_ = other.implementationHash_;
+          bitField0_ |= 0x00000002;
+          onChanged();
+        }
+        internalGetMutableInputPropertyHashes().mergeFrom(
+            other.internalGetInputPropertyHashes());
+        bitField0_ |= 0x00000004;
+        internalGetMutableInputFileHashes().mergeFrom(
+            other.internalGetInputFileHashes());
+        bitField0_ |= 0x00000008;
+        if (!other.outputPropertyNames_.isEmpty()) {
+          if (outputPropertyNames_.isEmpty()) {
+            outputPropertyNames_ = other.outputPropertyNames_;
+            bitField0_ |= 0x00000010;
+          } else {
+            ensureOutputPropertyNamesIsMutable();
+            outputPropertyNames_.addAll(other.outputPropertyNames_);
+          }
+          onChanged();
+        }
+        this.mergeUnknownFields(other.getUnknownFields());
+        onChanged();
+        return this;
+      }
+
+      @java.lang.Override
+      public final boolean isInitialized() {
+        return true;
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws java.io.IOException {
+        if (extensionRegistry == null) {
+          throw new java.lang.NullPointerException();
+        }
+        try {
+          boolean done = false;
+          while (!done) {
+            int tag = input.readTag();
+            switch (tag) {
+              case 0:
+                done = true;
+                break;
+              case 10: {
+                workIdentity_ = input.readStringRequireUtf8();
+                bitField0_ |= 0x00000001;
+                break;
+              } // case 10
+              case 18: {
+                implementationHash_ = input.readStringRequireUtf8();
+                bitField0_ |= 0x00000002;
+                break;
+              } // case 18
+              case 26: {
+                com.google.protobuf.MapEntry<java.lang.String, java.lang.String>
+                inputPropertyHashes__ = input.readMessage(
+                    InputPropertyHashesDefaultEntryHolder.defaultEntry.getParserForType(), extensionRegistry);
+                internalGetMutableInputPropertyHashes().getMutableMap().put(
+                    inputPropertyHashes__.getKey(), inputPropertyHashes__.getValue());
+                bitField0_ |= 0x00000004;
+                break;
+              } // case 26
+              case 34: {
+                com.google.protobuf.MapEntry<java.lang.String, java.lang.String>
+                inputFileHashes__ = input.readMessage(
+                    InputFileHashesDefaultEntryHolder.defaultEntry.getParserForType(), extensionRegistry);
+                internalGetMutableInputFileHashes().getMutableMap().put(
+                    inputFileHashes__.getKey(), inputFileHashes__.getValue());
+                bitField0_ |= 0x00000008;
+                break;
+              } // case 34
+              case 42: {
+                ensureOutputPropertyNamesIsMutable();
+                outputPropertyNames_.add(input.readStringRequireUtf8());
+                break;
+              } // case 42
+              default: {
+                if (!super.parseUnknownField(input, extensionRegistry, tag)) {
+                  done = true; // was an endgroup tag
+                }
+                break;
+              } // default:
+            } // switch (tag)
+          } // while (!done)
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.unwrapIOException();
+        } finally {
+          onChanged();
+        } // finally
+        return this;
+      }
+      private int bitField0_;
+
+      private java.lang.Object workIdentity_ = "";
+      /**
+       * <code>string work_identity = 1;</code>
+       * @return The workIdentity.
+       */
+      public java.lang.String getWorkIdentity() {
+        java.lang.Object ref = workIdentity_;
+        if (!(ref instanceof java.lang.String)) {
+          com.google.protobuf.ByteString bs =
+              (com.google.protobuf.ByteString) ref;
+          java.lang.String s = bs.toStringUtf8();
+          workIdentity_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <code>string work_identity = 1;</code>
+       * @return The bytes for workIdentity.
+       */
+      public com.google.protobuf.ByteString
+          getWorkIdentityBytes() {
+        java.lang.Object ref = workIdentity_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          workIdentity_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <code>string work_identity = 1;</code>
+       * @param value The workIdentity to set.
+       * @return This builder for chaining.
+       */
+      public Builder setWorkIdentity(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        workIdentity_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string work_identity = 1;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearWorkIdentity() {
+        workIdentity_ = getDefaultInstance().getWorkIdentity();
+        bitField0_ = (bitField0_ & ~0x00000001);
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string work_identity = 1;</code>
+       * @param value The bytes for workIdentity to set.
+       * @return This builder for chaining.
+       */
+      public Builder setWorkIdentityBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        workIdentity_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+
+      private java.lang.Object implementationHash_ = "";
+      /**
+       * <code>string implementation_hash = 2;</code>
+       * @return The implementationHash.
+       */
+      public java.lang.String getImplementationHash() {
+        java.lang.Object ref = implementationHash_;
+        if (!(ref instanceof java.lang.String)) {
+          com.google.protobuf.ByteString bs =
+              (com.google.protobuf.ByteString) ref;
+          java.lang.String s = bs.toStringUtf8();
+          implementationHash_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <code>string implementation_hash = 2;</code>
+       * @return The bytes for implementationHash.
+       */
+      public com.google.protobuf.ByteString
+          getImplementationHashBytes() {
+        java.lang.Object ref = implementationHash_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          implementationHash_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <code>string implementation_hash = 2;</code>
+       * @param value The implementationHash to set.
+       * @return This builder for chaining.
+       */
+      public Builder setImplementationHash(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        implementationHash_ = value;
+        bitField0_ |= 0x00000002;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string implementation_hash = 2;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearImplementationHash() {
+        implementationHash_ = getDefaultInstance().getImplementationHash();
+        bitField0_ = (bitField0_ & ~0x00000002);
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string implementation_hash = 2;</code>
+       * @param value The bytes for implementationHash to set.
+       * @return This builder for chaining.
+       */
+      public Builder setImplementationHashBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        implementationHash_ = value;
+        bitField0_ |= 0x00000002;
+        onChanged();
+        return this;
+      }
+
+      private com.google.protobuf.MapField<
+          java.lang.String, java.lang.String> inputPropertyHashes_;
+      private com.google.protobuf.MapField<java.lang.String, java.lang.String>
+          internalGetInputPropertyHashes() {
+        if (inputPropertyHashes_ == null) {
+          return com.google.protobuf.MapField.emptyMapField(
+              InputPropertyHashesDefaultEntryHolder.defaultEntry);
+        }
+        return inputPropertyHashes_;
+      }
+      private com.google.protobuf.MapField<java.lang.String, java.lang.String>
+          internalGetMutableInputPropertyHashes() {
+        if (inputPropertyHashes_ == null) {
+          inputPropertyHashes_ = com.google.protobuf.MapField.newMapField(
+              InputPropertyHashesDefaultEntryHolder.defaultEntry);
+        }
+        if (!inputPropertyHashes_.isMutable()) {
+          inputPropertyHashes_ = inputPropertyHashes_.copy();
+        }
+        bitField0_ |= 0x00000004;
+        onChanged();
+        return inputPropertyHashes_;
+      }
+      public int getInputPropertyHashesCount() {
+        return internalGetInputPropertyHashes().getMap().size();
+      }
+      /**
+       * <code>map&lt;string, string&gt; input_property_hashes = 3;</code>
+       */
+      @java.lang.Override
+      public boolean containsInputPropertyHashes(
+          java.lang.String key) {
+        if (key == null) { throw new NullPointerException("map key"); }
+        return internalGetInputPropertyHashes().getMap().containsKey(key);
+      }
+      /**
+       * Use {@link #getInputPropertyHashesMap()} instead.
+       */
+      @java.lang.Override
+      @java.lang.Deprecated
+      public java.util.Map<java.lang.String, java.lang.String> getInputPropertyHashes() {
+        return getInputPropertyHashesMap();
+      }
+      /**
+       * <code>map&lt;string, string&gt; input_property_hashes = 3;</code>
+       */
+      @java.lang.Override
+      public java.util.Map<java.lang.String, java.lang.String> getInputPropertyHashesMap() {
+        return internalGetInputPropertyHashes().getMap();
+      }
+      /**
+       * <code>map&lt;string, string&gt; input_property_hashes = 3;</code>
+       */
+      @java.lang.Override
+      public /* nullable */
+java.lang.String getInputPropertyHashesOrDefault(
+          java.lang.String key,
+          /* nullable */
+java.lang.String defaultValue) {
+        if (key == null) { throw new NullPointerException("map key"); }
+        java.util.Map<java.lang.String, java.lang.String> map =
+            internalGetInputPropertyHashes().getMap();
+        return map.containsKey(key) ? map.get(key) : defaultValue;
+      }
+      /**
+       * <code>map&lt;string, string&gt; input_property_hashes = 3;</code>
+       */
+      @java.lang.Override
+      public java.lang.String getInputPropertyHashesOrThrow(
+          java.lang.String key) {
+        if (key == null) { throw new NullPointerException("map key"); }
+        java.util.Map<java.lang.String, java.lang.String> map =
+            internalGetInputPropertyHashes().getMap();
+        if (!map.containsKey(key)) {
+          throw new java.lang.IllegalArgumentException();
+        }
+        return map.get(key);
+      }
+      public Builder clearInputPropertyHashes() {
+        bitField0_ = (bitField0_ & ~0x00000004);
+        internalGetMutableInputPropertyHashes().getMutableMap()
+            .clear();
+        return this;
+      }
+      /**
+       * <code>map&lt;string, string&gt; input_property_hashes = 3;</code>
+       */
+      public Builder removeInputPropertyHashes(
+          java.lang.String key) {
+        if (key == null) { throw new NullPointerException("map key"); }
+        internalGetMutableInputPropertyHashes().getMutableMap()
+            .remove(key);
+        return this;
+      }
+      /**
+       * Use alternate mutation accessors instead.
+       */
+      @java.lang.Deprecated
+      public java.util.Map<java.lang.String, java.lang.String>
+          getMutableInputPropertyHashes() {
+        bitField0_ |= 0x00000004;
+        return internalGetMutableInputPropertyHashes().getMutableMap();
+      }
+      /**
+       * <code>map&lt;string, string&gt; input_property_hashes = 3;</code>
+       */
+      public Builder putInputPropertyHashes(
+          java.lang.String key,
+          java.lang.String value) {
+        if (key == null) { throw new NullPointerException("map key"); }
+        if (value == null) { throw new NullPointerException("map value"); }
+        internalGetMutableInputPropertyHashes().getMutableMap()
+            .put(key, value);
+        bitField0_ |= 0x00000004;
+        return this;
+      }
+      /**
+       * <code>map&lt;string, string&gt; input_property_hashes = 3;</code>
+       */
+      public Builder putAllInputPropertyHashes(
+          java.util.Map<java.lang.String, java.lang.String> values) {
+        internalGetMutableInputPropertyHashes().getMutableMap()
+            .putAll(values);
+        bitField0_ |= 0x00000004;
+        return this;
+      }
+
+      private com.google.protobuf.MapField<
+          java.lang.String, java.lang.String> inputFileHashes_;
+      private com.google.protobuf.MapField<java.lang.String, java.lang.String>
+          internalGetInputFileHashes() {
+        if (inputFileHashes_ == null) {
+          return com.google.protobuf.MapField.emptyMapField(
+              InputFileHashesDefaultEntryHolder.defaultEntry);
+        }
+        return inputFileHashes_;
+      }
+      private com.google.protobuf.MapField<java.lang.String, java.lang.String>
+          internalGetMutableInputFileHashes() {
+        if (inputFileHashes_ == null) {
+          inputFileHashes_ = com.google.protobuf.MapField.newMapField(
+              InputFileHashesDefaultEntryHolder.defaultEntry);
+        }
+        if (!inputFileHashes_.isMutable()) {
+          inputFileHashes_ = inputFileHashes_.copy();
+        }
+        bitField0_ |= 0x00000008;
+        onChanged();
+        return inputFileHashes_;
+      }
+      public int getInputFileHashesCount() {
+        return internalGetInputFileHashes().getMap().size();
+      }
+      /**
+       * <code>map&lt;string, string&gt; input_file_hashes = 4;</code>
+       */
+      @java.lang.Override
+      public boolean containsInputFileHashes(
+          java.lang.String key) {
+        if (key == null) { throw new NullPointerException("map key"); }
+        return internalGetInputFileHashes().getMap().containsKey(key);
+      }
+      /**
+       * Use {@link #getInputFileHashesMap()} instead.
+       */
+      @java.lang.Override
+      @java.lang.Deprecated
+      public java.util.Map<java.lang.String, java.lang.String> getInputFileHashes() {
+        return getInputFileHashesMap();
+      }
+      /**
+       * <code>map&lt;string, string&gt; input_file_hashes = 4;</code>
+       */
+      @java.lang.Override
+      public java.util.Map<java.lang.String, java.lang.String> getInputFileHashesMap() {
+        return internalGetInputFileHashes().getMap();
+      }
+      /**
+       * <code>map&lt;string, string&gt; input_file_hashes = 4;</code>
+       */
+      @java.lang.Override
+      public /* nullable */
+java.lang.String getInputFileHashesOrDefault(
+          java.lang.String key,
+          /* nullable */
+java.lang.String defaultValue) {
+        if (key == null) { throw new NullPointerException("map key"); }
+        java.util.Map<java.lang.String, java.lang.String> map =
+            internalGetInputFileHashes().getMap();
+        return map.containsKey(key) ? map.get(key) : defaultValue;
+      }
+      /**
+       * <code>map&lt;string, string&gt; input_file_hashes = 4;</code>
+       */
+      @java.lang.Override
+      public java.lang.String getInputFileHashesOrThrow(
+          java.lang.String key) {
+        if (key == null) { throw new NullPointerException("map key"); }
+        java.util.Map<java.lang.String, java.lang.String> map =
+            internalGetInputFileHashes().getMap();
+        if (!map.containsKey(key)) {
+          throw new java.lang.IllegalArgumentException();
+        }
+        return map.get(key);
+      }
+      public Builder clearInputFileHashes() {
+        bitField0_ = (bitField0_ & ~0x00000008);
+        internalGetMutableInputFileHashes().getMutableMap()
+            .clear();
+        return this;
+      }
+      /**
+       * <code>map&lt;string, string&gt; input_file_hashes = 4;</code>
+       */
+      public Builder removeInputFileHashes(
+          java.lang.String key) {
+        if (key == null) { throw new NullPointerException("map key"); }
+        internalGetMutableInputFileHashes().getMutableMap()
+            .remove(key);
+        return this;
+      }
+      /**
+       * Use alternate mutation accessors instead.
+       */
+      @java.lang.Deprecated
+      public java.util.Map<java.lang.String, java.lang.String>
+          getMutableInputFileHashes() {
+        bitField0_ |= 0x00000008;
+        return internalGetMutableInputFileHashes().getMutableMap();
+      }
+      /**
+       * <code>map&lt;string, string&gt; input_file_hashes = 4;</code>
+       */
+      public Builder putInputFileHashes(
+          java.lang.String key,
+          java.lang.String value) {
+        if (key == null) { throw new NullPointerException("map key"); }
+        if (value == null) { throw new NullPointerException("map value"); }
+        internalGetMutableInputFileHashes().getMutableMap()
+            .put(key, value);
+        bitField0_ |= 0x00000008;
+        return this;
+      }
+      /**
+       * <code>map&lt;string, string&gt; input_file_hashes = 4;</code>
+       */
+      public Builder putAllInputFileHashes(
+          java.util.Map<java.lang.String, java.lang.String> values) {
+        internalGetMutableInputFileHashes().getMutableMap()
+            .putAll(values);
+        bitField0_ |= 0x00000008;
+        return this;
+      }
+
+      private com.google.protobuf.LazyStringArrayList outputPropertyNames_ =
+          com.google.protobuf.LazyStringArrayList.emptyList();
+      private void ensureOutputPropertyNamesIsMutable() {
+        if (!outputPropertyNames_.isModifiable()) {
+          outputPropertyNames_ = new com.google.protobuf.LazyStringArrayList(outputPropertyNames_);
+        }
+        bitField0_ |= 0x00000010;
+      }
+      /**
+       * <code>repeated string output_property_names = 5;</code>
+       * @return A list containing the outputPropertyNames.
+       */
+      public com.google.protobuf.ProtocolStringList
+          getOutputPropertyNamesList() {
+        outputPropertyNames_.makeImmutable();
+        return outputPropertyNames_;
+      }
+      /**
+       * <code>repeated string output_property_names = 5;</code>
+       * @return The count of outputPropertyNames.
+       */
+      public int getOutputPropertyNamesCount() {
+        return outputPropertyNames_.size();
+      }
+      /**
+       * <code>repeated string output_property_names = 5;</code>
+       * @param index The index of the element to return.
+       * @return The outputPropertyNames at the given index.
+       */
+      public java.lang.String getOutputPropertyNames(int index) {
+        return outputPropertyNames_.get(index);
+      }
+      /**
+       * <code>repeated string output_property_names = 5;</code>
+       * @param index The index of the value to return.
+       * @return The bytes of the outputPropertyNames at the given index.
+       */
+      public com.google.protobuf.ByteString
+          getOutputPropertyNamesBytes(int index) {
+        return outputPropertyNames_.getByteString(index);
+      }
+      /**
+       * <code>repeated string output_property_names = 5;</code>
+       * @param index The index to set the value at.
+       * @param value The outputPropertyNames to set.
+       * @return This builder for chaining.
+       */
+      public Builder setOutputPropertyNames(
+          int index, java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        ensureOutputPropertyNamesIsMutable();
+        outputPropertyNames_.set(index, value);
+        bitField0_ |= 0x00000010;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>repeated string output_property_names = 5;</code>
+       * @param value The outputPropertyNames to add.
+       * @return This builder for chaining.
+       */
+      public Builder addOutputPropertyNames(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        ensureOutputPropertyNamesIsMutable();
+        outputPropertyNames_.add(value);
+        bitField0_ |= 0x00000010;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>repeated string output_property_names = 5;</code>
+       * @param values The outputPropertyNames to add.
+       * @return This builder for chaining.
+       */
+      public Builder addAllOutputPropertyNames(
+          java.lang.Iterable<java.lang.String> values) {
+        ensureOutputPropertyNamesIsMutable();
+        com.google.protobuf.AbstractMessageLite.Builder.addAll(
+            values, outputPropertyNames_);
+        bitField0_ |= 0x00000010;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>repeated string output_property_names = 5;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearOutputPropertyNames() {
+        outputPropertyNames_ =
+          com.google.protobuf.LazyStringArrayList.emptyList();
+        bitField0_ = (bitField0_ & ~0x00000010);;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>repeated string output_property_names = 5;</code>
+       * @param value The bytes of the outputPropertyNames to add.
+       * @return This builder for chaining.
+       */
+      public Builder addOutputPropertyNamesBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        ensureOutputPropertyNamesIsMutable();
+        outputPropertyNames_.add(value);
+        bitField0_ |= 0x00000010;
+        onChanged();
+        return this;
+      }
+
+      // @@protoc_insertion_point(builder_scope:gradle.substrate.v1.ComputeCacheKeyRequest)
+    }
+
+    // @@protoc_insertion_point(class_scope:gradle.substrate.v1.ComputeCacheKeyRequest)
+    private static final gradle.substrate.v1.Substrate.ComputeCacheKeyRequest DEFAULT_INSTANCE;
+    static {
+      DEFAULT_INSTANCE = new gradle.substrate.v1.Substrate.ComputeCacheKeyRequest();
+    }
+
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyRequest getDefaultInstance() {
+      return DEFAULT_INSTANCE;
+    }
+
+    private static final com.google.protobuf.Parser<ComputeCacheKeyRequest>
+        PARSER = new com.google.protobuf.AbstractParser<ComputeCacheKeyRequest>() {
+      @java.lang.Override
+      public ComputeCacheKeyRequest parsePartialFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws com.google.protobuf.InvalidProtocolBufferException {
+        Builder builder = newBuilder();
+        try {
+          builder.mergeFrom(input, extensionRegistry);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.setUnfinishedMessage(builder.buildPartial());
+        } catch (com.google.protobuf.UninitializedMessageException e) {
+          throw e.asInvalidProtocolBufferException().setUnfinishedMessage(builder.buildPartial());
+        } catch (java.io.IOException e) {
+          throw new com.google.protobuf.InvalidProtocolBufferException(e)
+              .setUnfinishedMessage(builder.buildPartial());
+        }
+        return builder.buildPartial();
+      }
+    };
+
+    public static com.google.protobuf.Parser<ComputeCacheKeyRequest> parser() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<ComputeCacheKeyRequest> getParserForType() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.ComputeCacheKeyRequest getDefaultInstanceForType() {
+      return DEFAULT_INSTANCE;
+    }
+
+  }
+
+  public interface ComputeCacheKeyResponseOrBuilder extends
+      // @@protoc_insertion_point(interface_extends:gradle.substrate.v1.ComputeCacheKeyResponse)
+      com.google.protobuf.MessageOrBuilder {
+
+    /**
+     * <code>bytes cache_key = 1;</code>
+     * @return The cacheKey.
+     */
+    com.google.protobuf.ByteString getCacheKey();
+
+    /**
+     * <code>string cache_key_string = 2;</code>
+     * @return The cacheKeyString.
+     */
+    java.lang.String getCacheKeyString();
+    /**
+     * <code>string cache_key_string = 2;</code>
+     * @return The bytes for cacheKeyString.
+     */
+    com.google.protobuf.ByteString
+        getCacheKeyStringBytes();
+  }
+  /**
+   * Protobuf type {@code gradle.substrate.v1.ComputeCacheKeyResponse}
+   */
+  public static final class ComputeCacheKeyResponse extends
+      com.google.protobuf.GeneratedMessage implements
+      // @@protoc_insertion_point(message_implements:gradle.substrate.v1.ComputeCacheKeyResponse)
+      ComputeCacheKeyResponseOrBuilder {
+  private static final long serialVersionUID = 0L;
+    static {
+      com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
+        com.google.protobuf.RuntimeVersion.RuntimeDomain.PUBLIC,
+        /* major= */ 4,
+        /* minor= */ 34,
+        /* patch= */ 0,
+        /* suffix= */ "",
+        "ComputeCacheKeyResponse");
+    }
+    // Use ComputeCacheKeyResponse.newBuilder() to construct.
+    private ComputeCacheKeyResponse(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      super(builder);
+    }
+    private ComputeCacheKeyResponse() {
+      cacheKey_ = com.google.protobuf.ByteString.EMPTY;
+      cacheKeyString_ = "";
+    }
+
+    public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ComputeCacheKeyResponse_descriptor;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Descriptors.Descriptor getDescriptorForType() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ComputeCacheKeyResponse_descriptor;
+    }
+
+    @java.lang.Override
+    protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ComputeCacheKeyResponse_fieldAccessorTable
+          .ensureFieldAccessorsInitialized(
+              gradle.substrate.v1.Substrate.ComputeCacheKeyResponse.class, gradle.substrate.v1.Substrate.ComputeCacheKeyResponse.Builder.class);
+    }
+
+    public static final int CACHE_KEY_FIELD_NUMBER = 1;
+    private com.google.protobuf.ByteString cacheKey_ = com.google.protobuf.ByteString.EMPTY;
+    /**
+     * <code>bytes cache_key = 1;</code>
+     * @return The cacheKey.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString getCacheKey() {
+      return cacheKey_;
+    }
+
+    public static final int CACHE_KEY_STRING_FIELD_NUMBER = 2;
+    @SuppressWarnings("serial")
+    private volatile java.lang.Object cacheKeyString_ = "";
+    /**
+     * <code>string cache_key_string = 2;</code>
+     * @return The cacheKeyString.
+     */
+    @java.lang.Override
+    public java.lang.String getCacheKeyString() {
+      java.lang.Object ref = cacheKeyString_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        cacheKeyString_ = s;
+        return s;
+      }
+    }
+    /**
+     * <code>string cache_key_string = 2;</code>
+     * @return The bytes for cacheKeyString.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getCacheKeyStringBytes() {
+      java.lang.Object ref = cacheKeyString_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        cacheKeyString_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    private byte memoizedIsInitialized = -1;
+    @java.lang.Override
+    public final boolean isInitialized() {
+      byte isInitialized = memoizedIsInitialized;
+      if (isInitialized == 1) return true;
+      if (isInitialized == 0) return false;
+
+      memoizedIsInitialized = 1;
+      return true;
+    }
+
+    @java.lang.Override
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+                        throws java.io.IOException {
+      if (!cacheKey_.isEmpty()) {
+        output.writeBytes(1, cacheKey_);
+      }
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(cacheKeyString_)) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 2, cacheKeyString_);
+      }
+      getUnknownFields().writeTo(output);
+    }
+
+    @java.lang.Override
+    public int getSerializedSize() {
+      int size = memoizedSize;
+      if (size != -1) return size;
+
+      size = 0;
+      if (!cacheKey_.isEmpty()) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBytesSize(1, cacheKey_);
+      }
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(cacheKeyString_)) {
+        size += com.google.protobuf.GeneratedMessage.computeStringSize(2, cacheKeyString_);
+      }
+      size += getUnknownFields().getSerializedSize();
+      memoizedSize = size;
+      return size;
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+      if (obj == this) {
+       return true;
+      }
+      if (!(obj instanceof gradle.substrate.v1.Substrate.ComputeCacheKeyResponse)) {
+        return super.equals(obj);
+      }
+      gradle.substrate.v1.Substrate.ComputeCacheKeyResponse other = (gradle.substrate.v1.Substrate.ComputeCacheKeyResponse) obj;
+
+      if (!getCacheKey()
+          .equals(other.getCacheKey())) return false;
+      if (!getCacheKeyString()
+          .equals(other.getCacheKeyString())) return false;
+      if (!getUnknownFields().equals(other.getUnknownFields())) return false;
+      return true;
+    }
+
+    @java.lang.Override
+    public int hashCode() {
+      if (memoizedHashCode != 0) {
+        return memoizedHashCode;
+      }
+      int hash = 41;
+      hash = (19 * hash) + getDescriptor().hashCode();
+      hash = (37 * hash) + CACHE_KEY_FIELD_NUMBER;
+      hash = (53 * hash) + getCacheKey().hashCode();
+      hash = (37 * hash) + CACHE_KEY_STRING_FIELD_NUMBER;
+      hash = (53 * hash) + getCacheKeyString().hashCode();
+      hash = (29 * hash) + getUnknownFields().hashCode();
+      memoizedHashCode = hash;
+      return hash;
+    }
+
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyResponse parseFrom(
+        java.nio.ByteBuffer data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyResponse parseFrom(
+        java.nio.ByteBuffer data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyResponse parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyResponse parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyResponse parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyResponse parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyResponse parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyResponse parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyResponse parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input);
+    }
+
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyResponse parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyResponse parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyResponse parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    @java.lang.Override
+    public Builder newBuilderForType() { return newBuilder(); }
+    public static Builder newBuilder() {
+      return DEFAULT_INSTANCE.toBuilder();
+    }
+    public static Builder newBuilder(gradle.substrate.v1.Substrate.ComputeCacheKeyResponse prototype) {
+      return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
+    }
+    @java.lang.Override
+    public Builder toBuilder() {
+      return this == DEFAULT_INSTANCE
+          ? new Builder() : new Builder().mergeFrom(this);
+    }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+      Builder builder = new Builder(parent);
+      return builder;
+    }
+    /**
+     * Protobuf type {@code gradle.substrate.v1.ComputeCacheKeyResponse}
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessage.Builder<Builder> implements
+        // @@protoc_insertion_point(builder_implements:gradle.substrate.v1.ComputeCacheKeyResponse)
+        gradle.substrate.v1.Substrate.ComputeCacheKeyResponseOrBuilder {
+      public static final com.google.protobuf.Descriptors.Descriptor
+          getDescriptor() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ComputeCacheKeyResponse_descriptor;
+      }
+
+      @java.lang.Override
+      protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+          internalGetFieldAccessorTable() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ComputeCacheKeyResponse_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                gradle.substrate.v1.Substrate.ComputeCacheKeyResponse.class, gradle.substrate.v1.Substrate.ComputeCacheKeyResponse.Builder.class);
+      }
+
+      // Construct using gradle.substrate.v1.Substrate.ComputeCacheKeyResponse.newBuilder()
+      private Builder() {
+
+      }
+
+      private Builder(
+          com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+        super(parent);
+
+      }
+      @java.lang.Override
+      public Builder clear() {
+        super.clear();
+        bitField0_ = 0;
+        cacheKey_ = com.google.protobuf.ByteString.EMPTY;
+        cacheKeyString_ = "";
+        return this;
+      }
+
+      @java.lang.Override
+      public com.google.protobuf.Descriptors.Descriptor
+          getDescriptorForType() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ComputeCacheKeyResponse_descriptor;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.ComputeCacheKeyResponse getDefaultInstanceForType() {
+        return gradle.substrate.v1.Substrate.ComputeCacheKeyResponse.getDefaultInstance();
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.ComputeCacheKeyResponse build() {
+        gradle.substrate.v1.Substrate.ComputeCacheKeyResponse result = buildPartial();
+        if (!result.isInitialized()) {
+          throw newUninitializedMessageException(result);
+        }
+        return result;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.ComputeCacheKeyResponse buildPartial() {
+        gradle.substrate.v1.Substrate.ComputeCacheKeyResponse result = new gradle.substrate.v1.Substrate.ComputeCacheKeyResponse(this);
+        if (bitField0_ != 0) { buildPartial0(result); }
+        onBuilt();
+        return result;
+      }
+
+      private void buildPartial0(gradle.substrate.v1.Substrate.ComputeCacheKeyResponse result) {
+        int from_bitField0_ = bitField0_;
+        if (((from_bitField0_ & 0x00000001) != 0)) {
+          result.cacheKey_ = cacheKey_;
+        }
+        if (((from_bitField0_ & 0x00000002) != 0)) {
+          result.cacheKeyString_ = cacheKeyString_;
+        }
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(com.google.protobuf.Message other) {
+        if (other instanceof gradle.substrate.v1.Substrate.ComputeCacheKeyResponse) {
+          return mergeFrom((gradle.substrate.v1.Substrate.ComputeCacheKeyResponse)other);
+        } else {
+          super.mergeFrom(other);
+          return this;
+        }
+      }
+
+      public Builder mergeFrom(gradle.substrate.v1.Substrate.ComputeCacheKeyResponse other) {
+        if (other == gradle.substrate.v1.Substrate.ComputeCacheKeyResponse.getDefaultInstance()) return this;
+        if (!other.getCacheKey().isEmpty()) {
+          setCacheKey(other.getCacheKey());
+        }
+        if (!other.getCacheKeyString().isEmpty()) {
+          cacheKeyString_ = other.cacheKeyString_;
+          bitField0_ |= 0x00000002;
+          onChanged();
+        }
+        this.mergeUnknownFields(other.getUnknownFields());
+        onChanged();
+        return this;
+      }
+
+      @java.lang.Override
+      public final boolean isInitialized() {
+        return true;
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws java.io.IOException {
+        if (extensionRegistry == null) {
+          throw new java.lang.NullPointerException();
+        }
+        try {
+          boolean done = false;
+          while (!done) {
+            int tag = input.readTag();
+            switch (tag) {
+              case 0:
+                done = true;
+                break;
+              case 10: {
+                cacheKey_ = input.readBytes();
+                bitField0_ |= 0x00000001;
+                break;
+              } // case 10
+              case 18: {
+                cacheKeyString_ = input.readStringRequireUtf8();
+                bitField0_ |= 0x00000002;
+                break;
+              } // case 18
+              default: {
+                if (!super.parseUnknownField(input, extensionRegistry, tag)) {
+                  done = true; // was an endgroup tag
+                }
+                break;
+              } // default:
+            } // switch (tag)
+          } // while (!done)
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.unwrapIOException();
+        } finally {
+          onChanged();
+        } // finally
+        return this;
+      }
+      private int bitField0_;
+
+      private com.google.protobuf.ByteString cacheKey_ = com.google.protobuf.ByteString.EMPTY;
+      /**
+       * <code>bytes cache_key = 1;</code>
+       * @return The cacheKey.
+       */
+      @java.lang.Override
+      public com.google.protobuf.ByteString getCacheKey() {
+        return cacheKey_;
+      }
+      /**
+       * <code>bytes cache_key = 1;</code>
+       * @param value The cacheKey to set.
+       * @return This builder for chaining.
+       */
+      public Builder setCacheKey(com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        cacheKey_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>bytes cache_key = 1;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearCacheKey() {
+        bitField0_ = (bitField0_ & ~0x00000001);
+        cacheKey_ = getDefaultInstance().getCacheKey();
+        onChanged();
+        return this;
+      }
+
+      private java.lang.Object cacheKeyString_ = "";
+      /**
+       * <code>string cache_key_string = 2;</code>
+       * @return The cacheKeyString.
+       */
+      public java.lang.String getCacheKeyString() {
+        java.lang.Object ref = cacheKeyString_;
+        if (!(ref instanceof java.lang.String)) {
+          com.google.protobuf.ByteString bs =
+              (com.google.protobuf.ByteString) ref;
+          java.lang.String s = bs.toStringUtf8();
+          cacheKeyString_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <code>string cache_key_string = 2;</code>
+       * @return The bytes for cacheKeyString.
+       */
+      public com.google.protobuf.ByteString
+          getCacheKeyStringBytes() {
+        java.lang.Object ref = cacheKeyString_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          cacheKeyString_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <code>string cache_key_string = 2;</code>
+       * @param value The cacheKeyString to set.
+       * @return This builder for chaining.
+       */
+      public Builder setCacheKeyString(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        cacheKeyString_ = value;
+        bitField0_ |= 0x00000002;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string cache_key_string = 2;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearCacheKeyString() {
+        cacheKeyString_ = getDefaultInstance().getCacheKeyString();
+        bitField0_ = (bitField0_ & ~0x00000002);
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string cache_key_string = 2;</code>
+       * @param value The bytes for cacheKeyString to set.
+       * @return This builder for chaining.
+       */
+      public Builder setCacheKeyStringBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        cacheKeyString_ = value;
+        bitField0_ |= 0x00000002;
+        onChanged();
+        return this;
+      }
+
+      // @@protoc_insertion_point(builder_scope:gradle.substrate.v1.ComputeCacheKeyResponse)
+    }
+
+    // @@protoc_insertion_point(class_scope:gradle.substrate.v1.ComputeCacheKeyResponse)
+    private static final gradle.substrate.v1.Substrate.ComputeCacheKeyResponse DEFAULT_INSTANCE;
+    static {
+      DEFAULT_INSTANCE = new gradle.substrate.v1.Substrate.ComputeCacheKeyResponse();
+    }
+
+    public static gradle.substrate.v1.Substrate.ComputeCacheKeyResponse getDefaultInstance() {
+      return DEFAULT_INSTANCE;
+    }
+
+    private static final com.google.protobuf.Parser<ComputeCacheKeyResponse>
+        PARSER = new com.google.protobuf.AbstractParser<ComputeCacheKeyResponse>() {
+      @java.lang.Override
+      public ComputeCacheKeyResponse parsePartialFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws com.google.protobuf.InvalidProtocolBufferException {
+        Builder builder = newBuilder();
+        try {
+          builder.mergeFrom(input, extensionRegistry);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.setUnfinishedMessage(builder.buildPartial());
+        } catch (com.google.protobuf.UninitializedMessageException e) {
+          throw e.asInvalidProtocolBufferException().setUnfinishedMessage(builder.buildPartial());
+        } catch (java.io.IOException e) {
+          throw new com.google.protobuf.InvalidProtocolBufferException(e)
+              .setUnfinishedMessage(builder.buildPartial());
+        }
+        return builder.buildPartial();
+      }
+    };
+
+    public static com.google.protobuf.Parser<ComputeCacheKeyResponse> parser() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<ComputeCacheKeyResponse> getParserForType() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.ComputeCacheKeyResponse getDefaultInstanceForType() {
+      return DEFAULT_INSTANCE;
+    }
+
+  }
+
+  public interface ProbeCacheRequestOrBuilder extends
+      // @@protoc_insertion_point(interface_extends:gradle.substrate.v1.ProbeCacheRequest)
+      com.google.protobuf.MessageOrBuilder {
+
+    /**
+     * <code>bytes cache_key = 1;</code>
+     * @return The cacheKey.
+     */
+    com.google.protobuf.ByteString getCacheKey();
+  }
+  /**
+   * Protobuf type {@code gradle.substrate.v1.ProbeCacheRequest}
+   */
+  public static final class ProbeCacheRequest extends
+      com.google.protobuf.GeneratedMessage implements
+      // @@protoc_insertion_point(message_implements:gradle.substrate.v1.ProbeCacheRequest)
+      ProbeCacheRequestOrBuilder {
+  private static final long serialVersionUID = 0L;
+    static {
+      com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
+        com.google.protobuf.RuntimeVersion.RuntimeDomain.PUBLIC,
+        /* major= */ 4,
+        /* minor= */ 34,
+        /* patch= */ 0,
+        /* suffix= */ "",
+        "ProbeCacheRequest");
+    }
+    // Use ProbeCacheRequest.newBuilder() to construct.
+    private ProbeCacheRequest(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      super(builder);
+    }
+    private ProbeCacheRequest() {
+      cacheKey_ = com.google.protobuf.ByteString.EMPTY;
+    }
+
+    public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ProbeCacheRequest_descriptor;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Descriptors.Descriptor getDescriptorForType() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ProbeCacheRequest_descriptor;
+    }
+
+    @java.lang.Override
+    protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ProbeCacheRequest_fieldAccessorTable
+          .ensureFieldAccessorsInitialized(
+              gradle.substrate.v1.Substrate.ProbeCacheRequest.class, gradle.substrate.v1.Substrate.ProbeCacheRequest.Builder.class);
+    }
+
+    public static final int CACHE_KEY_FIELD_NUMBER = 1;
+    private com.google.protobuf.ByteString cacheKey_ = com.google.protobuf.ByteString.EMPTY;
+    /**
+     * <code>bytes cache_key = 1;</code>
+     * @return The cacheKey.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString getCacheKey() {
+      return cacheKey_;
+    }
+
+    private byte memoizedIsInitialized = -1;
+    @java.lang.Override
+    public final boolean isInitialized() {
+      byte isInitialized = memoizedIsInitialized;
+      if (isInitialized == 1) return true;
+      if (isInitialized == 0) return false;
+
+      memoizedIsInitialized = 1;
+      return true;
+    }
+
+    @java.lang.Override
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+                        throws java.io.IOException {
+      if (!cacheKey_.isEmpty()) {
+        output.writeBytes(1, cacheKey_);
+      }
+      getUnknownFields().writeTo(output);
+    }
+
+    @java.lang.Override
+    public int getSerializedSize() {
+      int size = memoizedSize;
+      if (size != -1) return size;
+
+      size = 0;
+      if (!cacheKey_.isEmpty()) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBytesSize(1, cacheKey_);
+      }
+      size += getUnknownFields().getSerializedSize();
+      memoizedSize = size;
+      return size;
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+      if (obj == this) {
+       return true;
+      }
+      if (!(obj instanceof gradle.substrate.v1.Substrate.ProbeCacheRequest)) {
+        return super.equals(obj);
+      }
+      gradle.substrate.v1.Substrate.ProbeCacheRequest other = (gradle.substrate.v1.Substrate.ProbeCacheRequest) obj;
+
+      if (!getCacheKey()
+          .equals(other.getCacheKey())) return false;
+      if (!getUnknownFields().equals(other.getUnknownFields())) return false;
+      return true;
+    }
+
+    @java.lang.Override
+    public int hashCode() {
+      if (memoizedHashCode != 0) {
+        return memoizedHashCode;
+      }
+      int hash = 41;
+      hash = (19 * hash) + getDescriptor().hashCode();
+      hash = (37 * hash) + CACHE_KEY_FIELD_NUMBER;
+      hash = (53 * hash) + getCacheKey().hashCode();
+      hash = (29 * hash) + getUnknownFields().hashCode();
+      memoizedHashCode = hash;
+      return hash;
+    }
+
+    public static gradle.substrate.v1.Substrate.ProbeCacheRequest parseFrom(
+        java.nio.ByteBuffer data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.ProbeCacheRequest parseFrom(
+        java.nio.ByteBuffer data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.ProbeCacheRequest parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.ProbeCacheRequest parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.ProbeCacheRequest parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.ProbeCacheRequest parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.ProbeCacheRequest parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.ProbeCacheRequest parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static gradle.substrate.v1.Substrate.ProbeCacheRequest parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input);
+    }
+
+    public static gradle.substrate.v1.Substrate.ProbeCacheRequest parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.ProbeCacheRequest parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.ProbeCacheRequest parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    @java.lang.Override
+    public Builder newBuilderForType() { return newBuilder(); }
+    public static Builder newBuilder() {
+      return DEFAULT_INSTANCE.toBuilder();
+    }
+    public static Builder newBuilder(gradle.substrate.v1.Substrate.ProbeCacheRequest prototype) {
+      return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
+    }
+    @java.lang.Override
+    public Builder toBuilder() {
+      return this == DEFAULT_INSTANCE
+          ? new Builder() : new Builder().mergeFrom(this);
+    }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+      Builder builder = new Builder(parent);
+      return builder;
+    }
+    /**
+     * Protobuf type {@code gradle.substrate.v1.ProbeCacheRequest}
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessage.Builder<Builder> implements
+        // @@protoc_insertion_point(builder_implements:gradle.substrate.v1.ProbeCacheRequest)
+        gradle.substrate.v1.Substrate.ProbeCacheRequestOrBuilder {
+      public static final com.google.protobuf.Descriptors.Descriptor
+          getDescriptor() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ProbeCacheRequest_descriptor;
+      }
+
+      @java.lang.Override
+      protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+          internalGetFieldAccessorTable() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ProbeCacheRequest_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                gradle.substrate.v1.Substrate.ProbeCacheRequest.class, gradle.substrate.v1.Substrate.ProbeCacheRequest.Builder.class);
+      }
+
+      // Construct using gradle.substrate.v1.Substrate.ProbeCacheRequest.newBuilder()
+      private Builder() {
+
+      }
+
+      private Builder(
+          com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+        super(parent);
+
+      }
+      @java.lang.Override
+      public Builder clear() {
+        super.clear();
+        bitField0_ = 0;
+        cacheKey_ = com.google.protobuf.ByteString.EMPTY;
+        return this;
+      }
+
+      @java.lang.Override
+      public com.google.protobuf.Descriptors.Descriptor
+          getDescriptorForType() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ProbeCacheRequest_descriptor;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.ProbeCacheRequest getDefaultInstanceForType() {
+        return gradle.substrate.v1.Substrate.ProbeCacheRequest.getDefaultInstance();
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.ProbeCacheRequest build() {
+        gradle.substrate.v1.Substrate.ProbeCacheRequest result = buildPartial();
+        if (!result.isInitialized()) {
+          throw newUninitializedMessageException(result);
+        }
+        return result;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.ProbeCacheRequest buildPartial() {
+        gradle.substrate.v1.Substrate.ProbeCacheRequest result = new gradle.substrate.v1.Substrate.ProbeCacheRequest(this);
+        if (bitField0_ != 0) { buildPartial0(result); }
+        onBuilt();
+        return result;
+      }
+
+      private void buildPartial0(gradle.substrate.v1.Substrate.ProbeCacheRequest result) {
+        int from_bitField0_ = bitField0_;
+        if (((from_bitField0_ & 0x00000001) != 0)) {
+          result.cacheKey_ = cacheKey_;
+        }
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(com.google.protobuf.Message other) {
+        if (other instanceof gradle.substrate.v1.Substrate.ProbeCacheRequest) {
+          return mergeFrom((gradle.substrate.v1.Substrate.ProbeCacheRequest)other);
+        } else {
+          super.mergeFrom(other);
+          return this;
+        }
+      }
+
+      public Builder mergeFrom(gradle.substrate.v1.Substrate.ProbeCacheRequest other) {
+        if (other == gradle.substrate.v1.Substrate.ProbeCacheRequest.getDefaultInstance()) return this;
+        if (!other.getCacheKey().isEmpty()) {
+          setCacheKey(other.getCacheKey());
+        }
+        this.mergeUnknownFields(other.getUnknownFields());
+        onChanged();
+        return this;
+      }
+
+      @java.lang.Override
+      public final boolean isInitialized() {
+        return true;
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws java.io.IOException {
+        if (extensionRegistry == null) {
+          throw new java.lang.NullPointerException();
+        }
+        try {
+          boolean done = false;
+          while (!done) {
+            int tag = input.readTag();
+            switch (tag) {
+              case 0:
+                done = true;
+                break;
+              case 10: {
+                cacheKey_ = input.readBytes();
+                bitField0_ |= 0x00000001;
+                break;
+              } // case 10
+              default: {
+                if (!super.parseUnknownField(input, extensionRegistry, tag)) {
+                  done = true; // was an endgroup tag
+                }
+                break;
+              } // default:
+            } // switch (tag)
+          } // while (!done)
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.unwrapIOException();
+        } finally {
+          onChanged();
+        } // finally
+        return this;
+      }
+      private int bitField0_;
+
+      private com.google.protobuf.ByteString cacheKey_ = com.google.protobuf.ByteString.EMPTY;
+      /**
+       * <code>bytes cache_key = 1;</code>
+       * @return The cacheKey.
+       */
+      @java.lang.Override
+      public com.google.protobuf.ByteString getCacheKey() {
+        return cacheKey_;
+      }
+      /**
+       * <code>bytes cache_key = 1;</code>
+       * @param value The cacheKey to set.
+       * @return This builder for chaining.
+       */
+      public Builder setCacheKey(com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        cacheKey_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>bytes cache_key = 1;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearCacheKey() {
+        bitField0_ = (bitField0_ & ~0x00000001);
+        cacheKey_ = getDefaultInstance().getCacheKey();
+        onChanged();
+        return this;
+      }
+
+      // @@protoc_insertion_point(builder_scope:gradle.substrate.v1.ProbeCacheRequest)
+    }
+
+    // @@protoc_insertion_point(class_scope:gradle.substrate.v1.ProbeCacheRequest)
+    private static final gradle.substrate.v1.Substrate.ProbeCacheRequest DEFAULT_INSTANCE;
+    static {
+      DEFAULT_INSTANCE = new gradle.substrate.v1.Substrate.ProbeCacheRequest();
+    }
+
+    public static gradle.substrate.v1.Substrate.ProbeCacheRequest getDefaultInstance() {
+      return DEFAULT_INSTANCE;
+    }
+
+    private static final com.google.protobuf.Parser<ProbeCacheRequest>
+        PARSER = new com.google.protobuf.AbstractParser<ProbeCacheRequest>() {
+      @java.lang.Override
+      public ProbeCacheRequest parsePartialFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws com.google.protobuf.InvalidProtocolBufferException {
+        Builder builder = newBuilder();
+        try {
+          builder.mergeFrom(input, extensionRegistry);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.setUnfinishedMessage(builder.buildPartial());
+        } catch (com.google.protobuf.UninitializedMessageException e) {
+          throw e.asInvalidProtocolBufferException().setUnfinishedMessage(builder.buildPartial());
+        } catch (java.io.IOException e) {
+          throw new com.google.protobuf.InvalidProtocolBufferException(e)
+              .setUnfinishedMessage(builder.buildPartial());
+        }
+        return builder.buildPartial();
+      }
+    };
+
+    public static com.google.protobuf.Parser<ProbeCacheRequest> parser() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<ProbeCacheRequest> getParserForType() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.ProbeCacheRequest getDefaultInstanceForType() {
+      return DEFAULT_INSTANCE;
+    }
+
+  }
+
+  public interface ProbeCacheResponseOrBuilder extends
+      // @@protoc_insertion_point(interface_extends:gradle.substrate.v1.ProbeCacheResponse)
+      com.google.protobuf.MessageOrBuilder {
+
+    /**
+     * <code>bool available = 1;</code>
+     * @return The available.
+     */
+    boolean getAvailable();
+
+    /**
+     * <pre>
+     * "local", "remote", or "both"
+     * </pre>
+     *
+     * <code>string location = 2;</code>
+     * @return The location.
+     */
+    java.lang.String getLocation();
+    /**
+     * <pre>
+     * "local", "remote", or "both"
+     * </pre>
+     *
+     * <code>string location = 2;</code>
+     * @return The bytes for location.
+     */
+    com.google.protobuf.ByteString
+        getLocationBytes();
+  }
+  /**
+   * Protobuf type {@code gradle.substrate.v1.ProbeCacheResponse}
+   */
+  public static final class ProbeCacheResponse extends
+      com.google.protobuf.GeneratedMessage implements
+      // @@protoc_insertion_point(message_implements:gradle.substrate.v1.ProbeCacheResponse)
+      ProbeCacheResponseOrBuilder {
+  private static final long serialVersionUID = 0L;
+    static {
+      com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
+        com.google.protobuf.RuntimeVersion.RuntimeDomain.PUBLIC,
+        /* major= */ 4,
+        /* minor= */ 34,
+        /* patch= */ 0,
+        /* suffix= */ "",
+        "ProbeCacheResponse");
+    }
+    // Use ProbeCacheResponse.newBuilder() to construct.
+    private ProbeCacheResponse(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      super(builder);
+    }
+    private ProbeCacheResponse() {
+      location_ = "";
+    }
+
+    public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ProbeCacheResponse_descriptor;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Descriptors.Descriptor getDescriptorForType() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ProbeCacheResponse_descriptor;
+    }
+
+    @java.lang.Override
+    protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ProbeCacheResponse_fieldAccessorTable
+          .ensureFieldAccessorsInitialized(
+              gradle.substrate.v1.Substrate.ProbeCacheResponse.class, gradle.substrate.v1.Substrate.ProbeCacheResponse.Builder.class);
+    }
+
+    public static final int AVAILABLE_FIELD_NUMBER = 1;
+    private boolean available_ = false;
+    /**
+     * <code>bool available = 1;</code>
+     * @return The available.
+     */
+    @java.lang.Override
+    public boolean getAvailable() {
+      return available_;
+    }
+
+    public static final int LOCATION_FIELD_NUMBER = 2;
+    @SuppressWarnings("serial")
+    private volatile java.lang.Object location_ = "";
+    /**
+     * <pre>
+     * "local", "remote", or "both"
+     * </pre>
+     *
+     * <code>string location = 2;</code>
+     * @return The location.
+     */
+    @java.lang.Override
+    public java.lang.String getLocation() {
+      java.lang.Object ref = location_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        location_ = s;
+        return s;
+      }
+    }
+    /**
+     * <pre>
+     * "local", "remote", or "both"
+     * </pre>
+     *
+     * <code>string location = 2;</code>
+     * @return The bytes for location.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getLocationBytes() {
+      java.lang.Object ref = location_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        location_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    private byte memoizedIsInitialized = -1;
+    @java.lang.Override
+    public final boolean isInitialized() {
+      byte isInitialized = memoizedIsInitialized;
+      if (isInitialized == 1) return true;
+      if (isInitialized == 0) return false;
+
+      memoizedIsInitialized = 1;
+      return true;
+    }
+
+    @java.lang.Override
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+                        throws java.io.IOException {
+      if (available_ != false) {
+        output.writeBool(1, available_);
+      }
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(location_)) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 2, location_);
+      }
+      getUnknownFields().writeTo(output);
+    }
+
+    @java.lang.Override
+    public int getSerializedSize() {
+      int size = memoizedSize;
+      if (size != -1) return size;
+
+      size = 0;
+      if (available_ != false) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBoolSize(1, available_);
+      }
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(location_)) {
+        size += com.google.protobuf.GeneratedMessage.computeStringSize(2, location_);
+      }
+      size += getUnknownFields().getSerializedSize();
+      memoizedSize = size;
+      return size;
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+      if (obj == this) {
+       return true;
+      }
+      if (!(obj instanceof gradle.substrate.v1.Substrate.ProbeCacheResponse)) {
+        return super.equals(obj);
+      }
+      gradle.substrate.v1.Substrate.ProbeCacheResponse other = (gradle.substrate.v1.Substrate.ProbeCacheResponse) obj;
+
+      if (getAvailable()
+          != other.getAvailable()) return false;
+      if (!getLocation()
+          .equals(other.getLocation())) return false;
+      if (!getUnknownFields().equals(other.getUnknownFields())) return false;
+      return true;
+    }
+
+    @java.lang.Override
+    public int hashCode() {
+      if (memoizedHashCode != 0) {
+        return memoizedHashCode;
+      }
+      int hash = 41;
+      hash = (19 * hash) + getDescriptor().hashCode();
+      hash = (37 * hash) + AVAILABLE_FIELD_NUMBER;
+      hash = (53 * hash) + com.google.protobuf.Internal.hashBoolean(
+          getAvailable());
+      hash = (37 * hash) + LOCATION_FIELD_NUMBER;
+      hash = (53 * hash) + getLocation().hashCode();
+      hash = (29 * hash) + getUnknownFields().hashCode();
+      memoizedHashCode = hash;
+      return hash;
+    }
+
+    public static gradle.substrate.v1.Substrate.ProbeCacheResponse parseFrom(
+        java.nio.ByteBuffer data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.ProbeCacheResponse parseFrom(
+        java.nio.ByteBuffer data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.ProbeCacheResponse parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.ProbeCacheResponse parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.ProbeCacheResponse parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.ProbeCacheResponse parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.ProbeCacheResponse parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.ProbeCacheResponse parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static gradle.substrate.v1.Substrate.ProbeCacheResponse parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input);
+    }
+
+    public static gradle.substrate.v1.Substrate.ProbeCacheResponse parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.ProbeCacheResponse parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.ProbeCacheResponse parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    @java.lang.Override
+    public Builder newBuilderForType() { return newBuilder(); }
+    public static Builder newBuilder() {
+      return DEFAULT_INSTANCE.toBuilder();
+    }
+    public static Builder newBuilder(gradle.substrate.v1.Substrate.ProbeCacheResponse prototype) {
+      return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
+    }
+    @java.lang.Override
+    public Builder toBuilder() {
+      return this == DEFAULT_INSTANCE
+          ? new Builder() : new Builder().mergeFrom(this);
+    }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+      Builder builder = new Builder(parent);
+      return builder;
+    }
+    /**
+     * Protobuf type {@code gradle.substrate.v1.ProbeCacheResponse}
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessage.Builder<Builder> implements
+        // @@protoc_insertion_point(builder_implements:gradle.substrate.v1.ProbeCacheResponse)
+        gradle.substrate.v1.Substrate.ProbeCacheResponseOrBuilder {
+      public static final com.google.protobuf.Descriptors.Descriptor
+          getDescriptor() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ProbeCacheResponse_descriptor;
+      }
+
+      @java.lang.Override
+      protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+          internalGetFieldAccessorTable() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ProbeCacheResponse_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                gradle.substrate.v1.Substrate.ProbeCacheResponse.class, gradle.substrate.v1.Substrate.ProbeCacheResponse.Builder.class);
+      }
+
+      // Construct using gradle.substrate.v1.Substrate.ProbeCacheResponse.newBuilder()
+      private Builder() {
+
+      }
+
+      private Builder(
+          com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+        super(parent);
+
+      }
+      @java.lang.Override
+      public Builder clear() {
+        super.clear();
+        bitField0_ = 0;
+        available_ = false;
+        location_ = "";
+        return this;
+      }
+
+      @java.lang.Override
+      public com.google.protobuf.Descriptors.Descriptor
+          getDescriptorForType() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_ProbeCacheResponse_descriptor;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.ProbeCacheResponse getDefaultInstanceForType() {
+        return gradle.substrate.v1.Substrate.ProbeCacheResponse.getDefaultInstance();
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.ProbeCacheResponse build() {
+        gradle.substrate.v1.Substrate.ProbeCacheResponse result = buildPartial();
+        if (!result.isInitialized()) {
+          throw newUninitializedMessageException(result);
+        }
+        return result;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.ProbeCacheResponse buildPartial() {
+        gradle.substrate.v1.Substrate.ProbeCacheResponse result = new gradle.substrate.v1.Substrate.ProbeCacheResponse(this);
+        if (bitField0_ != 0) { buildPartial0(result); }
+        onBuilt();
+        return result;
+      }
+
+      private void buildPartial0(gradle.substrate.v1.Substrate.ProbeCacheResponse result) {
+        int from_bitField0_ = bitField0_;
+        if (((from_bitField0_ & 0x00000001) != 0)) {
+          result.available_ = available_;
+        }
+        if (((from_bitField0_ & 0x00000002) != 0)) {
+          result.location_ = location_;
+        }
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(com.google.protobuf.Message other) {
+        if (other instanceof gradle.substrate.v1.Substrate.ProbeCacheResponse) {
+          return mergeFrom((gradle.substrate.v1.Substrate.ProbeCacheResponse)other);
+        } else {
+          super.mergeFrom(other);
+          return this;
+        }
+      }
+
+      public Builder mergeFrom(gradle.substrate.v1.Substrate.ProbeCacheResponse other) {
+        if (other == gradle.substrate.v1.Substrate.ProbeCacheResponse.getDefaultInstance()) return this;
+        if (other.getAvailable() != false) {
+          setAvailable(other.getAvailable());
+        }
+        if (!other.getLocation().isEmpty()) {
+          location_ = other.location_;
+          bitField0_ |= 0x00000002;
+          onChanged();
+        }
+        this.mergeUnknownFields(other.getUnknownFields());
+        onChanged();
+        return this;
+      }
+
+      @java.lang.Override
+      public final boolean isInitialized() {
+        return true;
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws java.io.IOException {
+        if (extensionRegistry == null) {
+          throw new java.lang.NullPointerException();
+        }
+        try {
+          boolean done = false;
+          while (!done) {
+            int tag = input.readTag();
+            switch (tag) {
+              case 0:
+                done = true;
+                break;
+              case 8: {
+                available_ = input.readBool();
+                bitField0_ |= 0x00000001;
+                break;
+              } // case 8
+              case 18: {
+                location_ = input.readStringRequireUtf8();
+                bitField0_ |= 0x00000002;
+                break;
+              } // case 18
+              default: {
+                if (!super.parseUnknownField(input, extensionRegistry, tag)) {
+                  done = true; // was an endgroup tag
+                }
+                break;
+              } // default:
+            } // switch (tag)
+          } // while (!done)
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.unwrapIOException();
+        } finally {
+          onChanged();
+        } // finally
+        return this;
+      }
+      private int bitField0_;
+
+      private boolean available_ ;
+      /**
+       * <code>bool available = 1;</code>
+       * @return The available.
+       */
+      @java.lang.Override
+      public boolean getAvailable() {
+        return available_;
+      }
+      /**
+       * <code>bool available = 1;</code>
+       * @param value The available to set.
+       * @return This builder for chaining.
+       */
+      public Builder setAvailable(boolean value) {
+
+        available_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>bool available = 1;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearAvailable() {
+        bitField0_ = (bitField0_ & ~0x00000001);
+        available_ = false;
+        onChanged();
+        return this;
+      }
+
+      private java.lang.Object location_ = "";
+      /**
+       * <pre>
+       * "local", "remote", or "both"
+       * </pre>
+       *
+       * <code>string location = 2;</code>
+       * @return The location.
+       */
+      public java.lang.String getLocation() {
+        java.lang.Object ref = location_;
+        if (!(ref instanceof java.lang.String)) {
+          com.google.protobuf.ByteString bs =
+              (com.google.protobuf.ByteString) ref;
+          java.lang.String s = bs.toStringUtf8();
+          location_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <pre>
+       * "local", "remote", or "both"
+       * </pre>
+       *
+       * <code>string location = 2;</code>
+       * @return The bytes for location.
+       */
+      public com.google.protobuf.ByteString
+          getLocationBytes() {
+        java.lang.Object ref = location_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          location_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <pre>
+       * "local", "remote", or "both"
+       * </pre>
+       *
+       * <code>string location = 2;</code>
+       * @param value The location to set.
+       * @return This builder for chaining.
+       */
+      public Builder setLocation(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        location_ = value;
+        bitField0_ |= 0x00000002;
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * "local", "remote", or "both"
+       * </pre>
+       *
+       * <code>string location = 2;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearLocation() {
+        location_ = getDefaultInstance().getLocation();
+        bitField0_ = (bitField0_ & ~0x00000002);
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * "local", "remote", or "both"
+       * </pre>
+       *
+       * <code>string location = 2;</code>
+       * @param value The bytes for location to set.
+       * @return This builder for chaining.
+       */
+      public Builder setLocationBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        location_ = value;
+        bitField0_ |= 0x00000002;
+        onChanged();
+        return this;
+      }
+
+      // @@protoc_insertion_point(builder_scope:gradle.substrate.v1.ProbeCacheResponse)
+    }
+
+    // @@protoc_insertion_point(class_scope:gradle.substrate.v1.ProbeCacheResponse)
+    private static final gradle.substrate.v1.Substrate.ProbeCacheResponse DEFAULT_INSTANCE;
+    static {
+      DEFAULT_INSTANCE = new gradle.substrate.v1.Substrate.ProbeCacheResponse();
+    }
+
+    public static gradle.substrate.v1.Substrate.ProbeCacheResponse getDefaultInstance() {
+      return DEFAULT_INSTANCE;
+    }
+
+    private static final com.google.protobuf.Parser<ProbeCacheResponse>
+        PARSER = new com.google.protobuf.AbstractParser<ProbeCacheResponse>() {
+      @java.lang.Override
+      public ProbeCacheResponse parsePartialFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws com.google.protobuf.InvalidProtocolBufferException {
+        Builder builder = newBuilder();
+        try {
+          builder.mergeFrom(input, extensionRegistry);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.setUnfinishedMessage(builder.buildPartial());
+        } catch (com.google.protobuf.UninitializedMessageException e) {
+          throw e.asInvalidProtocolBufferException().setUnfinishedMessage(builder.buildPartial());
+        } catch (java.io.IOException e) {
+          throw new com.google.protobuf.InvalidProtocolBufferException(e)
+              .setUnfinishedMessage(builder.buildPartial());
+        }
+        return builder.buildPartial();
+      }
+    };
+
+    public static com.google.protobuf.Parser<ProbeCacheResponse> parser() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<ProbeCacheResponse> getParserForType() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.ProbeCacheResponse getDefaultInstanceForType() {
+      return DEFAULT_INSTANCE;
+    }
+
+  }
+
+  public interface StoreOutputsRequestOrBuilder extends
+      // @@protoc_insertion_point(interface_extends:gradle.substrate.v1.StoreOutputsRequest)
+      com.google.protobuf.MessageOrBuilder {
+
+    /**
+     * <code>bytes cache_key = 1;</code>
+     * @return The cacheKey.
+     */
+    com.google.protobuf.ByteString getCacheKey();
+
+    /**
+     * <code>int64 execution_time_ms = 2;</code>
+     * @return The executionTimeMs.
+     */
+    long getExecutionTimeMs();
+  }
+  /**
+   * Protobuf type {@code gradle.substrate.v1.StoreOutputsRequest}
+   */
+  public static final class StoreOutputsRequest extends
+      com.google.protobuf.GeneratedMessage implements
+      // @@protoc_insertion_point(message_implements:gradle.substrate.v1.StoreOutputsRequest)
+      StoreOutputsRequestOrBuilder {
+  private static final long serialVersionUID = 0L;
+    static {
+      com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
+        com.google.protobuf.RuntimeVersion.RuntimeDomain.PUBLIC,
+        /* major= */ 4,
+        /* minor= */ 34,
+        /* patch= */ 0,
+        /* suffix= */ "",
+        "StoreOutputsRequest");
+    }
+    // Use StoreOutputsRequest.newBuilder() to construct.
+    private StoreOutputsRequest(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      super(builder);
+    }
+    private StoreOutputsRequest() {
+      cacheKey_ = com.google.protobuf.ByteString.EMPTY;
+    }
+
+    public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreOutputsRequest_descriptor;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Descriptors.Descriptor getDescriptorForType() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreOutputsRequest_descriptor;
+    }
+
+    @java.lang.Override
+    protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreOutputsRequest_fieldAccessorTable
+          .ensureFieldAccessorsInitialized(
+              gradle.substrate.v1.Substrate.StoreOutputsRequest.class, gradle.substrate.v1.Substrate.StoreOutputsRequest.Builder.class);
+    }
+
+    public static final int CACHE_KEY_FIELD_NUMBER = 1;
+    private com.google.protobuf.ByteString cacheKey_ = com.google.protobuf.ByteString.EMPTY;
+    /**
+     * <code>bytes cache_key = 1;</code>
+     * @return The cacheKey.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString getCacheKey() {
+      return cacheKey_;
+    }
+
+    public static final int EXECUTION_TIME_MS_FIELD_NUMBER = 2;
+    private long executionTimeMs_ = 0L;
+    /**
+     * <code>int64 execution_time_ms = 2;</code>
+     * @return The executionTimeMs.
+     */
+    @java.lang.Override
+    public long getExecutionTimeMs() {
+      return executionTimeMs_;
+    }
+
+    private byte memoizedIsInitialized = -1;
+    @java.lang.Override
+    public final boolean isInitialized() {
+      byte isInitialized = memoizedIsInitialized;
+      if (isInitialized == 1) return true;
+      if (isInitialized == 0) return false;
+
+      memoizedIsInitialized = 1;
+      return true;
+    }
+
+    @java.lang.Override
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+                        throws java.io.IOException {
+      if (!cacheKey_.isEmpty()) {
+        output.writeBytes(1, cacheKey_);
+      }
+      if (executionTimeMs_ != 0L) {
+        output.writeInt64(2, executionTimeMs_);
+      }
+      getUnknownFields().writeTo(output);
+    }
+
+    @java.lang.Override
+    public int getSerializedSize() {
+      int size = memoizedSize;
+      if (size != -1) return size;
+
+      size = 0;
+      if (!cacheKey_.isEmpty()) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBytesSize(1, cacheKey_);
+      }
+      if (executionTimeMs_ != 0L) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeInt64Size(2, executionTimeMs_);
+      }
+      size += getUnknownFields().getSerializedSize();
+      memoizedSize = size;
+      return size;
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+      if (obj == this) {
+       return true;
+      }
+      if (!(obj instanceof gradle.substrate.v1.Substrate.StoreOutputsRequest)) {
+        return super.equals(obj);
+      }
+      gradle.substrate.v1.Substrate.StoreOutputsRequest other = (gradle.substrate.v1.Substrate.StoreOutputsRequest) obj;
+
+      if (!getCacheKey()
+          .equals(other.getCacheKey())) return false;
+      if (getExecutionTimeMs()
+          != other.getExecutionTimeMs()) return false;
+      if (!getUnknownFields().equals(other.getUnknownFields())) return false;
+      return true;
+    }
+
+    @java.lang.Override
+    public int hashCode() {
+      if (memoizedHashCode != 0) {
+        return memoizedHashCode;
+      }
+      int hash = 41;
+      hash = (19 * hash) + getDescriptor().hashCode();
+      hash = (37 * hash) + CACHE_KEY_FIELD_NUMBER;
+      hash = (53 * hash) + getCacheKey().hashCode();
+      hash = (37 * hash) + EXECUTION_TIME_MS_FIELD_NUMBER;
+      hash = (53 * hash) + com.google.protobuf.Internal.hashLong(
+          getExecutionTimeMs());
+      hash = (29 * hash) + getUnknownFields().hashCode();
+      memoizedHashCode = hash;
+      return hash;
+    }
+
+    public static gradle.substrate.v1.Substrate.StoreOutputsRequest parseFrom(
+        java.nio.ByteBuffer data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.StoreOutputsRequest parseFrom(
+        java.nio.ByteBuffer data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.StoreOutputsRequest parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.StoreOutputsRequest parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.StoreOutputsRequest parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.StoreOutputsRequest parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.StoreOutputsRequest parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.StoreOutputsRequest parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static gradle.substrate.v1.Substrate.StoreOutputsRequest parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input);
+    }
+
+    public static gradle.substrate.v1.Substrate.StoreOutputsRequest parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.StoreOutputsRequest parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.StoreOutputsRequest parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    @java.lang.Override
+    public Builder newBuilderForType() { return newBuilder(); }
+    public static Builder newBuilder() {
+      return DEFAULT_INSTANCE.toBuilder();
+    }
+    public static Builder newBuilder(gradle.substrate.v1.Substrate.StoreOutputsRequest prototype) {
+      return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
+    }
+    @java.lang.Override
+    public Builder toBuilder() {
+      return this == DEFAULT_INSTANCE
+          ? new Builder() : new Builder().mergeFrom(this);
+    }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+      Builder builder = new Builder(parent);
+      return builder;
+    }
+    /**
+     * Protobuf type {@code gradle.substrate.v1.StoreOutputsRequest}
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessage.Builder<Builder> implements
+        // @@protoc_insertion_point(builder_implements:gradle.substrate.v1.StoreOutputsRequest)
+        gradle.substrate.v1.Substrate.StoreOutputsRequestOrBuilder {
+      public static final com.google.protobuf.Descriptors.Descriptor
+          getDescriptor() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreOutputsRequest_descriptor;
+      }
+
+      @java.lang.Override
+      protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+          internalGetFieldAccessorTable() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreOutputsRequest_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                gradle.substrate.v1.Substrate.StoreOutputsRequest.class, gradle.substrate.v1.Substrate.StoreOutputsRequest.Builder.class);
+      }
+
+      // Construct using gradle.substrate.v1.Substrate.StoreOutputsRequest.newBuilder()
+      private Builder() {
+
+      }
+
+      private Builder(
+          com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+        super(parent);
+
+      }
+      @java.lang.Override
+      public Builder clear() {
+        super.clear();
+        bitField0_ = 0;
+        cacheKey_ = com.google.protobuf.ByteString.EMPTY;
+        executionTimeMs_ = 0L;
+        return this;
+      }
+
+      @java.lang.Override
+      public com.google.protobuf.Descriptors.Descriptor
+          getDescriptorForType() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreOutputsRequest_descriptor;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.StoreOutputsRequest getDefaultInstanceForType() {
+        return gradle.substrate.v1.Substrate.StoreOutputsRequest.getDefaultInstance();
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.StoreOutputsRequest build() {
+        gradle.substrate.v1.Substrate.StoreOutputsRequest result = buildPartial();
+        if (!result.isInitialized()) {
+          throw newUninitializedMessageException(result);
+        }
+        return result;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.StoreOutputsRequest buildPartial() {
+        gradle.substrate.v1.Substrate.StoreOutputsRequest result = new gradle.substrate.v1.Substrate.StoreOutputsRequest(this);
+        if (bitField0_ != 0) { buildPartial0(result); }
+        onBuilt();
+        return result;
+      }
+
+      private void buildPartial0(gradle.substrate.v1.Substrate.StoreOutputsRequest result) {
+        int from_bitField0_ = bitField0_;
+        if (((from_bitField0_ & 0x00000001) != 0)) {
+          result.cacheKey_ = cacheKey_;
+        }
+        if (((from_bitField0_ & 0x00000002) != 0)) {
+          result.executionTimeMs_ = executionTimeMs_;
+        }
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(com.google.protobuf.Message other) {
+        if (other instanceof gradle.substrate.v1.Substrate.StoreOutputsRequest) {
+          return mergeFrom((gradle.substrate.v1.Substrate.StoreOutputsRequest)other);
+        } else {
+          super.mergeFrom(other);
+          return this;
+        }
+      }
+
+      public Builder mergeFrom(gradle.substrate.v1.Substrate.StoreOutputsRequest other) {
+        if (other == gradle.substrate.v1.Substrate.StoreOutputsRequest.getDefaultInstance()) return this;
+        if (!other.getCacheKey().isEmpty()) {
+          setCacheKey(other.getCacheKey());
+        }
+        if (other.getExecutionTimeMs() != 0L) {
+          setExecutionTimeMs(other.getExecutionTimeMs());
+        }
+        this.mergeUnknownFields(other.getUnknownFields());
+        onChanged();
+        return this;
+      }
+
+      @java.lang.Override
+      public final boolean isInitialized() {
+        return true;
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws java.io.IOException {
+        if (extensionRegistry == null) {
+          throw new java.lang.NullPointerException();
+        }
+        try {
+          boolean done = false;
+          while (!done) {
+            int tag = input.readTag();
+            switch (tag) {
+              case 0:
+                done = true;
+                break;
+              case 10: {
+                cacheKey_ = input.readBytes();
+                bitField0_ |= 0x00000001;
+                break;
+              } // case 10
+              case 16: {
+                executionTimeMs_ = input.readInt64();
+                bitField0_ |= 0x00000002;
+                break;
+              } // case 16
+              default: {
+                if (!super.parseUnknownField(input, extensionRegistry, tag)) {
+                  done = true; // was an endgroup tag
+                }
+                break;
+              } // default:
+            } // switch (tag)
+          } // while (!done)
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.unwrapIOException();
+        } finally {
+          onChanged();
+        } // finally
+        return this;
+      }
+      private int bitField0_;
+
+      private com.google.protobuf.ByteString cacheKey_ = com.google.protobuf.ByteString.EMPTY;
+      /**
+       * <code>bytes cache_key = 1;</code>
+       * @return The cacheKey.
+       */
+      @java.lang.Override
+      public com.google.protobuf.ByteString getCacheKey() {
+        return cacheKey_;
+      }
+      /**
+       * <code>bytes cache_key = 1;</code>
+       * @param value The cacheKey to set.
+       * @return This builder for chaining.
+       */
+      public Builder setCacheKey(com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        cacheKey_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>bytes cache_key = 1;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearCacheKey() {
+        bitField0_ = (bitField0_ & ~0x00000001);
+        cacheKey_ = getDefaultInstance().getCacheKey();
+        onChanged();
+        return this;
+      }
+
+      private long executionTimeMs_ ;
+      /**
+       * <code>int64 execution_time_ms = 2;</code>
+       * @return The executionTimeMs.
+       */
+      @java.lang.Override
+      public long getExecutionTimeMs() {
+        return executionTimeMs_;
+      }
+      /**
+       * <code>int64 execution_time_ms = 2;</code>
+       * @param value The executionTimeMs to set.
+       * @return This builder for chaining.
+       */
+      public Builder setExecutionTimeMs(long value) {
+
+        executionTimeMs_ = value;
+        bitField0_ |= 0x00000002;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>int64 execution_time_ms = 2;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearExecutionTimeMs() {
+        bitField0_ = (bitField0_ & ~0x00000002);
+        executionTimeMs_ = 0L;
+        onChanged();
+        return this;
+      }
+
+      // @@protoc_insertion_point(builder_scope:gradle.substrate.v1.StoreOutputsRequest)
+    }
+
+    // @@protoc_insertion_point(class_scope:gradle.substrate.v1.StoreOutputsRequest)
+    private static final gradle.substrate.v1.Substrate.StoreOutputsRequest DEFAULT_INSTANCE;
+    static {
+      DEFAULT_INSTANCE = new gradle.substrate.v1.Substrate.StoreOutputsRequest();
+    }
+
+    public static gradle.substrate.v1.Substrate.StoreOutputsRequest getDefaultInstance() {
+      return DEFAULT_INSTANCE;
+    }
+
+    private static final com.google.protobuf.Parser<StoreOutputsRequest>
+        PARSER = new com.google.protobuf.AbstractParser<StoreOutputsRequest>() {
+      @java.lang.Override
+      public StoreOutputsRequest parsePartialFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws com.google.protobuf.InvalidProtocolBufferException {
+        Builder builder = newBuilder();
+        try {
+          builder.mergeFrom(input, extensionRegistry);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.setUnfinishedMessage(builder.buildPartial());
+        } catch (com.google.protobuf.UninitializedMessageException e) {
+          throw e.asInvalidProtocolBufferException().setUnfinishedMessage(builder.buildPartial());
+        } catch (java.io.IOException e) {
+          throw new com.google.protobuf.InvalidProtocolBufferException(e)
+              .setUnfinishedMessage(builder.buildPartial());
+        }
+        return builder.buildPartial();
+      }
+    };
+
+    public static com.google.protobuf.Parser<StoreOutputsRequest> parser() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<StoreOutputsRequest> getParserForType() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.StoreOutputsRequest getDefaultInstanceForType() {
+      return DEFAULT_INSTANCE;
+    }
+
+  }
+
+  public interface StoreOutputsResponseOrBuilder extends
+      // @@protoc_insertion_point(interface_extends:gradle.substrate.v1.StoreOutputsResponse)
+      com.google.protobuf.MessageOrBuilder {
+
+    /**
+     * <code>bool success = 1;</code>
+     * @return The success.
+     */
+    boolean getSuccess();
+
+    /**
+     * <code>string error_message = 2;</code>
+     * @return The errorMessage.
+     */
+    java.lang.String getErrorMessage();
+    /**
+     * <code>string error_message = 2;</code>
+     * @return The bytes for errorMessage.
+     */
+    com.google.protobuf.ByteString
+        getErrorMessageBytes();
+  }
+  /**
+   * Protobuf type {@code gradle.substrate.v1.StoreOutputsResponse}
+   */
+  public static final class StoreOutputsResponse extends
+      com.google.protobuf.GeneratedMessage implements
+      // @@protoc_insertion_point(message_implements:gradle.substrate.v1.StoreOutputsResponse)
+      StoreOutputsResponseOrBuilder {
+  private static final long serialVersionUID = 0L;
+    static {
+      com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
+        com.google.protobuf.RuntimeVersion.RuntimeDomain.PUBLIC,
+        /* major= */ 4,
+        /* minor= */ 34,
+        /* patch= */ 0,
+        /* suffix= */ "",
+        "StoreOutputsResponse");
+    }
+    // Use StoreOutputsResponse.newBuilder() to construct.
+    private StoreOutputsResponse(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+      super(builder);
+    }
+    private StoreOutputsResponse() {
+      errorMessage_ = "";
+    }
+
+    public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreOutputsResponse_descriptor;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Descriptors.Descriptor getDescriptorForType() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreOutputsResponse_descriptor;
+    }
+
+    @java.lang.Override
+    protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+      return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreOutputsResponse_fieldAccessorTable
+          .ensureFieldAccessorsInitialized(
+              gradle.substrate.v1.Substrate.StoreOutputsResponse.class, gradle.substrate.v1.Substrate.StoreOutputsResponse.Builder.class);
+    }
+
+    public static final int SUCCESS_FIELD_NUMBER = 1;
+    private boolean success_ = false;
+    /**
+     * <code>bool success = 1;</code>
+     * @return The success.
+     */
+    @java.lang.Override
+    public boolean getSuccess() {
+      return success_;
+    }
+
+    public static final int ERROR_MESSAGE_FIELD_NUMBER = 2;
+    @SuppressWarnings("serial")
+    private volatile java.lang.Object errorMessage_ = "";
+    /**
+     * <code>string error_message = 2;</code>
+     * @return The errorMessage.
+     */
+    @java.lang.Override
+    public java.lang.String getErrorMessage() {
+      java.lang.Object ref = errorMessage_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        errorMessage_ = s;
+        return s;
+      }
+    }
+    /**
+     * <code>string error_message = 2;</code>
+     * @return The bytes for errorMessage.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getErrorMessageBytes() {
+      java.lang.Object ref = errorMessage_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        errorMessage_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
+    private byte memoizedIsInitialized = -1;
+    @java.lang.Override
+    public final boolean isInitialized() {
+      byte isInitialized = memoizedIsInitialized;
+      if (isInitialized == 1) return true;
+      if (isInitialized == 0) return false;
+
+      memoizedIsInitialized = 1;
+      return true;
+    }
+
+    @java.lang.Override
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+                        throws java.io.IOException {
+      if (success_ != false) {
+        output.writeBool(1, success_);
+      }
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(errorMessage_)) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 2, errorMessage_);
+      }
+      getUnknownFields().writeTo(output);
+    }
+
+    @java.lang.Override
+    public int getSerializedSize() {
+      int size = memoizedSize;
+      if (size != -1) return size;
+
+      size = 0;
+      if (success_ != false) {
+        size += com.google.protobuf.CodedOutputStream
+          .computeBoolSize(1, success_);
+      }
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(errorMessage_)) {
+        size += com.google.protobuf.GeneratedMessage.computeStringSize(2, errorMessage_);
+      }
+      size += getUnknownFields().getSerializedSize();
+      memoizedSize = size;
+      return size;
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+      if (obj == this) {
+       return true;
+      }
+      if (!(obj instanceof gradle.substrate.v1.Substrate.StoreOutputsResponse)) {
+        return super.equals(obj);
+      }
+      gradle.substrate.v1.Substrate.StoreOutputsResponse other = (gradle.substrate.v1.Substrate.StoreOutputsResponse) obj;
+
+      if (getSuccess()
+          != other.getSuccess()) return false;
+      if (!getErrorMessage()
+          .equals(other.getErrorMessage())) return false;
+      if (!getUnknownFields().equals(other.getUnknownFields())) return false;
+      return true;
+    }
+
+    @java.lang.Override
+    public int hashCode() {
+      if (memoizedHashCode != 0) {
+        return memoizedHashCode;
+      }
+      int hash = 41;
+      hash = (19 * hash) + getDescriptor().hashCode();
+      hash = (37 * hash) + SUCCESS_FIELD_NUMBER;
+      hash = (53 * hash) + com.google.protobuf.Internal.hashBoolean(
+          getSuccess());
+      hash = (37 * hash) + ERROR_MESSAGE_FIELD_NUMBER;
+      hash = (53 * hash) + getErrorMessage().hashCode();
+      hash = (29 * hash) + getUnknownFields().hashCode();
+      memoizedHashCode = hash;
+      return hash;
+    }
+
+    public static gradle.substrate.v1.Substrate.StoreOutputsResponse parseFrom(
+        java.nio.ByteBuffer data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.StoreOutputsResponse parseFrom(
+        java.nio.ByteBuffer data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.StoreOutputsResponse parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.StoreOutputsResponse parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.StoreOutputsResponse parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data);
+    }
+    public static gradle.substrate.v1.Substrate.StoreOutputsResponse parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+      return PARSER.parseFrom(data, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.StoreOutputsResponse parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.StoreOutputsResponse parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static gradle.substrate.v1.Substrate.StoreOutputsResponse parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input);
+    }
+
+    public static gradle.substrate.v1.Substrate.StoreOutputsResponse parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
+    }
+    public static gradle.substrate.v1.Substrate.StoreOutputsResponse parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input);
+    }
+    public static gradle.substrate.v1.Substrate.StoreOutputsResponse parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+      return com.google.protobuf.GeneratedMessage
+          .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    @java.lang.Override
+    public Builder newBuilderForType() { return newBuilder(); }
+    public static Builder newBuilder() {
+      return DEFAULT_INSTANCE.toBuilder();
+    }
+    public static Builder newBuilder(gradle.substrate.v1.Substrate.StoreOutputsResponse prototype) {
+      return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
+    }
+    @java.lang.Override
+    public Builder toBuilder() {
+      return this == DEFAULT_INSTANCE
+          ? new Builder() : new Builder().mergeFrom(this);
+    }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+      Builder builder = new Builder(parent);
+      return builder;
+    }
+    /**
+     * Protobuf type {@code gradle.substrate.v1.StoreOutputsResponse}
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessage.Builder<Builder> implements
+        // @@protoc_insertion_point(builder_implements:gradle.substrate.v1.StoreOutputsResponse)
+        gradle.substrate.v1.Substrate.StoreOutputsResponseOrBuilder {
+      public static final com.google.protobuf.Descriptors.Descriptor
+          getDescriptor() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreOutputsResponse_descriptor;
+      }
+
+      @java.lang.Override
+      protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
+          internalGetFieldAccessorTable() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreOutputsResponse_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                gradle.substrate.v1.Substrate.StoreOutputsResponse.class, gradle.substrate.v1.Substrate.StoreOutputsResponse.Builder.class);
+      }
+
+      // Construct using gradle.substrate.v1.Substrate.StoreOutputsResponse.newBuilder()
+      private Builder() {
+
+      }
+
+      private Builder(
+          com.google.protobuf.GeneratedMessage.BuilderParent parent) {
+        super(parent);
+
+      }
+      @java.lang.Override
+      public Builder clear() {
+        super.clear();
+        bitField0_ = 0;
+        success_ = false;
+        errorMessage_ = "";
+        return this;
+      }
+
+      @java.lang.Override
+      public com.google.protobuf.Descriptors.Descriptor
+          getDescriptorForType() {
+        return gradle.substrate.v1.Substrate.internal_static_gradle_substrate_v1_StoreOutputsResponse_descriptor;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.StoreOutputsResponse getDefaultInstanceForType() {
+        return gradle.substrate.v1.Substrate.StoreOutputsResponse.getDefaultInstance();
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.StoreOutputsResponse build() {
+        gradle.substrate.v1.Substrate.StoreOutputsResponse result = buildPartial();
+        if (!result.isInitialized()) {
+          throw newUninitializedMessageException(result);
+        }
+        return result;
+      }
+
+      @java.lang.Override
+      public gradle.substrate.v1.Substrate.StoreOutputsResponse buildPartial() {
+        gradle.substrate.v1.Substrate.StoreOutputsResponse result = new gradle.substrate.v1.Substrate.StoreOutputsResponse(this);
+        if (bitField0_ != 0) { buildPartial0(result); }
+        onBuilt();
+        return result;
+      }
+
+      private void buildPartial0(gradle.substrate.v1.Substrate.StoreOutputsResponse result) {
+        int from_bitField0_ = bitField0_;
+        if (((from_bitField0_ & 0x00000001) != 0)) {
+          result.success_ = success_;
+        }
+        if (((from_bitField0_ & 0x00000002) != 0)) {
+          result.errorMessage_ = errorMessage_;
+        }
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(com.google.protobuf.Message other) {
+        if (other instanceof gradle.substrate.v1.Substrate.StoreOutputsResponse) {
+          return mergeFrom((gradle.substrate.v1.Substrate.StoreOutputsResponse)other);
+        } else {
+          super.mergeFrom(other);
+          return this;
+        }
+      }
+
+      public Builder mergeFrom(gradle.substrate.v1.Substrate.StoreOutputsResponse other) {
+        if (other == gradle.substrate.v1.Substrate.StoreOutputsResponse.getDefaultInstance()) return this;
+        if (other.getSuccess() != false) {
+          setSuccess(other.getSuccess());
+        }
+        if (!other.getErrorMessage().isEmpty()) {
+          errorMessage_ = other.errorMessage_;
+          bitField0_ |= 0x00000002;
+          onChanged();
+        }
+        this.mergeUnknownFields(other.getUnknownFields());
+        onChanged();
+        return this;
+      }
+
+      @java.lang.Override
+      public final boolean isInitialized() {
+        return true;
+      }
+
+      @java.lang.Override
+      public Builder mergeFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws java.io.IOException {
+        if (extensionRegistry == null) {
+          throw new java.lang.NullPointerException();
+        }
+        try {
+          boolean done = false;
+          while (!done) {
+            int tag = input.readTag();
+            switch (tag) {
+              case 0:
+                done = true;
+                break;
+              case 8: {
+                success_ = input.readBool();
+                bitField0_ |= 0x00000001;
+                break;
+              } // case 8
+              case 18: {
+                errorMessage_ = input.readStringRequireUtf8();
+                bitField0_ |= 0x00000002;
+                break;
+              } // case 18
+              default: {
+                if (!super.parseUnknownField(input, extensionRegistry, tag)) {
+                  done = true; // was an endgroup tag
+                }
+                break;
+              } // default:
+            } // switch (tag)
+          } // while (!done)
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.unwrapIOException();
+        } finally {
+          onChanged();
+        } // finally
+        return this;
+      }
+      private int bitField0_;
+
+      private boolean success_ ;
+      /**
+       * <code>bool success = 1;</code>
+       * @return The success.
+       */
+      @java.lang.Override
+      public boolean getSuccess() {
+        return success_;
+      }
+      /**
+       * <code>bool success = 1;</code>
+       * @param value The success to set.
+       * @return This builder for chaining.
+       */
+      public Builder setSuccess(boolean value) {
+
+        success_ = value;
+        bitField0_ |= 0x00000001;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>bool success = 1;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearSuccess() {
+        bitField0_ = (bitField0_ & ~0x00000001);
+        success_ = false;
+        onChanged();
+        return this;
+      }
+
+      private java.lang.Object errorMessage_ = "";
+      /**
+       * <code>string error_message = 2;</code>
+       * @return The errorMessage.
+       */
+      public java.lang.String getErrorMessage() {
+        java.lang.Object ref = errorMessage_;
+        if (!(ref instanceof java.lang.String)) {
+          com.google.protobuf.ByteString bs =
+              (com.google.protobuf.ByteString) ref;
+          java.lang.String s = bs.toStringUtf8();
+          errorMessage_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <code>string error_message = 2;</code>
+       * @return The bytes for errorMessage.
+       */
+      public com.google.protobuf.ByteString
+          getErrorMessageBytes() {
+        java.lang.Object ref = errorMessage_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          errorMessage_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <code>string error_message = 2;</code>
+       * @param value The errorMessage to set.
+       * @return This builder for chaining.
+       */
+      public Builder setErrorMessage(
+          java.lang.String value) {
+        if (value == null) { throw new NullPointerException(); }
+        errorMessage_ = value;
+        bitField0_ |= 0x00000002;
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string error_message = 2;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearErrorMessage() {
+        errorMessage_ = getDefaultInstance().getErrorMessage();
+        bitField0_ = (bitField0_ & ~0x00000002);
+        onChanged();
+        return this;
+      }
+      /**
+       * <code>string error_message = 2;</code>
+       * @param value The bytes for errorMessage to set.
+       * @return This builder for chaining.
+       */
+      public Builder setErrorMessageBytes(
+          com.google.protobuf.ByteString value) {
+        if (value == null) { throw new NullPointerException(); }
+        checkByteStringIsUtf8(value);
+        errorMessage_ = value;
+        bitField0_ |= 0x00000002;
+        onChanged();
+        return this;
+      }
+
+      // @@protoc_insertion_point(builder_scope:gradle.substrate.v1.StoreOutputsResponse)
+    }
+
+    // @@protoc_insertion_point(class_scope:gradle.substrate.v1.StoreOutputsResponse)
+    private static final gradle.substrate.v1.Substrate.StoreOutputsResponse DEFAULT_INSTANCE;
+    static {
+      DEFAULT_INSTANCE = new gradle.substrate.v1.Substrate.StoreOutputsResponse();
+    }
+
+    public static gradle.substrate.v1.Substrate.StoreOutputsResponse getDefaultInstance() {
+      return DEFAULT_INSTANCE;
+    }
+
+    private static final com.google.protobuf.Parser<StoreOutputsResponse>
+        PARSER = new com.google.protobuf.AbstractParser<StoreOutputsResponse>() {
+      @java.lang.Override
+      public StoreOutputsResponse parsePartialFrom(
+          com.google.protobuf.CodedInputStream input,
+          com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+          throws com.google.protobuf.InvalidProtocolBufferException {
+        Builder builder = newBuilder();
+        try {
+          builder.mergeFrom(input, extensionRegistry);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+          throw e.setUnfinishedMessage(builder.buildPartial());
+        } catch (com.google.protobuf.UninitializedMessageException e) {
+          throw e.asInvalidProtocolBufferException().setUnfinishedMessage(builder.buildPartial());
+        } catch (java.io.IOException e) {
+          throw new com.google.protobuf.InvalidProtocolBufferException(e)
+              .setUnfinishedMessage(builder.buildPartial());
+        }
+        return builder.buildPartial();
+      }
+    };
+
+    public static com.google.protobuf.Parser<StoreOutputsResponse> parser() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<StoreOutputsResponse> getParserForType() {
+      return PARSER;
+    }
+
+    @java.lang.Override
+    public gradle.substrate.v1.Substrate.StoreOutputsResponse getDefaultInstanceForType() {
+      return DEFAULT_INSTANCE;
+    }
+
+  }
+
   private static final com.google.protobuf.Descriptors.Descriptor
     internal_static_gradle_substrate_v1_HandshakeRequest_descriptor;
   private static final 
@@ -24665,6 +40469,116 @@ java.lang.String defaultValue) {
   private static final 
     com.google.protobuf.GeneratedMessage.FieldAccessorTable
       internal_static_gradle_substrate_v1_RecordOutcomeResponse_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_LoadHistoryRequest_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_LoadHistoryRequest_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_LoadHistoryResponse_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_LoadHistoryResponse_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_StoreHistoryRequest_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_StoreHistoryRequest_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_StoreHistoryResponse_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_StoreHistoryResponse_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_RemoveHistoryRequest_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_RemoveHistoryRequest_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_RemoveHistoryResponse_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_RemoveHistoryResponse_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_FileToFingerprint_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_FileToFingerprint_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_FingerprintFilesRequest_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_FingerprintFilesRequest_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_FileFingerprintEntry_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_FileFingerprintEntry_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_FingerprintFilesResponse_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_FingerprintFilesResponse_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_PropertyValue_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_PropertyValue_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_SnapshotValuesRequest_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_SnapshotValuesRequest_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_ValueSnapshotResult_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_ValueSnapshotResult_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_SnapshotValuesResponse_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_SnapshotValuesResponse_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_InputPropertyHashesEntry_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_InputPropertyHashesEntry_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_InputFileHashesEntry_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_InputFileHashesEntry_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_ComputeCacheKeyResponse_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_ComputeCacheKeyResponse_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_ProbeCacheRequest_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_ProbeCacheRequest_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_ProbeCacheResponse_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_ProbeCacheResponse_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_StoreOutputsRequest_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_StoreOutputsRequest_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_gradle_substrate_v1_StoreOutputsResponse_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_gradle_substrate_v1_StoreOutputsResponse_fieldAccessorTable;
 
   public static com.google.protobuf.Descriptors.FileDescriptor
       getDescriptor() {
@@ -24756,53 +40670,131 @@ java.lang.String defaultValue) {
       "\022\026\n\016actual_outcome\030\003 \001(\t\022\032\n\022prediction_c" +
       "orrect\030\004 \001(\010\022\023\n\013duration_ms\030\005 \001(\003\"-\n\025Rec" +
       "ordOutcomeResponse\022\024\n\014acknowledged\030\001 \001(\010" +
-      "*\223\001\n\020PredictedOutcome\022\025\n\021PREDICTED_UNKNO" +
-      "WN\020\000\022\025\n\021PREDICTED_EXECUTE\020\001\022\030\n\024PREDICTED" +
-      "_UP_TO_DATE\020\002\022\030\n\024PREDICTED_FROM_CACHE\020\003\022" +
-      "\035\n\031PREDICTED_SHORT_CIRCUITED\020\004*\237\001\n\nPlanA" +
-      "ction\022\027\n\023PLAN_ACTION_UNKNOWN\020\000\022\027\n\023PLAN_A" +
-      "CTION_EXECUTE\020\001\022\037\n\033PLAN_ACTION_SKIP_UP_T" +
-      "O_DATE\020\002\022\037\n\033PLAN_ACTION_LOAD_FROM_CACHE\020" +
-      "\003\022\035\n\031PLAN_ACTION_SHORT_CIRCUIT\020\0042\305\001\n\016Con" +
-      "trolService\022Z\n\tHandshake\022%.gradle.substr" +
-      "ate.v1.HandshakeRequest\032&.gradle.substra" +
-      "te.v1.HandshakeResponse\022W\n\010Shutdown\022$.gr" +
-      "adle.substrate.v1.ShutdownRequest\032%.grad" +
-      "le.substrate.v1.ShutdownResponse2i\n\013Hash" +
-      "Service\022Z\n\tHashBatch\022%.gradle.substrate." +
-      "v1.HashBatchRequest\032&.gradle.substrate.v" +
-      "1.HashBatchResponse2\310\001\n\014CacheService\022Y\n\t" +
-      "LoadEntry\022%.gradle.substrate.v1.CacheLoa" +
-      "dRequest\032#.gradle.substrate.v1.CacheLoad" +
-      "Chunk0\001\022]\n\nStoreEntry\022$.gradle.substrate" +
-      ".v1.CacheStoreChunk\032\'.gradle.substrate.v" +
-      "1.CacheStoreResponse(\0012\331\003\n\013ExecService\022V" +
-      "\n\005Spawn\022%.gradle.substrate.v1.ExecSpawnR" +
-      "equest\032&.gradle.substrate.v1.ExecSpawnRe" +
-      "sponse\022S\n\004Wait\022$.gradle.substrate.v1.Exe" +
-      "cWaitRequest\032%.gradle.substrate.v1.ExecW" +
-      "aitResponse\022Y\n\006Signal\022&.gradle.substrate" +
-      ".v1.ExecSignalRequest\032\'.gradle.substrate" +
-      ".v1.ExecSignalResponse\022_\n\010KillTree\022(.gra" +
-      "dle.substrate.v1.ExecKillTreeRequest\032).g" +
-      "radle.substrate.v1.ExecKillTreeResponse\022" +
-      "a\n\017SubscribeOutput\022&.gradle.substrate.v1" +
-      ".ExecOutputRequest\032$.gradle.substrate.v1" +
-      ".ExecOutputChunk0\0012\322\001\n\013WorkService\022_\n\010Ev" +
-      "aluate\022(.gradle.substrate.v1.WorkEvaluat" +
-      "eRequest\032).gradle.substrate.v1.WorkEvalu" +
-      "ateResponse\022b\n\017RecordExecution\022&.gradle." +
-      "substrate.v1.WorkRecordRequest\032\'.gradle." +
-      "substrate.v1.WorkRecordResponse2\313\002\n\024Exec" +
-      "utionPlanService\022i\n\016PredictOutcome\022*.gra" +
-      "dle.substrate.v1.PredictOutcomeRequest\032+" +
-      ".gradle.substrate.v1.PredictOutcomeRespo" +
-      "nse\022`\n\013ResolvePlan\022\'.gradle.substrate.v1" +
-      ".ResolvePlanRequest\032(.gradle.substrate.v" +
-      "1.ResolvePlanResponse\022f\n\rRecordOutcome\022)" +
-      ".gradle.substrate.v1.RecordOutcomeReques" +
-      "t\032*.gradle.substrate.v1.RecordOutcomeRes" +
-      "ponseb\006proto3"
+      "\"+\n\022LoadHistoryRequest\022\025\n\rwork_identity\030" +
+      "\001 \001(\t\"I\n\023LoadHistoryResponse\022\r\n\005found\030\001 " +
+      "\001(\010\022\r\n\005state\030\002 \001(\014\022\024\n\014timestamp_ms\030\003 \001(\003" +
+      "\"Q\n\023StoreHistoryRequest\022\025\n\rwork_identity" +
+      "\030\001 \001(\t\022\r\n\005state\030\002 \001(\014\022\024\n\014timestamp_ms\030\003 " +
+      "\001(\003\"\'\n\024StoreHistoryResponse\022\017\n\007success\030\001" +
+      " \001(\010\"-\n\024RemoveHistoryRequest\022\025\n\rwork_ide" +
+      "ntity\030\001 \001(\t\"(\n\025RemoveHistoryResponse\022\017\n\007" +
+      "success\030\001 \001(\010\"^\n\021FileToFingerprint\022\025\n\rab" +
+      "solute_path\030\001 \001(\t\0222\n\004type\030\002 \001(\0162$.gradle" +
+      ".substrate.v1.FingerprintType\"\211\001\n\027Finger" +
+      "printFilesRequest\0225\n\005files\030\001 \003(\0132&.gradl" +
+      "e.substrate.v1.FileToFingerprint\022\036\n\026norm" +
+      "alization_strategy\030\002 \001(\t\022\027\n\017ignore_patte" +
+      "rns\030\003 \003(\t\"m\n\024FileFingerprintEntry\022\014\n\004pat" +
+      "h\030\001 \001(\t\022\014\n\004hash\030\002 \001(\014\022\014\n\004size\030\003 \001(\003\022\025\n\rl" +
+      "ast_modified\030\004 \001(\003\022\024\n\014is_directory\030\005 \001(\010" +
+      "\"\227\001\n\030FingerprintFilesResponse\022:\n\007entries" +
+      "\030\001 \003(\0132).gradle.substrate.v1.FileFingerp" +
+      "rintEntry\022\027\n\017collection_hash\030\002 \001(\014\022\025\n\rer" +
+      "ror_message\030\003 \001(\t\022\017\n\007success\030\004 \001(\010\"\300\001\n\rP" +
+      "ropertyValue\022\014\n\004name\030\001 \001(\t\022\026\n\014string_val" +
+      "ue\030\002 \001(\tH\000\022\024\n\nlong_value\030\003 \001(\003H\000\022\024\n\nbool" +
+      "_value\030\004 \001(\010H\000\022\026\n\014binary_value\030\005 \001(\014H\000\022\024" +
+      "\n\nlist_value\030\006 \001(\tH\000\022\023\n\tmap_value\030\007 \001(\tH" +
+      "\000\022\021\n\ttype_name\030\010 \001(\tB\007\n\005value\"o\n\025Snapsho" +
+      "tValuesRequest\0222\n\006values\030\001 \003(\0132\".gradle." +
+      "substrate.v1.PropertyValue\022\"\n\032implementa" +
+      "tion_fingerprint\030\002 \001(\t\"8\n\023ValueSnapshotR" +
+      "esult\022\014\n\004name\030\001 \001(\t\022\023\n\013fingerprint\030\002 \001(\014" +
+      "\"\223\001\n\026SnapshotValuesResponse\0229\n\007results\030\001" +
+      " \003(\0132(.gradle.substrate.v1.ValueSnapshot" +
+      "Result\022\026\n\016composite_hash\030\002 \001(\014\022\025\n\rerror_" +
+      "message\030\003 \001(\t\022\017\n\007success\030\004 \001(\010\"\241\003\n\026Compu" +
+      "teCacheKeyRequest\022\025\n\rwork_identity\030\001 \001(\t" +
+      "\022\033\n\023implementation_hash\030\002 \001(\t\022c\n\025input_p" +
+      "roperty_hashes\030\003 \003(\0132D.gradle.substrate." +
+      "v1.ComputeCacheKeyRequest.InputPropertyH" +
+      "ashesEntry\022[\n\021input_file_hashes\030\004 \003(\0132@." +
+      "gradle.substrate.v1.ComputeCacheKeyReque" +
+      "st.InputFileHashesEntry\022\035\n\025output_proper" +
+      "ty_names\030\005 \003(\t\032:\n\030InputPropertyHashesEnt" +
+      "ry\022\013\n\003key\030\001 \001(\t\022\r\n\005value\030\002 \001(\t:\0028\001\0326\n\024In" +
+      "putFileHashesEntry\022\013\n\003key\030\001 \001(\t\022\r\n\005value" +
+      "\030\002 \001(\t:\0028\001\"F\n\027ComputeCacheKeyResponse\022\021\n" +
+      "\tcache_key\030\001 \001(\014\022\030\n\020cache_key_string\030\002 \001" +
+      "(\t\"&\n\021ProbeCacheRequest\022\021\n\tcache_key\030\001 \001" +
+      "(\014\"9\n\022ProbeCacheResponse\022\021\n\tavailable\030\001 " +
+      "\001(\010\022\020\n\010location\030\002 \001(\t\"C\n\023StoreOutputsReq" +
+      "uest\022\021\n\tcache_key\030\001 \001(\014\022\031\n\021execution_tim" +
+      "e_ms\030\002 \001(\003\">\n\024StoreOutputsResponse\022\017\n\007su" +
+      "ccess\030\001 \001(\010\022\025\n\rerror_message\030\002 \001(\t*\223\001\n\020P" +
+      "redictedOutcome\022\025\n\021PREDICTED_UNKNOWN\020\000\022\025" +
+      "\n\021PREDICTED_EXECUTE\020\001\022\030\n\024PREDICTED_UP_TO" +
+      "_DATE\020\002\022\030\n\024PREDICTED_FROM_CACHE\020\003\022\035\n\031PRE" +
+      "DICTED_SHORT_CIRCUITED\020\004*\237\001\n\nPlanAction\022" +
+      "\027\n\023PLAN_ACTION_UNKNOWN\020\000\022\027\n\023PLAN_ACTION_" +
+      "EXECUTE\020\001\022\037\n\033PLAN_ACTION_SKIP_UP_TO_DATE" +
+      "\020\002\022\037\n\033PLAN_ACTION_LOAD_FROM_CACHE\020\003\022\035\n\031P" +
+      "LAN_ACTION_SHORT_CIRCUIT\020\004*X\n\017Fingerprin" +
+      "tType\022\024\n\020FINGERPRINT_FILE\020\000\022\031\n\025FINGERPRI" +
+      "NT_DIRECTORY\020\001\022\024\n\020FINGERPRINT_ROOT\020\0022\305\001\n" +
+      "\016ControlService\022Z\n\tHandshake\022%.gradle.su" +
+      "bstrate.v1.HandshakeRequest\032&.gradle.sub" +
+      "strate.v1.HandshakeResponse\022W\n\010Shutdown\022" +
+      "$.gradle.substrate.v1.ShutdownRequest\032%." +
+      "gradle.substrate.v1.ShutdownResponse2i\n\013" +
+      "HashService\022Z\n\tHashBatch\022%.gradle.substr" +
+      "ate.v1.HashBatchRequest\032&.gradle.substra" +
+      "te.v1.HashBatchResponse2\310\001\n\014CacheService" +
+      "\022Y\n\tLoadEntry\022%.gradle.substrate.v1.Cach" +
+      "eLoadRequest\032#.gradle.substrate.v1.Cache" +
+      "LoadChunk0\001\022]\n\nStoreEntry\022$.gradle.subst" +
+      "rate.v1.CacheStoreChunk\032\'.gradle.substra" +
+      "te.v1.CacheStoreResponse(\0012\331\003\n\013ExecServi" +
+      "ce\022V\n\005Spawn\022%.gradle.substrate.v1.ExecSp" +
+      "awnRequest\032&.gradle.substrate.v1.ExecSpa" +
+      "wnResponse\022S\n\004Wait\022$.gradle.substrate.v1" +
+      ".ExecWaitRequest\032%.gradle.substrate.v1.E" +
+      "xecWaitResponse\022Y\n\006Signal\022&.gradle.subst" +
+      "rate.v1.ExecSignalRequest\032\'.gradle.subst" +
+      "rate.v1.ExecSignalResponse\022_\n\010KillTree\022(" +
+      ".gradle.substrate.v1.ExecKillTreeRequest" +
+      "\032).gradle.substrate.v1.ExecKillTreeRespo" +
+      "nse\022a\n\017SubscribeOutput\022&.gradle.substrat" +
+      "e.v1.ExecOutputRequest\032$.gradle.substrat" +
+      "e.v1.ExecOutputChunk0\0012\322\001\n\013WorkService\022_" +
+      "\n\010Evaluate\022(.gradle.substrate.v1.WorkEva" +
+      "luateRequest\032).gradle.substrate.v1.WorkE" +
+      "valuateResponse\022b\n\017RecordExecution\022&.gra" +
+      "dle.substrate.v1.WorkRecordRequest\032\'.gra" +
+      "dle.substrate.v1.WorkRecordResponse2\313\002\n\024" +
+      "ExecutionPlanService\022i\n\016PredictOutcome\022*" +
+      ".gradle.substrate.v1.PredictOutcomeReque" +
+      "st\032+.gradle.substrate.v1.PredictOutcomeR" +
+      "esponse\022`\n\013ResolvePlan\022\'.gradle.substrat" +
+      "e.v1.ResolvePlanRequest\032(.gradle.substra" +
+      "te.v1.ResolvePlanResponse\022f\n\rRecordOutco" +
+      "me\022).gradle.substrate.v1.RecordOutcomeRe" +
+      "quest\032*.gradle.substrate.v1.RecordOutcom" +
+      "eResponse2\310\002\n\027ExecutionHistoryService\022`\n" +
+      "\013LoadHistory\022\'.gradle.substrate.v1.LoadH" +
+      "istoryRequest\032(.gradle.substrate.v1.Load" +
+      "HistoryResponse\022c\n\014StoreHistory\022(.gradle" +
+      ".substrate.v1.StoreHistoryRequest\032).grad" +
+      "le.substrate.v1.StoreHistoryResponse\022f\n\r" +
+      "RemoveHistory\022).gradle.substrate.v1.Remo" +
+      "veHistoryRequest\032*.gradle.substrate.v1.R" +
+      "emoveHistoryResponse2\211\001\n\026FileFingerprint" +
+      "Service\022o\n\020FingerprintFiles\022,.gradle.sub" +
+      "strate.v1.FingerprintFilesRequest\032-.grad" +
+      "le.substrate.v1.FingerprintFilesResponse" +
+      "2\201\001\n\024ValueSnapshotService\022i\n\016SnapshotVal" +
+      "ues\022*.gradle.substrate.v1.SnapshotValues" +
+      "Request\032+.gradle.substrate.v1.SnapshotVa" +
+      "luesResponse2\322\002\n\036BuildCacheOrchestration" +
+      "Service\022l\n\017ComputeCacheKey\022+.gradle.subs" +
+      "trate.v1.ComputeCacheKeyRequest\032,.gradle" +
+      ".substrate.v1.ComputeCacheKeyResponse\022]\n" +
+      "\nProbeCache\022&.gradle.substrate.v1.ProbeC" +
+      "acheRequest\032\'.gradle.substrate.v1.ProbeC" +
+      "acheResponse\022c\n\014StoreOutputs\022(.gradle.su" +
+      "bstrate.v1.StoreOutputsRequest\032).gradle." +
+      "substrate.v1.StoreOutputsResponseb\006proto" +
+      "3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,
@@ -25042,6 +41034,138 @@ java.lang.String defaultValue) {
       com.google.protobuf.GeneratedMessage.FieldAccessorTable(
         internal_static_gradle_substrate_v1_RecordOutcomeResponse_descriptor,
         new java.lang.String[] { "Acknowledged", });
+    internal_static_gradle_substrate_v1_LoadHistoryRequest_descriptor =
+      getDescriptor().getMessageType(35);
+    internal_static_gradle_substrate_v1_LoadHistoryRequest_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_LoadHistoryRequest_descriptor,
+        new java.lang.String[] { "WorkIdentity", });
+    internal_static_gradle_substrate_v1_LoadHistoryResponse_descriptor =
+      getDescriptor().getMessageType(36);
+    internal_static_gradle_substrate_v1_LoadHistoryResponse_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_LoadHistoryResponse_descriptor,
+        new java.lang.String[] { "Found", "State", "TimestampMs", });
+    internal_static_gradle_substrate_v1_StoreHistoryRequest_descriptor =
+      getDescriptor().getMessageType(37);
+    internal_static_gradle_substrate_v1_StoreHistoryRequest_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_StoreHistoryRequest_descriptor,
+        new java.lang.String[] { "WorkIdentity", "State", "TimestampMs", });
+    internal_static_gradle_substrate_v1_StoreHistoryResponse_descriptor =
+      getDescriptor().getMessageType(38);
+    internal_static_gradle_substrate_v1_StoreHistoryResponse_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_StoreHistoryResponse_descriptor,
+        new java.lang.String[] { "Success", });
+    internal_static_gradle_substrate_v1_RemoveHistoryRequest_descriptor =
+      getDescriptor().getMessageType(39);
+    internal_static_gradle_substrate_v1_RemoveHistoryRequest_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_RemoveHistoryRequest_descriptor,
+        new java.lang.String[] { "WorkIdentity", });
+    internal_static_gradle_substrate_v1_RemoveHistoryResponse_descriptor =
+      getDescriptor().getMessageType(40);
+    internal_static_gradle_substrate_v1_RemoveHistoryResponse_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_RemoveHistoryResponse_descriptor,
+        new java.lang.String[] { "Success", });
+    internal_static_gradle_substrate_v1_FileToFingerprint_descriptor =
+      getDescriptor().getMessageType(41);
+    internal_static_gradle_substrate_v1_FileToFingerprint_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_FileToFingerprint_descriptor,
+        new java.lang.String[] { "AbsolutePath", "Type", });
+    internal_static_gradle_substrate_v1_FingerprintFilesRequest_descriptor =
+      getDescriptor().getMessageType(42);
+    internal_static_gradle_substrate_v1_FingerprintFilesRequest_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_FingerprintFilesRequest_descriptor,
+        new java.lang.String[] { "Files", "NormalizationStrategy", "IgnorePatterns", });
+    internal_static_gradle_substrate_v1_FileFingerprintEntry_descriptor =
+      getDescriptor().getMessageType(43);
+    internal_static_gradle_substrate_v1_FileFingerprintEntry_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_FileFingerprintEntry_descriptor,
+        new java.lang.String[] { "Path", "Hash", "Size", "LastModified", "IsDirectory", });
+    internal_static_gradle_substrate_v1_FingerprintFilesResponse_descriptor =
+      getDescriptor().getMessageType(44);
+    internal_static_gradle_substrate_v1_FingerprintFilesResponse_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_FingerprintFilesResponse_descriptor,
+        new java.lang.String[] { "Entries", "CollectionHash", "ErrorMessage", "Success", });
+    internal_static_gradle_substrate_v1_PropertyValue_descriptor =
+      getDescriptor().getMessageType(45);
+    internal_static_gradle_substrate_v1_PropertyValue_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_PropertyValue_descriptor,
+        new java.lang.String[] { "Name", "StringValue", "LongValue", "BoolValue", "BinaryValue", "ListValue", "MapValue", "TypeName", "Value", });
+    internal_static_gradle_substrate_v1_SnapshotValuesRequest_descriptor =
+      getDescriptor().getMessageType(46);
+    internal_static_gradle_substrate_v1_SnapshotValuesRequest_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_SnapshotValuesRequest_descriptor,
+        new java.lang.String[] { "Values", "ImplementationFingerprint", });
+    internal_static_gradle_substrate_v1_ValueSnapshotResult_descriptor =
+      getDescriptor().getMessageType(47);
+    internal_static_gradle_substrate_v1_ValueSnapshotResult_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_ValueSnapshotResult_descriptor,
+        new java.lang.String[] { "Name", "Fingerprint", });
+    internal_static_gradle_substrate_v1_SnapshotValuesResponse_descriptor =
+      getDescriptor().getMessageType(48);
+    internal_static_gradle_substrate_v1_SnapshotValuesResponse_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_SnapshotValuesResponse_descriptor,
+        new java.lang.String[] { "Results", "CompositeHash", "ErrorMessage", "Success", });
+    internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_descriptor =
+      getDescriptor().getMessageType(49);
+    internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_descriptor,
+        new java.lang.String[] { "WorkIdentity", "ImplementationHash", "InputPropertyHashes", "InputFileHashes", "OutputPropertyNames", });
+    internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_InputPropertyHashesEntry_descriptor =
+      internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_descriptor.getNestedType(0);
+    internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_InputPropertyHashesEntry_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_InputPropertyHashesEntry_descriptor,
+        new java.lang.String[] { "Key", "Value", });
+    internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_InputFileHashesEntry_descriptor =
+      internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_descriptor.getNestedType(1);
+    internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_InputFileHashesEntry_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_ComputeCacheKeyRequest_InputFileHashesEntry_descriptor,
+        new java.lang.String[] { "Key", "Value", });
+    internal_static_gradle_substrate_v1_ComputeCacheKeyResponse_descriptor =
+      getDescriptor().getMessageType(50);
+    internal_static_gradle_substrate_v1_ComputeCacheKeyResponse_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_ComputeCacheKeyResponse_descriptor,
+        new java.lang.String[] { "CacheKey", "CacheKeyString", });
+    internal_static_gradle_substrate_v1_ProbeCacheRequest_descriptor =
+      getDescriptor().getMessageType(51);
+    internal_static_gradle_substrate_v1_ProbeCacheRequest_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_ProbeCacheRequest_descriptor,
+        new java.lang.String[] { "CacheKey", });
+    internal_static_gradle_substrate_v1_ProbeCacheResponse_descriptor =
+      getDescriptor().getMessageType(52);
+    internal_static_gradle_substrate_v1_ProbeCacheResponse_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_ProbeCacheResponse_descriptor,
+        new java.lang.String[] { "Available", "Location", });
+    internal_static_gradle_substrate_v1_StoreOutputsRequest_descriptor =
+      getDescriptor().getMessageType(53);
+    internal_static_gradle_substrate_v1_StoreOutputsRequest_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_StoreOutputsRequest_descriptor,
+        new java.lang.String[] { "CacheKey", "ExecutionTimeMs", });
+    internal_static_gradle_substrate_v1_StoreOutputsResponse_descriptor =
+      getDescriptor().getMessageType(54);
+    internal_static_gradle_substrate_v1_StoreOutputsResponse_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_gradle_substrate_v1_StoreOutputsResponse_descriptor,
+        new java.lang.String[] { "Success", "ErrorMessage", });
     descriptor.resolveAllFeaturesImmutable();
   }
 

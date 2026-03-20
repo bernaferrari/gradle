@@ -276,3 +276,185 @@ message RecordOutcomeRequest {
 message RecordOutcomeResponse {
   bool acknowledged = 1;
 }
+
+// -- Execution History Service (Phase 7) --
+
+// Stores and retrieves execution history for up-to-date checking.
+// Replaces Java's ExecutionHistoryStore with Rust-backed storage.
+service ExecutionHistoryService {
+  // Load previous execution state for a work unit.
+  rpc LoadHistory(LoadHistoryRequest) returns (LoadHistoryResponse);
+  // Store execution state after execution completes.
+  rpc StoreHistory(StoreHistoryRequest) returns (StoreHistoryResponse);
+  // Remove execution history for a work unit.
+  rpc RemoveHistory(RemoveHistoryRequest) returns (RemoveHistoryResponse);
+}
+
+message LoadHistoryRequest {
+  string work_identity = 1;
+}
+
+message LoadHistoryResponse {
+  bool found = 1;
+  // Serialized execution state (input fingerprints, output snapshots, etc.).
+  bytes state = 2;
+  // Timestamp of when this state was stored.
+  int64 timestamp_ms = 3;
+}
+
+message StoreHistoryRequest {
+  string work_identity = 1;
+  // Serialized execution state.
+  bytes state = 2;
+  int64 timestamp_ms = 3;
+}
+
+message StoreHistoryResponse {
+  bool success = 1;
+}
+
+message RemoveHistoryRequest {
+  string work_identity = 1;
+}
+
+message RemoveHistoryResponse {
+  bool success = 1;
+}
+
+// -- File Fingerprint Service (Phase 9) --
+
+// Walks file trees and computes content hashes in Rust.
+// Replaces Java's FileCollectionFingerprinter.
+service FileFingerprintService {
+  // Fingerprint a set of files/directories.
+  rpc FingerprintFiles(FingerprintFilesRequest) returns (FingerprintFilesResponse);
+}
+
+message FileToFingerprint {
+  string absolute_path = 1;
+  // How to handle this entry: FILE, DIRECTORY, or ROOT.
+  FingerprintType type = 2;
+}
+
+enum FingerprintType {
+  FINGERPRINT_FILE = 0;
+  FINGERPRINT_DIRECTORY = 1;
+  FINGERPRINT_ROOT = 2;
+}
+
+message FingerprintFilesRequest {
+  repeated FileToFingerprint files = 1;
+  // Normalization strategy: ABSOLUTE_PATH, RELATIVE_PATH, NAME_ONLY, HASH.
+  string normalization_strategy = 2;
+  // Ignore changes to this pattern (e.g. ".DS_Store").
+  repeated string ignore_patterns = 3;
+}
+
+message FileFingerprintEntry {
+  string path = 1;
+  bytes hash = 2;
+  int64 size = 3;
+  int64 last_modified = 4;
+  bool is_directory = 5;
+}
+
+message FingerprintFilesResponse {
+  // Fingerprinted entries.
+  repeated FileFingerprintEntry entries = 1;
+  // Overall hash of the entire file collection.
+  bytes collection_hash = 2;
+  // Error message if fingerprinting failed.
+  string error_message = 3;
+  bool success = 4;
+}
+
+// -- Value Snapshot Service (Phase 10) --
+
+// Computes fingerprints for input properties in Rust.
+// Replaces Java's DefaultValueSnapshotter.
+service ValueSnapshotService {
+  // Fingerprint a batch of input properties.
+  rpc SnapshotValues(SnapshotValuesRequest) returns (SnapshotValuesResponse);
+}
+
+message PropertyValue {
+  string name = 1;
+  // Serialized value representation.
+  oneof value {
+    string string_value = 2;
+    int64 long_value = 3;
+    bool bool_value = 4;
+    bytes binary_value = 5;
+    // For collection types, a semicolon-separated list.
+    string list_value = 6;
+    // For map types, key=value pairs separated by newlines.
+    string map_value = 7;
+  }
+  // Type name for the value (e.g. "java.lang.String", "java.io.File").
+  string type_name = 8;
+}
+
+message SnapshotValuesRequest {
+  repeated PropertyValue values = 1;
+  // Implementation fingerprint for the work unit.
+  string implementation_fingerprint = 2;
+}
+
+message ValueSnapshotResult {
+  string name = 1;
+  bytes fingerprint = 2;
+}
+
+message SnapshotValuesResponse {
+  repeated ValueSnapshotResult results = 1;
+  // Composite hash of all input values.
+  bytes composite_hash = 2;
+  // Error message if snapshotting failed.
+  string error_message = 3;
+  bool success = 4;
+}
+
+// -- Build Cache Orchestration Service (Phase 8) --
+
+// Coordinates build cache operations from Rust.
+// Replaces Java's BuildCacheController with Rust-backed orchestration.
+service BuildCacheOrchestrationService {
+  // Compute a cache key for the given work identity and input fingerprints.
+  rpc ComputeCacheKey(ComputeCacheKeyRequest) returns (ComputeCacheKeyResponse);
+  // Check if a cache entry exists without loading it.
+  rpc ProbeCache(ProbeCacheRequest) returns (ProbeCacheResponse);
+  // Pack execution outputs into a cache entry (delegates to existing CacheService).
+  rpc StoreOutputs(StoreOutputsRequest) returns (StoreOutputsResponse);
+}
+
+message ComputeCacheKeyRequest {
+  string work_identity = 1;
+  string implementation_hash = 2;
+  map<string, string> input_property_hashes = 3;
+  map<string, string> input_file_hashes = 4;
+  repeated string output_property_names = 5;
+}
+
+message ComputeCacheKeyResponse {
+  bytes cache_key = 1;
+  string cache_key_string = 2;
+}
+
+message ProbeCacheRequest {
+  bytes cache_key = 1;
+}
+
+message ProbeCacheResponse {
+  bool available = 1;
+  string location = 2; // "local", "remote", or "both"
+}
+
+message StoreOutputsRequest {
+  bytes cache_key = 1;
+  int64 execution_time_ms = 2;
+}
+
+message StoreOutputsResponse {
+  bool success = 1;
+  string error_message = 2;
+}
