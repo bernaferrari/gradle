@@ -4,3 +4,7 @@ pub mod cache;
 pub mod exec;
 pub mod work;
 pub mod execution_plan;
+pub mod execution_history;
+pub mod file_fingerprint;
+pub mod value_snapshot;
+pub mod cache_orchestration;
