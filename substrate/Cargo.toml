@@ -27,6 +27,11 @@ async-stream = "0.3"
 futures-util = "0.3"
 sha1 = "0.10"
 sha2 = "0.10"
+notify.workspace = true
+glob.workspace = true
+reqwest.workspace = true
+quick-xml.workspace = true
+nix.workspace = true
 
 [build-dependencies]
 tonic-build = "0.12"

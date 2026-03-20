@@ -94,6 +94,18 @@ struct Args {
     /// Path to the toolchain installation directory
     #[arg(long, default_value = "/tmp/gradle-substrate-toolchains")]
     toolchain_dir: String,
+
+    /// Remote build cache URL (e.g., https://cache.example.com/build-cache)
+    #[arg(long, env = "SUBSTRATE_REMOTE_CACHE_URL")]
+    remote_cache_url: Option<String>,
+
+    /// Remote cache username for HTTP Basic auth
+    #[arg(long, env = "SUBSTRATE_REMOTE_CACHE_USERNAME")]
+    remote_cache_username: Option<String>,
+
+    /// Remote cache password for HTTP Basic auth
+    #[arg(long, env = "SUBSTRATE_REMOTE_CACHE_PASSWORD")]
+    remote_cache_password: Option<String>,
 }
 
 fn init_logging(level: &str) {
@@ -161,7 +173,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 2: Build cache
     let cache_dir = PathBuf::from(&args.cache_dir);
     std::fs::create_dir_all(&cache_dir)?;
-    let cache = CacheServiceImpl::new(cache_dir);
+
+    let cache = if let Some(remote_url) = &args.remote_cache_url {
+        let remote = gradle_substrate_daemon::server::remote_cache::RemoteCacheStore::new(
+            remote_url.clone(),
+            args.remote_cache_username.clone(),
+            args.remote_cache_password.clone(),
+        );
+        tracing::info!(remote_url = %remote_url, "Remote cache configured");
+        CacheServiceImpl::with_remote(cache_dir, remote)
+    } else {
+        CacheServiceImpl::new(cache_dir)
+    };
 
     // Phase 3: Process execution
     let exec = ExecServiceImpl::new();
