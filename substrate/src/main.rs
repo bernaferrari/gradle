@@ -11,6 +11,7 @@ use gradle_substrate_daemon::{
         bootstrap_service_server::BootstrapServiceServer,
         build_cache_orchestration_service_server::BuildCacheOrchestrationServiceServer,
         build_event_stream_service_server::BuildEventStreamServiceServer,
+        build_layout_service_server::BuildLayoutServiceServer,
         build_operations_service_server::BuildOperationsServiceServer,
         cache_service_server::CacheServiceServer,
         configuration_cache_service_server::ConfigurationCacheServiceServer,
@@ -27,19 +28,21 @@ use gradle_substrate_daemon::{
         task_graph_service_server::TaskGraphServiceServer,
         toolchain_service_server::ToolchainServiceServer,
         value_snapshot_service_server::ValueSnapshotServiceServer,
+        worker_process_service_server::WorkerProcessServiceServer,
         work_service_server::WorkServiceServer,
     },
     server::{
         bootstrap::BootstrapServiceImpl, build_event_stream::BuildEventStreamServiceImpl,
-        build_operations::BuildOperationsServiceImpl, cache::CacheServiceImpl,
-        cache_orchestration::BuildCacheOrchestrationServiceImpl,
+        build_layout::BuildLayoutServiceImpl, build_operations::BuildOperationsServiceImpl,
+        cache::CacheServiceImpl, cache_orchestration::BuildCacheOrchestrationServiceImpl,
         config_cache::ConfigurationCacheServiceImpl, configuration::ConfigurationServiceImpl,
         control::ControlServiceImpl, dependency_resolution::DependencyResolutionServiceImpl,
         execution_history::ExecutionHistoryServiceImpl, execution_plan::ExecutionPlanServiceImpl,
         exec::ExecServiceImpl, file_fingerprint::FileFingerprintServiceImpl,
         file_watch::FileWatchServiceImpl, hash::HashServiceImpl, plugin::PluginServiceImpl,
         task_graph::TaskGraphServiceImpl, toolchain::ToolchainServiceImpl,
-        value_snapshot::ValueSnapshotServiceImpl, work::WorkServiceImpl,
+        value_snapshot::ValueSnapshotServiceImpl, worker_process::WorkerProcessServiceImpl,
+        work::WorkServiceImpl,
     },
     PROTOCOL_VERSION,
 };
@@ -202,12 +205,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 24: Build event streaming
     let build_event_stream = BuildEventStreamServiceImpl::new();
 
+    // Phase 25: Worker process management
+    let worker_process = WorkerProcessServiceImpl::new();
+
+    // Phase 26: Build layout / project model
+    let build_layout = BuildLayoutServiceImpl::new();
+
     let listener = UnixListener::bind(&socket_path)?;
 
     println!("Gradle Substrate Daemon v{}", env!("CARGO_PKG_VERSION"));
     println!("Protocol version: {}", PROTOCOL_VERSION);
     println!("Listening on: {}", args.socket_path);
-    println!("Services: control, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream");
+    println!("Services: control, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout");
 
     Server::builder()
         .add_service(ControlServiceServer::new(control))
@@ -230,6 +239,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(ConfigurationCacheServiceServer::new(config_cache))
         .add_service(ToolchainServiceServer::new(toolchain))
         .add_service(BuildEventStreamServiceServer::new(build_event_stream))
+        .add_service(WorkerProcessServiceServer::new(worker_process))
+        .add_service(BuildLayoutServiceServer::new(build_layout))
         .serve_with_incoming_shutdown(tokio_stream::wrappers::UnixListenerStream::new(listener), shutdown_signal())
         .await?;
 
