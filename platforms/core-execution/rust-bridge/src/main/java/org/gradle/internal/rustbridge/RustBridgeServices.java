@@ -5,6 +5,7 @@ import org.gradle.internal.buildoption.RustSubstrateOptions;
 import org.gradle.internal.rustbridge.cache.RustBuildCacheServiceFactory;
 import org.gradle.internal.rustbridge.execution.ExecutionPlanClient;
 import org.gradle.internal.rustbridge.fingerprint.RustFileFingerprintClient;
+import org.gradle.internal.rustbridge.history.RustExecutionHistoryClient;
 import org.gradle.internal.rustbridge.work.WorkerSchedulerClient;
 import org.gradle.internal.service.ServiceRegistration;
 import org.gradle.internal.service.scopes.AbstractGradleModuleServices;
@@ -100,6 +101,11 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
         @Provides
         RustFileFingerprintClient createRustFileFingerprintClient(SubstrateClient client) {
             return new RustFileFingerprintClient(client);
+        }
+
+        @Provides
+        RustExecutionHistoryClient createRustExecutionHistoryClient(SubstrateClient client) {
+            return new RustExecutionHistoryClient(client);
         }
     }
 }

@@ -5,6 +5,7 @@ import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
 import io.grpc.netty.shaded.io.netty.channel.unix.DomainSocketAddress;
 import gradle.substrate.v1.CacheServiceGrpc;
 import gradle.substrate.v1.ControlServiceGrpc;
+import gradle.substrate.v1.ExecutionHistoryServiceGrpc;
 import gradle.substrate.v1.ExecutionPlanServiceGrpc;
 import gradle.substrate.v1.ExecServiceGrpc;
 import gradle.substrate.v1.FileFingerprintServiceGrpc;
@@ -29,6 +30,7 @@ public class SubstrateClient implements Closeable {
     private final WorkServiceGrpc.WorkServiceBlockingStub workStub;
     private final ExecutionPlanServiceGrpc.ExecutionPlanServiceBlockingStub executionPlanStub;
     private final FileFingerprintServiceGrpc.FileFingerprintServiceBlockingStub fileFingerprintStub;
+    private final ExecutionHistoryServiceGrpc.ExecutionHistoryServiceBlockingStub executionHistoryStub;
     private final boolean noop;
 
     private SubstrateClient(ManagedChannel channel, boolean noop) {
@@ -42,6 +44,7 @@ public class SubstrateClient implements Closeable {
             this.workStub = null;
             this.executionPlanStub = null;
             this.fileFingerprintStub = null;
+            this.executionHistoryStub = null;
         } else {
             this.controlStub = ControlServiceGrpc.newBlockingStub(channel);
             this.hashStub = HashServiceGrpc.newBlockingStub(channel);
@@ -50,6 +53,7 @@ public class SubstrateClient implements Closeable {
             this.workStub = WorkServiceGrpc.newBlockingStub(channel);
             this.executionPlanStub = ExecutionPlanServiceGrpc.newBlockingStub(channel);
             this.fileFingerprintStub = FileFingerprintServiceGrpc.newBlockingStub(channel);
+            this.executionHistoryStub = ExecutionHistoryServiceGrpc.newBlockingStub(channel);
         }
     }
 
@@ -108,6 +112,11 @@ public class SubstrateClient implements Closeable {
     public FileFingerprintServiceGrpc.FileFingerprintServiceBlockingStub getFileFingerprintStub() {
         throwIfNoop();
         return fileFingerprintStub;
+    }
+
+    public ExecutionHistoryServiceGrpc.ExecutionHistoryServiceBlockingStub getExecutionHistoryStub() {
+        throwIfNoop();
+        return executionHistoryStub;
     }
 
     private void throwIfNoop() {
