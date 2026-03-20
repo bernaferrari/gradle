@@ -16,3 +16,5 @@ pub mod bootstrap;
 pub mod dependency_resolution;
 pub mod file_watch;
 pub mod config_cache;
+pub mod toolchain;
+pub mod build_event_stream;
