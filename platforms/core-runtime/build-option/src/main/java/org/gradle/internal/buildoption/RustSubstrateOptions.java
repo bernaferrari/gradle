@@ -197,6 +197,22 @@ public class RustSubstrateOptions {
     public static final InternalFlag ENABLE_RUST_EVENT_STREAM =
         new InternalFlag("org.gradle.rust.substrate.eventstream.enabled", false);
 
+    /**
+     * Enable Phase 25: Rust-native worker process management.
+     * Property: org.gradle.rust.substrate.worker.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_WORKER_PROCESS =
+        new InternalFlag("org.gradle.rust.substrate.worker.enabled", false);
+
+    /**
+     * Enable Phase 26: Rust-native build layout / project model.
+     * Property: org.gradle.rust.substrate.buildlayout.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_BUILD_LAYOUT =
+        new InternalFlag("org.gradle.rust.substrate.buildlayout.enabled", false);
+
     private RustSubstrateOptions() {
         // utility class
     }

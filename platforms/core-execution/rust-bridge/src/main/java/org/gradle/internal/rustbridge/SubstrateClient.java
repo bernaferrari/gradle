@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit;
  * gRPC client for communicating with the Rust substrate daemon.
  * Connects via Unix domain socket.
  *
- * <p>Provides blocking stubs for all 20 substrate services.
+ * <p>Provides blocking stubs for all 22 substrate services.
  * When the substrate is disabled (noop mode), all stub getters
  * throw {@link SubstrateException}.</p>
  */
@@ -62,6 +62,10 @@ public class SubstrateClient implements Closeable {
     private final ToolchainServiceGrpc.ToolchainServiceBlockingStub toolchainStub;
     // Phase 24: Build event streaming
     private final BuildEventStreamServiceGrpc.BuildEventStreamServiceBlockingStub buildEventStreamStub;
+    // Phase 25: Worker process management
+    private final WorkerProcessServiceGrpc.WorkerProcessServiceBlockingStub workerProcessStub;
+    // Phase 26: Build layout / project model
+    private final BuildLayoutServiceGrpc.BuildLayoutServiceBlockingStub buildLayoutStub;
 
     private SubstrateClient(ManagedChannel channel, boolean noop) {
         this.channel = channel;
@@ -87,6 +91,8 @@ public class SubstrateClient implements Closeable {
             this.configCacheStub = null;
             this.toolchainStub = null;
             this.buildEventStreamStub = null;
+            this.workerProcessStub = null;
+            this.buildLayoutStub = null;
         } else {
             this.controlStub = ControlServiceGrpc.newBlockingStub(channel);
             this.hashStub = HashServiceGrpc.newBlockingStub(channel);
@@ -108,6 +114,8 @@ public class SubstrateClient implements Closeable {
             this.configCacheStub = ConfigurationCacheServiceGrpc.newBlockingStub(channel);
             this.toolchainStub = ToolchainServiceGrpc.newBlockingStub(channel);
             this.buildEventStreamStub = BuildEventStreamServiceGrpc.newBlockingStub(channel);
+            this.workerProcessStub = WorkerProcessServiceGrpc.newBlockingStub(channel);
+            this.buildLayoutStub = BuildLayoutServiceGrpc.newBlockingStub(channel);
         }
     }
 
@@ -233,6 +241,16 @@ public class SubstrateClient implements Closeable {
     public BuildEventStreamServiceGrpc.BuildEventStreamServiceBlockingStub getBuildEventStreamStub() {
         throwIfNoop();
         return buildEventStreamStub;
+    }
+
+    public WorkerProcessServiceGrpc.WorkerProcessServiceBlockingStub getWorkerProcessStub() {
+        throwIfNoop();
+        return workerProcessStub;
+    }
+
+    public BuildLayoutServiceGrpc.BuildLayoutServiceBlockingStub getBuildLayoutStub() {
+        throwIfNoop();
+        return buildLayoutStub;
     }
 
     private void throwIfNoop() {

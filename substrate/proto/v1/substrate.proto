@@ -1165,3 +1165,183 @@ message GetEventLogResponse {
   repeated BuildEventMessage events = 1;
   int32 total_events = 2;
 }
+
+// -- Worker Process Management Service (Phase 25) --
+
+// Manages Gradle worker daemon processes (compiler daemons, test workers).
+// Replaces Gradle's WorkerDaemon infrastructure with a more efficient
+// Rust-based process pool.
+service WorkerProcessService {
+  // Acquire a worker process from the pool (or spawn a new one).
+  rpc AcquireWorker(AcquireWorkerRequest) returns (AcquireWorkerResponse);
+  // Release a worker back to the pool.
+  rpc ReleaseWorker(ReleaseWorkerRequest) returns (ReleaseWorkerResponse);
+  // Stop a specific worker process.
+  rpc StopWorker(StopWorkerRequest) returns (StopWorkerResponse);
+  // Get status of all worker processes.
+  rpc GetWorkerStatus(GetWorkerStatusRequest) returns (GetWorkerStatusResponse);
+  // Configure the worker pool (max size, idle timeout, etc.).
+  rpc ConfigurePool(ConfigurePoolRequest) returns (ConfigurePoolResponse);
+}
+
+message WorkerSpec {
+  string worker_key = 1;        // unique key identifying the worker type (e.g. "java-compiler", "test-worker")
+  string java_home = 2;         // JDK to use
+  repeated string classpath = 3; // worker classpath entries
+  string working_dir = 4;       // working directory for the worker
+  map<string, string> jvm_args = 5; // JVM arguments (e.g. "-Xmx512m")
+  int32 max_memory_mb = 6;      // max heap size in MB
+  bool daemon = 7;              // whether to keep the process alive between uses
+}
+
+message WorkerHandle {
+  string worker_id = 1;         // unique worker instance ID
+  string worker_key = 2;        // type of worker
+  int32 pid = 3;                // OS process ID
+  string connect_address = 4;   // address for IPC (socket/pipe)
+  int64 started_at_ms = 5;      // when the worker was started
+  bool healthy = 6;             // health check result
+}
+
+message AcquireWorkerRequest {
+  WorkerSpec spec = 1;
+  int64 timeout_ms = 2;         // max time to wait for a worker
+}
+
+message AcquireWorkerResponse {
+  WorkerHandle worker = 1;
+  bool reused = 2;              // true if reusing an existing idle worker
+  string error_message = 3;     // set if acquisition failed
+}
+
+message ReleaseWorkerRequest {
+  string worker_id = 1;
+  bool healthy = 2;             // whether the worker is still healthy (for pool reuse decisions)
+}
+
+message ReleaseWorkerResponse {
+  bool accepted = 1;
+}
+
+message StopWorkerRequest {
+  string worker_id = 1;
+  bool force = 2;               // SIGKILL vs graceful shutdown
+}
+
+message StopWorkerResponse {
+  bool stopped = 1;
+  string error_message = 2;
+}
+
+message GetWorkerStatusRequest {
+  string worker_key = 1;        // optional: filter by worker type
+}
+
+message WorkerStatus {
+  string worker_id = 1;
+  string worker_key = 2;
+  int32 pid = 3;
+  string state = 4;             // "idle", "busy", "starting", "stopping"
+  int64 started_at_ms = 5;
+  int64 last_used_ms = 6;
+  int64 memory_used_bytes = 7;
+  int32 tasks_completed = 8;
+}
+
+message GetWorkerStatusResponse {
+  repeated WorkerStatus workers = 1;
+  int32 pool_size = 2;
+  int32 idle_count = 3;
+  int32 busy_count = 4;
+}
+
+message ConfigurePoolRequest {
+  int32 max_pool_size = 1;
+  int64 idle_timeout_ms = 2;    // how long before idle workers are stopped
+  int32 max_per_key = 3;        // max workers per worker type
+  bool enable_health_checks = 4;
+}
+
+message ConfigurePoolResponse {
+  bool applied = 1;
+}
+
+// -- Build Layout / Project Model Service (Phase 26) --
+
+// Manages the Gradle project model: multi-project structure,
+// settings, and project inclusion. Replaces the JVM-side
+// SettingsProcessor and ProjectModel.
+service BuildLayoutService {
+  // Register the root project and parse settings.
+  rpc InitBuildLayout(InitBuildLayoutRequest) returns (InitBuildLayoutResponse);
+  // Add a subproject to the model.
+  rpc AddSubproject(AddSubprojectRequest) returns (AddSubprojectResponse);
+  // Resolve the full project tree.
+  rpc GetProjectTree(GetProjectTreeRequest) returns (GetProjectTreeResponse);
+  // Get the build file path for a project.
+  rpc GetBuildFilePath(GetBuildFilePathRequest) returns (GetBuildFilePathResponse);
+  // List all projects in the build.
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
+}
+
+message InitBuildLayoutRequest {
+  string root_dir = 1;          // absolute path to the root project
+  string settings_file = 2;     // path to settings.gradle/settings.gradle.kts
+  string build_file = 3;        // default build file name ("build.gradle" or "build.gradle.kts")
+  string build_name = 4;        // name of the build
+}
+
+message InitBuildLayoutResponse {
+  string build_id = 1;
+  bool initialized = 2;
+  string error_message = 3;
+}
+
+message AddSubprojectRequest {
+  string build_id = 1;
+  string project_path = 2;      // Gradle path, e.g. ":app", ":lib:utils"
+  string project_dir = 3;       // absolute path to the project directory
+  string build_file = 4;        // build file path for this project
+  string display_name = 5;      // human-readable name
+}
+
+message AddSubprojectResponse {
+  bool added = 1;
+  string error_message = 2;
+}
+
+message ProjectNode {
+  string project_path = 1;      // Gradle path, e.g. ":app", ":lib:utils"
+  string project_dir = 2;       // absolute directory path
+  string build_file = 3;        // build file path
+  string display_name = 4;
+  repeated string children = 5; // child project paths
+}
+
+message GetProjectTreeRequest {
+  string build_id = 1;
+}
+
+message GetProjectTreeResponse {
+  ProjectNode root = 1;
+  repeated ProjectNode all_projects = 2;
+}
+
+message GetBuildFilePathRequest {
+  string build_id = 1;
+  string project_path = 2;
+}
+
+message GetBuildFilePathResponse {
+  string build_file_path = 1;
+  bool found = 2;
+}
+
+message ListProjectsRequest {
+  string build_id = 1;
+}
+
+message ListProjectsResponse {
+  repeated string project_paths = 1;
+  repeated string project_dirs = 2;
+}
