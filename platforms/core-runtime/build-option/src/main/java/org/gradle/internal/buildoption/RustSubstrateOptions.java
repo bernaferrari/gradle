@@ -181,6 +181,22 @@ public class RustSubstrateOptions {
     public static final InternalFlag ENABLE_RUST_CONFIG_CACHE =
         new InternalFlag("org.gradle.rust.substrate.configcache.enabled", false);
 
+    /**
+     * Enable Phase 23: Rust-native toolchain management.
+     * Property: org.gradle.rust.substrate.toolchain.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_TOOLCHAIN =
+        new InternalFlag("org.gradle.rust.substrate.toolchain.enabled", false);
+
+    /**
+     * Enable Phase 24: Rust-native build event streaming.
+     * Property: org.gradle.rust.substrate.eventstream.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_EVENT_STREAM =
+        new InternalFlag("org.gradle.rust.substrate.eventstream.enabled", false);
+
     private RustSubstrateOptions() {
         // utility class
     }

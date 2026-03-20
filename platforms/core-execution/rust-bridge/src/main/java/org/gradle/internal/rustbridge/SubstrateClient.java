@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit;
  * gRPC client for communicating with the Rust substrate daemon.
  * Connects via Unix domain socket.
  *
- * <p>Provides blocking stubs for all 18 substrate services.
+ * <p>Provides blocking stubs for all 20 substrate services.
  * When the substrate is disabled (noop mode), all stub getters
  * throw {@link SubstrateException}.</p>
  */
@@ -58,6 +58,10 @@ public class SubstrateClient implements Closeable {
     private final FileWatchServiceGrpc.FileWatchServiceBlockingStub fileWatchStub;
     // Phase 20: Configuration cache
     private final ConfigurationCacheServiceGrpc.ConfigurationCacheServiceBlockingStub configCacheStub;
+    // Phase 23: Toolchain management
+    private final ToolchainServiceGrpc.ToolchainServiceBlockingStub toolchainStub;
+    // Phase 24: Build event streaming
+    private final BuildEventStreamServiceGrpc.BuildEventStreamServiceBlockingStub buildEventStreamStub;
 
     private SubstrateClient(ManagedChannel channel, boolean noop) {
         this.channel = channel;
@@ -81,6 +85,8 @@ public class SubstrateClient implements Closeable {
             this.dependencyResolutionStub = null;
             this.fileWatchStub = null;
             this.configCacheStub = null;
+            this.toolchainStub = null;
+            this.buildEventStreamStub = null;
         } else {
             this.controlStub = ControlServiceGrpc.newBlockingStub(channel);
             this.hashStub = HashServiceGrpc.newBlockingStub(channel);
@@ -100,6 +106,8 @@ public class SubstrateClient implements Closeable {
             this.dependencyResolutionStub = DependencyResolutionServiceGrpc.newBlockingStub(channel);
             this.fileWatchStub = FileWatchServiceGrpc.newBlockingStub(channel);
             this.configCacheStub = ConfigurationCacheServiceGrpc.newBlockingStub(channel);
+            this.toolchainStub = ToolchainServiceGrpc.newBlockingStub(channel);
+            this.buildEventStreamStub = BuildEventStreamServiceGrpc.newBlockingStub(channel);
         }
     }
 
@@ -215,6 +223,16 @@ public class SubstrateClient implements Closeable {
     public ConfigurationCacheServiceGrpc.ConfigurationCacheServiceBlockingStub getConfigCacheStub() {
         throwIfNoop();
         return configCacheStub;
+    }
+
+    public ToolchainServiceGrpc.ToolchainServiceBlockingStub getToolchainStub() {
+        throwIfNoop();
+        return toolchainStub;
+    }
+
+    public BuildEventStreamServiceGrpc.BuildEventStreamServiceBlockingStub getBuildEventStreamStub() {
+        throwIfNoop();
+        return buildEventStreamStub;
     }
 
     private void throwIfNoop() {

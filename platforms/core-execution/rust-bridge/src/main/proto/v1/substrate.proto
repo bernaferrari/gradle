@@ -1035,3 +1035,133 @@ message CleanConfigCacheResponse {
   int32 entries_removed = 1;
   int64 space_recovered_bytes = 2;
 }
+
+// -- Toolchain Management Service (Phase 23) --
+
+// Downloads, verifies, and manages JDK/toolchain distributions.
+service ToolchainService {
+  // Get available toolchain installations.
+  rpc ListToolchains(ListToolchainsRequest) returns (ListToolchainsResponse);
+  // Ensure a toolchain is available (download if missing).
+  rpc EnsureToolchain(EnsureToolchainRequest) returns (stream ToolchainProgress);
+  // Verify a toolchain installation (hash check).
+  rpc VerifyToolchain(VerifyToolchainRequest) returns (VerifyToolchainResponse);
+  // Get the current Java home for a given toolchain spec.
+  rpc GetJavaHome(GetJavaHomeRequest) returns (GetJavaHomeResponse);
+}
+
+message ToolchainDescriptor {
+  string language_version = 1; // e.g. "17", "21", "22"
+  string implementation = 2;   // "jbr", "temurin", "corretto", "graalvm"
+  string vendor = 3;           // e.g. "jetbrains", "eclipse"
+  string os = 4;               // "linux", "macos", "windows"
+  string arch = 5;             // "x86_64", "aarch64"
+}
+
+message ListToolchainsRequest {
+  string os = 1;
+  string arch = 2;
+}
+
+message ToolchainLocation {
+  string language_version = 1;
+  string implementation = 2;
+  string java_home = 3;
+  bool verified = 4;
+  int64 install_size_bytes = 5;
+  string installed_via = 6; // "auto", "manual", "sdkman"
+}
+
+message ListToolchainsResponse {
+  repeated ToolchainLocation toolchains = 1;
+}
+
+message EnsureToolchainRequest {
+  string language_version = 1;
+  string implementation = 2; // preferred implementation
+  string vendor = 3;
+  string os = 4;
+  string arch = 5;
+  repeated string download_urls = 6; // fallback URLs in order
+}
+
+message ToolchainProgress {
+  string phase = 1;          // "checking", "downloading", "extracting", "verifying", "done", "error"
+  int64 progress_percent = 2;
+  string message = 3;
+  bool success = 4;
+  string error_message = 5;
+  string java_home = 6;     // set when done
+}
+
+message VerifyToolchainRequest {
+  string java_home = 1;
+  string expected_version = 2;
+}
+
+message VerifyToolchainResponse {
+  bool valid = 1;
+  string detected_version = 2;
+  string error_message = 3;
+}
+
+message GetJavaHomeRequest {
+  string language_version = 1;
+  string implementation = 2;
+}
+
+message GetJavaHomeResponse {
+  string java_home = 1;
+  bool found = 2;
+}
+
+// -- Build Event Streaming Service (Phase 24) --
+
+// Streams build lifecycle events to IDEs and CI systems.
+service BuildEventStreamService {
+  // Subscribe to build events for a build session.
+  rpc SubscribeBuildEvents(SubscribeBuildEventsRequest) returns (stream BuildEventMessage);
+  // Send a build event from the JVM.
+  rpc SendBuildEvent(SendBuildEventRequest) returns (SendBuildEventResponse);
+  // Get the build event log.
+  rpc GetEventLog(GetEventLogRequest) returns (GetEventLogResponse);
+}
+
+message SubscribeBuildEventsRequest {
+  string build_id = 1;
+  repeated string event_types = 2; // filter: "task_start", "task_finish", "progress", "build_finish"
+}
+
+message BuildEventMessage {
+  string build_id = 1;
+  int64 timestamp_ms = 2;
+  string event_type = 3;       // "build_start", "task_start", "task_progress", "task_finish", "build_finish"
+  string event_id = 4;
+  map<string, string> properties = 5;
+  string display_name = 6;
+  string parent_id = 7;
+}
+
+message SendBuildEventRequest {
+  string build_id = 1;
+  string event_type = 2;
+  string event_id = 3;
+  map<string, string> properties = 4;
+  string display_name = 5;
+  string parent_id = 6;
+}
+
+message SendBuildEventResponse {
+  bool accepted = 1;
+}
+
+message GetEventLogRequest {
+  string build_id = 1;
+  int64 since_timestamp_ms = 2;
+  int32 max_events = 3;
+}
+
+message GetEventLogResponse {
+  repeated BuildEventMessage events = 1;
+  int32 total_events = 2;
+}
