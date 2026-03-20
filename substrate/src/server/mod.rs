@@ -25,3 +25,5 @@ pub mod problem_reporting;
 pub mod resource_management;
 pub mod build_comparison;
 pub mod console;
+pub mod test_execution;
+pub mod artifact_publishing;

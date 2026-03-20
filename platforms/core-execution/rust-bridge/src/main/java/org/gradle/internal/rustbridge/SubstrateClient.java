@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit;
  * gRPC client for communicating with the Rust substrate daemon.
  * Connects via Unix domain socket.
  *
- * <p>Provides blocking stubs for all 27 substrate services.
+ * <p>Provides blocking stubs for all 29 substrate services.
  * When the substrate is disabled (noop mode), all stub getters
  * throw {@link SubstrateException}.</p>
  */
@@ -76,6 +76,10 @@ public class SubstrateClient implements Closeable {
     private final BuildComparisonServiceGrpc.BuildComparisonServiceBlockingStub buildComparisonStub;
     // Phase 32: Console / rich output
     private final ConsoleServiceGrpc.ConsoleServiceBlockingStub consoleStub;
+    // Phase 33: Test execution
+    private final TestExecutionServiceGrpc.TestExecutionServiceBlockingStub testExecutionStub;
+    // Phase 34: Artifact publishing
+    private final ArtifactPublishingServiceGrpc.ArtifactPublishingServiceBlockingStub artifactPublishingStub;
 
     private SubstrateClient(ManagedChannel channel, boolean noop) {
         this.channel = channel;
@@ -108,6 +112,8 @@ public class SubstrateClient implements Closeable {
             this.resourceManagementStub = null;
             this.buildComparisonStub = null;
             this.consoleStub = null;
+            this.testExecutionStub = null;
+            this.artifactPublishingStub = null;
         } else {
             this.controlStub = ControlServiceGrpc.newBlockingStub(channel);
             this.hashStub = HashServiceGrpc.newBlockingStub(channel);
@@ -136,6 +142,8 @@ public class SubstrateClient implements Closeable {
             this.resourceManagementStub = ResourceManagementServiceGrpc.newBlockingStub(channel);
             this.buildComparisonStub = BuildComparisonServiceGrpc.newBlockingStub(channel);
             this.consoleStub = ConsoleServiceGrpc.newBlockingStub(channel);
+            this.testExecutionStub = TestExecutionServiceGrpc.newBlockingStub(channel);
+            this.artifactPublishingStub = ArtifactPublishingServiceGrpc.newBlockingStub(channel);
         }
     }
 
@@ -296,6 +304,16 @@ public class SubstrateClient implements Closeable {
     public ConsoleServiceGrpc.ConsoleServiceBlockingStub getConsoleStub() {
         throwIfNoop();
         return consoleStub;
+    }
+
+    public TestExecutionServiceGrpc.TestExecutionServiceBlockingStub getTestExecutionStub() {
+        throwIfNoop();
+        return testExecutionStub;
+    }
+
+    public ArtifactPublishingServiceGrpc.ArtifactPublishingServiceBlockingStub getArtifactPublishingStub() {
+        throwIfNoop();
+        return artifactPublishingStub;
     }
 
     private void throwIfNoop() {

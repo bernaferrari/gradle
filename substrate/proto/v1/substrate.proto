@@ -1729,3 +1729,191 @@ message SetBuildDescriptionRequest {
 message SetBuildDescriptionResponse {
   bool accepted = 1;
 }
+
+// -- Test Execution Service (Phase 33) --
+
+// Manages test discovery, execution tracking, and result aggregation.
+// Replaces Gradle's TestFramework and TestResultProcessor with a Rust
+// implementation that handles test filtering, parallel execution, and
+// result persistence more efficiently.
+service TestExecutionService {
+  // Register a test suite (class/container of tests).
+  rpc RegisterTestSuite(RegisterTestSuiteRequest) returns (RegisterTestSuiteResponse);
+  // Report a test result (pass/fail/skipped).
+  rpc ReportTestResult(ReportTestResultRequest) returns (ReportTestResultResponse);
+  // Get the full test report for a build.
+  rpc GetTestReport(GetTestReportRequest) returns (GetTestReportResponse);
+  // Get test results filtered by outcome.
+  rpc GetTestResultsByOutcome(GetTestResultsByOutcomeRequest) returns (GetTestResultsByOutcomeResponse);
+  // Get a test execution summary.
+  rpc GetTestSummary(GetTestSummaryRequest) returns (TestSummaryResponse);
+}
+
+message TestSuiteDescriptor {
+  string suite_id = 1;
+  string suite_name = 2;            // e.g. "com.example.MyTest"
+  string suite_type = 3;            // "junit", "junit5", "spock", "testng"
+  int32 test_count = 4;
+  string module_path = 5;           // Gradle project path
+}
+
+message RegisterTestSuiteRequest {
+  string build_id = 1;
+  TestSuiteDescriptor suite = 2;
+}
+
+message RegisterTestSuiteResponse {
+  bool accepted = 1;
+}
+
+message TestResultEntry {
+  string test_id = 1;               // unique test ID
+  string suite_id = 2;
+  string test_name = 3;             // e.g. "testSomething"
+  string test_class = 4;            // fully qualified class name
+  string outcome = 5;               // "PASSED", "FAILED", "SKIPPED", "ABORTED"
+  int64 start_time_ms = 6;
+  int64 end_time_ms = 7;
+  int64 duration_ms = 8;
+  string failure_message = 9;
+  string failure_type = 10;         // e.g. "AssertionError", "NullPointerException"
+  repeated string failure_stack_trace = 11;
+  bool rerun = 12;                  // true if this is a rerun of a failed test
+  int32 attempt = 13;               // retry attempt number
+}
+
+message ReportTestResultRequest {
+  string build_id = 1;
+  TestResultEntry result = 2;
+}
+
+message ReportTestResultResponse {
+  bool accepted = 1;
+}
+
+message GetTestReportRequest {
+  string build_id = 1;
+}
+
+message TestSuiteReport {
+  TestSuiteDescriptor suite = 1;
+  repeated TestResultEntry results = 2;
+  int32 passed = 3;
+  int32 failed = 4;
+  int32 skipped = 5;
+  int64 total_duration_ms = 6;
+}
+
+message GetTestReportResponse {
+  repeated TestSuiteReport suites = 1;
+  int32 total_tests = 2;
+  int32 total_passed = 3;
+  int32 total_failed = 4;
+  int32 total_skipped = 5;
+  int64 total_duration_ms = 6;
+}
+
+message GetTestResultsByOutcomeRequest {
+  string build_id = 1;
+  string outcome = 2;               // "PASSED", "FAILED", "SKIPPED"
+}
+
+message GetTestResultsByOutcomeResponse {
+  repeated TestResultEntry results = 1;
+  int32 count = 2;
+}
+
+message GetTestSummaryRequest {
+  string build_id = 1;
+}
+
+message TestSummaryResponse {
+  int32 suites = 1;
+  int32 tests = 2;
+  int32 passed = 3;
+  int32 failed = 4;
+  int32 skipped = 5;
+  int32 aborted = 6;
+  int64 total_duration_ms = 7;
+  repeated string failed_test_names = 8;
+  double pass_rate = 9;
+}
+
+// -- Artifact Publishing Service (Phase 34) --
+
+// Manages artifact upload to Maven/Ivy repositories.
+// Replaces Gradle's PublishMechanism with a more efficient Rust
+// implementation that handles artifact signing, checksumming,
+// and upload with better parallelism and retry logic.
+service ArtifactPublishingService {
+  // Register an artifact to be published.
+  rpc RegisterArtifact(RegisterArtifactRequest) returns (RegisterArtifactResponse);
+  // Record an artifact upload result.
+  rpc RecordUploadResult(RecordUploadResultRequest) returns (RecordUploadResultResponse);
+  // Get publishing status for a build.
+  rpc GetPublishingStatus(GetPublishingStatusRequest) returns (GetPublishingStatusResponse);
+  // Get checksums for an artifact.
+  rpc GetArtifactChecksums(GetArtifactChecksumsRequest) returns (GetArtifactChecksumsResponse);
+}
+
+message ArtifactDescriptor {
+  string artifact_id = 1;           // unique ID for this artifact
+  string group = 2;                 // e.g. "com.example"
+  string name = 3;                  // e.g. "my-lib"
+  string version = 4;               // e.g. "1.0.0"
+  string classifier = 5;            // e.g. "sources", "javadoc", "" (main)
+  string extension = 6;             // e.g. "jar", "aar", "pom"
+  string file_path = 7;             // local path to the artifact
+  int64 file_size_bytes = 8;
+  string repository_id = 9;         // target repository
+}
+
+message RegisterArtifactRequest {
+  string build_id = 1;
+  ArtifactDescriptor artifact = 2;
+}
+
+message RegisterArtifactResponse {
+  bool accepted = 1;
+}
+
+message RecordUploadResultRequest {
+  string artifact_id = 1;
+  bool success = 2;
+  string error_message = 3;
+  int64 upload_duration_ms = 4;
+  int64 bytes_transferred = 5;
+}
+
+message RecordUploadResultResponse {
+  bool accepted = 1;
+}
+
+message GetPublishingStatusRequest {
+  string build_id = 1;
+}
+
+message ArtifactPublishStatus {
+  ArtifactDescriptor artifact = 1;
+  string status = 2;                // "pending", "uploading", "uploaded", "failed"
+  int64 upload_duration_ms = 3;
+  string error_message = 4;
+}
+
+message GetPublishingStatusResponse {
+  repeated ArtifactPublishStatus artifacts = 1;
+  int32 total = 2;
+  int32 uploaded = 3;
+  int32 failed = 4;
+  int32 pending = 5;
+}
+
+message GetArtifactChecksumsRequest {
+  string artifact_id = 1;
+}
+
+message GetArtifactChecksumsResponse {
+  string md5 = 1;
+  string sha1 = 2;
+  string sha256 = 3;
+}

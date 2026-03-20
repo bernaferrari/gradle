@@ -8,6 +8,7 @@ use tonic::transport::Server;
 
 use gradle_substrate_daemon::{
     proto::{
+        artifact_publishing_service_server::ArtifactPublishingServiceServer,
         bootstrap_service_server::BootstrapServiceServer,
         build_cache_orchestration_service_server::BuildCacheOrchestrationServiceServer,
         build_comparison_service_server::BuildComparisonServiceServer,
@@ -31,12 +32,14 @@ use gradle_substrate_daemon::{
         problem_reporting_service_server::ProblemReportingServiceServer,
         resource_management_service_server::ResourceManagementServiceServer,
         task_graph_service_server::TaskGraphServiceServer,
+        test_execution_service_server::TestExecutionServiceServer,
         toolchain_service_server::ToolchainServiceServer,
         value_snapshot_service_server::ValueSnapshotServiceServer,
         worker_process_service_server::WorkerProcessServiceServer,
         work_service_server::WorkServiceServer,
     },
     server::{
+        artifact_publishing::ArtifactPublishingServiceImpl,
         bootstrap::BootstrapServiceImpl, build_comparison::BuildComparisonServiceImpl,
         build_event_stream::BuildEventStreamServiceImpl, build_layout::BuildLayoutServiceImpl,
         build_operations::BuildOperationsServiceImpl, build_result::BuildResultServiceImpl,
@@ -48,9 +51,9 @@ use gradle_substrate_daemon::{
         exec::ExecServiceImpl, file_fingerprint::FileFingerprintServiceImpl,
         file_watch::FileWatchServiceImpl, hash::HashServiceImpl, plugin::PluginServiceImpl,
         problem_reporting::ProblemReportingServiceImpl, resource_management::ResourceManagementServiceImpl,
-        task_graph::TaskGraphServiceImpl, toolchain::ToolchainServiceImpl,
-        value_snapshot::ValueSnapshotServiceImpl, worker_process::WorkerProcessServiceImpl,
-        work::WorkServiceImpl,
+        task_graph::TaskGraphServiceImpl, test_execution::TestExecutionServiceImpl,
+        toolchain::ToolchainServiceImpl, value_snapshot::ValueSnapshotServiceImpl,
+        worker_process::WorkerProcessServiceImpl, work::WorkServiceImpl,
     },
     PROTOCOL_VERSION,
 };
@@ -234,12 +237,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 32: Console / rich output
     let console = ConsoleServiceImpl::new();
 
+    // Phase 33: Test execution
+    let test_execution = TestExecutionServiceImpl::new();
+
+    // Phase 34: Artifact publishing
+    let artifact_publishing = ArtifactPublishingServiceImpl::new();
+
     let listener = UnixListener::bind(&socket_path)?;
 
     println!("Gradle Substrate Daemon v{}", env!("CARGO_PKG_VERSION"));
     println!("Protocol version: {}", PROTOCOL_VERSION);
     println!("Listening on: {}", args.socket_path);
-    println!("Services: control, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console");
+    println!("Services: control, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console, test-execution, artifact-publishing");
 
     Server::builder()
         .add_service(ControlServiceServer::new(control))
@@ -269,6 +278,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(ResourceManagementServiceServer::new(resource_management))
         .add_service(BuildComparisonServiceServer::new(build_comparison))
         .add_service(ConsoleServiceServer::new(console))
+        .add_service(TestExecutionServiceServer::new(test_execution))
+        .add_service(ArtifactPublishingServiceServer::new(artifact_publishing))
         .serve_with_incoming_shutdown(tokio_stream::wrappers::UnixListenerStream::new(listener), shutdown_signal())
         .await?;
 

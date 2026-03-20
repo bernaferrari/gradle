@@ -253,6 +253,22 @@ public class RustSubstrateOptions {
     public static final InternalFlag ENABLE_RUST_CONSOLE =
         new InternalFlag("org.gradle.rust.substrate.console.enabled", false);
 
+    /**
+     * Enable Phase 33: Rust-native test execution.
+     * Property: org.gradle.rust.substrate.testexec.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_TEST_EXECUTION =
+        new InternalFlag("org.gradle.rust.substrate.testexec.enabled", false);
+
+    /**
+     * Enable Phase 34: Rust-native artifact publishing.
+     * Property: org.gradle.rust.substrate.publishing.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_PUBLISHING =
+        new InternalFlag("org.gradle.rust.substrate.publishing.enabled", false);
+
     private RustSubstrateOptions() {
         // utility class
     }
