@@ -15,6 +15,8 @@ dependencies {
     implementation(libs.grpcStub)
     implementation(libs.grpcProtobuf)
     implementation(libs.grpcNettyShaded)
+    implementation(projects.execution)
+    implementation(projects.snapshots)
 
     testImplementation(testFixtures(projects.baseServices))
 }

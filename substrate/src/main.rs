@@ -10,11 +10,12 @@ use gradle_substrate_daemon::{
     proto::{
         cache_service_server::CacheServiceServer,
         control_service_server::ControlServiceServer,
+        execution_plan_service_server::ExecutionPlanServiceServer,
         exec_service_server::ExecServiceServer,
         hash_service_server::HashServiceServer,
         work_service_server::WorkServiceServer,
     },
-    server::{cache::CacheServiceImpl, control::ControlServiceImpl, exec::ExecServiceImpl, hash::HashServiceImpl, work::WorkServiceImpl},
+    server::{cache::CacheServiceImpl, control::ControlServiceImpl, exec::ExecServiceImpl, execution_plan::ExecutionPlanServiceImpl, hash::HashServiceImpl, work::WorkServiceImpl},
     PROTOCOL_VERSION,
 };
 
@@ -105,7 +106,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let work_scheduler = Arc::new(gradle_substrate_daemon::server::work::WorkerScheduler::new(
         num_cpus::get(),
     ));
-    let work = WorkServiceImpl::new(work_scheduler);
+    let work = WorkServiceImpl::new(work_scheduler.clone());
+    let execution_plan = ExecutionPlanServiceImpl::new(work_scheduler);
 
     let listener = UnixListener::bind(&socket_path)?;
 
@@ -119,6 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(CacheServiceServer::new(cache))
         .add_service(ExecServiceServer::new(exec))
         .add_service(WorkServiceServer::new(work))
+        .add_service(ExecutionPlanServiceServer::new(execution_plan))
         .serve_with_incoming_shutdown(tokio_stream::wrappers::UnixListenerStream::new(listener), shutdown_signal())
         .await?;
 

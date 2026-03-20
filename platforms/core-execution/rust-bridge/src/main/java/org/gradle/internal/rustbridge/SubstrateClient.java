@@ -5,6 +5,7 @@ import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
 import io.grpc.netty.shaded.io.netty.channel.unix.DomainSocketAddress;
 import gradle.substrate.v1.CacheServiceGrpc;
 import gradle.substrate.v1.ControlServiceGrpc;
+import gradle.substrate.v1.ExecutionPlanServiceGrpc;
 import gradle.substrate.v1.ExecServiceGrpc;
 import gradle.substrate.v1.HashServiceGrpc;
 import gradle.substrate.v1.WorkServiceGrpc;
@@ -25,6 +26,7 @@ public class SubstrateClient implements Closeable {
     private final CacheServiceGrpc.CacheServiceBlockingStub cacheStub;
     private final ExecServiceGrpc.ExecServiceBlockingStub execStub;
     private final WorkServiceGrpc.WorkServiceBlockingStub workStub;
+    private final ExecutionPlanServiceGrpc.ExecutionPlanServiceBlockingStub executionPlanStub;
     private final boolean noop;
 
     private SubstrateClient(ManagedChannel channel, boolean noop) {
@@ -36,12 +38,14 @@ public class SubstrateClient implements Closeable {
             this.cacheStub = null;
             this.execStub = null;
             this.workStub = null;
+            this.executionPlanStub = null;
         } else {
             this.controlStub = ControlServiceGrpc.newBlockingStub(channel);
             this.hashStub = HashServiceGrpc.newBlockingStub(channel);
             this.cacheStub = CacheServiceGrpc.newBlockingStub(channel);
             this.execStub = ExecServiceGrpc.newBlockingStub(channel);
             this.workStub = WorkServiceGrpc.newBlockingStub(channel);
+            this.executionPlanStub = ExecutionPlanServiceGrpc.newBlockingStub(channel);
         }
     }
 
@@ -90,6 +94,11 @@ public class SubstrateClient implements Closeable {
     public WorkServiceGrpc.WorkServiceBlockingStub getWorkStub() {
         throwIfNoop();
         return workStub;
+    }
+
+    public ExecutionPlanServiceGrpc.ExecutionPlanServiceBlockingStub getExecutionPlanStub() {
+        throwIfNoop();
+        return executionPlanStub;
     }
 
     private void throwIfNoop() {
