@@ -18,3 +18,5 @@ pub mod file_watch;
 pub mod config_cache;
 pub mod toolchain;
 pub mod build_event_stream;
+pub mod worker_process;
+pub mod build_layout;
