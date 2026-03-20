@@ -269,6 +269,22 @@ public class RustSubstrateOptions {
     public static final InternalFlag ENABLE_RUST_PUBLISHING =
         new InternalFlag("org.gradle.rust.substrate.publishing.enabled", false);
 
+    /**
+     * Enable Phase 35: Rust-native build initialization.
+     * Property: org.gradle.rust.substrate.buildinit.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_BUILD_INIT =
+        new InternalFlag("org.gradle.rust.substrate.buildinit.enabled", false);
+
+    /**
+     * Enable Phase 36: Rust-native incremental compilation.
+     * Property: org.gradle.rust.substrate.incremental.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_INCREMENTAL =
+        new InternalFlag("org.gradle.rust.substrate.incremental.enabled", false);
+
     private RustSubstrateOptions() {
         // utility class
     }
