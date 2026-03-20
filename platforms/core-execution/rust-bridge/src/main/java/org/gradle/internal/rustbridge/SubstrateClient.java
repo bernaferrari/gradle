@@ -3,14 +3,7 @@ package org.gradle.internal.rustbridge;
 import io.grpc.ManagedChannel;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
 import io.grpc.netty.shaded.io.netty.channel.unix.DomainSocketAddress;
-import gradle.substrate.v1.CacheServiceGrpc;
-import gradle.substrate.v1.ControlServiceGrpc;
-import gradle.substrate.v1.ExecutionHistoryServiceGrpc;
-import gradle.substrate.v1.ExecutionPlanServiceGrpc;
-import gradle.substrate.v1.ExecServiceGrpc;
-import gradle.substrate.v1.FileFingerprintServiceGrpc;
-import gradle.substrate.v1.HashServiceGrpc;
-import gradle.substrate.v1.WorkServiceGrpc;
+import gradle.substrate.v1.*;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -19,19 +12,52 @@ import java.util.concurrent.TimeUnit;
 /**
  * gRPC client for communicating with the Rust substrate daemon.
  * Connects via Unix domain socket.
+ *
+ * <p>Provides blocking stubs for all 18 substrate services.
+ * When the substrate is disabled (noop mode), all stub getters
+ * throw {@link SubstrateException}.</p>
  */
 public class SubstrateClient implements Closeable {
 
     private final ManagedChannel channel;
-    private final ControlServiceGrpc.ControlServiceBlockingStub controlStub;
-    private final HashServiceGrpc.HashServiceBlockingStub hashStub;
-    private final CacheServiceGrpc.CacheServiceBlockingStub cacheStub;
-    private final ExecServiceGrpc.ExecServiceBlockingStub execStub;
-    private final WorkServiceGrpc.WorkServiceBlockingStub workStub;
-    private final ExecutionPlanServiceGrpc.ExecutionPlanServiceBlockingStub executionPlanStub;
-    private final FileFingerprintServiceGrpc.FileFingerprintServiceBlockingStub fileFingerprintStub;
-    private final ExecutionHistoryServiceGrpc.ExecutionHistoryServiceBlockingStub executionHistoryStub;
     private final boolean noop;
+
+    // Phase 0: Control
+    private final ControlServiceGrpc.ControlServiceBlockingStub controlStub;
+    // Phase 1: Hashing
+    private final HashServiceGrpc.HashServiceBlockingStub hashStub;
+    // Phase 2: Build cache
+    private final CacheServiceGrpc.CacheServiceBlockingStub cacheStub;
+    // Phase 3: Process execution
+    private final ExecServiceGrpc.ExecServiceBlockingStub execStub;
+    // Phase 4: Work scheduling
+    private final WorkServiceGrpc.WorkServiceBlockingStub workStub;
+    // Phase 5-6: Execution planning
+    private final ExecutionPlanServiceGrpc.ExecutionPlanServiceBlockingStub executionPlanStub;
+    // Phase 7: Execution history
+    private final ExecutionHistoryServiceGrpc.ExecutionHistoryServiceBlockingStub executionHistoryStub;
+    // Phase 8: Build cache orchestration
+    private final BuildCacheOrchestrationServiceGrpc.BuildCacheOrchestrationServiceBlockingStub cacheOrchestrationStub;
+    // Phase 9: File fingerprinting
+    private final FileFingerprintServiceGrpc.FileFingerprintServiceBlockingStub fileFingerprintStub;
+    // Phase 10: Value snapshotting
+    private final ValueSnapshotServiceGrpc.ValueSnapshotServiceBlockingStub valueSnapshotStub;
+    // Phase 11: Task graph
+    private final TaskGraphServiceGrpc.TaskGraphServiceBlockingStub taskGraphStub;
+    // Phase 12: Configuration model
+    private final ConfigurationServiceGrpc.ConfigurationServiceBlockingStub configurationStub;
+    // Phase 13: Plugin system
+    private final PluginServiceGrpc.PluginServiceBlockingStub pluginStub;
+    // Phase 14: Build operations
+    private final BuildOperationsServiceGrpc.BuildOperationsServiceBlockingStub buildOperationsStub;
+    // Phase 15: Bootstrap
+    private final BootstrapServiceGrpc.BootstrapServiceBlockingStub bootstrapStub;
+    // Phase 18: Dependency resolution
+    private final DependencyResolutionServiceGrpc.DependencyResolutionServiceBlockingStub dependencyResolutionStub;
+    // Phase 19: File watching
+    private final FileWatchServiceGrpc.FileWatchServiceBlockingStub fileWatchStub;
+    // Phase 20: Configuration cache
+    private final ConfigurationCacheServiceGrpc.ConfigurationCacheServiceBlockingStub configCacheStub;
 
     private SubstrateClient(ManagedChannel channel, boolean noop) {
         this.channel = channel;
@@ -43,8 +69,18 @@ public class SubstrateClient implements Closeable {
             this.execStub = null;
             this.workStub = null;
             this.executionPlanStub = null;
-            this.fileFingerprintStub = null;
             this.executionHistoryStub = null;
+            this.cacheOrchestrationStub = null;
+            this.fileFingerprintStub = null;
+            this.valueSnapshotStub = null;
+            this.taskGraphStub = null;
+            this.configurationStub = null;
+            this.pluginStub = null;
+            this.buildOperationsStub = null;
+            this.bootstrapStub = null;
+            this.dependencyResolutionStub = null;
+            this.fileWatchStub = null;
+            this.configCacheStub = null;
         } else {
             this.controlStub = ControlServiceGrpc.newBlockingStub(channel);
             this.hashStub = HashServiceGrpc.newBlockingStub(channel);
@@ -52,8 +88,18 @@ public class SubstrateClient implements Closeable {
             this.execStub = ExecServiceGrpc.newBlockingStub(channel);
             this.workStub = WorkServiceGrpc.newBlockingStub(channel);
             this.executionPlanStub = ExecutionPlanServiceGrpc.newBlockingStub(channel);
-            this.fileFingerprintStub = FileFingerprintServiceGrpc.newBlockingStub(channel);
             this.executionHistoryStub = ExecutionHistoryServiceGrpc.newBlockingStub(channel);
+            this.cacheOrchestrationStub = BuildCacheOrchestrationServiceGrpc.newBlockingStub(channel);
+            this.fileFingerprintStub = FileFingerprintServiceGrpc.newBlockingStub(channel);
+            this.valueSnapshotStub = ValueSnapshotServiceGrpc.newBlockingStub(channel);
+            this.taskGraphStub = TaskGraphServiceGrpc.newBlockingStub(channel);
+            this.configurationStub = ConfigurationServiceGrpc.newBlockingStub(channel);
+            this.pluginStub = PluginServiceGrpc.newBlockingStub(channel);
+            this.buildOperationsStub = BuildOperationsServiceGrpc.newBlockingStub(channel);
+            this.bootstrapStub = BootstrapServiceGrpc.newBlockingStub(channel);
+            this.dependencyResolutionStub = DependencyResolutionServiceGrpc.newBlockingStub(channel);
+            this.fileWatchStub = FileWatchServiceGrpc.newBlockingStub(channel);
+            this.configCacheStub = ConfigurationCacheServiceGrpc.newBlockingStub(channel);
         }
     }
 
@@ -78,6 +124,8 @@ public class SubstrateClient implements Closeable {
     public boolean isNoop() {
         return noop;
     }
+
+    // -- Stub getters --
 
     public ControlServiceGrpc.ControlServiceBlockingStub getControlStub() {
         throwIfNoop();
@@ -109,14 +157,64 @@ public class SubstrateClient implements Closeable {
         return executionPlanStub;
     }
 
+    public ExecutionHistoryServiceGrpc.ExecutionHistoryServiceBlockingStub getExecutionHistoryStub() {
+        throwIfNoop();
+        return executionHistoryStub;
+    }
+
+    public BuildCacheOrchestrationServiceGrpc.BuildCacheOrchestrationServiceBlockingStub getCacheOrchestrationStub() {
+        throwIfNoop();
+        return cacheOrchestrationStub;
+    }
+
     public FileFingerprintServiceGrpc.FileFingerprintServiceBlockingStub getFileFingerprintStub() {
         throwIfNoop();
         return fileFingerprintStub;
     }
 
-    public ExecutionHistoryServiceGrpc.ExecutionHistoryServiceBlockingStub getExecutionHistoryStub() {
+    public ValueSnapshotServiceGrpc.ValueSnapshotServiceBlockingStub getValueSnapshotStub() {
         throwIfNoop();
-        return executionHistoryStub;
+        return valueSnapshotStub;
+    }
+
+    public TaskGraphServiceGrpc.TaskGraphServiceBlockingStub getTaskGraphStub() {
+        throwIfNoop();
+        return taskGraphStub;
+    }
+
+    public ConfigurationServiceGrpc.ConfigurationServiceBlockingStub getConfigurationStub() {
+        throwIfNoop();
+        return configurationStub;
+    }
+
+    public PluginServiceGrpc.PluginServiceBlockingStub getPluginStub() {
+        throwIfNoop();
+        return pluginStub;
+    }
+
+    public BuildOperationsServiceGrpc.BuildOperationsServiceBlockingStub getBuildOperationsStub() {
+        throwIfNoop();
+        return buildOperationsStub;
+    }
+
+    public BootstrapServiceGrpc.BootstrapServiceBlockingStub getBootstrapStub() {
+        throwIfNoop();
+        return bootstrapStub;
+    }
+
+    public DependencyResolutionServiceGrpc.DependencyResolutionServiceBlockingStub getDependencyResolutionStub() {
+        throwIfNoop();
+        return dependencyResolutionStub;
+    }
+
+    public FileWatchServiceGrpc.FileWatchServiceBlockingStub getFileWatchStub() {
+        throwIfNoop();
+        return fileWatchStub;
+    }
+
+    public ConfigurationCacheServiceGrpc.ConfigurationCacheServiceBlockingStub getConfigCacheStub() {
+        throwIfNoop();
+        return configCacheStub;
     }
 
     private void throwIfNoop() {
