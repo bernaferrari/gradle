@@ -29,3 +29,4 @@ pub mod test_execution;
 pub mod artifact_publishing;
 pub mod build_init;
 pub mod incremental_compilation;
+pub mod remote_cache;

@@ -7,6 +7,11 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
+#[cfg(unix)]
+use nix::sys::signal::{self, Signal};
+#[cfg(unix)]
+use nix::unistd::Pid;
+
 use crate::proto::{
     exec_service_server::ExecService, ExecOutputChunk, ExecOutputRequest, ExecKillTreeRequest,
     ExecKillTreeResponse, ExecSignalRequest, ExecSignalResponse, ExecSpawnRequest, ExecSpawnResponse,
@@ -46,6 +51,12 @@ impl ExecService for ExecServiceImpl {
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
+
+        // Create a new process group for tree cleanup
+        #[cfg(unix)]
+        {
+            cmd.process_group(0);
+        }
 
         if req.redirect_error_stream {
             cmd.stderr(std::process::Stdio::null());
@@ -154,12 +165,14 @@ impl ExecService for ExecServiceImpl {
 
         #[cfg(unix)]
         {
-            use tokio::process::Command;
-            let result = Command::new("kill")
-                .args(["-s", &req.signal.to_string(), &req.pid.to_string()])
-                .status()
-                .await;
-            match result {
+            let sig = match req.signal {
+                2 => Signal::SIGINT,
+                9 => Signal::SIGKILL,
+                15 => Signal::SIGTERM,
+                _ => Signal::SIGTERM,
+            };
+            let pid = Pid::from_raw(req.pid as i32);
+            match signal::kill(pid, sig) {
                 Ok(_) => Ok(Response::new(ExecSignalResponse {
                     success: true,
                     error_message: String::new(),
@@ -189,22 +202,58 @@ impl ExecService for ExecServiceImpl {
         &self,
         request: Request<ExecKillTreeRequest>,
     ) -> Result<Response<ExecKillTreeResponse>, Status> {
-        let pid = request.into_inner().pid as u32;
+        let req = request.into_inner();
+        let pid = req.pid as u32;
+        let force = req.force;
 
         #[cfg(unix)]
         {
-            use tokio::process::Command;
-            let _ = Command::new("kill")
-                .args(["--", &format!("-{}", pid)])
-                .status()
-                .await;
+            // Send signal to the entire process group (negative PID)
+            let pgid = Pid::from_raw(-(pid as i32));
+
+            if force {
+                // Force kill immediately
+                let _ = signal::kill(pgid, Signal::SIGKILL);
+            } else {
+                // Graceful: SIGTERM first
+                let _ = signal::kill(pgid, Signal::SIGTERM);
+
+                // Wait up to 5 seconds for graceful shutdown
+                if let Some((_, mut entry)) = self.processes.remove(&pid) {
+                    match tokio::time::timeout(
+                        tokio::time::Duration::from_secs(5),
+                        entry.child.wait(),
+                    )
+                    .await
+                    {
+                        Ok(_) => {
+                            tracing::debug!(pid, "Process tree terminated gracefully");
+                        }
+                        Err(_) => {
+                            // Force kill the process group
+                            let _ = signal::kill(pgid, Signal::SIGKILL);
+                            let _ = entry.child.wait().await;
+                            tracing::debug!(pid, "Process tree force-killed after timeout");
+                        }
+                    }
+                }
+            }
         }
 
-        if let Some((_, mut child)) = self.processes.remove(&pid) {
-            let _ = child.child.start_kill();
+        #[cfg(not(unix))]
+        {
+            if let Some((_, mut child)) = self.processes.remove(&pid) {
+                let _ = child.child.start_kill();
+            }
         }
 
-        tracing::debug!(pid, "Killed process tree");
+        // Clean up any remaining entry
+        #[cfg(unix)]
+        {
+            let _ = self.processes.remove(&pid);
+        }
+
+        tracing::debug!(pid, force, "Kill tree completed");
 
         Ok(Response::new(ExecKillTreeResponse {
             success: true,

@@ -69,12 +69,21 @@ impl LocalCacheStore {
 
 pub struct CacheServiceImpl {
     store: LocalCacheStore,
+    remote: Option<std::sync::Arc<crate::server::remote_cache::RemoteCacheStore>>,
 }
 
 impl CacheServiceImpl {
     pub fn new(base_dir: PathBuf) -> Self {
         Self {
             store: LocalCacheStore::new(base_dir),
+            remote: None,
+        }
+    }
+
+    pub fn with_remote(base_dir: PathBuf, remote: crate::server::remote_cache::RemoteCacheStore) -> Self {
+        Self {
+            store: LocalCacheStore::new(base_dir),
+            remote: Some(std::sync::Arc::new(remote)),
         }
     }
 }
@@ -90,44 +99,77 @@ impl CacheService for CacheServiceImpl {
         let key_bytes = request.into_inner().key;
         let key = hex::encode(&key_bytes);
         let store = self.store.clone();
+        let remote = self.remote.clone();
 
         let (tx, rx) = mpsc::channel(8);
 
         tokio::spawn(async move {
-            match store.load(&key).await {
-                Ok(Some(data)) => {
+            let data = if let Some(remote) = &remote {
+                // Try remote first
+                match remote.load(&key).await {
+                    Ok(Some(data)) => {
+                        tracing::debug!(key = %key, size = data.len(), "Cache hit (remote)");
+                        // Promote to local
+                        let _ = store.store(&key, &data).await;
+                        Some(data)
+                    }
+                    Ok(None) => {
+                        // Fall through to local
+                        match store.load(&key).await {
+                            Ok(data) => data,
+                            Err(e) => {
+                                let _ = tx.send(Err(Status::internal(e.to_string()))).await;
+                                return;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(key = %key, error = %e, "Remote cache load failed, falling back to local");
+                        match store.load(&key).await {
+                            Ok(data) => data,
+                            Err(err) => {
+                                let _ = tx.send(Err(Status::internal(err.to_string()))).await;
+                                return;
+                            }
+                        }
+                    }
+                }
+            } else {
+                match store.load(&key).await {
+                    Ok(data) => data,
+                    Err(e) => {
+                        let _ = tx.send(Err(Status::internal(e.to_string()))).await;
+                        return;
+                    }
+                }
+            };
+
+            if let Some(data) = data {
+                let _ = tx
+                    .send(Ok(CacheLoadChunk {
+                        payload: Some(cache_load_chunk::Payload::Metadata(
+                            CacheEntryMetadata {
+                                size: data.len() as i64,
+                                content_type: "application/octet-stream".to_string(),
+                            },
+                        )),
+                    }))
+                    .await;
+
+                for chunk in data.chunks(CHUNK_SIZE) {
+                    if tx.is_closed() {
+                        break;
+                    }
                     let _ = tx
                         .send(Ok(CacheLoadChunk {
-                            payload: Some(cache_load_chunk::Payload::Metadata(
-                                CacheEntryMetadata {
-                                    size: data.len() as i64,
-                                    content_type: "application/octet-stream".to_string(),
-                                },
+                            payload: Some(cache_load_chunk::Payload::Data(
+                                chunk.to_vec(),
                             )),
                         }))
                         .await;
-
-                    for chunk in data.chunks(CHUNK_SIZE) {
-                        if tx.is_closed() {
-                            break;
-                        }
-                        let _ = tx
-                            .send(Ok(CacheLoadChunk {
-                                payload: Some(cache_load_chunk::Payload::Data(
-                                    chunk.to_vec(),
-                                )),
-                            }))
-                            .await;
-                    }
                 }
-                Ok(None) => {
-                    tracing::debug!(key = %key, "Cache miss");
-                }
-                Err(e) => {
-                    let _ = tx
-                        .send(Err(Status::internal(e.to_string())))
-                        .await;
-                }
+            } else {
+                tracing::debug!(key = %key, "Cache miss");
             }
         });
 
@@ -167,7 +209,23 @@ impl CacheService for CacheServiceImpl {
 
         tracing::debug!(key = %key, size = data.len(), "Storing cache entry");
 
-        match store.store(&key, &data).await {
+        // Store locally first (fast)
+        let local_result = store.store(&key, &data).await;
+
+        // Store to remote in background (non-blocking)
+        if let Some(remote) = &self.remote {
+            let remote = remote.clone();
+            let key_clone = key.clone();
+            let data_clone = data.clone();
+            tokio::spawn(async move {
+                match remote.store(&key_clone, &data_clone).await {
+                    Ok(()) => tracing::debug!(key = %key_clone, "Cache entry stored to remote"),
+                    Err(e) => tracing::warn!(key = %key_clone, error = %e, "Failed to store cache entry to remote"),
+                }
+            });
+        }
+
+        match local_result {
             Ok(()) => Ok(Response::new(CacheStoreResponse {
                 success: true,
                 error_message: String::new(),
