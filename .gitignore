@@ -124,3 +124,7 @@ atlassian-ide-plugin.xml
 .claude/worktrees
 .harness.json
 
+
+# Rust
+# ----
+/target
