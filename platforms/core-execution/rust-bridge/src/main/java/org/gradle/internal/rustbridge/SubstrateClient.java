@@ -7,6 +7,7 @@ import gradle.substrate.v1.CacheServiceGrpc;
 import gradle.substrate.v1.ControlServiceGrpc;
 import gradle.substrate.v1.ExecutionPlanServiceGrpc;
 import gradle.substrate.v1.ExecServiceGrpc;
+import gradle.substrate.v1.FileFingerprintServiceGrpc;
 import gradle.substrate.v1.HashServiceGrpc;
 import gradle.substrate.v1.WorkServiceGrpc;
 
@@ -27,6 +28,7 @@ public class SubstrateClient implements Closeable {
     private final ExecServiceGrpc.ExecServiceBlockingStub execStub;
     private final WorkServiceGrpc.WorkServiceBlockingStub workStub;
     private final ExecutionPlanServiceGrpc.ExecutionPlanServiceBlockingStub executionPlanStub;
+    private final FileFingerprintServiceGrpc.FileFingerprintServiceBlockingStub fileFingerprintStub;
     private final boolean noop;
 
     private SubstrateClient(ManagedChannel channel, boolean noop) {
@@ -39,6 +41,7 @@ public class SubstrateClient implements Closeable {
             this.execStub = null;
             this.workStub = null;
             this.executionPlanStub = null;
+            this.fileFingerprintStub = null;
         } else {
             this.controlStub = ControlServiceGrpc.newBlockingStub(channel);
             this.hashStub = HashServiceGrpc.newBlockingStub(channel);
@@ -46,6 +49,7 @@ public class SubstrateClient implements Closeable {
             this.execStub = ExecServiceGrpc.newBlockingStub(channel);
             this.workStub = WorkServiceGrpc.newBlockingStub(channel);
             this.executionPlanStub = ExecutionPlanServiceGrpc.newBlockingStub(channel);
+            this.fileFingerprintStub = FileFingerprintServiceGrpc.newBlockingStub(channel);
         }
     }
 
@@ -99,6 +103,11 @@ public class SubstrateClient implements Closeable {
     public ExecutionPlanServiceGrpc.ExecutionPlanServiceBlockingStub getExecutionPlanStub() {
         throwIfNoop();
         return executionPlanStub;
+    }
+
+    public FileFingerprintServiceGrpc.FileFingerprintServiceBlockingStub getFileFingerprintStub() {
+        throwIfNoop();
+        return fileFingerprintStub;
     }
 
     private void throwIfNoop() {
