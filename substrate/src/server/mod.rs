@@ -13,3 +13,6 @@ pub mod configuration;
 pub mod plugin;
 pub mod build_operations;
 pub mod bootstrap;
+pub mod dependency_resolution;
+pub mod file_watch;
+pub mod config_cache;

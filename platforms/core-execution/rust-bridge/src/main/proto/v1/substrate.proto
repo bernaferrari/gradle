@@ -458,3 +458,580 @@ message StoreOutputsResponse {
   bool success = 1;
   string error_message = 2;
 }
+
+// -- Task Graph Service (Phase 11) --
+
+// Manages task dependency resolution and execution scheduling.
+// Replaces Java's DefaultTaskExecutionGraph core logic.
+service TaskGraphService {
+  // Register a task with its dependencies.
+  rpc RegisterTask(RegisterTaskRequest) returns (RegisterTaskResponse);
+  // Resolve the full execution plan (topological sort, parallel scheduling).
+  rpc ResolveExecutionPlan(ResolveExecutionPlanRequest) returns (ResolveExecutionPlanResponse);
+  // Notify that a task has started executing.
+  rpc TaskStarted(TaskStartedRequest) returns (TaskStartedResponse);
+  // Notify that a task has finished executing.
+  rpc TaskFinished(TaskFinishedRequest) returns (TaskFinishedResponse);
+  // Get the current execution progress.
+  rpc GetProgress(GetProgressRequest) returns (GetProgressResponse);
+}
+
+message RegisterTaskRequest {
+  string task_path = 1;
+  repeated string depends_on = 2;
+  bool should_execute = 3;
+  string task_type = 4; // e.g. "org.gradle.api.Task"
+}
+
+message RegisterTaskResponse {
+  bool success = 1;
+}
+
+message ResolveExecutionPlanRequest {
+  string build_id = 1;
+}
+
+message ExecutionNode {
+  string task_path = 1;
+  repeated string dependencies = 2;
+  int64 execution_order = 3;
+  // Estimated duration in ms (from history, 0 if unknown).
+  int64 estimated_duration_ms = 4;
+}
+
+message ResolveExecutionPlanResponse {
+  repeated ExecutionNode execution_order = 1;
+  int32 total_tasks = 2;
+  int32 ready_to_execute = 3;
+  // Estimated critical path duration in ms.
+  int64 critical_path_ms = 4;
+  bool has_cycles = 5;
+}
+
+message TaskStartedRequest {
+  string task_path = 1;
+  int64 start_time_ms = 2;
+}
+
+message TaskStartedResponse {
+  bool acknowledged = 1;
+}
+
+message TaskFinishedRequest {
+  string task_path = 1;
+  int64 duration_ms = 2;
+  bool success = 3;
+  string outcome = 4; // "EXECUTED", "UP_TO_DATE", "FROM_CACHE", "FAILED"
+}
+
+message TaskFinishedResponse {
+  bool acknowledged = 1;
+}
+
+message GetProgressRequest {}
+
+message TaskProgress {
+  string task_path = 1;
+  string status = 2; // "PENDING", "EXECUTING", "SUCCEEDED", "FAILED", "SKIPPED", "UP_TO_DATE", "FROM_CACHE"
+  int64 duration_ms = 3;
+}
+
+message GetProgressResponse {
+  repeated TaskProgress tasks = 1;
+  int32 completed = 2;
+  int32 total = 3;
+  int32 executing = 4;
+  int64 elapsed_ms = 5;
+}
+
+// -- Configuration Service (Phase 12) --
+
+// Manages project configuration and property resolution.
+// Offloads configuration evaluation from the JVM.
+service ConfigurationService {
+  // Register a project and its properties.
+  rpc RegisterProject(RegisterProjectRequest) returns (RegisterProjectResponse);
+  // Resolve a project property value.
+  rpc ResolveProperty(ResolvePropertyRequest) returns (ResolvePropertyResponse);
+  // Cache resolved configuration state.
+  rpc CacheConfiguration(CacheConfigurationRequest) returns (CacheConfigurationResponse);
+  // Check if configuration cache is valid.
+  rpc ValidateConfigCache(ValidateConfigCacheRequest) returns (ValidateConfigCacheResponse);
+}
+
+message RegisterProjectRequest {
+  string project_path = 1;
+  string project_dir = 2;
+  map<string, string> properties = 3;
+  repeated string applied_plugins = 4;
+}
+
+message RegisterProjectResponse {
+  bool success = 1;
+}
+
+message ResolvePropertyRequest {
+  string project_path = 1;
+  string property_name = 2;
+  string requested_by = 3; // Which task or plugin is requesting
+}
+
+message ResolvePropertyResponse {
+  string value = 1;
+  string source = 2; // "gradle.properties", "system", "project", "default"
+  bool found = 3;
+}
+
+message CacheConfigurationRequest {
+  string project_path = 1;
+  bytes config_hash = 2;
+  int64 timestamp_ms = 3;
+}
+
+message CacheConfigurationResponse {
+  bool cached = 1;
+  bool hit = 2;
+}
+
+message ValidateConfigCacheRequest {
+  string project_path = 1;
+  bytes expected_hash = 2;
+  repeated string input_files = 3;
+  repeated string build_script_hashes = 4;
+}
+
+message ValidateConfigCacheResponse {
+  bool valid = 1;
+  string reason = 2;
+}
+
+// -- Plugin Service (Phase 13) --
+
+// Manages plugin resolution and application.
+// Replaces PluginManager core logic.
+service PluginService {
+  // Register an available plugin.
+  rpc RegisterPlugin(RegisterPluginRequest) returns (RegisterPluginResponse);
+  // Request a plugin to be applied.
+  rpc ApplyPlugin(ApplyPluginRequest) returns (ApplyPluginResponse);
+  // Check if a plugin is already applied.
+  rpc HasPlugin(HasPluginRequest) returns (HasPluginResponse);
+  // Get all applied plugins for a project.
+  rpc GetAppliedPlugins(GetAppliedPluginsRequest) returns (GetAppliedPluginsResponse);
+}
+
+message RegisterPluginRequest {
+  string plugin_id = 1;
+  string plugin_class = 2;
+  string version = 3;
+  bool is_imperative = 4; // true = plugins {}, false = plugins id
+  repeated string applies_to = 5; // Which project types this plugin targets
+}
+
+message RegisterPluginResponse {
+  bool success = 1;
+}
+
+message ApplyPluginRequest {
+  string plugin_id = 1;
+  string project_path = 2;
+  int64 apply_order = 3;
+}
+
+message ApplyPluginResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+message HasPluginRequest {
+  string plugin_id = 1;
+  string project_path = 2;
+}
+
+message HasPluginResponse {
+  bool has_plugin = 1;
+}
+
+message GetAppliedPluginsRequest {
+  string project_path = 1;
+}
+
+message GetAppliedPluginsResponse {
+  repeated PluginInfo plugins = 1;
+}
+
+message PluginInfo {
+  string plugin_id = 1;
+  string plugin_class = 2;
+  string version = 3;
+  int64 applied_at_ms = 4;
+  int32 apply_order = 5;
+}
+
+// -- Build Operations Service (Phase 14) --
+
+// Streams build events and manages build lifecycle.
+// Replaces BuildOperationRunner.
+service BuildOperationsService {
+  // Start a build operation.
+  rpc StartOperation(StartOperationRequest) returns (StartOperationResponse);
+  // Complete a build operation.
+  rpc CompleteOperation(CompleteOperationRequest) returns (CompleteOperationResponse);
+  // Report progress for an operation.
+  rpc ReportProgress(ReportProgressRequest) returns (ReportProgressResponse);
+  // Stream build lifecycle events (server-streaming).
+  rpc StreamEvents(StreamEventsRequest) returns (stream BuildEvent);
+  // Get build summary at completion.
+  rpc GetBuildSummary(GetBuildSummaryRequest) returns (GetBuildSummaryResponse);
+}
+
+message StartOperationRequest {
+  string operation_id = 1;
+  string display_name = 2;
+  string operation_type = 3;
+  string parent_id = 4; // Empty for root operations
+  int64 start_time_ms = 5;
+  map<string, string> metadata = 6;
+}
+
+message StartOperationResponse {
+  bool success = 1;
+}
+
+message CompleteOperationRequest {
+  string operation_id = 1;
+  int64 duration_ms = 2;
+  bool success = 3;
+  string outcome = 4;
+}
+
+message CompleteOperationResponse {
+  bool success = 1;
+}
+
+message ReportProgressRequest {
+  string operation_id = 1;
+  string message = 2;
+  float progress = 3; // 0.0 - 1.0
+  int64 elapsed_ms = 4;
+}
+
+message ReportProgressResponse {
+  bool acknowledged = 1;
+}
+
+message StreamEventsRequest {
+  string build_id = 1;
+}
+
+message BuildEvent {
+  int64 timestamp_ms = 1;
+  string event_type = 2; // "START", "PROGRESS", "FINISH", "FAILURE"
+  string operation_id = 3;
+  string display_name = 4;
+  string message = 5;
+  float progress = 6;
+  bool success = 7;
+}
+
+message GetBuildSummaryRequest {}
+
+message BuildSummary {
+  string build_id = 1;
+  int64 total_duration_ms = 2;
+  int32 total_tasks = 3;
+  int32 executed_tasks = 4;
+  int32 up_to_date_tasks = 5;
+  int32 from_cache_tasks = 6;
+  int32 failed_tasks = 7;
+  string outcome = 8; // "SUCCESS", "FAILURE"
+}
+
+message GetBuildSummaryResponse {
+  BuildSummary summary = 1;
+}
+
+// -- Bootstrap Service (Phase 15) --
+
+// Coordinates Gradle initialization and provides the final JVM-Rust handoff.
+service BootstrapService {
+  // Initialize a build session.
+  rpc InitBuild(InitBuildRequest) returns (InitBuildResponse);
+  // Notify build completion.
+  rpc CompleteBuild(CompleteBuildRequest) returns (CompleteBuildResponse);
+  // Get the substrate daemon health and version info.
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+  // Get a summary of what the substrate is handling.
+  rpc GetSubstrateInfo(GetSubstrateInfoRequest) returns (GetSubstrateInfoResponse);
+}
+
+message InitBuildRequest {
+  string build_id = 1;
+  string project_dir = 2;
+  int64 start_time_ms = 3;
+  int32 requested_parallelism = 4;
+  map<string, string> system_properties = 5;
+  repeated string requested_features = 6;
+}
+
+message InitBuildResponse {
+  string build_id = 1;
+  string substrate_version = 2;
+  string protocol_version = 3;
+  int32 max_parallelism = 4;
+}
+
+message CompleteBuildRequest {
+  string build_id = 1;
+  string outcome = 2;
+  int64 duration_ms = 3;
+}
+
+message CompleteBuildResponse {
+  bool acknowledged = 1;
+}
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  bool healthy = 1;
+  string version = 2;
+  string uptime = 3;
+  int64 active_builds = 4;
+}
+
+message GetSubstrateInfoRequest {}
+
+message SubstrateServiceInfo {
+  string service_name = 1;
+  string status = 2; // "active", "shadow", "disabled"
+  int64 requests_served = 3;
+}
+
+message GetSubstrateInfoResponse {
+  string daemon_version = 1;
+  repeated SubstrateServiceInfo services = 2;
+  int64 total_requests = 3;
+}
+
+// -- Dependency Resolution Service (Phase 18) --
+
+// Resolves dependency graphs and manages artifact downloads.
+service DependencyResolutionService {
+  // Resolve a dependency graph.
+  rpc ResolveDependencies(ResolveDependenciesRequest) returns (ResolveDependenciesResponse);
+  // Check if an artifact is in the local cache.
+  rpc CheckArtifactCache(CheckArtifactCacheRequest) returns (CheckArtifactCacheResponse);
+  // Download an artifact.
+  rpc DownloadArtifact(DownloadArtifactRequest) returns (stream DownloadArtifactChunk);
+  // Report resolution result for tracking.
+  rpc RecordResolution(RecordResolutionRequest) returns (RecordResolutionResponse);
+}
+
+message DependencyDescriptor {
+  string group = 1;
+  string name = 2;
+  string version = 3;
+  string classifier = 4; // e.g. "sources", "javadoc"
+  string extension = 5;  // e.g. "jar", "aar", "pom"
+  bool transitive = 6;
+}
+
+message RepositoryDescriptor {
+  string id = 1;
+  string url = 2;
+  bool m2compatible = 3;
+  bool allow_insecure_protocol = 4;
+  map<string, string> credentials = 5;
+}
+
+message ResolveDependenciesRequest {
+  string configuration_name = 1;
+  repeated DependencyDescriptor dependencies = 2;
+  repeated RepositoryDescriptor repositories = 3;
+  repeated string attributes = 4;
+  bool lenient = 5;
+}
+
+message ResolvedDependency {
+  string group = 1;
+  string name = 2;
+  string version = 3;
+  string selected_version = 4; // after conflict resolution
+  repeated ResolvedDependency dependencies = 5;
+  bool resolved = 6;
+  string failure_reason = 7;
+  string artifact_url = 8;
+  int64 artifact_size = 9;
+  string artifact_sha256 = 10;
+}
+
+message ResolveDependenciesResponse {
+  bool success = 1;
+  repeated ResolvedDependency resolved_dependencies = 2;
+  string error_message = 3;
+  int64 resolution_time_ms = 4;
+  int32 total_artifacts = 5;
+  int64 total_download_size = 6;
+}
+
+message CheckArtifactCacheRequest {
+  string group = 1;
+  string name = 2;
+  string version = 3;
+  string classifier = 4;
+  string extension = 5;
+  string sha256 = 6;
+}
+
+message CheckArtifactCacheResponse {
+  bool cached = 1;
+  string local_path = 2;
+  int64 cached_size = 3;
+}
+
+message DownloadArtifactRequest {
+  string url = 1;
+  string group = 2;
+  string name = 3;
+  string version = 4;
+  string classifier = 5;
+  string extension = 6;
+  repeated RepositoryDescriptor repositories = 7;
+}
+
+message DownloadArtifactChunk {
+  bytes data = 1;
+  int64 offset = 2;
+  int64 total_size = 3;
+  bool is_last = 4;
+  string error_message = 5;
+}
+
+message RecordResolutionRequest {
+  string configuration_name = 1;
+  int32 dependency_count = 2;
+  int64 resolution_time_ms = 3;
+  bool success = 4;
+  int64 cache_hits = 5;
+}
+
+message RecordResolutionResponse {
+  bool acknowledged = 1;
+}
+
+// -- File System Watch Service (Phase 19) --
+
+// Watches file system changes for incremental builds.
+service FileWatchService {
+  // Start watching a directory tree.
+  rpc StartWatching(StartWatchingRequest) returns (StartWatchingResponse);
+  // Stop watching a directory tree.
+  rpc StopWatching(StopWatchingRequest) returns (StopWatchingResponse);
+  // Poll for changes since last poll (server-streaming).
+  rpc PollChanges(PollChangesRequest) returns (stream FileChangeEvent);
+  // Get watch statistics.
+  rpc GetWatchStats(GetWatchStatsRequest) returns (GetWatchStatsResponse);
+}
+
+message StartWatchingRequest {
+  string root_path = 1;
+  repeated string include_patterns = 2;
+  repeated string exclude_patterns = 3;
+}
+
+message StartWatchingResponse {
+  bool watching = 1;
+  string watch_id = 2;
+  int64 files_watched = 3;
+}
+
+message StopWatchingRequest {
+  string watch_id = 1;
+}
+
+message StopWatchingResponse {
+  bool stopped = 1;
+}
+
+message PollChangesRequest {
+  string watch_id = 1;
+  int64 since_timestamp_ms = 2;
+}
+
+message FileChangeEvent {
+  string path = 1;
+  string change_type = 2; // CREATED, MODIFIED, DELETED
+  int64 timestamp_ms = 3;
+  int64 file_size = 4;
+  bool is_directory = 5;
+}
+
+message GetWatchStatsRequest {
+  string watch_id = 1;
+}
+
+message GetWatchStatsResponse {
+  int64 files_watched = 1;
+  int64 changes_detected = 2;
+  int64 last_poll_time_ms = 3;
+  int64 watch_start_time_ms = 4;
+}
+
+// -- Configuration Cache Service (Phase 20) --
+
+// Stores and retrieves serialized build configuration.
+service ConfigurationCacheService {
+  // Store a configuration cache entry.
+  rpc StoreConfigCache(StoreConfigCacheRequest) returns (StoreConfigCacheResponse);
+  // Load a configuration cache entry.
+  rpc LoadConfigCache(LoadConfigCacheRequest) returns (LoadConfigCacheResponse);
+  // Validate a configuration cache entry.
+  rpc ValidateConfig(ValidateConfigRequest) returns (ValidateConfigResponse);
+  // Clean stale cache entries.
+  rpc CleanConfigCache(CleanConfigCacheRequest) returns (CleanConfigCacheResponse);
+}
+
+message StoreConfigCacheRequest {
+  string cache_key = 1;
+  bytes serialized_config = 2;
+  int64 entry_count = 3;
+  repeated string input_hashes = 4;
+  int64 timestamp_ms = 5;
+}
+
+message StoreConfigCacheResponse {
+  bool stored = 1;
+  int64 storage_time_ms = 2;
+}
+
+message LoadConfigCacheRequest {
+  string cache_key = 1;
+}
+
+message LoadConfigCacheResponse {
+  bool found = 2;
+  bytes serialized_config = 3;
+  int64 entry_count = 4;
+  int64 timestamp_ms = 5;
+}
+
+message ValidateConfigRequest {
+  string cache_key = 1;
+  repeated string input_hashes = 2;
+}
+
+message ValidateConfigResponse {
+  bool valid = 1;
+  string reason = 2;
+}
+
+message CleanConfigCacheRequest {
+  int64 max_age_ms = 1;
+  int32 max_entries = 2;
+}
+
+message CleanConfigCacheResponse {
+  int32 entries_removed = 1;
+  int64 space_recovered_bytes = 2;
+}
