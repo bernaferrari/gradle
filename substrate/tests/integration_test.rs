@@ -327,6 +327,7 @@ async fn test_cache_orchestration_e2e() {
         .store_outputs(Request::new(StoreOutputsRequest {
             cache_key: compute_resp.cache_key.clone(),
             execution_time_ms: 500,
+            output_properties: vec![],
         }))
         .await
         .unwrap()
@@ -573,6 +574,7 @@ async fn test_multi_service_sequence() {
         .store_outputs(Request::new(StoreOutputsRequest {
             cache_key,
             execution_time_ms: 200,
+            output_properties: vec![],
         }))
         .await
         .unwrap()

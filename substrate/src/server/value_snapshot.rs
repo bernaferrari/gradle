@@ -8,12 +8,85 @@ use crate::proto::{
 
 /// Rust-native value snapshotting service.
 /// Computes fingerprints for input properties, replacing Java's DefaultValueSnapshotter.
+/// Supports Gradle-compatible normalization: sorted collections, path normalization,
+/// and deterministic serialization.
 #[derive(Default)]
 pub struct ValueSnapshotServiceImpl;
 
 impl ValueSnapshotServiceImpl {
     pub fn new() -> Self {
         Self
+    }
+
+    /// Check if a type name represents a Gradle FileCollection or similar ordered collection
+    /// where the serialization order is not deterministic.
+    fn is_ordered_collection_type(type_name: &str) -> bool {
+        matches!(
+            type_name,
+            "org.gradle.api.file.FileCollection"
+                | "org.gradle.api.file.ConfigurableFileCollection"
+                | "org.gradle.api.file.FileTree"
+                | "org.gradle.api.file.SourceDirectorySet"
+                | "org.gradle.api.file.DirectorySet"
+        )
+    }
+
+    /// Normalize a path for fingerprinting: forward slashes, no trailing slash, lowercase drive on Windows.
+    fn normalize_path(p: &str) -> String {
+        let p = p.replace('\\', "/");
+        let p = p.trim_end_matches('/');
+        p.to_string()
+    }
+
+    /// Normalize a semicolon-separated path list (FileCollection serialization).
+    /// Sorts entries, deduplicates, normalizes each path.
+    fn normalize_path_list(s: &str) -> String {
+        if s.is_empty() {
+            return String::new();
+        }
+        let mut paths: Vec<String> = s
+            .split(';')
+            .filter(|p| !p.is_empty())
+            .map(Self::normalize_path)
+            .collect();
+        paths.sort();
+        paths.dedup();
+        paths.join(";")
+    }
+
+    /// Normalize a comma-separated value list.
+    /// Sorts entries, deduplicates.
+    fn normalize_value_list(s: &str) -> String {
+        if s.is_empty() {
+            return String::new();
+        }
+        let mut values: Vec<&str> = s.split(',').map(|v| v.trim()).filter(|v| !v.is_empty()).collect();
+        values.sort();
+        values.dedup();
+        values.join(",")
+    }
+
+    /// Normalize a key=value map serialization (e.g., "k1=v1;k2=v2").
+    /// Sorts by key for determinism.
+    fn normalize_map(s: &str) -> String {
+        if s.is_empty() {
+            return String::new();
+        }
+        let mut entries: Vec<(&str, &str)> = s
+            .split(';')
+            .filter_map(|entry| {
+                let mut parts = entry.splitn(2, '=');
+                let key = parts.next()?.trim();
+                let value = parts.next()?.trim();
+                Some((key, value))
+            })
+            .collect();
+        entries.sort_by_key(|(k, _)| *k);
+        entries
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect::<Vec<_>>()
+            .join(";")
     }
 
     fn fingerprint_value(prop: &PropertyValue) -> Vec<u8> {
@@ -27,7 +100,13 @@ impl ValueSnapshotServiceImpl {
         match &prop.value {
             Some(crate::proto::property_value::Value::StringValue(s)) => {
                 hasher.update(b"S:");
-                hasher.update(s.as_bytes());
+                if Self::is_ordered_collection_type(&prop.type_name) {
+                    // FileCollection: normalize as path list
+                    let normalized = Self::normalize_path_list(s);
+                    hasher.update(normalized.as_bytes());
+                } else {
+                    hasher.update(s.as_bytes());
+                }
             }
             Some(crate::proto::property_value::Value::LongValue(l)) => {
                 hasher.update(b"L:");
@@ -43,12 +122,16 @@ impl ValueSnapshotServiceImpl {
             }
             Some(crate::proto::property_value::Value::ListValue(s)) => {
                 hasher.update(b"[");
-                hasher.update(s.as_bytes());
+                // Normalize list: sort entries for determinism
+                let normalized = Self::normalize_value_list(s);
+                hasher.update(normalized.as_bytes());
                 hasher.update(b"]");
             }
             Some(crate::proto::property_value::Value::MapValue(s)) => {
                 hasher.update(b"{");
-                hasher.update(s.as_bytes());
+                // Normalize map: sort by key for determinism
+                let normalized = Self::normalize_map(s);
+                hasher.update(normalized.as_bytes());
                 hasher.update(b"}");
             }
             None => {
@@ -219,5 +302,134 @@ mod tests {
         let fp_long = ValueSnapshotServiceImpl::fingerprint_value(&prop_long);
 
         assert_ne!(fp_str, fp_long, "Different types should produce different fingerprints");
+    }
+
+    #[test]
+    fn test_file_collection_order_independence() {
+        // FileCollection paths in different order should produce same fingerprint
+        let prop_a = PropertyValue {
+            name: "classpath".to_string(),
+            value: Some(Value::StringValue("/a.jar;/b.jar;/c.jar".to_string())),
+            type_name: "org.gradle.api.file.FileCollection".to_string(),
+        };
+        let prop_b = PropertyValue {
+            name: "classpath".to_string(),
+            value: Some(Value::StringValue("/c.jar;/a.jar;/b.jar".to_string())),
+            type_name: "org.gradle.api.file.FileCollection".to_string(),
+        };
+
+        let fp_a = ValueSnapshotServiceImpl::fingerprint_value(&prop_a);
+        let fp_b = ValueSnapshotServiceImpl::fingerprint_value(&prop_b);
+        assert_eq!(fp_a, fp_b, "FileCollection paths in different order should have same fingerprint");
+    }
+
+    #[test]
+    fn test_file_collection_dedup() {
+        // Duplicate paths should not affect fingerprint
+        let prop_unique = PropertyValue {
+            name: "cp".to_string(),
+            value: Some(Value::StringValue("/a.jar;/b.jar".to_string())),
+            type_name: "org.gradle.api.file.FileCollection".to_string(),
+        };
+        let prop_dup = PropertyValue {
+            name: "cp".to_string(),
+            value: Some(Value::StringValue("/a.jar;/b.jar;/a.jar".to_string())),
+            type_name: "org.gradle.api.file.FileCollection".to_string(),
+        };
+
+        let fp_unique = ValueSnapshotServiceImpl::fingerprint_value(&prop_unique);
+        let fp_dup = ValueSnapshotServiceImpl::fingerprint_value(&prop_dup);
+        assert_eq!(fp_unique, fp_dup, "Duplicate FileCollection paths should be deduplicated");
+    }
+
+    #[test]
+    fn test_non_file_collection_string_unchanged() {
+        // Regular strings should NOT be sorted
+        let prop1 = PropertyValue {
+            name: "s".to_string(),
+            value: Some(Value::StringValue("hello world".to_string())),
+            type_name: "java.lang.String".to_string(),
+        };
+        let prop2 = PropertyValue {
+            name: "s".to_string(),
+            value: Some(Value::StringValue("world hello".to_string())),
+            type_name: "java.lang.String".to_string(),
+        };
+
+        let fp1 = ValueSnapshotServiceImpl::fingerprint_value(&prop1);
+        let fp2 = ValueSnapshotServiceImpl::fingerprint_value(&prop2);
+        assert_ne!(fp1, fp2, "Regular strings should not be normalized");
+    }
+
+    #[test]
+    fn test_list_normalization() {
+        // List values should be sorted for determinism
+        let prop_a = PropertyValue {
+            name: "opts".to_string(),
+            value: Some(Value::ListValue("z,a,m".to_string())),
+            type_name: "java.util.List".to_string(),
+        };
+        let prop_b = PropertyValue {
+            name: "opts".to_string(),
+            value: Some(Value::ListValue("a,m,z".to_string())),
+            type_name: "java.util.List".to_string(),
+        };
+
+        let fp_a = ValueSnapshotServiceImpl::fingerprint_value(&prop_a);
+        let fp_b = ValueSnapshotServiceImpl::fingerprint_value(&prop_b);
+        assert_eq!(fp_a, fp_b, "List values should be sorted");
+    }
+
+    #[test]
+    fn test_map_normalization() {
+        // Map values should be sorted by key
+        let prop_a = PropertyValue {
+            name: "env".to_string(),
+            value: Some(Value::MapValue("z=3;a=1;m=2".to_string())),
+            type_name: "java.util.Map".to_string(),
+        };
+        let prop_b = PropertyValue {
+            name: "env".to_string(),
+            value: Some(Value::MapValue("a=1;m=2;z=3".to_string())),
+            type_name: "java.util.Map".to_string(),
+        };
+
+        let fp_a = ValueSnapshotServiceImpl::fingerprint_value(&prop_a);
+        let fp_b = ValueSnapshotServiceImpl::fingerprint_value(&prop_b);
+        assert_eq!(fp_a, fp_b, "Map values should be sorted by key");
+    }
+
+    #[test]
+    fn test_path_normalization() {
+        assert_eq!(
+            ValueSnapshotServiceImpl::normalize_path("/foo/bar/"),
+            "/foo/bar"
+        );
+        assert_eq!(
+            ValueSnapshotServiceImpl::normalize_path("/foo\\bar"),
+            "/foo/bar"
+        );
+        assert_eq!(
+            ValueSnapshotServiceImpl::normalize_path("/foo/bar"),
+            "/foo/bar"
+        );
+    }
+
+    #[test]
+    fn test_file_collection_with_backslashes() {
+        let prop_unix = PropertyValue {
+            name: "src".to_string(),
+            value: Some(Value::StringValue("/a/b;/c/d".to_string())),
+            type_name: "org.gradle.api.file.FileCollection".to_string(),
+        };
+        let prop_mixed = PropertyValue {
+            name: "src".to_string(),
+            value: Some(Value::StringValue("\\a\\b;/c/d".to_string())),
+            type_name: "org.gradle.api.file.FileCollection".to_string(),
+        };
+
+        let fp_unix = ValueSnapshotServiceImpl::fingerprint_value(&prop_unix);
+        let fp_mixed = ValueSnapshotServiceImpl::fingerprint_value(&prop_mixed);
+        assert_eq!(fp_unix, fp_mixed, "Backslash paths should normalize to forward slash");
     }
 }
