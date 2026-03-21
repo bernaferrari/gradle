@@ -983,3 +983,110 @@ async fn test_build_operations_e2e() {
 
     assert!(summary_resp.summary.is_some());
 }
+
+#[tokio::test]
+async fn test_execution_history_stats_e2e() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client = execution_history_service_client::ExecutionHistoryServiceClient::new(channel);
+
+    // Store and load to generate stats
+    client
+        .store_history(Request::new(StoreHistoryRequest {
+            work_identity: ":compileJava".to_string(),
+            state: vec![1, 2, 3],
+            timestamp_ms: 1000,
+        }))
+        .await
+        .unwrap();
+
+    client
+        .load_history(Request::new(LoadHistoryRequest {
+            work_identity: ":compileJava".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    client
+        .load_history(Request::new(LoadHistoryRequest {
+            work_identity: ":nonexistent".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    let stats = client
+        .get_history_stats(Request::new(GetHistoryStatsRequest {}))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(stats.entry_count, 1);
+    assert_eq!(stats.load_hits, 1);
+    assert_eq!(stats.load_misses, 1);
+    assert_eq!(stats.stores, 1);
+    assert!((stats.hit_rate - 0.5).abs() < f64::EPSILON);
+}
+
+#[tokio::test]
+async fn test_dependency_resolution_cache_e2e() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client = dependency_resolution_service_client::DependencyResolutionServiceClient::new(channel);
+
+    // Initially not cached
+    let check = client
+        .check_artifact_cache(Request::new(CheckArtifactCacheRequest {
+            group: "com.example".to_string(),
+            name: "test-lib".to_string(),
+            version: "1.0".to_string(),
+            classifier: String::new(),
+            sha256: String::new(),
+            extension: String::new(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(!check.cached);
+
+    // Add to cache
+    let add_resp = client
+        .add_artifact_to_cache(Request::new(AddArtifactToCacheRequest {
+            group: "com.example".to_string(),
+            name: "test-lib".to_string(),
+            version: "1.0".to_string(),
+            classifier: String::new(),
+            local_path: "/tmp/test-lib-1.0.jar".to_string(),
+            size: 2048,
+            sha256: "deadbeef".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(add_resp.accepted);
+
+    // Now cached
+    let check2 = client
+        .check_artifact_cache(Request::new(CheckArtifactCacheRequest {
+            group: "com.example".to_string(),
+            name: "test-lib".to_string(),
+            version: "1.0".to_string(),
+            classifier: String::new(),
+            sha256: String::new(),
+            extension: String::new(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(check2.cached);
+    assert_eq!(check2.local_path, "/tmp/test-lib-1.0.jar");
+    assert_eq!(check2.cached_size, 2048);
+
+    // Get stats
+    let stats = client
+        .get_resolution_stats(Request::new(GetResolutionStatsRequest {}))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(stats.artifact_cache_hits, 1);
+    assert_eq!(stats.cached_artifacts, 1);
+}
