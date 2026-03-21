@@ -13,9 +13,12 @@ use crate::SERVER_VERSION;
 
 /// Active build session.
 struct BuildSession {
+    #[allow(dead_code)]
     project_dir: String,
     start_time: Instant,
+    #[allow(dead_code)]
     requested_parallelism: i32,
+    #[allow(dead_code)]
     requested_features: Vec<String>,
 }
 

@@ -13,7 +13,9 @@ use crate::proto::{
 
 /// A tracked resource reservation.
 struct Reservation {
+    #[allow(dead_code)]
     reservation_id: String,
+    #[allow(dead_code)]
     build_id: String,
     resources: Vec<(String, i64)>, // (resource_type, amount)
     created_at_ms: i64,

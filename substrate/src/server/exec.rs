@@ -32,6 +32,7 @@ struct ManagedProcess {
     child: tokio::process::Child,
     stdout_rx: Option<mpsc::Receiver<Vec<u8>>>,
     stderr_rx: Option<mpsc::Receiver<Vec<u8>>>,
+    #[allow(dead_code)]
     command: String,
     started_at: Instant,
 }
@@ -100,7 +101,9 @@ impl ExecServiceImpl {
                         {
                             let _ = entry.child.start_kill();
                         }
-                        let _ = entry.child.wait();
+                        // Spawn async wait to reap the child (we already own it from remove)
+                        let mut child = entry.child;
+                        tokio::spawn(async move { let _ = child.wait().await; });
                     }
                     Err(_) => {}
                 }
