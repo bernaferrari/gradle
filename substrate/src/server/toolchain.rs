@@ -1,8 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::time::Duration;
 
 use dashmap::DashMap;
+use tokio::io::AsyncWriteExt;
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
@@ -27,6 +29,7 @@ pub struct ToolchainServiceImpl {
     toolchain_dir: PathBuf,
     downloads_total: AtomicI64,
     downloads_completed: AtomicI64,
+    http_client: reqwest::Client,
 }
 
 impl ToolchainServiceImpl {
@@ -37,6 +40,10 @@ impl ToolchainServiceImpl {
             toolchain_dir,
             downloads_total: AtomicI64::new(0),
             downloads_completed: AtomicI64::new(0),
+            http_client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(300))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
         }
     }
 
@@ -212,6 +219,167 @@ impl ToolchainServiceImpl {
         }
         total
     }
+
+    /// Construct a download URL for a JDK distribution.
+    fn build_download_urls(version: &str, implementation: &str, os: &str, arch: &str) -> Vec<String> {
+        let mut urls = Vec::new();
+
+        let os_part = match os {
+            "macos" => "mac",
+            "linux" => "linux",
+            "windows" => "windows",
+            _ => os,
+        };
+        let arch_part = match arch {
+            "x86_64" => "x64",
+            "aarch64" => "aarch64",
+            _ => arch,
+        };
+        let ext = if os == "windows" { "zip" } else { "tar.gz" };
+
+        // Adoptium (Eclipse Temurin) API
+        urls.push(format!(
+            "https://api.adoptium.net/v3/binary/latest/{}/ga/{}/{}/jdk/hotspot/normal/eclipse?project=jdk",
+            version, os_part, arch_part
+        ));
+
+        // Direct Temurin releases
+        let major = version.parse::<u32>().unwrap_or(0);
+        let series = if major >= 17 { "" } else { "8" };
+        urls.push(format!(
+            "https://github.com/adoptium/temurin{}-binaries/releases/download/jdk-{}/OpenJDK{}_U-jdk_{}_{}_{}_{}",
+            series, version, version, os_part, arch_part, "hotspot", ext
+        ));
+
+        // Corretto fallback
+        let corretto_arch = match arch_part {
+            "x64" => "x64",
+            "aarch64" => "aarch64",
+            _ => arch_part,
+        };
+        urls.push(format!(
+            "https://corretto.aws/downloads/latest/{}/amazon-corretto-{}-{}-{}-{}.{}",
+            version, version, os_part, corretto_arch, version, ext
+        ));
+
+        urls
+    }
+
+    /// Download a file from a URL to a local path, with progress reporting via a channel.
+    async fn download_file(
+        &self,
+        url: &str,
+        dest: &Path,
+    ) -> Result<(), String> {
+        let response = self.http_client.get(url)
+            .send()
+            .await
+            .map_err(|e| format!("Download request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(format!("HTTP {} for {}", response.status().as_u16(), url));
+        }
+
+        let total_size = response.content_length().unwrap_or(0);
+        let mut downloaded: u64 = 0;
+
+        let mut file = tokio::fs::File::create(dest).await
+            .map_err(|e| format!("Failed to create file: {}", e))?;
+
+        let mut stream = response.bytes_stream();
+        use futures_util::StreamExt;
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result.map_err(|e| format!("Stream error: {}", e))?;
+            file.write_all(&chunk).await
+                .map_err(|e| format!("Write error: {}", e))?;
+            downloaded += chunk.len() as u64;
+
+            if total_size > 0 {
+                let percent = ((downloaded as f64 / total_size as f64) * 100.0) as i64;
+                tracing::debug!(percent, downloaded, total_size, "Downloading toolchain");
+            }
+        }
+
+        file.flush().await
+            .map_err(|e| format!("Flush error: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Extract a .tar.gz archive to a directory.
+    fn extract_tar_gz(archive: &Path, dest: &Path) -> Result<(), String> {
+        let file = std::fs::File::open(archive)
+            .map_err(|e| format!("Failed to open archive: {}", e))?;
+        let gz_decoder = flate2::read::GzDecoder::new(file);
+        let mut archive = tar::Archive::new(gz_decoder);
+
+        archive.unpack(dest)
+            .map_err(|e| format!("Failed to extract tar.gz: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Extract a .zip archive to a directory.
+    fn extract_zip(archive: &Path, dest: &Path) -> Result<(), String> {
+        let file = std::fs::File::open(archive)
+            .map_err(|e| format!("Failed to open archive: {}", e))?;
+        let mut archive = zip::read::ZipArchive::new(file)
+            .map_err(|e| format!("Failed to read zip: {}", e))?;
+
+        for i in 0..archive.len() {
+            let mut entry = archive.by_index(i)
+                .map_err(|e| format!("Failed to read entry {}: {}", i, e))?;
+
+            let outpath = match entry.enclosed_name() {
+                Some(path) => dest.join(path),
+                None => continue,
+            };
+
+            if entry.is_dir() || entry.name().ends_with('/') {
+                std::fs::create_dir_all(&outpath)
+                    .map_err(|e| format!("Failed to create dir: {}", e))?;
+            } else {
+                if let Some(parent) = outpath.parent() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| format!("Failed to create parent: {}", e))?;
+                }
+                let mut outfile = std::fs::File::create(&outpath)
+                    .map_err(|e| format!("Failed to create file: {}", e))?;
+                std::io::copy(&mut entry, &mut outfile)
+                    .map_err(|e| format!("Failed to write file: {}", e))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Find the java home inside an extracted toolchain directory.
+    /// JDK archives typically contain a single root directory.
+    fn find_java_home_in_dir(dir: &Path) -> Option<PathBuf> {
+        // Check if dir itself contains bin/java
+        if dir.join("bin/java").exists() || dir.join("bin/java.exe").exists() {
+            return Some(dir.to_path_buf());
+        }
+
+        // Check Contents/Home on macOS
+        let contents_home = dir.join("Contents/Home");
+        if contents_home.join("bin/java").exists() {
+            return Some(contents_home);
+        }
+
+        // Look for a single subdirectory that contains bin/java
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            let subdirs: Vec<_> = entries.flatten().filter(|e| e.path().is_dir()).collect();
+            if subdirs.len() == 1 {
+                let candidate = subdirs[0].path();
+                if candidate.join("bin/java").exists() || candidate.join("Contents/Home/bin/java").exists() {
+                    return Some(candidate);
+                }
+            }
+        }
+
+        None
+    }
 }
 
 #[tonic::async_trait]
@@ -285,54 +453,278 @@ impl ToolchainService for ToolchainServiceImpl {
         let version = req.language_version.clone();
         let impl_name = req.implementation.clone();
         let toolchain_dir = self.toolchain_dir.clone();
+        let download_urls = req.download_urls.clone();
+        let http_client = self.http_client.clone();
 
-        let java_home = toolchain_dir
-            .join(format!("{}-{}", impl_name, version))
-            .to_string_lossy()
-            .to_string();
-
-        let stream = futures_util::stream::iter(vec![
-            Ok(ToolchainProgress {
+        let stream = async_stream::stream! {
+            // Phase 1: Check
+            yield Ok(ToolchainProgress {
                 phase: "checking".to_string(),
                 progress_percent: 5,
                 message: format!("Checking for {} {}", impl_name, version),
                 success: true,
                 error_message: String::new(),
                 java_home: String::new(),
-            }),
-            Ok(ToolchainProgress {
+            });
+
+            // Phase 2: Download
+            yield Ok(ToolchainProgress {
                 phase: "downloading".to_string(),
-                progress_percent: 30,
-                message: "Download not yet implemented".to_string(),
+                progress_percent: 10,
+                message: "Preparing download URLs".to_string(),
                 success: true,
                 error_message: String::new(),
                 java_home: String::new(),
-            }),
-            Ok(ToolchainProgress {
+            });
+
+            let os = std::env::consts::OS;
+            let arch = std::env::consts::ARCH;
+
+            // Use provided URLs or construct default ones
+            let urls: Vec<String> = if download_urls.is_empty() {
+                Self::build_download_urls(&version, &impl_name, os, arch)
+            } else {
+                download_urls
+            };
+
+            let target_dir = toolchain_dir.join(format!("{}-{}", impl_name, version));
+            let archive_path = target_dir.join(if os == "windows" { "jdk.zip" } else { "jdk.tar.gz" });
+
+            // Try each URL
+            let mut download_success = false;
+            for (i, url) in urls.iter().enumerate() {
+                yield Ok(ToolchainProgress {
+                    phase: "downloading".to_string(),
+                    progress_percent: 15,
+                    message: format!("Trying URL {} ({}/{})", url, i + 1, urls.len()),
+                    success: true,
+                    error_message: String::new(),
+                    java_home: String::new(),
+                });
+
+                // Create temp dir for download
+                if let Err(e) = std::fs::create_dir_all(&target_dir) {
+                    yield Ok(ToolchainProgress {
+                        phase: "error".to_string(),
+                        progress_percent: 0,
+                        message: format!("Failed to create directory: {}", e),
+                        success: false,
+                        error_message: e.to_string(),
+                        java_home: String::new(),
+                    });
+                    return;
+                }
+
+                match http_client.get(url).send().await {
+                    Ok(response) if response.status().is_success() => {
+                        let total_size = response.content_length().unwrap_or(0);
+
+                        // Download to file
+                        match tokio::fs::File::create(&archive_path).await {
+                            Ok(mut file) => {
+                                use futures_util::StreamExt;
+                                let mut stream = response.bytes_stream();
+                                let mut downloaded: u64 = 0;
+                                let mut last_percent: i64 = 15;
+
+                                while let Some(chunk_result) = stream.next().await {
+                                    match chunk_result {
+                                        Ok(chunk) => {
+                                            if file.write_all(&chunk).await.is_err() {
+                                                break;
+                                            }
+                                            downloaded += chunk.len() as u64;
+
+                                            if total_size > 0 {
+                                                let percent = 20 + ((downloaded as f64 / total_size as f64) * 40.0) as i64;
+                                                if percent > last_percent + 5 {
+                                                    last_percent = percent;
+                                                    yield Ok(ToolchainProgress {
+                                                        phase: "downloading".to_string(),
+                                                        progress_percent: percent.min(60),
+                                                        message: format!(
+                                                            "Downloaded {} / {} ({:.0}%)",
+                                                            downloaded / 1024 / 1024,
+                                                            total_size / 1024 / 1024,
+                                                            downloaded as f64 / total_size as f64 * 100.0
+                                                        ),
+                                                        success: true,
+                                                        error_message: String::new(),
+                                                        java_home: String::new(),
+                                                    });
+                                                }
+                                            }
+                                        }
+                                        Err(_) => break,
+                                    }
+                                }
+
+                                if file.flush().await.is_ok() {
+                                    download_success = true;
+                                    break;
+                                }
+                            }
+                            Err(e) => {
+                                tracing::debug!("Failed to create download file: {}", e);
+                            }
+                        }
+                    }
+                    Ok(response) => {
+                        tracing::debug!("HTTP {} for {}", response.status().as_u16(), url);
+                    }
+                    Err(e) => {
+                        tracing::debug!("Download error for {}: {}", url, e);
+                    }
+                }
+            }
+
+            if !download_success {
+                yield Ok(ToolchainProgress {
+                    phase: "error".to_string(),
+                    progress_percent: 0,
+                    message: "Failed to download from any URL".to_string(),
+                    success: false,
+                    error_message: "All download URLs failed".to_string(),
+                    java_home: String::new(),
+                });
+                return;
+            }
+
+            // Phase 3: Extract
+            yield Ok(ToolchainProgress {
                 phase: "extracting".to_string(),
-                progress_percent: 70,
-                message: "Extraction not yet implemented".to_string(),
+                progress_percent: 65,
+                message: "Extracting archive".to_string(),
                 success: true,
                 error_message: String::new(),
                 java_home: String::new(),
-            }),
-            Ok(ToolchainProgress {
+            });
+
+            let extract_dir = target_dir.join("extract");
+            if std::fs::create_dir_all(&extract_dir).is_err() {
+                yield Ok(ToolchainProgress {
+                    phase: "error".to_string(),
+                    progress_percent: 0,
+                    message: "Failed to create extract directory".to_string(),
+                    success: false,
+                    error_message: "mkdir failed".to_string(),
+                    java_home: String::new(),
+                });
+                return;
+            }
+
+            let archive_path_clone = archive_path.clone();
+            let extract_dir_clone = extract_dir.clone();
+            let extract_result = tokio::task::spawn_blocking(move || {
+                let ext = archive_path_clone.extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("");
+                if ext == "gz" || archive_path_clone.to_string_lossy().ends_with(".tar.gz") {
+                    Self::extract_tar_gz(&archive_path_clone, &extract_dir_clone)
+                } else {
+                    Self::extract_zip(&archive_path_clone, &extract_dir_clone)
+                }
+            }).await;
+
+            if let Err(e) = extract_result {
+                yield Ok(ToolchainProgress {
+                    phase: "error".to_string(),
+                    progress_percent: 0,
+                    message: format!("Extraction failed: {}", e),
+                    success: false,
+                    error_message: e.to_string(),
+                    java_home: String::new(),
+                });
+                return;
+            }
+
+            let extract_result = extract_result.unwrap();
+            if let Err(e) = extract_result {
+                yield Ok(ToolchainProgress {
+                    phase: "error".to_string(),
+                    progress_percent: 0,
+                    message: format!("Extraction failed: {}", e),
+                    success: false,
+                    error_message: e.to_string(),
+                    java_home: String::new(),
+                });
+                return;
+            }
+
+            // Phase 4: Verify
+            yield Ok(ToolchainProgress {
                 phase: "verifying".to_string(),
                 progress_percent: 90,
-                message: "Verification not yet implemented".to_string(),
+                message: "Verifying installation".to_string(),
                 success: true,
                 error_message: String::new(),
                 java_home: String::new(),
-            }),
-            Ok(ToolchainProgress {
+            });
+
+            let java_home = match Self::find_java_home_in_dir(&extract_dir) {
+                Some(home) => home.to_string_lossy().to_string(),
+                None => {
+                    yield Ok(ToolchainProgress {
+                        phase: "error".to_string(),
+                        progress_percent: 0,
+                        message: "Could not find bin/java in extracted archive".to_string(),
+                        success: false,
+                        error_message: "Invalid JDK archive structure".to_string(),
+                        java_home: String::new(),
+                    });
+                    return;
+                }
+            };
+
+            // Verify java -version works
+            let java_bin = if os == "windows" {
+                format!("{}\\bin\\java.exe", java_home)
+            } else {
+                format!("{}/bin/java", java_home)
+            };
+
+            match tokio::process::Command::new(&java_bin).arg("-version").output().await {
+                Ok(output) if output.status.success() => {
+                    // All good
+                }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    yield Ok(ToolchainProgress {
+                        phase: "error".to_string(),
+                        progress_percent: 0,
+                        message: format!("java -version failed: {}", stderr),
+                        success: false,
+                        error_message: "JDK verification failed".to_string(),
+                        java_home: String::new(),
+                    });
+                    return;
+                }
+                Err(e) => {
+                    yield Ok(ToolchainProgress {
+                        phase: "error".to_string(),
+                        progress_percent: 0,
+                        message: format!("Failed to run java: {}", e),
+                        success: false,
+                        error_message: "JDK verification failed".to_string(),
+                        java_home: String::new(),
+                    });
+                    return;
+                }
+            }
+
+            // Clean up archive
+            let _ = std::fs::remove_file(&archive_path);
+
+            // Phase 5: Done
+            yield Ok(ToolchainProgress {
                 phase: "done".to_string(),
                 progress_percent: 100,
-                message: format!("Toolchain ready at {}", java_home),
+                message: format!("Toolchain {} {} installed at {}", impl_name, version, java_home),
                 success: true,
                 error_message: String::new(),
-                java_home,
-            }),
-        ]);
+                java_home: java_home.clone(),
+            });
+        };
 
         Ok(Response::new(Box::pin(stream) as Self::EnsureToolchainStream))
     }

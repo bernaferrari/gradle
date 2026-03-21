@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicI64, Ordering};
+
 use md5::{Digest, Md5};
 use tonic::{Request, Response, Status};
 
@@ -7,17 +9,50 @@ use crate::proto::{
     StoreOutputsRequest, StoreOutputsResponse,
 };
 
+/// Maximum number of stored cache keys to track before eviction.
+const MAX_STORED_KEYS: usize = 50_000;
+
 /// Rust-native build cache orchestration service.
 /// Computes cache keys and coordinates cache operations.
 pub struct BuildCacheOrchestrationServiceImpl {
     // Track which cache keys have been stored (local cache availability)
-    stored_keys: dashmap::DashMap<String, bool>,
+    stored_keys: dashmap::DashMap<String, i64>,
+    /// Monotonically increasing sequence number for eviction ordering.
+    sequence: AtomicI64,
+    /// Count of evicted entries.
+    keys_evicted: AtomicI64,
 }
 
 impl BuildCacheOrchestrationServiceImpl {
     pub fn new() -> Self {
         Self {
             stored_keys: dashmap::DashMap::new(),
+            sequence: AtomicI64::new(0),
+            keys_evicted: AtomicI64::new(0),
+        }
+    }
+
+    /// Evict old entries if the store exceeds the capacity.
+    /// Uses the value field as a sequence number — evicts oldest entries.
+    fn maybe_evict_keys(&self) {
+        if self.stored_keys.len() <= MAX_STORED_KEYS {
+            return;
+        }
+
+        let to_remove_count = self.stored_keys.len() - MAX_STORED_KEYS / 2;
+
+        // Collect entries sorted by sequence number (oldest first)
+        let mut sequenced: Vec<(i64, String)> = self
+            .stored_keys
+            .iter()
+            .map(|entry| (*entry.value(), entry.key().clone()))
+            .collect();
+        sequenced.sort_by_key(|(seq, _)| *seq);
+
+        for (seq, key) in sequenced.into_iter().take(to_remove_count) {
+            if self.stored_keys.remove(&key).is_some() {
+                self.keys_evicted.fetch_add(1, Ordering::Relaxed);
+            }
         }
     }
 
@@ -124,13 +159,15 @@ impl BuildCacheOrchestrationService for BuildCacheOrchestrationServiceImpl {
         let req = request.into_inner();
         let key = String::from_utf8_lossy(&req.cache_key).to_string();
 
-        // Mark as stored in local cache tracking
-        // The actual data is stored via the existing CacheService (streaming)
-        self.stored_keys.insert(key.clone(), true);
+        // Use monotonically increasing sequence as value for eviction ordering
+        let seq = self.sequence.fetch_add(1, Ordering::Relaxed);
+        self.stored_keys.insert(key.clone(), seq);
+        self.maybe_evict_keys();
 
         tracing::debug!(
             cache_key = %key,
             execution_time_ms = req.execution_time_ms,
+            total_keys = self.stored_keys.len(),
             "Marked outputs as cached"
         );
 
@@ -219,5 +256,34 @@ mod tests {
         })).await.unwrap().into_inner();
         assert!(probe.available);
         assert_eq!(probe.location, "local");
+    }
+
+    #[tokio::test]
+    async fn test_eviction_on_capacity() {
+        let svc = BuildCacheOrchestrationServiceImpl::new();
+
+        // Store more than MAX_STORED_KEYS entries to trigger eviction
+        for i in 0..(MAX_STORED_KEYS + 100) {
+            let key = format!("key-{}", i);
+            svc.store_outputs(Request::new(StoreOutputsRequest {
+                cache_key: key.as_bytes().to_vec(),
+                execution_time_ms: i as i64,
+            })).await.unwrap();
+        }
+
+        // After eviction, should be well below the max
+        assert!(svc.stored_keys.len() <= MAX_STORED_KEYS);
+
+        // Oldest keys should have been evicted
+        let probe = svc.probe_cache(Request::new(ProbeCacheRequest {
+            cache_key: b"key-0".to_vec(),
+        })).await.unwrap().into_inner();
+        assert!(!probe.available, "Oldest key should have been evicted");
+
+        // Recent keys should still be present
+        let probe = svc.probe_cache(Request::new(ProbeCacheRequest {
+            cache_key: format!("key-{}", MAX_STORED_KEYS + 50).as_bytes().to_vec(),
+        })).await.unwrap().into_inner();
+        assert!(probe.available, "Recent key should still be present");
     }
 }
