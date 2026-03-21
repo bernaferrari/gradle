@@ -48,6 +48,21 @@ struct ExecutionRecord {
     input_fingerprint: String,
     outcome: String,
     duration_ms: i64,
+    /// Number of consecutive executions (for rebuild loop detection).
+    consecutive_executions: i64,
+    /// Total execution time across consecutive runs (for average estimation).
+    total_consecutive_ms: i64,
+}
+
+impl ExecutionRecord {
+    /// Estimated duration based on history. Returns 0 if no history.
+    fn estimated_duration_ms(&self) -> i64 {
+        if self.total_consecutive_ms > 0 && self.consecutive_executions > 0 {
+            self.total_consecutive_ms / self.consecutive_executions
+        } else {
+            self.duration_ms
+        }
+    }
 }
 
 pub struct ExecutionPlanServiceImpl {
@@ -69,6 +84,54 @@ impl ExecutionPlanServiceImpl {
             history: ExecutionPlanHistory::default(),
             stats: PredictionStats::default(),
         }
+    }
+
+    /// Record an outcome and update execution history for rebuild loop tracking.
+    /// This is the synchronous core used by both the gRPC handler and tests.
+    fn record_outcome_internal(
+        &self,
+        work_identity: &str,
+        predicted_outcome: i32,
+        actual_outcome: &str,
+        prediction_correct: bool,
+        duration_ms: i64,
+    ) {
+        self.stats.record("overall", prediction_correct);
+
+        let predicted_name = match PredictedOutcome::try_from(predicted_outcome) {
+            Ok(PredictedOutcome::PredictedExecute) => "execute",
+            Ok(PredictedOutcome::PredictedUpToDate) => "up_to_date",
+            Ok(PredictedOutcome::PredictedFromCache) => "from_cache",
+            Ok(PredictedOutcome::PredictedShortCircuited) => "short_circuited",
+            _ => "unknown",
+        };
+        self.stats.record(predicted_name, prediction_correct);
+
+        // Update execution history for rebuild loop tracking
+        let is_execute = actual_outcome == "EXECUTED"
+            || actual_outcome == "EXECUTED_NON_INCREMENTALLY"
+            || actual_outcome == "FAILED";
+
+        if let Some((_, mut entry)) = self.history.entries.remove(work_identity) {
+            if is_execute {
+                entry.consecutive_executions += 1;
+                entry.total_consecutive_ms += duration_ms;
+            } else {
+                entry.consecutive_executions = 0;
+                entry.total_consecutive_ms = 0;
+            }
+            entry.duration_ms = duration_ms;
+            entry.outcome = actual_outcome.to_string();
+            self.history.entries.insert(work_identity.to_string(), entry);
+        }
+
+        tracing::debug!(
+            work = %work_identity,
+            predicted = predicted_name,
+            actual = %actual_outcome,
+            correct = prediction_correct,
+            "Recorded outcome for shadow comparison"
+        );
     }
 
     /// Compute a composite fingerprint from work metadata.
@@ -118,21 +181,39 @@ impl ExecutionPlanServiceImpl {
         // Check execution history for matching fingerprint
         if let Some(entry) = self.history.entries.get(&work.work_identity) {
             if entry.input_fingerprint == fingerprint {
+                let est_ms = entry.estimated_duration_ms();
+                let mut reasoning = format!(
+                    "Inputs unchanged (previous: {}ms avg: {}ms, outcome: {})",
+                    entry.duration_ms, est_ms, entry.outcome
+                );
+                // Detect potential rebuild loops
+                if entry.consecutive_executions > 3 {
+                    reasoning = format!(
+                        "Inputs unchanged (previous: {}ms avg: {}ms, outcome: {}, {} consecutive executions — possible rebuild loop)",
+                        entry.duration_ms, est_ms, entry.outcome, entry.consecutive_executions
+                    );
+                }
                 return (
                     PredictedOutcome::PredictedUpToDate,
-                    format!(
-                        "Inputs unchanged (previous: {}ms, outcome: {})",
-                        entry.duration_ms, entry.outcome
-                    ),
+                    reasoning,
                     0.99,
                 );
             } else {
+                // Inputs changed — check if this is a rebuild loop
+                let mut reasoning = format!(
+                    "Inputs changed (fingerprint {} -> {})",
+                    &entry.input_fingerprint[..8.min(entry.input_fingerprint.len())],
+                    &fingerprint[..8.min(fingerprint.len())]
+                );
+                if entry.consecutive_executions > 3 {
+                    reasoning = format!(
+                        "{} — {} consecutive executions, possible rebuild loop",
+                        reasoning, entry.consecutive_executions
+                    );
+                }
                 return (
                     PredictedOutcome::PredictedExecute,
-                    format!(
-                        "Inputs changed (fingerprint {} -> {})",
-                        entry.input_fingerprint, fingerprint
-                    ),
+                    reasoning,
                     0.95,
                 );
             }
@@ -202,24 +283,46 @@ impl ExecutionPlanService for ExecutionPlanServiceImpl {
         } else if let Some(entry) = self.history.entries.get(&work.work_identity) {
             if entry.input_fingerprint == fingerprint {
                 action = crate::proto::PlanAction::SkipUpToDate as i32;
-                reasoning = format!(
-                    "Inputs unchanged (previous execution: {}ms)",
-                    entry.duration_ms
-                );
+                let est_ms = entry.estimated_duration_ms();
+                if entry.consecutive_executions > 3 {
+                    reasoning = format!(
+                        "Inputs unchanged (previous: {}ms avg: {}ms, {} consecutive executions — possible rebuild loop)",
+                        entry.duration_ms, est_ms, entry.consecutive_executions
+                    );
+                } else {
+                    reasoning = format!(
+                        "Inputs unchanged (previous: {}ms avg: {}ms)",
+                        entry.duration_ms, est_ms
+                    );
+                }
                 cache_key_hint = String::new();
             } else {
-                if work.caching_enabled && work.can_load_from_cache {
+                if entry.consecutive_executions > 3 {
+                    // Rebuild loop detected — still execute but warn
+                    action = crate::proto::PlanAction::Execute as i32;
+                    cache_key_hint = String::new();
+                    reasoning = format!(
+                        "Inputs changed, {} consecutive executions — possible rebuild loop, forcing execute",
+                        entry.consecutive_executions
+                    );
+                } else if work.caching_enabled && work.can_load_from_cache {
                     action = crate::proto::PlanAction::LoadFromCache as i32;
                     // Use the fingerprint as a cache key hint
                     cache_key_hint = fingerprint.clone();
+                    let est_ms = entry.estimated_duration_ms();
                     reasoning = format!(
-                        "Inputs changed, attempting cache lookup (key hint: {})",
-                        &fingerprint[..8.min(fingerprint.len())]
+                        "Inputs changed, attempting cache lookup (key hint: {}, est. duration: {}ms)",
+                        &fingerprint[..8.min(fingerprint.len())],
+                        est_ms
                     );
                 } else {
                     action = crate::proto::PlanAction::Execute as i32;
                     cache_key_hint = String::new();
-                    reasoning = "Inputs changed, caching not available".to_string();
+                    let est_ms = entry.estimated_duration_ms();
+                    reasoning = format!(
+                        "Inputs changed, caching not available (est. duration: {}ms)",
+                        est_ms
+                    );
                 }
             }
         } else if work.caching_enabled && work.can_load_from_cache {
@@ -253,23 +356,12 @@ impl ExecutionPlanService for ExecutionPlanServiceImpl {
     ) -> Result<Response<RecordOutcomeResponse>, Status> {
         let req = request.into_inner();
 
-        self.stats.record("overall", req.prediction_correct);
-
-        let predicted_name = match PredictedOutcome::try_from(req.predicted_outcome) {
-            Ok(PredictedOutcome::PredictedExecute) => "execute",
-            Ok(PredictedOutcome::PredictedUpToDate) => "up_to_date",
-            Ok(PredictedOutcome::PredictedFromCache) => "from_cache",
-            Ok(PredictedOutcome::PredictedShortCircuited) => "short_circuited",
-            _ => "unknown",
-        };
-        self.stats.record(predicted_name, req.prediction_correct);
-
-        tracing::debug!(
-            work = %req.work_identity,
-            predicted = predicted_name,
-            actual = %req.actual_outcome,
-            correct = req.prediction_correct,
-            "Recorded outcome for shadow comparison"
+        self.record_outcome_internal(
+            &req.work_identity,
+            req.predicted_outcome,
+            &req.actual_outcome,
+            req.prediction_correct,
+            req.duration_ms,
         );
 
         Ok(Response::new(RecordOutcomeResponse {
@@ -333,6 +425,8 @@ mod tests {
                 input_fingerprint: fp,
                 outcome: "EXECUTED_NON_INCREMENTALLY".to_string(),
                 duration_ms: 1200,
+                consecutive_executions: 1,
+                total_consecutive_ms: 1200,
             },
         );
 
@@ -356,6 +450,8 @@ mod tests {
                 input_fingerprint: fp1,
                 outcome: "EXECUTED_NON_INCREMENTALLY".to_string(),
                 duration_ms: 500,
+                consecutive_executions: 1,
+                total_consecutive_ms: 500,
             },
         );
 
@@ -439,6 +535,8 @@ mod tests {
                 input_fingerprint: fp,
                 outcome: "EXECUTED".to_string(),
                 duration_ms: 100,
+                consecutive_executions: 1,
+                total_consecutive_ms: 100,
             },
         );
 
@@ -452,5 +550,176 @@ mod tests {
             .into_inner();
 
         assert_eq!(resp.action, crate::proto::PlanAction::SkipUpToDate as i32);
+    }
+
+    #[tokio::test]
+    async fn test_predict_rebuild_loop_detection() {
+        let svc = make_service();
+        let work = make_work(":compileJava", vec![("source", "src/main/java")], vec![]);
+        let fp = ExecutionPlanServiceImpl::compute_fingerprint(&work);
+
+        // Simulate 5 consecutive executions (rebuild loop)
+        svc.history.entries.insert(
+            ":compileJava".to_string(),
+            ExecutionRecord {
+                input_fingerprint: fp,
+                outcome: "EXECUTED_NON_INCREMENTALLY".to_string(),
+                duration_ms: 200,
+                consecutive_executions: 5,
+                total_consecutive_ms: 1000,
+            },
+        );
+
+        let (outcome, reason, _) = svc.predict(&work);
+        assert_eq!(outcome, PredictedOutcome::PredictedUpToDate);
+        assert!(reason.contains("possible rebuild loop"));
+        assert!(reason.contains("5 consecutive executions"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_plan_rebuild_loop_forces_execute() {
+        let svc = make_service();
+        let work_v1 = make_work(":compileJava", vec![("source", "v1")], vec![]);
+        let work_v2 = make_work(":compileJava", vec![("source", "v2")], vec![]);
+        let fp1 = ExecutionPlanServiceImpl::compute_fingerprint(&work_v1);
+
+        // Simulate 5 consecutive executions, now inputs changed again
+        svc.history.entries.insert(
+            ":compileJava".to_string(),
+            ExecutionRecord {
+                input_fingerprint: fp1,
+                outcome: "EXECUTED".to_string(),
+                duration_ms: 150,
+                consecutive_executions: 5,
+                total_consecutive_ms: 750,
+            },
+        );
+
+        let resp = svc
+            .resolve_plan(Request::new(ResolvePlanRequest {
+                work: Some(work_v2),
+                authoritative: true,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Even with caching enabled, rebuild loop forces execute
+        assert_eq!(resp.action, crate::proto::PlanAction::Execute as i32);
+        assert!(resp.reasoning.contains("possible rebuild loop"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_plan_rebuild_loop_on_up_to_date() {
+        let svc = make_service();
+        let work = make_work(":compileJava", vec![("x", "y")], vec![]);
+        let fp = ExecutionPlanServiceImpl::compute_fingerprint(&work);
+
+        svc.history.entries.insert(
+            ":compileJava".to_string(),
+            ExecutionRecord {
+                input_fingerprint: fp,
+                outcome: "EXECUTED".to_string(),
+                duration_ms: 100,
+                consecutive_executions: 4,
+                total_consecutive_ms: 400,
+            },
+        );
+
+        let resp = svc
+            .resolve_plan(Request::new(ResolvePlanRequest {
+                work: Some(work),
+                authoritative: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Still SKIP_UP_TO_DATE but with rebuild loop warning in reasoning
+        assert_eq!(resp.action, crate::proto::PlanAction::SkipUpToDate as i32);
+        assert!(resp.reasoning.contains("possible rebuild loop"));
+        assert!(resp.reasoning.contains("avg:"));
+    }
+
+    #[test]
+    fn test_record_outcome_tracks_consecutive() {
+        let svc = ExecutionPlanServiceImpl::default();
+        let fp = ExecutionPlanServiceImpl::compute_fingerprint(
+            &make_work(":compileJava", vec![("x", "y")], vec![]),
+        );
+
+        // Seed initial history
+        svc.history.entries.insert(
+            ":compileJava".to_string(),
+            ExecutionRecord {
+                input_fingerprint: fp.clone(),
+                outcome: "EXECUTED".to_string(),
+                duration_ms: 100,
+                consecutive_executions: 1,
+                total_consecutive_ms: 100,
+            },
+        );
+
+        // Record an execution outcome
+        svc.record_outcome_internal(
+            ":compileJava",
+            PredictedOutcome::PredictedExecute as i32,
+            "EXECUTED",
+            true,
+            200,
+        );
+
+        // Verify via get clone to avoid holding lock
+        let entry = svc.history.entries.get(":compileJava").map(|r| {
+            (
+                r.consecutive_executions,
+                r.total_consecutive_ms,
+                r.duration_ms,
+            )
+        });
+        assert_eq!(entry, Some((2, 300, 200)));
+
+        // Record UP_TO_DATE — should reset consecutive counter
+        svc.record_outcome_internal(
+            ":compileJava",
+            PredictedOutcome::PredictedUpToDate as i32,
+            "UP_TO_DATE",
+            true,
+            0,
+        );
+
+        let entry = svc.history.entries.get(":compileJava").map(|r| {
+            (
+                r.consecutive_executions,
+                r.total_consecutive_ms,
+                r.duration_ms,
+            )
+        });
+        assert_eq!(entry, Some((0, 0, 0)));
+    }
+
+    #[tokio::test]
+    async fn test_estimated_duration_average() {
+        let svc = make_service();
+        let work = make_work(":compileJava", vec![("source", "src")], vec![]);
+        let fp = ExecutionPlanServiceImpl::compute_fingerprint(&work);
+
+        // 3 executions totaling 600ms
+        svc.history.entries.insert(
+            ":compileJava".to_string(),
+            ExecutionRecord {
+                input_fingerprint: fp,
+                outcome: "EXECUTED".to_string(),
+                duration_ms: 250, // most recent
+                consecutive_executions: 3,
+                total_consecutive_ms: 600,
+            },
+        );
+
+        let (outcome, reason, _) = svc.predict(&work);
+        assert_eq!(outcome, PredictedOutcome::PredictedUpToDate);
+        // Should show average = 200ms
+        assert!(reason.contains("avg: 200ms"));
+        assert!(reason.contains("previous: 250ms"));
     }
 }
