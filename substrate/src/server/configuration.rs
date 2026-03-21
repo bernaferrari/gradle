@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
@@ -15,6 +16,11 @@ use crate::proto::{
 pub struct ConfigurationServiceImpl {
     projects: DashMap<String, ProjectState>,
     config_cache: DashMap<String, ConfigCacheEntry>,
+    // Stats
+    property_resolutions: AtomicI64,
+    property_hits: AtomicI64,
+    cache_validations: AtomicI64,
+    cache_hits: AtomicI64,
 }
 
 struct ProjectState {
@@ -33,8 +39,58 @@ impl ConfigurationServiceImpl {
         Self {
             projects: DashMap::new(),
             config_cache: DashMap::new(),
+            property_resolutions: AtomicI64::new(0),
+            property_hits: AtomicI64::new(0),
+            cache_validations: AtomicI64::new(0),
+            cache_hits: AtomicI64::new(0),
         }
     }
+
+    /// Get all properties for a project.
+    pub fn get_project_properties(&self, project_path: &str) -> HashMap<String, String> {
+        self.projects
+            .get(project_path)
+            .map(|p| p.properties.clone())
+            .unwrap_or_default()
+    }
+
+    /// Get stats about configuration service usage.
+    pub fn get_stats(&self) -> ConfigStats {
+        let resolutions = self.property_resolutions.load(Ordering::Relaxed);
+        let hits = self.property_hits.load(Ordering::Relaxed);
+        let validations = self.cache_validations.load(Ordering::Relaxed);
+        let cache_hits = self.cache_hits.load(Ordering::Relaxed);
+
+        ConfigStats {
+            registered_projects: self.projects.len() as i64,
+            cached_configs: self.config_cache.len() as i64,
+            property_resolutions: resolutions,
+            property_hits: hits,
+            property_hit_rate: if resolutions > 0 {
+                hits as f64 / resolutions as f64
+            } else {
+                1.0
+            },
+            cache_validations: validations,
+            cache_hits,
+            cache_hit_rate: if validations > 0 {
+                cache_hits as f64 / validations as f64
+            } else {
+                1.0
+            },
+        }
+    }
+}
+
+pub struct ConfigStats {
+    pub registered_projects: i64,
+    pub cached_configs: i64,
+    pub property_resolutions: i64,
+    pub property_hits: i64,
+    pub property_hit_rate: f64,
+    pub cache_validations: i64,
+    pub cache_hits: i64,
+    pub cache_hit_rate: f64,
 }
 
 #[tonic::async_trait]
@@ -62,9 +118,11 @@ impl ConfigurationService for ConfigurationServiceImpl {
         request: Request<ResolvePropertyRequest>,
     ) -> Result<Response<ResolvePropertyResponse>, Status> {
         let req = request.into_inner();
+        self.property_resolutions.fetch_add(1, Ordering::Relaxed);
 
         if let Some(project) = self.projects.get(&req.project_path) {
             if let Some(value) = project.properties.get(&req.property_name) {
+                self.property_hits.fetch_add(1, Ordering::Relaxed);
                 return Ok(Response::new(ResolvePropertyResponse {
                     value: value.clone(),
                     source: "project".to_string(),
@@ -110,9 +168,11 @@ impl ConfigurationService for ConfigurationServiceImpl {
         request: Request<ValidateConfigCacheRequest>,
     ) -> Result<Response<ValidateConfigCacheResponse>, Status> {
         let req = request.into_inner();
+        self.cache_validations.fetch_add(1, Ordering::Relaxed);
 
         if let Some(cached) = self.config_cache.get(&req.project_path) {
             if cached.hash == req.expected_hash {
+                self.cache_hits.fetch_add(1, Ordering::Relaxed);
                 return Ok(Response::new(ValidateConfigCacheResponse {
                     valid: true,
                     reason: "Hash matches cached configuration".to_string(),
@@ -277,5 +337,66 @@ mod tests {
             .unwrap()
             .into_inner();
         assert!(!resp.valid);
+    }
+
+    #[tokio::test]
+    async fn test_configuration_stats() {
+        let svc = ConfigurationServiceImpl::new();
+
+        // Register a project with properties
+        svc.register_project(Request::new(RegisterProjectRequest {
+            project_path: ":app".to_string(),
+            project_dir: "/tmp/app".to_string(),
+            properties: vec![
+                ("version".to_string(), "1.0".to_string()),
+                ("group".to_string(), "com.example".to_string()),
+            ].into_iter().collect(),
+            applied_plugins: vec!["java".to_string()],
+        })).await.unwrap();
+
+        // Resolve hit
+        let _ = svc.resolve_property(Request::new(ResolvePropertyRequest {
+            project_path: ":app".to_string(),
+            property_name: "version".to_string(),
+            requested_by: "test".to_string(),
+        })).await.unwrap();
+
+        // Resolve miss
+        let _ = svc.resolve_property(Request::new(ResolvePropertyRequest {
+            project_path: ":app".to_string(),
+            property_name: "missing".to_string(),
+            requested_by: "test".to_string(),
+        })).await.unwrap();
+
+        // Validate cache hit
+        svc.cache_configuration(Request::new(CacheConfigurationRequest {
+            project_path: ":app".to_string(),
+            config_hash: vec![1, 2, 3],
+            timestamp_ms: 100,
+        })).await.unwrap();
+
+        svc.validate_config_cache(Request::new(ValidateConfigCacheRequest {
+            project_path: ":app".to_string(),
+            expected_hash: vec![1, 2, 3],
+            input_files: vec![],
+            build_script_hashes: vec![],
+        })).await.unwrap();
+
+        // Validate cache miss
+        svc.validate_config_cache(Request::new(ValidateConfigCacheRequest {
+            project_path: ":app".to_string(),
+            expected_hash: vec![9, 9, 9],
+            input_files: vec![],
+            build_script_hashes: vec![],
+        })).await.unwrap();
+
+        let stats = svc.get_stats();
+        assert_eq!(stats.registered_projects, 1);
+        assert_eq!(stats.cached_configs, 1);
+        assert_eq!(stats.property_resolutions, 2);
+        assert_eq!(stats.property_hits, 1);
+        assert!((stats.property_hit_rate - 0.5).abs() < f64::EPSILON);
+        assert_eq!(stats.cache_validations, 2);
+        assert_eq!(stats.cache_hits, 1);
     }
 }
