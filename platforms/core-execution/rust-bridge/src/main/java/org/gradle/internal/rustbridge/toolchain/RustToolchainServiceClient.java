@@ -1,9 +1,11 @@
 package org.gradle.internal.rustbridge.toolchain;
 
+import gradle.substrate.v1.EnsureToolchainRequest;
 import gradle.substrate.v1.GetJavaHomeRequest;
 import gradle.substrate.v1.GetJavaHomeResponse;
 import gradle.substrate.v1.ListToolchainsRequest;
 import gradle.substrate.v1.ListToolchainsResponse;
+import gradle.substrate.v1.ToolchainProgress;
 import gradle.substrate.v1.ToolchainServiceGrpc;
 import gradle.substrate.v1.VerifyToolchainRequest;
 import gradle.substrate.v1.VerifyToolchainResponse;
@@ -11,6 +13,8 @@ import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
 import org.slf4j.Logger;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -76,6 +80,43 @@ public class RustToolchainServiceClient {
         } catch (Exception e) {
             LOGGER.debug("[substrate:toolchain] get java home failed", e);
             return GetJavaHomeResponse.getDefaultInstance();
+        }
+    }
+
+    /**
+     * Ensure a toolchain is available, downloading if necessary.
+     * Collects all progress events from the server-streaming RPC.
+     * Returns the final progress event (which contains the javaHome on success),
+     * or an empty list on failure.
+     */
+    public List<ToolchainProgress> ensureToolchain(String languageVersion, String implementation,
+                                                    String vendor, String os, String arch,
+                                                    List<String> downloadUrls) {
+        if (client.isNoop()) {
+            return Collections.emptyList();
+        }
+
+        try {
+            EnsureToolchainRequest.Builder request = EnsureToolchainRequest.newBuilder()
+                .setLanguageVersion(languageVersion)
+                .setImplementation(implementation != null ? implementation : "")
+                .setVendor(vendor != null ? vendor : "")
+                .setOs(os != null ? os : "")
+                .setArch(arch != null ? arch : "");
+
+            if (downloadUrls != null) {
+                request.addAllDownloadUrls(downloadUrls);
+            }
+
+            List<ToolchainProgress> progress = new ArrayList<>();
+            client.getToolchainStub()
+                .ensureToolchain(request.build())
+                .forEachRemaining(progress::add);
+
+            return progress;
+        } catch (Exception e) {
+            LOGGER.debug("[substrate:toolchain] ensure toolchain failed", e);
+            return Collections.emptyList();
         }
     }
 }
