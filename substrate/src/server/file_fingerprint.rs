@@ -45,14 +45,44 @@ impl FileFingerprintServiceImpl {
         Ok((hash, size, modified))
     }
 
-    fn fingerprint_directory(dir: &Path) -> Result<(Vec<(String, Vec<u8>, i64, i64, bool)>, Vec<u8>), String> {
+    fn fingerprint_directory(dir: &Path, ignore_patterns: &[String]) -> Result<(Vec<(String, Vec<u8>, i64, i64, bool)>, Vec<u8>), String> {
         let mut entries = Vec::new();
         let mut dir_hasher = Md5::new();
 
-        Self::walk_dir(dir, dir, &mut entries, &mut dir_hasher)?;
+        Self::walk_dir(dir, dir, &mut entries, &mut dir_hasher, ignore_patterns)?;
 
         let collection_hash = dir_hasher.finalize().to_vec();
         Ok((entries, collection_hash))
+    }
+
+    fn should_ignore(path: &Path, ignore_patterns: &[String]) -> bool {
+        let file_name = path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+        let path_str = path.to_string_lossy();
+
+        for pattern in ignore_patterns {
+            // Exact filename match
+            if file_name == pattern {
+                return true;
+            }
+            // *.ext pattern: match files ending with .ext
+            if pattern.starts_with("*.") {
+                let ext = &pattern[1..]; // e.g. ".class"
+                if file_name.ends_with(ext) {
+                    return true;
+                }
+            }
+            // Directory/partial path match: if path contains the pattern as a path component
+            if path_str.contains(&format!("/{}", pattern)) {
+                return true;
+            }
+            // Endswith for directory patterns like "build"
+            if path_str.ends_with(&format!("/{}", pattern)) {
+                return true;
+            }
+        }
+        false
     }
 
     fn walk_dir(
@@ -60,6 +90,7 @@ impl FileFingerprintServiceImpl {
         current: &Path,
         entries: &mut Vec<(String, Vec<u8>, i64, i64, bool)>,
         hasher: &mut Md5,
+        ignore_patterns: &[String],
     ) -> Result<(), String> {
         let dir_entries = std::fs::read_dir(current)
             .map_err(|e| format!("{}: {}", current.display(), e))?;
@@ -71,6 +102,11 @@ impl FileFingerprintServiceImpl {
 
         for entry in dir_entries {
             let path = entry.path();
+
+            if Self::should_ignore(&path, ignore_patterns) {
+                continue;
+            }
+
             let relative = path
                 .strip_prefix(base)
                 .unwrap_or(&path)
@@ -78,7 +114,7 @@ impl FileFingerprintServiceImpl {
                 .to_string();
 
             if path.is_dir() {
-                Self::walk_dir(base, &path, entries, hasher)?;
+                Self::walk_dir(base, &path, entries, hasher, ignore_patterns)?;
             } else {
                 if let Ok((hash, size, modified)) = Self::fingerprint_file(&path) {
                     hasher.update(relative.as_bytes());
@@ -117,7 +153,7 @@ impl FileFingerprintService for FileFingerprintServiceImpl {
             match file_type {
                 FingerprintType::FingerprintDirectory | FingerprintType::FingerprintRoot => {
                     if path.is_dir() {
-                        match Self::fingerprint_directory(path) {
+                        match Self::fingerprint_directory(path, &req.ignore_patterns) {
                             Ok((entries, dir_hash)) => {
                                 for (rel_path, hash, size, modified, is_dir) in &entries {
                                     collection_hasher.update(rel_path.as_bytes());
@@ -172,6 +208,11 @@ impl FileFingerprintService for FileFingerprintServiceImpl {
         }
 
         let collection_hash = collection_hasher.finalize().to_vec();
+
+        tracing::debug!(
+            files = all_entries.len(),
+            "Fingerprinted files"
+        );
 
         Ok(Response::new(FingerprintFilesResponse {
             success: true,
@@ -271,5 +312,48 @@ mod tests {
         let expected: [u8; 16] = Md5::digest(b"test content").into();
         assert_eq!(hash, expected.to_vec());
         assert_eq!(size, 12);
+    }
+
+    #[tokio::test]
+    async fn test_fingerprint_with_ignore_patterns() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "aaa").unwrap();
+        std::fs::write(dir.path().join("a.class"), "compiled").unwrap();
+        std::fs::write(dir.path().join("b.txt"), "bbb").unwrap();
+        std::fs::create_dir(dir.path().join("build")).unwrap();
+        std::fs::write(dir.path().join("build/output.class"), "compiled").unwrap();
+
+        let svc = FileFingerprintServiceImpl::new();
+        let resp = svc
+            .fingerprint_files(Request::new(FingerprintFilesRequest {
+                files: vec![crate::proto::FileToFingerprint {
+                    absolute_path: dir.path().to_string_lossy().to_string(),
+                    r#type: FingerprintType::FingerprintDirectory as i32,
+                }],
+                normalization_strategy: "ABSOLUTE_PATH".to_string(),
+                ignore_patterns: vec!["*.class".to_string(), "build".to_string()],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.success);
+        // Should only include a.txt and b.txt (class files and build/ ignored)
+        assert_eq!(resp.entries.len(), 2);
+    }
+
+    #[test]
+    fn test_should_ignore() {
+        let path = Path::new("/some/path/build/output.class");
+        assert!(FileFingerprintServiceImpl::should_ignore(
+            path,
+            &["*.class".to_string(), "build".to_string()],
+        ));
+
+        let path2 = Path::new("/some/path/src/Main.java");
+        assert!(!FileFingerprintServiceImpl::should_ignore(
+            path2,
+            &["*.class".to_string(), "build".to_string()],
+        ));
     }
 }
