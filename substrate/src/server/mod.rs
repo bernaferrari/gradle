@@ -30,3 +30,5 @@ pub mod artifact_publishing;
 pub mod build_init;
 pub mod incremental_compilation;
 pub mod remote_cache;
+pub mod build_metrics;
+pub mod garbage_collection;
