@@ -17,6 +17,9 @@ dependencies {
     implementation(libs.grpcNettyShaded)
     implementation(projects.execution)
     implementation(projects.snapshots)
+    implementation(projects.fileWatching)
+    implementation(projects.buildOperations)
+    implementation(projects.testingBase)
 
     testImplementation(projects.baseServicesGroovy)
     testImplementation(testFixtures(projects.baseServices))
