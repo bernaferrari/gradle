@@ -9,6 +9,9 @@ use crate::proto::{
     SubscribeBuildEventsRequest,
 };
 
+/// Maximum events buffered per build to prevent unbounded memory growth.
+const MAX_EVENTS_PER_BUILD: usize = 10_000;
+
 /// Rust-native build event streaming service.
 /// Buffers build events and streams them to subscribers (IDEs, CI systems).
 ///
@@ -20,6 +23,7 @@ pub struct BuildEventStreamServiceImpl {
     subscribers: AtomicI64,
     events_sent: AtomicI64,
     events_received: AtomicI64,
+    events_evicted: AtomicI64,
 }
 
 impl BuildEventStreamServiceImpl {
@@ -29,6 +33,7 @@ impl BuildEventStreamServiceImpl {
             subscribers: AtomicI64::new(0),
             events_sent: AtomicI64::new(0),
             events_received: AtomicI64::new(0),
+            events_evicted: AtomicI64::new(0),
         }
     }
 
@@ -100,10 +105,20 @@ impl BuildEventStreamService for BuildEventStreamServiceImpl {
         };
 
         // Buffer the event
-        self.event_buffers
-            .entry(req.build_id.clone())
-            .or_insert_with(Vec::new)
-            .push(event);
+        if let Some(mut buf) = self.event_buffers.get_mut(&req.build_id) {
+            if buf.len() >= MAX_EVENTS_PER_BUILD {
+                // Evict oldest events (keep the most recent half)
+                let evict_count = buf.len() / 2;
+                buf.drain(..evict_count);
+                self.events_evicted.fetch_add(evict_count as i64, Ordering::Relaxed);
+            }
+            buf.push(event);
+        } else {
+            self.event_buffers
+                .entry(req.build_id.clone())
+                .or_insert_with(Vec::new)
+                .push(event);
+        }
 
         self.events_sent.fetch_add(1, Ordering::Relaxed);
 
@@ -288,5 +303,66 @@ mod tests {
             .into_inner();
 
         assert_eq!(log.total_events, 0);
+    }
+
+    #[tokio::test]
+    async fn test_buffer_eviction() {
+        let svc = BuildEventStreamServiceImpl::new();
+
+        // Temporarily lower the threshold for testing by sending MAX_EVENTS_PER_BUILD events
+        for i in 0..MAX_EVENTS_PER_BUILD {
+            svc.send_build_event(Request::new(SendBuildEventRequest {
+                build_id: "build-evict".to_string(),
+                event_type: format!("event_{}", i),
+                event_id: format!("e{}", i),
+                properties: Default::default(),
+                display_name: String::new(),
+                parent_id: String::new(),
+            }))
+            .await
+            .unwrap();
+        }
+
+        // Buffer should be at capacity
+        let log = svc
+            .get_event_log(Request::new(GetEventLogRequest {
+                build_id: "build-evict".to_string(),
+                since_timestamp_ms: 0,
+                max_events: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(log.total_events, MAX_EVENTS_PER_BUILD as i32);
+
+        // Send one more — should trigger eviction
+        svc.send_build_event(Request::new(SendBuildEventRequest {
+            build_id: "build-evict".to_string(),
+            event_type: "overflow".to_string(),
+            event_id: "e-overflow".to_string(),
+            properties: Default::default(),
+            display_name: String::new(),
+            parent_id: String::new(),
+        }))
+        .await
+        .unwrap();
+
+        // Should have evicted old events
+        assert!(svc.events_evicted.load(Ordering::Relaxed) > 0);
+
+        let log2 = svc
+            .get_event_log(Request::new(GetEventLogRequest {
+                build_id: "build-evict".to_string(),
+                since_timestamp_ms: 0,
+                max_events: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Buffer should have shrunk, and the oldest event should be gone
+        assert!(log2.total_events < MAX_EVENTS_PER_BUILD as i32);
+        assert_eq!(log2.events[0].event_type, format!("event_{}", MAX_EVENTS_PER_BUILD / 2));
     }
 }
