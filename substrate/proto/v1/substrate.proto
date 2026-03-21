@@ -175,12 +175,14 @@ message WorkEvaluateRequest {
 message WorkEvaluateResponse {
   bool should_execute = 1;
   string reason = 2;
+  string input_hash = 3;
 }
 
 message WorkRecordRequest {
   string task_path = 1;
   int64 duration_ms = 2;
   bool success = 3;
+  string input_hash = 4;
 }
 
 message WorkRecordResponse {
