@@ -9,6 +9,7 @@ use gradle_substrate_daemon::proto::*;
 use gradle_substrate_daemon::server::{
     artifact_publishing::ArtifactPublishingServiceImpl,
     bootstrap::BootstrapServiceImpl,
+    build_metrics::BuildMetricsServiceImpl,
     cache_orchestration::BuildCacheOrchestrationServiceImpl,
     build_comparison::BuildComparisonServiceImpl,
     build_event_stream::BuildEventStreamServiceImpl,
@@ -27,6 +28,7 @@ use gradle_substrate_daemon::server::{
     exec::ExecServiceImpl,
     file_fingerprint::FileFingerprintServiceImpl,
     file_watch::FileWatchServiceImpl,
+    garbage_collection::GarbageCollectionServiceImpl,
     hash::HashServiceImpl,
     incremental_compilation::IncrementalCompilationServiceImpl,
     plugin::PluginServiceImpl,
@@ -63,12 +65,12 @@ async fn spawn_test_server() -> (String, tempfile::TempDir) {
 
     let control = ControlServiceImpl::new(shutdown_tx);
     let hash = HashServiceImpl;
-    let cache = CacheServiceImpl::new(cache_dir);
+    let cache = CacheServiceImpl::new(cache_dir.clone());
     let exec = ExecServiceImpl::new();
     let work_scheduler = Arc::new(WorkerScheduler::new(4));
     let work = WorkServiceImpl::new(work_scheduler.clone());
     let execution_plan = ExecutionPlanServiceImpl::new(work_scheduler);
-    let execution_history = ExecutionHistoryServiceImpl::new(history_dir);
+    let execution_history = ExecutionHistoryServiceImpl::new(history_dir.clone());
     let cache_orchestration = BuildCacheOrchestrationServiceImpl::new();
     let file_fingerprint = FileFingerprintServiceImpl::new();
     let value_snapshot = ValueSnapshotServiceImpl::new();
@@ -79,7 +81,7 @@ async fn spawn_test_server() -> (String, tempfile::TempDir) {
     let bootstrap = BootstrapServiceImpl::new();
     let dependency_resolution = DependencyResolutionServiceImpl::new();
     let file_watch = FileWatchServiceImpl::new();
-    let config_cache = ConfigurationCacheServiceImpl::new(config_cache_dir);
+    let config_cache = ConfigurationCacheServiceImpl::new(config_cache_dir.clone());
     let toolchain = ToolchainServiceImpl::new(toolchain_dir);
     let build_event_stream = BuildEventStreamServiceImpl::new();
     let worker_process = WorkerProcessServiceImpl::new();
@@ -93,6 +95,12 @@ async fn spawn_test_server() -> (String, tempfile::TempDir) {
     let artifact_publishing = ArtifactPublishingServiceImpl::new();
     let build_init = BuildInitServiceImpl::new();
     let incremental_compilation = IncrementalCompilationServiceImpl::new();
+    let build_metrics = BuildMetricsServiceImpl::new();
+    let garbage_collection = GarbageCollectionServiceImpl::new(
+        cache_dir.clone(),
+        history_dir.clone(),
+        config_cache_dir.clone(),
+    );
 
     let listener = UnixListener::bind(&socket_path).unwrap();
 
@@ -130,6 +138,8 @@ async fn spawn_test_server() -> (String, tempfile::TempDir) {
             .add_service(artifact_publishing_service_server::ArtifactPublishingServiceServer::new(artifact_publishing))
             .add_service(build_init_service_server::BuildInitServiceServer::new(build_init))
             .add_service(incremental_compilation_service_server::IncrementalCompilationServiceServer::new(incremental_compilation))
+            .add_service(build_metrics_service_server::BuildMetricsServiceServer::new(build_metrics))
+            .add_service(garbage_collection_service_server::GarbageCollectionServiceServer::new(garbage_collection))
             .serve_with_incoming(UnixListenerStream::new(listener))
             .await;
     });
@@ -604,4 +614,372 @@ async fn test_hash_batch_multiple_files() {
         assert!(!result.hash_bytes.is_empty());
         assert!(!result.error);
     }
+}
+
+// ============================================================
+// Test 11: Build metrics end-to-end
+// ============================================================
+
+#[tokio::test]
+async fn test_build_metrics_e2e() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client = build_metrics_service_client::BuildMetricsServiceClient::new(channel);
+
+    // Record a counter metric
+    let record_resp = client
+        .record_metric(Request::new(RecordMetricRequest {
+            build_id: "test-build".to_string(),
+            event: Some(MetricEvent {
+                name: "build.start".to_string(),
+                value: "1".to_string(),
+                metric_type: "counter".to_string(),
+                tags: std::collections::HashMap::new(),
+                timestamp_ms: 0,
+            }),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(record_resp.recorded);
+
+    // Record a timer metric
+    client
+        .record_metric(Request::new(RecordMetricRequest {
+            build_id: "test-build".to_string(),
+            event: Some(MetricEvent {
+                name: "task.compile".to_string(),
+                value: "250".to_string(),
+                metric_type: "timer".to_string(),
+                tags: std::collections::HashMap::new(),
+                timestamp_ms: 0,
+            }),
+        }))
+        .await
+        .unwrap();
+
+    // Get metrics back
+    let get_resp = client
+        .get_metrics(Request::new(GetMetricsRequest {
+            build_id: "test-build".to_string(),
+            metric_names: vec!["build.start".to_string(), "task.compile".to_string()],
+            since_ms: 0,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(get_resp.metrics.len() >= 2);
+
+    // Get performance summary
+    let summary_resp = client
+        .get_performance_summary(Request::new(GetPerformanceSummaryRequest {
+            build_id: "test-build".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(summary_resp.summary.is_some());
+}
+
+// ============================================================
+// Test 12: Garbage collection end-to-end
+// ============================================================
+
+#[tokio::test]
+async fn test_garbage_collection_e2e() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client = garbage_collection_service_client::GarbageCollectionServiceClient::new(channel);
+
+    // Get storage stats (should work on empty cache)
+    let stats_resp = client
+        .get_storage_stats(Request::new(GetStorageStatsRequest {
+            store_names: vec![
+                "build_cache".to_string(),
+                "execution_history".to_string(),
+                "config_cache".to_string(),
+            ],
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(stats_resp.stats.len(), 3);
+
+    // GC with dry_run=true should not delete anything
+    let gc_resp = client
+        .gc_build_cache(Request::new(GcBuildCacheRequest {
+            max_age_ms: 0, // evict all
+            max_total_bytes: 0,
+            dry_run: true,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    // dry_run should report 0 removed
+    assert_eq!(gc_resp.entries_removed, 0);
+}
+
+// ============================================================
+// Test 13: Incremental compilation end-to-end
+// ============================================================
+
+#[tokio::test]
+async fn test_incremental_compilation_e2e() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client =
+        incremental_compilation_service_client::IncrementalCompilationServiceClient::new(channel);
+
+    // Register source set
+    client
+        .register_source_set(Request::new(RegisterSourceSetRequest {
+            build_id: "test-build".to_string(),
+            source_set: Some(SourceSetDescriptor {
+                source_set_id: "main".to_string(),
+                name: "main".to_string(),
+                source_dirs: vec!["src/main/java".to_string()],
+                output_dirs: vec!["build/classes".to_string()],
+                classpath_hash: "abc123".to_string(),
+            }),
+        }))
+        .await
+        .unwrap();
+
+    // Record compilation units with dependencies: A -> B -> C
+    client
+        .record_compilation(Request::new(RecordCompilationRequest {
+            build_id: "test-build".to_string(),
+            unit: Some(CompilationUnit {
+                source_set_id: "main".to_string(),
+                source_file: "C.java".to_string(),
+                output_class: "C.class".to_string(),
+                source_hash: "hash-C".to_string(),
+                class_hash: "class-C".to_string(),
+                dependencies: vec![],
+                compile_duration_ms: 50,
+            }),
+        }))
+        .await
+        .unwrap();
+
+    client
+        .record_compilation(Request::new(RecordCompilationRequest {
+            build_id: "test-build".to_string(),
+            unit: Some(CompilationUnit {
+                source_set_id: "main".to_string(),
+                source_file: "B.java".to_string(),
+                output_class: "B.class".to_string(),
+                source_hash: "hash-B".to_string(),
+                class_hash: "class-B".to_string(),
+                dependencies: vec!["C.java".to_string()],
+                compile_duration_ms: 75,
+            }),
+        }))
+        .await
+        .unwrap();
+
+    client
+        .record_compilation(Request::new(RecordCompilationRequest {
+            build_id: "test-build".to_string(),
+            unit: Some(CompilationUnit {
+                source_set_id: "main".to_string(),
+                source_file: "A.java".to_string(),
+                output_class: "A.class".to_string(),
+                source_hash: "hash-A".to_string(),
+                class_hash: "class-A".to_string(),
+                dependencies: vec!["B.java".to_string()],
+                compile_duration_ms: 100,
+            }),
+        }))
+        .await
+        .unwrap();
+
+    // Get rebuild set: C.java changed should transitively affect all
+    let rebuild = client
+        .get_rebuild_set(Request::new(GetRebuildSetRequest {
+            build_id: "test-build".to_string(),
+            source_set_id: "main".to_string(),
+            changed_files: vec!["C.java".to_string()],
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(rebuild.total_sources, 3);
+    assert_eq!(rebuild.must_recompile_count, 3);
+    assert_eq!(rebuild.up_to_date_count, 0);
+
+    // Get incremental state
+    let state = client
+        .get_incremental_state(Request::new(GetIncrementalStateRequest {
+            build_id: "test-build".to_string(),
+            source_set_id: "main".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(state.state.is_some());
+    assert_eq!(state.state.unwrap().total_compiled, 3);
+}
+
+// ============================================================
+// Test 14: Build init with real settings file end-to-end
+// ============================================================
+
+#[tokio::test]
+async fn test_build_init_e2e() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client = build_init_service_client::BuildInitServiceClient::new(channel);
+
+    let dir = tempfile::tempdir().unwrap();
+    let settings_path = dir.path().join("settings.gradle");
+    std::fs::write(
+        &settings_path,
+        r#"rootProject.name = 'e2e-test'
+include ':app', ':lib'
+"#,
+    )
+    .unwrap();
+
+    let init_resp = client
+        .init_build_settings(Request::new(InitBuildSettingsRequest {
+            build_id: "e2e-build".to_string(),
+            root_dir: dir.path().to_str().unwrap().to_string(),
+            settings_file: settings_path.to_str().unwrap().to_string(),
+            gradle_user_home: String::new(),
+            init_scripts: vec![],
+            requested_build_features: vec![],
+            current_dir: dir.path().to_str().unwrap().to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(init_resp.initialized);
+
+    let status = client
+        .get_build_init_status(Request::new(GetBuildInitStatusRequest {
+            build_id: "e2e-build".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(status.status.is_some());
+    let status = status.status.unwrap();
+    assert_eq!(status.included_projects, vec![":app".to_string(), ":lib".to_string()]);
+
+    // Check root project name was parsed
+    let root_name: Option<&str> = status
+        .settings_details
+        .iter()
+        .find(|d| d.key == "rootProjectName")
+        .map(|d| d.value.as_str());
+    assert_eq!(root_name, Some("e2e-test"));
+}
+
+// ============================================================
+// Test 15: Problem reporting end-to-end
+// ============================================================
+
+#[tokio::test]
+async fn test_problem_reporting_e2e() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client = problem_reporting_service_client::ProblemReportingServiceClient::new(channel);
+
+    // Report a warning
+    let report_resp = client
+        .report_problem(Request::new(ReportProblemRequest {
+            build_id: "test-build".to_string(),
+            problem: Some(ProblemDetails {
+                problem_id: String::new(),
+                severity: "warning".to_string(),
+                category: "deprecation".to_string(),
+                message: "Deprecation warning in code".to_string(),
+                details: String::new(),
+                file_path: "src/main/java/Example.java".to_string(),
+                line_number: 42,
+                column: 10,
+                contextual_label: String::new(),
+                documentation_url: String::new(),
+                additional_data: String::new(),
+                timestamp_ms: 0,
+            }),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(report_resp.accepted);
+
+    // Get problems
+    let get_resp = client
+        .get_problems(Request::new(GetProblemsRequest {
+            build_id: "test-build".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(get_resp.total >= 1);
+    assert!(get_resp.warning_count >= 1);
+}
+
+// ============================================================
+// Test 16: Build operations end-to-end
+// ============================================================
+
+#[tokio::test]
+async fn test_build_operations_e2e() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client = build_operations_service_client::BuildOperationsServiceClient::new(channel);
+
+    // Start an operation
+    let start_resp = client
+        .start_operation(Request::new(StartOperationRequest {
+            operation_id: "op-1".to_string(),
+            display_name: "compileJava".to_string(),
+            operation_type: "TASK".to_string(),
+            parent_id: String::new(),
+            start_time_ms: 0,
+            metadata: std::collections::HashMap::new(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(start_resp.success);
+
+    // Complete the operation
+    let complete_resp = client
+        .complete_operation(Request::new(CompleteOperationRequest {
+            operation_id: "op-1".to_string(),
+            duration_ms: 150,
+            success: true,
+            outcome: "SUCCESS".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(complete_resp.success);
+
+    // Get build summary — may or may not contain the operation
+    // since each test spawns a fresh server
+    let summary_resp = client
+        .get_build_summary(Request::new(GetBuildSummaryRequest {}))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(summary_resp.summary.is_some());
 }
