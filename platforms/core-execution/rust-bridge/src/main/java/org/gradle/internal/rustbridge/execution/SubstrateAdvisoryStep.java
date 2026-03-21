@@ -3,6 +3,7 @@ package org.gradle.internal.rustbridge.execution;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSortedMap;
 import org.gradle.api.logging.Logging;
+import org.gradle.internal.rustbridge.cache.BuildCacheOrchestrationClient;
 import org.gradle.internal.execution.Execution;
 import org.gradle.internal.execution.UnitOfWork;
 import org.gradle.internal.execution.history.ExecutionOutputState;
@@ -22,6 +23,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Execution pipeline step that consults the Rust substrate for execution planning.
@@ -38,16 +40,19 @@ public class SubstrateAdvisoryStep<C extends MutableChangesContext> implements S
 
     private final Step<? super C, ? extends AfterExecutionResult> delegate;
     private final ExecutionPlanClient planClient;
+    private final @Nullable BuildCacheOrchestrationClient cacheOrchestration;
     private final boolean authoritative;
 
     public SubstrateAdvisoryStep(
         Step<? super C, ? extends AfterExecutionResult> delegate,
         ExecutionPlanClient planClient,
-        boolean authoritative
+        boolean authoritative,
+        @Nullable BuildCacheOrchestrationClient cacheOrchestration
     ) {
         this.delegate = delegate;
         this.planClient = planClient;
         this.authoritative = authoritative;
+        this.cacheOrchestration = cacheOrchestration;
     }
 
     @Override
@@ -126,11 +131,20 @@ public class SubstrateAdvisoryStep<C extends MutableChangesContext> implements S
             return skipExecution(work, context, plan.getReasoning());
         }
 
-        // For FROM_CACHE and SHORT_CIRCUIT, we still let Java handle the actual
-        // cache loading/short-circuiting since it needs to wire up the execution context.
-        // Rust's decision is used to validate or override the skip decision only.
-        // Full authoritative cache handling comes when the cache service is fully
-        // migrated in later phases.
+        // Authoritative cache mode: probe the cache and short-circuit if available
+        if (plan.shouldLoadFromCache() && cacheOrchestration != null) {
+            String cacheKeyHint = plan.getCacheKeyHint();
+            if (!cacheKeyHint.isEmpty()) {
+                BuildCacheOrchestrationClient.ProbeResult probe =
+                    cacheOrchestration.probeCache(cacheKeyHint.getBytes());
+
+                if (probe.isAvailable()) {
+                    LOGGER.lifecycle("[substrate:authoritative] {} FROM_CACHE (key={}, location={})",
+                        work.getDisplayName(), cacheKeyHint, probe.getLocation());
+                    return skipExecution(work, context, "Loaded from Rust cache: " + cacheKeyHint);
+                }
+            }
+        }
 
         // Fall through to Java's execution with Rust's plan recorded
         long startTime = System.currentTimeMillis();
@@ -144,6 +158,14 @@ public class SubstrateAdvisoryStep<C extends MutableChangesContext> implements S
 
         LOGGER.info("[substrate:authoritative] {} plan_action={} actual={}",
             work.getDisplayName(), plan.getAction(), actualOutcome);
+
+        // Record outcome so Rust's execution plan service learns from authoritative-mode outcomes
+        String workIdentity = context.getIdentity().getUniqueId();
+        ExecutionPlanClient.Prediction planPrediction = plan.shouldSkip() ? ExecutionPlanClient.Prediction.UP_TO_DATE
+            : plan.shouldLoadFromCache() ? ExecutionPlanClient.Prediction.FROM_CACHE
+            : ExecutionPlanClient.Prediction.EXECUTE;
+        planClient.recordOutcome(workIdentity, planPrediction, actualOutcome,
+            isPredictionCorrect(planPrediction, actualOutcome), duration);
 
         return result;
     }

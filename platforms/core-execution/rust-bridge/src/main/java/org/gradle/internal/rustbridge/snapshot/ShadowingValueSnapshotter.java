@@ -23,15 +23,18 @@ public class ShadowingValueSnapshotter {
     private final ValueSnapshotterDelegate javaDelegate;
     private final RustValueSnapshotClient rustClient;
     private final HashMismatchReporter mismatchReporter;
+    private final boolean authoritative;
 
     public ShadowingValueSnapshotter(
         ValueSnapshotterDelegate javaDelegate,
         RustValueSnapshotClient rustClient,
-        HashMismatchReporter mismatchReporter
+        HashMismatchReporter mismatchReporter,
+        boolean authoritative
     ) {
         this.javaDelegate = javaDelegate;
         this.rustClient = rustClient;
         this.mismatchReporter = mismatchReporter;
+        this.authoritative = authoritative;
     }
 
     /**
@@ -42,6 +45,19 @@ public class ShadowingValueSnapshotter {
      * @return the Java-computed snapshot hash (authoritative)
      */
     public byte[] snapshot(Map<String, Object> properties, String implementationFingerprint) {
+        // Authoritative mode: use Rust directly, fall back to Java on failure
+        if (authoritative && rustClient != null && !properties.isEmpty()) {
+            try {
+                RustValueSnapshotClient.SnapshotResult rustResult = rustClient.snapshotValues(properties, implementationFingerprint);
+                if (rustResult.isSuccess()) {
+                    LOGGER.debug("[substrate:snapshot] authoritative: using Rust hash");
+                    return rustResult.getCompositeHash();
+                }
+            } catch (Exception e) {
+                LOGGER.debug("[substrate:snapshot] authoritative Rust failed, falling back to Java", e);
+            }
+        }
+
         // Always use Java result for correctness
         byte[] javaHash = javaDelegate.snapshot(properties);
 
