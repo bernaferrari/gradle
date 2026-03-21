@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
-use tonic::Status;
 
 /// HTTP-based remote build cache store.
 /// Supports GET/PUT with retry logic, authentication, and streaming.
@@ -11,6 +10,12 @@ pub struct RemoteCacheStore {
     username: Option<String>,
     password: Option<String>,
     max_retries: u32,
+}
+
+impl Default for RemoteCacheStore {
+    fn default() -> Self {
+        Self::new(String::new(), None, None)
+    }
 }
 
 impl RemoteCacheStore {

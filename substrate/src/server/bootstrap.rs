@@ -28,6 +28,12 @@ pub struct BootstrapServiceImpl {
     health_status: std::sync::atomic::AtomicBool,
 }
 
+impl Default for BootstrapServiceImpl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BootstrapServiceImpl {
     pub fn new() -> Self {
         Self {

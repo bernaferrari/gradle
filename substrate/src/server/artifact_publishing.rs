@@ -3,8 +3,6 @@ use std::time::Duration;
 
 use dashmap::DashMap;
 use md5::Digest as _;
-use sha1::Digest as _;
-use sha2::Digest as _;
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
@@ -38,6 +36,12 @@ pub struct ArtifactPublishingServiceImpl {
     uploads_completed: AtomicI64,
     repos: DashMap<String, RepoCredentials>,
     http_client: reqwest::Client,
+}
+
+impl Default for ArtifactPublishingServiceImpl {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ArtifactPublishingServiceImpl {
@@ -199,7 +203,7 @@ impl ArtifactPublishingService for ArtifactPublishingServiceImpl {
 
         self.build_artifacts
             .entry(build_id)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(artifact_id);
 
         self.artifacts_registered.fetch_add(1, Ordering::Relaxed);

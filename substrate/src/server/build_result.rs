@@ -20,6 +20,7 @@ struct BuildState {
 
 /// Rust-native build result reporting service.
 /// Aggregates task results and build outcomes for structured reporting.
+#[derive(Default)]
 pub struct BuildResultServiceImpl {
     task_results: DashMap<String, Vec<TaskResult>>, // build_id -> [TaskResult]
     build_states: DashMap<String, BuildState>,
@@ -74,7 +75,7 @@ impl BuildResultService for BuildResultServiceImpl {
 
         self.task_results
             .entry(req.build_id.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(result);
 
         self.results_reported.fetch_add(1, Ordering::Relaxed);

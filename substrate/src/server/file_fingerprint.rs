@@ -8,8 +8,12 @@ use crate::proto::{
     FingerprintFilesRequest, FingerprintFilesResponse, FingerprintType,
 };
 
+/// A single fingerprinted file entry: (relative_path, content_hash, size_bytes, modified_time_ms, is_directory).
+type FingerprintEntry = (String, Vec<u8>, i64, i64, bool);
+
 /// Rust-native file fingerprinting service.
 /// Walks file trees and computes content hashes, replacing Java's FileCollectionFingerprinter.
+#[derive(Default)]
 pub struct FileFingerprintServiceImpl;
 
 /// Normalization strategy for file paths in fingerprint computation.
@@ -38,7 +42,7 @@ impl NormalizationStrategy {
     /// Normalize a path according to the strategy.
     /// `base` is the root directory (used for RELATIVE_PATH).
     /// `relative` is the path relative to base.
-    fn normalize<'a>(&self, base: &Path, relative: &'a str, full_path: &Path) -> std::borrow::Cow<'a, str> {
+    fn normalize<'a>(&self, _base: &Path, relative: &'a str, full_path: &Path) -> std::borrow::Cow<'a, str> {
         match self {
             Self::AbsolutePath => {
                 // Use the full absolute path
@@ -109,7 +113,7 @@ impl FileFingerprintServiceImpl {
         dir: &Path,
         ignore_patterns: &[String],
         strategy: NormalizationStrategy,
-    ) -> Result<(Vec<(String, Vec<u8>, i64, i64, bool)>, Vec<u8>), String> {
+    ) -> Result<(Vec<FingerprintEntry>, Vec<u8>), String> {
         let mut entries = Vec::new();
         let mut dir_hasher = Md5::new();
 
@@ -152,7 +156,7 @@ impl FileFingerprintServiceImpl {
     fn walk_dir(
         base: &Path,
         current: &Path,
-        entries: &mut Vec<(String, Vec<u8>, i64, i64, bool)>,
+        entries: &mut Vec<FingerprintEntry>,
         hasher: &mut Md5,
         ignore_patterns: &[String],
         strategy: NormalizationStrategy,
@@ -233,7 +237,7 @@ impl FileFingerprintService for FileFingerprintServiceImpl {
                     if path.is_dir() {
                         match Self::fingerprint_directory(path, &req.ignore_patterns, strategy) {
                             Ok((entries, dir_hash)) => {
-                                for (entry_path, hash, size, modified, is_dir) in &entries {
+                                for (entry_path, hash, _size, _modified, _is_dir) in &entries {
                                     match strategy {
                                         NormalizationStrategy::HashOnly => {
                                             collection_hasher.update(hash);

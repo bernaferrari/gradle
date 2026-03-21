@@ -49,6 +49,12 @@ pub struct BuildOperationsServiceImpl {
     total_operation_duration_ms: AtomicI64,
 }
 
+impl Default for BuildOperationsServiceImpl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BuildOperationsServiceImpl {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::channel(1000);

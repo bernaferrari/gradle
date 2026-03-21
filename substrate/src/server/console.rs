@@ -21,6 +21,7 @@ struct ProgressEntry {
 
 /// Rust-native console/rich output service.
 /// Manages console output, progress rendering, and status lines.
+#[derive(Default)]
 pub struct ConsoleServiceImpl {
     progress_ops: DashMap<String, ProgressEntry>, // operation_id -> entry
     build_descriptions: DashMap<String, String>,  // build_id -> description
@@ -82,7 +83,7 @@ impl ConsoleService for ConsoleServiceImpl {
                 "{}",
                 req.message
             ),
-            "lifecycle" | _ => tracing::info!(
+            _ => tracing::info!(
                 build_id = %req.build_id,
                 category = %req.category,
                 "[{}] {}",

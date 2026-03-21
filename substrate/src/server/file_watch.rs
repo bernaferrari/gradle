@@ -22,7 +22,7 @@ struct WatchSession {
     files_watched: i64,
     changes_detected: AtomicI64,
     last_poll_ms: AtomicI64,
-    event_tx: mpsc::Sender<Result<FileChangeEvent, Status>>,
+    _event_tx: mpsc::Sender<Result<FileChangeEvent, Status>>,
     _watcher: RecommendedWatcher,
 }
 
@@ -32,6 +32,12 @@ struct WatchSession {
 pub struct FileWatchServiceImpl {
     watches: DashMap<String, WatchSession>,
     next_watch_id: AtomicI64,
+}
+
+impl Default for FileWatchServiceImpl {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl FileWatchServiceImpl {
@@ -131,7 +137,7 @@ impl FileWatchService for FileWatchServiceImpl {
         let (event_tx, _event_rx) = mpsc::channel::<Result<FileChangeEvent, Status>>(256);
 
         // Set up the OS-level file watcher
-        let root_path_clone = root_path.clone();
+        let _root_path_clone = root_path.clone();
         let include_patterns = req.include_patterns.clone();
         let exclude_patterns = req.exclude_patterns.clone();
         let changes_detected = Arc::new(AtomicI64::new(0));
@@ -174,7 +180,7 @@ impl FileWatchService for FileWatchServiceImpl {
                 files_watched,
                 changes_detected: AtomicI64::new(0),
                 last_poll_ms: AtomicI64::new(Self::now_ms()),
-                event_tx,
+                _event_tx: event_tx,
                 _watcher: watcher,
             },
         );
@@ -244,7 +250,7 @@ impl FileWatchService for FileWatchServiceImpl {
                             }
 
                             changes_for_stream.fetch_add(1, Ordering::Relaxed);
-                            let change_type = Self::event_kind_to_change_type(&event.kind);
+                            let _change_type = Self::event_kind_to_change_type(&event.kind);
 
                             let change_type = Self::event_kind_to_change_type(&event.kind).to_string();
                             let file_event = FileChangeEvent {

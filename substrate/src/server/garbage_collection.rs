@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::fs;
@@ -17,6 +17,16 @@ pub struct GarbageCollectionServiceImpl {
     cache_dir: PathBuf,
     history_dir: PathBuf,
     config_cache_dir: PathBuf,
+}
+
+impl Default for GarbageCollectionServiceImpl {
+    fn default() -> Self {
+        Self::new(
+            std::path::PathBuf::new(),
+            std::path::PathBuf::new(),
+            std::path::PathBuf::new(),
+        )
+    }
 }
 
 impl GarbageCollectionServiceImpl {
@@ -41,7 +51,7 @@ impl GarbageCollectionServiceImpl {
 
     async fn gc_directory(
         &self,
-        dir: &PathBuf,
+        dir: &Path,
         max_age_ms: i64,
         max_entries: Option<i32>,
         dry_run: bool,
@@ -55,7 +65,7 @@ impl GarbageCollectionServiceImpl {
         let mut entries: Vec<(String, i64, i64)> = Vec::new(); // (path, mtime_ms, size_bytes)
 
         // Walk subdirectories too (build cache uses shard dirs)
-        let mut dirs_to_scan = vec![dir.clone()];
+        let mut dirs_to_scan = vec![dir.to_path_buf()];
         while let Some(scan_dir) = dirs_to_scan.pop() {
             let mut dir_entries = fs::read_dir(&scan_dir).await.map_err(|e| {
                 Status::internal(format!("Failed to read directory {}: {}", scan_dir.display(), e))
@@ -132,7 +142,7 @@ impl GarbageCollectionServiceImpl {
         Ok((removed, bytes_recovered, remaining))
     }
 
-    async fn dir_total_bytes(&self, dir: &PathBuf, extension: &str) -> Result<i64, Status> {
+    async fn dir_total_bytes(&self, dir: &Path, extension: &str) -> Result<i64, Status> {
         if !dir.exists() {
             return Ok(0);
         }
@@ -140,7 +150,7 @@ impl GarbageCollectionServiceImpl {
         let mut total = 0i64;
 
         // Walk subdirectories too (build cache uses shard dirs)
-        let mut dirs_to_scan = vec![dir.clone()];
+        let mut dirs_to_scan = vec![dir.to_path_buf()];
         while let Some(scan_dir) = dirs_to_scan.pop() {
             let mut entries = match fs::read_dir(&scan_dir).await {
                 Ok(e) => e,
@@ -164,7 +174,7 @@ impl GarbageCollectionServiceImpl {
         Ok(total)
     }
 
-    async fn dir_stats(&self, dir: &PathBuf, extension: &str) -> Result<StorageStats, Status> {
+    async fn dir_stats(&self, dir: &Path, extension: &str) -> Result<StorageStats, Status> {
         if !dir.exists() {
             return Ok(StorageStats {
                 store_name: dir
@@ -184,7 +194,7 @@ impl GarbageCollectionServiceImpl {
         let mut newest = 0i64;
 
         // Walk subdirectories too (build cache uses shard dirs)
-        let mut dirs_to_scan = vec![dir.clone()];
+        let mut dirs_to_scan = vec![dir.to_path_buf()];
         while let Some(scan_dir) = dirs_to_scan.pop() {
             let mut dir_entries = fs::read_dir(&scan_dir).await.map_err(|e| {
                 Status::internal(format!("Failed to read directory {}: {}", scan_dir.display(), e))
@@ -265,7 +275,7 @@ impl GarbageCollectionService for GarbageCollectionServiceImpl {
 
         Ok(Response::new(GcBuildCacheResponse {
             entries_removed: removed,
-            bytes_recovered: bytes_recovered,
+            bytes_recovered,
             entries_remaining: remaining,
             bytes_remaining,
         }))

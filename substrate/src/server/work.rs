@@ -60,6 +60,12 @@ pub struct WorkServiceImpl {
     scheduler: std::sync::Arc<WorkerScheduler>,
 }
 
+impl Default for WorkServiceImpl {
+    fn default() -> Self {
+        Self::new(std::sync::Arc::new(WorkerScheduler::new(16)))
+    }
+}
+
 impl WorkServiceImpl {
     pub fn new(scheduler: std::sync::Arc<WorkerScheduler>) -> Self {
         Self { scheduler }

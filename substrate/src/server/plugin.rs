@@ -1,4 +1,5 @@
 use dashmap::DashMap;
+use std::collections::HashSet;
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
@@ -13,7 +14,9 @@ struct PluginEntry {
     plugin_id: String,
     plugin_class: String,
     version: String,
+    #[allow(dead_code)]
     is_imperative: bool,
+    #[allow(dead_code)]
     applies_to: Vec<String>,
     /// Plugins that must be applied before this one.
     requires: Vec<String>,
@@ -31,14 +34,16 @@ struct AppliedPlugin {
 }
 
 /// Plugin compatibility check result.
-struct CompatibilityResult {
+pub struct CompatibilityResult {
     compatible: bool,
     warnings: Vec<String>,
     errors: Vec<String>,
 }
 
 /// Rust-native plugin service.
-/// Manages plugin registry and application tracking.
+/// Manages plugin registry and application tracking with dependency resolution,
+/// conflict detection, and topological ordering.
+#[derive(Default)]
 pub struct PluginServiceImpl {
     registry: DashMap<String, PluginEntry>,
     applied: DashMap<String, Vec<AppliedPlugin>>,
@@ -123,6 +128,84 @@ impl PluginServiceImpl {
 
         result
     }
+
+    /// Compute a valid apply order for a set of plugin IDs using topological sort.
+    /// Returns the plugin IDs in dependency order (requirements before dependents).
+    /// Returns None if there's a circular dependency.
+    pub fn resolve_apply_order(&self, plugin_ids: &[String]) -> Option<Vec<String>> {
+        // Build a local dependency graph from the requested plugins
+        let id_set: HashSet<&str> = plugin_ids.iter().map(|s| s.as_str()).collect();
+
+        // Collect requirements per plugin (owned strings to avoid lifetime issues)
+        let mut deps: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+        for id in &id_set {
+            deps.insert(id.to_string(), Vec::new());
+        }
+
+        for id in plugin_ids {
+            if let Some(entry) = self.registry.get(id.as_str()) {
+                for req in &entry.requires {
+                    if id_set.contains(req.as_str()) {
+                        deps.get_mut(id).unwrap().push(req.clone());
+                    }
+                }
+            }
+        }
+
+        // Kahn's algorithm for topological sort
+        // in_degree[plugin] = number of requirements that plugin has (within the set)
+        let mut in_degree: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for id in plugin_ids {
+            in_degree.insert(id.clone(), 0);
+        }
+        for (id, reqs) in &deps {
+            *in_degree.get_mut(id).unwrap() += reqs.len();
+        }
+
+        let mut queue: std::collections::VecDeque<String> = in_degree
+            .iter()
+            .filter(|(_, &deg)| deg == 0)
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        let mut result = Vec::new();
+        while let Some(id) = queue.pop_front() {
+            result.push(id.clone());
+            // Find all plugins that depend on this one
+            for (other_id, reqs) in &deps {
+                if reqs.contains(&id) {
+                    let deg = in_degree.get_mut(other_id).unwrap();
+                    *deg -= 1;
+                    if *deg == 0 {
+                        queue.push_back(other_id.clone());
+                    }
+                }
+            }
+        }
+
+        if result.len() != plugin_ids.len() {
+            None // Circular dependency
+        } else {
+            Some(result)
+        }
+    }
+
+    /// Get all registered plugin IDs.
+    pub fn registered_plugin_ids(&self) -> Vec<String> {
+        self.registry.iter().map(|e| e.key().clone()).collect()
+    }
+
+    /// Get the apply order for a project.
+    pub fn get_apply_order(&self, project_path: &str) -> Vec<String> {
+        self.applied
+            .get(project_path)
+            .map(|plugins| {
+                let mut ordered: Vec<_> = plugins.iter().collect();
+                ordered.sort_by_key(|p| p.apply_order);
+                ordered.iter().map(|p| p.plugin_id.clone()).collect()
+            })
+            .unwrap_or_default()
+    }
 }
 
 #[tonic::async_trait]
@@ -162,6 +245,15 @@ impl PluginService for PluginServiceImpl {
             }));
         }
 
+        // Run compatibility check
+        let compat = self.check_compatibility(&req.plugin_id, &req.project_path);
+        if !compat.compatible {
+            return Ok(Response::new(ApplyPluginResponse {
+                success: false,
+                error_message: compat.errors.join("; "),
+            }));
+        }
+
         let entry = self.registry.get(&req.plugin_id).unwrap();
         let mut order = self
             .apply_counters
@@ -170,7 +262,7 @@ impl PluginService for PluginServiceImpl {
 
         self.applied
             .entry(req.project_path.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(AppliedPlugin {
                 plugin_id: entry.plugin_id.clone(),
                 plugin_class: entry.plugin_class.clone(),
@@ -180,6 +272,12 @@ impl PluginService for PluginServiceImpl {
             });
 
         *order += 1;
+
+        tracing::debug!(
+            plugin_id = %req.plugin_id,
+            project = %req.project_path,
+            "Applied plugin"
+        );
 
         Ok(Response::new(ApplyPluginResponse {
             success: true,
@@ -212,7 +310,9 @@ impl PluginService for PluginServiceImpl {
             .applied
             .get(&req.project_path)
             .map(|project_plugins| {
-                project_plugins
+                let mut ordered: Vec<_> = project_plugins.iter().collect();
+                ordered.sort_by_key(|p| p.apply_order);
+                ordered
                     .iter()
                     .map(|p| PluginInfo {
                         plugin_id: p.plugin_id.clone(),
@@ -349,7 +449,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_applied_plugins() {
+    async fn test_get_applied_plugins_ordered() {
         let svc = PluginServiceImpl::new();
 
         for id in &["java", "kotlin", "idea"] {
@@ -383,6 +483,13 @@ mod tests {
             .into_inner();
 
         assert_eq!(resp.plugins.len(), 3);
+        // Verify ordering
+        assert_eq!(resp.plugins[0].plugin_id, "java");
+        assert_eq!(resp.plugins[1].plugin_id, "kotlin");
+        assert_eq!(resp.plugins[2].plugin_id, "idea");
+        // Verify apply_order is monotonically increasing
+        assert!(resp.plugins[0].apply_order < resp.plugins[1].apply_order);
+        assert!(resp.plugins[1].apply_order < resp.plugins[2].apply_order);
     }
 
     #[tokio::test]
@@ -469,5 +576,200 @@ mod tests {
         let result = svc.check_compatibility("kotlin", ":app");
         assert!(!result.compatible);
         assert!(result.errors.iter().any(|e| e.contains("requires")));
+    }
+
+    #[tokio::test]
+    async fn test_apply_checks_compatibility() {
+        let svc = PluginServiceImpl::new();
+
+        svc.register_plugin(Request::new(RegisterPluginRequest {
+            plugin_id: "kotlin".to_string(),
+            plugin_class: "KotlinPlugin".to_string(),
+            version: "1.0".to_string(),
+            is_imperative: false,
+            applies_to: vec![],
+            requires: vec!["java".to_string()],
+            conflicts_with: vec![],
+        }))
+        .await
+        .unwrap();
+
+        // Applying kotlin without java should fail
+        let resp = svc
+            .apply_plugin(Request::new(ApplyPluginRequest {
+                plugin_id: "kotlin".to_string(),
+                project_path: ":app".to_string(),
+                apply_order: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.success);
+        assert!(resp.error_message.contains("requires"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_apply_order_simple() {
+        let svc = PluginServiceImpl::new();
+
+        // java has no deps, kotlin requires java
+        svc.register_plugin(Request::new(RegisterPluginRequest {
+            plugin_id: "java".to_string(),
+            plugin_class: "JavaPlugin".to_string(),
+            version: "1.0".to_string(),
+            is_imperative: false,
+            applies_to: vec![],
+            requires: vec![],
+            conflicts_with: vec![],
+        }))
+        .await
+        .unwrap();
+
+        svc.register_plugin(Request::new(RegisterPluginRequest {
+            plugin_id: "kotlin".to_string(),
+            plugin_class: "KotlinPlugin".to_string(),
+            version: "1.0".to_string(),
+            is_imperative: false,
+            applies_to: vec![],
+            requires: vec!["java".to_string()],
+            conflicts_with: vec![],
+        }))
+        .await
+        .unwrap();
+
+        let order = svc.resolve_apply_order(&[
+            "kotlin".to_string(),
+            "java".to_string(),
+        ]);
+
+        let order = order.expect("Should resolve without cycles");
+        assert_eq!(order.len(), 2);
+        // Java must come before kotlin
+        let java_idx = order.iter().position(|p| p == "java").unwrap();
+        let kotlin_idx = order.iter().position(|p| p == "kotlin").unwrap();
+        assert!(java_idx < kotlin_idx);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_apply_order_chain() {
+        let svc = PluginServiceImpl::new();
+
+        // A -> B -> C (C requires B, B requires A)
+        svc.register_plugin(Request::new(RegisterPluginRequest {
+            plugin_id: "a".to_string(),
+            plugin_class: "A".to_string(),
+            version: "1.0".to_string(),
+            is_imperative: false,
+            applies_to: vec![],
+            requires: vec![],
+            conflicts_with: vec![],
+        }))
+        .await
+        .unwrap();
+
+        svc.register_plugin(Request::new(RegisterPluginRequest {
+            plugin_id: "b".to_string(),
+            plugin_class: "B".to_string(),
+            version: "1.0".to_string(),
+            is_imperative: false,
+            applies_to: vec![],
+            requires: vec!["a".to_string()],
+            conflicts_with: vec![],
+        }))
+        .await
+        .unwrap();
+
+        svc.register_plugin(Request::new(RegisterPluginRequest {
+            plugin_id: "c".to_string(),
+            plugin_class: "C".to_string(),
+            version: "1.0".to_string(),
+            is_imperative: false,
+            applies_to: vec![],
+            requires: vec!["b".to_string()],
+            conflicts_with: vec![],
+        }))
+        .await
+        .unwrap();
+
+        let order = svc.resolve_apply_order(&[
+            "c".to_string(),
+            "a".to_string(),
+            "b".to_string(),
+        ]);
+
+        let order = order.expect("Should resolve without cycles");
+        assert_eq!(order, vec!["a", "b", "c"]);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_apply_order_circular() {
+        let svc = PluginServiceImpl::new();
+
+        // A requires B, B requires A (circular)
+        svc.register_plugin(Request::new(RegisterPluginRequest {
+            plugin_id: "a".to_string(),
+            plugin_class: "A".to_string(),
+            version: "1.0".to_string(),
+            is_imperative: false,
+            applies_to: vec![],
+            requires: vec!["b".to_string()],
+            conflicts_with: vec![],
+        }))
+        .await
+        .unwrap();
+
+        svc.register_plugin(Request::new(RegisterPluginRequest {
+            plugin_id: "b".to_string(),
+            plugin_class: "B".to_string(),
+            version: "1.0".to_string(),
+            is_imperative: false,
+            applies_to: vec![],
+            requires: vec!["a".to_string()],
+            conflicts_with: vec![],
+        }))
+        .await
+        .unwrap();
+
+        let order = svc.resolve_apply_order(&[
+            "a".to_string(),
+            "b".to_string(),
+        ]);
+
+        assert!(order.is_none(), "Circular dependency should return None");
+    }
+
+    #[tokio::test]
+    async fn test_registered_plugin_ids() {
+        let svc = PluginServiceImpl::new();
+
+        svc.register_plugin(Request::new(RegisterPluginRequest {
+            plugin_id: "java".to_string(),
+            plugin_class: "JavaPlugin".to_string(),
+            version: "1.0".to_string(),
+            is_imperative: false,
+            applies_to: vec![],
+            requires: vec![],
+            conflicts_with: vec![],
+        }))
+        .await
+        .unwrap();
+
+        svc.register_plugin(Request::new(RegisterPluginRequest {
+            plugin_id: "kotlin".to_string(),
+            plugin_class: "KotlinPlugin".to_string(),
+            version: "1.0".to_string(),
+            is_imperative: false,
+            applies_to: vec![],
+            requires: vec![],
+            conflicts_with: vec![],
+        }))
+        .await
+        .unwrap();
+
+        let ids = svc.registered_plugin_ids();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&"java".to_string()));
+        assert!(ids.contains(&"kotlin".to_string()));
     }
 }

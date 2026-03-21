@@ -18,6 +18,12 @@ pub struct ProblemReportingServiceImpl {
     problems_reported: AtomicI32,
 }
 
+impl Default for ProblemReportingServiceImpl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProblemReportingServiceImpl {
     pub fn new() -> Self {
         Self {
@@ -61,7 +67,7 @@ impl ProblemReportingService for ProblemReportingServiceImpl {
 
         self.problems
             .entry(req.build_id.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(problem);
 
         self.problems_reported.fetch_add(1, Ordering::Relaxed);

@@ -19,6 +19,7 @@ struct TestSuite {
 }
 
 /// History of test outcomes across builds, keyed by test_id.
+#[derive(Default)]
 struct TestHistory {
     /// test_id -> list of outcomes (across builds and reruns)
     outcomes: DashMap<String, Vec<String>>,
@@ -30,6 +31,7 @@ struct TestHistory {
 
 /// Rust-native test execution service.
 /// Tracks test discovery, execution, result aggregation, and flaky test detection.
+#[derive(Default)]
 pub struct TestExecutionServiceImpl {
     suites: DashMap<String, TestSuite>,     // suite_id -> TestSuite
     build_suites: DashMap<String, Vec<String>>, // build_id -> [suite_id]
@@ -140,7 +142,7 @@ impl TestExecutionService for TestExecutionServiceImpl {
 
         self.build_suites
             .entry(build_id)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(suite_id);
 
         Ok(Response::new(RegisterTestSuiteResponse { accepted: true }))
@@ -187,7 +189,7 @@ impl TestExecutionService for TestExecutionServiceImpl {
         self.history
             .outcomes
             .entry(test_id)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(outcome);
 
         Ok(Response::new(ReportTestResultResponse { accepted: true }))

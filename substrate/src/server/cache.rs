@@ -232,6 +232,12 @@ pub struct CacheServiceImpl {
     remote: Option<std::sync::Arc<crate::server::remote_cache::RemoteCacheStore>>,
 }
 
+impl Default for CacheServiceImpl {
+    fn default() -> Self {
+        Self::new(std::path::PathBuf::new())
+    }
+}
+
 impl CacheServiceImpl {
     pub fn new(base_dir: PathBuf) -> Self {
         Self {
@@ -344,7 +350,6 @@ impl CacheService for CacheServiceImpl {
         let store = self.store.clone();
 
         let mut key: Option<String> = None;
-        let mut total_size: i64 = 0;
         let mut data = Vec::new();
 
         while let Some(chunk) = stream.message().await.map_err(|e| {
@@ -353,7 +358,7 @@ impl CacheService for CacheServiceImpl {
             match chunk.payload {
                 Some(cache_store_chunk::Payload::Init(init)) => {
                     key = Some(hex::encode(&init.key));
-                    total_size = init.total_size;
+                    let total_size = init.total_size;
                     data.reserve(total_size as usize);
                 }
                 Some(cache_store_chunk::Payload::Data(bytes)) => {

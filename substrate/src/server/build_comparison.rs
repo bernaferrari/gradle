@@ -2,11 +2,12 @@ use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
-    build_comparison_service_server::BuildComparisonService, BuildDataSnapshot,
-    ComparisonSummary, GetComparisonResultRequest, GetComparisonResultResponse,
-    RecordBuildDataRequest, RecordBuildDataResponse, StartComparisonRequest,
-    StartComparisonResponse, TaskComparison,
+    build_comparison_service_server::BuildComparisonService, ComparisonSummary,
+    GetComparisonResultRequest, GetComparisonResultResponse, RecordBuildDataRequest,
+    RecordBuildDataResponse, StartComparisonRequest, StartComparisonResponse, TaskComparison,
 };
+#[cfg(test)]
+use crate::proto::BuildDataSnapshot;
 
 /// Stored build data for comparison.
 struct StoredBuildData {
@@ -31,6 +32,12 @@ pub struct BuildComparisonServiceImpl {
     build_data: DashMap<String, StoredBuildData>,
     comparisons: DashMap<String, Comparison>,
     next_comparison_id: std::sync::atomic::AtomicI64,
+}
+
+impl Default for BuildComparisonServiceImpl {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl BuildComparisonServiceImpl {
