@@ -6,6 +6,7 @@ import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
 import org.slf4j.Logger;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;

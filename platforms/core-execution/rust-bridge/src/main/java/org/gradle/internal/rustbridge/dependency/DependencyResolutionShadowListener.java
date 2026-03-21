@@ -17,7 +17,7 @@ import java.util.Map;
  */
 public class DependencyResolutionShadowListener implements DependencyResolutionListener {
 
-    private static final Logger LOGGER = Logging.getLogger(DependencyShadowListener.class);
+    private static final Logger LOGGER = Logging.getLogger(DependencyResolutionShadowListener.class);
 
     private final RustDependencyResolutionClient client;
     private final HashMismatchReporter mismatchReporter;
@@ -76,7 +76,7 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
                 ResolutionResult result = dependencies.getResolutionResult();
                 javaSuccess = result != null;
 
-                if (result != null {
+                if (result != null) {
                     artifactCount = result.getAllResolvedArtifacts().size();
                     failureCount = result.getAllAttempts().stream()
                         .mapToInt(a -> a.getFailure() != null ? 1 : 0)
