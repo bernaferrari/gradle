@@ -38,7 +38,7 @@ pub struct ResourceManagementServiceImpl {
 
 impl ResourceManagementServiceImpl {
     pub fn new() -> Self {
-        let mut resources = DashMap::new();
+        let mut resources = DashMap::new(); // mut needed for insert
         resources.insert(
             "memory_mb".to_string(),
             ResourceSlot {
@@ -339,7 +339,7 @@ impl ResourceManagementService for ResourceManagementServiceImpl {
 
         // Check availability for each resource
         for resource in &req.resources {
-            if let Some(mut slot) = self.resources.get_mut(&resource.resource_type) {
+            if let Some(slot) = self.resources.get_mut(&resource.resource_type) {
                 let available = slot.total_capacity - slot.used;
                 if resource.amount > available {
                     return Ok(Response::new(ReserveResourcesResponse {
@@ -369,7 +369,7 @@ impl ResourceManagementService for ResourceManagementServiceImpl {
         // Grant the reservation
         let mut reserved = Vec::new();
         for resource in &req.resources {
-            if let Some(mut slot) = self.resources.get_mut(&resource.resource_type) {
+            if let Some(slot) = self.resources.get_mut(&resource.resource_type) {
                 slot.used += resource.amount;
                 reserved.push((resource.resource_type.clone(), resource.amount));
             }
@@ -457,7 +457,7 @@ impl ResourceManagementService for ResourceManagementServiceImpl {
             .unwrap_or(0);
 
         let cpu_usage_percent = Self::read_cpu_usage_percent();
-        let process_rss_bytes = Self::read_process_rss_mb() * 1024 * 1024;
+        let _process_rss_bytes = Self::read_process_rss_mb() * 1024 * 1024;
 
         Ok(Response::new(GetResourceUsageResponse {
             usage,
