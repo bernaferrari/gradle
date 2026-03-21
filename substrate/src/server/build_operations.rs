@@ -24,10 +24,19 @@ struct ActiveOperation {
     progress: f32,
 }
 
+/// Completed operation record for summary.
+struct CompletedOperation {
+    display_name: String,
+    operation_type: String,
+    duration_ms: i64,
+    success: bool,
+}
+
 /// Rust-native build operations service.
 /// Streams build events and manages build lifecycle.
 pub struct BuildOperationsServiceImpl {
     operations: DashMap<String, ActiveOperation>,
+    completed: DashMap<String, CompletedOperation>,
     build_events_tx: tokio::sync::Mutex<mpsc::Sender<BuildEvent>>,
     build_events_rx: tokio::sync::Mutex<Option<mpsc::Receiver<BuildEvent>>>,
     build_start_ms: AtomicI64,
@@ -36,6 +45,8 @@ pub struct BuildOperationsServiceImpl {
     up_to_date_tasks: AtomicI32,
     from_cache_tasks: AtomicI32,
     failed_tasks: AtomicI32,
+    total_operations: AtomicI32,
+    total_operation_duration_ms: AtomicI64,
 }
 
 impl BuildOperationsServiceImpl {
@@ -43,6 +54,7 @@ impl BuildOperationsServiceImpl {
         let (tx, rx) = mpsc::channel(1000);
         Self {
             operations: DashMap::new(),
+            completed: DashMap::new(),
             build_events_tx: tokio::sync::Mutex::new(tx),
             build_events_rx: tokio::sync::Mutex::new(Some(rx)),
             build_start_ms: AtomicI64::new(0),
@@ -51,6 +63,8 @@ impl BuildOperationsServiceImpl {
             up_to_date_tasks: AtomicI32::new(0),
             from_cache_tasks: AtomicI32::new(0),
             failed_tasks: AtomicI32::new(0),
+            total_operations: AtomicI32::new(0),
+            total_operation_duration_ms: AtomicI64::new(0),
         }
     }
 
@@ -102,6 +116,14 @@ impl BuildOperationsService for BuildOperationsServiceImpl {
         let req = request.into_inner();
         let display_name = req.display_name.clone();
 
+        // Track build start on first operation
+        self.build_start_ms.compare_exchange(
+            0,
+            Self::now_ms(),
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ).ok();
+
         self.operations.insert(
             req.operation_id.clone(),
             ActiveOperation {
@@ -133,11 +155,31 @@ impl BuildOperationsService for BuildOperationsServiceImpl {
     ) -> Result<Response<CompleteOperationResponse>, Status> {
         let req = request.into_inner();
 
-        let display_name = self
+        let (display_name, op_type, start_ms) = self
             .operations
             .remove(&req.operation_id)
-            .map(|(_key, op)| op.display_name)
+            .map(|(_key, op)| (op.display_name, op.operation_type, op.start_time_ms))
             .unwrap_or_default();
+
+        // Record completed operation
+        let duration = Self::now_ms() - start_ms;
+        self.completed.insert(
+            req.operation_id.clone(),
+            CompletedOperation {
+                display_name: display_name.clone(),
+                operation_type: op_type,
+                duration_ms: duration,
+                success: req.success,
+            },
+        );
+
+        self.total_operations.fetch_add(1, Ordering::Relaxed);
+        self.total_operation_duration_ms.fetch_add(duration, Ordering::Relaxed);
+
+        // Record task outcome if the operation type suggests a task
+        if !req.operation_id.is_empty() {
+            self.record_task_outcome(&req.outcome);
+        }
 
         self.emit_event(BuildEvent {
             timestamp_ms: Self::now_ms(),
