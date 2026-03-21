@@ -4,6 +4,8 @@ import org.gradle.api.logging.Logging;
 import org.gradle.internal.hash.HashCode;
 import org.slf4j.Logger;
 
+import java.util.List;
+
 /**
  * Reports hash mismatches between Java and Rust implementations.
  * Thread-safe for concurrent use during builds.

@@ -86,6 +86,7 @@ import org.gradle.internal.operations.BuildOperationProgressEventEmitter;
 import org.gradle.internal.operations.BuildOperationRunner;
 import org.gradle.internal.operations.CurrentBuildOperationRef;
 import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.rustbridge.cache.BuildCacheOrchestrationClient;
 import org.gradle.internal.rustbridge.execution.ExecutionPlanClient;
 import org.gradle.internal.rustbridge.execution.SubstrateAdvisoryStep;
 import org.gradle.internal.scopeids.id.BuildInvocationScopeId;
@@ -168,7 +169,8 @@ public class ExecutionBuildServices implements ServiceRegistrationProvider {
         InternalProblems problems,
         WorkerLeaseService workerLeaseService,
         InternalOptions options,
-        @Nullable SubstrateClient substrateClient
+        @Nullable SubstrateClient substrateClient,
+        @Nullable BuildCacheOrchestrationClient cacheOrchestrationClient
     ) {
         UniqueId buildId = buildInvocationScopeId.getId();
         Supplier<OutputsCleaner> skipEmptyWorkOutputsCleanerSupplier = () -> new OutputsCleaner(deleter, buildOutputCleanupRegistry::isOutputOwnedByBuild, buildOutputCleanupRegistry::isOutputOwnedByBuild);
@@ -211,7 +213,7 @@ public class ExecutionBuildServices implements ServiceRegistrationProvider {
             new ResolveChangesStep<>(changeDetector,
             new ResolveMutableCachingStateStep<>(buildCacheController, emitBuildCacheDebugLogging,
             new MarkSnapshottingInputsFinishedStep<>(
-            createSkipStep(planClient, authoritativeEnabled,
+            createSkipStep(planClient, authoritativeEnabled, cacheOrchestrationClient,
             new StoreExecutionStateStep<>(
             new BuildCacheStep<>(buildCacheController, deleter, fileSystemAccess, outputChangeListener,
             new ResolveInputChangesStep<>(
@@ -241,10 +243,11 @@ public class ExecutionBuildServices implements ServiceRegistrationProvider {
     Step<C, org.gradle.internal.execution.steps.UpToDateResult> createSkipStep(
         @Nullable ExecutionPlanClient planClient,
         boolean authoritative,
+        @Nullable BuildCacheOrchestrationClient cacheOrchestrationClient,
         Step<? super C, ? extends org.gradle.internal.execution.steps.AfterExecutionResult> delegate
     ) {
         if (planClient != null) {
-            return new SubstrateAdvisoryStep(delegate, planClient, authoritative);
+            return new SubstrateAdvisoryStep(delegate, planClient, authoritative, cacheOrchestrationClient);
         }
         return new SkipUpToDateStep<>(delegate);
     }

@@ -2,8 +2,13 @@ package org.gradle.internal.rustbridge;
 
 import org.gradle.internal.buildoption.InternalOptions;
 import org.gradle.internal.buildoption.RustSubstrateOptions;
+import org.gradle.internal.rustbridge.cache.BuildCacheOrchestrationClient;
 import org.gradle.internal.rustbridge.cache.RustBuildCacheServiceFactory;
 import org.gradle.internal.rustbridge.cache.RustRemoteBuildCacheServiceFactory;
+import org.gradle.internal.event.ListenerManager;
+import org.gradle.internal.rustbridge.shadow.BuildFinishMismatchLogger;
+import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
+import org.gradle.internal.rustbridge.shadow.ShadowingBuildCacheKeyComputer;
 import org.gradle.internal.rustbridge.configuration.RustConfigurationClient;
 import org.gradle.internal.rustbridge.execution.ExecutionPlanClient;
 import org.gradle.internal.rustbridge.fingerprint.RustFileFingerprintClient;
@@ -137,6 +142,36 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
         @Provides
         RustFileWatchClient createRustFileWatchClient(SubstrateClient client) {
             return new RustFileWatchClient(client);
+        }
+
+        @Provides
+        BuildCacheOrchestrationClient createBuildCacheOrchestrationClient(SubstrateClient client) {
+            return new BuildCacheOrchestrationClient(client);
+        }
+
+        @Provides
+        HashMismatchReporter createHashMismatchReporter() {
+            return new HashMismatchReporter(true);
+        }
+
+        @Provides
+        BuildFinishMismatchLogger createBuildFinishMismatchLogger(
+            HashMismatchReporter reporter,
+            ListenerManager listenerManager
+        ) {
+            BuildFinishMismatchLogger logger = new BuildFinishMismatchLogger(reporter);
+            listenerManager.addListener(logger);
+            return logger;
+        }
+
+        @Provides
+        ShadowingBuildCacheKeyComputer createShadowingBuildCacheKeyComputer(
+            BuildCacheOrchestrationClient cacheOrchestrationClient,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            boolean authoritative = options.getOption(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION).get();
+            return new ShadowingBuildCacheKeyComputer(cacheOrchestrationClient, mismatchReporter, authoritative);
         }
     }
 }

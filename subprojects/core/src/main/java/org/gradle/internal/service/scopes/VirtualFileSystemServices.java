@@ -192,7 +192,8 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
             }
             FileHasher javaHasher = new DefaultFileHasher(streamHasher);
             RustGrpcFileHasher rustHasher = new RustGrpcFileHasher(substrateClient);
-            if (options.getOption(RustSubstrateOptions.SHADOW_HASHING).get()) {
+            if (options.getOption(RustSubstrateOptions.SHADOW_HASHING).get()
+                && !options.getOption(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION).get()) {
                 return new ShadowingFileHasher(
                     javaHasher,
                     rustHasher,
@@ -372,7 +373,8 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
             } else {
                 FileHasher javaHasher = new DefaultFileHasher(streamHasher);
                 RustGrpcFileHasher rustHasher = new RustGrpcFileHasher(substrateClient);
-                if (options.getOption(RustSubstrateOptions.SHADOW_HASHING).get()) {
+                if (options.getOption(RustSubstrateOptions.SHADOW_HASHING).get()
+                    && !options.getOption(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION).get()) {
                     localDelegate = new ShadowingFileHasher(
                         javaHasher,
                         rustHasher,

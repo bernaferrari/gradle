@@ -18,7 +18,9 @@ dependencies {
     implementation(projects.execution)
     implementation(projects.snapshots)
 
+    testImplementation(projects.baseServicesGroovy)
     testImplementation(testFixtures(projects.baseServices))
+    testImplementation(testFixtures(projects.execution))
 }
 
 gradleModule {
