@@ -54,27 +54,36 @@ impl GarbageCollectionServiceImpl {
         let now = Self::now_ms();
         let mut entries: Vec<(String, i64, i64)> = Vec::new(); // (path, mtime_ms, size_bytes)
 
-        let mut dir_entries = fs::read_dir(dir).await.map_err(|e| {
-            Status::internal(format!("Failed to read directory {}: {}", dir.display(), e))
-        })?;
+        // Walk subdirectories too (build cache uses shard dirs)
+        let mut dirs_to_scan = vec![dir.clone()];
+        while let Some(scan_dir) = dirs_to_scan.pop() {
+            let mut dir_entries = fs::read_dir(&scan_dir).await.map_err(|e| {
+                Status::internal(format!("Failed to read directory {}: {}", scan_dir.display(), e))
+            })?;
 
-        while let Some(entry) = dir_entries.next_entry().await.map_err(|e| {
-            Status::internal(format!("Failed to read directory entry: {}", e))
-        })? {
-            if let Some(name) = entry.file_name().to_str() {
-                if name.ends_with(extension) {
-                    let metadata = match fs::metadata(entry.path()).await {
-                        Ok(m) => m,
-                        Err(_) => continue,
-                    };
-                    let mtime_ms = metadata
-                        .modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                        .map(|d| d.as_millis() as i64)
-                        .unwrap_or(0);
-                    let size = metadata.len() as i64;
-                    entries.push((entry.path().to_string_lossy().to_string(), mtime_ms, size));
+            while let Some(entry) = dir_entries.next_entry().await.map_err(|e| {
+                Status::internal(format!("Failed to read directory entry: {}", e))
+            })? {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs_to_scan.push(path);
+                    continue;
+                }
+                if let Some(name) = entry.file_name().to_str() {
+                    if extension.is_empty() || name.ends_with(extension) {
+                        let metadata = match fs::metadata(&path).await {
+                            Ok(m) => m,
+                            Err(_) => continue,
+                        };
+                        let mtime_ms = metadata
+                            .modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                            .map(|d| d.as_millis() as i64)
+                            .unwrap_or(0);
+                        let size = metadata.len() as i64;
+                        entries.push((path.to_string_lossy().to_string(), mtime_ms, size));
+                    }
                 }
             }
         }
@@ -123,6 +132,38 @@ impl GarbageCollectionServiceImpl {
         Ok((removed, bytes_recovered, remaining))
     }
 
+    async fn dir_total_bytes(&self, dir: &PathBuf, extension: &str) -> Result<i64, Status> {
+        if !dir.exists() {
+            return Ok(0);
+        }
+
+        let mut total = 0i64;
+
+        // Walk subdirectories too (build cache uses shard dirs)
+        let mut dirs_to_scan = vec![dir.clone()];
+        while let Some(scan_dir) = dirs_to_scan.pop() {
+            let mut entries = match fs::read_dir(&scan_dir).await {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+
+            while let Some(entry) = entries.next_entry().await.ok().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs_to_scan.push(path);
+                } else if let Some(name) = entry.file_name().to_str() {
+                    if extension.is_empty() || name.ends_with(extension) {
+                        if let Ok(metadata) = fs::metadata(&path).await {
+                            total += metadata.len() as i64;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(total)
+    }
+
     async fn dir_stats(&self, dir: &PathBuf, extension: &str) -> Result<StorageStats, Status> {
         if !dir.exists() {
             return Ok(StorageStats {
@@ -142,26 +183,35 @@ impl GarbageCollectionServiceImpl {
         let mut oldest = i64::MAX;
         let mut newest = 0i64;
 
-        let mut dir_entries = fs::read_dir(dir).await.map_err(|e| {
-            Status::internal(format!("Failed to read directory {}: {}", dir.display(), e))
-        })?;
+        // Walk subdirectories too (build cache uses shard dirs)
+        let mut dirs_to_scan = vec![dir.clone()];
+        while let Some(scan_dir) = dirs_to_scan.pop() {
+            let mut dir_entries = fs::read_dir(&scan_dir).await.map_err(|e| {
+                Status::internal(format!("Failed to read directory {}: {}", scan_dir.display(), e))
+            })?;
 
-        while let Some(entry) = dir_entries.next_entry().await.map_err(|e| {
-            Status::internal(format!("Failed to read directory entry: {}", e))
-        })? {
-            if let Some(name) = entry.file_name().to_str() {
-                if name.ends_with(extension) {
-                    entries += 1;
-                    let metadata = match fs::metadata(entry.path()).await {
-                        Ok(m) => m,
-                        Err(_) => continue,
-                    };
-                    total_bytes += metadata.len() as i64;
-                    if let Ok(mtime) = metadata.modified() {
-                        if let Ok(dur) = mtime.duration_since(UNIX_EPOCH) {
-                            let ms = dur.as_millis() as i64;
-                            oldest = oldest.min(ms);
-                            newest = newest.max(ms);
+            while let Some(entry) = dir_entries.next_entry().await.map_err(|e| {
+                Status::internal(format!("Failed to read directory entry: {}", e))
+            })? {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs_to_scan.push(path);
+                    continue;
+                }
+                if let Some(name) = entry.file_name().to_str() {
+                    if extension.is_empty() || name.ends_with(extension) {
+                        entries += 1;
+                        let metadata = match fs::metadata(&path).await {
+                            Ok(m) => m,
+                            Err(_) => continue,
+                        };
+                        total_bytes += metadata.len() as i64;
+                        if let Ok(mtime) = metadata.modified() {
+                            if let Ok(dur) = mtime.duration_since(UNIX_EPOCH) {
+                                let ms = dur.as_millis() as i64;
+                                oldest = oldest.min(ms);
+                                newest = newest.max(ms);
+                            }
                         }
                     }
                 }
@@ -192,7 +242,7 @@ impl GarbageCollectionService for GarbageCollectionServiceImpl {
         request: Request<GcBuildCacheRequest>,
     ) -> Result<Response<GcBuildCacheResponse>, Status> {
         let req = request.into_inner();
-        let (removed, bytes, remaining) = self
+        let (removed, bytes_recovered, remaining) = self
             .gc_directory(
                 &self.cache_dir,
                 req.max_age_ms,
@@ -202,9 +252,12 @@ impl GarbageCollectionService for GarbageCollectionServiceImpl {
             )
             .await?;
 
+        let bytes_remaining = self.dir_total_bytes(&self.cache_dir, "").await?;
+
         tracing::info!(
             removed,
-            bytes_recovered = bytes,
+            bytes_recovered,
+            bytes_remaining,
             remaining,
             dry_run = req.dry_run,
             "Build cache GC complete"
@@ -212,9 +265,9 @@ impl GarbageCollectionService for GarbageCollectionServiceImpl {
 
         Ok(Response::new(GcBuildCacheResponse {
             entries_removed: removed,
-            bytes_recovered: bytes,
+            bytes_recovered: bytes_recovered,
             entries_remaining: remaining,
-            bytes_remaining: 0, // Could calculate but not critical
+            bytes_remaining,
         }))
     }
 
