@@ -316,6 +316,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
         @Nullable
         DependencyResolutionShadowListener createDependencyResolutionShadowListener(
             RustDependencyResolutionClient rustDependencyResolutionClient,
+            HashMismatchReporter mismatchReporter,
             ListenerManager listenerManager,
             InternalOptions options
         ) {
@@ -323,7 +324,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
                 return null;
             }
             DependencyResolutionShadowListener listener =
-                new DependencyResolutionShadowListener(rustDependencyResolutionClient);
+                new DependencyResolutionShadowListener(rustDependencyResolutionClient, mismatchReporter);
             listenerManager.addListener(listener);
             return listener;
         }
