@@ -641,6 +641,8 @@ message RegisterPluginRequest {
   string version = 3;
   bool is_imperative = 4; // true = plugins {}, false = plugins id
   repeated string applies_to = 5; // Which project types this plugin targets
+  repeated string requires = 6;     // Plugins that must be applied first
+  repeated string conflicts_with = 7; // Plugins that are incompatible
 }
 
 message RegisterPluginResponse {
