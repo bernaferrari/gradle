@@ -4,11 +4,12 @@ use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
-    test_execution_service_server::TestExecutionService, GetTestReportRequest,
+    test_execution_service_server::TestExecutionService, DetectFlakyTestsRequest,
+    DetectFlakyTestsResponse, FlakyTestInfo as ProtoFlakyTestInfo, GetTestReportRequest,
     GetTestReportResponse, GetTestResultsByOutcomeRequest, GetTestResultsByOutcomeResponse,
     GetTestSummaryRequest, RegisterTestSuiteRequest, RegisterTestSuiteResponse,
-    ReportTestResultRequest, ReportTestResultResponse, TestResultEntry,
-    TestSuiteDescriptor, TestSuiteReport, TestSummaryResponse,
+    ReportTestResultRequest, ReportTestResultResponse, TestResultEntry, TestSuiteDescriptor,
+    TestSuiteReport, TestSummaryResponse,
 };
 
 /// Registered test suite metadata.
@@ -51,7 +52,7 @@ impl TestExecutionServiceImpl {
     }
 
     /// Detect flaky tests: tests that have both PASSED and FAILED outcomes.
-    fn detect_flaky_tests(&self, build_id: &str) -> Vec<FlakyTestInfo> {
+    fn detect_flaky_tests(&self, build_id: &str) -> Vec<InternalFlakyTestInfo> {
         let suite_ids = self
             .build_suites
             .get(build_id)
@@ -85,7 +86,7 @@ impl TestExecutionServiceImpl {
                     if passes > 0 && failures > 0 {
                         let total_runs = passes + failures;
                         let flake_rate = failures as f64 / total_runs as f64;
-                        flaky.push(FlakyTestInfo {
+                        flaky.push(InternalFlakyTestInfo {
                             test_id: r.test_id.clone(),
                             test_name: r.test_name.clone(),
                             test_class: r.test_class.clone(),
@@ -104,8 +105,8 @@ impl TestExecutionServiceImpl {
     }
 }
 
-/// Information about a flaky test.
-struct FlakyTestInfo {
+/// Information about a flaky test (internal representation).
+struct InternalFlakyTestInfo {
     test_id: String,
     test_name: String,
     test_class: String,
@@ -343,6 +344,28 @@ impl TestExecutionService for TestExecutionServiceImpl {
             total_duration_ms,
             failed_test_names,
             pass_rate,
+        }))
+    }
+
+    async fn detect_flaky_tests(
+        &self,
+        request: Request<DetectFlakyTestsRequest>,
+    ) -> Result<Response<DetectFlakyTestsResponse>, Status> {
+        let req = request.into_inner();
+        let flaky = self.detect_flaky_tests(&req.build_id);
+
+        Ok(Response::new(DetectFlakyTestsResponse {
+            flaky_tests: flaky
+                .into_iter()
+                .map(|f| ProtoFlakyTestInfo {
+                    test_id: f.test_id,
+                    test_name: f.test_name,
+                    test_class: f.test_class,
+                    pass_count: f.pass_count,
+                    fail_count: f.fail_count,
+                    flake_rate: f.flake_rate,
+                })
+                .collect(),
         }))
     }
 }
@@ -626,5 +649,47 @@ mod tests {
 
         let flaky = svc.detect_flaky_tests("build-stable");
         assert_eq!(flaky.len(), 0); // test1 always passes, test2 only fails
+    }
+
+    #[tokio::test]
+    async fn test_detect_flaky_tests_grpc() {
+        let svc = TestExecutionServiceImpl::new();
+
+        svc.register_test_suite(Request::new(RegisterTestSuiteRequest {
+            build_id: "build-grpc-flaky".to_string(),
+            suite: Some(make_suite("suite-g", "FlakyGTest")),
+        }))
+        .await
+        .unwrap();
+
+        svc.report_test_result(Request::new(ReportTestResultRequest {
+            build_id: "build-grpc-flaky".to_string(),
+            result: Some(make_test_result("suite-g", "testFlaky", "com.GTest", "PASSED", 10)),
+        }))
+        .await
+        .unwrap();
+
+        svc.report_test_result(Request::new(ReportTestResultRequest {
+            build_id: "build-grpc-flaky".to_string(),
+            result: Some(make_test_result("suite-g", "testFlaky", "com.GTest", "FAILED", 20)),
+        }))
+        .await
+        .unwrap();
+
+        let resp = TestExecutionService::detect_flaky_tests(
+            &svc,
+            Request::new(DetectFlakyTestsRequest {
+                build_id: "build-grpc-flaky".to_string(),
+            }),
+        )
+        .await
+        .unwrap()
+        .into_inner();
+
+        assert_eq!(resp.flaky_tests.len(), 1);
+        assert_eq!(resp.flaky_tests[0].test_name, "testFlaky");
+        assert_eq!(resp.flaky_tests[0].pass_count, 1);
+        assert_eq!(resp.flaky_tests[0].fail_count, 1);
+        assert!((resp.flaky_tests[0].flake_rate - 0.5).abs() < f64::EPSILON);
     }
 }

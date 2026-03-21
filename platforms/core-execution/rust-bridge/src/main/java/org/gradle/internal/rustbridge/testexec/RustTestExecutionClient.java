@@ -1,5 +1,7 @@
 package org.gradle.internal.rustbridge.testexec;
 
+import gradle.substrate.v1.DetectFlakyTestsRequest;
+import gradle.substrate.v1.DetectFlakyTestsResponse;
 import gradle.substrate.v1.GetTestReportRequest;
 import gradle.substrate.v1.GetTestReportResponse;
 import gradle.substrate.v1.GetTestResultsByOutcomeRequest;
@@ -124,6 +126,22 @@ public class RustTestExecutionClient {
         } catch (Exception e) {
             LOGGER.debug("[substrate:testexec] get test results by outcome failed", e);
             return GetTestResultsByOutcomeResponse.getDefaultInstance();
+        }
+    }
+
+    public DetectFlakyTestsResponse detectFlakyTests(String buildId) {
+        if (client.isNoop()) {
+            return DetectFlakyTestsResponse.getDefaultInstance();
+        }
+
+        try {
+            return client.getTestExecutionStub()
+                .detectFlakyTests(DetectFlakyTestsRequest.newBuilder()
+                    .setBuildId(buildId)
+                    .build());
+        } catch (Exception e) {
+            LOGGER.debug("[substrate:testexec] detect flaky tests failed", e);
+            return DetectFlakyTestsResponse.getDefaultInstance();
         }
     }
 }
