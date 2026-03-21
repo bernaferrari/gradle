@@ -1,11 +1,15 @@
 package org.gradle.internal.rustbridge.dependency;
 
+import gradle.substrate.v1.AddArtifactToCacheRequest;
+import gradle.substrate.v1.AddArtifactToCacheResponse;
 import gradle.substrate.v1.CheckArtifactCacheRequest;
 import gradle.substrate.v1.CheckArtifactCacheResponse;
 import gradle.substrate.v1.DependencyDescriptor;
 import gradle.substrate.v1.DependencyResolutionServiceGrpc;
 import gradle.substrate.v1.DownloadArtifactRequest;
 import gradle.substrate.v1.DownloadArtifactChunk;
+import gradle.substrate.v1.GetResolutionStatsRequest;
+import gradle.substrate.v1.GetResolutionStatsResponse;
 import gradle.substrate.v1.RecordResolutionRequest;
 import gradle.substrate.v1.RecordResolutionResponse;
 import gradle.substrate.v1.RepositoryDescriptor;
@@ -172,6 +176,51 @@ public class RustDependencyResolutionClient {
                     .build());
         } catch (Exception e) {
             LOGGER.debug("[substrate:dep-resolve] record resolution failed", e);
+        }
+    }
+
+    /**
+     * Add an artifact to the Rust-side cache after download.
+     */
+    public boolean addArtifactToCache(String group, String name, String version,
+                                       String classifier, String localPath,
+                                       long size, String sha256) {
+        if (client.isNoop()) {
+            return false;
+        }
+
+        try {
+            AddArtifactToCacheResponse response = client.getDependencyResolutionStub()
+                .addArtifactToCache(AddArtifactToCacheRequest.newBuilder()
+                    .setGroup(group)
+                    .setName(name)
+                    .setVersion(version)
+                    .setClassifier(classifier)
+                    .setLocalPath(localPath)
+                    .setSize(size)
+                    .setSha256(sha256)
+                    .build());
+            return response.getAccepted();
+        } catch (Exception e) {
+            LOGGER.debug("[substrate:dep-resolve] add artifact to cache failed", e);
+            return false;
+        }
+    }
+
+    /**
+     * Get resolution statistics from the Rust service.
+     */
+    public GetResolutionStatsResponse getResolutionStats() {
+        if (client.isNoop()) {
+            return GetResolutionStatsResponse.getDefaultInstance();
+        }
+
+        try {
+            return client.getDependencyResolutionStub()
+                .getResolutionStats(GetResolutionStatsRequest.newBuilder().build());
+        } catch (Exception e) {
+            LOGGER.debug("[substrate:dep-resolve] get resolution stats failed", e);
+            return GetResolutionStatsResponse.getDefaultInstance();
         }
     }
 }
