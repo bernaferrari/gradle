@@ -33,6 +33,9 @@ reqwest.workspace = true
 quick-xml.workspace = true
 nix.workspace = true
 libc.workspace = true
+zip = "2"
+tar = "0.4"
+flate2 = "1"
 
 [build-dependencies]
 tonic-build = "0.12"
