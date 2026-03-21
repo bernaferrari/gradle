@@ -1,5 +1,7 @@
 package org.gradle.internal.rustbridge.history;
 
+import gradle.substrate.v1.GetHistoryStatsRequest;
+import gradle.substrate.v1.GetHistoryStatsResponse;
 import gradle.substrate.v1.LoadHistoryRequest;
 import gradle.substrate.v1.LoadHistoryResponse;
 import gradle.substrate.v1.RemoveHistoryRequest;
@@ -146,6 +148,25 @@ public class RustExecutionHistoryClient {
         } catch (Exception e) {
             LOGGER.debug("[substrate:history] remove failed for {}: {}", key, e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Get statistics about the history store.
+     *
+     * @return stats response, or default if the client is a noop
+     */
+    public GetHistoryStatsResponse getStats() {
+        if (client.isNoop()) {
+            return GetHistoryStatsResponse.getDefaultInstance();
+        }
+
+        try {
+            return client.getExecutionHistoryStub()
+                .getHistoryStats(GetHistoryStatsRequest.newBuilder().build());
+        } catch (Exception e) {
+            LOGGER.debug("[substrate:history] getStats failed: {}", e.getMessage());
+            return GetHistoryStatsResponse.getDefaultInstance();
         }
     }
 }

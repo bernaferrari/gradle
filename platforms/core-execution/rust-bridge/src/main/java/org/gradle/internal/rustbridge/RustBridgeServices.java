@@ -300,6 +300,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
         BuildResultShadowListener createBuildResultShadowListener(
             RustBuildResultClient rustBuildResultClient,
             RustBuildMetricsClient rustBuildMetricsClient,
+            RustExecutionHistoryClient rustExecutionHistoryClient,
             ListenerManager listenerManager,
             InternalOptions options
         ) {
@@ -307,7 +308,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
                 return null;
             }
             BuildResultShadowListener listener = new BuildResultShadowListener(
-                rustBuildResultClient, rustBuildMetricsClient);
+                rustBuildResultClient, rustBuildMetricsClient, rustExecutionHistoryClient);
             listenerManager.addListener(listener);
             return listener;
         }
