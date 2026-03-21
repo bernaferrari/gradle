@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet, VecDeque};
+
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
@@ -20,7 +22,7 @@ struct SourceSet {
 }
 
 /// Rust-native incremental compilation service.
-/// Tracks source changes and computes rebuild decisions.
+/// Tracks source changes and computes rebuild decisions with transitive dependency closure.
 pub struct IncrementalCompilationServiceImpl {
     source_sets: DashMap<String, SourceSet>,     // source_set_id -> SourceSet
     build_source_sets: DashMap<String, Vec<String>>, // build_id -> [source_set_id]
@@ -32,6 +34,42 @@ impl IncrementalCompilationServiceImpl {
             source_sets: DashMap::new(),
             build_source_sets: DashMap::new(),
         }
+    }
+
+    /// Compute the transitive closure of files that must be recompiled.
+    /// Uses reverse dependency map: if A depends on B, then changing B requires recompiling A.
+    fn compute_transitive_rebuild_set(
+        units: &[CompilationUnit],
+        changed_files: &[String],
+    ) -> HashSet<String> {
+        // Build reverse dependency map: file -> set of files that depend on it
+        let mut reverse_deps: HashMap<&str, Vec<&str>> = HashMap::new();
+        for unit in units {
+            for dep in &unit.dependencies {
+                reverse_deps.entry(dep.as_str()).or_default().push(&unit.source_file);
+            }
+        }
+
+        // BFS from changed files through reverse dependencies
+        let mut affected: HashSet<String> = HashSet::new();
+        let mut queue: VecDeque<&str> = changed_files.iter().map(|s| s.as_str()).collect();
+
+        while let Some(file) = queue.pop_front() {
+            if affected.contains(file) {
+                continue;
+            }
+            affected.insert(file.to_string());
+
+            if let Some(dependents) = reverse_deps.get(file) {
+                for dep in dependents {
+                    if !affected.contains(*dep) {
+                        queue.push_back(dep);
+                    }
+                }
+            }
+        }
+
+        affected
     }
 }
 
@@ -120,29 +158,31 @@ impl IncrementalCompilationService for IncrementalCompilationServiceImpl {
         if let Some(ss) = self.source_sets.get(&req.source_set_id) {
             total_sources = ss.units.len() as i32;
 
-            for unit in &ss.units {
-                let source_changed = req.changed_files.iter().any(|f| f == &unit.source_file);
-                let dependency_changed = unit
-                    .dependencies
-                    .iter()
-                    .any(|dep| req.changed_files.iter().any(|f| f == dep));
+            if req.changed_files.is_empty() {
+                up_to_date_count = total_sources;
+            } else {
+                // Compute transitive closure of affected files
+                let affected =
+                    Self::compute_transitive_rebuild_set(&ss.units, &req.changed_files);
 
-                let must_recompile = source_changed || dependency_changed;
-
-                if must_recompile {
-                    must_recompile_count += 1;
-                    let reason = if source_changed {
-                        "source_changed".to_string()
+                for unit in &ss.units {
+                    if affected.contains(&unit.source_file) {
+                        must_recompile_count += 1;
+                        let directly_changed =
+                            req.changed_files.iter().any(|f| f == &unit.source_file);
+                        let reason = if directly_changed {
+                            "source_changed".to_string()
+                        } else {
+                            "transitive_dependency_changed".to_string()
+                        };
+                        decisions.push(RebuildDecision {
+                            source_file: unit.source_file.clone(),
+                            reason,
+                            must_recompile: true,
+                        });
                     } else {
-                        "dependency_changed".to_string()
-                    };
-                    decisions.push(RebuildDecision {
-                        source_file: unit.source_file.clone(),
-                        reason,
-                        must_recompile: true,
-                    });
-                } else {
-                    up_to_date_count += 1;
+                        up_to_date_count += 1;
+                    }
                 }
             }
         } else {
@@ -384,5 +424,142 @@ mod tests {
             .into_inner();
 
         assert_eq!(rebuild.total_sources, 0);
+    }
+
+    #[tokio::test]
+    async fn test_transitive_dependency_closure() {
+        // A.java -> B.java -> C.java -> D.java
+        // Changing D.java should transitively recompile C, B, A
+        let svc = IncrementalCompilationServiceImpl::new();
+
+        svc.register_source_set(Request::new(RegisterSourceSetRequest {
+            build_id: "build-6".to_string(),
+            source_set: Some(make_source_set("ss6", "main")),
+        }))
+        .await
+        .unwrap();
+
+        svc.record_compilation(Request::new(RecordCompilationRequest {
+            build_id: "build-6".to_string(),
+            unit: Some(make_compilation_unit("ss6", "D.java", vec![])),
+        }))
+        .await
+        .unwrap();
+
+        svc.record_compilation(Request::new(RecordCompilationRequest {
+            build_id: "build-6".to_string(),
+            unit: Some(make_compilation_unit("ss6", "C.java", vec!["D.java"])),
+        }))
+        .await
+        .unwrap();
+
+        svc.record_compilation(Request::new(RecordCompilationRequest {
+            build_id: "build-6".to_string(),
+            unit: Some(make_compilation_unit("ss6", "B.java", vec!["C.java"])),
+        }))
+        .await
+        .unwrap();
+
+        svc.record_compilation(Request::new(RecordCompilationRequest {
+            build_id: "build-6".to_string(),
+            unit: Some(make_compilation_unit("ss6", "A.java", vec!["B.java"])),
+        }))
+        .await
+        .unwrap();
+
+        // E.java is independent
+        svc.record_compilation(Request::new(RecordCompilationRequest {
+            build_id: "build-6".to_string(),
+            unit: Some(make_compilation_unit("ss6", "E.java", vec![])),
+        }))
+        .await
+        .unwrap();
+
+        // Change D.java — should transitively affect A, B, C, D but not E
+        let rebuild = svc
+            .get_rebuild_set(Request::new(GetRebuildSetRequest {
+                build_id: "build-6".to_string(),
+                source_set_id: "ss6".to_string(),
+                changed_files: vec!["D.java".to_string()],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(rebuild.total_sources, 5);
+        assert_eq!(rebuild.must_recompile_count, 4);
+        assert_eq!(rebuild.up_to_date_count, 1);
+
+        let rebuild_files: std::collections::HashSet<String> =
+            rebuild.decisions.iter().map(|d| d.source_file.clone()).collect();
+        assert!(rebuild_files.contains("D.java"));
+        assert!(rebuild_files.contains("C.java"));
+        assert!(rebuild_files.contains("B.java"));
+        assert!(rebuild_files.contains("A.java"));
+        assert!(!rebuild_files.contains("E.java"));
+
+        // D is directly changed, others are transitive
+        let d_decision = rebuild.decisions.iter().find(|d| d.source_file == "D.java").unwrap();
+        assert_eq!(d_decision.reason, "source_changed");
+        let a_decision = rebuild.decisions.iter().find(|d| d.source_file == "A.java").unwrap();
+        assert_eq!(a_decision.reason, "transitive_dependency_changed");
+    }
+
+    #[tokio::test]
+    async fn test_diamond_dependency() {
+        //     A
+        //    / \
+        //   B   C
+        //    \ /
+        //     D
+        // Changing D should recompile B, C, A (but D only once)
+        let svc = IncrementalCompilationServiceImpl::new();
+
+        svc.register_source_set(Request::new(RegisterSourceSetRequest {
+            build_id: "build-7".to_string(),
+            source_set: Some(make_source_set("ss7", "main")),
+        }))
+        .await
+        .unwrap();
+
+        svc.record_compilation(Request::new(RecordCompilationRequest {
+            build_id: "build-7".to_string(),
+            unit: Some(make_compilation_unit("ss7", "D.java", vec![])),
+        }))
+        .await
+        .unwrap();
+
+        svc.record_compilation(Request::new(RecordCompilationRequest {
+            build_id: "build-7".to_string(),
+            unit: Some(make_compilation_unit("ss7", "B.java", vec!["D.java"])),
+        }))
+        .await
+        .unwrap();
+
+        svc.record_compilation(Request::new(RecordCompilationRequest {
+            build_id: "build-7".to_string(),
+            unit: Some(make_compilation_unit("ss7", "C.java", vec!["D.java"])),
+        }))
+        .await
+        .unwrap();
+
+        svc.record_compilation(Request::new(RecordCompilationRequest {
+            build_id: "build-7".to_string(),
+            unit: Some(make_compilation_unit("ss7", "A.java", vec!["B.java", "C.java"])),
+        }))
+        .await
+        .unwrap();
+
+        let rebuild = svc
+            .get_rebuild_set(Request::new(GetRebuildSetRequest {
+                build_id: "build-7".to_string(),
+                source_set_id: "ss7".to_string(),
+                changed_files: vec!["D.java".to_string()],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(rebuild.must_recompile_count, 4);
     }
 }
