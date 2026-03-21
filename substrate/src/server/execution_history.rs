@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
@@ -6,9 +7,9 @@ use tokio::fs;
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
-    execution_history_service_server::ExecutionHistoryService, LoadHistoryRequest,
-    LoadHistoryResponse, RemoveHistoryRequest, RemoveHistoryResponse, StoreHistoryRequest,
-    StoreHistoryResponse,
+    execution_history_service_server::ExecutionHistoryService, GetHistoryStatsRequest,
+    GetHistoryStatsResponse, LoadHistoryRequest, LoadHistoryResponse, RemoveHistoryRequest,
+    RemoveHistoryResponse, StoreHistoryRequest, StoreHistoryResponse,
 };
 
 /// Rust-native execution history store.
@@ -16,6 +17,10 @@ use crate::proto::{
 pub struct ExecutionHistoryServiceImpl {
     entries: DashMap<String, HistoryEntry>,
     persistence_dir: PathBuf,
+    load_hits: AtomicI64,
+    load_misses: AtomicI64,
+    stores: AtomicI64,
+    removes: AtomicI64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -30,6 +35,10 @@ impl ExecutionHistoryServiceImpl {
         Self {
             entries: DashMap::new(),
             persistence_dir,
+            load_hits: AtomicI64::new(0),
+            load_misses: AtomicI64::new(0),
+            stores: AtomicI64::new(0),
+            removes: AtomicI64::new(0),
         }
     }
 
@@ -99,12 +108,14 @@ impl ExecutionHistoryService for ExecutionHistoryServiceImpl {
         let req = request.into_inner();
 
         if let Some(entry) = self.entries.get(&req.work_identity) {
+            self.load_hits.fetch_add(1, Ordering::Relaxed);
             Ok(Response::new(LoadHistoryResponse {
                 found: true,
                 state: entry.state.clone(),
                 timestamp_ms: entry.timestamp_ms,
             }))
         } else {
+            self.load_misses.fetch_add(1, Ordering::Relaxed);
             Ok(Response::new(LoadHistoryResponse {
                 found: false,
                 state: Vec::new(),
@@ -126,6 +137,7 @@ impl ExecutionHistoryService for ExecutionHistoryServiceImpl {
 
         self.entries.insert(req.work_identity.clone(), entry.clone());
         self.persist_to_disk(&req.work_identity, &entry).await;
+        self.stores.fetch_add(1, Ordering::Relaxed);
 
         tracing::debug!(
             work = %req.work_identity,
@@ -144,8 +156,43 @@ impl ExecutionHistoryService for ExecutionHistoryServiceImpl {
 
         self.entries.remove(&req.work_identity);
         self.remove_from_disk(&req.work_identity).await;
+        self.removes.fetch_add(1, Ordering::Relaxed);
 
         Ok(Response::new(RemoveHistoryResponse { success: true }))
+    }
+
+    async fn get_history_stats(
+        &self,
+        _request: Request<GetHistoryStatsRequest>,
+    ) -> Result<Response<GetHistoryStatsResponse>, Status> {
+        let entry_count = self.entries.len() as i64;
+        let total_bytes: i64 = self
+            .entries
+            .iter()
+            .map(|e| e.value().state.len() as i64)
+            .sum();
+
+        let load_hits = self.load_hits.load(Ordering::Relaxed);
+        let load_misses = self.load_misses.load(Ordering::Relaxed);
+        let stores = self.stores.load(Ordering::Relaxed);
+        let removes = self.removes.load(Ordering::Relaxed);
+
+        let total_loads = load_hits + load_misses;
+        let hit_rate = if total_loads > 0 {
+            load_hits as f64 / total_loads as f64
+        } else {
+            1.0
+        };
+
+        Ok(Response::new(GetHistoryStatsResponse {
+            entry_count,
+            total_bytes_stored: total_bytes,
+            load_hits,
+            load_misses,
+            stores,
+            removes,
+            hit_rate,
+        }))
     }
 }
 
@@ -256,5 +303,62 @@ mod tests {
         assert!(resp.found);
         assert_eq!(resp.state, vec![99, 100]);
         assert_eq!(resp.timestamp_ms, 999);
+    }
+
+    #[tokio::test]
+    async fn test_history_stats() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = ExecutionHistoryServiceImpl::new(dir.path().to_path_buf());
+
+        // Store two entries
+        svc.store_history(Request::new(StoreHistoryRequest {
+            work_identity: ":a".to_string(),
+            state: vec![1, 2, 3],
+            timestamp_ms: 100,
+        }))
+        .await
+        .unwrap();
+
+        svc.store_history(Request::new(StoreHistoryRequest {
+            work_identity: ":b".to_string(),
+            state: vec![4, 5],
+            timestamp_ms: 200,
+        }))
+        .await
+        .unwrap();
+
+        // Hit and miss
+        svc.load_history(Request::new(LoadHistoryRequest {
+            work_identity: ":a".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        svc.load_history(Request::new(LoadHistoryRequest {
+            work_identity: ":missing".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        // Remove one
+        svc.remove_history(Request::new(RemoveHistoryRequest {
+            work_identity: ":b".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        let stats = svc
+            .get_history_stats(Request::new(GetHistoryStatsRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(stats.entry_count, 1); // :b was removed
+        assert_eq!(stats.total_bytes_stored, 3); // only :a remains
+        assert_eq!(stats.load_hits, 1);
+        assert_eq!(stats.load_misses, 1);
+        assert_eq!(stats.stores, 2);
+        assert_eq!(stats.removes, 1);
+        assert!((stats.hit_rate - 0.5).abs() < f64::EPSILON);
     }
 }
