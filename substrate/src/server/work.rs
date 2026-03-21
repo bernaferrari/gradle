@@ -107,6 +107,7 @@ impl WorkService for WorkServiceImpl {
         Ok(Response::new(WorkEvaluateResponse {
             should_execute,
             reason,
+            input_hash,
         }))
     }
 
@@ -119,7 +120,7 @@ impl WorkService for WorkServiceImpl {
         self.scheduler.history.entries.insert(
             req.task_path.clone(),
             WorkHistoryEntry {
-                input_hash: String::new(),
+                input_hash: req.input_hash,
                 success: req.success,
                 duration_ms: req.duration_ms,
             },
