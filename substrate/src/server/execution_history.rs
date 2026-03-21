@@ -21,6 +21,7 @@ pub struct ExecutionHistoryServiceImpl {
     load_misses: AtomicI64,
     stores: AtomicI64,
     removes: AtomicI64,
+    evictions: AtomicI64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -39,6 +40,7 @@ impl ExecutionHistoryServiceImpl {
             load_misses: AtomicI64::new(0),
             stores: AtomicI64::new(0),
             removes: AtomicI64::new(0),
+            evictions: AtomicI64::new(0),
         }
     }
 
@@ -97,6 +99,35 @@ impl ExecutionHistoryServiceImpl {
             }
         }
     }
+
+    /// Evict old entries if the store exceeds the given max_entries threshold.
+    /// Removes entries with the oldest timestamps.
+    fn maybe_evict(&self, max_entries: usize) {
+        if self.entries.len() <= max_entries {
+            return;
+        }
+
+        let to_remove_count = self.entries.len() - max_entries / 2;
+
+        // Collect entries sorted by timestamp (oldest first)
+        let mut timestamped: Vec<(i64, String)> = self
+            .entries
+            .iter()
+            .map(|entry| (entry.value().timestamp_ms, entry.key().clone()))
+            .collect();
+        timestamped.sort_by_key(|(ts, _)| *ts);
+
+        for (_, key) in timestamped.into_iter().take(to_remove_count) {
+            if self.entries.remove(&key).is_some() {
+                self.evictions.fetch_add(1, Ordering::Relaxed);
+                // Remove disk file in background (best-effort)
+                let path = self.state_file_path(&key);
+                tokio::spawn(async move {
+                    let _ = fs::remove_file(path).await;
+                });
+            }
+        }
+    }
 }
 
 #[tonic::async_trait]
@@ -137,6 +168,7 @@ impl ExecutionHistoryService for ExecutionHistoryServiceImpl {
 
         self.entries.insert(req.work_identity.clone(), entry.clone());
         self.persist_to_disk(&req.work_identity, &entry).await;
+        self.maybe_evict(10_000);
         self.stores.fetch_add(1, Ordering::Relaxed);
 
         tracing::debug!(
