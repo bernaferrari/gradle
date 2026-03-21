@@ -138,18 +138,53 @@ impl TaskGraphServiceImpl {
     }
 
     fn calculate_critical_path(&self) -> i64 {
-        // Dynamic programming: longest path from source to each node
-        let mut longest: HashMap<String, i64> = HashMap::new();
+        // Topological sort via Kahn's algorithm, then DP for longest path.
+        // DashMap iteration order is non-deterministic, so we must sort first.
+        let mut in_degree: HashMap<String, usize> = HashMap::new();
+        let mut dependents: HashMap<String, Vec<String>> = HashMap::new();
 
         for entry in self.tasks.iter() {
             let path = entry.task_path.clone();
-            let mut max_dep = 0i64;
+            in_degree.entry(path.clone()).or_insert(0);
             for dep in &entry.depends_on {
-                let dep_duration = longest.get(dep).copied().unwrap_or(0);
-                max_dep = max_dep.max(dep_duration);
+                if self.tasks.contains_key(dep.as_str()) {
+                    *in_degree.entry(path.clone()).or_insert(0) += 1;
+                    dependents.entry(dep.clone()).or_default().push(path.clone());
+                }
             }
-            let current = entry.estimated_duration_ms + max_dep;
-            longest.insert(path, current);
+        }
+
+        let mut queue: VecDeque<String> = VecDeque::new();
+        for (task, &deg) in &in_degree {
+            if deg == 0 {
+                queue.push_back(task.clone());
+            }
+        }
+
+        let mut topo_order = Vec::new();
+        while let Some(task) = queue.pop_front() {
+            topo_order.push(task.clone());
+            if let Some(deps) = dependents.get(&task) {
+                for dep in deps {
+                    let degree = in_degree.get_mut(dep).unwrap();
+                    *degree -= 1;
+                    if *degree == 0 {
+                        queue.push_back(dep.clone());
+                    }
+                }
+            }
+        }
+
+        // DP: longest path in topological order
+        let mut longest: HashMap<String, i64> = HashMap::new();
+        for task in &topo_order {
+            if let Some(entry) = self.tasks.get(task) {
+                let mut max_dep = 0i64;
+                for dep in &entry.depends_on {
+                    max_dep = max_dep.max(longest.get(dep).copied().unwrap_or(0));
+                }
+                longest.insert(task.clone(), entry.estimated_duration_ms + max_dep);
+            }
         }
 
         longest.values().copied().max().unwrap_or(0)

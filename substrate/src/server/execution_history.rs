@@ -15,7 +15,7 @@ use crate::proto::{
 /// Rust-native execution history store.
 /// Replaces Java's ExecutionHistoryStore with in-memory DashMap + disk persistence.
 pub struct ExecutionHistoryServiceImpl {
-    entries: DashMap<String, HistoryEntry>,
+    pub(crate) entries: DashMap<String, HistoryEntry>,
     persistence_dir: PathBuf,
     load_hits: AtomicI64,
     load_misses: AtomicI64,
@@ -25,10 +25,10 @@ pub struct ExecutionHistoryServiceImpl {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-struct HistoryEntry {
-    key: String,
-    state: Vec<u8>,
-    timestamp_ms: i64,
+pub(crate) struct HistoryEntry {
+    pub(crate) key: String,
+    pub(crate) state: Vec<u8>,
+    pub(crate) timestamp_ms: i64,
 }
 
 impl Default for ExecutionHistoryServiceImpl {
