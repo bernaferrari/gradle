@@ -21,6 +21,9 @@ struct ConfigCacheEntry {
     storage_time_ms: i64,
 }
 
+/// Default maximum cache entries before LRU eviction kicks in.
+const MAX_CACHE_ENTRIES: usize = 1000;
+
 /// Rust-native configuration cache service.
 /// Stores and retrieves serialized build configuration using bincode.
 ///
@@ -33,6 +36,7 @@ pub struct ConfigurationCacheServiceImpl {
     total_stores: AtomicI64,
     total_hits: AtomicI64,
     total_misses: AtomicI64,
+    entries_evicted: AtomicI64,
 }
 
 impl ConfigurationCacheServiceImpl {
@@ -44,6 +48,7 @@ impl ConfigurationCacheServiceImpl {
             total_stores: AtomicI64::new(0),
             total_hits: AtomicI64::new(0),
             total_misses: AtomicI64::new(0),
+            entries_evicted: AtomicI64::new(0),
         }
     }
 
@@ -107,6 +112,24 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
 
         let key = req.cache_key.clone();
         self.cache.insert(key.clone(), entry);
+
+        // LRU eviction: if cache is over capacity, remove the oldest entries
+        if self.cache.len() > MAX_CACHE_ENTRIES {
+            let to_remove = self.cache.len() - MAX_CACHE_ENTRIES / 2;
+            // Remove oldest entries (first entries in iteration order)
+            let keys_to_remove: Vec<String> = self
+                .cache
+                .iter()
+                .take(to_remove)
+                .map(|entry| entry.key().clone())
+                .collect();
+            for k in &keys_to_remove {
+                if self.cache.remove(k).is_some() {
+                    self.remove_from_disk(k);
+                }
+            }
+            self.entries_evicted.fetch_add(keys_to_remove.len() as i64, Ordering::Relaxed);
+        }
 
         // Persist to disk
         if let Some(stored_entry) = self.cache.get(&key) {
