@@ -127,6 +127,7 @@ impl IncrementalCompilationService for IncrementalCompilationServiceImpl {
             let existing = ss.units.iter().find(|u| u.source_file == unit.source_file);
             changed = existing.is_some();
 
+            let compile_duration_ms = unit.compile_duration_ms;
             if let Some(existing) = ss.units.iter_mut().find(|u| u.source_file == unit.source_file) {
                 *existing = unit.clone();
                 ss.incremental_compiles += 1;
@@ -134,6 +135,7 @@ impl IncrementalCompilationService for IncrementalCompilationServiceImpl {
                 ss.units.push(unit);
                 ss.full_compiles += 1;
             }
+            ss.total_compile_time_ms += compile_duration_ms;
         } else {
             changed = false;
         }
