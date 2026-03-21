@@ -8,8 +8,6 @@ use nix::sys::signal::{self, Signal};
 #[cfg(unix)]
 use nix::unistd::Pid;
 
-#[cfg(target_os = "macos")]
-use std::mem;
 
 use crate::proto::{
     worker_process_service_server::WorkerProcessService, AcquireWorkerRequest,
@@ -45,6 +43,12 @@ pub struct WorkerProcessServiceImpl {
     workers_spawned: AtomicI64,
     workers_reused: AtomicI64,
     workers_stopped: AtomicI64,
+}
+
+impl Default for WorkerProcessServiceImpl {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl WorkerProcessServiceImpl {
@@ -331,8 +335,7 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
         let spawn_result = self.spawn_worker(&spec).await;
 
         // If spawn fails, fall back to stub behavior
-        if spawn_result.is_err() {
-            let e = spawn_result.unwrap_err();
+        if let Err(e) = &spawn_result {
             tracing::warn!(
                 worker_key = %worker_key,
                 error = %e,
@@ -405,7 +408,7 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
                 // Add to idle pool
                 self.idle_workers
                     .entry(key)
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(req.worker_id.clone());
 
                 tracing::debug!(
@@ -801,8 +804,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_spawn_echo_process() {
-        let svc = WorkerProcessServiceImpl::new();
-
         // Use echo command as a real process test
         let mut cmd = tokio::process::Command::new("echo");
         cmd.arg("hello")

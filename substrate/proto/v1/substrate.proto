@@ -1219,6 +1219,7 @@ message GetEventLogRequest {
   string build_id = 1;
   int64 since_timestamp_ms = 2;
   int32 max_events = 3;
+  repeated string event_types = 4;
 }
 
 message GetEventLogResponse {

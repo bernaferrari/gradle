@@ -49,6 +49,12 @@ pub struct DependencyResolutionServiceImpl {
     http_client: reqwest::Client,
 }
 
+impl Default for DependencyResolutionServiceImpl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DependencyResolutionServiceImpl {
     pub fn new() -> Self {
         Self {
@@ -118,7 +124,7 @@ impl DependencyResolutionServiceImpl {
             let optional = extract_tag_text(bytes, pos, b"optional")
                 .map(|v| v == "true")
                 .unwrap_or(false);
-            let classifier = extract_tag_text(bytes, pos, b"classifier").unwrap_or_default();
+            let _classifier = extract_tag_text(bytes, pos, b"classifier").unwrap_or_default();
             let _type_field = extract_tag_text(bytes, pos, b"type").unwrap_or_default();
 
             if !group.is_empty() && !name.is_empty() {
@@ -154,7 +160,6 @@ impl DependencyResolutionServiceImpl {
 
         // Extract all <key>value</key> pairs within the properties block
         let mut i = start + b"<properties>".len();
-        let end = end; // shadow for the loop
         while i < end {
             // Find next opening tag <something>
             let tag_start = match bytes[i..].iter().position(|&b| b == b'<') {
@@ -441,7 +446,7 @@ impl DependencyResolutionServiceImpl {
     }
 
     /// Download an artifact with retry logic.
-    async fn download_with_retry(&self, url: &str, max_retries: u32) -> Result<Vec<u8>, String> {
+    async fn _download_with_retry(&self, url: &str, max_retries: u32) -> Result<Vec<u8>, String> {
         let mut attempt = 0;
         loop {
             attempt += 1;
@@ -503,7 +508,7 @@ fn find_open_tag_exact(bytes: &[u8], from: usize, tag: &[u8]) -> Option<usize> {
 }
 
 /// Find the start of a tag (e.g., `<dependency>`) in bytes. (Legacy — kept for compatibility)
-fn find_tag(bytes: &[u8], from: usize, tag: &[u8]) -> Option<usize> {
+fn _find_tag(bytes: &[u8], from: usize, tag: &[u8]) -> Option<usize> {
     find_open_tag_exact(bytes, from, tag)
 }
 
@@ -683,7 +688,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
         let stream = async_stream::stream! {
             if url.is_empty() {
                 yield Ok(crate::proto::DownloadArtifactChunk {
-                    data: Vec::new().into(),
+                    data: Vec::new(),
                     offset: 0,
                     total_size: 0,
                     is_last: true,
@@ -712,7 +717,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                                             Ok(bytes) => {
                                                 let chunk_len = bytes.len() as u64;
                                                 yield Ok(crate::proto::DownloadArtifactChunk {
-                                                    data: bytes.to_vec().into(),
+                                                    data: bytes.to_vec(),
                                                     offset: offset as i64,
                                                     total_size: total_size as i64,
                                                     is_last: false,
@@ -722,7 +727,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                                             }
                                             Err(e) => {
                                                 yield Ok(crate::proto::DownloadArtifactChunk {
-                                                    data: Vec::new().into(),
+                                                    data: Vec::new(),
                                                     offset: offset as i64,
                                                     total_size: total_size as i64,
                                                     is_last: true,
@@ -735,7 +740,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
 
                                     // Final chunk
                                     yield Ok(crate::proto::DownloadArtifactChunk {
-                                        data: Vec::new().into(),
+                                        data: Vec::new(),
                                         offset: offset as i64,
                                         total_size: total_size as i64,
                                         is_last: true,
@@ -750,7 +755,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                                             for (offset, chunk) in bytes.chunks(chunk_size).enumerate() {
                                                 let is_last = offset * chunk_size + chunk.len() >= bytes.len();
                                                 yield Ok(crate::proto::DownloadArtifactChunk {
-                                                    data: chunk.to_vec().into(),
+                                                    data: chunk.to_vec(),
                                                     offset: (offset * chunk_size) as i64,
                                                     total_size: total,
                                                     is_last,
@@ -760,7 +765,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                                         }
                                         Err(e) => {
                                             yield Ok(crate::proto::DownloadArtifactChunk {
-                                                data: Vec::new().into(),
+                                                data: Vec::new(),
                                                 offset: 0,
                                                 total_size: 0,
                                                 is_last: true,
@@ -773,7 +778,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                             }
                             404 => {
                                 yield Ok(crate::proto::DownloadArtifactChunk {
-                                    data: Vec::new().into(),
+                                    data: Vec::new(),
                                     offset: 0,
                                     total_size: 0,
                                     is_last: true,
@@ -788,7 +793,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                             }
                             status => {
                                 yield Ok(crate::proto::DownloadArtifactChunk {
-                                    data: Vec::new().into(),
+                                    data: Vec::new(),
                                     offset: 0,
                                     total_size: 0,
                                     is_last: true,
@@ -805,7 +810,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                     }
                     Err(e) => {
                         yield Ok(crate::proto::DownloadArtifactChunk {
-                            data: Vec::new().into(),
+                            data: Vec::new(),
                             offset: 0,
                             total_size: 0,
                             is_last: true,

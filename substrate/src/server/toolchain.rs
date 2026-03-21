@@ -28,8 +28,14 @@ pub struct ToolchainServiceImpl {
     installations: DashMap<String, InstalledToolchain>,
     toolchain_dir: PathBuf,
     downloads_total: AtomicI64,
-    downloads_completed: AtomicI64,
+    _downloads_completed: AtomicI64,
     http_client: reqwest::Client,
+}
+
+impl Default for ToolchainServiceImpl {
+    fn default() -> Self {
+        Self::new(std::path::PathBuf::new())
+    }
 }
 
 impl ToolchainServiceImpl {
@@ -39,7 +45,7 @@ impl ToolchainServiceImpl {
             installations: DashMap::new(),
             toolchain_dir,
             downloads_total: AtomicI64::new(0),
-            downloads_completed: AtomicI64::new(0),
+            _downloads_completed: AtomicI64::new(0),
             http_client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(300))
                 .build()
@@ -189,7 +195,7 @@ impl ToolchainServiceImpl {
                     let major = major.split('_').next().unwrap_or("0");
                     return Some(format!("JDK {}", major));
                 }
-            } else if trimmed.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+            } else if trimmed.chars().next().is_some_and(|c| c.is_ascii_digit()) {
                 // Modern style: "17.0.12" -> "JDK 17"
                 if let Some(major) = trimmed.split('.').next() {
                     if major.parse::<u32>().is_ok() {
@@ -221,7 +227,7 @@ impl ToolchainServiceImpl {
     }
 
     /// Construct a download URL for a JDK distribution.
-    fn build_download_urls(version: &str, implementation: &str, os: &str, arch: &str) -> Vec<String> {
+    fn build_download_urls(version: &str, _implementation: &str, os: &str, arch: &str) -> Vec<String> {
         let mut urls = Vec::new();
 
         let os_part = match os {
@@ -252,11 +258,7 @@ impl ToolchainServiceImpl {
         ));
 
         // Corretto fallback
-        let corretto_arch = match arch_part {
-            "x64" => "x64",
-            "aarch64" => "aarch64",
-            _ => arch_part,
-        };
+        let corretto_arch = arch_part;
         urls.push(format!(
             "https://corretto.aws/downloads/latest/{}/amazon-corretto-{}-{}-{}-{}.{}",
             version, version, os_part, corretto_arch, version, ext
@@ -266,7 +268,7 @@ impl ToolchainServiceImpl {
     }
 
     /// Download a file from a URL to a local path, with progress reporting via a channel.
-    async fn download_file(
+    async fn _download_file(
         &self,
         url: &str,
         dest: &Path,

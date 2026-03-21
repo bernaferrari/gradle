@@ -31,6 +31,12 @@ struct HistoryEntry {
     timestamp_ms: i64,
 }
 
+impl Default for ExecutionHistoryServiceImpl {
+    fn default() -> Self {
+        Self::new(std::path::PathBuf::new())
+    }
+}
+
 impl ExecutionHistoryServiceImpl {
     pub fn new(persistence_dir: PathBuf) -> Self {
         Self {
@@ -78,7 +84,7 @@ impl ExecutionHistoryServiceImpl {
 
     fn state_file_path(&self, key: &str) -> PathBuf {
         // Sanitize key for filesystem use (work identity may contain ':' etc.)
-        let safe_key = key.replace(':', "_").replace('/', "_").replace('\\', "_");
+        let safe_key = key.replace([':', '/', '\\'], "_");
         self.persistence_dir.join(format!("{}.bin", safe_key))
     }
 

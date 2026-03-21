@@ -11,8 +11,14 @@ use crate::proto::{
     ValidateConfigCacheResponse,
 };
 
+/// Maximum number of cached configurations before eviction.
+const MAX_CACHED_CONFIGS: usize = 500;
+
 /// Rust-native configuration service.
 /// Manages project properties, plugin tracking, and configuration caching.
+/// Supports Gradle convention properties, environment variable fallback,
+/// and system property resolution.
+#[derive(Default)]
 pub struct ConfigurationServiceImpl {
     projects: DashMap<String, ProjectState>,
     config_cache: DashMap<String, ConfigCacheEntry>,
@@ -24,15 +30,29 @@ pub struct ConfigurationServiceImpl {
 }
 
 struct ProjectState {
+    #[allow(dead_code)]
     project_dir: String,
     properties: HashMap<String, String>,
+    #[allow(dead_code)]
     applied_plugins: Vec<String>,
 }
 
 struct ConfigCacheEntry {
     hash: Vec<u8>,
+    #[allow(dead_code)]
     timestamp_ms: i64,
 }
+
+/// Gradle convention property names that are automatically resolved.
+const GRADLE_CONVENTION_PROPERTIES: &[(&str, &str)] = &[
+    ("project.name", "project"),
+    ("project.group", "group"),
+    ("project.version", "version"),
+    ("project.description", "description"),
+    ("project.path", "project.path"),
+    ("rootProject.name", "rootProject"),
+    ("gradle.version", "gradle"),
+];
 
 impl ConfigurationServiceImpl {
     pub fn new() -> Self {
@@ -52,6 +72,51 @@ impl ConfigurationServiceImpl {
             .get(project_path)
             .map(|p| p.properties.clone())
             .unwrap_or_default()
+    }
+
+    /// Resolve a property name with fallback chain:
+    /// 1. Project properties (explicitly set)
+    /// 2. Gradle convention properties (mapped names)
+    /// 3. Environment variables (GRADLE_PROPERTY_ prefix or direct match)
+    /// 4. System properties (java.util.Properties via std::env)
+    fn resolve_property_fallback(&self, project_path: &str, property_name: &str) -> Option<(String, String)> {
+        // 1. Project properties
+        if let Some(project) = self.projects.get(project_path) {
+            if let Some(value) = project.properties.get(property_name) {
+                return Some((value.clone(), "project".to_string()));
+            }
+        }
+
+        // 2. Gradle convention properties
+        for (convention_name, mapped_name) in GRADLE_CONVENTION_PROPERTIES {
+            if property_name == *convention_name {
+                // Look up the mapped property name
+                if let Some(project) = self.projects.get(project_path) {
+                    if let Some(value) = project.properties.get(*mapped_name) {
+                        return Some((value.clone(), "convention".to_string()));
+                    }
+                }
+            }
+        }
+
+        // 3. Environment variables
+        // Try GRADLE_PROPERTY_{UPPER_CASE} first, then direct match
+        let env_key_upper = format!("GRADLE_PROPERTY_{}", property_name.replace('.', "_").to_uppercase());
+        if let Ok(value) = std::env::var(&env_key_upper) {
+            return Some((value, "env".to_string()));
+        }
+        if let Ok(value) = std::env::var(property_name) {
+            return Some((value, "env".to_string()));
+        }
+
+        // 4. System properties (via java system properties or env vars)
+        // In a Rust context, we check env vars with a "org.gradle." prefix
+        let sys_prop = format!("org.gradle.{}", property_name);
+        if let Ok(value) = std::env::var(&sys_prop) {
+            return Some((value, "system".to_string()));
+        }
+
+        None
     }
 
     /// Get stats about configuration service usage.
@@ -80,6 +145,19 @@ impl ConfigurationServiceImpl {
             },
         }
     }
+
+    /// Evict old cache entries if at capacity.
+    fn maybe_evict_cache(&self) {
+        if self.config_cache.len() <= MAX_CACHED_CONFIGS {
+            return;
+        }
+
+        let to_remove = self.config_cache.len() - MAX_CACHED_CONFIGS / 2;
+        let keys: Vec<String> = self.config_cache.iter().take(to_remove).map(|e| e.key().clone()).collect();
+        for key in keys {
+            self.config_cache.remove(&key);
+        }
+    }
 }
 
 pub struct ConfigStats {
@@ -101,14 +179,27 @@ impl ConfigurationService for ConfigurationServiceImpl {
     ) -> Result<Response<RegisterProjectResponse>, Status> {
         let req = request.into_inner();
 
+        // Derive convention properties from the path
+        let mut properties: HashMap<String, String> = req.properties.into_iter().collect();
+
+        // Auto-populate "project" from project_path if not set
+        if !properties.contains_key("project") {
+            properties.insert(
+                "project".to_string(),
+                req.project_path.strip_prefix(':').unwrap_or(&req.project_path).to_string(),
+            );
+        }
+
         self.projects.insert(
             req.project_path.clone(),
             ProjectState {
                 project_dir: req.project_dir,
-                properties: req.properties.into_iter().collect(),
+                properties,
                 applied_plugins: req.applied_plugins,
             },
         );
+
+        tracing::debug!(project = %req.project_path, "Registered project");
 
         Ok(Response::new(RegisterProjectResponse { success: true }))
     }
@@ -120,15 +211,14 @@ impl ConfigurationService for ConfigurationServiceImpl {
         let req = request.into_inner();
         self.property_resolutions.fetch_add(1, Ordering::Relaxed);
 
-        if let Some(project) = self.projects.get(&req.project_path) {
-            if let Some(value) = project.properties.get(&req.property_name) {
-                self.property_hits.fetch_add(1, Ordering::Relaxed);
-                return Ok(Response::new(ResolvePropertyResponse {
-                    value: value.clone(),
-                    source: "project".to_string(),
-                    found: true,
-                }));
-            }
+        // Try fallback chain
+        if let Some((value, source)) = self.resolve_property_fallback(&req.project_path, &req.property_name) {
+            self.property_hits.fetch_add(1, Ordering::Relaxed);
+            return Ok(Response::new(ResolvePropertyResponse {
+                value,
+                source,
+                found: true,
+            }));
         }
 
         Ok(Response::new(ResolvePropertyResponse {
@@ -156,6 +246,7 @@ impl ConfigurationService for ConfigurationServiceImpl {
             .unwrap_or(false);
 
         self.config_cache.insert(req.project_path.clone(), entry);
+        self.maybe_evict_cache();
 
         Ok(Response::new(CacheConfigurationResponse {
             cached: true,
@@ -243,6 +334,215 @@ mod tests {
             .into_inner();
 
         assert!(!resp.found);
+    }
+
+    #[tokio::test]
+    async fn test_convention_property_project_name() {
+        let svc = ConfigurationServiceImpl::new();
+
+        let mut props = HashMap::new();
+        props.insert("project".to_string(), "my-app".to_string());
+
+        svc.register_project(Request::new(RegisterProjectRequest {
+            project_path: ":app".to_string(),
+            project_dir: "/tmp/app".to_string(),
+            properties: props,
+            applied_plugins: vec![],
+        }))
+        .await
+        .unwrap();
+
+        // Resolve via convention name
+        let resp = svc
+            .resolve_property(Request::new(ResolvePropertyRequest {
+                project_path: ":app".to_string(),
+                property_name: "project.name".to_string(),
+                requested_by: "test".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.found);
+        assert_eq!(resp.value, "my-app");
+        assert_eq!(resp.source, "convention");
+    }
+
+    #[tokio::test]
+    async fn test_convention_property_project_version() {
+        let svc = ConfigurationServiceImpl::new();
+
+        let mut props = HashMap::new();
+        props.insert("version".to_string(), "2.0.0".to_string());
+
+        svc.register_project(Request::new(RegisterProjectRequest {
+            project_path: ":app".to_string(),
+            project_dir: "/tmp/app".to_string(),
+            properties: props,
+            applied_plugins: vec![],
+        }))
+        .await
+        .unwrap();
+
+        let resp = svc
+            .resolve_property(Request::new(ResolvePropertyRequest {
+                project_path: ":app".to_string(),
+                property_name: "project.version".to_string(),
+                requested_by: "test".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.found);
+        assert_eq!(resp.value, "2.0.0");
+        assert_eq!(resp.source, "convention");
+    }
+
+    #[tokio::test]
+    async fn test_auto_derive_project_name() {
+        let svc = ConfigurationServiceImpl::new();
+
+        svc.register_project(Request::new(RegisterProjectRequest {
+            project_path: ":my-app".to_string(),
+            project_dir: "/tmp/my-app".to_string(),
+            properties: HashMap::new(),
+            applied_plugins: vec![],
+        }))
+        .await
+        .unwrap();
+
+        // The "project" property should be auto-derived from the path
+        let resp = svc
+            .resolve_property(Request::new(ResolvePropertyRequest {
+                project_path: ":my-app".to_string(),
+                property_name: "project".to_string(),
+                requested_by: "test".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.found);
+        assert_eq!(resp.value, "my-app");
+
+        // And project.name should resolve via convention
+        let resp = svc
+            .resolve_property(Request::new(ResolvePropertyRequest {
+                project_path: ":my-app".to_string(),
+                property_name: "project.name".to_string(),
+                requested_by: "test".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.found);
+        assert_eq!(resp.value, "my-app");
+        assert_eq!(resp.source, "convention");
+    }
+
+    #[tokio::test]
+    async fn test_env_var_fallback() {
+        let svc = ConfigurationServiceImpl::new();
+
+        // Register a project without the property
+        svc.register_project(Request::new(RegisterProjectRequest {
+            project_path: ":app".to_string(),
+            project_dir: "/tmp/app".to_string(),
+            properties: HashMap::new(),
+            applied_plugins: vec![],
+        }))
+        .await
+        .unwrap();
+
+        // Set an env var for the test
+        std::env::set_var("GRADLE_PROPERTY_CUSTOM_PROP", "env_value");
+        let resp = svc
+            .resolve_property(Request::new(ResolvePropertyRequest {
+                project_path: ":app".to_string(),
+                property_name: "custom.prop".to_string(),
+                requested_by: "test".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Clean up
+        std::env::remove_var("GRADLE_PROPERTY_CUSTOM_PROP");
+
+        assert!(resp.found);
+        assert_eq!(resp.value, "env_value");
+        assert_eq!(resp.source, "env");
+    }
+
+    #[tokio::test]
+    async fn test_system_property_fallback() {
+        let svc = ConfigurationServiceImpl::new();
+
+        svc.register_project(Request::new(RegisterProjectRequest {
+            project_path: ":app".to_string(),
+            project_dir: "/tmp/app".to_string(),
+            properties: HashMap::new(),
+            applied_plugins: vec![],
+        }))
+        .await
+        .unwrap();
+
+        // Set a system property-style env var
+        std::env::set_var("org.gradle.java.home", "/usr/lib/jvm/java-17");
+        let resp = svc
+            .resolve_property(Request::new(ResolvePropertyRequest {
+                project_path: ":app".to_string(),
+                property_name: "java.home".to_string(),
+                requested_by: "test".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        std::env::remove_var("org.gradle.java.home");
+
+        assert!(resp.found);
+        assert_eq!(resp.value, "/usr/lib/jvm/java-17");
+        assert_eq!(resp.source, "system");
+    }
+
+    #[tokio::test]
+    async fn test_priority_order() {
+        let svc = ConfigurationServiceImpl::new();
+
+        // Register project with a property
+        let mut props = HashMap::new();
+        props.insert("custom".to_string(), "project_value".to_string());
+        svc.register_project(Request::new(RegisterProjectRequest {
+            project_path: ":app".to_string(),
+            project_dir: "/tmp/app".to_string(),
+            properties: props,
+            applied_plugins: vec![],
+        }))
+        .await
+        .unwrap();
+
+        // Set env var with same name
+        std::env::set_var("GRADLE_PROPERTY_CUSTOM", "env_value");
+
+        let resp = svc
+            .resolve_property(Request::new(ResolvePropertyRequest {
+                project_path: ":app".to_string(),
+                property_name: "custom".to_string(),
+                requested_by: "test".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        std::env::remove_var("GRADLE_PROPERTY_CUSTOM");
+
+        // Project property should win over env var
+        assert!(resp.found);
+        assert_eq!(resp.value, "project_value");
+        assert_eq!(resp.source, "project");
     }
 
     #[tokio::test]
@@ -398,5 +698,24 @@ mod tests {
         assert!((stats.property_hit_rate - 0.5).abs() < f64::EPSILON);
         assert_eq!(stats.cache_validations, 2);
         assert_eq!(stats.cache_hits, 1);
+    }
+
+    #[tokio::test]
+    async fn test_cache_eviction() {
+        let svc = ConfigurationServiceImpl::new();
+
+        // Fill cache beyond capacity
+        for i in 0..(MAX_CACHED_CONFIGS + 100) {
+            svc.cache_configuration(Request::new(CacheConfigurationRequest {
+                project_path: format!(":project-{}", i),
+                config_hash: vec![i as u8],
+                timestamp_ms: 100,
+            }))
+            .await
+            .unwrap();
+        }
+
+        // Should have evicted entries
+        assert!(svc.config_cache.len() <= MAX_CACHED_CONFIGS);
     }
 }

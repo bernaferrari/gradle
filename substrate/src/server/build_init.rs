@@ -34,6 +34,7 @@ struct InitScriptRecord {
 
 /// Rust-native build initialization service.
 /// Manages build startup, settings processing, init scripts, and settings file parsing.
+#[derive(Default)]
 pub struct BuildInitServiceImpl {
     builds: DashMap<String, BuildInitState>,
 }
@@ -167,10 +168,10 @@ impl BuildInitServiceImpl {
 
     fn extract_included_projects_groovy(line: &str, projects: &mut Vec<String>) {
         // include ':app', ':lib' or include ':app', ':lib'
-        let rest = if line.starts_with("include ") {
-            &line[8..]
-        } else if line.starts_with("include(") {
-            &line[8..]
+        let rest = if let Some(r) = line.strip_prefix("include ") {
+            r
+        } else if let Some(r) = line.strip_prefix("include(") {
+            r
         } else {
             return;
         };
@@ -217,10 +218,10 @@ impl BuildInitServiceImpl {
     }
 
     fn extract_included_builds_groovy(line: &str, builds: &mut Vec<String>) {
-        let rest = if line.starts_with("includeBuild ") {
-            &line[13..]
-        } else if line.starts_with("includeBuild(") {
-            &line[13..]
+        let rest = if let Some(r) = line.strip_prefix("includeBuild ") {
+            r
+        } else if let Some(r) = line.strip_prefix("includeBuild(") {
+            r
         } else {
             return;
         };

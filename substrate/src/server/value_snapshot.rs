@@ -8,6 +8,7 @@ use crate::proto::{
 
 /// Rust-native value snapshotting service.
 /// Computes fingerprints for input properties, replacing Java's DefaultValueSnapshotter.
+#[derive(Default)]
 pub struct ValueSnapshotServiceImpl;
 
 impl ValueSnapshotServiceImpl {
@@ -34,7 +35,7 @@ impl ValueSnapshotServiceImpl {
             }
             Some(crate::proto::property_value::Value::BoolValue(b)) => {
                 hasher.update(b"B:");
-                hasher.update(&[*b as u8]);
+                hasher.update([*b as u8]);
             }
             Some(crate::proto::property_value::Value::BinaryValue(bytes)) => {
                 hasher.update(b"X:");
