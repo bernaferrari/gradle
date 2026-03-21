@@ -299,13 +299,15 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
         @Nullable
         BuildResultShadowListener createBuildResultShadowListener(
             RustBuildResultClient rustBuildResultClient,
+            RustBuildMetricsClient rustBuildMetricsClient,
             ListenerManager listenerManager,
             InternalOptions options
         ) {
             if (!options.getOption(RustSubstrateOptions.ENABLE_SUBSTRATE).get()) {
                 return null;
             }
-            BuildResultShadowListener listener = new BuildResultShadowListener(rustBuildResultClient);
+            BuildResultShadowListener listener = new BuildResultShadowListener(
+                rustBuildResultClient, rustBuildMetricsClient);
             listenerManager.addListener(listener);
             return listener;
         }
