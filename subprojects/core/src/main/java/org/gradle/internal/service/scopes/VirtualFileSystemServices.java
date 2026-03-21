@@ -48,9 +48,15 @@ import org.gradle.internal.buildoption.InternalOption;
 import org.gradle.internal.buildoption.InternalOptions;
 import org.gradle.internal.buildoption.RustSubstrateOptions;
 import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.rustbridge.fingerprint.RustFileFingerprintClient;
+import org.gradle.internal.rustbridge.fingerprint.ShadowingFileCollectionSnapshotter;
 import org.gradle.internal.rustbridge.hash.RustGrpcFileHasher;
 import org.gradle.internal.rustbridge.hash.ShadowingFileHasher;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
+import org.gradle.internal.rustbridge.snapshot.ShadowingInputFingerprinter;
+import org.gradle.internal.rustbridge.snapshot.ShadowingValueSnapshotter;
+import org.gradle.internal.rustbridge.watch.RustFileWatchClient;
+import org.gradle.internal.rustbridge.watch.ShadowingFileWatcherRegistryFactory;
 import org.gradle.internal.classloader.ClasspathHasher;
 import org.gradle.internal.event.ListenerManager;
 import org.gradle.internal.execution.FileCollectionFingerprinterRegistry;
@@ -236,16 +242,31 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
             FileChangeListeners fileChangeListeners,
             NativeServices.FileEventFunctionsProvider fileEvents,
             FileSystem fileSystem,
-            WatchableFileSystemDetector watchableFileSystemDetector
+            WatchableFileSystemDetector watchableFileSystemDetector,
+            InternalOptions options,
+            @Nullable SubstrateClient substrateClient
         ) {
             CaseSensitivity caseSensitivity = fileSystem.isCaseSensitive() ? CASE_SENSITIVE : CASE_INSENSITIVE;
             SnapshotHierarchy root = DefaultSnapshotHierarchy.empty(caseSensitivity);
 
-            BuildLifecycleAwareVirtualFileSystem virtualFileSystem = determineWatcherRegistryFactory(
+            Optional<FileWatcherRegistryFactory> maybeFactory = determineWatcherRegistryFactory(
                 OperatingSystem.current(),
                 nativeCapabilities,
                 fileEvents,
-                fileWatchingFilter.getImmutableLocations()::contains)
+                fileWatchingFilter.getImmutableLocations()::contains);
+
+            // Conditionally wrap with Rust shadow watcher
+            if (options.getOption(RustSubstrateOptions.ENABLE_RUST_FILE_WATCH).get()
+                && maybeFactory.isPresent() && substrateClient != null && !substrateClient.isNoop()) {
+                FileWatcherRegistryFactory shadowFactory = new ShadowingFileWatcherRegistryFactory(
+                    maybeFactory.get(),
+                    new RustFileWatchClient(substrateClient),
+                    new HashMismatchReporter(true)
+                );
+                maybeFactory = Optional.of(shadowFactory);
+            }
+
+            BuildLifecycleAwareVirtualFileSystem virtualFileSystem = maybeFactory
                 .<BuildLifecycleAwareVirtualFileSystem>map(watcherRegistryFactory -> new WatchingVirtualFileSystem(
                     watcherRegistryFactory,
                     root,
@@ -415,8 +436,21 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
         }
 
         @Provides
-        FileCollectionSnapshotter createFileCollectionSnapshotter(FileSystemAccess fileSystemAccess, Stat stat) {
-            return new DefaultFileCollectionSnapshotter(fileSystemAccess, stat);
+        FileCollectionSnapshotter createFileCollectionSnapshotter(
+            FileSystemAccess fileSystemAccess,
+            Stat stat,
+            InternalOptions options,
+            @Nullable RustFileFingerprintClient rustFileFingerprintClient,
+            @Nullable HashMismatchReporter mismatchReporter
+        ) {
+            FileCollectionSnapshotter javaSnapshotter = new DefaultFileCollectionSnapshotter(fileSystemAccess, stat);
+
+            if (options.getOption(RustSubstrateOptions.ENABLE_RUST_FINGERPRINTING).get()
+                && rustFileFingerprintClient != null && mismatchReporter != null) {
+                return new ShadowingFileCollectionSnapshotter(javaSnapshotter, rustFileFingerprintClient, mismatchReporter);
+            }
+
+            return javaSnapshotter;
         }
 
         @Provides
@@ -447,9 +481,17 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
         InputFingerprinter createInputFingerprinter(
             FileCollectionSnapshotter snapshotter,
             FileCollectionFingerprinterRegistry fingerprinterRegistry,
-            ValueSnapshotter valueSnapshotter
+            ValueSnapshotter valueSnapshotter,
+            @Nullable ShadowingValueSnapshotter shadowingValueSnapshotter
         ) {
-            return new DefaultInputFingerprinter(snapshotter, fingerprinterRegistry, valueSnapshotter);
+            InputFingerprinter fingerprinter = new DefaultInputFingerprinter(
+                snapshotter, fingerprinterRegistry, valueSnapshotter);
+
+            if (shadowingValueSnapshotter != null) {
+                return new ShadowingInputFingerprinter(fingerprinter, shadowingValueSnapshotter);
+            }
+
+            return fingerprinter;
         }
 
         @Provides
