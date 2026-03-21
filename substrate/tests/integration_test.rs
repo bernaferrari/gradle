@@ -1090,3 +1090,82 @@ async fn test_dependency_resolution_cache_e2e() {
     assert_eq!(stats.artifact_cache_hits, 1);
     assert_eq!(stats.cached_artifacts, 1);
 }
+
+#[tokio::test]
+async fn test_build_operations_full_flow_e2e() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut ops_client = build_operations_service_client::BuildOperationsServiceClient::new(channel.clone());
+    let mut result_client = build_result_service_client::BuildResultServiceClient::new(channel.clone());
+
+    // Record a build failure
+    result_client
+        .report_build_failure(Request::new(ReportBuildFailureRequest {
+            build_id: "build-flow-test".to_string(),
+            failure_type: "compilation_error".to_string(),
+            failure_message: "Cannot resolve symbol 'foo'".to_string(),
+            failed_task_paths: vec![":app:compileJava".to_string()],
+        }))
+        .await
+        .unwrap();
+
+    // Start operations
+    ops_client
+        .start_operation(Request::new(StartOperationRequest {
+            operation_id: "op-compile".to_string(),
+            display_name: "Compile Java".to_string(),
+            operation_type: "TASK_EXECUTION".to_string(),
+            parent_id: String::new(),
+            start_time_ms: 1000,
+            metadata: Default::default(),
+        }))
+        .await
+        .unwrap();
+
+    ops_client
+        .start_operation(Request::new(StartOperationRequest {
+            operation_id: "op-test".to_string(),
+            display_name: "Run tests".to_string(),
+            operation_type: "TASK_EXECUTION".to_string(),
+            parent_id: String::new(),
+            start_time_ms: 2000,
+            metadata: Default::default(),
+        }))
+        .await
+        .unwrap();
+
+    // Complete operations
+    ops_client
+        .complete_operation(Request::new(CompleteOperationRequest {
+            operation_id: "op-compile".to_string(),
+            duration_ms: 500,
+            success: true,
+            outcome: "SUCCESS".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    ops_client
+        .complete_operation(Request::new(CompleteOperationRequest {
+            operation_id: "op-test".to_string(),
+            duration_ms: 1200,
+            success: false,
+            outcome: "FAILED".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    // Get build result
+    let result = result_client
+        .get_build_result(Request::new(GetBuildResultRequest {
+            build_id: "build-flow-test".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    // The build result should have the outcome we reported
+    assert!(result.outcome.is_some());
+    let outcome = result.outcome.unwrap();
+    assert_eq!(outcome.overall_result, "FAILED");
+}
