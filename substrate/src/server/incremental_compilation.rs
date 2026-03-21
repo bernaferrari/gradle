@@ -14,6 +14,7 @@ use crate::proto::{
 /// Tracked source set for incremental compilation.
 struct SourceSet {
     descriptor: SourceSetDescriptor,
+    #[allow(dead_code)]
     classpath_hash: String,
     units: Vec<CompilationUnit>,
     total_compile_time_ms: i64,

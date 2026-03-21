@@ -22,7 +22,9 @@ struct TrackedArtifact {
 
 /// Repository credentials.
 struct RepoCredentials {
+    #[allow(dead_code)]
     username: String,
+    #[allow(dead_code)]
     password: String,
 }
 
@@ -35,6 +37,7 @@ pub struct ArtifactPublishingServiceImpl {
     artifacts_registered: AtomicI64,
     uploads_completed: AtomicI64,
     repos: DashMap<String, RepoCredentials>,
+    #[allow(dead_code)]
     http_client: reqwest::Client,
 }
 
@@ -65,6 +68,7 @@ impl ArtifactPublishingServiceImpl {
     }
 
     /// Build the Maven repository URL for an artifact.
+    #[allow(dead_code)]
     fn artifact_url(&self, descriptor: &ArtifactDescriptor) -> String {
         let group_path = descriptor.group.replace('.', "/");
         let classifier = if descriptor.classifier.is_empty() {
@@ -86,6 +90,7 @@ impl ArtifactPublishingServiceImpl {
     }
 
     /// Perform an actual HTTP PUT upload of an artifact to a Maven repository.
+    #[allow(dead_code)]
     async fn perform_upload(
         &self,
         descriptor: &ArtifactDescriptor,
@@ -151,6 +156,7 @@ impl ArtifactPublishingServiceImpl {
     }
 }
 
+#[allow(dead_code)]
 fn base64_encode(data: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::new();

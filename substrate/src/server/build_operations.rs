@@ -18,17 +18,23 @@ use crate::proto::{
 struct ActiveOperation {
     display_name: String,
     operation_type: String,
+    #[allow(dead_code)]
     parent_id: String,
     start_time_ms: i64,
+    #[allow(dead_code)]
     metadata: Vec<(String, String)>,
     progress: f32,
 }
 
 /// Completed operation record for summary.
 struct CompletedOperation {
+    #[allow(dead_code)]
     display_name: String,
+    #[allow(dead_code)]
     operation_type: String,
+    #[allow(dead_code)]
     duration_ms: i64,
+    #[allow(dead_code)]
     success: bool,
 }
 

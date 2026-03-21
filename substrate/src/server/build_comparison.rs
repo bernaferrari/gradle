@@ -11,9 +11,11 @@ use crate::proto::BuildDataSnapshot;
 
 /// Stored build data for comparison.
 struct StoredBuildData {
+    #[allow(dead_code)]
     build_id: String,
     task_durations: std::collections::HashMap<String, i64>,
     task_outcomes: std::collections::HashMap<String, String>,
+    #[allow(dead_code)]
     task_order: Vec<String>,
     total_duration_ms: i64,
 }

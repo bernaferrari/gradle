@@ -19,16 +19,21 @@ struct BuildInitState {
     settings_details: Vec<SettingsDetailEntry>,
     init_scripts: Vec<InitScriptRecord>,
     included_projects: Vec<String>,
+    #[allow(dead_code)]
     included_builds: Vec<String>,
     root_project_name: Option<String>,
+    #[allow(dead_code)]
     settings_file_exists: bool,
+    #[allow(dead_code)]
     gradle_version: String,
 }
 
 /// Record of an executed init script.
 struct InitScriptRecord {
     path: String,
+    #[allow(dead_code)]
     success: bool,
+    #[allow(dead_code)]
     duration_ms: i64,
 }
 

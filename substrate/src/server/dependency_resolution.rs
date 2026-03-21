@@ -13,6 +13,7 @@ use crate::proto::{
 };
 
 /// Cached artifact metadata.
+#[allow(dead_code)]
 struct CachedArtifact {
     group: String,
     name: String,
