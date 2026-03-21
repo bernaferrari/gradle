@@ -12,16 +12,30 @@ use crate::proto::{
 /// Maximum number of stored cache keys to track before eviction.
 const MAX_STORED_KEYS: usize = 50_000;
 
+/// A tracked cached output entry: what outputs were stored and when.
+struct CachedOutputEntry {
+    /// Monotonically increasing sequence number for eviction ordering.
+    sequence: i64,
+    /// Execution time in ms when this was stored.
+    execution_time_ms: i64,
+    /// Output property names that were cached.
+    output_properties: Vec<String>,
+}
+
 /// Rust-native build cache orchestration service.
 /// Computes cache keys and coordinates cache operations.
 #[derive(Default)]
 pub struct BuildCacheOrchestrationServiceImpl {
-    // Track which cache keys have been stored (local cache availability)
-    stored_keys: dashmap::DashMap<String, i64>,
+    // Track which cache keys have been stored with their output metadata
+    stored_keys: dashmap::DashMap<String, CachedOutputEntry>,
     /// Monotonically increasing sequence number for eviction ordering.
     sequence: AtomicI64,
     /// Count of evicted entries.
     keys_evicted: AtomicI64,
+    /// Total number of cache hits.
+    cache_hits: AtomicI64,
+    /// Total number of cache misses.
+    cache_misses: AtomicI64,
 }
 
 impl BuildCacheOrchestrationServiceImpl {
@@ -30,11 +44,13 @@ impl BuildCacheOrchestrationServiceImpl {
             stored_keys: dashmap::DashMap::new(),
             sequence: AtomicI64::new(0),
             keys_evicted: AtomicI64::new(0),
+            cache_hits: AtomicI64::new(0),
+            cache_misses: AtomicI64::new(0),
         }
     }
 
     /// Evict old entries if the store exceeds the capacity.
-    /// Uses the value field as a sequence number — evicts oldest entries.
+    /// Uses the sequence number for eviction ordering — evicts oldest entries.
     fn maybe_evict_keys(&self) {
         if self.stored_keys.len() <= MAX_STORED_KEYS {
             return;
@@ -46,7 +62,7 @@ impl BuildCacheOrchestrationServiceImpl {
         let mut sequenced: Vec<(i64, String)> = self
             .stored_keys
             .iter()
-            .map(|entry| (*entry.value(), entry.key().clone()))
+            .map(|entry| (entry.value().sequence, entry.key().clone()))
             .collect();
         sequenced.sort_by_key(|(seq, _)| *seq);
 
@@ -145,12 +161,23 @@ impl BuildCacheOrchestrationService for BuildCacheOrchestrationServiceImpl {
         let req = request.into_inner();
         let key = String::from_utf8_lossy(&req.cache_key).to_string();
 
-        let available = self.stored_keys.contains_key(&key);
-
-        Ok(Response::new(ProbeCacheResponse {
-            available,
-            location: if available { "local".to_string() } else { String::new() },
-        }))
+        if let Some(entry) = self.stored_keys.get(&key) {
+            self.cache_hits.fetch_add(1, Ordering::Relaxed);
+            Ok(Response::new(ProbeCacheResponse {
+                available: true,
+                location: "local".to_string(),
+                output_properties: entry.output_properties.clone(),
+                execution_time_ms: entry.execution_time_ms,
+            }))
+        } else {
+            self.cache_misses.fetch_add(1, Ordering::Relaxed);
+            Ok(Response::new(ProbeCacheResponse {
+                available: false,
+                location: String::new(),
+                output_properties: Vec::new(),
+                execution_time_ms: 0,
+            }))
+        }
     }
 
     async fn store_outputs(
@@ -160,9 +187,16 @@ impl BuildCacheOrchestrationService for BuildCacheOrchestrationServiceImpl {
         let req = request.into_inner();
         let key = String::from_utf8_lossy(&req.cache_key).to_string();
 
-        // Use monotonically increasing sequence as value for eviction ordering
+        // Use monotonically increasing sequence for eviction ordering
         let seq = self.sequence.fetch_add(1, Ordering::Relaxed);
-        self.stored_keys.insert(key.clone(), seq);
+        self.stored_keys.insert(
+            key.clone(),
+            CachedOutputEntry {
+                sequence: seq,
+                execution_time_ms: req.execution_time_ms,
+                output_properties: req.output_properties,
+            },
+        );
         self.maybe_evict_keys();
 
         tracing::debug!(
@@ -248,6 +282,7 @@ mod tests {
         let store = svc.store_outputs(Request::new(StoreOutputsRequest {
             cache_key: b"test-key".to_vec(),
             execution_time_ms: 500,
+            output_properties: vec!["classes".to_string()],
         })).await.unwrap().into_inner();
         assert!(store.success);
 
@@ -269,6 +304,7 @@ mod tests {
             svc.store_outputs(Request::new(StoreOutputsRequest {
                 cache_key: key.as_bytes().to_vec(),
                 execution_time_ms: i as i64,
+                output_properties: Vec::new(),
             })).await.unwrap();
         }
 
@@ -286,5 +322,72 @@ mod tests {
             cache_key: format!("key-{}", MAX_STORED_KEYS + 50).as_bytes().to_vec(),
         })).await.unwrap().into_inner();
         assert!(probe.available, "Recent key should still be present");
+    }
+
+    #[tokio::test]
+    async fn test_probe_returns_output_properties() {
+        let svc = BuildCacheOrchestrationServiceImpl::new();
+
+        // Store with output properties
+        svc.store_outputs(Request::new(StoreOutputsRequest {
+            cache_key: b"key-outputs".to_vec(),
+            execution_time_ms: 250,
+            output_properties: vec!["classes".to_string(), "resources".to_string()],
+        })).await.unwrap();
+
+        // Probe should return the stored outputs
+        let probe = svc.probe_cache(Request::new(ProbeCacheRequest {
+            cache_key: b"key-outputs".to_vec(),
+        })).await.unwrap().into_inner();
+
+        assert!(probe.available);
+        assert_eq!(probe.location, "local");
+        assert_eq!(probe.execution_time_ms, 250);
+        assert_eq!(probe.output_properties.len(), 2);
+        assert!(probe.output_properties.contains(&"classes".to_string()));
+        assert!(probe.output_properties.contains(&"resources".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_probe_miss_returns_empty_outputs() {
+        let svc = BuildCacheOrchestrationServiceImpl::new();
+
+        let probe = svc.probe_cache(Request::new(ProbeCacheRequest {
+            cache_key: b"nonexistent".to_vec(),
+        })).await.unwrap().into_inner();
+
+        assert!(!probe.available);
+        assert!(probe.output_properties.is_empty());
+        assert_eq!(probe.execution_time_ms, 0);
+    }
+
+    #[tokio::test]
+    async fn test_cache_hit_miss_tracking() {
+        let svc = BuildCacheOrchestrationServiceImpl::new();
+
+        // Miss
+        let _ = svc.probe_cache(Request::new(ProbeCacheRequest {
+            cache_key: b"miss-key".to_vec(),
+        })).await.unwrap();
+
+        // Store
+        svc.store_outputs(Request::new(StoreOutputsRequest {
+            cache_key: b"hit-key".to_vec(),
+            execution_time_ms: 100,
+            output_properties: vec![],
+        })).await.unwrap();
+
+        // Hit
+        let _ = svc.probe_cache(Request::new(ProbeCacheRequest {
+            cache_key: b"hit-key".to_vec(),
+        })).await.unwrap();
+
+        // Another miss
+        let _ = svc.probe_cache(Request::new(ProbeCacheRequest {
+            cache_key: b"miss-key-2".to_vec(),
+        })).await.unwrap();
+
+        assert_eq!(svc.cache_hits.load(Ordering::Relaxed), 1);
+        assert_eq!(svc.cache_misses.load(Ordering::Relaxed), 2);
     }
 }
