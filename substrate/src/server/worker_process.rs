@@ -8,6 +8,9 @@ use nix::sys::signal::{self, Signal};
 #[cfg(unix)]
 use nix::unistd::Pid;
 
+#[cfg(target_os = "macos")]
+use std::mem;
+
 use crate::proto::{
     worker_process_service_server::WorkerProcessService, AcquireWorkerRequest,
     AcquireWorkerResponse, ConfigurePoolRequest, ConfigurePoolResponse, GetWorkerStatusRequest,
@@ -518,7 +521,7 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
 }
 
 /// Get memory usage for a process in bytes.
-/// Uses /proc/{pid}/status on Linux, proc_info on macOS.
+/// Uses /proc/{pid}/status on Linux, proc_pidinfo on macOS.
 fn get_process_memory(pid: u32) -> i64 {
     #[cfg(target_os = "linux")]
     {
@@ -543,11 +546,36 @@ fn get_process_memory(pid: u32) -> i64 {
 
     #[cfg(target_os = "macos")]
     {
+        use std::mem;
+        // Use proc_pidinfo to get RSS for a specific PID
+        #[repr(C)]
+        struct ProcVminfo {
+            pvi_size: u64,       // virtual memory size (bytes)
+            pvi_rssize: u64,     // resident set size (bytes)
+            pvi_footprint: u64,  // memory footprint (bytes)
+        }
+
+        let mut info: ProcVminfo = unsafe { mem::zeroed() };
+        let info_size = mem::size_of::<ProcVminfo>() as i32;
+
+        unsafe {
+            let ret = libc::proc_pidinfo(
+                pid as i32,
+                5, // PROC_PID_VMINFO = 5
+                0,
+                &mut info as *mut _ as *mut libc::c_void,
+                info_size,
+            );
+            if ret == info_size {
+                return info.pvi_rssize as i64;
+            }
+        }
         0
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
+        let _ = pid;
         0
     }
 }

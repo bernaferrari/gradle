@@ -12,6 +12,66 @@ use crate::proto::{
 /// Walks file trees and computes content hashes, replacing Java's FileCollectionFingerprinter.
 pub struct FileFingerprintServiceImpl;
 
+/// Normalization strategy for file paths in fingerprint computation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum NormalizationStrategy {
+    /// Use absolute paths (default).
+    AbsolutePath,
+    /// Use paths relative to the common root directory.
+    RelativePath,
+    /// Use only file names (ignore directory structure).
+    NameOnly,
+    /// Use only content hashes (ignore paths entirely).
+    HashOnly,
+}
+
+impl NormalizationStrategy {
+    fn from_str(s: &str) -> Self {
+        match s {
+            "RELATIVE_PATH" => Self::RelativePath,
+            "NAME_ONLY" => Self::NameOnly,
+            "HASH" => Self::HashOnly,
+            _ => Self::AbsolutePath,
+        }
+    }
+
+    /// Normalize a path according to the strategy.
+    /// `base` is the root directory (used for RELATIVE_PATH).
+    /// `relative` is the path relative to base.
+    fn normalize<'a>(&self, base: &Path, relative: &'a str, full_path: &Path) -> std::borrow::Cow<'a, str> {
+        match self {
+            Self::AbsolutePath => {
+                // Use the full absolute path
+                std::borrow::Cow::Owned(full_path.to_string_lossy().to_string())
+            }
+            Self::RelativePath => {
+                // Already relative to base
+                std::borrow::Cow::Borrowed(relative)
+            }
+            Self::NameOnly => {
+                // Use only the file name
+                std::borrow::Cow::Owned(
+                    full_path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(relative)
+                        .to_string(),
+                )
+            }
+            Self::HashOnly => {
+                // Use "hash-" prefix + relative as a placeholder;
+                // the actual entry path is replaced with the hash below
+                std::borrow::Cow::Borrowed(relative)
+            }
+        }
+    }
+
+    /// Replace a path entry with a hash-based identifier for HashOnly strategy.
+    fn hash_only_path(hash: &[u8]) -> String {
+        format!("hash-{:x}", Md5::digest(hash))
+    }
+}
+
 impl FileFingerprintServiceImpl {
     pub fn new() -> Self {
         Self
@@ -45,11 +105,15 @@ impl FileFingerprintServiceImpl {
         Ok((hash, size, modified))
     }
 
-    fn fingerprint_directory(dir: &Path, ignore_patterns: &[String]) -> Result<(Vec<(String, Vec<u8>, i64, i64, bool)>, Vec<u8>), String> {
+    fn fingerprint_directory(
+        dir: &Path,
+        ignore_patterns: &[String],
+        strategy: NormalizationStrategy,
+    ) -> Result<(Vec<(String, Vec<u8>, i64, i64, bool)>, Vec<u8>), String> {
         let mut entries = Vec::new();
         let mut dir_hasher = Md5::new();
 
-        Self::walk_dir(dir, dir, &mut entries, &mut dir_hasher, ignore_patterns)?;
+        Self::walk_dir(dir, dir, &mut entries, &mut dir_hasher, ignore_patterns, strategy)?;
 
         let collection_hash = dir_hasher.finalize().to_vec();
         Ok((entries, collection_hash))
@@ -91,6 +155,7 @@ impl FileFingerprintServiceImpl {
         entries: &mut Vec<(String, Vec<u8>, i64, i64, bool)>,
         hasher: &mut Md5,
         ignore_patterns: &[String],
+        strategy: NormalizationStrategy,
     ) -> Result<(), String> {
         let dir_entries = std::fs::read_dir(current)
             .map_err(|e| format!("{}: {}", current.display(), e))?;
@@ -114,14 +179,26 @@ impl FileFingerprintServiceImpl {
                 .to_string();
 
             if path.is_dir() {
-                Self::walk_dir(base, &path, entries, hasher, ignore_patterns)?;
+                Self::walk_dir(base, &path, entries, hasher, ignore_patterns, strategy)?;
             } else {
                 if let Ok((hash, size, modified)) = Self::fingerprint_file(&path) {
-                    hasher.update(relative.as_bytes());
-                    hasher.update(b"=");
-                    hasher.update(&hash);
-                    hasher.update(b";");
-                    entries.push((relative, hash, size, modified, false));
+                    let normalized = strategy.normalize(base, &relative, &path);
+
+                    match strategy {
+                        NormalizationStrategy::HashOnly => {
+                            // Only hash content contributes; path is ignored
+                            hasher.update(&hash);
+                            hasher.update(b";");
+                            entries.push((NormalizationStrategy::hash_only_path(&hash), hash, size, modified, false));
+                        }
+                        _ => {
+                            hasher.update(normalized.as_bytes());
+                            hasher.update(b"=");
+                            hasher.update(&hash);
+                            hasher.update(b";");
+                            entries.push((normalized.into_owned(), hash, size, modified, false));
+                        }
+                    }
                 }
             }
         }
@@ -139,6 +216,7 @@ impl FileFingerprintService for FileFingerprintServiceImpl {
         let req = request.into_inner();
         let mut all_entries = Vec::new();
         let mut collection_hasher = Md5::new();
+        let strategy = NormalizationStrategy::from_str(&req.normalization_strategy);
 
         for file in &req.files {
             let path = Path::new(&file.absolute_path);
@@ -153,15 +231,22 @@ impl FileFingerprintService for FileFingerprintServiceImpl {
             match file_type {
                 FingerprintType::FingerprintDirectory | FingerprintType::FingerprintRoot => {
                     if path.is_dir() {
-                        match Self::fingerprint_directory(path, &req.ignore_patterns) {
+                        match Self::fingerprint_directory(path, &req.ignore_patterns, strategy) {
                             Ok((entries, dir_hash)) => {
-                                for (rel_path, hash, size, modified, is_dir) in &entries {
-                                    collection_hasher.update(rel_path.as_bytes());
-                                    collection_hasher.update(hash);
+                                for (entry_path, hash, size, modified, is_dir) in &entries {
+                                    match strategy {
+                                        NormalizationStrategy::HashOnly => {
+                                            collection_hasher.update(hash);
+                                        }
+                                        _ => {
+                                            collection_hasher.update(entry_path.as_bytes());
+                                            collection_hasher.update(hash);
+                                        }
+                                    }
                                 }
-                                for (rel_path, hash, size, modified, is_dir) in entries {
+                                for (entry_path, hash, size, modified, is_dir) in entries {
                                     all_entries.push(FileFingerprintEntry {
-                                        path: rel_path,
+                                        path: entry_path,
                                         hash,
                                         size,
                                         last_modified: modified,
@@ -184,15 +269,33 @@ impl FileFingerprintService for FileFingerprintServiceImpl {
                 FingerprintType::FingerprintFile => {
                     match Self::fingerprint_file(path) {
                         Ok((hash, size, modified)) => {
+                            let display_path = match strategy {
+                                NormalizationStrategy::RelativePath => file.absolute_path.clone(),
+                                NormalizationStrategy::NameOnly => {
+                                    path.file_name()
+                                        .and_then(|n| n.to_str())
+                                        .unwrap_or(&file.absolute_path)
+                                        .to_string()
+                                }
+                                NormalizationStrategy::HashOnly => format!("hash-{:x}", Md5::digest(&hash)),
+                                _ => file.absolute_path.clone(),
+                            };
                             all_entries.push(FileFingerprintEntry {
-                                path: file.absolute_path.clone(),
+                                path: display_path.clone(),
                                 hash: hash.clone(),
                                 size,
                                 last_modified: modified,
                                 is_directory: false,
                             });
-                            collection_hasher.update(file.absolute_path.as_bytes());
-                            collection_hasher.update(&hash);
+                            match strategy {
+                                NormalizationStrategy::HashOnly => {
+                                    collection_hasher.update(&hash);
+                                }
+                                _ => {
+                                    collection_hasher.update(display_path.as_bytes());
+                                    collection_hasher.update(&hash);
+                                }
+                            }
                         }
                         Err(e) => {
                             return Ok(Response::new(FingerprintFilesResponse {
@@ -211,6 +314,7 @@ impl FileFingerprintService for FileFingerprintServiceImpl {
 
         tracing::debug!(
             files = all_entries.len(),
+            strategy = ?strategy,
             "Fingerprinted files"
         );
 
@@ -355,5 +459,139 @@ mod tests {
             path2,
             &["*.class".to_string(), "build".to_string()],
         ));
+    }
+
+    #[tokio::test]
+    async fn test_fingerprint_name_only_strategy() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub/a.txt"), "hello").unwrap();
+        std::fs::write(dir.path().join("sub/b.txt"), "world").unwrap();
+
+        let svc = FileFingerprintServiceImpl::new();
+        let resp = svc
+            .fingerprint_files(Request::new(FingerprintFilesRequest {
+                files: vec![crate::proto::FileToFingerprint {
+                    absolute_path: dir.path().to_string_lossy().to_string(),
+                    r#type: FingerprintType::FingerprintDirectory as i32,
+                }],
+                normalization_strategy: "NAME_ONLY".to_string(),
+                ignore_patterns: Vec::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.success);
+        assert_eq!(resp.entries.len(), 2);
+        // Paths should be just filenames
+        for entry in &resp.entries {
+            assert!(!entry.path.contains('/'), "Expected name-only, got: {}", entry.path);
+            assert!(
+                entry.path == "a.txt" || entry.path == "b.txt",
+                "Expected a.txt or b.txt, got: {}",
+                entry.path
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fingerprint_hash_only_strategy() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("test.txt"), "content").unwrap();
+
+        let svc = FileFingerprintServiceImpl::new();
+        let resp = svc
+            .fingerprint_files(Request::new(FingerprintFilesRequest {
+                files: vec![crate::proto::FileToFingerprint {
+                    absolute_path: dir.path().to_string_lossy().to_string(),
+                    r#type: FingerprintType::FingerprintDirectory as i32,
+                }],
+                normalization_strategy: "HASH".to_string(),
+                ignore_patterns: Vec::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.success);
+        assert_eq!(resp.entries.len(), 1);
+        // Path should start with "hash-"
+        assert!(resp.entries[0].path.starts_with("hash-"), "Expected hash- prefix, got: {}", resp.entries[0].path);
+    }
+
+    #[tokio::test]
+    async fn test_fingerprint_relative_path_strategy() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("test.txt"), "data").unwrap();
+
+        let svc = FileFingerprintServiceImpl::new();
+        let resp = svc
+            .fingerprint_files(Request::new(FingerprintFilesRequest {
+                files: vec![crate::proto::FileToFingerprint {
+                    absolute_path: dir.path().to_string_lossy().to_string(),
+                    r#type: FingerprintType::FingerprintDirectory as i32,
+                }],
+                normalization_strategy: "RELATIVE_PATH".to_string(),
+                ignore_patterns: Vec::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.success);
+        assert_eq!(resp.entries.len(), 1);
+        // Relative path should be just "test.txt" (no absolute path prefix)
+        assert_eq!(resp.entries[0].path, "test.txt");
+    }
+
+    #[tokio::test]
+    async fn test_same_content_different_paths_hash_only() {
+        // Two directories with same file content but different paths should have same hash
+        let dir1 = tempfile::tempdir().unwrap();
+        let dir2 = tempfile::tempdir().unwrap();
+        std::fs::write(dir1.path().join("same.txt"), "identical content").unwrap();
+        std::fs::write(dir2.path().join("same.txt"), "identical content").unwrap();
+
+        let svc = FileFingerprintServiceImpl::new();
+
+        let resp1 = svc
+            .fingerprint_files(Request::new(FingerprintFilesRequest {
+                files: vec![crate::proto::FileToFingerprint {
+                    absolute_path: dir1.path().to_string_lossy().to_string(),
+                    r#type: FingerprintType::FingerprintDirectory as i32,
+                }],
+                normalization_strategy: "HASH".to_string(),
+                ignore_patterns: Vec::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let resp2 = svc
+            .fingerprint_files(Request::new(FingerprintFilesRequest {
+                files: vec![crate::proto::FileToFingerprint {
+                    absolute_path: dir2.path().to_string_lossy().to_string(),
+                    r#type: FingerprintType::FingerprintDirectory as i32,
+                }],
+                normalization_strategy: "HASH".to_string(),
+                ignore_patterns: Vec::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp1.collection_hash, resp2.collection_hash,
+            "HASH strategy should produce same collection hash for same content regardless of path");
+    }
+
+    #[test]
+    fn test_normalization_strategy_from_str() {
+        assert_eq!(NormalizationStrategy::from_str("ABSOLUTE_PATH"), NormalizationStrategy::AbsolutePath);
+        assert_eq!(NormalizationStrategy::from_str("RELATIVE_PATH"), NormalizationStrategy::RelativePath);
+        assert_eq!(NormalizationStrategy::from_str("NAME_ONLY"), NormalizationStrategy::NameOnly);
+        assert_eq!(NormalizationStrategy::from_str("HASH"), NormalizationStrategy::HashOnly);
+        assert_eq!(NormalizationStrategy::from_str("unknown"), NormalizationStrategy::AbsolutePath);
+        assert_eq!(NormalizationStrategy::from_str(""), NormalizationStrategy::AbsolutePath);
     }
 }

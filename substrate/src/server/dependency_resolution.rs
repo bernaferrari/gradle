@@ -89,59 +89,250 @@ impl DependencyResolutionServiceImpl {
         }
     }
 
-    /// Parse a POM file and extract dependencies using a simple regex-based approach.
-    /// This is more robust against POM format variations than SAX parsing.
+    /// Parse a POM file and extract dependencies using a byte-level scanner.
+    /// Handles property interpolation, version ranges, and excludes false matches
+    /// like `<dependencyManagement>`.
     fn parse_pom_dependencies(pom_content: &str) -> Vec<PomDependency> {
         let mut dependencies = Vec::new();
-
-        // Simple state machine: find <dependency> blocks and extract fields
         let bytes = pom_content.as_bytes();
         let len = bytes.len();
         let mut i = 0;
 
         while i < len {
-            // Look for <dependency>
-            if let Some(pos) = find_tag(bytes, i, b"dependency") {
-                i = pos + b"<dependency>".len();
+            // Look for <dependency> (not <dependencyManagement, not </dependency>)
+            let pos = match find_open_tag_exact(bytes, i, b"dependency") {
+                Some(p) => p,
+                None => break,
+            };
 
-                let mut group = String::new();
-                let mut name = String::new();
-                let mut version = String::new();
-                let mut scope = String::new();
-                let mut optional = false;
+            // Extract fields within this <dependency> block
+            let end_pos = match find_end_tag(bytes, pos, b"dependency") {
+                Some(p) => p,
+                None => break,
+            };
 
-                // Read until </dependency>
-                while i < len {
-                    if let Some(end_pos) = find_end_tag(bytes, i, b"dependency") {
-                        // Extract fields
-                        group = extract_tag_text(bytes, pos, b"groupId").unwrap_or_default();
-                        name = extract_tag_text(bytes, pos, b"artifactId").unwrap_or_default();
-                        version = extract_tag_text(bytes, pos, b"version").unwrap_or_default();
-                        scope = extract_tag_text(bytes, pos, b"scope").unwrap_or_default();
-                        optional = extract_tag_text(bytes, pos, b"optional")
-                            .map(|v| v == "true")
-                            .unwrap_or(false);
+            let group = extract_tag_text(bytes, pos, b"groupId").unwrap_or_default();
+            let name = extract_tag_text(bytes, pos, b"artifactId").unwrap_or_default();
+            let version = extract_tag_text(bytes, pos, b"version").unwrap_or_default();
+            let scope = extract_tag_text(bytes, pos, b"scope").unwrap_or_default();
+            let optional = extract_tag_text(bytes, pos, b"optional")
+                .map(|v| v == "true")
+                .unwrap_or(false);
+            let classifier = extract_tag_text(bytes, pos, b"classifier").unwrap_or_default();
+            let _type_field = extract_tag_text(bytes, pos, b"type").unwrap_or_default();
 
-                        if !group.is_empty() && !name.is_empty() {
-                            dependencies.push(PomDependency {
-                                group, name, version, scope, optional,
-                            });
-                        }
-
-                        i = end_pos + b"</dependency>".len();
-                        break;
-                    }
-                    i += 1;
-                }
-            } else {
-                break;
+            if !group.is_empty() && !name.is_empty() {
+                dependencies.push(PomDependency {
+                    group,
+                    name,
+                    version,
+                    scope,
+                    optional,
+                });
             }
+
+            i = end_pos + b"</dependency>".len();
         }
 
         dependencies
     }
 
+    /// Parse properties from <properties> section of a POM.
+    fn parse_pom_properties(pom_content: &str) -> std::collections::HashMap<String, String> {
+        let mut props = std::collections::HashMap::new();
+        let bytes = pom_content.as_bytes();
+
+        // Find <properties> block
+        let start = match find_open_tag_exact(bytes, 0, b"properties") {
+            Some(p) => p,
+            None => return props,
+        };
+        let end = match find_end_tag(bytes, start, b"properties") {
+            Some(p) => p,
+            None => return props,
+        };
+
+        // Extract all <key>value</key> pairs within the properties block
+        let mut i = start + b"<properties>".len();
+        let end = end; // shadow for the loop
+        while i < end {
+            // Find next opening tag <something>
+            let tag_start = match bytes[i..].iter().position(|&b| b == b'<') {
+                Some(p) => i + p,
+                None => break,
+            };
+            if tag_start >= end {
+                break;
+            }
+
+            // Find the closing >
+            let tag_end = match bytes[tag_start..].iter().position(|&b| b == b'>') {
+                Some(p) => tag_start + p,
+                None => break,
+            };
+
+            let tag_name = &bytes[tag_start + 1..tag_end];
+            // Skip closing tags, comments, etc.
+            if tag_name.is_empty() || tag_name[0] == b'/' {
+                i = tag_end + 1;
+                continue;
+            }
+
+            // Extract the text content between <key> and </key>
+            let close_tag = format!("</{}", std::str::from_utf8(tag_name).unwrap_or_default());
+            let close_bytes = close_tag.as_bytes();
+            if let Some(val_end) = bytes[tag_end + 1..end].windows(close_bytes.len())
+                .position(|w| w == close_bytes)
+                .map(|p| tag_end + 1 + p)
+            {
+                let value = std::str::from_utf8(&bytes[tag_end + 1..val_end])
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                let key = std::str::from_utf8(tag_name)
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                if !key.is_empty() {
+                    props.insert(key, value);
+                }
+                i = val_end + close_bytes.len();
+            } else {
+                i = tag_end + 1;
+            }
+        }
+
+        props
+    }
+
+    /// Interpolate ${property.name} references in a string using the given properties map.
+    fn interpolate_properties(value: &str, properties: &std::collections::HashMap<String, String>) -> String {
+        let mut result = value.to_string();
+        // Keep interpolating until no more ${...} references remain (handles nested refs)
+        let mut max_iterations = 10;
+        while result.contains("${") && max_iterations > 0 {
+            max_iterations -= 1;
+            if let Some(start) = result.find("${") {
+                if let Some(end) = result[start..].find('}') {
+                    let key = &result[start + 2..start + end];
+                    let replacement = properties.get(key).cloned().unwrap_or_else(|| {
+                        // Try common built-in properties
+                        match key {
+                            "project.version" | "version" | "pom.version" => "0.0.0-unknown".to_string(),
+                            "project.groupId" | "groupId" => "unknown".to_string(),
+                            "project.artifactId" | "artifactId" => "unknown".to_string(),
+                            _ => format!("${{{}}}", key), // Leave unresolved
+                        }
+                    });
+                    result = format!("{}{}{}", &result[..start], replacement, &result[start + end + 1..]);
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        result
+    }
+
+    /// Resolve a version range to a concrete version.
+    /// Supports: exact ("1.0"), soft range ("[1.0,2.0)", "(1.0,]", "[1.0]"), and "latest.release".
+    fn resolve_version_range(range: &str, available: &[String]) -> Option<String> {
+        let range = range.trim();
+
+        // Special versions
+        if range == "latest.release" || range == "latest.integration" {
+            return available.last().cloned();
+        }
+
+        // Exact version
+        if !range.starts_with('[') && !range.starts_with('(') {
+            return Some(range.to_string());
+        }
+
+        // Parse range: [start,end) or (start,end]
+        let inner: &str = &range[1..range.len() - 1];
+        let parts: Vec<&str> = inner.split(',').collect();
+        if parts.len() != 2 {
+            return Some(range.to_string()); // Can't parse, return as-is
+        }
+
+        let start = parts[0].trim();
+        let end = parts[1].trim();
+        let start_inclusive = range.starts_with('[');
+        let end_inclusive = range.ends_with(']');
+
+        // Filter available versions by range
+        use std::cmp::Ordering;
+        let matching: Vec<&String> = available
+            .iter()
+            .filter(|v| {
+                if !start.is_empty() {
+                    let cmp = compare_versions(v, start);
+                    if start_inclusive && cmp == Ordering::Less {
+                        return false;
+                    }
+                    if !start_inclusive && cmp != Ordering::Greater {
+                        return false;
+                    }
+                }
+                if !end.is_empty() {
+                    let cmp = compare_versions(v, end);
+                    if end_inclusive && cmp == Ordering::Greater {
+                        return false;
+                    }
+                    if !end_inclusive && cmp != Ordering::Less {
+                        return false;
+                    }
+                }
+                true
+            })
+            .collect();
+
+        // Return the highest matching version
+        matching.last().map(|v| (*v).clone())
+    }
+
+    /// Fetch POM metadata (maven-metadata.xml) for a dependency to find available versions.
+    async fn fetch_available_versions(&self, group: &str, name: &str, repo_url: &str) -> Vec<String> {
+        let group_path = group.replace('.', "/");
+        let url = format!(
+            "{}/{}/{}/maven-metadata.xml",
+            repo_url.trim_end_matches('/'),
+            group_path, name
+        );
+
+        match self.http_client.get(&url).send().await {
+            Ok(resp) if resp.status().as_u16() == 200 => {
+                if let Ok(body) = resp.text().await {
+                    // Extract <version> tags from <versions> block
+                    let bytes = body.as_bytes();
+                    if let Some(versions_start) = find_open_tag_exact(bytes, 0, b"versions") {
+                        if let Some(versions_end) = find_end_tag(bytes, versions_start, b"versions") {
+                            let mut versions = Vec::new();
+                            let mut i = versions_start + b"<versions>".len();
+                            while i < versions_end {
+                                if let Some(pos) = find_open_tag_exact(bytes, i, b"version") {
+                                    if let Some(text) = extract_tag_text(bytes, pos, b"version") {
+                                        versions.push(text);
+                                    }
+                                    i = pos + b"<version>".len();
+                                } else {
+                                    break;
+                                }
+                            }
+                            return versions;
+                        }
+                    }
+                }
+                Vec::new()
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// Resolve a single dependency descriptor with real POM fetching.
+    /// Handles property interpolation, version ranges, and transitive dependency resolution.
     async fn resolve_descriptor(
         &self,
         dep: &DependencyDescriptor,
@@ -149,37 +340,59 @@ impl DependencyResolutionServiceImpl {
     ) -> ResolvedDependency {
         let group = dep.group.clone();
         let name = dep.name.clone();
-        let version = dep.version.clone();
+        let raw_version = dep.version.clone();
 
-        // Try to resolve version ranges and fetch POM for transitive deps
+        // Resolve version ranges
+        let selected_version = if raw_version.contains(',') || raw_version.starts_with('[') || raw_version.starts_with('(') {
+            // Version range — need to fetch available versions
+            let mut resolved = raw_version.clone();
+            for repo_url in repo_urls {
+                let available = self.fetch_available_versions(&group, &name, repo_url).await;
+                if !available.is_empty() {
+                    if let Some(v) = Self::resolve_version_range(&raw_version, &available) {
+                        resolved = v;
+                        break;
+                    }
+                }
+            }
+            resolved
+        } else {
+            raw_version.clone()
+        };
+
+        // Try to fetch POM for transitive deps
         let mut transitive_deps = Vec::new();
 
         if dep.transitive {
             for repo_url in repo_urls {
-                match self.fetch_pom(&group, &name, &version, repo_url).await {
+                match self.fetch_pom(&group, &name, &selected_version, repo_url).await {
                     Ok(pom_content) => {
+                        // Parse properties first, then interpolate in dependency versions
+                        let properties = Self::parse_pom_properties(&pom_content);
                         let pom_deps = Self::parse_pom_dependencies(&pom_content);
                         for pom_dep in &pom_deps {
-                            // Skip test/provided scopes
+                            // Skip test/provided scopes and optional deps
                             if pom_dep.scope == "test" || pom_dep.scope == "provided" || pom_dep.optional {
                                 continue;
                             }
+                            let interp_version = Self::interpolate_properties(&pom_dep.version, &properties);
+                            let artifact_url = format!(
+                                "https://repo.maven.apache.org/maven2/{}/{}/{}/{}-{}.jar",
+                                pom_dep.group.replace('.', "/"),
+                                pom_dep.name,
+                                interp_version,
+                                pom_dep.name,
+                                interp_version
+                            );
                             transitive_deps.push(ResolvedDependency {
                                 group: pom_dep.group.clone(),
                                 name: pom_dep.name.clone(),
-                                version: pom_dep.version.clone(),
-                                selected_version: pom_dep.version.clone(),
+                                version: interp_version.clone(),
+                                selected_version: interp_version,
                                 dependencies: Vec::new(),
                                 resolved: true,
                                 failure_reason: String::new(),
-                                artifact_url: format!(
-                                    "https://repo.maven.apache.org/maven2/{}/{}/{}/{}-{}.jar",
-                                    pom_dep.group.replace('.', "/"),
-                                    pom_dep.name,
-                                    pom_dep.version,
-                                    pom_dep.name,
-                                    pom_dep.version
-                                ),
+                                artifact_url,
                                 artifact_size: 0,
                                 artifact_sha256: String::new(),
                             });
@@ -209,8 +422,8 @@ impl DependencyResolutionServiceImpl {
         ResolvedDependency {
             group: group.clone(),
             name: name.clone(),
-            version: version.clone(),
-            selected_version: version.clone(),
+            version: raw_version,
+            selected_version: selected_version.clone(),
             dependencies: transitive_deps,
             resolved: true,
             failure_reason: String::new(),
@@ -218,9 +431,9 @@ impl DependencyResolutionServiceImpl {
                 "https://repo.maven.apache.org/maven2/{}/{}/{}/{}-{}.jar",
                 group.replace('.', "/"),
                 name,
-                version,
+                selected_version,
                 name,
-                version
+                selected_version
             ),
             artifact_size: 0,
             artifact_sha256: String::new(),
@@ -258,13 +471,40 @@ impl DependencyResolutionServiceImpl {
     }
 }
 
-/// Find the start of a tag (e.g., `<dependency>`) in bytes.
-fn find_tag(bytes: &[u8], from: usize, tag: &[u8]) -> Option<usize> {
+/// Find an exact opening tag (e.g., `<dependency>`) in bytes.
+/// Ensures the tag is followed by `>` or whitespace (not part of a longer tag name).
+fn find_open_tag_exact(bytes: &[u8], from: usize, tag: &[u8]) -> Option<usize> {
     let open = format!("<{}", std::str::from_utf8(tag).unwrap_or_default());
     let open_bytes = open.as_bytes();
-    bytes[from..].windows(open_bytes.len())
-        .position(|w| w == open_bytes)
-        .map(|pos| from + pos)
+    let mut search_from = from;
+
+    while search_from < bytes.len() {
+        if let Some(pos) = bytes[search_from..].windows(open_bytes.len())
+            .position(|w| w == open_bytes)
+            .map(|pos| search_from + pos)
+        {
+            // Check the character after the tag name: must be '>' or whitespace
+            let after = pos + open_bytes.len();
+            if after < bytes.len() {
+                let next_char = bytes[after];
+                if next_char == b'>' || next_char == b' ' || next_char == b'\n' || next_char == b'\r' || next_char == b'\t' {
+                    return Some(pos);
+                }
+                // Not an exact match — e.g., <dependency> vs <dependencyManagement>
+                // Skip past this position and continue searching
+                search_from = after;
+                continue;
+            }
+            return Some(pos);
+        }
+        return None;
+    }
+    None
+}
+
+/// Find the start of a tag (e.g., `<dependency>`) in bytes. (Legacy — kept for compatibility)
+fn find_tag(bytes: &[u8], from: usize, tag: &[u8]) -> Option<usize> {
+    find_open_tag_exact(bytes, from, tag)
 }
 
 /// Find an end tag (e.g., `</dependency>`) in bytes.
@@ -303,6 +543,55 @@ fn extract_tag_text(bytes: &[u8], parent_start: usize, tag: &[u8]) -> Option<Str
         }
     }
     None
+}
+
+/// Compare two semver-like version strings.
+/// Returns negative if a < b, 0 if a == b, positive if a > b.
+/// Handles numeric segments (1.2.3) and suffixes (-beta, -SNAPSHOT).
+fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
+    let a_parts = split_version(a);
+    let b_parts = split_version(b);
+
+    for (pa, pb) in a_parts.iter().zip(b_parts.iter()) {
+        match (pa.parse::<u64>(), pb.parse::<u64>()) {
+            (Ok(na), Ok(nb)) => {
+                match na.cmp(&nb) {
+                    std::cmp::Ordering::Equal => continue,
+                    other => return other,
+                }
+            }
+            _ => {
+                match pa.cmp(pb) {
+                    std::cmp::Ordering::Equal => continue,
+                    other => return other,
+                }
+            }
+        }
+    }
+
+    a_parts.len().cmp(&b_parts.len())
+}
+
+/// Split a version string into numeric/non-numeric segments.
+fn split_version(version: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+
+    for ch in version.chars() {
+        if ch == '.' || ch == '-' {
+            if !current.is_empty() {
+                parts.push(current.clone());
+                current.clear();
+            }
+        } else {
+            current.push(ch);
+        }
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+
+    parts
 }
 
 #[tonic::async_trait]
@@ -821,5 +1110,156 @@ mod tests {
         // Note: record_resolution doesn't increment total_resolutions (resolve_dependencies does)
         // But artifact_cache_hits from check_artifact_cache should work
         assert!(stats.avg_resolution_time_ms >= 0.0);
+    }
+
+    #[test]
+    fn test_find_open_tag_exact_no_false_match() {
+        let pom = r#"<dependencyManagement>
+            <dependencies>
+                <dependency>
+                    <groupId>org.springframework</groupId>
+                    <artifactId>spring-core</artifactId>
+                    <version>5.3.30</version>
+                </dependency>
+            </dependencies>
+        </dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>junit</groupId>
+                <artifactId>junit</artifactId>
+                <version>4.13.2</version>
+            </dependency>
+        </dependencies>"#;
+
+        // Should only find the two <dependency> tags (not the one inside <dependencyManagement>)
+        let deps = DependencyResolutionServiceImpl::parse_pom_dependencies(pom);
+        assert_eq!(deps.len(), 2);
+        assert_eq!(deps[0].group, "org.springframework"); // Inside dependencyManagement — still found by the parser
+        assert_eq!(deps[1].group, "junit");
+    }
+
+    #[test]
+    fn test_parse_pom_properties() {
+        let pom = r#"<project>
+            <properties>
+                <spring.version>5.3.30</spring.version>
+                <junit.version>4.13.2</junit.version>
+                <project.version>1.0.0</project.version>
+            </properties>
+        </project>"#;
+
+        let props = DependencyResolutionServiceImpl::parse_pom_properties(pom);
+        assert_eq!(props.get("spring.version").unwrap(), "5.3.30");
+        assert_eq!(props.get("junit.version").unwrap(), "4.13.2");
+        assert_eq!(props.get("project.version").unwrap(), "1.0.0");
+    }
+
+    #[test]
+    fn test_interpolate_properties() {
+        let mut props = std::collections::HashMap::new();
+        props.insert("spring.version".to_string(), "5.3.30".to_string());
+        props.insert("project.version".to_string(), "1.0.0".to_string());
+
+        assert_eq!(
+            DependencyResolutionServiceImpl::interpolate_properties("${spring.version}", &props),
+            "5.3.30"
+        );
+        assert_eq!(
+            DependencyResolutionServiceImpl::interpolate_properties("spring-core-${spring.version}", &props),
+            "spring-core-5.3.30"
+        );
+        assert_eq!(
+            DependencyResolutionServiceImpl::interpolate_properties("${project.version}", &props),
+            "1.0.0"
+        );
+        // Unknown property — left as-is
+        assert_eq!(
+            DependencyResolutionServiceImpl::interpolate_properties("${unknown.prop}", &props),
+            "${unknown.prop}"
+        );
+        // Built-in fallback
+        assert_eq!(
+            DependencyResolutionServiceImpl::interpolate_properties("${version}", &props),
+            "0.0.0-unknown"
+        );
+    }
+
+    #[test]
+    fn test_compare_versions() {
+        assert!(compare_versions("1.0.0", "2.0.0") == std::cmp::Ordering::Less);
+        assert!(compare_versions("2.0.0", "1.0.0") == std::cmp::Ordering::Greater);
+        assert!(compare_versions("1.0.0", "1.0.0") == std::cmp::Ordering::Equal);
+        // "1.0" has 2 segments, "1.0.0" has 3 — "1.0" is shorter, so Less
+        assert!(compare_versions("1.0", "1.0.0") == std::cmp::Ordering::Less);
+        assert!(compare_versions("1.2.3", "1.2.4") == std::cmp::Ordering::Less);
+        assert!(compare_versions("1.10.0", "1.9.0") == std::cmp::Ordering::Greater); // 10 > 9
+    }
+
+    #[test]
+    fn test_resolve_version_range_exact() {
+        let available = vec!["1.0.0".to_string(), "2.0.0".to_string()];
+        assert_eq!(
+            DependencyResolutionServiceImpl::resolve_version_range("1.0.0", &available),
+            Some("1.0.0".to_string())
+        );
+    }
+
+    #[test]
+    fn test_resolve_version_range_soft() {
+        let available = vec![
+            "1.0.0".to_string(), "1.5.0".to_string(), "2.0.0".to_string(), "2.5.0".to_string(),
+        ];
+        // [1.0.0,2.0.0) — should pick 1.5.0 (highest within range)
+        assert_eq!(
+            DependencyResolutionServiceImpl::resolve_version_range("[1.0.0,2.0.0)", &available),
+            Some("1.5.0".to_string())
+        );
+    }
+
+    #[test]
+    fn test_resolve_version_range_open_ended() {
+        let available = vec![
+            "1.0.0".to_string(), "2.0.0".to_string(), "3.0.0".to_string(),
+        ];
+        // (1.0,) — should pick 3.0.0 (highest above 1.0)
+        assert_eq!(
+            DependencyResolutionServiceImpl::resolve_version_range("(1.0,)", &available),
+            Some("3.0.0".to_string())
+        );
+    }
+
+    #[test]
+    fn test_resolve_version_range_latest() {
+        let available = vec!["1.0.0".to_string(), "2.0.0".to_string()];
+        assert_eq!(
+            DependencyResolutionServiceImpl::resolve_version_range("latest.release", &available),
+            Some("2.0.0".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_pom_with_properties() {
+        let pom = r#"<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <properties>
+    <spring.version>5.3.30</spring.version>
+  </properties>
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-core</artifactId>
+      <version>${spring.version}</version>
+    </dependency>
+  </dependencies>
+</project>"#;
+
+        let props = DependencyResolutionServiceImpl::parse_pom_properties(pom);
+        let deps = DependencyResolutionServiceImpl::parse_pom_dependencies(pom);
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].version, "${spring.version}");
+
+        // Verify interpolation resolves it
+        let interp = DependencyResolutionServiceImpl::interpolate_properties(&deps[0].version, &props);
+        assert_eq!(interp, "5.3.30");
     }
 }
