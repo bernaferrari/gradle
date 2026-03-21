@@ -704,6 +704,7 @@ dependencies = [
  "glob",
  "http-body-util",
  "hyper-util",
+ "libc",
  "md-5",
  "nix",
  "notify",

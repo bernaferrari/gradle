@@ -16,6 +16,7 @@ struct Reservation {
     reservation_id: String,
     build_id: String,
     resources: Vec<(String, i64)>, // (resource_type, amount)
+    created_at_ms: i64,
 }
 
 /// A tracked resource with current usage and limits.
@@ -57,7 +58,7 @@ impl ResourceManagementServiceImpl {
         resources.insert(
             "file_descriptors".to_string(),
             ResourceSlot {
-                total_capacity: 1024,
+                total_capacity: Self::fd_limit(),
                 used: 0,
                 soft_limit: 0,
             },
@@ -81,10 +82,8 @@ impl ResourceManagementServiceImpl {
     }
 
     fn system_memory_mb() -> i64 {
-        // Best-effort system memory detection
         #[cfg(target_os = "macos")]
         {
-            // Use sysctl hw.memsize
             std::process::Command::new("sysctl")
                 .args(["-n", "hw.memsize"])
                 .output()
@@ -113,9 +112,214 @@ impl ResourceManagementServiceImpl {
         }
     }
 
+    /// Get the system file descriptor limit using getrlimit.
+    fn fd_limit() -> i64 {
+        unsafe {
+            let mut rlim: libc::rlimit = std::mem::zeroed();
+            if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rlim) == 0 {
+                rlim.rlim_cur as i64
+            } else {
+                1024
+            }
+        }
+    }
+
+    /// Read current CPU usage percentage via /proc/stat (Linux) or sysctl (macOS).
+    fn read_cpu_usage_percent() -> f64 {
+        #[cfg(target_os = "linux")]
+        {
+            Self::read_cpu_usage_linux()
+        }
+        #[cfg(target_os = "macos")]
+        {
+            Self::read_cpu_usage_macos()
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        {
+            0.0
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn read_cpu_usage_linux() -> f64 {
+        let cpu_line = match std::fs::read_to_string("/proc/stat") {
+            Ok(content) => content.lines().next().map(|l| l.to_string()),
+            Err(_) => None,
+        };
+
+        let cpu_line = match cpu_line {
+            Some(line) => line,
+            None => return 0.0,
+        };
+
+        // Format: cpu  user nice system idle iowait irq softirq steal guest guest_nice
+        let parts: Vec<u64> = cpu_line
+            .split_whitespace()
+            .skip(1) // skip "cpu"
+            .filter_map(|s| s.parse::<u64>().ok())
+            .collect();
+
+        if parts.len() < 4 {
+            return 0.0;
+        }
+
+        let idle = parts[3];
+        let iowait = if parts.len() > 4 { parts[4] } else { 0 };
+        let total_idle = idle + iowait;
+        let total: u64 = parts.iter().sum();
+
+        if total == 0 {
+            return 0.0;
+        }
+
+        // CPU usage = 1.0 - (idle / total)
+        1.0 - (total_idle as f64 / total as f64)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn read_cpu_usage_macos() -> f64 {
+        // Use sysctl vm.loadavg for load average (proxy for CPU pressure)
+        // A load average > CPU count indicates saturation
+        std::process::Command::new("sysctl")
+            .args(["-n", "vm.loadavg"])
+            .output()
+            .ok()
+            .and_then(|out| String::from_utf8(out.stdout).ok())
+            .and_then(|s| {
+                // Output format: { 1.23 0.98 0.76 }
+                let trimmed = s.trim().trim_start_matches('{').trim_end_matches('}');
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                parts.first().and_then(|p| p.parse::<f64>().ok())
+            })
+            .map(|load_avg| {
+                let cpu_count = num_cpus::get() as f64;
+                // Convert load average to percentage (capped at 100%)
+                let usage = load_avg / cpu_count;
+                if usage > 1.0 { 100.0 } else { usage * 100.0 }
+            })
+            .unwrap_or(0.0)
+    }
+
+    /// Read current process RSS memory usage in MB.
+    fn read_process_rss_mb() -> i64 {
+        #[cfg(target_os = "linux")]
+        {
+            std::fs::read_to_string("/proc/self/status")
+                .ok()
+                .and_then(|s| {
+                    s.lines()
+                        .find(|l| l.starts_with("VmRSS:"))
+                        .and_then(|l| l.split_whitespace().nth(1))
+                        .and_then(|v| v.parse::<i64>().ok())
+                })
+                .map(|kb| kb / 1024)
+                .unwrap_or(0)
+        }
+        #[cfg(target_os = "macos")]
+        {
+            // Use proc_info to get RSS on macOS
+            unsafe {
+                let mut info: libc::proc_taskinfo = std::mem::zeroed();
+                let ret = libc::proc_pidinfo(
+                    libc::getpid(),
+                    libc::PROC_PIDTASKINFO,
+                    0,
+                    &mut info as *mut _ as *mut libc::c_void,
+                    std::mem::size_of::<libc::proc_taskinfo>() as libc::c_int,
+                );
+                if ret > 0 {
+                    (info.pti_resident_size / 1024 / 1024) as i64
+                } else {
+                    0
+                }
+            }
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        {
+            0
+        }
+    }
+
+    /// Read system memory available in MB.
+    fn read_available_memory_mb() -> i64 {
+        #[cfg(target_os = "linux")]
+        {
+            std::fs::read_to_string("/proc/meminfo")
+                .ok()
+                .and_then(|s| {
+                    s.lines()
+                        .find(|l| l.starts_with("MemAvailable:"))
+                        .and_then(|l| l.split_whitespace().nth(1))
+                        .and_then(|v| v.parse::<i64>().ok())
+                })
+                .map(|kb| kb / 1024)
+                .unwrap_or(0)
+        }
+        #[cfg(target_os = "macos")]
+        {
+            // On macOS, approximate available memory using vm_stat
+            std::process::Command::new("vm_stat")
+                .output()
+                .ok()
+                .and_then(|out| String::from_utf8(out.stdout).ok())
+                .map(|s| {
+                    let mut free_pages: u64 = 0;
+                    let mut inactive_pages: u64 = 0;
+                    for line in s.lines() {
+                        if let Some(val) = line
+                            .strip_prefix("Pages free:")
+                            .or_else(|| line.strip_prefix("Pages free:"))
+                        {
+                            free_pages = val.trim().trim_end_matches('.').parse().unwrap_or(0);
+                        }
+                        if let Some(val) = line.strip_prefix("Pages inactive:") {
+                            inactive_pages = val.trim().trim_end_matches('.').parse().unwrap_or(0);
+                        }
+                    }
+                    // page_size is 4096 on all modern macOS
+                    ((free_pages + inactive_pages) * 4096 / 1024 / 1024) as i64
+                })
+                .unwrap_or(0)
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        {
+            0
+        }
+    }
+
     fn generate_reservation_id(&self) -> String {
         let id = self.next_reservation_id.fetch_add(1, Ordering::Relaxed);
         format!("res-{}", id)
+    }
+
+    /// Clean up stale reservations older than the given timeout.
+    fn cleanup_stale_reservations(&self, timeout_ms: i64) -> i32 {
+        let now = Self::now_ms();
+        let stale_ids: Vec<String> = self
+            .reservations
+            .iter()
+            .filter(|entry| now - entry.value().created_at_ms > timeout_ms)
+            .map(|entry| entry.key().clone())
+            .collect();
+
+        let cleaned = stale_ids.len() as i32;
+        for id in &stale_ids {
+            if let Some((_, reservation)) = self.reservations.remove(id) {
+                for (resource_type, amount) in &reservation.resources {
+                    if let Some(mut slot) = self.resources.get_mut(resource_type) {
+                        slot.used = (slot.used - amount).max(0);
+                    }
+                }
+            }
+        }
+        cleaned
+    }
+
+    fn now_ms() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0)
     }
 }
 
@@ -177,6 +381,7 @@ impl ResourceManagementService for ResourceManagementServiceImpl {
                 reservation_id: reservation_id.clone(),
                 build_id: req.build_id.clone(),
                 resources: reserved,
+                created_at_ms: Self::now_ms(),
             },
         );
 
@@ -225,6 +430,9 @@ impl ResourceManagementService for ResourceManagementServiceImpl {
     ) -> Result<Response<GetResourceUsageResponse>, Status> {
         let _req = request.into_inner();
 
+        // Clean up stale reservations (older than 30 minutes)
+        self.cleanup_stale_reservations(30 * 60 * 1000);
+
         let mut usage = Vec::new();
         for entry in self.resources.iter() {
             usage.push(ResourceUsageEntry {
@@ -248,11 +456,14 @@ impl ResourceManagementService for ResourceManagementServiceImpl {
             .map(|r| r.used * 1024 * 1024)
             .unwrap_or(0);
 
+        let cpu_usage_percent = Self::read_cpu_usage_percent();
+        let process_rss_bytes = Self::read_process_rss_mb() * 1024 * 1024;
+
         Ok(Response::new(GetResourceUsageResponse {
             usage,
             total_memory_bytes: total_memory,
             used_memory_bytes: used_memory,
-            cpu_usage_percent: 0.0, // In production, read from /proc or sysinfo
+            cpu_usage_percent,
             active_threads: self
                 .resources
                 .get("threads")
