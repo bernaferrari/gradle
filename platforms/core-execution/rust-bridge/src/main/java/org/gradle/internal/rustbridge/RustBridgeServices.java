@@ -51,6 +51,8 @@ import org.gradle.internal.rustbridge.buildinit.RustBuildInitClient;
 import org.gradle.internal.rustbridge.incremental.RustIncrementalCompilationClient;
 import org.gradle.internal.rustbridge.metrics.RustBuildMetricsClient;
 import org.gradle.internal.rustbridge.gc.RustGarbageCollectionClient;
+import org.gradle.internal.rustbridge.evaluation.ProjectEvaluationShadowListener;
+import org.gradle.internal.rustbridge.graph.TaskExecutionGraphShadowListener;
 import org.gradle.internal.service.Provides;
 import org.gradle.internal.service.ServiceRegistration;
 import org.gradle.internal.service.scopes.AbstractGradleModuleServices;
@@ -442,6 +444,36 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             }
             PropertyShadowEvaluationListener listener = new PropertyShadowEvaluationListener(
                 new ShadowingPropertyResolver(rustConfigurationClient, mismatchReporter));
+            listenerManager.addListener(listener);
+            return listener;
+        }
+
+        @Provides
+        @Nullable
+        ProjectEvaluationShadowListener createProjectEvaluationShadowListener(
+            SubstrateClient client,
+            ListenerManager listenerManager,
+            InternalOptions options
+        ) {
+            if (!options.getOption(RustSubstrateOptions.ENABLE_SUBSTRATE).get()) {
+                return null;
+            }
+            ProjectEvaluationShadowListener listener = new ProjectEvaluationShadowListener(client);
+            listenerManager.addListener(listener);
+            return listener;
+        }
+
+        @Provides
+        @Nullable
+        TaskExecutionGraphShadowListener createTaskExecutionGraphShadowListener(
+            SubstrateClient client,
+            ListenerManager listenerManager,
+            InternalOptions options
+        ) {
+            if (!options.getOption(RustSubstrateOptions.ENABLE_SUBSTRATE).get()) {
+                return null;
+            }
+            TaskExecutionGraphShadowListener listener = new TaskExecutionGraphShadowListener(client);
             listenerManager.addListener(listener);
             return listener;
         }
