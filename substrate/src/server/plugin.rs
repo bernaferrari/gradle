@@ -14,6 +14,10 @@ struct PluginEntry {
     version: String,
     is_imperative: bool,
     applies_to: Vec<String>,
+    /// Plugins that must be applied before this one.
+    requires: Vec<String>,
+    /// Plugins that are incompatible with this one.
+    conflicts_with: Vec<String>,
 }
 
 /// Applied plugin tracking.
@@ -23,6 +27,13 @@ struct AppliedPlugin {
     version: String,
     applied_at_ms: i64,
     apply_order: i32,
+}
+
+/// Plugin compatibility check result.
+struct CompatibilityResult {
+    compatible: bool,
+    warnings: Vec<String>,
+    errors: Vec<String>,
 }
 
 /// Rust-native plugin service.
@@ -40,6 +51,76 @@ impl PluginServiceImpl {
             applied: DashMap::new(),
             apply_counters: DashMap::new(),
         }
+    }
+
+    /// Check if a plugin can be applied to a project given current state.
+    pub fn check_compatibility(
+        &self,
+        plugin_id: &str,
+        project_path: &str,
+    ) -> CompatibilityResult {
+        let mut result = CompatibilityResult {
+            compatible: true,
+            warnings: Vec::new(),
+            errors: Vec::new(),
+        };
+
+        // Check if plugin exists
+        let entry = match self.registry.get(plugin_id) {
+            Some(e) => e,
+            None => {
+                result.errors.push(format!("Plugin '{}' not found in registry", plugin_id));
+                result.compatible = false;
+                return result;
+            }
+        };
+
+        // Check if already applied
+        if let Some(applied_plugins) = self.applied.get(project_path) {
+            // Check conflicts even if already applied
+            for applied in applied_plugins.iter() {
+                if entry.conflicts_with.contains(&applied.plugin_id) {
+                    result.errors.push(format!(
+                        "Plugin '{}' conflicts with already-applied '{}'",
+                        plugin_id, applied.plugin_id
+                    ));
+                    result.compatible = false;
+                }
+            }
+
+            for applied in applied_plugins.iter() {
+                if applied.plugin_id == plugin_id {
+                    result.warnings.push(format!(
+                        "Plugin '{}' already applied to '{}'",
+                        plugin_id, project_path
+                    ));
+                    return result;
+                }
+            }
+
+            // Check requirements
+            for req_id in &entry.requires {
+                let req_met = applied_plugins.iter().any(|p| p.plugin_id == *req_id);
+                if !req_met {
+                    result.errors.push(format!(
+                        "Plugin '{}' requires '{}' which is not applied",
+                        plugin_id, req_id
+                    ));
+                    result.compatible = false;
+                }
+            }
+        } else {
+            // No plugins applied yet — check if this one has requirements
+            if !entry.requires.is_empty() {
+                result.errors.push(format!(
+                    "Plugin '{}' requires {:?} but no plugins are applied yet",
+                    plugin_id, entry.requires
+                ));
+                result.compatible = false;
+            }
+        }
+
+        result
     }
 }
 
@@ -59,6 +140,8 @@ impl PluginService for PluginServiceImpl {
                 version: req.version,
                 is_imperative: req.is_imperative,
                 applies_to: req.applies_to,
+                requires: req.requires,
+                conflicts_with: req.conflicts_with,
             },
         );
 
@@ -166,6 +249,8 @@ mod tests {
             version: "1.0".to_string(),
             is_imperative: false,
             applies_to: vec![],
+            requires: vec![],
+            conflicts_with: vec![],
         }))
         .await
         .unwrap();
@@ -211,6 +296,8 @@ mod tests {
             version: "1.0".to_string(),
             is_imperative: false,
             applies_to: vec![],
+            requires: vec![],
+            conflicts_with: vec![],
         }))
         .await
         .unwrap();
@@ -257,6 +344,8 @@ mod tests {
                 version: "1.0".to_string(),
                 is_imperative: false,
                 applies_to: vec![],
+                requires: vec![],
+                conflicts_with: vec![],
             }))
             .await
             .unwrap();
@@ -279,5 +368,91 @@ mod tests {
             .into_inner();
 
         assert_eq!(resp.plugins.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_plugin_conflict_detection() {
+        let svc = PluginServiceImpl::new();
+
+        svc.register_plugin(Request::new(RegisterPluginRequest {
+            plugin_id: "java".to_string(),
+            plugin_class: "JavaPlugin".to_string(),
+            version: "1.0".to_string(),
+            is_imperative: false,
+            applies_to: vec![],
+            requires: vec![],
+            conflicts_with: vec!["groovy".to_string()],
+        }))
+        .await
+        .unwrap();
+
+        svc.register_plugin(Request::new(RegisterPluginRequest {
+            plugin_id: "groovy".to_string(),
+            plugin_class: "GroovyPlugin".to_string(),
+            version: "1.0".to_string(),
+            is_imperative: false,
+            applies_to: vec![],
+            requires: vec!["java".to_string()],
+            conflicts_with: vec![],
+        }))
+        .await
+        .unwrap();
+
+        // Apply java first
+        let result = svc.check_compatibility("java", ":app");
+        assert!(result.compatible);
+        assert!(result.errors.is_empty());
+
+        svc.apply_plugin(Request::new(ApplyPluginRequest {
+            plugin_id: "java".to_string(),
+            project_path: ":app".to_string(),
+            apply_order: 0,
+        }))
+        .await
+        .unwrap();
+
+        // Try to apply groovy — requires java (which is applied, OK)
+        let result = svc.check_compatibility("groovy", ":app");
+        assert!(result.compatible);
+
+        // Now try java again — should warn about already applied
+        let result = svc.check_compatibility("java", ":app");
+        assert!(result.warnings.iter().any(|w| w.contains("already applied")));
+
+        // Apply groovy, then try java — should conflict
+        svc.apply_plugin(Request::new(ApplyPluginRequest {
+            plugin_id: "groovy".to_string(),
+            project_path: ":app".to_string(),
+            apply_order: 1,
+        }))
+        .await
+        .unwrap();
+
+        // Try to apply java again (now conflicts with groovy)
+        let result = svc.check_compatibility("java", ":app");
+        assert!(!result.compatible);
+        assert!(result.errors.iter().any(|e| e.contains("conflicts")));
+    }
+
+    #[tokio::test]
+    async fn test_plugin_requires_missing() {
+        let svc = PluginServiceImpl::new();
+
+        svc.register_plugin(Request::new(RegisterPluginRequest {
+            plugin_id: "kotlin".to_string(),
+            plugin_class: "KotlinPlugin".to_string(),
+            version: "1.0".to_string(),
+            is_imperative: false,
+            applies_to: vec![],
+            requires: vec!["java".to_string()],
+            conflicts_with: vec![],
+        }))
+        .await
+        .unwrap();
+
+        // Kotlin requires java but nothing is applied
+        let result = svc.check_compatibility("kotlin", ":app");
+        assert!(!result.compatible);
+        assert!(result.errors.iter().any(|e| e.contains("requires")));
     }
 }
