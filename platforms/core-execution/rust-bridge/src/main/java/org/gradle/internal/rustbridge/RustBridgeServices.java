@@ -49,6 +49,8 @@ import org.gradle.internal.rustbridge.console.RustConsoleClient;
 import org.gradle.internal.rustbridge.testexec.RustTestExecutionClient;
 import org.gradle.internal.rustbridge.buildinit.RustBuildInitClient;
 import org.gradle.internal.rustbridge.incremental.RustIncrementalCompilationClient;
+import org.gradle.internal.rustbridge.metrics.RustBuildMetricsClient;
+import org.gradle.internal.rustbridge.gc.RustGarbageCollectionClient;
 import org.gradle.internal.service.Provides;
 import org.gradle.internal.service.ServiceRegistration;
 import org.gradle.internal.service.scopes.AbstractGradleModuleServices;
@@ -281,6 +283,16 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
         @Provides
         RustIncrementalCompilationClient createRustIncrementalCompilationClient(SubstrateClient client) {
             return new RustIncrementalCompilationClient(client);
+        }
+
+        @Provides
+        RustBuildMetricsClient createRustBuildMetricsClient(SubstrateClient client) {
+            return new RustBuildMetricsClient(client);
+        }
+
+        @Provides
+        RustGarbageCollectionClient createRustGarbageCollectionClient(SubstrateClient client) {
+            return new RustGarbageCollectionClient(client);
         }
 
         @Provides

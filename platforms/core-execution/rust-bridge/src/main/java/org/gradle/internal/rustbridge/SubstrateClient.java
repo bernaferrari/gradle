@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit;
  * gRPC client for communicating with the Rust substrate daemon.
  * Connects via Unix domain socket.
  *
- * <p>Provides blocking stubs for all 31 substrate services.
+ * <p>Provides blocking stubs for all 33 substrate services.
  * When the substrate is disabled (noop mode), all stub getters
  * throw {@link SubstrateException}.</p>
  */
@@ -84,6 +84,10 @@ public class SubstrateClient implements Closeable {
     private final BuildInitServiceGrpc.BuildInitServiceBlockingStub buildInitStub;
     // Phase 36: Incremental compilation
     private final IncrementalCompilationServiceGrpc.IncrementalCompilationServiceBlockingStub incrementalCompilationStub;
+    // Phase 37: Build metrics
+    private final BuildMetricsServiceGrpc.BuildMetricsServiceBlockingStub buildMetricsStub;
+    // Phase 38: Garbage collection
+    private final GarbageCollectionServiceGrpc.GarbageCollectionServiceBlockingStub garbageCollectionStub;
 
     private SubstrateClient(ManagedChannel channel, boolean noop) {
         this.channel = channel;
@@ -120,6 +124,8 @@ public class SubstrateClient implements Closeable {
             this.artifactPublishingStub = null;
             this.buildInitStub = null;
             this.incrementalCompilationStub = null;
+            this.buildMetricsStub = null;
+            this.garbageCollectionStub = null;
         } else {
             this.controlStub = ControlServiceGrpc.newBlockingStub(channel);
             this.hashStub = HashServiceGrpc.newBlockingStub(channel);
@@ -152,6 +158,8 @@ public class SubstrateClient implements Closeable {
             this.artifactPublishingStub = ArtifactPublishingServiceGrpc.newBlockingStub(channel);
             this.buildInitStub = BuildInitServiceGrpc.newBlockingStub(channel);
             this.incrementalCompilationStub = IncrementalCompilationServiceGrpc.newBlockingStub(channel);
+            this.buildMetricsStub = BuildMetricsServiceGrpc.newBlockingStub(channel);
+            this.garbageCollectionStub = GarbageCollectionServiceGrpc.newBlockingStub(channel);
         }
     }
 
@@ -332,6 +340,16 @@ public class SubstrateClient implements Closeable {
     public IncrementalCompilationServiceGrpc.IncrementalCompilationServiceBlockingStub getIncrementalCompilationStub() {
         throwIfNoop();
         return incrementalCompilationStub;
+    }
+
+    public BuildMetricsServiceGrpc.BuildMetricsServiceBlockingStub getBuildMetricsStub() {
+        throwIfNoop();
+        return buildMetricsStub;
+    }
+
+    public GarbageCollectionServiceGrpc.GarbageCollectionServiceBlockingStub getGarbageCollectionStub() {
+        throwIfNoop();
+        return garbageCollectionStub;
     }
 
     private void throwIfNoop() {

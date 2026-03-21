@@ -285,6 +285,22 @@ public class RustSubstrateOptions {
     public static final InternalFlag ENABLE_RUST_INCREMENTAL =
         new InternalFlag("org.gradle.rust.substrate.incremental.enabled", false);
 
+    /**
+     * Enable Phase 37: Rust-native build metrics tracking.
+     * Property: org.gradle.rust.substrate.metrics.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_METRICS =
+        new InternalFlag("org.gradle.rust.substrate.metrics.enabled", false);
+
+    /**
+     * Enable Phase 38: Rust-native garbage collection.
+     * Property: org.gradle.rust.substrate.gc.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_GC =
+        new InternalFlag("org.gradle.rust.substrate.gc.enabled", false);
+
     private RustSubstrateOptions() {
         // utility class
     }
