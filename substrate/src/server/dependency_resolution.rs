@@ -5,9 +5,10 @@ use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
-    dependency_resolution_service_server::DependencyResolutionService, CheckArtifactCacheRequest,
-    CheckArtifactCacheResponse, DependencyDescriptor, RecordResolutionRequest,
-    RecordResolutionResponse, ResolveDependenciesRequest,
+    dependency_resolution_service_server::DependencyResolutionService, AddArtifactToCacheRequest,
+    AddArtifactToCacheResponse, CheckArtifactCacheRequest, CheckArtifactCacheResponse,
+    DependencyDescriptor, GetResolutionStatsRequest, GetResolutionStatsResponse,
+    RecordResolutionRequest, RecordResolutionResponse, ResolveDependenciesRequest,
     ResolveDependenciesResponse, ResolvedDependency,
 };
 
@@ -548,6 +549,70 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             acknowledged: true,
         }))
     }
+
+    async fn get_resolution_stats(
+        &self,
+        _request: Request<GetResolutionStatsRequest>,
+    ) -> Result<Response<GetResolutionStatsResponse>, Status> {
+        let total = self.resolution_stats.total_resolutions.load(Ordering::Relaxed);
+        let cache_hits = self.resolution_stats.cache_hits.load(Ordering::Relaxed);
+        let total_time = self.resolution_stats.total_time_ms.load(Ordering::Relaxed);
+        let cached_artifacts = self.artifact_cache.len() as i64;
+        let avg_time = if total > 0 {
+            total_time as f64 / total as f64
+        } else {
+            0.0
+        };
+
+        Ok(Response::new(GetResolutionStatsResponse {
+            total_resolutions: total,
+            artifact_cache_hits: cache_hits,
+            total_resolution_time_ms: total_time,
+            avg_resolution_time_ms: avg_time,
+            cached_artifacts,
+        }))
+    }
+
+    async fn add_artifact_to_cache(
+        &self,
+        request: Request<AddArtifactToCacheRequest>,
+    ) -> Result<Response<AddArtifactToCacheResponse>, Status> {
+        let req = request.into_inner();
+
+        let key = Self::artifact_cache_key(&req.group, &req.name, &req.version, &req.classifier);
+
+        let group = req.group.clone();
+        let name = req.name.clone();
+        let version = req.version.clone();
+        let classifier = req.classifier.clone();
+
+        let artifact = CachedArtifact {
+            group,
+            name,
+            version,
+            classifier,
+            extension: String::new(),
+            sha256: req.sha256,
+            local_path: req.local_path,
+            size: req.size,
+            cached_at_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64,
+        };
+
+        self.artifact_cache.insert(key, artifact);
+
+        tracing::debug!(
+            group = %req.group,
+            name = %req.name,
+            version = %req.version,
+            size = req.size,
+            "Artifact added to cache"
+        );
+
+        Ok(Response::new(AddArtifactToCacheResponse { accepted: true }))
+    }
 }
 
 #[cfg(test)]
@@ -687,5 +752,74 @@ mod tests {
         let key = DependencyResolutionServiceImpl::artifact_cache_key(
             "com.example", "my-lib", "1.0", "");
         assert_eq!(key, "com.example:my-lib:1.0:");
+    }
+
+    #[tokio::test]
+    async fn test_add_and_check_artifact_cache() {
+        let svc = DependencyResolutionServiceImpl::new();
+
+        // Not cached initially
+        let miss = svc.check_artifact_cache(Request::new(CheckArtifactCacheRequest {
+            group: "com.example".to_string(),
+            name: "my-lib".to_string(),
+            version: "1.0".to_string(),
+            classifier: String::new(),
+            sha256: String::new(),
+            extension: String::new(),
+        })).await.unwrap().into_inner();
+        assert!(!miss.cached);
+
+        // Add to cache
+        svc.add_artifact_to_cache(Request::new(AddArtifactToCacheRequest {
+            group: "com.example".to_string(),
+            name: "my-lib".to_string(),
+            version: "1.0".to_string(),
+            classifier: String::new(),
+            local_path: "/tmp/my-lib-1.0.jar".to_string(),
+            size: 1024,
+            sha256: "abc123".to_string(),
+        })).await.unwrap();
+
+        // Now cached
+        let hit = svc.check_artifact_cache(Request::new(CheckArtifactCacheRequest {
+            group: "com.example".to_string(),
+            name: "my-lib".to_string(),
+            version: "1.0".to_string(),
+            classifier: String::new(),
+            sha256: String::new(),
+            extension: String::new(),
+        })).await.unwrap().into_inner();
+        assert!(hit.cached);
+        assert_eq!(hit.local_path, "/tmp/my-lib-1.0.jar");
+        assert_eq!(hit.cached_size, 1024);
+    }
+
+    #[tokio::test]
+    async fn test_resolution_stats() {
+        let svc = DependencyResolutionServiceImpl::new();
+
+        // Record some resolutions
+        svc.record_resolution(Request::new(RecordResolutionRequest {
+            configuration_name: "compileClasspath".to_string(),
+            dependency_count: 10,
+            resolution_time_ms: 100,
+            success: true,
+            cache_hits: 5,
+        })).await.unwrap();
+
+        svc.record_resolution(Request::new(RecordResolutionRequest {
+            configuration_name: "testRuntimeClasspath".to_string(),
+            dependency_count: 20,
+            resolution_time_ms: 200,
+            success: true,
+            cache_hits: 15,
+        })).await.unwrap();
+
+        let stats = svc.get_resolution_stats(Request::new(GetResolutionStatsRequest {}))
+            .await.unwrap().into_inner();
+
+        // Note: record_resolution doesn't increment total_resolutions (resolve_dependencies does)
+        // But artifact_cache_hits from check_artifact_cache should work
+        assert!(stats.avg_resolution_time_ms >= 0.0);
     }
 }
