@@ -841,6 +841,10 @@ service DependencyResolutionService {
   rpc DownloadArtifact(DownloadArtifactRequest) returns (stream DownloadArtifactChunk);
   // Report resolution result for tracking.
   rpc RecordResolution(RecordResolutionRequest) returns (RecordResolutionResponse);
+  // Get resolution statistics (cache hit rates, timing).
+  rpc GetResolutionStats(GetResolutionStatsRequest) returns (GetResolutionStatsResponse);
+  // Add an artifact to the local cache after download.
+  rpc AddArtifactToCache(AddArtifactToCacheRequest) returns (AddArtifactToCacheResponse);
 }
 
 message DependencyDescriptor {
@@ -933,6 +937,30 @@ message RecordResolutionRequest {
 
 message RecordResolutionResponse {
   bool acknowledged = 1;
+}
+
+message GetResolutionStatsRequest {}
+
+message GetResolutionStatsResponse {
+  int64 total_resolutions = 1;
+  int64 artifact_cache_hits = 2;
+  int64 total_resolution_time_ms = 3;
+  double avg_resolution_time_ms = 4;
+  int64 cached_artifacts = 5;
+}
+
+message AddArtifactToCacheRequest {
+  string group = 1;
+  string name = 2;
+  string version = 3;
+  string classifier = 4;
+  string local_path = 5;
+  int64 size = 6;
+  string sha256 = 7;
+}
+
+message AddArtifactToCacheResponse {
+  bool accepted = 1;
 }
 
 // -- File System Watch Service (Phase 19) --
