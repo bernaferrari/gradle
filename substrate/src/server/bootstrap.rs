@@ -118,83 +118,27 @@ impl BootstrapService for BootstrapServiceImpl {
         &self,
         _request: Request<GetSubstrateInfoRequest>,
     ) -> Result<Response<GetSubstrateInfoResponse>, Status> {
-        let services = vec![
-            SubstrateServiceInfo {
-                service_name: "control".to_string(),
-                status: "active".to_string(),
-                requests_served: Self::increment_requests("control", &self.request_counts),
-            },
-            SubstrateServiceInfo {
-                service_name: "hash".to_string(),
-                status: "active".to_string(),
-                requests_served: Self::increment_requests("hash", &self.request_counts),
-            },
-            SubstrateServiceInfo {
-                service_name: "cache".to_string(),
-                status: "active".to_string(),
-                requests_served: Self::increment_requests("cache", &self.request_counts),
-            },
-            SubstrateServiceInfo {
-                service_name: "exec".to_string(),
-                status: "active".to_string(),
-                requests_served: Self::increment_requests("exec", &self.request_counts),
-            },
-            SubstrateServiceInfo {
-                service_name: "work".to_string(),
-                status: "active".to_string(),
-                requests_served: Self::increment_requests("work", &self.request_counts),
-            },
-            SubstrateServiceInfo {
-                service_name: "execution-plan".to_string(),
-                status: "active".to_string(),
-                requests_served: Self::increment_requests("execution-plan", &self.request_counts),
-            },
-            SubstrateServiceInfo {
-                service_name: "execution-history".to_string(),
-                status: "active".to_string(),
-                requests_served: Self::increment_requests("execution-history", &self.request_counts),
-            },
-            SubstrateServiceInfo {
-                service_name: "cache-orchestration".to_string(),
-                status: "active".to_string(),
-                requests_served: Self::increment_requests("cache-orchestration", &self.request_counts),
-            },
-            SubstrateServiceInfo {
-                service_name: "file-fingerprint".to_string(),
-                status: "active".to_string(),
-                requests_served: Self::increment_requests("file-fingerprint", &self.request_counts),
-            },
-            SubstrateServiceInfo {
-                service_name: "value-snapshot".to_string(),
-                status: "active".to_string(),
-                requests_served: Self::increment_requests("value-snapshot", &self.request_counts),
-            },
-            SubstrateServiceInfo {
-                service_name: "task-graph".to_string(),
-                status: "active".to_string(),
-                requests_served: Self::increment_requests("task-graph", &self.request_counts),
-            },
-            SubstrateServiceInfo {
-                service_name: "configuration".to_string(),
-                status: "active".to_string(),
-                requests_served: Self::increment_requests("configuration", &self.request_counts),
-            },
-            SubstrateServiceInfo {
-                service_name: "plugin".to_string(),
-                status: "active".to_string(),
-                requests_served: Self::increment_requests("plugin", &self.request_counts),
-            },
-            SubstrateServiceInfo {
-                service_name: "build-operations".to_string(),
-                status: "active".to_string(),
-                requests_served: Self::increment_requests("build-operations", &self.request_counts),
-            },
-            SubstrateServiceInfo {
-                service_name: "bootstrap".to_string(),
-                status: "active".to_string(),
-                requests_served: Self::increment_requests("bootstrap", &self.request_counts),
-            },
+        let all_services = [
+            "control", "hash", "cache", "exec", "work",
+            "execution-plan", "execution-history", "cache-orchestration",
+            "file-fingerprint", "value-snapshot", "task-graph",
+            "configuration", "plugin", "build-operations", "bootstrap",
+            "dependency-resolution", "file-watch", "configuration-cache",
+            "toolchain", "build-event-stream", "worker-process",
+            "build-layout", "build-result", "problem-reporting",
+            "resource-management", "build-comparison", "console",
+            "test-execution", "artifact-publishing", "build-init",
+            "incremental-compilation", "build-metrics", "garbage-collection",
         ];
+
+        let services: Vec<SubstrateServiceInfo> = all_services
+            .iter()
+            .map(|&name| SubstrateServiceInfo {
+                service_name: name.to_string(),
+                status: "active".to_string(),
+                requests_served: Self::increment_requests(name, &self.request_counts),
+            })
+            .collect();
 
         let total: i64 = services.iter().map(|s| s.requests_served).sum();
 
@@ -271,7 +215,7 @@ mod tests {
             .into_inner();
 
         assert!(!resp.daemon_version.is_empty());
-        assert!(resp.services.len() >= 15);
+        assert!(resp.services.len() >= 31);
         assert!(resp.total_requests > 0);
     }
 }
