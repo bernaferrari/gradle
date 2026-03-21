@@ -27,6 +27,8 @@ public class WorkerSchedulerClient {
     /**
      * Ask the Rust scheduler whether a task should execute.
      * The scheduler checks execution history for input changes.
+     *
+     * @return a WorkDecision with the decision and the computed input hash
      */
     public WorkDecision evaluate(String taskPath, Map<String, String> inputProperties) {
         if (client.isNoop()) {
@@ -42,17 +44,17 @@ public class WorkerSchedulerClient {
 
         if (response.getShouldExecute()) {
             LOGGER.debug("[substrate:work] {}: {}", taskPath, response.getReason());
-            return WorkDecision.EXECUTE;
+            return new WorkDecision(WorkDecision.Type.EXECUTE, response.getInputHash());
         } else {
             LOGGER.lifecycle("[substrate:work] {}: {}", taskPath, response.getReason());
-            return WorkDecision.SKIP;
+            return new WorkDecision(WorkDecision.Type.SKIP, response.getInputHash());
         }
     }
 
     /**
      * Record the outcome of a task execution for future up-to-date checks.
      */
-    public void recordExecution(String taskPath, long durationMs, boolean success) {
+    public void recordExecution(String taskPath, long durationMs, boolean success, String inputHash) {
         if (client.isNoop()) {
             return;
         }
@@ -62,8 +64,31 @@ public class WorkerSchedulerClient {
                 .setTaskPath(taskPath)
                 .setDurationMs(durationMs)
                 .setSuccess(success)
+                .setInputHash(inputHash != null ? inputHash : "")
                 .build()
         );
+    }
+
+    /**
+     * Backward-compatible overload without input hash.
+     */
+    public void recordExecution(String taskPath, long durationMs, boolean success) {
+        recordExecution(taskPath, durationMs, success, "");
+    }
+
+    public static class WorkDecision {
+        public enum Type {
+            EXECUTE,
+            SKIP
+        }
+
+        public final Type type;
+        public final String inputHash;
+
+        WorkDecision(Type type, String inputHash) {
+            this.type = type;
+            this.inputHash = inputHash;
+        }
     }
 
     public enum WorkDecision {
