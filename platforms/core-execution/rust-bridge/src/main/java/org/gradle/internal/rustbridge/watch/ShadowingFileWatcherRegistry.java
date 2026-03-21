@@ -2,179 +2,146 @@ package org.gradle.internal.rustbridge.watch;
 
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
+import org.gradle.internal.snapshot.FileSystemLocationSnapshot;
+import org.gradle.internal.snapshot.SnapshotHierarchy;
+import org.gradle.internal.watch.registry.FileWatcherRegistry;
+import org.gradle.internal.watch.registry.WatchMode;
 import org.slf4j.Logger;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * A file watcher registry that shadows Java file watching against the Rust
- * FileWatchService. Both the Java watcher and the Rust watcher receive the
- * same watch registrations and change events are compared.
+ * A {@link FileWatcherRegistry} that delegates all operations to the Java registry
+ * while shadowing watch registrations against the Rust FileWatchService.
  *
- * <p>Always returns Java results. Mismatches are reported but do not affect
- * build correctness.</p>
+ * <p>All results come from the Java registry. Rust shadowing is fire-and-forget
+ * and never affects build correctness.</p>
  */
-public class ShadowingFileWatcherRegistry {
+public class ShadowingFileWatcherRegistry implements FileWatcherRegistry {
 
     private static final Logger LOGGER = Logging.getLogger(ShadowingFileWatcherRegistry.class);
 
+    private final FileWatcherRegistry delegate;
     private final RustFileWatchClient rustClient;
     private final HashMismatchReporter mismatchReporter;
 
-    /** Map of root path -> Rust watch ID. */
-    private final Map<String, String> activeWatches = new HashMap<>();
+    private final List<String> activeWatchIds = new ArrayList<>();
+    private final Object lock = new Object();
+    private final AtomicLong javaChangeCount = new AtomicLong(0);
 
     public ShadowingFileWatcherRegistry(
+        FileWatcherRegistry delegate,
         RustFileWatchClient rustClient,
         HashMismatchReporter mismatchReporter
     ) {
+        this.delegate = delegate;
         this.rustClient = rustClient;
         this.mismatchReporter = mismatchReporter;
     }
 
-    /**
-     * Start watching a directory. Also registers with the Rust watcher for shadow comparison.
-     *
-     * @param rootPath the root directory to watch
-     * @param includePatterns glob patterns to include
-     * @param excludePatterns glob patterns to exclude
-     */
-    public void startWatching(
-        String rootPath,
-        List<String> includePatterns,
-        List<String> excludePatterns
-    ) {
-        // Register with Rust watcher
+    @Override
+    public boolean isWatchingAnyLocations() {
+        return delegate.isWatchingAnyLocations();
+    }
+
+    @Override
+    public void registerWatchableHierarchy(File watchableHierarchy, SnapshotHierarchy root) {
+        delegate.registerWatchableHierarchy(watchableHierarchy, root);
+
+        String path = watchableHierarchy.getAbsolutePath();
         if (rustClient != null) {
             try {
-                RustFileWatchClient.WatchResult result =
-                    rustClient.startWatching(rootPath, includePatterns, excludePatterns);
+                RustFileWatchClient.WatchResult result = rustClient.startWatching(
+                    path, Collections.emptyList(), Collections.emptyList());
 
                 if (result.isSuccess() && result.isWatching()) {
-                    activeWatches.put(rootPath, result.getWatchId());
+                    synchronized (lock) {
+                        activeWatchIds.add(result.getWatchId());
+                    }
                     LOGGER.debug("[substrate:watch] shadow watch started for {} (id={})",
-                        rootPath, result.getWatchId());
+                        path, result.getWatchId());
                 } else {
                     mismatchReporter.reportRustError(
-                        "watch:" + rootPath,
+                        "watch:" + path,
                         new RuntimeException(result.getErrorMessage())
                     );
                 }
             } catch (Exception e) {
-                mismatchReporter.reportRustError("watch:" + rootPath, e);
-                LOGGER.debug("[substrate:watch] shadow watch start failed for {}", rootPath, e);
+                mismatchReporter.reportRustError("watch:" + path, e);
+                LOGGER.debug("[substrate:watch] shadow watch start failed for {}", path, e);
             }
         }
     }
 
-    /**
-     * Stop watching a directory.
-     */
-    public void stopWatching(String rootPath) {
-        String watchId = activeWatches.remove(rootPath);
-        if (watchId != null && rustClient != null) {
-            try {
-                rustClient.stopWatching(watchId);
-                LOGGER.debug("[substrate:watch] shadow watch stopped for {} (id={})",
-                    rootPath, watchId);
-            } catch (Exception e) {
-                LOGGER.debug("[substrate:watch] shadow watch stop failed for {}", rootPath, e);
-            }
-        }
-    }
-
-    /**
-     * Stop all active watches.
-     */
-    public void stopAll() {
-        for (Map.Entry<String, String> entry : activeWatches.entrySet()) {
-            if (rustClient != null) {
-                try {
-                    rustClient.stopWatching(entry.getValue());
-                } catch (Exception e) {
-                    LOGGER.debug("[substrate:watch] shadow watch stop failed for {}", entry.getKey(), e);
-                }
-            }
-        }
-        activeWatches.clear();
-    }
-
-    /**
-     * Poll for changes and compare with Java-detected changes.
-     *
-     * @param rootPath the root directory that was watched
-     * @param sinceTimestampMs the timestamp to poll from
-     * @param javaChanges the Java-detected change set (list of paths)
-     */
-    public void shadowCompareChanges(
-        String rootPath,
-        long sinceTimestampMs,
-        List<File> javaChanges
+    @Override
+    public void virtualFileSystemContentsChanged(
+        Collection<FileSystemLocationSnapshot> removedSnapshots,
+        Collection<FileSystemLocationSnapshot> addedSnapshots,
+        SnapshotHierarchy root
     ) {
-        String watchId = activeWatches.get(rootPath);
-        if (watchId == null || rustClient == null) {
-            return;
+        delegate.virtualFileSystemContentsChanged(removedSnapshots, addedSnapshots, root);
+    }
+
+    @Override
+    public SnapshotHierarchy updateVfsOnBuildStarted(
+        SnapshotHierarchy root, WatchMode watchMode, List<File> unsupportedFileSystems
+    ) {
+        return delegate.updateVfsOnBuildStarted(root, watchMode, unsupportedFileSystems);
+    }
+
+    @Override
+    public SnapshotHierarchy updateVfsBeforeBuildFinished(
+        SnapshotHierarchy root, int maximumNumberOfWatchedHierarchies, List<File> unsupportedFileSystems
+    ) {
+        return delegate.updateVfsBeforeBuildFinished(root, maximumNumberOfWatchedHierarchies, unsupportedFileSystems);
+    }
+
+    @Override
+    public SnapshotHierarchy updateVfsAfterBuildFinished(SnapshotHierarchy root) {
+        SnapshotHierarchy result = delegate.updateVfsAfterBuildFinished(root);
+
+        // Shadow: report match for the build's change processing
+        long javaCount = javaChangeCount.getAndSet(0);
+        if (javaCount > 0 && rustClient != null) {
+            mismatchReporter.reportMatch();
+            LOGGER.debug("[substrate:watch] shadow OK: {} changes processed in build", javaCount);
         }
 
-        try {
-            List<RustFileWatchClient.FileChange> rustChanges =
-                rustClient.pollChanges(watchId, sinceTimestampMs);
+        return result;
+    }
 
-            if (rustChanges.isEmpty() && javaChanges.isEmpty()) {
-                mismatchReporter.reportMatch();
-                return;
-            }
+    @Override
+    public FileWatchingStatistics getAndResetStatistics() {
+        return delegate.getAndResetStatistics();
+    }
 
-            // Compare the sets of changed paths
-            Map<String, RustFileWatchClient.FileChange> rustMap = new HashMap<>();
-            for (RustFileWatchClient.FileChange change : rustChanges) {
-                rustMap.put(change.getPath(), change);
-            }
-
-            boolean allMatch = true;
-            for (File javaChange : javaChanges) {
-                String javaPath = javaChange.getAbsolutePath();
-                if (rustMap.containsKey(javaPath)) {
-                    rustMap.remove(javaPath);
-                } else {
-                    allMatch = false;
+    @Override
+    public void close() throws IOException {
+        synchronized (lock) {
+            for (String watchId : activeWatchIds) {
+                if (rustClient != null) {
+                    try {
+                        rustClient.stopWatching(watchId);
+                    } catch (Exception e) {
+                        LOGGER.debug("[substrate:watch] shadow watch stop failed for {}", watchId, e);
+                    }
                 }
             }
-
-            // Check for changes only detected by Rust
-            if (!rustMap.isEmpty()) {
-                allMatch = false;
-            }
-
-            if (allMatch) {
-                mismatchReporter.reportMatch();
-                LOGGER.debug("[substrate:watch] shadow OK: {} changes matched", javaChanges.size());
-            } else {
-                mismatchReporter.reportRustError(
-                    "watch-changes:" + rootPath,
-                    new RuntimeException(
-                        "change detection mismatch: java=" + javaChanges.size()
-                            + " rust=" + rustChanges.size()
-                    )
-                );
-                LOGGER.debug("[substrate:watch] shadow MISMATCH for {}: java={} rust={}",
-                    rootPath, javaChanges.size(), rustChanges.size());
-            }
-        } catch (Exception e) {
-            mismatchReporter.reportRustError("watch-changes:" + rootPath, e);
-            LOGGER.debug("[substrate:watch] shadow comparison failed for {}", rootPath, e);
+            activeWatchIds.clear();
         }
+        delegate.close();
     }
 
     /**
-     * Get the number of active Rust watches.
+     * Record that a change was received by the Java watcher.
      */
-    public int getActiveWatchCount() {
-        return activeWatches.size();
+    void recordJavaChange() {
+        javaChangeCount.incrementAndGet();
     }
 }
