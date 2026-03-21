@@ -15,6 +15,7 @@ use gradle_substrate_daemon::{
         build_event_stream_service_server::BuildEventStreamServiceServer,
         build_init_service_server::BuildInitServiceServer,
         build_layout_service_server::BuildLayoutServiceServer,
+        build_metrics_service_server::BuildMetricsServiceServer,
         build_operations_service_server::BuildOperationsServiceServer,
         build_result_service_server::BuildResultServiceServer,
         cache_service_server::CacheServiceServer,
@@ -28,6 +29,7 @@ use gradle_substrate_daemon::{
         exec_service_server::ExecServiceServer,
         file_fingerprint_service_server::FileFingerprintServiceServer,
         file_watch_service_server::FileWatchServiceServer,
+        garbage_collection_service_server::GarbageCollectionServiceServer,
         hash_service_server::HashServiceServer,
         incremental_compilation_service_server::IncrementalCompilationServiceServer,
         plugin_service_server::PluginServiceServer,
@@ -44,20 +46,21 @@ use gradle_substrate_daemon::{
         artifact_publishing::ArtifactPublishingServiceImpl,
         bootstrap::BootstrapServiceImpl, build_comparison::BuildComparisonServiceImpl,
         build_event_stream::BuildEventStreamServiceImpl, build_init::BuildInitServiceImpl,
-        build_layout::BuildLayoutServiceImpl, build_operations::BuildOperationsServiceImpl,
-        build_result::BuildResultServiceImpl, cache::CacheServiceImpl,
-        cache_orchestration::BuildCacheOrchestrationServiceImpl,
+        build_layout::BuildLayoutServiceImpl, build_metrics::BuildMetricsServiceImpl,
+        build_operations::BuildOperationsServiceImpl, build_result::BuildResultServiceImpl,
+        cache::CacheServiceImpl, cache_orchestration::BuildCacheOrchestrationServiceImpl,
         config_cache::ConfigurationCacheServiceImpl, configuration::ConfigurationServiceImpl,
         console::ConsoleServiceImpl, control::ControlServiceImpl,
         dependency_resolution::DependencyResolutionServiceImpl,
         execution_history::ExecutionHistoryServiceImpl, execution_plan::ExecutionPlanServiceImpl,
         exec::ExecServiceImpl, file_fingerprint::FileFingerprintServiceImpl,
-        file_watch::FileWatchServiceImpl, hash::HashServiceImpl,
-        incremental_compilation::IncrementalCompilationServiceImpl, plugin::PluginServiceImpl,
-        problem_reporting::ProblemReportingServiceImpl, resource_management::ResourceManagementServiceImpl,
-        task_graph::TaskGraphServiceImpl, test_execution::TestExecutionServiceImpl,
-        toolchain::ToolchainServiceImpl, value_snapshot::ValueSnapshotServiceImpl,
-        worker_process::WorkerProcessServiceImpl, work::WorkServiceImpl,
+        file_watch::FileWatchServiceImpl, garbage_collection::GarbageCollectionServiceImpl,
+        hash::HashServiceImpl, incremental_compilation::IncrementalCompilationServiceImpl,
+        plugin::PluginServiceImpl, problem_reporting::ProblemReportingServiceImpl,
+        resource_management::ResourceManagementServiceImpl, task_graph::TaskGraphServiceImpl,
+        test_execution::TestExecutionServiceImpl, toolchain::ToolchainServiceImpl,
+        value_snapshot::ValueSnapshotServiceImpl, worker_process::WorkerProcessServiceImpl,
+        work::WorkServiceImpl,
     },
     PROTOCOL_VERSION,
 };
@@ -173,6 +176,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 2: Build cache
     let cache_dir = PathBuf::from(&args.cache_dir);
     std::fs::create_dir_all(&cache_dir)?;
+    let gc_cache_dir = cache_dir.clone();
 
     let cache = if let Some(remote_url) = &args.remote_cache_url {
         let remote = gradle_substrate_daemon::server::remote_cache::RemoteCacheStore::new(
@@ -198,6 +202,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Phase 7: Execution history
     let history_dir = PathBuf::from(&args.history_dir);
+    let gc_history_dir = history_dir.clone();
     let execution_history = ExecutionHistoryServiceImpl::new(history_dir);
     let history_count = execution_history.load_from_disk().await?;
     tracing::info!("Loaded {} execution history entries", history_count);
@@ -234,6 +239,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Phase 20: Configuration cache
     let config_cache_dir = PathBuf::from(&args.config_cache_dir);
+    let gc_config_cache_dir = config_cache_dir.clone();
     let config_cache = ConfigurationCacheServiceImpl::new(config_cache_dir);
 
     // Phase 23: Toolchain management
@@ -276,12 +282,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 36: Incremental compilation
     let incremental_compilation = IncrementalCompilationServiceImpl::new();
 
+    // Phase 37: Build metrics
+    let build_metrics = BuildMetricsServiceImpl::new();
+
+    // Phase 38: Garbage collection
+    let garbage_collection = GarbageCollectionServiceImpl::new(
+        gc_cache_dir,
+        gc_history_dir,
+        gc_config_cache_dir,
+    );
+
     let listener = UnixListener::bind(&socket_path)?;
 
     println!("Gradle Substrate Daemon v{}", env!("CARGO_PKG_VERSION"));
     println!("Protocol version: {}", PROTOCOL_VERSION);
     println!("Listening on: {}", args.socket_path);
-    println!("Services: control, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console, test-execution, artifact-publishing, build-init, incremental-compilation");
+    println!("Services: control, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console, test-execution, artifact-publishing, build-init, incremental-compilation, build-metrics, garbage-collection");
 
     Server::builder()
         .add_service(ControlServiceServer::new(control))
@@ -315,6 +331,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(ArtifactPublishingServiceServer::new(artifact_publishing))
         .add_service(BuildInitServiceServer::new(build_init))
         .add_service(IncrementalCompilationServiceServer::new(incremental_compilation))
+        .add_service(BuildMetricsServiceServer::new(build_metrics))
+        .add_service(GarbageCollectionServiceServer::new(garbage_collection))
         .serve_with_incoming_shutdown(tokio_stream::wrappers::UnixListenerStream::new(listener), shutdown_signal())
         .await?;
 
