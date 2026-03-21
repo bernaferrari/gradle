@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
@@ -10,6 +11,8 @@ use crate::proto::{
     ResolveExecutionPlanResponse, TaskFinishedRequest, TaskFinishedResponse,
     TaskProgress, TaskStartedRequest, TaskStartedResponse,
 };
+
+use super::execution_history::ExecutionHistoryServiceImpl;
 
 /// Task graph node stored internally.
 struct TaskNode {
@@ -27,10 +30,17 @@ struct TaskNode {
 
 /// Rust-native task graph service.
 /// Manages dependency resolution and execution scheduling.
-#[derive(Default)]
 pub struct TaskGraphServiceImpl {
     tasks: DashMap<String, TaskNode>,
     request_counter: AtomicI64,
+    /// Optional reference to execution history for duration estimates.
+    history: Option<Arc<ExecutionHistoryServiceImpl>>,
+}
+
+impl Default for TaskGraphServiceImpl {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TaskGraphServiceImpl {
@@ -38,6 +48,23 @@ impl TaskGraphServiceImpl {
         Self {
             tasks: DashMap::new(),
             request_counter: AtomicI64::new(0),
+            history: None,
+        }
+    }
+
+    pub fn with_history(history: Arc<ExecutionHistoryServiceImpl>) -> Self {
+        Self {
+            tasks: DashMap::new(),
+            request_counter: AtomicI64::new(0),
+            history: Some(history),
+        }
+    }
+
+    /// Look up estimated duration from execution history for a task path.
+    fn lookup_historical_duration(&self, task_path: &str) -> i64 {
+        match &self.history {
+            Some(h) => h.get_task_duration(task_path),
+            None => 0,
         }
     }
 
@@ -137,6 +164,9 @@ impl TaskGraphService for TaskGraphServiceImpl {
     ) -> Result<Response<RegisterTaskResponse>, Status> {
         let req = request.into_inner();
 
+        // Look up estimated duration from execution history
+        let estimated = self.lookup_historical_duration(&req.task_path);
+
         self.tasks.insert(
             req.task_path.clone(),
             TaskNode {
@@ -144,7 +174,7 @@ impl TaskGraphService for TaskGraphServiceImpl {
                 depends_on: req.depends_on,
                 should_execute: req.should_execute,
                 task_type: req.task_type,
-                estimated_duration_ms: 0,
+                estimated_duration_ms: estimated,
                 status: "PENDING".to_string(),
                 start_time_ms: 0,
                 duration_ms: 0,
@@ -207,6 +237,11 @@ impl TaskGraphService for TaskGraphServiceImpl {
             task.duration_ms = req.duration_ms;
             // Update estimated duration for future scheduling
             task.estimated_duration_ms = req.duration_ms;
+        }
+
+        // Persist duration to execution history for future builds
+        if let Some(history) = &self.history {
+            history.store_task_duration(&req.task_path, req.duration_ms);
         }
 
         Ok(Response::new(TaskFinishedResponse { acknowledged: true }))
@@ -433,5 +468,120 @@ mod tests {
 
         assert_eq!(progress.completed, 1);
         assert_eq!(progress.executing, 0);
+    }
+
+    #[tokio::test]
+    async fn test_task_graph_with_history_durations() {
+        let history = Arc::new(ExecutionHistoryServiceImpl::new(std::path::PathBuf::new()));
+        let svc = TaskGraphServiceImpl::with_history(Arc::clone(&history));
+
+        // Pre-populate history with known durations
+        history.store_task_duration(":fast", 100);
+        history.store_task_duration(":slow", 5000);
+        history.store_task_duration(":medium", 500);
+
+        // Register tasks — they should pick up historical durations
+        svc.register_task(Request::new(RegisterTaskRequest {
+            task_path: ":fast".to_string(),
+            depends_on: vec![],
+            should_execute: true,
+            task_type: "Task".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        svc.register_task(Request::new(RegisterTaskRequest {
+            task_path: ":slow".to_string(),
+            depends_on: vec![],
+            should_execute: true,
+            task_type: "Task".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        svc.register_task(Request::new(RegisterTaskRequest {
+            task_path: ":no_history".to_string(),
+            depends_on: vec![],
+            should_execute: true,
+            task_type: "Task".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        let resp = svc
+            .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
+                build_id: "test".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Verify estimated durations are picked up from history
+        let mut durations: Vec<_> = resp.execution_order
+            .iter()
+            .map(|n| (n.task_path.as_str(), n.estimated_duration_ms))
+            .collect();
+        durations.sort_by_key(|(_, d)| *d);
+
+        assert_eq!(durations[0].1, 0);     // :no_history
+        assert_eq!(durations[1].1, 100);   // :fast
+        assert_eq!(durations[2].1, 5000);  // :slow
+
+        // Critical path should reflect the longest path
+        assert_eq!(resp.critical_path_ms, 5000);
+
+        // Now finish a task and verify duration is updated in history
+        svc.task_finished(Request::new(TaskFinishedRequest {
+            task_path: ":fast".to_string(),
+            duration_ms: 150,
+            success: true,
+            outcome: "EXECUTED".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        // History should be updated
+        assert_eq!(history.get_task_duration(":fast"), 150);
+    }
+
+    #[tokio::test]
+    async fn test_critical_path_with_dependencies() {
+        let history = Arc::new(ExecutionHistoryServiceImpl::new(std::path::PathBuf::new()));
+        let svc = TaskGraphServiceImpl::with_history(Arc::clone(&history));
+
+        // A(100ms) -> B(200ms) -> C(50ms)
+        // D(300ms) -> C
+        history.store_task_duration(":a", 100);
+        history.store_task_duration(":b", 200);
+        history.store_task_duration(":c", 50);
+        history.store_task_duration(":d", 300);
+
+        for (path, deps) in [
+            (":a", vec![] as Vec<&str>),
+            (":b", vec![":a"]),
+            (":c", vec![":b", ":d"]),
+            (":d", vec![]),
+        ] {
+            svc.register_task(Request::new(RegisterTaskRequest {
+                task_path: path.to_string(),
+                depends_on: deps.into_iter().map(String::from).collect(),
+                should_execute: true,
+                task_type: "Task".to_string(),
+            }))
+            .await
+            .unwrap();
+        }
+
+        let resp = svc
+            .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
+                build_id: "test".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Critical path: D(300) -> C(50) = 350, or A(100) -> B(200) -> C(50) = 350
+        assert_eq!(resp.critical_path_ms, 350);
+        assert!(!resp.has_cycles);
     }
 }
