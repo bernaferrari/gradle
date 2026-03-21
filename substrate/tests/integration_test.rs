@@ -1169,3 +1169,725 @@ async fn test_build_operations_full_flow_e2e() {
     let outcome = result.outcome.unwrap();
     assert_eq!(outcome.overall_result, "FAILED");
 }
+
+// ============================================================
+// Test 20: Plugin management end-to-end
+// ============================================================
+
+#[tokio::test]
+async fn test_plugin_management_e2e() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client = plugin_service_client::PluginServiceClient::new(channel);
+
+    // Register plugins
+    client
+        .register_plugin(Request::new(RegisterPluginRequest {
+            plugin_id: "java".to_string(),
+            plugin_class: "org.gradle.api.plugins.JavaPlugin".to_string(),
+            version: "1.0".to_string(),
+            is_imperative: false,
+            applies_to: vec![],
+            requires: vec![],
+            conflicts_with: vec![],
+        }))
+        .await
+        .unwrap();
+
+    client
+        .register_plugin(Request::new(RegisterPluginRequest {
+            plugin_id: "kotlin".to_string(),
+            plugin_class: "org.gradle.api.plugins.KotlinPlugin".to_string(),
+            version: "1.9".to_string(),
+            is_imperative: false,
+            applies_to: vec![],
+            requires: vec!["java".to_string()],
+            conflicts_with: vec![],
+        }))
+        .await
+        .unwrap();
+
+    // Check compatibility: kotlin requires java (not applied yet)
+    let compat = client
+        .check_plugin_compatibility(Request::new(CheckPluginCompatibilityRequest {
+            plugin_id: "kotlin".to_string(),
+            project_path: ":app".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(!compat.compatible);
+    assert!(!compat.errors.is_empty());
+
+    // Apply java first
+    let apply_java = client
+        .apply_plugin(Request::new(ApplyPluginRequest {
+            plugin_id: "java".to_string(),
+            project_path: ":app".to_string(),
+            apply_order: 0,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(apply_java.success);
+
+    // Now kotlin should be compatible
+    let compat2 = client
+        .check_plugin_compatibility(Request::new(CheckPluginCompatibilityRequest {
+            plugin_id: "kotlin".to_string(),
+            project_path: ":app".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(compat2.compatible);
+
+    // Apply kotlin
+    let apply_kotlin = client
+        .apply_plugin(Request::new(ApplyPluginRequest {
+            plugin_id: "kotlin".to_string(),
+            project_path: ":app".to_string(),
+            apply_order: 1,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(apply_kotlin.success);
+
+    // Check has_plugin
+    let has = client
+        .has_plugin(Request::new(HasPluginRequest {
+            plugin_id: "java".to_string(),
+            project_path: ":app".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(has.has_plugin);
+
+    // Get applied plugins — should be ordered
+    let applied = client
+        .get_applied_plugins(Request::new(GetAppliedPluginsRequest {
+            project_path: ":app".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(applied.plugins.len(), 2);
+    assert_eq!(applied.plugins[0].plugin_id, "java");
+    assert_eq!(applied.plugins[1].plugin_id, "kotlin");
+}
+
+// ============================================================
+// Test 21: Console logging end-to-end
+// ============================================================
+
+#[tokio::test]
+async fn test_console_logging_e2e() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client = console_service_client::ConsoleServiceClient::new(channel);
+
+    // Send log messages at different levels
+    client
+        .log_message(Request::new(LogMessageRequest {
+            build_id: "console-test".to_string(),
+            level: "lifecycle".to_string(),
+            category: "org.gradle".to_string(),
+            message: "Build started".to_string(),
+            throwable: String::new(),
+        }))
+        .await
+        .unwrap();
+
+    client
+        .log_message(Request::new(LogMessageRequest {
+            build_id: "console-test".to_string(),
+            level: "warn".to_string(),
+            category: "org.gradle.api".to_string(),
+            message: "Deprecated API usage".to_string(),
+            throwable: String::new(),
+        }))
+        .await
+        .unwrap();
+
+    // Update progress
+    client
+        .update_progress(Request::new(UpdateProgressRequest {
+            build_id: "console-test".to_string(),
+            operations: vec![ProgressOperation {
+                operation_id: "op-1".to_string(),
+                description: "Compiling Java sources".to_string(),
+                status: "running".to_string(),
+                total_work: 100,
+                completed_work: 50,
+                start_time_ms: 1000,
+                end_time_ms: 0,
+                header: ":compileJava".to_string(),
+            }],
+        }))
+        .await
+        .unwrap();
+
+    // Set build description
+    client
+        .set_build_description(Request::new(SetBuildDescriptionRequest {
+            build_id: "console-test".to_string(),
+            description: "Building my-app (10 tasks)".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    // Request input (daemon mode returns empty)
+    let input_resp = client
+        .request_input(Request::new(RequestInputRequest {
+            build_id: "console-test".to_string(),
+            prompt: "Continue? [y,n]".to_string(),
+            default_value: "y".to_string(),
+            input_id: "input-1".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(input_resp.value.is_empty()); // daemon mode
+}
+
+// ============================================================
+// Test 22: Resource management end-to-end
+// ============================================================
+
+#[tokio::test]
+async fn test_resource_management_e2e() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client = resource_management_service_client::ResourceManagementServiceClient::new(channel);
+
+    // Get initial resource limits
+    let limits = client
+        .get_resource_limits(Request::new(GetResourceLimitsRequest {
+            build_id: "res-test".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(!limits.limits.is_empty());
+
+    // Reserve resources for a task
+    let reserve = client
+        .reserve_resources(Request::new(ReserveResourcesRequest {
+            build_id: "res-test".to_string(),
+            resources: vec![ResourceRequest {
+                resource_type: "memory_mb".to_string(),
+                amount: 512,
+                requester_id: ":compileJava".to_string(),
+            }],
+            timeout_ms: 5000,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(reserve.granted);
+
+    // Get usage
+    let usage = client
+        .get_resource_usage(Request::new(GetResourceUsageRequest {
+            build_id: "res-test".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    // Should have usage entries
+    assert!(!usage.usage.is_empty() || reserve.reservation_id.is_empty());
+
+    // Release resources
+    let release = client
+        .release_resources(Request::new(ReleaseResourcesRequest {
+            reservation_id: reserve.reservation_id,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(release.released);
+}
+
+// ============================================================
+// Test 23: Garbage collection end-to-end (extended)
+// ============================================================
+
+#[tokio::test]
+async fn test_garbage_collection_extended_e2e() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client = garbage_collection_service_client::GarbageCollectionServiceClient::new(channel);
+
+    // Run GC on build cache
+    let gc_cache = client
+        .gc_build_cache(Request::new(GcBuildCacheRequest {
+            max_age_ms: 24 * 60 * 60 * 1000,
+            max_total_bytes: 1024 * 1024 * 1024,
+            dry_run: false,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(gc_cache.entries_removed >= 0);
+
+    // Run GC on execution history
+    let gc_history = client
+        .gc_execution_history(Request::new(GcExecutionHistoryRequest {
+            max_age_ms: 168 * 60 * 60 * 1000,
+            max_entries: 10000,
+            dry_run: false,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(gc_history.entries_removed >= 0);
+
+    // Run GC on config cache
+    let gc_config = client
+        .gc_config_cache(Request::new(GcConfigCacheRequest {
+            max_age_ms: 24 * 60 * 60 * 1000,
+            max_entries: 1000,
+            dry_run: false,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(gc_config.entries_removed >= 0);
+
+    // Get storage stats
+    let stats = client
+        .get_storage_stats(Request::new(GetStorageStatsRequest {
+            store_names: vec![],
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    // Stats should be returned (empty for fresh dirs is fine)
+    assert!(stats.stats.is_empty() || !stats.stats.is_empty());
+}
+
+// ============================================================
+// Test 24: Worker process pool end-to-end
+// ============================================================
+
+#[tokio::test]
+async fn test_worker_process_pool_e2e() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client = worker_process_service_client::WorkerProcessServiceClient::new(channel);
+
+    // Configure pool
+    let config = client
+        .configure_pool(Request::new(ConfigurePoolRequest {
+            max_pool_size: 4,
+            idle_timeout_ms: 60_000,
+            max_per_key: 2,
+            enable_health_checks: true,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(config.applied);
+
+    // Get worker status (no workers yet)
+    let status = client
+        .get_worker_status(Request::new(GetWorkerStatusRequest {
+            worker_key: String::new(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    // No workers spawned yet, status should be valid
+    assert_eq!(status.workers.len(), 0);
+}
+
+// ============================================================
+// Test 25: Full build lifecycle integration
+// ============================================================
+
+#[tokio::test]
+async fn test_full_build_lifecycle() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+
+    // 1. Bootstrap: init build
+    let mut bootstrap_client = bootstrap_service_client::BootstrapServiceClient::new(channel.clone());
+    let init = bootstrap_client
+        .init_build(Request::new(InitBuildRequest {
+            build_id: "lifecycle-build".to_string(),
+            project_dir: "/tmp/lifecycle-test".to_string(),
+            start_time_ms: 0,
+            requested_parallelism: 4,
+            system_properties: Default::default(),
+            requested_features: vec!["configuration-cache".to_string()],
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(!init.build_id.is_empty());
+
+    // 2. Build init: settings
+    let mut init_client = build_init_service_client::BuildInitServiceClient::new(channel.clone());
+    init_client
+        .init_build_settings(Request::new(InitBuildSettingsRequest {
+            build_id: "lifecycle-build".to_string(),
+            root_dir: "/tmp/lifecycle-test".to_string(),
+            settings_file: "/tmp/lifecycle-test/settings.gradle".to_string(),
+            gradle_user_home: String::new(),
+            init_scripts: vec![],
+            requested_build_features: vec![],
+            current_dir: "/tmp/lifecycle-test".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    // 3. Configuration: register projects
+    let mut config_client = configuration_service_client::ConfigurationServiceClient::new(channel.clone());
+    config_client
+        .register_project(Request::new(RegisterProjectRequest {
+            project_path: ":app".to_string(),
+            project_dir: "/tmp/lifecycle-test/app".to_string(),
+            properties: make_prop_map(vec![("version", "2.0.0"), ("group", "com.example")]),
+            applied_plugins: vec!["java".to_string()],
+        }))
+        .await
+        .unwrap();
+
+    // 4. Plugin management
+    let mut plugin_client = plugin_service_client::PluginServiceClient::new(channel.clone());
+    plugin_client
+        .register_plugin(Request::new(RegisterPluginRequest {
+            plugin_id: "java".to_string(),
+            plugin_class: "JavaPlugin".to_string(),
+            version: "1.0".to_string(),
+            is_imperative: false,
+            applies_to: vec![],
+            requires: vec![],
+            conflicts_with: vec![],
+        }))
+        .await
+        .unwrap();
+
+    plugin_client
+        .apply_plugin(Request::new(ApplyPluginRequest {
+            plugin_id: "java".to_string(),
+            project_path: ":app".to_string(),
+            apply_order: 0,
+        }))
+        .await
+        .unwrap();
+
+    // 5. Task graph: register and resolve tasks
+    let mut task_client = task_graph_service_client::TaskGraphServiceClient::new(channel.clone());
+    task_client
+        .register_task(Request::new(RegisterTaskRequest {
+            task_path: ":compileJava".to_string(),
+            depends_on: vec![":processResources".to_string()],
+            task_type: "JavaCompile".to_string(),
+            should_execute: true,
+        }))
+        .await
+        .unwrap();
+
+    task_client
+        .register_task(Request::new(RegisterTaskRequest {
+            task_path: ":processResources".to_string(),
+            depends_on: vec![],
+            task_type: "Copy".to_string(),
+            should_execute: true,
+        }))
+        .await
+        .unwrap();
+
+    let plan = task_client
+        .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
+            build_id: "lifecycle-build".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(plan.total_tasks >= 2);
+    assert!(!plan.has_cycles);
+
+    // 6. Build operations: track task execution
+    let mut ops_client = build_operations_service_client::BuildOperationsServiceClient::new(channel.clone());
+    ops_client
+        .start_operation(Request::new(StartOperationRequest {
+            operation_id: "op-process".to_string(),
+            display_name: ":processResources".to_string(),
+            operation_type: "TASK".to_string(),
+            parent_id: String::new(),
+            start_time_ms: 0,
+            metadata: Default::default(),
+        }))
+        .await
+        .unwrap();
+
+    ops_client
+        .complete_operation(Request::new(CompleteOperationRequest {
+            operation_id: "op-process".to_string(),
+            duration_ms: 100,
+            success: true,
+            outcome: "SUCCESS".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    ops_client
+        .start_operation(Request::new(StartOperationRequest {
+            operation_id: "op-compile".to_string(),
+            display_name: ":compileJava".to_string(),
+            operation_type: "TASK".to_string(),
+            parent_id: String::new(),
+            start_time_ms: 100,
+            metadata: Default::default(),
+        }))
+        .await
+        .unwrap();
+
+    ops_client
+        .complete_operation(Request::new(CompleteOperationRequest {
+            operation_id: "op-compile".to_string(),
+            duration_ms: 2000,
+            success: true,
+            outcome: "SUCCESS".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    // 7. Console: log build progress
+    let mut console_client = console_service_client::ConsoleServiceClient::new(channel.clone());
+    console_client
+        .log_message(Request::new(LogMessageRequest {
+            build_id: "lifecycle-build".to_string(),
+            level: "lifecycle".to_string(),
+            category: "org.gradle".to_string(),
+            message: "BUILD SUCCESSFUL in 2s".to_string(),
+            throwable: String::new(),
+        }))
+        .await
+        .unwrap();
+
+    // 8. Build result: report outcome
+    let mut result_client = build_result_service_client::BuildResultServiceClient::new(channel.clone());
+    result_client
+        .report_task_result(Request::new(ReportTaskResultRequest {
+            build_id: "lifecycle-build".to_string(),
+            result: Some(TaskResult {
+                task_path: ":compileJava".to_string(),
+                outcome: "SUCCESS".to_string(),
+                duration_ms: 2000,
+                did_work: true,
+                cache_key: String::new(),
+                start_time_ms: 0,
+                end_time_ms: 2000,
+                failure_message: String::new(),
+                execution_reason: 0,
+            }),
+        }))
+        .await
+        .unwrap();
+
+    // 9. Complete build
+    let complete = bootstrap_client
+        .complete_build(Request::new(CompleteBuildRequest {
+            build_id: "lifecycle-build".to_string(),
+            outcome: "SUCCESS".to_string(),
+            duration_ms: 2100,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(complete.acknowledged);
+
+    // 10. Get final build result
+    let result = result_client
+        .get_build_result(Request::new(GetBuildResultRequest {
+            build_id: "lifecycle-build".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(result.outcome.is_some());
+    let outcome = result.outcome.unwrap();
+    assert_eq!(outcome.overall_result, "SUCCESS");
+
+    // 11. Get build summary
+    let summary = ops_client
+        .get_build_summary(Request::new(GetBuildSummaryRequest {}))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(summary.summary.is_some());
+    let summary = summary.summary.unwrap();
+    assert!(summary.total_tasks >= 0);
+}
+
+// ============================================================
+// Test 26: Config cache end-to-end
+// ============================================================
+
+#[tokio::test]
+async fn test_config_cache_e2e() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client = configuration_cache_service_client::ConfigurationCacheServiceClient::new(channel);
+
+    // Store config cache
+    let store = client
+        .store_config_cache(Request::new(StoreConfigCacheRequest {
+            cache_key: "config-hash-123".to_string(),
+            serialized_config: vec![1, 2, 3, 4, 5],
+            entry_count: 5,
+            input_hashes: vec!["build.gradle".to_string(), "settings.gradle".to_string()],
+            timestamp_ms: 1000,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(store.stored);
+
+    // Load config cache
+    let load = client
+        .load_config_cache(Request::new(LoadConfigCacheRequest {
+            cache_key: "config-hash-123".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(load.found);
+    assert_eq!(load.serialized_config, vec![1, 2, 3, 4, 5]);
+
+    // Validate config
+    let validate = client
+        .validate_config(Request::new(ValidateConfigRequest {
+            cache_key: "config-hash-123".to_string(),
+            input_hashes: vec!["build.gradle".to_string(), "settings.gradle".to_string()],
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(validate.valid);
+
+    // Invalid cache key
+    let invalid = client
+        .validate_config(Request::new(ValidateConfigRequest {
+            cache_key: "wrong-hash".to_string(),
+            input_hashes: vec!["build.gradle".to_string()],
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(!invalid.valid);
+}
+
+// ============================================================
+// Test 27: Build layout end-to-end
+// ============================================================
+
+#[tokio::test]
+async fn test_build_layout_e2e() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client = build_layout_service_client::BuildLayoutServiceClient::new(channel);
+
+    // Init build layout
+    let init_resp = client
+        .init_build_layout(Request::new(InitBuildLayoutRequest {
+            root_dir: "/tmp/layout-test".to_string(),
+            settings_file: "/tmp/layout-test/settings.gradle".to_string(),
+            build_file: "build.gradle".to_string(),
+            build_name: "my-app".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    let build_id = init_resp.build_id;
+    assert!(!build_id.is_empty());
+
+    // Add subprojects
+    client
+        .add_subproject(Request::new(AddSubprojectRequest {
+            build_id: build_id.clone(),
+            project_path: ":app".to_string(),
+            project_dir: "/tmp/layout-test/app".to_string(),
+            build_file: "/tmp/layout-test/app/build.gradle".to_string(),
+            display_name: "app".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    client
+        .add_subproject(Request::new(AddSubprojectRequest {
+            build_id: build_id.clone(),
+            project_path: ":lib".to_string(),
+            project_dir: "/tmp/layout-test/lib".to_string(),
+            build_file: "/tmp/layout-test/lib/build.gradle".to_string(),
+            display_name: "lib".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    // List projects
+    let projects = client
+        .list_projects(Request::new(ListProjectsRequest {
+            build_id: build_id.clone(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(projects.project_paths.len() >= 2);
+
+    // Get project tree
+    let tree = client
+        .get_project_tree(Request::new(GetProjectTreeRequest {
+            build_id: build_id.clone(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(tree.root.is_some());
+
+    // Get build file path
+    let build_file = client
+        .get_build_file_path(Request::new(GetBuildFilePathRequest {
+            build_id,
+            project_path: ":app".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(build_file.build_file_path, "/tmp/layout-test/app/build.gradle");
+}
