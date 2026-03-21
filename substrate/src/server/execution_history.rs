@@ -134,6 +134,34 @@ impl ExecutionHistoryServiceImpl {
             }
         }
     }
+
+    /// Store a task duration for historical lookups.
+    /// Uses a dedicated key prefix to avoid collision with serialized execution state.
+    pub fn store_task_duration(&self, task_path: &str, duration_ms: i64) {
+        let key = format!("__duration__:{}", task_path);
+        let state = duration_ms.to_le_bytes().to_vec();
+        let entry = HistoryEntry {
+            key: key.clone(),
+            state,
+            timestamp_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0),
+        };
+        self.entries.insert(key, entry);
+    }
+
+    /// Look up a historical task duration. Returns 0 if no history exists.
+    pub fn get_task_duration(&self, task_path: &str) -> i64 {
+        let key = format!("__duration__:{}", task_path);
+        if let Some(entry) = self.entries.get(&key) {
+            if entry.state.len() == 8 {
+                let bytes: [u8; 8] = entry.state.clone().try_into().unwrap_or([0; 8]);
+                return i64::from_le_bytes(bytes);
+            }
+        }
+        0
+    }
 }
 
 #[tonic::async_trait]
@@ -398,5 +426,54 @@ mod tests {
         assert_eq!(stats.stores, 2);
         assert_eq!(stats.removes, 1);
         assert!((stats.hit_rate - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_store_and_get_task_duration() {
+        let svc = ExecutionHistoryServiceImpl::new(std::path::PathBuf::new());
+
+        // No history yet
+        assert_eq!(svc.get_task_duration(":compileJava"), 0);
+
+        // Store a duration
+        svc.store_task_duration(":compileJava", 1234);
+        assert_eq!(svc.get_task_duration(":compileJava"), 1234);
+
+        // Update with new duration
+        svc.store_task_duration(":compileJava", 5678);
+        assert_eq!(svc.get_task_duration(":compileJava"), 5678);
+
+        // Different task
+        assert_eq!(svc.get_task_duration(":test"), 0);
+        svc.store_task_duration(":test", 999);
+        assert_eq!(svc.get_task_duration(":test"), 999);
+    }
+
+    #[test]
+    fn test_task_duration_uses_dedicated_prefix() {
+        let svc = ExecutionHistoryServiceImpl::new(std::path::PathBuf::new());
+
+        // Store a duration for :compileJava
+        svc.store_task_duration(":compileJava", 500);
+
+        // Store regular execution state for the same identity
+        svc.entries.insert(
+            ":compileJava".to_string(),
+            HistoryEntry {
+                key: ":compileJava".to_string(),
+                state: vec![1, 2, 3],
+                timestamp_ms: 1000,
+            },
+        );
+
+        // Duration should still be retrievable (uses __duration__ prefix)
+        assert_eq!(svc.get_task_duration(":compileJava"), 500);
+
+        // Regular state should not be confused with duration
+        // (state length is 3, not 8, so duration would return 0)
+        assert_eq!(
+            svc.get_task_duration(":compileJava"), 500,
+            "Duration should be from dedicated prefix, not regular state"
+        );
     }
 }
