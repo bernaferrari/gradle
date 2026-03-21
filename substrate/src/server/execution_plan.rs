@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use dashmap::DashMap;
 use md5::{Digest, Md5};
+use serde::{Deserialize, Serialize};
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
@@ -9,6 +10,7 @@ use crate::proto::{
     PredictOutcomeResponse, PredictedOutcome, RecordOutcomeRequest, RecordOutcomeResponse,
     ResolvePlanRequest, ResolvePlanResponse, WorkMetadata,
 };
+use crate::server::execution_history::ExecutionHistoryServiceImpl;
 use crate::server::work::WorkerScheduler;
 
 /// Tracks prediction accuracy for shadow mode reporting.
@@ -44,6 +46,7 @@ struct ExecutionPlanHistory {
     entries: DashMap<String, ExecutionRecord>,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
 struct ExecutionRecord {
     input_fingerprint: String,
     outcome: String,
@@ -69,6 +72,8 @@ pub struct ExecutionPlanServiceImpl {
     _scheduler: Arc<WorkerScheduler>,
     history: ExecutionPlanHistory,
     stats: PredictionStats,
+    /// Optional persistent history for cross-daemon-restart durability.
+    persistent_history: Option<Arc<ExecutionHistoryServiceImpl>>,
 }
 
 impl Default for ExecutionPlanServiceImpl {
@@ -83,6 +88,63 @@ impl ExecutionPlanServiceImpl {
             _scheduler: scheduler,
             history: ExecutionPlanHistory::default(),
             stats: PredictionStats::default(),
+            persistent_history: None,
+        }
+    }
+
+    pub fn with_persistent_history(
+        scheduler: Arc<WorkerScheduler>,
+        persistent_history: Arc<ExecutionHistoryServiceImpl>,
+    ) -> Self {
+        Self {
+            _scheduler: scheduler,
+            history: ExecutionPlanHistory::default(),
+            stats: PredictionStats::default(),
+            persistent_history: Some(persistent_history),
+        }
+    }
+
+    /// Load persisted execution records from history service.
+    /// Call this after construction to restore state across daemon restarts.
+    pub fn load_persistent_history(&self) {
+        let ph = match &self.persistent_history {
+            Some(h) => h,
+            None => return,
+        };
+
+        for entry in ph.entries.iter() {
+            let key = entry.key();
+            if key.starts_with("__exec_record__:") {
+                if let Ok(record) = bincode::deserialize::<ExecutionRecord>(&entry.value().state) {
+                    let work_identity = key.strip_prefix("__exec_record__:").unwrap_or(key).to_string();
+                    self.history.entries.insert(work_identity, record);
+                }
+            }
+        }
+        let count = self.history.entries.len();
+        if count > 0 {
+            tracing::info!("Loaded {} execution records from persistent history", count);
+        }
+    }
+
+    /// Persist an execution record to the history service.
+    fn persist_record(&self, work_identity: &str, record: &ExecutionRecord) {
+        if let Some(ph) = &self.persistent_history {
+            let key = format!("__exec_record__:{}", work_identity);
+            if let Ok(state) = bincode::serialize(record) {
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+                ph.entries.insert(
+                    key.clone(),
+                    super::execution_history::HistoryEntry {
+                        key,
+                        state,
+                        timestamp_ms: ts,
+                    },
+                );
+            }
         }
     }
 
@@ -112,7 +174,8 @@ impl ExecutionPlanServiceImpl {
             || actual_outcome == "EXECUTED_NON_INCREMENTALLY"
             || actual_outcome == "FAILED";
 
-        if let Some((_, mut entry)) = self.history.entries.remove(work_identity) {
+        let updated_record = if let Some((_, entry)) = self.history.entries.remove(work_identity) {
+            let mut entry = entry;
             if is_execute {
                 entry.consecutive_executions += 1;
                 entry.total_consecutive_ms += duration_ms;
@@ -122,7 +185,22 @@ impl ExecutionPlanServiceImpl {
             }
             entry.duration_ms = duration_ms;
             entry.outcome = actual_outcome.to_string();
-            self.history.entries.insert(work_identity.to_string(), entry);
+            Some(entry)
+        } else {
+            // No existing record — create a new one
+            Some(ExecutionRecord {
+                input_fingerprint: String::new(), // fingerprint unknown at this point
+                outcome: actual_outcome.to_string(),
+                duration_ms,
+                consecutive_executions: if is_execute { 1 } else { 0 },
+                total_consecutive_ms: if is_execute { duration_ms } else { 0 },
+            })
+        };
+
+        if let Some(record) = updated_record {
+            self.history.entries.insert(work_identity.to_string(), record.clone());
+            // Persist to history service for cross-daemon-restart durability
+            self.persist_record(work_identity, &record);
         }
 
         tracing::debug!(
@@ -721,5 +799,73 @@ mod tests {
         // Should show average = 200ms
         assert!(reason.contains("avg: 200ms"));
         assert!(reason.contains("previous: 250ms"));
+    }
+
+    #[test]
+    fn test_persistent_history_roundtrip() {
+        let history = Arc::new(ExecutionHistoryServiceImpl::new(std::path::PathBuf::new()));
+        let svc = ExecutionPlanServiceImpl::with_persistent_history(
+            Arc::new(WorkerScheduler::new(4)),
+            Arc::clone(&history),
+        );
+
+        // No history initially
+        assert!(svc.history.entries.is_empty());
+
+        // Record an outcome
+        svc.record_outcome_internal(
+            ":compileJava",
+            PredictedOutcome::PredictedExecute as i32,
+            "EXECUTED",
+            true,
+            500,
+        );
+
+        // Should be in memory
+        assert_eq!(svc.history.entries.len(), 1);
+        let record = svc.history.entries.get(":compileJava").map(|r| (
+            r.consecutive_executions,
+            r.total_consecutive_ms,
+            r.duration_ms,
+            r.outcome.clone(),
+        ));
+        assert_eq!(record, Some((1, 500, 500, "EXECUTED".to_string())));
+
+        // Should also be persisted in history service
+        // Note: work_identity is ":compileJava", so key is "__exec_record__::compileJava"
+        let persisted = history.entries.get("__exec_record__::compileJava").map(|e| e.state.clone());
+        assert!(persisted.is_some());
+        assert!(!persisted.unwrap().is_empty());
+
+        // Create a NEW service instance and load from history
+        let svc2 = ExecutionPlanServiceImpl::with_persistent_history(
+            Arc::new(WorkerScheduler::new(4)),
+            Arc::clone(&history),
+        );
+        svc2.load_persistent_history();
+
+        // Should have restored the record
+        assert_eq!(svc2.history.entries.len(), 1);
+        let restored = svc2.history.entries.get(":compileJava").map(|r| (
+            r.consecutive_executions,
+            r.duration_ms,
+        ));
+        assert_eq!(restored, Some((1, 500)));
+
+        // Record another execution — should increment consecutive
+        svc2.record_outcome_internal(
+            ":compileJava",
+            PredictedOutcome::PredictedExecute as i32,
+            "EXECUTED",
+            true,
+            600,
+        );
+
+        let record = svc2.history.entries.get(":compileJava").map(|r| (
+            r.consecutive_executions,
+            r.total_consecutive_ms,
+            r.duration_ms,
+        ));
+        assert_eq!(record, Some((2, 1100, 600)));
     }
 }
