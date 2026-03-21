@@ -3,6 +3,7 @@ use tonic::{Request, Response, Status};
 
 use crate::proto::{
     plugin_service_server::PluginService, ApplyPluginRequest, ApplyPluginResponse,
+    CheckPluginCompatibilityRequest, CheckPluginCompatibilityResponse,
     GetAppliedPluginsRequest, GetAppliedPluginsResponse, HasPluginRequest, HasPluginResponse,
     PluginInfo, RegisterPluginRequest, RegisterPluginResponse,
 };
@@ -225,6 +226,20 @@ impl PluginService for PluginServiceImpl {
             .unwrap_or_default();
 
         Ok(Response::new(GetAppliedPluginsResponse { plugins }))
+    }
+
+    async fn check_plugin_compatibility(
+        &self,
+        request: Request<CheckPluginCompatibilityRequest>,
+    ) -> Result<Response<CheckPluginCompatibilityResponse>, Status> {
+        let req = request.into_inner();
+        let result = self.check_compatibility(&req.plugin_id, &req.project_path);
+
+        Ok(Response::new(CheckPluginCompatibilityResponse {
+            compatible: result.compatible,
+            errors: result.errors,
+            warnings: result.warnings,
+        }))
     }
 }
 

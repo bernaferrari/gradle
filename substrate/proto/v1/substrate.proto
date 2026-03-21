@@ -633,6 +633,8 @@ service PluginService {
   rpc HasPlugin(HasPluginRequest) returns (HasPluginResponse);
   // Get all applied plugins for a project.
   rpc GetAppliedPlugins(GetAppliedPluginsRequest) returns (GetAppliedPluginsResponse);
+  // Check if a plugin can be applied given current project state.
+  rpc CheckPluginCompatibility(CheckPluginCompatibilityRequest) returns (CheckPluginCompatibilityResponse);
 }
 
 message RegisterPluginRequest {
@@ -675,6 +677,17 @@ message GetAppliedPluginsRequest {
 
 message GetAppliedPluginsResponse {
   repeated PluginInfo plugins = 1;
+}
+
+message CheckPluginCompatibilityRequest {
+  string plugin_id = 1;
+  string project_path = 2;
+}
+
+message CheckPluginCompatibilityResponse {
+  bool compatible = 1;
+  repeated string errors = 2;
+  repeated string warnings = 3;
 }
 
 message PluginInfo {
