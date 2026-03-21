@@ -26,6 +26,7 @@ impl PredictionStats {
         }
     }
 
+    #[allow(dead_code)]
     fn accuracy(&self, category: &str) -> f32 {
         let total = self.total.get(category).map(|r| *r).unwrap_or(0);
         let correct = self.correct.get(category).map(|r| *r).unwrap_or(0);
@@ -50,15 +51,21 @@ struct ExecutionRecord {
 }
 
 pub struct ExecutionPlanServiceImpl {
-    scheduler: Arc<WorkerScheduler>,
+    _scheduler: Arc<WorkerScheduler>,
     history: ExecutionPlanHistory,
     stats: PredictionStats,
+}
+
+impl Default for ExecutionPlanServiceImpl {
+    fn default() -> Self {
+        Self::new(std::sync::Arc::new(WorkerScheduler::new(16)))
+    }
 }
 
 impl ExecutionPlanServiceImpl {
     pub fn new(scheduler: Arc<WorkerScheduler>) -> Self {
         Self {
-            scheduler,
+            _scheduler: scheduler,
             history: ExecutionPlanHistory::default(),
             stats: PredictionStats::default(),
         }

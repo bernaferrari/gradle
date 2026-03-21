@@ -25,6 +25,7 @@ struct TaskNode {
 
 /// Rust-native task graph service.
 /// Manages dependency resolution and execution scheduling.
+#[derive(Default)]
 pub struct TaskGraphServiceImpl {
     tasks: DashMap<String, TaskNode>,
     request_counter: AtomicI64,

@@ -14,6 +14,7 @@ const MAX_STORED_KEYS: usize = 50_000;
 
 /// Rust-native build cache orchestration service.
 /// Computes cache keys and coordinates cache operations.
+#[derive(Default)]
 pub struct BuildCacheOrchestrationServiceImpl {
     // Track which cache keys have been stored (local cache availability)
     stored_keys: dashmap::DashMap<String, i64>,
@@ -49,7 +50,7 @@ impl BuildCacheOrchestrationServiceImpl {
             .collect();
         sequenced.sort_by_key(|(seq, _)| *seq);
 
-        for (seq, key) in sequenced.into_iter().take(to_remove_count) {
+        for (_seq, key) in sequenced.into_iter().take(to_remove_count) {
             if self.stored_keys.remove(&key).is_some() {
                 self.keys_evicted.fetch_add(1, Ordering::Relaxed);
             }

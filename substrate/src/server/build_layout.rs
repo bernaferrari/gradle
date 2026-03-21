@@ -28,6 +28,7 @@ struct BuildLayout {
 /// Rust-native build layout service.
 /// Manages Gradle's multi-project structure, project tree,
 /// and settings. Replaces the JVM-side SettingsProcessor.
+#[derive(Default)]
 pub struct BuildLayoutServiceImpl {
     builds: DashMap<String, BuildLayout>,
     projects: DashMap<String, Project>, // keyed by "build_id:project_path"

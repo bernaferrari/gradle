@@ -39,6 +39,12 @@ pub struct ConfigurationCacheServiceImpl {
     entries_evicted: AtomicI64,
 }
 
+impl Default for ConfigurationCacheServiceImpl {
+    fn default() -> Self {
+        Self::new(std::path::PathBuf::new())
+    }
+}
+
 impl ConfigurationCacheServiceImpl {
     pub fn new(cache_dir: PathBuf) -> Self {
         std::fs::create_dir_all(&cache_dir).ok();
@@ -162,7 +168,7 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
             self.total_hits.fetch_add(1, Ordering::Relaxed);
             return Ok(Response::new(LoadConfigCacheResponse {
                 found: true,
-                serialized_config: entry.serialized_config.clone().into(),
+                serialized_config: entry.serialized_config.clone(),
                 entry_count: entry.entry_count,
                 timestamp_ms: entry.timestamp_ms,
             }));
@@ -173,7 +179,7 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
             self.total_hits.fetch_add(1, Ordering::Relaxed);
             let timestamp = entry.timestamp_ms;
             let count = entry.entry_count;
-            let config = entry.serialized_config.clone().into();
+            let config = entry.serialized_config.clone();
             self.cache.insert(req.cache_key, entry);
             return Ok(Response::new(LoadConfigCacheResponse {
                 found: true,
@@ -187,7 +193,7 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
 
         Ok(Response::new(LoadConfigCacheResponse {
             found: false,
-            serialized_config: Vec::new().into(),
+            serialized_config: Vec::new(),
             entry_count: 0,
             timestamp_ms: 0,
         }))

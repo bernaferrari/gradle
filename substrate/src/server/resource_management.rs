@@ -36,9 +36,15 @@ pub struct ResourceManagementServiceImpl {
     reservations_total: AtomicI64,
 }
 
+impl Default for ResourceManagementServiceImpl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ResourceManagementServiceImpl {
     pub fn new() -> Self {
-        let mut resources = DashMap::new(); // mut needed for insert
+        let resources = DashMap::new();
         resources.insert(
             "memory_mb".to_string(),
             ResourceSlot {
@@ -241,7 +247,7 @@ impl ResourceManagementServiceImpl {
     }
 
     /// Read system memory available in MB.
-    fn read_available_memory_mb() -> i64 {
+    fn _read_available_memory_mb() -> i64 {
         #[cfg(target_os = "linux")]
         {
             std::fs::read_to_string("/proc/meminfo")
@@ -369,7 +375,7 @@ impl ResourceManagementService for ResourceManagementServiceImpl {
         // Grant the reservation
         let mut reserved = Vec::new();
         for resource in &req.resources {
-            if let Some(slot) = self.resources.get_mut(&resource.resource_type) {
+            if let Some(mut slot) = self.resources.get_mut(&resource.resource_type) {
                 slot.used += resource.amount;
                 reserved.push((resource.resource_type.clone(), resource.amount));
             }
@@ -511,7 +517,7 @@ impl ResourceManagementService for ResourceManagementServiceImpl {
             if !req.build_id.is_empty() {
                 self.build_limits
                     .entry(req.build_id.clone())
-                    .or_insert_with(DashMap::new)
+                    .or_default()
                     .insert(limit.resource_type.clone(), limit);
             }
         }

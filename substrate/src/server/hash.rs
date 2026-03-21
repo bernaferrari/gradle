@@ -10,6 +10,7 @@ use crate::proto::{
     hash_service_server::HashService, HashBatchRequest, HashBatchResponse, HashResult,
 };
 
+#[derive(Default)]
 pub struct HashServiceImpl;
 
 #[tonic::async_trait]

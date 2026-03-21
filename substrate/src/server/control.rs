@@ -10,6 +10,13 @@ pub struct ControlServiceImpl {
     shutdown_tx: tokio::sync::broadcast::Sender<()>,
 }
 
+impl Default for ControlServiceImpl {
+    fn default() -> Self {
+        let (tx, _) = tokio::sync::broadcast::channel(1);
+        Self::new(tx)
+    }
+}
+
 impl ControlServiceImpl {
     pub fn new(shutdown_tx: tokio::sync::broadcast::Sender<()>) -> Self {
         Self { shutdown_tx }

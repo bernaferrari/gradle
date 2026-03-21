@@ -6,10 +6,12 @@ use tonic::{Request, Response, Status};
 
 use crate::proto::{
     build_metrics_service_server::BuildMetricsService, GetMetricsRequest, GetMetricsResponse,
-    GetPerformanceSummaryRequest, GetPerformanceSummaryResponse, MetricEvent, MetricSnapshot,
+    GetPerformanceSummaryRequest, GetPerformanceSummaryResponse, MetricSnapshot,
     PerformanceSummary, RecordMetricRequest, RecordMetricResponse, ResetMetricsRequest,
     ResetMetricsResponse,
 };
+#[cfg(test)]
+use crate::proto::MetricEvent;
 
 /// Aggregated metric data for a single metric name.
 #[derive(Default)]
@@ -45,6 +47,7 @@ impl MetricData {
 }
 
 /// Tracks build performance metrics for monitoring and optimization.
+#[derive(Default)]
 pub struct BuildMetricsServiceImpl {
     metrics: DashMap<String, MetricData>,
     builds: DashMap<String, BuildSummaryData>,

@@ -23,6 +23,7 @@ struct SourceSet {
 
 /// Rust-native incremental compilation service.
 /// Tracks source changes and computes rebuild decisions with transitive dependency closure.
+#[derive(Default)]
 pub struct IncrementalCompilationServiceImpl {
     source_sets: DashMap<String, SourceSet>,     // source_set_id -> SourceSet
     build_source_sets: DashMap<String, Vec<String>>, // build_id -> [source_set_id]
@@ -103,7 +104,7 @@ impl IncrementalCompilationService for IncrementalCompilationServiceImpl {
 
         self.build_source_sets
             .entry(build_id)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(source_set_id);
 
         Ok(Response::new(RegisterSourceSetResponse { accepted: true }))
