@@ -130,10 +130,12 @@ public class ExecutionBuildServices implements ServiceRegistrationProvider {
 
         if (options.getOption(RustSubstrateOptions.ENABLE_RUST_HISTORY).get()
             && rustHistoryClient != null) {
+            boolean authoritative = options.getOption(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION).get();
             return new ShadowingExecutionHistoryStore(
                 javaStore,
                 rustHistoryClient,
-                new BinaryEncoderExecutionHistorySerializer(stringInterner, classLoaderHasher)
+                new BinaryEncoderExecutionHistorySerializer(stringInterner, classLoaderHasher),
+                authoritative
             );
         }
 
