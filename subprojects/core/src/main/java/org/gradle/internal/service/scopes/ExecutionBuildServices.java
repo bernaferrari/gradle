@@ -89,6 +89,9 @@ import org.gradle.internal.rustbridge.SubstrateClient;
 import org.gradle.internal.rustbridge.cache.BuildCacheOrchestrationClient;
 import org.gradle.internal.rustbridge.execution.ExecutionPlanClient;
 import org.gradle.internal.rustbridge.execution.SubstrateAdvisoryStep;
+import org.gradle.internal.rustbridge.history.BinaryEncoderExecutionHistorySerializer;
+import org.gradle.internal.rustbridge.history.RustExecutionHistoryClient;
+import org.gradle.internal.rustbridge.history.ShadowingExecutionHistoryStore;
 import org.gradle.internal.scopeids.id.BuildInvocationScopeId;
 import org.gradle.internal.service.Provides;
 import org.gradle.internal.service.ServiceRegistrationProvider;
@@ -114,14 +117,27 @@ public class ExecutionBuildServices implements ServiceRegistrationProvider {
         ExecutionHistoryCacheAccess executionHistoryCacheAccess,
         InMemoryCacheDecoratorFactory inMemoryCacheDecoratorFactory,
         StringInterner stringInterner,
-        ClassLoaderHierarchyHasher classLoaderHasher
+        ClassLoaderHierarchyHasher classLoaderHasher,
+        InternalOptions options,
+        @Nullable RustExecutionHistoryClient rustHistoryClient
     ) {
-        return new DefaultExecutionHistoryStore(
+        ExecutionHistoryStore javaStore = new DefaultExecutionHistoryStore(
             executionHistoryCacheAccess,
             inMemoryCacheDecoratorFactory,
             stringInterner,
             classLoaderHasher
         );
+
+        if (options.getOption(RustSubstrateOptions.ENABLE_RUST_HISTORY).get()
+            && rustHistoryClient != null) {
+            return new ShadowingExecutionHistoryStore(
+                javaStore,
+                rustHistoryClient,
+                new BinaryEncoderExecutionHistorySerializer(stringInterner, classLoaderHasher)
+            );
+        }
+
+        return javaStore;
     }
 
     @Provides

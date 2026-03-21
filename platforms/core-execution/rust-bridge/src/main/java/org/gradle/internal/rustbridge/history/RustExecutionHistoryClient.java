@@ -1,11 +1,11 @@
 package org.gradle.internal.rustbridge.history;
 
-import gradle.substrate.v1.GetHistoryRequest;
-import gradle.substrate.v1.GetHistoryResponse;
-import gradle.substrate.v1.RecordHistoryRequest;
-import gradle.substrate.v1.RecordHistoryResponse;
+import gradle.substrate.v1.LoadHistoryRequest;
+import gradle.substrate.v1.LoadHistoryResponse;
 import gradle.substrate.v1.RemoveHistoryRequest;
 import gradle.substrate.v1.RemoveHistoryResponse;
+import gradle.substrate.v1.StoreHistoryRequest;
+import gradle.substrate.v1.StoreHistoryResponse;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
 import org.slf4j.Logger;
@@ -62,18 +62,18 @@ public class RustExecutionHistoryClient {
         }
 
         try {
-            RecordHistoryRequest request = RecordHistoryRequest.newBuilder()
-                .setKey(key)
-                .setSerializedState(com.google.protobuf.ByteString.copyFrom(serializedState))
+            StoreHistoryRequest request = StoreHistoryRequest.newBuilder()
+                .setWorkIdentity(key)
+                .setState(com.google.protobuf.ByteString.copyFrom(serializedState))
                 .build();
 
-            RecordHistoryResponse response = client.getExecutionHistoryStub()
-                .recordHistory(request);
+            StoreHistoryResponse response = client.getExecutionHistoryStub()
+                .storeHistory(request);
 
             if (response.getSuccess()) {
                 LOGGER.debug("[substrate:history] stored {} ({} bytes)", key, serializedState.length);
             } else {
-                LOGGER.debug("[substrate:history] store failed for {}: {}", key, response.getErrorMessage());
+                LOGGER.debug("[substrate:history] store failed for {}", key);
             }
             return response.getSuccess();
         } catch (Exception e) {
@@ -94,21 +94,21 @@ public class RustExecutionHistoryClient {
         }
 
         try {
-            GetHistoryRequest request = GetHistoryRequest.newBuilder()
-                .setKey(key)
+            LoadHistoryRequest request = LoadHistoryRequest.newBuilder()
+                .setWorkIdentity(key)
                 .build();
 
-            GetHistoryResponse response = client.getExecutionHistoryStub()
-                .getHistory(request);
+            LoadHistoryResponse response = client.getExecutionHistoryStub()
+                .loadHistory(request);
 
             if (response.getFound()) {
                 LOGGER.debug("[substrate:history] loaded {} ({} bytes, ts={})",
-                    key, response.getSerializedState().size(), response.getTimestampMs());
+                    key, response.getState().size(), response.getTimestampMs());
                 return new HistoryEntry(
                     key,
-                    response.getSerializedState().toByteArray(),
+                    response.getState().toByteArray(),
                     response.getTimestampMs(),
-                    response.getSerializedState().size()
+                    response.getState().size()
                 );
             } else {
                 LOGGER.debug("[substrate:history] not found: {}", key);
@@ -133,16 +133,16 @@ public class RustExecutionHistoryClient {
 
         try {
             RemoveHistoryRequest request = RemoveHistoryRequest.newBuilder()
-                .setKey(key)
+                .setWorkIdentity(key)
                 .build();
 
             RemoveHistoryResponse response = client.getExecutionHistoryStub()
                 .removeHistory(request);
 
-            if (response.getRemoved()) {
+            if (response.getSuccess()) {
                 LOGGER.debug("[substrate:history] removed {}", key);
             }
-            return response.getRemoved();
+            return response.getSuccess();
         } catch (Exception e) {
             LOGGER.debug("[substrate:history] remove failed for {}: {}", key, e.getMessage());
             return false;
