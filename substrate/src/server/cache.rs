@@ -1,4 +1,6 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::Arc;
 
 use tokio::fs;
 use tokio::sync::mpsc;
@@ -15,14 +17,37 @@ const CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks for streaming
 
 /// Local filesystem build cache store.
 /// Entries are stored as files named by their cache key (hex string).
+struct CacheCounters {
+    max_size_bytes: AtomicU64,
+    total_bytes: AtomicU64,
+    entry_count: AtomicI64,
+    hits: AtomicI64,
+    misses: AtomicI64,
+}
+
 #[derive(Clone)]
 pub struct LocalCacheStore {
     base_dir: PathBuf,
+    counters: Arc<CacheCounters>,
 }
 
 impl LocalCacheStore {
     pub fn new(base_dir: PathBuf) -> Self {
-        Self { base_dir }
+        Self {
+            base_dir,
+            counters: Arc::new(CacheCounters {
+                max_size_bytes: AtomicU64::new(0),
+                total_bytes: AtomicU64::new(0),
+                entry_count: AtomicI64::new(0),
+                hits: AtomicI64::new(0),
+                misses: AtomicI64::new(0),
+            }),
+        }
+    }
+
+    /// Set the maximum cache size in bytes (0 = unlimited).
+    pub fn set_max_size(&self, max_bytes: u64) {
+        self.counters.max_size_bytes.store(max_bytes, Ordering::Relaxed);
     }
 
     fn key_to_path(&self, key: &str) -> PathBuf {
@@ -36,35 +61,170 @@ impl LocalCacheStore {
 
     pub async fn contains(&self, key: &str) -> Result<bool, SubstrateError> {
         let path = self.key_to_path(key);
-        Ok(fs::metadata(&path).await.is_ok())
+        let found = fs::metadata(&path).await.is_ok();
+        if found {
+            self.counters.hits.fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.counters.misses.fetch_add(1, Ordering::Relaxed);
+        }
+        Ok(found)
     }
 
     pub async fn load(&self, key: &str) -> Result<Option<Vec<u8>>, SubstrateError> {
         let path = self.key_to_path(key);
         match fs::read(&path).await {
-            Ok(data) => Ok(Some(data)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Ok(data) => {
+                self.counters.hits.fetch_add(1, Ordering::Relaxed);
+                Ok(Some(data))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                self.counters.misses.fetch_add(1, Ordering::Relaxed);
+                Ok(None)
+            }
             Err(e) => Err(SubstrateError::Cache(format!("Failed to load cache entry {}: {}", key, e))),
         }
     }
 
     pub async fn store(&self, key: &str, data: &[u8]) -> Result<(), SubstrateError> {
         let path = self.key_to_path(key);
+        let data_len = data.len() as u64;
+
+        // Check if we need to evict before storing
+        self.maybe_evict(data_len).await;
+
+        // Check if this is an update (file already exists)
+        let is_update = fs::metadata(&path).await.is_ok();
+
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).await?;
         }
         fs::write(&path, data).await?;
+
+        if is_update {
+            // Don't double-count for updates
+        } else {
+            self.counters.entry_count.fetch_add(1, Ordering::Relaxed);
+        }
+        self.counters.total_bytes.fetch_add(data_len, Ordering::Relaxed);
+
         Ok(())
     }
 
     pub async fn remove(&self, key: &str) -> Result<bool, SubstrateError> {
         let path = self.key_to_path(key);
         match fs::remove_file(&path).await {
-            Ok(()) => Ok(true),
+            Ok(()) => {
+                self.counters.entry_count.fetch_sub(1, Ordering::Relaxed);
+                // Note: we can't track per-entry size without metadata, so total_bytes is approximate
+                Ok(true)
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
             Err(e) => Err(SubstrateError::Cache(format!("Failed to remove cache entry {}: {}", key, e))),
         }
     }
+
+    /// Evict oldest entries if the cache would exceed the max size.
+    async fn maybe_evict(&self, incoming_size: u64) {
+        let max = self.counters.max_size_bytes.load(Ordering::Relaxed);
+        if max == 0 {
+            return; // unlimited
+        }
+
+        let current = self.counters.total_bytes.load(Ordering::Relaxed);
+        if current + incoming_size <= max {
+            return; // fits
+        }
+
+        // Need to evict: scan directory, sort by modification time, remove oldest
+        let entries = self.scan_entries_by_age().await;
+        let mut freed: u64 = 0;
+        let target = current + incoming_size - max;
+
+        for (path, size) in entries {
+            if freed >= target {
+                break;
+            }
+            if fs::remove_file(&path).await.is_ok() {
+                freed += size;
+                self.counters.entry_count.fetch_sub(1, Ordering::Relaxed);
+                self.counters.total_bytes.fetch_sub(size, Ordering::Relaxed);
+                tracing::debug!(path = %path.display(), size, "Evicted cache entry");
+            }
+        }
+
+        if freed > 0 {
+            tracing::info!(freed_bytes = freed, target_bytes = target, "Cache eviction completed");
+        }
+    }
+
+    /// Scan cache directory for entries sorted by modification time (oldest first).
+    async fn scan_entries_by_age(&self) -> Vec<(PathBuf, u64)> {
+        let mut entries = Vec::new();
+
+        if let Ok(mut dir) = fs::read_dir(&self.base_dir).await {
+            while let Ok(Some(entry)) = dir.next_entry().await {
+                if let Ok(metadata) = entry.metadata().await {
+                    let size = metadata.len();
+                    let modified = metadata
+                        .modified()
+                        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                    entries.push((entry.path(), size, modified));
+                }
+            }
+        }
+
+        // Also scan subdirectories (shard dirs like "aa/", "bb/")
+        if let Ok(mut dir) = fs::read_dir(&self.base_dir).await {
+            while let Ok(Some(entry)) = dir.next_entry().await {
+                if entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false) {
+                    if let Ok(mut sub_dir) = fs::read_dir(entry.path()).await {
+                        while let Ok(Some(sub_entry)) = sub_dir.next_entry().await {
+                            if let Ok(metadata) = sub_entry.metadata().await {
+                                let size = metadata.len();
+                                let modified = metadata
+                                    .modified()
+                                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                                entries.push((sub_entry.path(), size, modified));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        entries.sort_by_key(|e| e.2);
+        entries.into_iter().map(|(path, size, _)| (path, size)).collect()
+    }
+
+    /// Get cache statistics.
+    pub fn get_stats(&self) -> CacheStats {
+        let hits = self.counters.hits.load(Ordering::Relaxed);
+        let misses = self.counters.misses.load(Ordering::Relaxed);
+        let total_lookups = hits + misses;
+        let hit_rate = if total_lookups > 0 {
+            hits as f64 / total_lookups as f64
+        } else {
+            1.0
+        };
+
+        CacheStats {
+            entry_count: self.counters.entry_count.load(Ordering::Relaxed),
+            total_bytes: self.counters.total_bytes.load(Ordering::Relaxed),
+            max_bytes: self.counters.max_size_bytes.load(Ordering::Relaxed),
+            hits,
+            misses,
+            hit_rate,
+        }
+    }
+}
+
+pub struct CacheStats {
+    pub entry_count: i64,
+    pub total_bytes: u64,
+    pub max_bytes: u64,
+    pub hits: i64,
+    pub misses: i64,
+    pub hit_rate: f64,
 }
 
 pub struct CacheServiceImpl {
@@ -286,5 +446,43 @@ mod tests {
 
         let loaded = store.load("bb1122334455").await.unwrap();
         assert_eq!(loaded, Some(data));
+    }
+
+    #[tokio::test]
+    async fn test_cache_stats() {
+        let tmp = TempDir::new().unwrap();
+        let store = LocalCacheStore::new(tmp.path().to_path_buf());
+
+        store.store("cc1111111111", b"data1").await.unwrap();
+        store.store("cc2222222222", b"data2longer").await.unwrap();
+
+        // Hit
+        let _ = store.load("cc1111111111").await.unwrap();
+        // Miss
+        let _ = store.load("cc9999999999").await.unwrap();
+
+        let stats = store.get_stats();
+        assert_eq!(stats.entry_count, 2);
+        assert_eq!(stats.total_bytes, 5 + 11);
+        assert_eq!(stats.hits, 1);
+        assert_eq!(stats.misses, 1);
+    }
+
+    #[tokio::test]
+    async fn test_cache_eviction() {
+        let tmp = TempDir::new().unwrap();
+        let store = LocalCacheStore::new(tmp.path().to_path_buf());
+        store.set_max_size(30); // 30 bytes max
+
+        // Store entries totaling 40 bytes
+        store.store("dd1111111111", b"0123456789").await.unwrap(); // 10 bytes
+        store.store("dd2222222222", b"0123456789").await.unwrap(); // 10 bytes
+        store.store("dd3333333333", b"0123456789").await.unwrap(); // 10 bytes
+        store.store("dd4444444444", b"0123456789").await.unwrap(); // 10 bytes - should trigger eviction
+
+        let stats = store.get_stats();
+        // After eviction, total should be <= 30 bytes
+        assert!(stats.total_bytes <= 30);
+        assert!(stats.entry_count <= 3);
     }
 }
