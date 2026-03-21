@@ -464,11 +464,14 @@ message ProbeCacheRequest {
 message ProbeCacheResponse {
   bool available = 1;
   string location = 2; // "local", "remote", or "both"
+  repeated string output_properties = 3; // output property names available in this cache entry
+  int64 execution_time_ms = 4;            // execution time of the cached result
 }
 
 message StoreOutputsRequest {
   bytes cache_key = 1;
   int64 execution_time_ms = 2;
+  repeated string output_properties = 3; // output property names being stored
 }
 
 message StoreOutputsResponse {
@@ -2159,6 +2162,9 @@ message IncrementalState {
   int32 fully_recompiled = 4;
   int64 total_compile_time_ms = 5;
   repeated CompilationUnit units = 6;
+  bool classpath_changed = 7;             // true if classpath changed since last compilation
+  string previous_classpath_hash = 8;     // previous classpath fingerprint
+  string current_classpath_hash = 9;      // current classpath fingerprint
 }
 
 message GetIncrementalStateResponse {
