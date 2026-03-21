@@ -19,9 +19,13 @@ struct Project {
 
 /// A registered build layout.
 struct BuildLayout {
+    #[allow(dead_code)]
     build_id: String,
+    #[allow(dead_code)]
     root_dir: String,
+    #[allow(dead_code)]
     build_file: String,
+    #[allow(dead_code)]
     build_name: String,
 }
 

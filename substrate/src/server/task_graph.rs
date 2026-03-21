@@ -15,7 +15,9 @@ use crate::proto::{
 struct TaskNode {
     task_path: String,
     depends_on: Vec<String>,
+    #[allow(dead_code)]
     should_execute: bool,
+    #[allow(dead_code)]
     task_type: String,
     estimated_duration_ms: i64,
     status: String,

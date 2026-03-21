@@ -14,18 +14,21 @@ const MAX_LOG_BUFFER: usize = 1000;
 
 /// A tracked progress operation.
 struct ProgressEntry {
+    #[allow(dead_code)]
     operation_id: String,
     description: String,
     status: String,
     total_work: i64,
     completed_work: i64,
+    #[allow(dead_code)]
     start_time_ms: i64,
     end_time_ms: i64,
 }
 
 /// A buffered log message for replay.
-#[derive(Clone)]
-struct BufferedLog {
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub struct BufferedLog {
     build_id: String,
     level: String,
     category: String,
@@ -34,6 +37,7 @@ struct BufferedLog {
 }
 
 /// ANSI color codes for console output.
+#[allow(dead_code)]
 mod ansi {
     pub const RESET: &str = "\x1b[0m";
     pub const RED: &str = "\x1b[31m";

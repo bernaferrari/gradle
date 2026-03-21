@@ -13,8 +13,11 @@ use crate::proto::{
 /// A tracked build's aggregated state.
 struct BuildState {
     failed: bool,
+    #[allow(dead_code)]
     failure_type: String,
+    #[allow(dead_code)]
     failure_message: String,
+    #[allow(dead_code)]
     failed_task_paths: Vec<String>,
 }
 
