@@ -128,6 +128,35 @@ public class RustBuildMetricsClient {
     }
 
     /**
+     * Get aggregated metrics for a build.
+     */
+    public List<gradle.substrate.v1.MetricSnapshot> getMetrics(String buildId,
+                                                               List<String> metricNames,
+                                                               long sinceMs) {
+        if (client.isNoop()) {
+            return List.of();
+        }
+
+        try {
+            gradle.substrate.v1.GetMetricsRequest.Builder request =
+                gradle.substrate.v1.GetMetricsRequest.newBuilder()
+                    .setBuildId(buildId != null ? buildId : "")
+                    .setSinceMs(sinceMs);
+
+            if (metricNames != null) {
+                request.addAllMetricNames(metricNames);
+            }
+
+            return client.getBuildMetricsStub()
+                .getMetrics(request.build())
+                .getMetricsList();
+        } catch (Exception e) {
+            LOGGER.debug("[substrate:metrics] failed to get metrics: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
      * Get the performance summary for a build.
      */
     public PerformanceSummary getPerformanceSummary(String buildId) {
