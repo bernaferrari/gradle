@@ -17,12 +17,23 @@ struct TestSuite {
     results: Vec<TestResultEntry>,
 }
 
+/// History of test outcomes across builds, keyed by test_id.
+struct TestHistory {
+    /// test_id -> list of outcomes (across builds and reruns)
+    outcomes: DashMap<String, Vec<String>>,
+    /// test_id -> count of passes
+    pass_counts: DashMap<String, i64>,
+    /// test_id -> count of failures
+    fail_counts: DashMap<String, i64>,
+}
+
 /// Rust-native test execution service.
-/// Tracks test discovery, execution, and result aggregation.
+/// Tracks test discovery, execution, result aggregation, and flaky test detection.
 pub struct TestExecutionServiceImpl {
     suites: DashMap<String, TestSuite>,     // suite_id -> TestSuite
     build_suites: DashMap<String, Vec<String>>, // build_id -> [suite_id]
     results_reported: AtomicI64,
+    history: TestHistory,
 }
 
 impl TestExecutionServiceImpl {
@@ -31,8 +42,76 @@ impl TestExecutionServiceImpl {
             suites: DashMap::new(),
             build_suites: DashMap::new(),
             results_reported: AtomicI64::new(0),
+            history: TestHistory {
+                outcomes: DashMap::new(),
+                pass_counts: DashMap::new(),
+                fail_counts: DashMap::new(),
+            },
         }
     }
+
+    /// Detect flaky tests: tests that have both PASSED and FAILED outcomes.
+    fn detect_flaky_tests(&self, build_id: &str) -> Vec<FlakyTestInfo> {
+        let suite_ids = self
+            .build_suites
+            .get(build_id)
+            .map(|s| s.clone())
+            .unwrap_or_default();
+
+        let mut flaky = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for suite_id in &suite_ids {
+            if let Some(suite) = self.suites.get(suite_id) {
+                for r in &suite.results {
+                    if seen.contains(&r.test_id) {
+                        continue;
+                    }
+                    seen.insert(r.test_id.clone());
+
+                    let passes = self
+                        .history
+                        .pass_counts
+                        .get(&r.test_id)
+                        .map(|c| *c)
+                        .unwrap_or(0);
+                    let failures = self
+                        .history
+                        .fail_counts
+                        .get(&r.test_id)
+                        .map(|c| *c)
+                        .unwrap_or(0);
+
+                    if passes > 0 && failures > 0 {
+                        let total_runs = passes + failures;
+                        let flake_rate = failures as f64 / total_runs as f64;
+                        flaky.push(FlakyTestInfo {
+                            test_id: r.test_id.clone(),
+                            test_name: r.test_name.clone(),
+                            test_class: r.test_class.clone(),
+                            pass_count: passes,
+                            fail_count: failures,
+                            flake_rate,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Sort by flake rate descending
+        flaky.sort_by(|a, b| b.flake_rate.partial_cmp(&a.flake_rate).unwrap_or(std::cmp::Ordering::Equal));
+        flaky
+    }
+}
+
+/// Information about a flaky test.
+struct FlakyTestInfo {
+    test_id: String,
+    test_name: String,
+    test_class: String,
+    pass_count: i64,
+    fail_count: i64,
+    flake_rate: f64,
 }
 
 #[tonic::async_trait]
@@ -79,12 +158,11 @@ impl TestExecutionService for TestExecutionServiceImpl {
         let suite_id = result.suite_id.clone();
         let test_name = result.test_name.clone();
         let outcome = result.outcome.clone();
+        let test_id = result.test_id.clone();
 
         if let Some(mut suite) = self.suites.get_mut(&suite_id) {
             suite.results.push(result);
         }
-
-        self.results_reported.fetch_add(1, Ordering::Relaxed);
 
         tracing::debug!(
             suite_id = %suite_id,
@@ -92,6 +170,24 @@ impl TestExecutionService for TestExecutionServiceImpl {
             outcome = %outcome,
             "Test result reported"
         );
+
+        self.results_reported.fetch_add(1, Ordering::Relaxed);
+
+        // Track outcome history for flaky test detection
+        match outcome.as_str() {
+            "PASSED" => {
+                *self.history.pass_counts.entry(test_id.clone()).or_insert(0) += 1;
+            }
+            "FAILED" => {
+                *self.history.fail_counts.entry(test_id.clone()).or_insert(0) += 1;
+            }
+            _ => {}
+        }
+        self.history
+            .outcomes
+            .entry(test_id)
+            .or_insert_with(Vec::new)
+            .push(outcome);
 
         Ok(Response::new(ReportTestResultResponse { accepted: true }))
     }
@@ -431,5 +527,104 @@ mod tests {
 
         assert_eq!(summary.tests, 0);
         assert_eq!(summary.pass_rate, 1.0);
+    }
+
+    #[tokio::test]
+    async fn test_flaky_test_detection() {
+        let svc = TestExecutionServiceImpl::new();
+
+        svc.register_test_suite(Request::new(RegisterTestSuiteRequest {
+            build_id: "build-flaky".to_string(),
+            suite: Some(make_suite("suite-flaky", "FlakyTest")),
+        }))
+        .await
+        .unwrap();
+
+        // Test passes first time
+        svc.report_test_result(Request::new(ReportTestResultRequest {
+            build_id: "build-flaky".to_string(),
+            result: Some(make_test_result(
+                "suite-flaky",
+                "unstableTest",
+                "com.FlakyTest",
+                "PASSED",
+                50,
+            )),
+        }))
+        .await
+        .unwrap();
+
+        // Same test fails on rerun (simulates flaky behavior)
+        svc.report_test_result(Request::new(ReportTestResultRequest {
+            build_id: "build-flaky".to_string(),
+            result: Some(make_test_result(
+                "suite-flaky",
+                "unstableTest",
+                "com.FlakyTest",
+                "FAILED",
+                75,
+            )),
+        }))
+        .await
+        .unwrap();
+
+        // Stable test that always passes
+        svc.report_test_result(Request::new(ReportTestResultRequest {
+            build_id: "build-flaky".to_string(),
+            result: Some(make_test_result(
+                "suite-flaky",
+                "stableTest",
+                "com.FlakyTest",
+                "PASSED",
+                25,
+            )),
+        }))
+        .await
+        .unwrap();
+
+        let flaky = svc.detect_flaky_tests("build-flaky");
+
+        // Only unstableTest should be flaky
+        assert_eq!(flaky.len(), 1);
+        assert_eq!(flaky[0].test_name, "unstableTest");
+        assert_eq!(flaky[0].pass_count, 1);
+        assert_eq!(flaky[0].fail_count, 1);
+        assert!((flaky[0].flake_rate - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[tokio::test]
+    async fn test_no_flaky_when_stable() {
+        let svc = TestExecutionServiceImpl::new();
+
+        svc.register_test_suite(Request::new(RegisterTestSuiteRequest {
+            build_id: "build-stable".to_string(),
+            suite: Some(make_suite("suite-stable", "StableTest")),
+        }))
+        .await
+        .unwrap();
+
+        svc.report_test_result(Request::new(ReportTestResultRequest {
+            build_id: "build-stable".to_string(),
+            result: Some(make_test_result("suite-stable", "test1", "A", "PASSED", 10)),
+        }))
+        .await
+        .unwrap();
+
+        svc.report_test_result(Request::new(ReportTestResultRequest {
+            build_id: "build-stable".to_string(),
+            result: Some(make_test_result("suite-stable", "test1", "A", "PASSED", 10)),
+        }))
+        .await
+        .unwrap();
+
+        svc.report_test_result(Request::new(ReportTestResultRequest {
+            build_id: "build-stable".to_string(),
+            result: Some(make_test_result("suite-stable", "test2", "A", "FAILED", 20)),
+        }))
+        .await
+        .unwrap();
+
+        let flaky = svc.detect_flaky_tests("build-stable");
+        assert_eq!(flaky.len(), 0); // test1 always passes, test2 only fails
     }
 }
