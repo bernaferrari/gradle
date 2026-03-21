@@ -13,8 +13,11 @@ import org.gradle.internal.execution.history.impl.SerializableFileCollectionFing
 import org.gradle.internal.fingerprint.FileCollectionFingerprint;
 import org.gradle.internal.hash.ClassLoaderHierarchyHasher;
 import org.gradle.internal.serialize.HashCodeSerializer;
+import org.gradle.internal.serialize.kryo.KryoBackedDecoder;
 import org.gradle.internal.serialize.kryo.KryoBackedEncoder;
+import org.jspecify.annotations.Nullable;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
@@ -83,5 +86,17 @@ public class BinaryEncoderExecutionHistorySerializer
             fingerprints,
             value -> value.archive(SerializableFileCollectionFingerprint::new)
         ));
+    }
+
+    @Override
+    @Nullable
+    public PreviousExecutionState deserialize(byte[] data) {
+        try {
+            ByteArrayInputStream bais = new ByteArrayInputStream(data);
+            KryoBackedDecoder decoder = new KryoBackedDecoder(bais);
+            return serializer.read(decoder);
+        } catch (Exception e) {
+            return null;
+        }
     }
 }
