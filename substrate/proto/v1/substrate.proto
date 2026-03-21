@@ -1748,6 +1748,8 @@ service TestExecutionService {
   rpc GetTestResultsByOutcome(GetTestResultsByOutcomeRequest) returns (GetTestResultsByOutcomeResponse);
   // Get a test execution summary.
   rpc GetTestSummary(GetTestSummaryRequest) returns (TestSummaryResponse);
+  // Detect flaky tests (tests with both PASSED and FAILED outcomes).
+  rpc DetectFlakyTests(DetectFlakyTestsRequest) returns (DetectFlakyTestsResponse);
 }
 
 message TestSuiteDescriptor {
@@ -1838,6 +1840,23 @@ message TestSummaryResponse {
   int64 total_duration_ms = 7;
   repeated string failed_test_names = 8;
   double pass_rate = 9;
+}
+
+message DetectFlakyTestsRequest {
+  string build_id = 1;
+}
+
+message FlakyTestInfo {
+  string test_id = 1;
+  string test_name = 2;
+  string test_class = 3;
+  int64 pass_count = 4;
+  int64 fail_count = 5;
+  double flake_rate = 6;
+}
+
+message DetectFlakyTestsResponse {
+  repeated FlakyTestInfo flaky_tests = 1;
 }
 
 // -- Artifact Publishing Service (Phase 34) --

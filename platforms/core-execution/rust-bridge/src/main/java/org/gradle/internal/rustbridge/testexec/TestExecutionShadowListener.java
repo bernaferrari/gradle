@@ -4,6 +4,8 @@ import org.gradle.api.logging.Logging;
 import org.gradle.api.tasks.testing.TestDescriptor;
 import org.gradle.api.tasks.testing.TestListener;
 import org.gradle.api.tasks.testing.TestResult;
+import gradle.substrate.v1.DetectFlakyTestsResponse;
+import gradle.substrate.v1.FlakyTestInfo;
 import org.gradle.internal.rustbridge.SubstrateClient;
 import org.slf4j.Logger;
 
@@ -69,6 +71,27 @@ public class TestExecutionShadowListener implements TestListener {
             LOGGER.debug("[substrate:testexec] suite '{}' completed: {} passed, {} failed, {} skipped",
                 suite.getName(), result.getSuccessfulTestCount(),
                 result.getFailedTestCount(), result.getSkippedTestCount());
+
+            // Query Rust for flaky test detection on the root suite (top-level completion)
+            if (suite.getParent() == null && result.getTestCount() > 0) {
+                DetectFlakyTestsResponse flakyResponse = client.getTestExecutionStub()
+                    .detectFlakyTests(
+                        gradle.substrate.v1.DetectFlakyTestsRequest.newBuilder()
+                            .setBuildId("build")
+                            .build()
+                    );
+                if (flakyResponse.getFlakyTestsCount() > 0) {
+                    LOGGER.warn("[substrate:testexec] {} flaky test(s) detected:", flakyResponse.getFlakyTestsCount());
+                    for (FlakyTestInfo flaky : flakyResponse.getFlakyTestsList()) {
+                        LOGGER.warn(
+                            "  - {} > {} (flake rate: {}%, {}/{} runs failed)",
+                            flaky.getTestClass(), flaky.getTestName(),
+                            String.format("%.1f", flaky.getFlakeRate() * 100),
+                            flaky.getFailCount(), flaky.getPassCount() + flaky.getFailCount()
+                        );
+                    }
+                }
+            }
         } catch (Exception e) {
             LOGGER.debug("[substrate:testexec] shadow afterSuite failed", e);
         }
