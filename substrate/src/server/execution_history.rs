@@ -449,6 +449,77 @@ mod tests {
         assert_eq!(svc.get_task_duration(":test"), 999);
     }
 
+    #[tokio::test]
+    async fn test_store_overwrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = ExecutionHistoryServiceImpl::new(dir.path().to_path_buf());
+
+        svc.store_history(Request::new(StoreHistoryRequest {
+            work_identity: ":overwrite".to_string(),
+            state: vec![1, 2],
+            timestamp_ms: 100,
+        }))
+        .await
+        .unwrap();
+
+        svc.store_history(Request::new(StoreHistoryRequest {
+            work_identity: ":overwrite".to_string(),
+            state: vec![3, 4, 5],
+            timestamp_ms: 200,
+        }))
+        .await
+        .unwrap();
+
+        let resp = svc
+            .load_history(Request::new(LoadHistoryRequest {
+                work_identity: ":overwrite".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.found);
+        assert_eq!(resp.state, vec![3, 4, 5]);
+        assert_eq!(resp.timestamp_ms, 200);
+    }
+
+    #[tokio::test]
+    async fn test_remove_nonexistent() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = ExecutionHistoryServiceImpl::new(dir.path().to_path_buf());
+
+        // Removing nonexistent key should succeed
+        let resp = svc
+            .remove_history(Request::new(RemoveHistoryRequest {
+                work_identity: ":nonexistent".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.success);
+    }
+
+    #[tokio::test]
+    async fn test_stats_initial_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = ExecutionHistoryServiceImpl::new(dir.path().to_path_buf());
+
+        let stats = svc
+            .get_history_stats(Request::new(GetHistoryStatsRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(stats.entry_count, 0);
+        assert_eq!(stats.total_bytes_stored, 0);
+        assert_eq!(stats.load_hits, 0);
+        assert_eq!(stats.load_misses, 0);
+        assert_eq!(stats.stores, 0);
+        assert_eq!(stats.removes, 0);
+        assert!((stats.hit_rate - 1.0).abs() < f64::EPSILON); // no loads = 100%
+    }
+
     #[test]
     fn test_task_duration_uses_dedicated_prefix() {
         let svc = ExecutionHistoryServiceImpl::new(std::path::PathBuf::new());

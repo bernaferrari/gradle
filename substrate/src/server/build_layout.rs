@@ -502,6 +502,98 @@ mod tests {
         assert!(!resp2.found);
     }
 
+    #[tokio::test]
+    async fn test_init_without_root_dir() {
+        let svc = BuildLayoutServiceImpl::new();
+
+        let result = svc
+            .init_build_layout(Request::new(InitBuildLayoutRequest {
+                root_dir: String::new(),
+                settings_file: String::new(),
+                build_file: String::new(),
+                build_name: String::new(),
+            }))
+            .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_add_subproject_to_nonexistent_build() {
+        let svc = BuildLayoutServiceImpl::new();
+
+        let resp = svc
+            .add_subproject(Request::new(AddSubprojectRequest {
+                build_id: "nonexistent".to_string(),
+                project_path: ":app".to_string(),
+                project_dir: "/tmp".to_string(),
+                build_file: String::new(),
+                display_name: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.added);
+        assert!(!resp.error_message.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_project_tree_nonexistent_build() {
+        let svc = BuildLayoutServiceImpl::new();
+
+        let result = svc
+            .get_project_tree(Request::new(GetProjectTreeRequest {
+                build_id: "nonexistent".to_string(),
+            }))
+            .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_default_build_file_and_name() {
+        let svc = BuildLayoutServiceImpl::new();
+
+        let resp = svc
+            .init_build_layout(Request::new(InitBuildLayoutRequest {
+                root_dir: "/tmp/default".to_string(),
+                settings_file: String::new(),
+                build_file: String::new(), // should default to "build.gradle"
+                build_name: String::new(), // should default to "root project"
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let tree = svc
+            .get_project_tree(Request::new(GetProjectTreeRequest {
+                build_id: resp.build_id,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let root = tree.root.unwrap();
+        assert_eq!(root.build_file, "build.gradle");
+        assert_eq!(root.display_name, "root project");
+    }
+
+    #[tokio::test]
+    async fn test_list_projects_empty_build() {
+        let svc = BuildLayoutServiceImpl::new();
+
+        let list = svc
+            .list_projects(Request::new(ListProjectsRequest {
+                build_id: "nonexistent".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(list.project_paths.is_empty());
+    }
+
     #[test]
     fn test_parent_project_path() {
         assert_eq!(parent_project_path(":"), ":");

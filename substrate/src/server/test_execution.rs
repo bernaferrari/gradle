@@ -654,6 +654,124 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_report_to_nonexistent_suite() {
+        let svc = TestExecutionServiceImpl::new();
+
+        // Reporting to a suite that doesn't exist should succeed (silently dropped)
+        let result = svc
+            .report_test_result(Request::new(ReportTestResultRequest {
+                build_id: "build-no-suite".to_string(),
+                result: Some(make_test_result("nonexistent", "test1", "A", "PASSED", 10)),
+            }))
+            .await;
+
+        assert!(result.is_ok());
+        assert!(result.unwrap().into_inner().accepted);
+
+        // But the result should not appear in any summary
+        let summary = svc
+            .get_test_summary(Request::new(GetTestSummaryRequest {
+                build_id: "build-no-suite".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(summary.tests, 0);
+    }
+
+    #[tokio::test]
+    async fn test_skipped_and_aborted_counts() {
+        let svc = TestExecutionServiceImpl::new();
+
+        svc.register_test_suite(Request::new(RegisterTestSuiteRequest {
+            build_id: "build-skip".to_string(),
+            suite: Some(make_suite("s-skip", "SkipTest")),
+        }))
+        .await
+        .unwrap();
+
+        svc.report_test_result(Request::new(ReportTestResultRequest {
+            build_id: "build-skip".to_string(),
+            result: Some(make_test_result("s-skip", "test1", "A", "PASSED", 10)),
+        }))
+        .await
+        .unwrap();
+
+        svc.report_test_result(Request::new(ReportTestResultRequest {
+            build_id: "build-skip".to_string(),
+            result: Some(make_test_result("s-skip", "test2", "A", "SKIPPED", 0)),
+        }))
+        .await
+        .unwrap();
+
+        svc.report_test_result(Request::new(ReportTestResultRequest {
+            build_id: "build-skip".to_string(),
+            result: Some(make_test_result("s-skip", "test3", "A", "ABORTED", 5)),
+        }))
+        .await
+        .unwrap();
+
+        let summary = svc
+            .get_test_summary(Request::new(GetTestSummaryRequest {
+                build_id: "build-skip".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(summary.tests, 3);
+        assert_eq!(summary.passed, 1);
+        assert_eq!(summary.skipped, 1);
+        assert_eq!(summary.aborted, 1);
+    }
+
+    #[tokio::test]
+    async fn test_results_reported_counter() {
+        let svc = TestExecutionServiceImpl::new();
+
+        svc.register_test_suite(Request::new(RegisterTestSuiteRequest {
+            build_id: "build-ct".to_string(),
+            suite: Some(make_suite("s-ct", "CT")),
+        }))
+        .await
+        .unwrap();
+
+        svc.report_test_result(Request::new(ReportTestResultRequest {
+            build_id: "build-ct".to_string(),
+            result: Some(make_test_result("s-ct", "test1", "A", "PASSED", 10)),
+        }))
+        .await
+        .unwrap();
+
+        svc.report_test_result(Request::new(ReportTestResultRequest {
+            build_id: "build-ct".to_string(),
+            result: Some(make_test_result("s-ct", "test2", "A", "FAILED", 20)),
+        }))
+        .await
+        .unwrap();
+
+        assert_eq!(svc.results_reported.load(Ordering::Relaxed), 2);
+    }
+
+    #[tokio::test]
+    async fn test_get_test_results_by_outcome_empty() {
+        let svc = TestExecutionServiceImpl::new();
+
+        let resp = svc
+            .get_test_results_by_outcome(Request::new(GetTestResultsByOutcomeRequest {
+                build_id: "nonexistent".to_string(),
+                outcome: "PASSED".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.count, 0);
+        assert!(resp.results.is_empty());
+    }
+
+    #[tokio::test]
     async fn test_detect_flaky_tests_grpc() {
         let svc = TestExecutionServiceImpl::new();
 

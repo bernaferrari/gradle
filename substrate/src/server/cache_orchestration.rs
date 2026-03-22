@@ -362,6 +362,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_cache_key_includes_implementation_hash() {
+        let svc = BuildCacheOrchestrationServiceImpl::new();
+
+        let resp1 = svc.compute_cache_key(Request::new(ComputeCacheKeyRequest {
+            work_identity: ":compileJava".to_string(),
+            implementation_hash: "impl-v1".to_string(),
+            input_property_hashes: HashMap::new(),
+            input_file_hashes: HashMap::new(),
+            output_property_names: vec![],
+        })).await.unwrap().into_inner();
+
+        let resp2 = svc.compute_cache_key(Request::new(ComputeCacheKeyRequest {
+            work_identity: ":compileJava".to_string(),
+            implementation_hash: "impl-v2".to_string(),
+            input_property_hashes: HashMap::new(),
+            input_file_hashes: HashMap::new(),
+            output_property_names: vec![],
+        })).await.unwrap().into_inner();
+
+        assert_ne!(resp1.cache_key_string, resp2.cache_key_string);
+    }
+
+    #[tokio::test]
+    async fn test_cache_key_includes_work_identity() {
+        let svc = BuildCacheOrchestrationServiceImpl::new();
+
+        let resp1 = svc.compute_cache_key(Request::new(ComputeCacheKeyRequest {
+            work_identity: ":compileJava".to_string(),
+            implementation_hash: "impl".to_string(),
+            input_property_hashes: HashMap::new(),
+            input_file_hashes: HashMap::new(),
+            output_property_names: vec![],
+        })).await.unwrap().into_inner();
+
+        let resp2 = svc.compute_cache_key(Request::new(ComputeCacheKeyRequest {
+            work_identity: ":test".to_string(),
+            implementation_hash: "impl".to_string(),
+            input_property_hashes: HashMap::new(),
+            input_file_hashes: HashMap::new(),
+            output_property_names: vec![],
+        })).await.unwrap().into_inner();
+
+        assert_ne!(resp1.cache_key_string, resp2.cache_key_string);
+    }
+
+    #[tokio::test]
+    async fn test_store_overwrites_existing() {
+        let svc = BuildCacheOrchestrationServiceImpl::new();
+
+        svc.store_outputs(Request::new(StoreOutputsRequest {
+            cache_key: b"overwrite-key".to_vec(),
+            execution_time_ms: 100,
+            output_properties: vec!["old_output".to_string()],
+        })).await.unwrap();
+
+        svc.store_outputs(Request::new(StoreOutputsRequest {
+            cache_key: b"overwrite-key".to_vec(),
+            execution_time_ms: 200,
+            output_properties: vec!["new_output".to_string()],
+        })).await.unwrap();
+
+        let probe = svc.probe_cache(Request::new(ProbeCacheRequest {
+            cache_key: b"overwrite-key".to_vec(),
+        })).await.unwrap().into_inner();
+
+        assert!(probe.available);
+        assert_eq!(probe.execution_time_ms, 200);
+        assert_eq!(probe.output_properties, vec!["new_output".to_string()]);
+    }
+
+    #[tokio::test]
     async fn test_cache_hit_miss_tracking() {
         let svc = BuildCacheOrchestrationServiceImpl::new();
 
