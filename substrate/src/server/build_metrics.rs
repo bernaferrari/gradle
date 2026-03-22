@@ -25,9 +25,22 @@ struct MetricData {
 }
 
 impl MetricData {
+    fn new() -> Self {
+        Self {
+            min: AtomicI64::new(i64::MAX),
+            ..Self::default()
+        }
+    }
+}
+
+impl MetricData {
     fn record(&self, value: f64, tags: HashMap<String, String>) {
         self.count.fetch_add(1, Ordering::Relaxed);
-        self.sum.fetch_add(value.to_bits(), Ordering::Relaxed);
+        // Properly add f64 using atomic fetch_update to avoid bit corruption
+        self.sum.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            let current_f64 = f64::from_bits(current);
+            Some((current_f64 + value).to_bits())
+        }).ok();
         let ival = value as i64;
         if ival < self.min.load(Ordering::Relaxed) {
             self.min.store(ival, Ordering::Relaxed);
@@ -85,7 +98,7 @@ impl BuildMetricsServiceImpl {
     fn ensure_metric(&self, name: &str) {
         if !self.metrics.contains_key(name) {
             self.metrics
-                .insert(name.to_string(), MetricData::default());
+                .insert(name.to_string(), MetricData::new());
         }
     }
 
@@ -451,5 +464,138 @@ mod tests {
 
         assert!(resp.reset);
         assert_eq!(resp.metrics_cleared, 1);
+    }
+
+    #[tokio::test]
+    async fn test_timer_metric_aggregation() {
+        let svc = make_svc();
+
+        // Record multiple timer values
+        for ms in [100, 200, 300] {
+            svc.record_metric(Request::new(RecordMetricRequest {
+                build_id: "build1".to_string(),
+                event: Some(MetricEvent {
+                    name: "task.compile".to_string(),
+                    value: ms.to_string(),
+                    metric_type: "timer".to_string(),
+                    tags: HashMap::new(),
+                    timestamp_ms: 1000,
+                }),
+            }))
+            .await
+            .unwrap();
+        }
+
+        let resp = svc
+            .get_metrics(Request::new(GetMetricsRequest {
+                build_id: "build1".to_string(),
+                metric_names: vec!["task.compile".to_string()],
+                since_ms: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.metrics.len(), 1);
+        let m = &resp.metrics[0];
+        assert_eq!(m.count, 3);
+        assert_eq!(m.min, 100.0);
+        assert_eq!(m.max, 300.0);
+        // avg = sum/count = 600/3 = 200
+        assert!((m.sum / m.count as f64 - 200.0).abs() < 0.01);
+    }
+
+    #[tokio::test]
+    async fn test_metric_with_tags() {
+        let svc = make_svc();
+
+        let mut tags = HashMap::new();
+        tags.insert("task".to_string(), ":compileJava".to_string());
+
+        svc.record_metric(Request::new(RecordMetricRequest {
+            build_id: "build1".to_string(),
+            event: Some(MetricEvent {
+                name: "task.duration".to_string(),
+                value: "500".to_string(),
+                metric_type: "timer".to_string(),
+                tags,
+                timestamp_ms: 1000,
+            }),
+        }))
+        .await
+        .unwrap();
+
+        let resp = svc
+            .get_metrics(Request::new(GetMetricsRequest {
+                build_id: "build1".to_string(),
+                metric_names: vec!["task.duration".to_string()],
+                since_ms: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.metrics[0].tags.len(), 1);
+        assert_eq!(resp.metrics[0].tags.get("task").unwrap(), ":compileJava");
+    }
+
+    #[tokio::test]
+    async fn test_get_metrics_unknown_name() {
+        let svc = make_svc();
+
+        let resp = svc
+            .get_metrics(Request::new(GetMetricsRequest {
+                build_id: "build1".to_string(),
+                metric_names: vec!["nonexistent".to_string()],
+                since_ms: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.metrics.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_performance_summary_success() {
+        let svc = make_svc();
+
+        svc.record_metric(Request::new(RecordMetricRequest {
+            build_id: "build1".to_string(),
+            event: Some(MetricEvent {
+                name: "build.start".to_string(),
+                value: "0".to_string(),
+                metric_type: "timer".to_string(),
+                tags: HashMap::new(),
+                timestamp_ms: 1000,
+            }),
+        }))
+        .await
+        .unwrap();
+
+        svc.record_metric(Request::new(RecordMetricRequest {
+            build_id: "build1".to_string(),
+            event: Some(MetricEvent {
+                name: "build.end".to_string(),
+                value: "SUCCESS".to_string(),
+                metric_type: "timer".to_string(),
+                tags: HashMap::new(),
+                timestamp_ms: 3000,
+            }),
+        }))
+        .await
+        .unwrap();
+
+        let resp = svc
+            .get_performance_summary(Request::new(GetPerformanceSummaryRequest {
+                build_id: "build1".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let summary = resp.summary.unwrap();
+        assert_eq!(summary.build_outcome, "SUCCESS");
+        assert_eq!(summary.duration_ms, 2000);
     }
 }

@@ -335,4 +335,114 @@ mod tests {
         let op = svc.operations.get("op-1").unwrap();
         assert!((op.progress - 0.5).abs() < 0.01);
     }
+
+    #[tokio::test]
+    async fn test_build_summary_tracks_outcomes() {
+        let svc = BuildOperationsServiceImpl::new();
+
+        // Simulate task executions
+        for (id, outcome) in [
+            ("t1", "EXECUTED"),
+            ("t2", "UP_TO_DATE"),
+            ("t3", "FROM_CACHE"),
+            ("t4", "EXECUTED_INCREMENTALLY"),
+            ("t5", "FAILED"),
+        ] {
+            svc.start_operation(Request::new(StartOperationRequest {
+                operation_id: id.to_string(),
+                display_name: id.to_string(),
+                operation_type: "Task".to_string(),
+                parent_id: String::new(),
+                start_time_ms: 0,
+                metadata: Default::default(),
+            }))
+            .await
+            .unwrap();
+
+            svc.complete_operation(Request::new(CompleteOperationRequest {
+                operation_id: id.to_string(),
+                duration_ms: 100,
+                success: outcome != "FAILED",
+                outcome: outcome.to_string(),
+            }))
+            .await
+            .unwrap();
+        }
+
+        let summary = svc
+            .get_build_summary(Request::new(GetBuildSummaryRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(summary.summary.is_some());
+        let s = summary.summary.unwrap();
+        assert_eq!(s.total_tasks, 5);
+        assert_eq!(s.executed_tasks, 2); // EXECUTED + EXECUTED_INCREMENTALLY
+        assert_eq!(s.up_to_date_tasks, 1);
+        assert_eq!(s.from_cache_tasks, 1);
+        assert_eq!(s.failed_tasks, 1);
+        assert_eq!(s.outcome, "FAILURE");
+    }
+
+    #[tokio::test]
+    async fn test_build_summary_success_when_no_failures() {
+        let svc = BuildOperationsServiceImpl::new();
+
+        svc.start_operation(Request::new(StartOperationRequest {
+            operation_id: "t1".to_string(),
+            display_name: "t1".to_string(),
+            operation_type: "Task".to_string(),
+            parent_id: String::new(),
+            start_time_ms: 0,
+            metadata: Default::default(),
+        }))
+        .await
+        .unwrap();
+
+        svc.complete_operation(Request::new(CompleteOperationRequest {
+            operation_id: "t1".to_string(),
+            duration_ms: 100,
+            success: true,
+            outcome: "EXECUTED".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        let summary = svc
+            .get_build_summary(Request::new(GetBuildSummaryRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(summary.summary.unwrap().outcome, "SUCCESS");
+    }
+
+    #[tokio::test]
+    async fn test_completed_operations_tracked() {
+        let svc = BuildOperationsServiceImpl::new();
+
+        svc.start_operation(Request::new(StartOperationRequest {
+            operation_id: "op-1".to_string(),
+            display_name: "op1".to_string(),
+            operation_type: "T".to_string(),
+            parent_id: String::new(),
+            start_time_ms: 0,
+            metadata: Default::default(),
+        }))
+        .await
+        .unwrap();
+
+        svc.complete_operation(Request::new(CompleteOperationRequest {
+            operation_id: "op-1".to_string(),
+            duration_ms: 200,
+            success: true,
+            outcome: "EXECUTED".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        assert_eq!(svc.total_operations.load(Ordering::Relaxed), 1);
+        assert_eq!(svc.completed.len(), 1);
+    }
 }
