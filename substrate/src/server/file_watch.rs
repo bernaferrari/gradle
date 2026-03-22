@@ -687,4 +687,290 @@ mod tests {
             status.message()
         );
     }
+
+    /// Test that after stopping a watcher, its stats are cleared and it cannot be polled.
+    #[tokio::test]
+    async fn test_stop_watcher_no_longer_active() {
+        let svc = FileWatchServiceImpl::new();
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = dir.path().to_string_lossy().to_string();
+
+        let resp = svc
+            .start_watching(Request::new(StartWatchingRequest {
+                root_path: dir_path.clone(),
+                include_patterns: vec![],
+                exclude_patterns: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.watching);
+        let watch_id = resp.watch_id.clone();
+
+        // Verify the watcher is active via stats
+        let stats_before = svc
+            .get_watch_stats(Request::new(GetWatchStatsRequest {
+                watch_id: watch_id.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(stats_before.watch_start_time_ms > 0, "watcher should be active before stop");
+
+        // Stop the watcher
+        let stop_resp = svc
+            .stop_watching(Request::new(StopWatchingRequest {
+                watch_id: watch_id.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(stop_resp.stopped);
+
+        // Stats should now return zeros
+        let stats_after = svc
+            .get_watch_stats(Request::new(GetWatchStatsRequest {
+                watch_id: watch_id.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(stats_after.files_watched, 0, "files_watched should be 0 after stop");
+        assert_eq!(stats_after.changes_detected, 0, "changes_detected should be 0 after stop");
+        assert_eq!(stats_after.watch_start_time_ms, 0, "watch_start_time_ms should be 0 after stop");
+
+        // Polling the stopped watcher should fail with NotFound
+        let poll_result = svc
+            .poll_changes(Request::new(PollChangesRequest {
+                watch_id: watch_id.clone(),
+                since_timestamp_ms: 0,
+            }))
+            .await;
+
+        assert!(poll_result.is_err(), "polling a stopped watcher should return an error");
+        match poll_result {
+            Err(status) => {
+                assert_eq!(status.code(), tonic::Code::NotFound);
+            }
+            Ok(_) => panic!("expected NotFound error when polling a stopped watcher"),
+        }
+    }
+
+    /// Test that polling with no active watchers returns an error (not_found).
+    #[tokio::test]
+    async fn test_poll_changes_no_watchers_returns_error() {
+        let svc = FileWatchServiceImpl::new();
+
+        // With no watchers started at all, polling any watch_id should fail
+        let result = svc
+            .poll_changes(Request::new(PollChangesRequest {
+                watch_id: "watch-nothing".to_string(),
+                since_timestamp_ms: 0,
+            }))
+            .await;
+
+        assert!(result.is_err(), "polling with no watchers should fail");
+        match result {
+            Err(status) => {
+                assert_eq!(status.code(), tonic::Code::NotFound);
+                assert!(
+                    status.message().contains("not found"),
+                    "error message should say 'not found': {}",
+                    status.message()
+                );
+            }
+            Ok(_) => panic!("expected NotFound error when no watchers exist"),
+        }
+
+        // Also try with a completely empty watch_id
+        let result2 = svc
+            .poll_changes(Request::new(PollChangesRequest {
+                watch_id: String::new(),
+                since_timestamp_ms: 0,
+            }))
+            .await;
+
+        assert!(result2.is_err(), "polling with empty watch_id should also fail");
+    }
+
+    /// Test that multiple polls on the same watcher each return independent streams.
+    /// Verifies that poll_changes can be called multiple times on the same watch_id,
+    /// and each call succeeds and returns a valid (non-error) response. Then verifies
+    /// that after stopping the watcher, subsequent polls fail.
+    #[tokio::test]
+    async fn test_incremental_poll_changes() {
+        use tokio::time::Duration;
+
+        let svc = FileWatchServiceImpl::new();
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = dir.path().to_string_lossy().to_string();
+
+        let resp = svc
+            .start_watching(Request::new(StartWatchingRequest {
+                root_path: dir_path.clone(),
+                include_patterns: vec!["**/*".to_string()],
+                exclude_patterns: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.watching);
+        let watch_id = resp.watch_id.clone();
+
+        // First poll should succeed and return a valid stream
+        let stream1 = svc
+            .poll_changes(Request::new(PollChangesRequest {
+                watch_id: watch_id.clone(),
+                since_timestamp_ms: 0,
+            }))
+            .await;
+
+        assert!(stream1.is_ok(), "first poll_changes should succeed");
+
+        // Create a file while the first stream is active
+        let file1 = dir.path().join("alpha.txt");
+        std::fs::write(&file1, b"first").unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Drop the first stream (simulate client finishing the first poll)
+        drop(stream1);
+
+        // Second poll on the same watch_id should also succeed
+        let stream2 = svc
+            .poll_changes(Request::new(PollChangesRequest {
+                watch_id: watch_id.clone(),
+                since_timestamp_ms: 0,
+            }))
+            .await;
+
+        assert!(stream2.is_ok(), "second poll_changes on same watch_id should succeed");
+
+        // Create another file while the second stream is active
+        let file2 = dir.path().join("beta.txt");
+        std::fs::write(&file2, b"second").unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Drop the second stream
+        drop(stream2);
+
+        // Third poll should also succeed — the watch session is still active
+        let stream3 = svc
+            .poll_changes(Request::new(PollChangesRequest {
+                watch_id: watch_id.clone(),
+                since_timestamp_ms: 0,
+            }))
+            .await;
+
+        assert!(stream3.is_ok(), "third poll_changes on same watch_id should succeed");
+        drop(stream3);
+
+        // Verify the watch session is still alive via stats
+        let stats = svc
+            .get_watch_stats(Request::new(GetWatchStatsRequest {
+                watch_id: watch_id.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(stats.watch_start_time_ms > 0, "watch session should still be active after multiple polls");
+
+        // After stopping the watcher, polls should fail
+        svc.stop_watching(Request::new(StopWatchingRequest {
+            watch_id: watch_id.clone(),
+        }))
+        .await
+        .unwrap();
+
+        let stream_after_stop = svc
+            .poll_changes(Request::new(PollChangesRequest {
+                watch_id: watch_id.clone(),
+                since_timestamp_ms: 0,
+            }))
+            .await;
+
+        assert!(stream_after_stop.is_err(), "poll after stop should fail");
+    }
+
+    /// Test watching a single file (not a directory). The notify crate supports
+    /// watching individual files via RecursiveMode::Recursive, so this should
+    /// succeed. This test verifies that start_watching accepts a file path,
+    /// returns files_watched == 1, poll_changes succeeds, and the watcher can
+    /// be stopped cleanly.
+    #[tokio::test]
+    async fn test_watch_single_file() {
+        let svc = FileWatchServiceImpl::new();
+        let dir = tempfile::tempdir().unwrap();
+
+        // Create a specific file to watch
+        let target_file = dir.path().join("target.log");
+        std::fs::write(&target_file, b"initial content").unwrap();
+        let file_path = target_file.to_string_lossy().to_string();
+
+        // Start watching the file directly
+        let resp = svc
+            .start_watching(Request::new(StartWatchingRequest {
+                root_path: file_path.clone(),
+                include_patterns: vec![],
+                exclude_patterns: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.watching, "watching a single file should succeed");
+        assert!(!resp.watch_id.is_empty());
+        // count_files returns 1 for a file
+        assert_eq!(resp.files_watched, 1, "a single file should report files_watched == 1");
+
+        let watch_id = resp.watch_id.clone();
+
+        // Verify stats are available for the file watcher
+        let stats = svc
+            .get_watch_stats(Request::new(GetWatchStatsRequest {
+                watch_id: watch_id.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(stats.files_watched, 1);
+        assert!(stats.watch_start_time_ms > 0);
+
+        // Verify poll_changes works on a file watcher (should not error)
+        let stream = svc
+            .poll_changes(Request::new(PollChangesRequest {
+                watch_id: watch_id.clone(),
+                since_timestamp_ms: 0,
+            }))
+            .await;
+
+        assert!(stream.is_ok(), "poll_changes on a file watcher should succeed");
+
+        // Verify last_poll_time_ms was updated by the poll
+        let stats_after_poll = svc
+            .get_watch_stats(Request::new(GetWatchStatsRequest {
+                watch_id: watch_id.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(
+            stats_after_poll.last_poll_time_ms > 0,
+            "last_poll_time_ms should be updated after poll"
+        );
+
+        // Cleanup
+        svc.stop_watching(Request::new(StopWatchingRequest {
+            watch_id,
+        }))
+        .await
+        .unwrap();
+    }
 }

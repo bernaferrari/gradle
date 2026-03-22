@@ -632,4 +632,374 @@ mod tests {
         let fp_mixed = ValueSnapshotServiceImpl::fingerprint_value(&prop_mixed);
         assert_eq!(fp_unix, fp_mixed, "Backslash paths should normalize to forward slash");
     }
+
+    #[tokio::test]
+    async fn test_snapshot_multiple_properties_of_different_types() {
+        let svc = ValueSnapshotServiceImpl::new();
+
+        let resp = svc
+            .snapshot_values(Request::new(SnapshotValuesRequest {
+                values: vec![
+                    PropertyValue {
+                        name: "project-name".to_string(),
+                        value: Some(Value::StringValue("my-app".to_string())),
+                        type_name: "java.lang.String".to_string(),
+                    },
+                    PropertyValue {
+                        name: "min-sdk".to_string(),
+                        value: Some(Value::LongValue(21)),
+                        type_name: "java.lang.Integer".to_string(),
+                    },
+                    PropertyValue {
+                        name: "release".to_string(),
+                        value: Some(Value::BoolValue(true)),
+                        type_name: "boolean".to_string(),
+                    },
+                    PropertyValue {
+                        name: "bytecode-level".to_string(),
+                        value: Some(Value::BinaryValue(vec![0xCA, 0xFE, 0xBA, 0xBE])),
+                        type_name: "[B".to_string(),
+                    },
+                    PropertyValue {
+                        name: "compiler-args".to_string(),
+                        value: Some(Value::ListValue("-Xlint;-Werror;-parameters".to_string())),
+                        type_name: "java.util.List".to_string(),
+                    },
+                    PropertyValue {
+                        name: "env-vars".to_string(),
+                        value: Some(Value::MapValue("JAVA_HOME=/usr/lib/jvm;PATH=/usr/bin".to_string())),
+                        type_name: "java.util.Map".to_string(),
+                    },
+                ],
+                implementation_fingerprint: "multi-type-impl".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.success);
+        assert_eq!(resp.results.len(), 6);
+        assert!(resp.error_message.is_empty());
+
+        // Results should be sorted alphabetically by property name
+        let expected_order = [
+            "bytecode-level",
+            "compiler-args",
+            "env-vars",
+            "min-sdk",
+            "project-name",
+            "release",
+        ];
+        for (i, expected_name) in expected_order.iter().enumerate() {
+            assert_eq!(resp.results[i].name, *expected_name,
+                "Result at position {} should be '{}'", i, expected_name);
+            assert_eq!(resp.results[i].fingerprint.len(), 16,
+                "Fingerprint for '{}' must be 16 bytes", expected_name);
+        }
+
+        // Composite hash must be 16 bytes (MD5)
+        assert_eq!(resp.composite_hash.len(), 16);
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_deeply_nested_dotted_property_names() {
+        let svc = ValueSnapshotServiceImpl::new();
+
+        let dotted_names = vec![
+            "android.buildTypes.release.minifyEnabled",
+            "android.defaultConfig.applicationId",
+            "android.compileOptions.sourceCompatibility",
+            "android.productFlavors.free.dimension",
+            "android.signingConfigs.release.storeFile",
+            "kotlin.jvm.target.compatibility",
+            "spring.datasource.hikari.maximum-pool-size",
+            "spring.jpa.hibernate.ddl-auto",
+        ];
+
+        let values: Vec<PropertyValue> = dotted_names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| PropertyValue {
+                name: name.to_string(),
+                value: Some(Value::StringValue(format!("value-{}", i))),
+                type_name: "java.lang.String".to_string(),
+            })
+            .collect();
+
+        let resp = svc
+            .snapshot_values(Request::new(SnapshotValuesRequest {
+                values,
+                implementation_fingerprint: "dotted-paths-impl".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.success);
+        assert_eq!(resp.results.len(), dotted_names.len());
+        assert!(resp.error_message.is_empty());
+
+        // Each property must have its own unique fingerprint
+        let fingerprints: Vec<Vec<u8>> = resp.results.iter().map(|r| r.fingerprint.clone()).collect();
+        for i in 0..fingerprints.len() {
+            for j in (i + 1)..fingerprints.len() {
+                assert_ne!(fingerprints[i], fingerprints[j],
+                    "Properties at indices {} and {} must have different fingerprints", i, j);
+            }
+        }
+
+        // Results should be sorted alphabetically by dotted name
+        let mut sorted_names: Vec<&str> = dotted_names.iter().map(|s| s.as_ref()).collect();
+        sorted_names.sort();
+        for (i, expected) in sorted_names.iter().enumerate() {
+            assert_eq!(resp.results[i].name, *expected,
+                "Result at position {} should be sorted as '{}'", i, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_individual_fingerprints_differ_for_different_values() {
+        let svc = ValueSnapshotServiceImpl::new();
+
+        // Create a request with multiple properties having different values
+        let resp = svc
+            .snapshot_values(Request::new(SnapshotValuesRequest {
+                values: vec![
+                    PropertyValue {
+                        name: "prop-a".to_string(),
+                        value: Some(Value::StringValue("alpha".to_string())),
+                        type_name: "java.lang.String".to_string(),
+                    },
+                    PropertyValue {
+                        name: "prop-b".to_string(),
+                        value: Some(Value::StringValue("bravo".to_string())),
+                        type_name: "java.lang.String".to_string(),
+                    },
+                    PropertyValue {
+                        name: "prop-c".to_string(),
+                        value: Some(Value::StringValue("charlie".to_string())),
+                        type_name: "java.lang.String".to_string(),
+                    },
+                    PropertyValue {
+                        name: "prop-d".to_string(),
+                        value: Some(Value::LongValue(100)),
+                        type_name: "java.lang.Long".to_string(),
+                    },
+                    PropertyValue {
+                        name: "prop-e".to_string(),
+                        value: Some(Value::LongValue(200)),
+                        type_name: "java.lang.Long".to_string(),
+                    },
+                ],
+                implementation_fingerprint: "fingerprint-diff-impl".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.success);
+        assert_eq!(resp.results.len(), 5);
+
+        // Every individual fingerprint must differ from every other
+        for i in 0..resp.results.len() {
+            for j in (i + 1)..resp.results.len() {
+                assert_ne!(
+                    resp.results[i].fingerprint, resp.results[j].fingerprint,
+                    "Fingerprints for '{}' and '{}' must differ",
+                    resp.results[i].name, resp.results[j].name
+                );
+            }
+        }
+
+        // Now snapshot the same properties with the same values again and verify
+        // each fingerprint matches the corresponding one from the first call.
+        let resp2 = svc
+            .snapshot_values(Request::new(SnapshotValuesRequest {
+                values: vec![
+                    PropertyValue {
+                        name: "prop-a".to_string(),
+                        value: Some(Value::StringValue("alpha".to_string())),
+                        type_name: "java.lang.String".to_string(),
+                    },
+                    PropertyValue {
+                        name: "prop-b".to_string(),
+                        value: Some(Value::StringValue("bravo".to_string())),
+                        type_name: "java.lang.String".to_string(),
+                    },
+                    PropertyValue {
+                        name: "prop-c".to_string(),
+                        value: Some(Value::StringValue("charlie".to_string())),
+                        type_name: "java.lang.String".to_string(),
+                    },
+                    PropertyValue {
+                        name: "prop-d".to_string(),
+                        value: Some(Value::LongValue(100)),
+                        type_name: "java.lang.Long".to_string(),
+                    },
+                    PropertyValue {
+                        name: "prop-e".to_string(),
+                        value: Some(Value::LongValue(200)),
+                        type_name: "java.lang.Long".to_string(),
+                    },
+                ],
+                implementation_fingerprint: "fingerprint-diff-impl".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Same fingerprint for each matching property across calls
+        for (r1, r2) in resp.results.iter().zip(resp2.results.iter()) {
+            assert_eq!(r1.name, r2.name);
+            assert_eq!(r1.fingerprint, r2.fingerprint,
+                "Fingerprint for '{}' must be stable across calls", r1.name);
+        }
+
+        assert_eq!(resp.composite_hash, resp2.composite_hash,
+            "Composite hash must be stable across calls with identical inputs");
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_with_many_properties() {
+        let svc = ValueSnapshotServiceImpl::new();
+
+        // Generate 150 properties covering all value types
+        let values: Vec<PropertyValue> = (0..150)
+            .map(|i| {
+                let (value, type_name) = match i % 6 {
+                    0 => (
+                        Value::StringValue(format!("string-value-{}", i)),
+                        "java.lang.String".to_string(),
+                    ),
+                    1 => (
+                        Value::LongValue(i as i64),
+                        "java.lang.Long".to_string(),
+                    ),
+                    2 => (
+                        Value::BoolValue(i % 2 == 0),
+                        "boolean".to_string(),
+                    ),
+                    3 => (
+                        Value::BinaryValue(vec![i as u8, (i >> 8) as u8, (i >> 16) as u8]),
+                        "[B".to_string(),
+                    ),
+                    4 => (
+                        Value::ListValue(format!("item-{};item-{}b", i, i)),
+                        "java.util.List".to_string(),
+                    ),
+                    _ => (
+                        Value::MapValue(format!("key{}=val{}", i, i)),
+                        "java.util.Map".to_string(),
+                    ),
+                };
+                PropertyValue {
+                    name: format!("prop-{:03}", i),
+                    value: Some(value),
+                    type_name,
+                }
+            })
+            .collect();
+
+        assert_eq!(values.len(), 150);
+
+        let resp = svc
+            .snapshot_values(Request::new(SnapshotValuesRequest {
+                values,
+                implementation_fingerprint: "many-props-impl".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.success);
+        assert_eq!(resp.results.len(), 150, "Should return results for all 150 properties");
+        assert!(resp.error_message.is_empty());
+
+        // Every fingerprint must be 16 bytes (MD5)
+        for result in &resp.results {
+            assert_eq!(result.fingerprint.len(), 16,
+                "Fingerprint for '{}' must be 16 bytes", result.name);
+        }
+
+        // Composite hash must be 16 bytes
+        assert_eq!(resp.composite_hash.len(), 16);
+
+        // Results must be sorted by name
+        for window in resp.results.windows(2) {
+            assert!(window[0].name < window[1].name,
+                "Results must be sorted: '{}' should come before '{}'",
+                window[0].name, window[1].name);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_with_large_binary_value() {
+        let svc = ValueSnapshotServiceImpl::new();
+
+        // Create a 512 KB binary value (simulates a serialized class file or compiled output)
+        let large_binary: Vec<u8> = (0..512 * 1024)
+            .map(|i| (i % 256) as u8)
+            .collect();
+
+        let resp = svc
+            .snapshot_values(Request::new(SnapshotValuesRequest {
+                values: vec![PropertyValue {
+                    name: "compiled-bytecode".to_string(),
+                    value: Some(Value::BinaryValue(large_binary.clone())),
+                    type_name: "[B".to_string(),
+                }],
+                implementation_fingerprint: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.success);
+        assert_eq!(resp.results.len(), 1);
+        assert_eq!(resp.results[0].name, "compiled-bytecode");
+        assert_eq!(resp.results[0].fingerprint.len(), 16,
+            "MD5 fingerprint must be 16 bytes regardless of input size");
+        assert_eq!(resp.composite_hash.len(), 16,
+            "Composite hash must be 16 bytes");
+        assert!(resp.error_message.is_empty());
+
+        // Verify determinism: same binary input produces same fingerprint
+        let resp2 = svc
+            .snapshot_values(Request::new(SnapshotValuesRequest {
+                values: vec![PropertyValue {
+                    name: "compiled-bytecode".to_string(),
+                    value: Some(Value::BinaryValue(large_binary)),
+                    type_name: "[B".to_string(),
+                }],
+                implementation_fingerprint: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.results[0].fingerprint, resp2.results[0].fingerprint,
+            "Large binary fingerprint must be deterministic");
+        assert_eq!(resp.composite_hash, resp2.composite_hash,
+            "Composite hash must be deterministic for large binary values");
+
+        // Different binary content should produce a different fingerprint
+        let different_binary: Vec<u8> = (0..512 * 1024)
+            .map(|i| ((i + 1) % 256) as u8)
+            .collect();
+        let resp3 = svc
+            .snapshot_values(Request::new(SnapshotValuesRequest {
+                values: vec![PropertyValue {
+                    name: "compiled-bytecode".to_string(),
+                    value: Some(Value::BinaryValue(different_binary)),
+                    type_name: "[B".to_string(),
+                }],
+                implementation_fingerprint: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_ne!(resp.results[0].fingerprint, resp3.results[0].fingerprint,
+            "Different binary content must produce different fingerprints");
+    }
 }
