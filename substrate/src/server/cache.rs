@@ -228,7 +228,7 @@ pub struct CacheStats {
 }
 
 pub struct CacheServiceImpl {
-    store: LocalCacheStore,
+    store: Arc<LocalCacheStore>,
     remote: Option<std::sync::Arc<crate::server::remote_cache::RemoteCacheStore>>,
 }
 
@@ -241,16 +241,21 @@ impl Default for CacheServiceImpl {
 impl CacheServiceImpl {
     pub fn new(base_dir: PathBuf) -> Self {
         Self {
-            store: LocalCacheStore::new(base_dir),
+            store: Arc::new(LocalCacheStore::new(base_dir)),
             remote: None,
         }
     }
 
     pub fn with_remote(base_dir: PathBuf, remote: crate::server::remote_cache::RemoteCacheStore) -> Self {
         Self {
-            store: LocalCacheStore::new(base_dir),
+            store: Arc::new(LocalCacheStore::new(base_dir)),
             remote: Some(std::sync::Arc::new(remote)),
         }
+    }
+
+    /// Get a reference to the local cache store for cross-service integration.
+    pub fn local_store(&self) -> Arc<LocalCacheStore> {
+        Arc::clone(&self.store)
     }
 }
 
