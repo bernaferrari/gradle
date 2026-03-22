@@ -429,4 +429,171 @@ mod tests {
         assert_eq!(resp.warning_count, 0);
         assert_eq!(resp.error_count, 0);
     }
+
+    #[tokio::test]
+    async fn test_report_problem_without_details() {
+        let svc = ProblemReportingServiceImpl::new();
+
+        // Report a problem with only severity, category, and message -- no file_path,
+        // no line_number, no additional_data, no details, no contextual_label, etc.
+        let problem = ProblemDetails {
+            problem_id: String::new(),
+            severity: "error".to_string(),
+            category: "compilation".to_string(),
+            message: "Build failed with unknown error".to_string(),
+            details: String::new(),
+            file_path: String::new(),
+            line_number: 0,
+            column: 0,
+            contextual_label: String::new(),
+            documentation_url: String::new(),
+            additional_data: String::new(),
+            timestamp_ms: 0,
+        };
+
+        let report_resp = svc
+            .report_problem(Request::new(ReportProblemRequest {
+                build_id: "build-no-details".to_string(),
+                problem: Some(problem),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(report_resp.accepted);
+
+        // Verify it was stored and retrievable
+        let get_resp = svc
+            .get_problems(Request::new(GetProblemsRequest {
+                build_id: "build-no-details".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(get_resp.total, 1);
+        assert_eq!(get_resp.error_count, 1);
+
+        let stored = &get_resp.problems[0];
+        assert_eq!(stored.severity, "error");
+        assert_eq!(stored.category, "compilation");
+        assert_eq!(stored.message, "Build failed with unknown error");
+        assert!(stored.file_path.is_empty());
+        assert_eq!(stored.line_number, 0);
+        assert!(stored.details.is_empty());
+        assert!(stored.additional_data.is_empty());
+        assert!(stored.contextual_label.is_empty());
+        assert!(stored.documentation_url.is_empty());
+        // Auto-assigned fields
+        assert!(!stored.problem_id.is_empty());
+        assert_ne!(stored.timestamp_ms, 0);
+    }
+
+    #[tokio::test]
+    async fn test_large_number_of_problems() {
+        let svc = ProblemReportingServiceImpl::new();
+        let build_id = "build-large";
+        let num_problems = 150;
+
+        // Report 150 problems with a mix of severities
+        for i in 0..num_problems {
+            let severity = match i % 3 {
+                0 => "error",
+                1 => "warning",
+                _ => "deprecation",
+            };
+            let category = match i % 3 {
+                0 => "compile",
+                1 => "lint",
+                _ => "property_override",
+            };
+            let message = format!("Problem #{}: something went wrong", i);
+
+            let resp = svc
+                .report_problem(Request::new(ReportProblemRequest {
+                    build_id: build_id.to_string(),
+                    problem: Some(make_problem(severity, category, &message)),
+                }))
+                .await
+                .unwrap()
+                .into_inner();
+
+            assert!(resp.accepted, "Problem #{} should be accepted", i);
+        }
+
+        // Retrieve all problems and verify counts
+        let get_resp = svc
+            .get_problems(Request::new(GetProblemsRequest {
+                build_id: build_id.to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(get_resp.total, num_problems);
+        // 150 / 3 = 50 of each severity
+        assert_eq!(get_resp.error_count, 50);
+        assert_eq!(get_resp.warning_count, 50);
+        assert_eq!(get_resp.deprecation_count, 50);
+
+        // Verify each problem has a unique auto-assigned ID (all follow "problem-N" pattern)
+        let numeric_ids: std::collections::HashSet<i32> = get_resp
+            .problems
+            .iter()
+            .map(|p| {
+                p.problem_id
+                    .strip_prefix("problem-")
+                    .expect("problem ID should start with 'problem-'")
+                    .parse::<i32>()
+                    .expect("problem ID suffix should be a number")
+            })
+            .collect();
+        assert_eq!(
+            numeric_ids.len(),
+            num_problems as usize,
+            "All {} problems should have unique IDs",
+            num_problems
+        );
+
+        // Verify all problems have a non-zero timestamp
+        for problem in &get_resp.problems {
+            assert_ne!(problem.timestamp_ms, 0);
+        }
+
+        // Verify severity filter still works at scale
+        let warn_resp = svc
+            .get_problems_by_severity(Request::new(GetProblemsBySeverityRequest {
+                build_id: build_id.to_string(),
+                severity: "warning".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(warn_resp.total, 50);
+        assert_eq!(warn_resp.warning_count, 50);
+        assert_eq!(warn_resp.error_count, 0);
+        assert_eq!(warn_resp.deprecation_count, 0);
+
+        // Clear all and verify
+        let clear_resp = svc
+            .clear_problems(Request::new(ClearProblemsRequest {
+                build_id: build_id.to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(clear_resp.cleared, num_problems);
+
+        let empty_resp = svc
+            .get_problems(Request::new(GetProblemsRequest {
+                build_id: build_id.to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(empty_resp.total, 0);
+    }
 }
