@@ -23,6 +23,7 @@ use gradle_substrate_daemon::{
         configuration_service_server::ConfigurationServiceServer,
         console_service_server::ConsoleServiceServer,
         control_service_server::ControlServiceServer,
+        dag_executor_service_server::DagExecutorServiceServer,
         dependency_resolution_service_server::DependencyResolutionServiceServer,
         execution_history_service_server::ExecutionHistoryServiceServer,
         execution_plan_service_server::ExecutionPlanServiceServer,
@@ -44,6 +45,7 @@ use gradle_substrate_daemon::{
     },
     server::{
         authoritative::AuthoritativeConfig,
+        dag_executor::DagExecutorServiceImpl,
         artifact_publishing::ArtifactPublishingServiceImpl,
         bootstrap::BootstrapServiceImpl, build_comparison::BuildComparisonServiceImpl,
         build_event_stream::BuildEventStreamServiceImpl, build_init::BuildInitServiceImpl,
@@ -209,7 +211,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("Loaded {} execution history entries", history_count);
 
     // Phase 5-6: Execution planning (wired to persistent history for rebuild loop detection)
-    let execution_plan = ExecutionPlanServiceImpl::with_persistent_history(work_scheduler, execution_history.clone());
+    let execution_plan = ExecutionPlanServiceImpl::with_persistent_history(work_scheduler.clone(), execution_history.clone());
     execution_plan.load_persistent_history();
 
     // Phase 8: Build cache orchestration (wired to local cache for real probe operations)
@@ -257,10 +259,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 24: Build event streaming (wired to console + metrics for auto fan-out)
     let console = Arc::new(ConsoleServiceImpl::new());
     let build_metrics = Arc::new(BuildMetricsServiceImpl::new());
-    let build_event_stream = BuildEventStreamServiceImpl::with_dispatchers(vec![
+    let event_dispatchers: Vec<Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>> = vec![
         Arc::clone(&console) as Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
         Arc::clone(&build_metrics) as Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
-    ]);
+    ];
+    let build_event_stream = BuildEventStreamServiceImpl::with_dispatchers(event_dispatchers.clone());
+
+    // DAG Executor (orchestrates build execution using task graph + worker scheduler)
+    let dag_executor = DagExecutorServiceImpl::new(work_scheduler.clone(), Arc::clone(&task_graph), event_dispatchers);
 
     // Phase 25: Worker process management
     let worker_process = WorkerProcessServiceImpl::new();
@@ -304,10 +310,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Gradle Substrate Daemon v{}", env!("CARGO_PKG_VERSION"));
     println!("Protocol version: {}", PROTOCOL_VERSION);
     println!("Listening on: {}", args.socket_path);
-    println!("Services: control, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console, test-execution, artifact-publishing, build-init, incremental-compilation, build-metrics, garbage-collection");
+    println!("Services: control, dag-executor, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console, test-execution, artifact-publishing, build-init, incremental-compilation, build-metrics, garbage-collection");
 
     Server::builder()
         .add_service(ControlServiceServer::new(control))
+        .add_service(DagExecutorServiceServer::new(dag_executor))
         .add_service(HashServiceServer::new(hash))
         .add_service(CacheServiceServer::new(cache))
         .add_service(ExecServiceServer::new(exec))
