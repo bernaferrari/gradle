@@ -909,6 +909,32 @@ OpenJDK Runtime Environment (build 21.0.4+7)"#;
         }
     }
 
+    #[test]
+    fn test_parse_java_version_invalid() {
+        let output = "no version info here";
+        let version = ToolchainServiceImpl::parse_java_version(output);
+        assert_eq!(version, None);
+    }
+
+    #[test]
+    fn test_parse_java_version_empty() {
+        let version = ToolchainServiceImpl::parse_java_version("");
+        assert_eq!(version, None);
+    }
+
+    #[test]
+    fn test_parse_java_version_java11() {
+        let output = r#"openjdk version "11.0.24" 2024-04-16"#;
+        let version = ToolchainServiceImpl::parse_java_version(output);
+        assert_eq!(version, Some("JDK 11".to_string()));
+    }
+
+    #[test]
+    fn test_toolchain_key() {
+        assert_eq!(ToolchainServiceImpl::toolchain_key("17", "temurin"), "temurin-17");
+        assert_eq!(ToolchainServiceImpl::toolchain_key("21", "corretto"), "corretto-21");
+    }
+
     #[tokio::test]
     async fn test_get_java_home_missing() {
         let svc = make_svc();
