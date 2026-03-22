@@ -2427,3 +2427,123 @@ message GetStorageStatsRequest {
 message GetStorageStatsResponse {
   repeated StorageStats stats = 1;
 }
+
+// ────────────────────────────────────────────────────────────────────
+// DAG Executor Service — orchestrates build execution using task graph
+// ────────────────────────────────────────────────────────────────────
+
+service DagExecutorService {
+  // Start executing a build's task graph. Returns immediately.
+  rpc StartBuild(StartBuildRequest) returns (StartBuildResponse);
+  // Cancel a running build. Marks remaining tasks as SKIPPED.
+  rpc CancelBuild(CancelBuildRequest) returns (CancelBuildResponse);
+  // Get the next task ready to execute. JVM polls this in a loop.
+  // Empty task_path = nothing ready (retry). "__BUILD_COMPLETE__" = done.
+  rpc GetNextTask(GetNextTaskRequest) returns (GetNextTaskResponse);
+  // Report that the JVM has begun executing a task.
+  rpc NotifyTaskStarted(NotifyTaskStartedRequest) returns (NotifyTaskStartedResponse);
+  // Report that a task finished. Unblocks dependents.
+  rpc NotifyTaskFinished(NotifyTaskFinishedRequest) returns (NotifyTaskFinishedResponse);
+  // Query the status of a running or completed build.
+  rpc GetBuildStatus(GetBuildStatusRequest) returns (GetBuildStatusResponse);
+  // Wait for a build to complete.
+  rpc AwaitBuildCompletion(AwaitBuildCompletionRequest) returns (AwaitBuildCompletionResponse);
+}
+
+message StartBuildRequest {
+  string build_id = 1;
+  // Maximum parallelism (0 = use default from WorkerScheduler)
+  int32 max_parallelism = 2;
+  // Task paths to include (empty = all tasks in the graph)
+  repeated string task_filter = 3;
+}
+
+message StartBuildResponse {
+  bool accepted = 1;
+  string error_message = 2;
+  int32 total_tasks = 3;
+  int64 critical_path_ms = 4;
+}
+
+message CancelBuildRequest {
+  string build_id = 1;
+  string reason = 2;
+}
+
+message CancelBuildResponse {
+  bool cancelled = 1;
+}
+
+message GetNextTaskRequest {
+  string build_id = 1;
+}
+
+message GetNextTaskResponse {
+  // Empty = nothing ready. "__BUILD_COMPLETE__" = build finished.
+  string task_path = 1;
+  string task_type = 2;
+  int64 estimated_duration_ms = 3;
+}
+
+message NotifyTaskStartedRequest {
+  string build_id = 1;
+  string task_path = 2;
+  int64 start_time_ms = 3;
+}
+
+message NotifyTaskStartedResponse {
+  bool acknowledged = 1;
+}
+
+message NotifyTaskFinishedRequest {
+  string build_id = 1;
+  string task_path = 2;
+  bool success = 3;
+  string outcome = 4;
+  int64 duration_ms = 5;
+  string failure_message = 6;
+}
+
+message NotifyTaskFinishedResponse {
+  bool acknowledged = 1;
+  // Tasks that are now unblocked and ready to execute.
+  repeated string newly_ready_tasks = 2;
+}
+
+message GetBuildStatusRequest {
+  string build_id = 1;
+}
+
+message GetBuildStatusResponse {
+  string build_id = 1;
+  string status = 2;  // PENDING, EXECUTING, COMPLETED, FAILED, CANCELLED
+  int32 total_tasks = 3;
+  int32 completed_tasks = 4;
+  int32 executing_tasks = 5;
+  int32 pending_tasks = 6;
+  int32 failed_tasks = 7;
+  int32 skipped_tasks = 8;
+  int64 elapsed_ms = 9;
+  repeated TaskStatusEntry task_statuses = 10;
+}
+
+message TaskStatusEntry {
+  string task_path = 1;
+  string status = 2;  // PENDING, EXECUTING, SUCCEEDED, FAILED, SKIPPED
+  int64 duration_ms = 3;
+}
+
+message AwaitBuildCompletionRequest {
+  string build_id = 1;
+  int64 timeout_ms = 2;  // 0 = wait indefinitely
+}
+
+message AwaitBuildCompletionResponse {
+  string build_id = 1;
+  string final_status = 2;  // COMPLETED, FAILED, CANCELLED
+  int32 tasks_succeeded = 3;
+  int32 tasks_failed = 4;
+  int32 tasks_skipped = 5;
+  int64 total_duration_ms = 6;
+  string failure_message = 7;
+}
