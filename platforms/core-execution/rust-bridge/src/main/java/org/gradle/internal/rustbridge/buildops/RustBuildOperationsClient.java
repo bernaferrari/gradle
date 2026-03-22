@@ -1,6 +1,7 @@
 package org.gradle.internal.rustbridge.buildops;
 
 import gradle.substrate.v1.BuildOperationsServiceGrpc;
+import gradle.substrate.v1.BuildEvent;
 import gradle.substrate.v1.CompleteOperationRequest;
 import gradle.substrate.v1.CompleteOperationResponse;
 import gradle.substrate.v1.GetBuildSummaryRequest;
@@ -9,10 +10,14 @@ import gradle.substrate.v1.ReportProgressRequest;
 import gradle.substrate.v1.ReportProgressResponse;
 import gradle.substrate.v1.StartOperationRequest;
 import gradle.substrate.v1.StartOperationResponse;
+import gradle.substrate.v1.StreamEventsRequest;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
 import org.slf4j.Logger;
 
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -106,6 +111,25 @@ public class RustBuildOperationsClient {
         } catch (Exception e) {
             LOGGER.debug("[substrate:buildops] get build summary failed", e);
             return GetBuildSummaryResponse.getDefaultInstance();
+        }
+    }
+
+    /**
+     * Stream build events for a build. Returns an empty iterator if substrate is disabled.
+     */
+    public Iterator<BuildEvent> streamEvents(String buildId) {
+        if (client.isNoop()) {
+            return Collections.emptyIterator();
+        }
+
+        try {
+            return client.getBuildOperationsStub()
+                .streamEvents(StreamEventsRequest.newBuilder()
+                    .setBuildId(buildId != null ? buildId : "")
+                    .build());
+        } catch (Exception e) {
+            LOGGER.debug("[substrate:buildops] stream events failed for build {}", buildId, e);
+            return Collections.emptyIterator();
         }
     }
 }
