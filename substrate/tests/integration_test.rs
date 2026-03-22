@@ -477,6 +477,7 @@ async fn test_task_graph_e2e() {
     // Register tasks
     let _ = client
         .register_task(Request::new(RegisterTaskRequest {
+            build_id: "test-build".to_string(),
             task_path: ":compileJava".to_string(),
             depends_on: vec![":processResources".to_string()],
             task_type: "JavaCompile".to_string(),
@@ -487,6 +488,7 @@ async fn test_task_graph_e2e() {
 
     let _ = client
         .register_task(Request::new(RegisterTaskRequest {
+            build_id: "test-build".to_string(),
             task_path: ":processResources".to_string(),
             depends_on: vec![],
             task_type: "ProcessResources".to_string(),
@@ -1614,6 +1616,7 @@ async fn test_full_build_lifecycle() {
     let mut task_client = task_graph_service_client::TaskGraphServiceClient::new(channel.clone());
     task_client
         .register_task(Request::new(RegisterTaskRequest {
+            build_id: "lifecycle-build".to_string(),
             task_path: ":compileJava".to_string(),
             depends_on: vec![":processResources".to_string()],
             task_type: "JavaCompile".to_string(),
@@ -1624,6 +1627,7 @@ async fn test_full_build_lifecycle() {
 
     task_client
         .register_task(Request::new(RegisterTaskRequest {
+            build_id: "lifecycle-build".to_string(),
             task_path: ":processResources".to_string(),
             depends_on: vec![],
             task_type: "Copy".to_string(),
@@ -2359,6 +2363,7 @@ async fn test_cross_service_execution_plan_with_history() {
     // Register a task in the graph
     graph_client
         .register_task(Request::new(RegisterTaskRequest {
+            build_id: String::new(),
             task_path: ":compileJava".to_string(),
             depends_on: vec![],
             task_type: "JavaCompile".to_string(),
@@ -2404,6 +2409,7 @@ async fn test_cross_service_execution_plan_with_history() {
     // Complete the task in the graph (persists duration to history)
     graph_client
         .task_finished(Request::new(TaskFinishedRequest {
+            build_id: String::new(),
             task_path: ":compileJava".to_string(),
             duration_ms: 500,
             success: true,
@@ -2619,6 +2625,7 @@ async fn test_task_graph_to_build_result_workflow() {
     for (path, task_type, deps) in &tasks {
         graph_client
             .register_task(Request::new(RegisterTaskRequest {
+                build_id: build_id.clone(),
                 task_path: path.to_string(),
                 depends_on: deps.clone(),
                 task_type: task_type.to_string(),
@@ -2631,6 +2638,7 @@ async fn test_task_graph_to_build_result_workflow() {
     // 2. Mark tasks as executing and finished
     graph_client
         .task_started(Request::new(TaskStartedRequest {
+            build_id: build_id.clone(),
             task_path: ":compileKotlin".to_string(),
             start_time_ms: 0,
         }))
@@ -2639,6 +2647,7 @@ async fn test_task_graph_to_build_result_workflow() {
 
     graph_client
         .task_finished(Request::new(TaskFinishedRequest {
+            build_id: build_id.clone(),
             task_path: ":compileKotlin".to_string(),
             duration_ms: 300,
             success: true,
@@ -2649,6 +2658,7 @@ async fn test_task_graph_to_build_result_workflow() {
 
     graph_client
         .task_started(Request::new(TaskStartedRequest {
+            build_id: build_id.clone(),
             task_path: ":compileJava".to_string(),
             start_time_ms: 300,
         }))
@@ -2657,6 +2667,7 @@ async fn test_task_graph_to_build_result_workflow() {
 
     graph_client
         .task_finished(Request::new(TaskFinishedRequest {
+            build_id: build_id.clone(),
             task_path: ":compileJava".to_string(),
             duration_ms: 800,
             success: true,
@@ -2790,7 +2801,9 @@ async fn test_task_graph_to_build_result_workflow() {
 
     // 7. Verify task graph progress
     let progress = graph_client
-        .get_progress(Request::new(GetProgressRequest {}))
+        .get_progress(Request::new(GetProgressRequest {
+            build_id: "workflow-build".to_string(),
+        }))
         .await
         .unwrap()
         .into_inner();
@@ -3989,6 +4002,7 @@ async fn test_task_graph_with_execution_history_integration() {
     // Step 2: Register a task with the task graph
     task_graph_client
         .register_task(Request::new(RegisterTaskRequest {
+            build_id: "integration-test-build".to_string(),
             task_path: task_path.to_string(),
             depends_on: vec![],
             should_execute: true,
