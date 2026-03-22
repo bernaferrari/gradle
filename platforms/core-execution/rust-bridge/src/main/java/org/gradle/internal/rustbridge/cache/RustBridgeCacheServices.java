@@ -19,5 +19,12 @@ public class RustBridgeCacheServices extends AbstractGradleModuleServices {
                 RustBuildCacheServiceFactory.class
             )
         );
+        registration.add(
+            BuildCacheServiceRegistration.class,
+            new DefaultBuildCacheServiceRegistration(
+                RustRemoteBuildCache.class,
+                RustRemoteBuildCacheServiceFactory.class
+            )
+        );
     }
 }
