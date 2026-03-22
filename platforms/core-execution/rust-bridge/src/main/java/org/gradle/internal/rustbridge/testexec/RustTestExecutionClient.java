@@ -7,6 +7,7 @@ import gradle.substrate.v1.GetTestReportResponse;
 import gradle.substrate.v1.GetTestResultsByOutcomeRequest;
 import gradle.substrate.v1.GetTestResultsByOutcomeResponse;
 import gradle.substrate.v1.GetTestSummaryRequest;
+import gradle.substrate.v1.GetTestSummaryResponse;
 import gradle.substrate.v1.RegisterTestSuiteRequest;
 import gradle.substrate.v1.RegisterTestSuiteResponse;
 import gradle.substrate.v1.ReportTestResultRequest;
@@ -142,6 +143,22 @@ public class RustTestExecutionClient {
         } catch (Exception e) {
             LOGGER.debug("[substrate:testexec] detect flaky tests failed", e);
             return DetectFlakyTestsResponse.getDefaultInstance();
+        }
+    }
+
+    public GetTestSummaryResponse getTestSummary(String buildId) {
+        if (client.isNoop()) {
+            return GetTestSummaryResponse.getDefaultInstance();
+        }
+
+        try {
+            return client.getTestExecutionStub()
+                .getTestSummary(GetTestSummaryRequest.newBuilder()
+                    .setBuildId(buildId)
+                    .build());
+        } catch (Exception e) {
+            LOGGER.debug("[substrate:testexec] get test summary failed", e);
+            return GetTestSummaryResponse.getDefaultInstance();
         }
     }
 }
