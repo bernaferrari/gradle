@@ -37,6 +37,20 @@ impl Default for ExecutionHistoryServiceImpl {
     }
 }
 
+impl Clone for ExecutionHistoryServiceImpl {
+    fn clone(&self) -> Self {
+        Self {
+            entries: self.entries.clone(),
+            persistence_dir: self.persistence_dir.clone(),
+            load_hits: AtomicI64::new(self.load_hits.load(Ordering::Relaxed)),
+            load_misses: AtomicI64::new(self.load_misses.load(Ordering::Relaxed)),
+            stores: AtomicI64::new(self.stores.load(Ordering::Relaxed)),
+            removes: AtomicI64::new(self.removes.load(Ordering::Relaxed)),
+            evictions: AtomicI64::new(self.evictions.load(Ordering::Relaxed)),
+        }
+    }
+}
+
 impl ExecutionHistoryServiceImpl {
     pub fn new(persistence_dir: PathBuf) -> Self {
         Self {
