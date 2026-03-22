@@ -28,6 +28,7 @@ public class SubstrateClient implements Closeable {
     private final HashServiceGrpc.HashServiceBlockingStub hashStub;
     // Phase 2: Build cache
     private final CacheServiceGrpc.CacheServiceBlockingStub cacheStub;
+    private final CacheServiceGrpc.CacheServiceStub cacheAsyncStub;
     // Phase 3: Process execution
     private final ExecServiceGrpc.ExecServiceBlockingStub execStub;
     // Phase 4: Work scheduling
@@ -96,6 +97,7 @@ public class SubstrateClient implements Closeable {
             this.controlStub = null;
             this.hashStub = null;
             this.cacheStub = null;
+            this.cacheAsyncStub = null;
             this.execStub = null;
             this.workStub = null;
             this.executionPlanStub = null;
@@ -130,6 +132,7 @@ public class SubstrateClient implements Closeable {
             this.controlStub = ControlServiceGrpc.newBlockingStub(channel);
             this.hashStub = HashServiceGrpc.newBlockingStub(channel);
             this.cacheStub = CacheServiceGrpc.newBlockingStub(channel);
+            this.cacheAsyncStub = CacheServiceGrpc.newStub(channel);
             this.execStub = ExecServiceGrpc.newBlockingStub(channel);
             this.workStub = WorkServiceGrpc.newBlockingStub(channel);
             this.executionPlanStub = ExecutionPlanServiceGrpc.newBlockingStub(channel);
@@ -200,6 +203,11 @@ public class SubstrateClient implements Closeable {
     public CacheServiceGrpc.CacheServiceBlockingStub getCacheStub() {
         throwIfNoop();
         return cacheStub;
+    }
+
+    public CacheServiceGrpc.CacheServiceStub getCacheAsyncStub() {
+        throwIfNoop();
+        return cacheAsyncStub;
     }
 
     public ExecServiceGrpc.ExecServiceBlockingStub getExecStub() {

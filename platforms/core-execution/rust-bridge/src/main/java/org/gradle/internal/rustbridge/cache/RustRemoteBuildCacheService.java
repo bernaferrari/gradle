@@ -1,8 +1,10 @@
 package org.gradle.internal.rustbridge.cache;
 
-import gradle.substrate.v1.CacheServiceGrpc;
+import gradle.substrate.v1.CacheLoadChunk;
+import gradle.substrate.v1.CacheLoadRequest;
 import gradle.substrate.v1.CacheStoreChunk;
 import gradle.substrate.v1.CacheStoreInit;
+import gradle.substrate.v1.CacheStoreResponse;
 import io.grpc.stub.StreamObserver;
 import org.gradle.caching.BuildCacheEntryReader;
 import org.gradle.caching.BuildCacheEntryWriter;
@@ -11,7 +13,10 @@ import org.gradle.caching.BuildCacheKey;
 import org.gradle.caching.BuildCacheService;
 import org.gradle.internal.rustbridge.SubstrateClient;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.Iterator;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -41,62 +46,34 @@ public class RustRemoteBuildCacheService implements BuildCacheService {
         }
 
         try {
-            AtomicBoolean found = new AtomicBoolean(false);
-            AtomicReference<byte[]> dataRef = new AtomicReference<>();
-            CountDownLatch latch = new CountDownLatch(1);
-
-            client.getCacheStub().loadEntry(
-                gradle.substrate.v1.CacheLoadRequest.newBuilder()
+            // Server-streaming RPC via blocking stub returns an iterator
+            Iterator<CacheLoadChunk> chunks = client.getCacheStub().loadEntry(
+                CacheLoadRequest.newBuilder()
                     .setKey(com.google.protobuf.ByteString.copyFrom(key.toByteArray()))
-                    .build(),
-                new StreamObserver<gradle.substrate.v1.CacheLoadChunk>() {
-                    @Override
-                    public void onNext(gradle.substrate.v1.CacheLoadChunk chunk) {
-                        if (chunk.hasData()) {
-                            byte[] existing = dataRef.get();
-                            byte[] newData = chunk.getData().toByteArray();
-                            if (existing == null) {
-                                dataRef.set(newData);
-                            } else {
-                                byte[] combined = new byte[existing.length + newData.length];
-                                System.arraycopy(existing, 0, combined, 0, existing.length);
-                                System.arraycopy(newData, 0, combined, existing.length, newData.length);
-                                dataRef.set(combined);
-                            }
-                            found.set(true);
-                        }
-                    }
-
-                    @Override
-                    public void onError(Throwable t) {
-                        latch.countDown();
-                    }
-
-                    @Override
-                    public void onCompleted() {
-                        latch.countDown();
-                    }
-                }
+                    .build()
             );
 
-            latch.await();
+            boolean found = false;
+            ByteArrayOutputStream collected = new ByteArrayOutputStream();
 
-            if (!found.get()) {
+            while (chunks.hasNext()) {
+                CacheLoadChunk chunk = chunks.next();
+                if (chunk.hasData()) {
+                    collected.write(chunk.getData().toByteArray());
+                    found = true;
+                }
+            }
+
+            if (!found) {
                 return false;
             }
 
-            byte[] data = dataRef.get();
-            if (data == null) {
-                return false;
-            }
-
-            reader.readFrom(new java.io.ByteArrayInputStream(data));
+            reader.readFrom(new ByteArrayInputStream(collected.toByteArray()));
             return true;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BuildCacheException("Interrupted while loading from Rust remote cache", e);
         } catch (IOException e) {
             throw new BuildCacheException("Failed to read from Rust remote cache", e);
+        } catch (Exception e) {
+            throw new BuildCacheException("Failed to load from Rust remote cache", e);
         }
     }
 
@@ -107,18 +84,61 @@ public class RustRemoteBuildCacheService implements BuildCacheService {
         }
 
         try {
-            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            // Capture the entry bytes
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
             writer.writeTo(baos);
             byte[] data = baos.toByteArray();
 
-            client.getCacheStub()
-                .storeEntry(CacheStoreChunk.newBuilder()
-                    .setInit(CacheStoreInit.newBuilder()
-                        .setKey(com.google.protobuf.ByteString.copyFrom(key.toByteArray()))
-                        .setTotalSize(data.length)
-                        .build())
+            // Client-streaming RPC via async stub: send Init chunk + Data chunk
+            AtomicBoolean success = new AtomicBoolean(false);
+            AtomicReference<String> errorMessage = new AtomicReference<>("");
+            CountDownLatch latch = new CountDownLatch(1);
+
+            StreamObserver<CacheStoreChunk> requestObserver =
+                client.getCacheAsyncStub().storeEntry(new StreamObserver<CacheStoreResponse>() {
+                    @Override
+                    public void onNext(CacheStoreResponse response) {
+                        success.set(response.getSuccess());
+                        errorMessage.set(response.getErrorMessage());
+                    }
+
+                    @Override
+                    public void onError(Throwable t) {
+                        errorMessage.set(t.getMessage());
+                        latch.countDown();
+                    }
+
+                    @Override
+                    public void onCompleted() {
+                        latch.countDown();
+                    }
+                });
+
+            // Send Init chunk with metadata
+            requestObserver.onNext(CacheStoreChunk.newBuilder()
+                .setInit(CacheStoreInit.newBuilder()
+                    .setKey(com.google.protobuf.ByteString.copyFrom(key.toByteArray()))
+                    .setTotalSize(data.length)
                     .build())
-                .block();
+                .build());
+
+            // Send Data chunk with actual content
+            requestObserver.onNext(CacheStoreChunk.newBuilder()
+                .setData(com.google.protobuf.ByteString.copyFrom(data))
+                .build());
+
+            // Signal completion of the stream
+            requestObserver.onCompleted();
+
+            // Wait for the server response
+            latch.await();
+
+            if (!success.get() && !errorMessage.get().isEmpty()) {
+                throw new BuildCacheException("Failed to store in Rust remote cache: " + errorMessage.get());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BuildCacheException("Interrupted while storing to Rust remote cache", e);
         } catch (IOException e) {
             throw new BuildCacheException("Failed to write to Rust remote cache", e);
         }
