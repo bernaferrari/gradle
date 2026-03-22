@@ -587,4 +587,189 @@ mod tests {
         assert_eq!(summary.tasks_only_in_baseline, 1); // :a
         assert_eq!(summary.tasks_only_in_candidate, 1); // :c
     }
+
+    // Edge case 1: start_comparison with nonexistent baseline returns NOT_FOUND
+    #[tokio::test]
+    async fn test_start_comparison_nonexistent_baseline_returns_not_found() {
+        let svc = BuildComparisonServiceImpl::new();
+
+        // Candidate exists but baseline does not
+        svc.record_build_data(Request::new(RecordBuildDataRequest {
+            snapshot: Some(make_snapshot(
+                "existing-candidate",
+                vec![(":compileJava", "SUCCESS", 500)],
+            )),
+        }))
+        .await
+        .unwrap();
+
+        let result = svc
+            .start_comparison(Request::new(StartComparisonRequest {
+                baseline_build_id: "ghost-baseline".to_string(),
+                candidate_build_id: "existing-candidate".to_string(),
+            }))
+            .await;
+
+        let err = result.expect_err("should fail for nonexistent baseline");
+        assert_eq!(err.code(), tonic::Code::NotFound);
+        assert!(
+            err.message().contains("ghost-baseline"),
+            "error message should mention the missing build id"
+        );
+    }
+
+    // Edge case 2: start_comparison with nonexistent candidate returns NOT_FOUND
+    #[tokio::test]
+    async fn test_start_comparison_nonexistent_candidate_returns_not_found() {
+        let svc = BuildComparisonServiceImpl::new();
+
+        // Baseline exists but candidate does not
+        svc.record_build_data(Request::new(RecordBuildDataRequest {
+            snapshot: Some(make_snapshot(
+                "existing-baseline",
+                vec![(":compileJava", "SUCCESS", 500)],
+            )),
+        }))
+        .await
+        .unwrap();
+
+        let result = svc
+            .start_comparison(Request::new(StartComparisonRequest {
+                baseline_build_id: "existing-baseline".to_string(),
+                candidate_build_id: "ghost-candidate".to_string(),
+            }))
+            .await;
+
+        let err = result.expect_err("should fail for nonexistent candidate");
+        assert_eq!(err.code(), tonic::Code::NotFound);
+        assert!(
+            err.message().contains("ghost-candidate"),
+            "error message should mention the missing build id"
+        );
+    }
+
+    // Edge case 3: record_build_data with empty task list succeeds and stores zero total duration
+    #[tokio::test]
+    async fn test_record_build_data_empty_task_list() {
+        let svc = BuildComparisonServiceImpl::new();
+
+        let snapshot = BuildDataSnapshot {
+            build_id: "empty-build".to_string(),
+            start_time_ms: 1000,
+            end_time_ms: 1000,
+            task_durations: HashMap::new(),
+            task_outcomes: HashMap::new(),
+            task_order: vec![],
+            root_dir: "/tmp/project".to_string(),
+            input_properties: vec![],
+        };
+
+        let resp = svc
+            .record_build_data(Request::new(RecordBuildDataRequest {
+                snapshot: Some(snapshot),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.accepted);
+
+        // Verify the build was stored and can be used in a comparison
+        // Record a second build with one task so we can compare
+        svc.record_build_data(Request::new(RecordBuildDataRequest {
+            snapshot: Some(make_snapshot(
+                "with-tasks",
+                vec![(":compileJava", "SUCCESS", 300)],
+            )),
+        }))
+        .await
+        .unwrap();
+
+        let cmp = svc
+            .start_comparison(Request::new(StartComparisonRequest {
+                baseline_build_id: "empty-build".to_string(),
+                candidate_build_id: "with-tasks".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(cmp.started);
+
+        let result = svc
+            .get_comparison_result(Request::new(GetComparisonResultRequest {
+                comparison_id: cmp.comparison_id,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let summary = result.summary.unwrap();
+        assert_eq!(summary.baseline_total_ms, 0);
+        assert_eq!(summary.candidate_total_ms, 300);
+        assert_eq!(summary.total_diff_ms, 300);
+        assert_eq!(summary.tasks_only_in_baseline, 0);
+        assert_eq!(summary.tasks_only_in_candidate, 1);
+        assert_eq!(summary.tasks_with_changed_outcome, 1); // UNKNOWN vs SUCCESS
+    }
+
+    // Edge case 4: start_comparison with same build as both baseline and candidate
+    #[tokio::test]
+    async fn test_start_comparison_same_build_as_baseline_and_candidate() {
+        let svc = BuildComparisonServiceImpl::new();
+
+        svc.record_build_data(Request::new(RecordBuildDataRequest {
+            snapshot: Some(make_snapshot(
+                "self-compare",
+                vec![
+                    (":compileJava", "SUCCESS", 1000),
+                    (":test", "FAILED", 5000),
+                    (":jar", "SUCCESS", 200),
+                ],
+            )),
+        }))
+        .await
+        .unwrap();
+
+        let cmp = svc
+            .start_comparison(Request::new(StartComparisonRequest {
+                baseline_build_id: "self-compare".to_string(),
+                candidate_build_id: "self-compare".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(cmp.started);
+        assert!(cmp.comparison_id.starts_with("cmp-"));
+
+        let result = svc
+            .get_comparison_result(Request::new(GetComparisonResultRequest {
+                comparison_id: cmp.comparison_id,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let summary = result.summary.unwrap();
+        assert_eq!(summary.baseline_build_id, "self-compare");
+        assert_eq!(summary.candidate_build_id, "self-compare");
+        assert_eq!(summary.baseline_total_ms, 6200);
+        assert_eq!(summary.candidate_total_ms, 6200);
+        assert_eq!(summary.total_diff_ms, 0);
+        assert_eq!(summary.tasks_with_changed_outcome, 0);
+        assert_eq!(summary.tasks_with_regression, 0);
+        assert_eq!(summary.tasks_with_improvement, 0);
+        assert_eq!(summary.tasks_only_in_baseline, 0);
+        assert_eq!(summary.tasks_only_in_candidate, 0);
+
+        // All task comparisons should have diff=0 and outcome_changed=false
+        for tc in &result.task_comparisons {
+            assert_eq!(tc.duration_diff_ms, 0);
+            assert!(!tc.outcome_changed);
+            assert_eq!(tc.baseline_outcome, tc.candidate_outcome);
+            assert_eq!(tc.baseline_duration_ms, tc.candidate_duration_ms);
+        }
+        assert_eq!(result.task_comparisons.len(), 3);
+    }
 }

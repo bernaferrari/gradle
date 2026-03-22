@@ -547,4 +547,262 @@ mod tests {
             "Duration should be from dedicated prefix, not regular state"
         );
     }
+
+    #[tokio::test]
+    async fn test_store_and_retrieve_durations_for_multiple_tasks() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = ExecutionHistoryServiceImpl::new(dir.path().to_path_buf());
+
+        // Store durations for several distinct tasks
+        svc.store_task_duration(":app:compileKotlin", 3200);
+        svc.store_task_duration(":app:processResources", 150);
+        svc.store_task_duration(":app:compileJava", 4800);
+        svc.store_task_duration(":lib:compileKotlin", 2100);
+        svc.store_task_duration(":lib:test", 12500);
+
+        // Verify each task returns its own duration
+        assert_eq!(svc.get_task_duration(":app:compileKotlin"), 3200);
+        assert_eq!(svc.get_task_duration(":app:processResources"), 150);
+        assert_eq!(svc.get_task_duration(":app:compileJava"), 4800);
+        assert_eq!(svc.get_task_duration(":lib:compileKotlin"), 2100);
+        assert_eq!(svc.get_task_duration(":lib:test"), 12500);
+
+        // A task that was never stored should return 0
+        assert_eq!(svc.get_task_duration(":app:jar"), 0);
+
+        // Updating an existing task's duration overwrites the old value
+        svc.store_task_duration(":app:compileKotlin", 4100);
+        assert_eq!(svc.get_task_duration(":app:compileKotlin"), 4100);
+
+        // The other tasks should remain unaffected
+        assert_eq!(svc.get_task_duration(":app:processResources"), 150);
+        assert_eq!(svc.get_task_duration(":lib:test"), 12500);
+    }
+
+    #[tokio::test]
+    async fn test_stats_for_task_with_no_history_returns_zeros() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = ExecutionHistoryServiceImpl::new(dir.path().to_path_buf());
+
+        // Without storing anything, stats should reflect an empty store
+        let stats = svc
+            .get_history_stats(Request::new(GetHistoryStatsRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(stats.entry_count, 0);
+        assert_eq!(stats.total_bytes_stored, 0);
+        assert_eq!(stats.load_hits, 0);
+        assert_eq!(stats.load_misses, 0);
+        assert_eq!(stats.stores, 0);
+        assert_eq!(stats.removes, 0);
+        // When no loads have occurred, hit_rate defaults to 1.0
+        assert!((stats.hit_rate - 1.0).abs() < f64::EPSILON);
+
+        // Now perform load requests against nonexistent tasks to verify counters
+        svc.load_history(Request::new(LoadHistoryRequest {
+            work_identity: ":noSuchTask".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        svc.load_history(Request::new(LoadHistoryRequest {
+            work_identity: ":alsoMissing".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        let stats = svc
+            .get_history_stats(Request::new(GetHistoryStatsRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(stats.entry_count, 0);
+        assert_eq!(stats.load_misses, 2);
+        assert_eq!(stats.load_hits, 0);
+        // hit_rate should be 0.0 (0 hits out of 2 total loads)
+        assert!((stats.hit_rate - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[tokio::test]
+    async fn test_store_and_load_detailed_execution_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = ExecutionHistoryServiceImpl::new(dir.path().to_path_buf());
+
+        // Simulate a detailed execution record: serialized fingerprint + output snapshot
+        let execution_state: Vec<u8> = (0u8..=255).collect();
+        let timestamp_ms = 1_700_000_000_000i64; // a realistic-ish timestamp
+
+        svc.store_history(Request::new(StoreHistoryRequest {
+            work_identity: ":app:compileKotlin".to_string(),
+            state: execution_state.clone(),
+            timestamp_ms,
+        }))
+        .await
+        .unwrap();
+
+        // Load it back and verify all fields
+        let resp = svc
+            .load_history(Request::new(LoadHistoryRequest {
+                work_identity: ":app:compileKotlin".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.found);
+        assert_eq!(resp.state.len(), 256);
+        assert_eq!(resp.state, execution_state);
+        assert_eq!(resp.timestamp_ms, timestamp_ms);
+
+        // Loading with a wrong work_identity should not return this data
+        let wrong = svc
+            .load_history(Request::new(LoadHistoryRequest {
+                work_identity: ":app:compileJava".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!wrong.found);
+        assert!(wrong.state.is_empty());
+        assert_eq!(wrong.timestamp_ms, 0);
+
+        // Overwrite with a smaller state and verify the load returns updated data
+        let smaller_state = vec![10, 20, 30];
+        svc.store_history(Request::new(StoreHistoryRequest {
+            work_identity: ":app:compileKotlin".to_string(),
+            state: smaller_state.clone(),
+            timestamp_ms: timestamp_ms + 60_000,
+        }))
+        .await
+        .unwrap();
+
+        let updated = svc
+            .load_history(Request::new(LoadHistoryRequest {
+                work_identity: ":app:compileKotlin".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(updated.found);
+        assert_eq!(updated.state, smaller_state);
+        assert_eq!(updated.timestamp_ms, timestamp_ms + 60_000);
+    }
+
+    #[tokio::test]
+    async fn test_clear_history_for_specific_task_leaves_others_intact() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = ExecutionHistoryServiceImpl::new(dir.path().to_path_buf());
+
+        // Store records for three different tasks
+        svc.store_history(Request::new(StoreHistoryRequest {
+            work_identity: ":app:compileKotlin".to_string(),
+            state: vec![1, 2, 3],
+            timestamp_ms: 100,
+        }))
+        .await
+        .unwrap();
+
+        svc.store_history(Request::new(StoreHistoryRequest {
+            work_identity: ":app:compileJava".to_string(),
+            state: vec![4, 5, 6, 7],
+            timestamp_ms: 200,
+        }))
+        .await
+        .unwrap();
+
+        svc.store_history(Request::new(StoreHistoryRequest {
+            work_identity: ":app:test".to_string(),
+            state: vec![8, 9],
+            timestamp_ms: 300,
+        }))
+        .await
+        .unwrap();
+
+        // Verify all three exist
+        for identity in &[":app:compileKotlin", ":app:compileJava", ":app:test"] {
+            let resp = svc
+                .load_history(Request::new(LoadHistoryRequest {
+                    work_identity: identity.to_string(),
+                }))
+                .await
+                .unwrap()
+                .into_inner();
+            assert!(resp.found, "Expected {} to be found", identity);
+        }
+
+        // Remove only :app:compileJava
+        svc.remove_history(Request::new(RemoveHistoryRequest {
+            work_identity: ":app:compileJava".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        // The removed task should no longer be found
+        let removed = svc
+            .load_history(Request::new(LoadHistoryRequest {
+                work_identity: ":app:compileJava".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!removed.found);
+
+        // The other two tasks should still be present with correct data
+        let kotlin = svc
+            .load_history(Request::new(LoadHistoryRequest {
+                work_identity: ":app:compileKotlin".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(kotlin.found);
+        assert_eq!(kotlin.state, vec![1, 2, 3]);
+        assert_eq!(kotlin.timestamp_ms, 100);
+
+        let test = svc
+            .load_history(Request::new(LoadHistoryRequest {
+                work_identity: ":app:test".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(test.found);
+        assert_eq!(test.state, vec![8, 9]);
+        assert_eq!(test.timestamp_ms, 300);
+
+        // Stats should reflect 2 remaining entries and 1 removal
+        let stats = svc
+            .get_history_stats(Request::new(GetHistoryStatsRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(stats.entry_count, 2);
+        assert_eq!(stats.removes, 1);
+        assert_eq!(stats.stores, 3);
+        // 3 initial loads (all hits) + 1 load (miss for removed) + 2 loads (kotlin + test hits) = 5 hits, 1 miss
+        assert_eq!(stats.load_hits, 5);
+        assert_eq!(stats.load_misses, 1);
+
+        // Removing the same task again should be a no-op and not affect counts
+        svc.remove_history(Request::new(RemoveHistoryRequest {
+            work_identity: ":app:compileJava".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        let stats2 = svc
+            .get_history_stats(Request::new(GetHistoryStatsRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(stats2.entry_count, 2);
+        assert_eq!(stats2.removes, 2); // incremented even for no-op remove
+    }
 }
