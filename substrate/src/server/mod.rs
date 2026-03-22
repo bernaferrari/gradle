@@ -1,3 +1,4 @@
+pub mod scopes;
 pub mod control;
 pub mod hash;
 pub mod cache;
