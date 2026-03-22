@@ -491,6 +491,121 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_send_event_auto_timestamp() {
+        let svc = BuildEventStreamServiceImpl::new();
+
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        svc.send_build_event(Request::new(SendBuildEventRequest {
+            build_id: "build-ts".to_string(),
+            event_type: "test".to_string(),
+            event_id: "ts-1".to_string(),
+            properties: Default::default(),
+            display_name: String::new(),
+            parent_id: String::new(),
+        }))
+        .await
+        .unwrap();
+
+        let after = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        let log = svc
+            .get_event_log(Request::new(GetEventLogRequest {
+                build_id: "build-ts".to_string(),
+                since_timestamp_ms: 0,
+                max_events: 0,
+                event_types: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(log.events[0].timestamp_ms >= before);
+        assert!(log.events[0].timestamp_ms <= after);
+    }
+
+    #[tokio::test]
+    async fn test_filtered_subscription() {
+        let svc = BuildEventStreamServiceImpl::new();
+
+        // Subscribe with filter
+        let resp = svc
+            .subscribe_build_events(Request::new(SubscribeBuildEventsRequest {
+                build_id: "build-filter".to_string(),
+                event_types: vec!["important".to_string()],
+            }))
+            .await
+            .unwrap();
+
+        let mut stream = resp.into_inner();
+
+        // Send events of different types
+        svc.send_build_event(Request::new(SendBuildEventRequest {
+            build_id: "build-filter".to_string(),
+            event_type: "noise".to_string(),
+            event_id: "n1".to_string(),
+            properties: Default::default(),
+            display_name: String::new(),
+            parent_id: String::new(),
+        }))
+        .await
+        .unwrap();
+
+        svc.send_build_event(Request::new(SendBuildEventRequest {
+            build_id: "build-filter".to_string(),
+            event_type: "important".to_string(),
+            event_id: "i1".to_string(),
+            properties: Default::default(),
+            display_name: String::new(),
+            parent_id: String::new(),
+        }))
+        .await
+        .unwrap();
+
+        use futures_util::StreamExt;
+        // Should get the important event (noise filtered out)
+        if let Some(Ok(event)) = stream.next().await {
+            assert_eq!(event.event_type, "important");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_counters_tracked() {
+        let svc = BuildEventStreamServiceImpl::new();
+
+        svc.send_build_event(Request::new(SendBuildEventRequest {
+            build_id: "build-ct".to_string(),
+            event_type: "e".to_string(),
+            event_id: "c1".to_string(),
+            properties: Default::default(),
+            display_name: String::new(),
+            parent_id: String::new(),
+        }))
+        .await
+        .unwrap();
+
+        svc.send_build_event(Request::new(SendBuildEventRequest {
+            build_id: "build-ct".to_string(),
+            event_type: "e".to_string(),
+            event_id: "c2".to_string(),
+            properties: Default::default(),
+            display_name: String::new(),
+            parent_id: String::new(),
+        }))
+        .await
+        .unwrap();
+
+        assert_eq!(svc.events_received.load(Ordering::Relaxed), 2);
+        assert_eq!(svc.events_sent.load(Ordering::Relaxed), 2);
+    }
+
+    #[tokio::test]
     async fn test_cleanup_build() {
         let svc = BuildEventStreamServiceImpl::new();
 

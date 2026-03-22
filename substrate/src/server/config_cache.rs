@@ -405,6 +405,106 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_validate_nonexistent_key() {
+        let svc = make_svc();
+
+        let resp = svc
+            .validate_config(Request::new(ValidateConfigRequest {
+                cache_key: ":nonexistent".to_string(),
+                input_hashes: vec!["h1".to_string()],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.valid);
+        assert!(resp.reason.contains("No cached configuration"));
+    }
+
+    #[tokio::test]
+    async fn test_clean_nonexistent_key() {
+        let svc = make_svc();
+
+        let resp = svc
+            .clean_config_cache(Request::new(CleanConfigCacheRequest {
+                max_age_ms: 0,
+                max_entries: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.entries_removed, 0);
+        assert_eq!(resp.space_recovered_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn test_update_existing_key() {
+        let svc = make_svc();
+
+        svc.store_config_cache(Request::new(StoreConfigCacheRequest {
+            cache_key: ":update".to_string(),
+            serialized_config: vec![1, 2, 3].into(),
+            entry_count: 5,
+            input_hashes: vec!["old-hash".to_string()],
+            timestamp_ms: 100,
+        }))
+        .await
+        .unwrap();
+
+        // Store again with different data
+        svc.store_config_cache(Request::new(StoreConfigCacheRequest {
+            cache_key: ":update".to_string(),
+            serialized_config: vec![4, 5, 6, 7].into(),
+            entry_count: 8,
+            input_hashes: vec!["new-hash".to_string()],
+            timestamp_ms: 200,
+        }))
+        .await
+        .unwrap();
+
+        let resp = svc
+            .load_config_cache(Request::new(LoadConfigCacheRequest {
+                cache_key: ":update".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.found);
+        assert_eq!(resp.entry_count, 8);
+        assert_eq!(resp.serialized_config.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn test_validate_wrong_length() {
+        let svc = make_svc();
+
+        svc.store_config_cache(Request::new(StoreConfigCacheRequest {
+            cache_key: ":len".to_string(),
+            serialized_config: vec![].into(),
+            entry_count: 1,
+            input_hashes: vec!["h1".to_string(), "h2".to_string()],
+            timestamp_ms: 100,
+        }))
+        .await
+        .unwrap();
+
+        // Request with 1 hash instead of 2
+        let resp = svc
+            .validate_config(Request::new(ValidateConfigRequest {
+                cache_key: ":len".to_string(),
+                input_hashes: vec!["h1".to_string()],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.valid);
+        assert!(resp.reason.contains("do not match"));
+    }
+
+    #[tokio::test]
     async fn test_disk_persistence() {
         let dir = tempdir().unwrap();
         let cache_key = ":persistTest";

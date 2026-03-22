@@ -475,6 +475,94 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_gc_nonexistent_dir() {
+        let svc = GarbageCollectionServiceImpl::new(
+            std::path::PathBuf::from("/nonexistent/path/that/does/not/exist"),
+            std::path::PathBuf::from("/nonexistent/path/that/does/not/exist"),
+            std::path::PathBuf::from("/nonexistent/path/that/does/not/exist"),
+        );
+
+        let resp = svc
+            .gc_build_cache(Request::new(GcBuildCacheRequest {
+                max_age_ms: 0,
+                max_total_bytes: 0,
+                dry_run: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.entries_removed, 0);
+        assert_eq!(resp.entries_remaining, 0);
+    }
+
+    #[tokio::test]
+    async fn test_gc_build_cache_all_extensions() {
+        let dir = tempdir().unwrap();
+
+        // Build cache uses no extension filter (empty string)
+        tokio::fs::write(dir.path().join("entry1.bin"), vec![0u8; 50])
+            .await.unwrap();
+        tokio::fs::write(dir.path().join("entry2.dat"), vec![0u8; 75])
+            .await.unwrap();
+        tokio::fs::write(dir.path().join("entry3.txt"), vec![0u8; 25])
+            .await.unwrap();
+
+        let svc = GarbageCollectionServiceImpl::new(
+            dir.path().to_path_buf(),
+            dir.path().to_path_buf(),
+            dir.path().to_path_buf(),
+        );
+
+        let resp = svc
+            .gc_build_cache(Request::new(GcBuildCacheRequest {
+                max_age_ms: 0,
+                max_total_bytes: 0,
+                dry_run: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // All files should be removed (no extension filter)
+        assert_eq!(resp.entries_removed, 3);
+        assert_eq!(resp.bytes_recovered, 150);
+    }
+
+    #[tokio::test]
+    async fn test_gc_subdirectory_scanning() {
+        let dir = tempdir().unwrap();
+
+        // Create subdirectory structure (simulates build cache shards)
+        let shard_dir = dir.path().join("ab");
+        tokio::fs::create_dir_all(&shard_dir).await.unwrap();
+        tokio::fs::write(shard_dir.join("entry1.bin"), vec![0u8; 100])
+            .await.unwrap();
+        tokio::fs::write(dir.path().join("entry2.bin"), vec![0u8; 200])
+            .await.unwrap();
+
+        let svc = GarbageCollectionServiceImpl::new(
+            dir.path().to_path_buf(),
+            dir.path().to_path_buf(),
+            dir.path().to_path_buf(),
+        );
+
+        let resp = svc
+            .gc_execution_history(Request::new(GcExecutionHistoryRequest {
+                max_age_ms: 0,
+                max_entries: 0,
+                dry_run: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Should find both files (root + subdirectory)
+        assert_eq!(resp.entries_removed, 2);
+        assert_eq!(resp.bytes_recovered, 300);
+    }
+
+    #[tokio::test]
     async fn test_storage_stats() {
         let dir = tempdir().unwrap();
 
@@ -505,5 +593,42 @@ mod tests {
         let history = &resp.stats[1];
         assert_eq!(history.entries, 2);
         assert_eq!(history.total_bytes, 300);
+    }
+
+    #[tokio::test]
+    async fn test_gc_config_cache() {
+        let dir = tempdir().unwrap();
+
+        for i in 0..4 {
+            let path = dir.path().join(format!("config{}.bin", i));
+            tokio::fs::write(&path, vec![0u8; 80])
+                .await
+                .unwrap();
+        }
+        // Also a non-.bin file that should be ignored
+        tokio::fs::write(dir.path().join("readme.txt"), vec![0u8; 50])
+            .await
+            .unwrap();
+
+        let svc = GarbageCollectionServiceImpl::new(
+            dir.path().to_path_buf(),
+            dir.path().to_path_buf(),
+            dir.path().to_path_buf(),
+        );
+
+        // Use max_age_ms=-1 (don't evict by age) and max_entries=2
+        let resp = svc
+            .gc_config_cache(Request::new(GcConfigCacheRequest {
+                max_age_ms: -1,
+                max_entries: 2,
+                dry_run: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Should only evict .bin files, keep at most 2
+        assert_eq!(resp.entries_removed, 2);
+        assert_eq!(resp.entries_remaining, 2);
     }
 }

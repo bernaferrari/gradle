@@ -679,6 +679,130 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_get_resource_limits() {
+        let svc = ResourceManagementServiceImpl::new();
+
+        let resp = svc
+            .get_resource_limits(Request::new(GetResourceLimitsRequest {
+                build_id: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.limits.len() >= 4); // memory, cpu, fd, threads
+        let mem = resp.limits.iter().find(|l| l.resource_type == "memory_mb").unwrap();
+        assert!(mem.max_amount > 0);
+    }
+
+    #[tokio::test]
+    async fn test_set_and_get_limits() {
+        let svc = ResourceManagementServiceImpl::new();
+
+        svc.set_resource_limits(Request::new(SetResourceLimitsRequest {
+            build_id: String::new(),
+            limits: vec![
+                ResourceLimit {
+                    resource_type: "memory_mb".to_string(),
+                    max_amount: 1024,
+                    soft_limit: 800,
+                },
+                ResourceLimit {
+                    resource_type: "cpu_cores".to_string(),
+                    max_amount: 4,
+                    soft_limit: 3,
+                },
+            ],
+        }))
+        .await
+        .unwrap();
+
+        let resp = svc
+            .get_resource_limits(Request::new(GetResourceLimitsRequest {
+                build_id: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let mem = resp.limits.iter().find(|l| l.resource_type == "memory_mb").unwrap();
+        assert_eq!(mem.max_amount, 1024);
+        assert_eq!(mem.soft_limit, 800);
+
+        let cpu = resp.limits.iter().find(|l| l.resource_type == "cpu_cores").unwrap();
+        assert_eq!(cpu.max_amount, 4);
+    }
+
+    #[tokio::test]
+    async fn test_auto_register_unknown_resource() {
+        let svc = ResourceManagementServiceImpl::new();
+
+        // Request a resource type that doesn't exist yet
+        let resp = svc
+            .reserve_resources(Request::new(ReserveResourcesRequest {
+                build_id: "build-auto".to_string(),
+                resources: vec![make_resource_req("custom_gpu", 2)],
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.granted);
+
+        // Should now appear in resource usage
+        let usage = svc
+            .get_resource_usage(Request::new(GetResourceUsageRequest {
+                build_id: "build-auto".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let gpu = usage.usage.iter().find(|u| u.resource_type == "custom_gpu").unwrap();
+        assert_eq!(gpu.used, 2);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_reservations_accumulate() {
+        let svc = ResourceManagementServiceImpl::new();
+
+        let resp1 = svc
+            .reserve_resources(Request::new(ReserveResourcesRequest {
+                build_id: "build-accum".to_string(),
+                resources: vec![make_resource_req("memory_mb", 100)],
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let resp2 = svc
+            .reserve_resources(Request::new(ReserveResourcesRequest {
+                build_id: "build-accum".to_string(),
+                resources: vec![make_resource_req("memory_mb", 200)],
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp1.granted);
+        assert!(resp2.granted);
+
+        let usage = svc
+            .get_resource_usage(Request::new(GetResourceUsageRequest {
+                build_id: "build-accum".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let mem = usage.usage.iter().find(|u| u.resource_type == "memory_mb").unwrap();
+        assert_eq!(mem.used, 300);
+    }
+
+    #[tokio::test]
     async fn test_empty_request() {
         let svc = ResourceManagementServiceImpl::new();
 
