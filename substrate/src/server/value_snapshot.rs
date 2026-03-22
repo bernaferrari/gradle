@@ -415,6 +415,206 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_snapshot_empty_value() {
+        let svc = ValueSnapshotServiceImpl::new();
+
+        // Property with no value set (None)
+        let resp = svc
+            .snapshot_values(Request::new(SnapshotValuesRequest {
+                values: vec![PropertyValue {
+                    name: "empty-prop".to_string(),
+                    value: None,
+                    type_name: "java.lang.String".to_string(),
+                }],
+                implementation_fingerprint: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.success);
+        assert_eq!(resp.results.len(), 1);
+        assert_eq!(resp.results[0].name, "empty-prop");
+        assert!(!resp.results[0].fingerprint.is_empty(),
+            "Even a null value should produce a non-empty fingerprint");
+        assert!(resp.error_message.is_empty());
+
+        // Also test empty string value — should differ from null
+        let resp_empty_str = svc
+            .snapshot_values(Request::new(SnapshotValuesRequest {
+                values: vec![PropertyValue {
+                    name: "empty-prop".to_string(),
+                    value: Some(Value::StringValue(String::new())),
+                    type_name: "java.lang.String".to_string(),
+                }],
+                implementation_fingerprint: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_ne!(
+            resp.results[0].fingerprint,
+            resp_empty_str.results[0].fingerprint,
+            "Null and empty-string values must produce different fingerprints"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_same_value_twice_is_deterministic() {
+        let svc = ValueSnapshotServiceImpl::new();
+
+        let request = SnapshotValuesRequest {
+            values: vec![
+                PropertyValue {
+                    name: "compiler".to_string(),
+                    value: Some(Value::StringValue("javac".to_string())),
+                    type_name: "java.lang.String".to_string(),
+                },
+                PropertyValue {
+                    name: "debuggable".to_string(),
+                    value: Some(Value::BoolValue(false)),
+                    type_name: "boolean".to_string(),
+                },
+                PropertyValue {
+                    name: "max-heap".to_string(),
+                    value: Some(Value::LongValue(2048)),
+                    type_name: "java.lang.Long".to_string(),
+                },
+            ],
+            implementation_fingerprint: "stable-impl-fp".to_string(),
+        };
+
+        let resp1 = svc
+            .snapshot_values(Request::new(request.clone()))
+            .await
+            .unwrap()
+            .into_inner();
+        let resp2 = svc
+            .snapshot_values(Request::new(request.clone()))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Composite hash must be identical
+        assert_eq!(resp1.composite_hash, resp2.composite_hash,
+            "Composite hash must be deterministic across calls");
+
+        // Each individual fingerprint must be identical
+        assert_eq!(resp1.results.len(), resp2.results.len());
+        for (r1, r2) in resp1.results.iter().zip(resp2.results.iter()) {
+            assert_eq!(r1.name, r2.name);
+            assert_eq!(r1.fingerprint, r2.fingerprint,
+                "Fingerprint for '{}' must be deterministic", r1.name);
+        }
+
+        assert!(resp1.success);
+        assert!(resp2.success);
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_very_long_value() {
+        let svc = ValueSnapshotServiceImpl::new();
+
+        let long_string = "x".repeat(1_000_000); // 1 MB string
+        let resp = svc
+            .snapshot_values(Request::new(SnapshotValuesRequest {
+                values: vec![PropertyValue {
+                    name: "large-input".to_string(),
+                    value: Some(Value::StringValue(long_string.clone())),
+                    type_name: "java.lang.String".to_string(),
+                }],
+                implementation_fingerprint: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.success);
+        assert_eq!(resp.results.len(), 1);
+        assert_eq!(resp.results[0].name, "large-input");
+        // MD5 output is always 16 bytes regardless of input size
+        assert_eq!(resp.results[0].fingerprint.len(), 16,
+            "MD5 fingerprint must always be 16 bytes");
+        assert_eq!(resp.composite_hash.len(), 16,
+            "Composite MD5 hash must always be 16 bytes");
+        assert!(resp.error_message.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_different_types_produce_different_hashes() {
+        let svc = ValueSnapshotServiceImpl::new();
+
+        // Build separate single-property requests for each type, all with the
+        // same logical value "42" but different proto representations.
+        let types_request = |value: Value, type_name: &str| SnapshotValuesRequest {
+            values: vec![PropertyValue {
+                name: "prop".to_string(),
+                value: Some(value),
+                type_name: type_name.to_string(),
+            }],
+            implementation_fingerprint: "same-impl".to_string(),
+        };
+
+        let string_resp = svc
+            .snapshot_values(Request::new(types_request(
+                Value::StringValue("42".to_string()),
+                "java.lang.String",
+            )))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let bool_resp = svc
+            .snapshot_values(Request::new(types_request(
+                Value::BoolValue(true),
+                "boolean",
+            )))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let long_resp = svc
+            .snapshot_values(Request::new(types_request(
+                Value::LongValue(42),
+                "java.lang.Integer",
+            )))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let binary_resp = svc
+            .snapshot_values(Request::new(types_request(
+                Value::BinaryValue(b"42".to_vec()),
+                "[B",
+            )))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // All four composite hashes must differ
+        assert_ne!(string_resp.composite_hash, bool_resp.composite_hash,
+            "String and bool composite hashes must differ");
+        assert_ne!(string_resp.composite_hash, long_resp.composite_hash,
+            "String and long composite hashes must differ");
+        assert_ne!(string_resp.composite_hash, binary_resp.composite_hash,
+            "String and binary composite hashes must differ");
+        assert_ne!(bool_resp.composite_hash, long_resp.composite_hash,
+            "Bool and long composite hashes must differ");
+        assert_ne!(bool_resp.composite_hash, binary_resp.composite_hash,
+            "Bool and binary composite hashes must differ");
+        assert_ne!(long_resp.composite_hash, binary_resp.composite_hash,
+            "Long and binary composite hashes must differ");
+
+        // Verify all succeeded
+        for resp in [&string_resp, &bool_resp, &long_resp, &binary_resp] {
+            assert!(resp.success);
+            assert_eq!(resp.results.len(), 1);
+            assert_eq!(resp.results[0].fingerprint.len(), 16);
+        }
+    }
+
     #[test]
     fn test_file_collection_with_backslashes() {
         let prop_unix = PropertyValue {
