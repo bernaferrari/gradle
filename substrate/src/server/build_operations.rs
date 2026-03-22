@@ -10,32 +10,30 @@ use crate::proto::{
     build_operations_service_server::BuildOperationsService, BuildEvent,
     BuildSummary, CompleteOperationRequest,
     CompleteOperationResponse, GetBuildSummaryRequest, GetBuildSummaryResponse,
-    ReportProgressRequest, ReportProgressResponse, StartOperationRequest,
-    StartOperationResponse, StreamEventsRequest,
+    GetOperationDetailsRequest, GetOperationDetailsResponse,
+    OperationDetail, ReportProgressRequest, ReportProgressResponse,
+    StartOperationRequest, StartOperationResponse, StreamEventsRequest,
 };
 
 /// Active build operation.
 struct ActiveOperation {
     display_name: String,
     operation_type: String,
-    #[allow(dead_code)]
     parent_id: String,
     start_time_ms: i64,
-    #[allow(dead_code)]
     metadata: Vec<(String, String)>,
     progress: f32,
 }
 
 /// Completed operation record for summary.
 struct CompletedOperation {
-    #[allow(dead_code)]
     display_name: String,
-    #[allow(dead_code)]
     operation_type: String,
-    #[allow(dead_code)]
+    parent_id: String,
+    start_time_ms: i64,
     duration_ms: i64,
-    #[allow(dead_code)]
     success: bool,
+    metadata: Vec<(String, String)>,
 }
 
 /// Rust-native build operations service.
@@ -95,7 +93,6 @@ impl BuildOperationsServiceImpl {
             .unwrap_or(0)
     }
 
-    #[allow(dead_code)]
     fn record_task_outcome(&self, outcome: &str) {
         self.total_tasks.fetch_add(1, Ordering::Relaxed);
         match outcome {
@@ -167,10 +164,18 @@ impl BuildOperationsService for BuildOperationsServiceImpl {
     ) -> Result<Response<CompleteOperationResponse>, Status> {
         let req = request.into_inner();
 
-        let (display_name, op_type, start_ms) = self
+        let (display_name, op_type, start_ms, parent_id, metadata) = self
             .operations
             .remove(&req.operation_id)
-            .map(|(_key, op)| (op.display_name, op.operation_type, op.start_time_ms))
+            .map(|(_key, op)| {
+                (
+                    op.display_name,
+                    op.operation_type,
+                    op.start_time_ms,
+                    op.parent_id,
+                    op.metadata,
+                )
+            })
             .unwrap_or_default();
 
         // Record completed operation
@@ -179,9 +184,12 @@ impl BuildOperationsService for BuildOperationsServiceImpl {
             req.operation_id.clone(),
             CompletedOperation {
                 display_name: display_name.clone(),
-                operation_type: op_type,
+                operation_type: op_type.clone(),
+                parent_id,
+                start_time_ms: start_ms,
                 duration_ms: duration,
                 success: req.success,
+                metadata,
             },
         );
 
@@ -197,7 +205,7 @@ impl BuildOperationsService for BuildOperationsServiceImpl {
             timestamp_ms: Self::now_ms(),
             event_type: "FINISH".to_string(),
             operation_id: req.operation_id,
-            display_name,
+            display_name: display_name.clone(),
             message: if req.success {
                 "Completed".to_string()
             } else {
@@ -207,7 +215,12 @@ impl BuildOperationsService for BuildOperationsServiceImpl {
             success: req.success,
         });
 
-        Ok(Response::new(CompleteOperationResponse { success: true }))
+        Ok(Response::new(CompleteOperationResponse {
+            success: true,
+            display_name: Some(display_name),
+            operation_type: Some(op_type),
+            duration_ms: duration,
+        }))
     }
 
     async fn report_progress(
@@ -247,6 +260,58 @@ impl BuildOperationsService for BuildOperationsServiceImpl {
         Ok(Response::new(Box::pin(stream) as Self::StreamEventsStream))
     }
 
+    async fn get_operation_details(
+        &self,
+        request: Request<GetOperationDetailsRequest>,
+    ) -> Result<Response<GetOperationDetailsResponse>, Status> {
+        let req = request.into_inner();
+        let operation_id = &req.operation_id;
+
+        // Check completed operations first
+        if let Some(op) = self.completed.get(operation_id) {
+            return Ok(Response::new(GetOperationDetailsResponse {
+                detail: Some(OperationDetail {
+                    operation_id: operation_id.clone(),
+                    display_name: Some(op.display_name.clone()),
+                    operation_type: Some(op.operation_type.clone()),
+                    parent_id: if op.parent_id.is_empty() {
+                        None
+                    } else {
+                        Some(op.parent_id.clone())
+                    },
+                    start_time_ms: op.start_time_ms,
+                    duration_ms: op.duration_ms,
+                    success: op.success,
+                    metadata: op.metadata.iter().cloned().collect(),
+                }),
+            }));
+        }
+
+        // Fall back to active operations
+        if let Some(op) = self.operations.get(operation_id) {
+            let duration = Self::now_ms() - op.start_time_ms;
+            return Ok(Response::new(GetOperationDetailsResponse {
+                detail: Some(OperationDetail {
+                    operation_id: operation_id.clone(),
+                    display_name: Some(op.display_name.clone()),
+                    operation_type: Some(op.operation_type.clone()),
+                    parent_id: if op.parent_id.is_empty() {
+                        None
+                    } else {
+                        Some(op.parent_id.clone())
+                    },
+                    start_time_ms: op.start_time_ms,
+                    duration_ms: duration,
+                    success: true, // active operations are still in progress
+                    metadata: op.metadata.iter().cloned().collect(),
+                }),
+            }));
+        }
+
+        // Not found — return empty response
+        Ok(Response::new(GetOperationDetailsResponse { detail: None }))
+    }
+
     async fn get_build_summary(
         &self,
         request: Request<GetBuildSummaryRequest>,
@@ -259,6 +324,37 @@ impl BuildOperationsService for BuildOperationsServiceImpl {
 
         let total = self.total_tasks.load(Ordering::Relaxed);
         let has_failures = self.failed_tasks.load(Ordering::Relaxed) > 0;
+        let total_ops = self.total_operations.load(Ordering::Relaxed);
+        let total_op_duration = self.total_operation_duration_ms.load(Ordering::Relaxed);
+
+        // Compute operations-by-type count
+        let mut operations_by_type = std::collections::HashMap::new();
+        let completed_operations: Vec<OperationDetail> = self
+            .completed
+            .iter()
+            .map(|entry| {
+                let op = entry.value();
+                *operations_by_type.entry(op.operation_type.clone()).or_insert(0i32) += 1;
+                OperationDetail {
+                    operation_id: entry.key().clone(),
+                    display_name: Some(op.display_name.clone()),
+                    operation_type: Some(op.operation_type.clone()),
+                    parent_id: if op.parent_id.is_empty() {
+                        None
+                    } else {
+                        Some(op.parent_id.clone())
+                    },
+                    start_time_ms: op.start_time_ms,
+                    duration_ms: op.duration_ms,
+                    success: op.success,
+                    metadata: op
+                        .metadata
+                        .iter()
+                        .cloned()
+                        .collect(),
+                }
+            })
+            .collect();
 
         Ok(Response::new(GetBuildSummaryResponse {
             summary: Some(BuildSummary {
@@ -270,6 +366,10 @@ impl BuildOperationsService for BuildOperationsServiceImpl {
                 from_cache_tasks: self.from_cache_tasks.load(Ordering::Relaxed),
                 failed_tasks: self.failed_tasks.load(Ordering::Relaxed),
                 outcome: if has_failures { "FAILURE" } else { "SUCCESS" }.to_string(),
+                total_operations: total_ops,
+                total_operation_duration_ms: total_op_duration,
+                operations_by_type,
+                completed_operations,
             }),
         }))
     }

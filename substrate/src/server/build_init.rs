@@ -6,8 +6,8 @@ use tonic::{Request, Response, Status};
 use crate::proto::{
     build_init_service_server::BuildInitService, BuildInitStatus, GetBuildInitStatusRequest,
     GetBuildInitStatusResponse, InitBuildSettingsRequest, InitBuildSettingsResponse,
-    RecordInitScriptRequest, RecordInitScriptResponse, RecordSettingsDetailRequest,
-    RecordSettingsDetailResponse, SettingsDetailEntry,
+    InitScriptInfo, RecordInitScriptRequest, RecordInitScriptResponse,
+    RecordSettingsDetailRequest, RecordSettingsDetailResponse, SettingsDetailEntry,
 };
 
 /// Tracked build initialization state.
@@ -19,21 +19,16 @@ struct BuildInitState {
     settings_details: Vec<SettingsDetailEntry>,
     init_scripts: Vec<InitScriptRecord>,
     included_projects: Vec<String>,
-    #[allow(dead_code)]
     included_builds: Vec<String>,
     root_project_name: Option<String>,
-    #[allow(dead_code)]
     settings_file_exists: bool,
-    #[allow(dead_code)]
     gradle_version: String,
 }
 
 /// Record of an executed init script.
 struct InitScriptRecord {
     path: String,
-    #[allow(dead_code)]
     success: bool,
-    #[allow(dead_code)]
     duration_ms: i64,
 }
 
@@ -410,8 +405,15 @@ impl BuildInitService for BuildInitServiceImpl {
         let req = request.into_inner();
 
         if let Some(build) = self.builds.get(&req.build_id) {
-            let script_paths: Vec<String> =
-                build.init_scripts.iter().map(|s| s.path.clone()).collect();
+            let script_infos: Vec<InitScriptInfo> = build
+                .init_scripts
+                .iter()
+                .map(|s| InitScriptInfo {
+                    path: s.path.clone(),
+                    success: s.success,
+                    duration_ms: s.duration_ms,
+                })
+                .collect();
 
             Ok(Response::new(GetBuildInitStatusResponse {
                 status: Some(BuildInitStatus {
@@ -420,8 +422,15 @@ impl BuildInitService for BuildInitServiceImpl {
                     initialized: build.initialized,
                     init_duration_ms: build.init_duration_ms,
                     settings_details: build.settings_details.clone(),
-                    executed_init_scripts: script_paths,
+                    executed_init_scripts: script_infos,
                     included_projects: build.included_projects.clone(),
+                    included_builds: build.included_builds.clone(),
+                    settings_file_exists: build.settings_file_exists,
+                    gradle_version: if build.gradle_version.is_empty() {
+                        None
+                    } else {
+                        Some(build.gradle_version.clone())
+                    },
                 }),
             }))
         } else {
@@ -592,6 +601,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(status.executed_init_scripts.len(), 1);
+        assert_eq!(status.executed_init_scripts[0].path, "/tmp/init.gradle");
+        assert!(status.executed_init_scripts[0].success);
+        assert_eq!(status.executed_init_scripts[0].duration_ms, 50);
     }
 
     #[tokio::test]
@@ -716,6 +728,8 @@ include ':core'
             .unwrap();
 
         assert_eq!(status.included_projects, vec![":core".to_string()]);
+        assert!(status.settings_file_exists);
+        assert!(status.gradle_version.is_none()); // not set during init
 
         // Check settings details
         let root_name: Vec<&str> = status
@@ -814,8 +828,12 @@ include ':core'
             .unwrap();
 
         assert_eq!(status.executed_init_scripts.len(), 2);
-        assert_eq!(status.executed_init_scripts[0], "/tmp/init1.gradle");
-        assert_eq!(status.executed_init_scripts[1], "/tmp/init2.gradle");
+        assert_eq!(status.executed_init_scripts[0].path, "/tmp/init1.gradle");
+        assert!(status.executed_init_scripts[0].success);
+        assert_eq!(status.executed_init_scripts[0].duration_ms, 10);
+        assert_eq!(status.executed_init_scripts[1].path, "/tmp/init2.gradle");
+        assert!(!status.executed_init_scripts[1].success);
+        assert_eq!(status.executed_init_scripts[1].duration_ms, 5);
     }
 
     #[tokio::test]

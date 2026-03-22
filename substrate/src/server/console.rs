@@ -14,20 +14,56 @@ const MAX_LOG_BUFFER: usize = 1000;
 
 /// A tracked progress operation.
 struct ProgressEntry {
-    #[allow(dead_code)]
     operation_id: String,
     description: String,
     status: String,
     total_work: i64,
     completed_work: i64,
-    #[allow(dead_code)]
     start_time_ms: i64,
     end_time_ms: i64,
 }
 
+impl ProgressEntry {
+    /// Format this entry as a human-readable status line with ANSI colors.
+    fn format_status_line(&self) -> String {
+        let elapsed = if self.end_time_ms > 0 && self.start_time_ms > 0 {
+            self.end_time_ms - self.start_time_ms
+        } else if self.start_time_ms > 0 {
+            Self::now_ms() - self.start_time_ms
+        } else {
+            0
+        };
+
+        let pct = if self.total_work > 0 {
+            self.completed_work as f64 / self.total_work as f64 * 100.0
+        } else {
+            0.0
+        };
+
+        let status_color = ansi::color_for_status(&self.status);
+        let reset = ansi::RESET;
+        let bold = ansi::BOLD;
+
+        format!(
+            "{bold}{}{reset} [{}] {status_color}{}{reset} {}%{}",
+            self.operation_id,
+            self.description,
+            self.status,
+            pct as u64,
+            if elapsed > 0 { format!(" ({}ms)", elapsed) } else { String::new() },
+        )
+    }
+
+    fn now_ms() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0)
+    }
+}
+
 /// A buffered log message for replay.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub struct BufferedLog {
     build_id: String,
     level: String,
@@ -36,8 +72,42 @@ pub struct BufferedLog {
     timestamp_ms: i64,
 }
 
+impl BufferedLog {
+    /// Format this buffered log message with ANSI colors, including timestamp.
+    pub fn formatted(&self) -> String {
+        let color = ansi::color_for_level(&self.level);
+        let reset = ansi::RESET;
+        let bold = ansi::BOLD;
+        let dim = ansi::DIM;
+        let level_upper = self.level.to_uppercase();
+        format!(
+            "{dim}{}{reset} {bold}{color}[{level_upper}]{reset} [{}] {}",
+            self.timestamp_ms, self.category, self.message
+        )
+    }
+
+    pub fn build_id(&self) -> &str {
+        &self.build_id
+    }
+
+    pub fn level(&self) -> &str {
+        &self.level
+    }
+
+    pub fn category(&self) -> &str {
+        &self.category
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    pub fn timestamp_ms(&self) -> i64 {
+        self.timestamp_ms
+    }
+}
+
 /// ANSI color codes for console output.
-#[allow(dead_code)]
 mod ansi {
     pub const RESET: &str = "\x1b[0m";
     pub const RED: &str = "\x1b[31m";
@@ -63,6 +133,32 @@ mod ansi {
             "quiet" => DIM,
             "progress" => BLUE,
             _ => "",
+        }
+    }
+
+    /// Map a log level to a bold ANSI color string for headings/summaries.
+    pub fn bold_color_for_level(level: &str) -> &'static str {
+        match level {
+            "error" => RED_BOLD,
+            "warn" => YELLOW_BOLD,
+            "info" => GREEN_BOLD,
+            "debug" => DIM,
+            "lifecycle" => CYAN,
+            "quiet" => DIM,
+            "progress" => BLUE,
+            _ => "",
+        }
+    }
+
+    /// Map a progress status string to an ANSI color.
+    /// Uses `RED` for failures and `MAGENTA` for unknown states.
+    pub fn color_for_status(status: &str) -> &'static str {
+        match status {
+            "running" => BLUE,
+            "succeeded" | "complete" | "completed" | "up_to_date" => GREEN,
+            "failed" => RED,
+            "skipped" => DIM,
+            _ => MAGENTA,
         }
     }
 }
@@ -106,12 +202,38 @@ impl ConsoleServiceImpl {
         format!("{color}[{level_upper}]{reset} [{category}] {message}")
     }
 
+    /// Format a log message with bold ANSI level tag (for headings/summaries).
+    pub fn format_log_message_bold(level: &str, category: &str, message: &str) -> String {
+        let color = ansi::bold_color_for_level(level);
+        let reset = ansi::RESET;
+        let bold = ansi::BOLD;
+        let level_upper = level.to_uppercase();
+        format!("{bold}{color}[{level_upper}]{reset} [{category}] {message}")
+    }
+
     /// Get all buffered log messages for a build.
     pub fn get_log_buffer(&self, build_id: &str) -> Vec<BufferedLog> {
         self.log_buffer
             .get(build_id)
             .map(|buf| buf.iter().cloned().collect())
             .unwrap_or_default()
+    }
+
+    /// Get all buffered log messages for a build, formatted with ANSI colors and timestamps.
+    pub fn get_formatted_log_buffer(&self, build_id: &str) -> Vec<String> {
+        self.log_buffer
+            .get(build_id)
+            .map(|buf| buf.iter().map(|log| log.formatted()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Flush (clear) the log buffer for a build, returning the evicted count.
+    pub fn flush_log_buffer(&self, build_id: &str) -> usize {
+        if let Some((_, buf)) = self.log_buffer.remove(build_id) {
+            buf.len()
+        } else {
+            0
+        }
     }
 
     /// Get progress percentage for an operation.
@@ -167,48 +289,69 @@ impl ConsoleService for ConsoleServiceImpl {
         // Buffer the log message
         self.buffer_log(&req.build_id, &req.level, &req.category, &req.message);
 
-        // Format and log via tracing
-        let formatted = Self::format_log_message(&req.level, &req.category, &req.message);
+        // Format and log via tracing; use bold formatting for errors to make them stand out
+        let formatted = match req.level.as_str() {
+            "error" => Self::format_log_message_bold(&req.level, &req.category, &req.message),
+            _ => Self::format_log_message(&req.level, &req.category, &req.message),
+        };
+
+        let evicted = self.logs_evicted.load(Ordering::Relaxed);
+        let total = self.log_counts.load(Ordering::Relaxed);
+
         match req.level.as_str() {
             "error" => tracing::error!(
                 build_id = %req.build_id,
                 category = %req.category,
+                log_count = total,
+                logs_evicted = evicted,
                 "{}",
                 formatted
             ),
             "warn" => tracing::warn!(
                 build_id = %req.build_id,
                 category = %req.category,
+                log_count = total,
+                logs_evicted = evicted,
                 "{}",
                 formatted
             ),
             "quiet" => tracing::info!(
                 build_id = %req.build_id,
                 category = %req.category,
+                log_count = total,
+                logs_evicted = evicted,
                 "{}",
                 formatted
             ),
             "lifecycle" => tracing::info!(
                 build_id = %req.build_id,
                 category = %req.category,
+                log_count = total,
+                logs_evicted = evicted,
                 "{}",
                 formatted
             ),
             "progress" => tracing::info!(
                 build_id = %req.build_id,
                 category = %req.category,
+                log_count = total,
+                logs_evicted = evicted,
                 "{}",
                 formatted
             ),
             "debug" => tracing::debug!(
                 build_id = %req.build_id,
                 category = %req.category,
+                log_count = total,
+                logs_evicted = evicted,
                 "{}",
                 formatted
             ),
             _ => tracing::info!(
                 build_id = %req.build_id,
                 category = %req.category,
+                log_count = total,
+                logs_evicted = evicted,
                 "{}",
                 formatted
             ),
@@ -236,6 +379,8 @@ impl ConsoleService for ConsoleServiceImpl {
             let op_end = op.end_time_ms;
             let op_status_nonempty = !op.status.is_empty();
 
+            let is_new = !self.progress_ops.contains_key(&op_id);
+
             self.progress_ops
                 .entry(op_id.clone())
                 .and_modify(|entry| {
@@ -245,12 +390,15 @@ impl ConsoleService for ConsoleServiceImpl {
                     }
                     entry.total_work = op_total;
                     entry.completed_work = op_completed;
+                    if op_start > 0 {
+                        entry.start_time_ms = op_start;
+                    }
                     if op_end > 0 {
                         entry.end_time_ms = op_end;
                     }
                 })
                 .or_insert_with(|| ProgressEntry {
-                    operation_id: op_id,
+                    operation_id: op_id.clone(),
                     description: op_desc,
                     status: op_status,
                     total_work: op_total,
@@ -258,6 +406,26 @@ impl ConsoleService for ConsoleServiceImpl {
                     start_time_ms: if op_start > 0 { op_start } else { now },
                     end_time_ms: op_end,
                 });
+
+            // Log the formatted status line for this operation
+            if let Some(entry) = self.progress_ops.get(&op_id) {
+                let status_line = entry.format_status_line();
+                if is_new {
+                    tracing::info!(
+                        build_id = %req.build_id,
+                        operation_id = %entry.operation_id,
+                        start_time_ms = entry.start_time_ms,
+                        "Progress started: {}", status_line
+                    );
+                } else {
+                    tracing::debug!(
+                        build_id = %req.build_id,
+                        operation_id = %entry.operation_id,
+                        start_time_ms = entry.start_time_ms,
+                        "Progress updated: {}", status_line
+                    );
+                }
+            }
         }
 
         Ok(Response::new(UpdateProgressResponse { accepted: true }))
@@ -267,7 +435,15 @@ impl ConsoleService for ConsoleServiceImpl {
         &self,
         request: Request<RequestInputRequest>,
     ) -> Result<Response<RequestInputResponse>, Status> {
-        let _req = request.into_inner();
+        let req = request.into_inner();
+
+        tracing::warn!(
+            build_id = %req.build_id,
+            input_id = %req.input_id,
+            prompt = %req.prompt,
+            default_value = %req.default_value,
+            "Input requested in daemon mode -- returning empty value"
+        );
 
         // In daemon mode, input requests are typically not supported.
         Ok(Response::new(RequestInputResponse {
@@ -282,7 +458,15 @@ impl ConsoleService for ConsoleServiceImpl {
         let req = request.into_inner();
 
         self.build_descriptions
-            .insert(req.build_id, req.description);
+            .insert(req.build_id.clone(), req.description.clone());
+
+        let total_ops = self.progress_ops.len();
+        tracing::info!(
+            build_id = %req.build_id,
+            description = %req.description,
+            active_operations = total_ops,
+            "Build description set"
+        );
 
         Ok(Response::new(SetBuildDescriptionResponse { accepted: true }))
     }

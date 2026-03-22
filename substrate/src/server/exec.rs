@@ -32,7 +32,6 @@ struct ManagedProcess {
     child: tokio::process::Child,
     stdout_rx: Option<mpsc::Receiver<Vec<u8>>>,
     stderr_rx: Option<mpsc::Receiver<Vec<u8>>>,
-    #[allow(dead_code)]
     command: String,
     started_at: Instant,
 }
@@ -85,10 +84,12 @@ impl ExecServiceImpl {
 
         for pid in &stale_pids {
             if let Some((_, mut entry)) = self.processes.remove(pid) {
+                let command = entry.command.clone();
                 // Check if already exited
                 match entry.child.try_wait() {
                     Ok(Some(_)) => {
                         // Already exited, just clean up
+                        tracing::debug!(pid, command = %command, "Reaped already-exited stale process");
                     }
                     Ok(None) => {
                         // Still running but stale, kill it
@@ -104,6 +105,7 @@ impl ExecServiceImpl {
                         // Spawn async wait to reap the child (we already own it from remove)
                         let mut child = entry.child;
                         tokio::spawn(async move { let _ = child.wait().await; });
+                        tracing::debug!(pid, command = %command, "Killed stale process");
                     }
                     Err(_) => {}
                 }
@@ -292,6 +294,7 @@ impl ExecService for ExecServiceImpl {
         let elapsed = entry.started_at.elapsed();
         tracing::debug!(
             pid,
+            command = %entry.command,
             exit_code,
             elapsed_ms = elapsed.as_millis() as u64,
             "Process exited"
@@ -320,22 +323,36 @@ impl ExecService for ExecServiceImpl {
                 _ => Signal::SIGTERM,
             };
             let pid = Pid::from_raw(req.pid);
-            match signal::kill(pid, sig) {
-                Ok(_) => Ok(Response::new(ExecSignalResponse {
-                    success: true,
-                    error_message: String::new(),
-                })),
-                Err(e) => Ok(Response::new(ExecSignalResponse {
-                    success: false,
-                    error_message: e.to_string(),
-                })),
-            }
+            let command = self
+                .processes
+                .get(&(req.pid as u32))
+                .map(|e| e.command.clone())
+                .unwrap_or_default();
+            let result = match signal::kill(pid, sig) {
+                Ok(_) => {
+                    tracing::debug!(pid = req.pid, command = %command, signal = req.signal, "Sent signal to process");
+                    Ok(Response::new(ExecSignalResponse {
+                        success: true,
+                        error_message: String::new(),
+                    }))
+                }
+                Err(e) => {
+                    tracing::debug!(pid = req.pid, command = %command, signal = req.signal, error = %e, "Failed to send signal");
+                    Ok(Response::new(ExecSignalResponse {
+                        success: false,
+                        error_message: e.to_string(),
+                    }))
+                }
+            };
+            result
         }
 
         #[cfg(not(unix))]
         {
             if let Some(mut child) = self.processes.get_mut(&(req.pid as u32)) {
+                let command = child.command.clone();
                 let _ = child.child.start_kill();
+                tracing::debug!(pid = req.pid, command = %command, signal = req.signal, "Killed process");
                 Ok(Response::new(ExecSignalResponse {
                     success: true,
                     error_message: String::new(),
@@ -353,6 +370,13 @@ impl ExecService for ExecServiceImpl {
         let req = request.into_inner();
         let pid = req.pid as u32;
         let force = req.force;
+
+        // Capture command for logging before potential removal
+        let command = self
+            .processes
+            .get(&pid)
+            .map(|e| e.command.clone())
+            .unwrap_or_default();
 
         #[cfg(unix)]
         {
@@ -375,13 +399,13 @@ impl ExecService for ExecServiceImpl {
                     .await
                     {
                         Ok(_) => {
-                            tracing::debug!(pid, "Process tree terminated gracefully");
+                            tracing::debug!(pid, command = %command, "Process tree terminated gracefully");
                         }
                         Err(_) => {
                             // Force kill the process group
                             let _ = signal::kill(pgid, Signal::SIGKILL);
                             let _ = entry.child.wait().await;
-                            tracing::debug!(pid, "Process tree force-killed after timeout");
+                            tracing::debug!(pid, command = %command, "Process tree force-killed after timeout");
                         }
                     }
                 }
@@ -401,7 +425,7 @@ impl ExecService for ExecServiceImpl {
             let _ = self.processes.remove(&pid);
         }
 
-        tracing::debug!(pid, force, "Kill tree completed");
+        tracing::debug!(pid, command = %command, force, "Kill tree completed");
 
         Ok(Response::new(ExecKillTreeResponse {
             success: true,
@@ -421,10 +445,13 @@ impl ExecService for ExecServiceImpl {
             .get_mut(&pid)
             .ok_or_else(|| Status::not_found(format!("Unknown process: {}", pid)))?;
 
+        let command = entry.command.clone();
         let stdout_rx: Option<mpsc::Receiver<Vec<u8>>> = entry.stdout_rx.take();
         let stderr_rx: Option<mpsc::Receiver<Vec<u8>>> = entry.stderr_rx.take();
 
         let (tx, rx) = mpsc::channel(128);
+
+        tracing::debug!(pid, command = %command, "Subscribing to process output");
 
         tokio::spawn(async move {
             if let Some(mut stdout_rx) = stdout_rx {

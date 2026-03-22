@@ -3713,8 +3713,8 @@ async fn test_plugin_to_dependency_resolution_chain() {
 
     // resolve_dependencies incremented total_resolutions by 1
     assert_eq!(stats.total_resolutions, 1);
-    // Two cache hits from check_artifact_cache
-    assert_eq!(stats.artifact_cache_hits, 2);
+    // Two cache hits from check_artifact_cache + cache_hits from record_resolution calls (3+5+2+1=11)
+    assert_eq!(stats.artifact_cache_hits, 13);
     // Two artifacts in cache
     assert_eq!(stats.cached_artifacts, 2);
     // total_resolution_time_ms should be >= 0 (from the resolve_dependencies call)

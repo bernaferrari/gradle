@@ -13,7 +13,6 @@ use crate::proto::{
 };
 
 /// Cached artifact metadata.
-#[allow(dead_code)]
 struct CachedArtifact {
     group: String,
     name: String,
@@ -40,6 +39,8 @@ struct PomDependency {
     version: String,
     scope: String,
     optional: bool,
+    classifier: String,
+    type_field: String,
 }
 
 /// Rust-native dependency resolution service.
@@ -135,6 +136,8 @@ impl DependencyResolutionServiceImpl {
                     version,
                     scope,
                     optional,
+                    classifier: _classifier,
+                    type_field: _type_field,
                 });
             }
 
@@ -382,13 +385,18 @@ impl DependencyResolutionServiceImpl {
                                 continue;
                             }
                             let interp_version = Self::interpolate_properties(&pom_dep.version, &properties);
+                            let ext = if pom_dep.type_field.is_empty() { "jar" } else { &pom_dep.type_field };
+                            let artifact_filename = if pom_dep.classifier.is_empty() {
+                                format!("{}-{}.{}", pom_dep.name, interp_version, ext)
+                            } else {
+                                format!("{}-{}-{}.{}", pom_dep.name, interp_version, pom_dep.classifier, ext)
+                            };
                             let artifact_url = format!(
-                                "https://repo.maven.apache.org/maven2/{}/{}/{}/{}-{}.jar",
+                                "https://repo.maven.apache.org/maven2/{}/{}/{}/{}",
                                 pom_dep.group.replace('.', "/"),
                                 pom_dep.name,
                                 interp_version,
-                                pom_dep.name,
-                                interp_version
+                                artifact_filename
                             );
                             transitive_deps.push(ResolvedDependency {
                                 group: pom_dep.group.clone(),
@@ -661,6 +669,45 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
 
         if let Some(cached) = self.artifact_cache.get(&key) {
             self.resolution_stats.cache_hits.fetch_add(1, Ordering::Relaxed);
+
+            // Validate SHA-256 if the caller provided one
+            if !req.sha256.is_empty() && !cached.sha256.is_empty() && req.sha256 != cached.sha256 {
+                tracing::warn!(
+                    group = %cached.group,
+                    name = %cached.name,
+                    version = %cached.version,
+                    classifier = %cached.classifier,
+                    expected_sha256 = %req.sha256,
+                    cached_sha256 = %cached.sha256,
+                    "Artifact cache SHA-256 mismatch"
+                );
+                return Ok(Response::new(CheckArtifactCacheResponse {
+                    cached: false,
+                    local_path: String::new(),
+                    cached_size: 0,
+                }));
+            }
+
+            let age_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64
+                - cached.cached_at_ms;
+
+            tracing::debug!(
+                group = %cached.group,
+                name = %cached.name,
+                version = %cached.version,
+                classifier = %cached.classifier,
+                extension = %cached.extension,
+                sha256 = %cached.sha256,
+                local_path = %cached.local_path,
+                size = cached.size,
+                cached_at_ms = cached.cached_at_ms,
+                age_ms,
+                "Artifact cache hit"
+            );
+
             return Ok(Response::new(CheckArtifactCacheResponse {
                 cached: true,
                 local_path: cached.local_path.clone(),
@@ -837,8 +884,16 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             dependencies = req.dependency_count,
             time_ms = req.resolution_time_ms,
             success = req.success,
+            cache_hits = req.cache_hits,
             "Resolution recorded"
         );
+
+        // Feed recorded cache hits into global stats
+        if req.success {
+            self.resolution_stats
+                .cache_hits
+                .fetch_add(req.cache_hits, Ordering::Relaxed);
+        }
 
         Ok(Response::new(RecordResolutionResponse {
             acknowledged: true,
@@ -880,13 +935,18 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
         let name = req.name.clone();
         let version = req.version.clone();
         let classifier = req.classifier.clone();
+        let extension = if classifier.is_empty() {
+            "jar".to_string()
+        } else {
+            format!("{}.jar", classifier)
+        };
 
         let artifact = CachedArtifact {
             group,
             name,
             version,
             classifier,
-            extension: String::new(),
+            extension,
             sha256: req.sha256,
             local_path: req.local_path,
             size: req.size,
