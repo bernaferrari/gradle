@@ -2445,3 +2445,635 @@ async fn test_cross_service_execution_plan_with_history() {
     // The history service has its own stats (may have entries from other tests' stores)
     assert!(stats.hit_rate >= 0.0 && stats.hit_rate <= 1.0);
 }
+
+// ============================================================
+// Test 36: Build result service dedicated e2e
+// ============================================================
+
+#[tokio::test]
+async fn test_build_result_service_e2e() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client = build_result_service_client::BuildResultServiceClient::new(channel);
+
+    let build_id = "e2e-build-result".to_string();
+
+    // Report task results with various outcomes
+    client
+        .report_task_result(Request::new(ReportTaskResultRequest {
+            build_id: build_id.clone(),
+            result: Some(TaskResult {
+                task_path: ":compileJava".to_string(),
+                outcome: "SUCCESS".to_string(),
+                duration_ms: 1500,
+                did_work: true,
+                cache_key: "ck-compile".to_string(),
+                start_time_ms: 0,
+                end_time_ms: 1500,
+                failure_message: String::new(),
+                execution_reason: 0,
+            }),
+        }))
+        .await
+        .unwrap();
+
+    client
+        .report_task_result(Request::new(ReportTaskResultRequest {
+            build_id: build_id.clone(),
+            result: Some(TaskResult {
+                task_path: ":processResources".to_string(),
+                outcome: "UP_TO_DATE".to_string(),
+                duration_ms: 0,
+                did_work: false,
+                cache_key: String::new(),
+                start_time_ms: 1500,
+                end_time_ms: 1500,
+                failure_message: String::new(),
+                execution_reason: 0,
+            }),
+        }))
+        .await
+        .unwrap();
+
+    client
+        .report_task_result(Request::new(ReportTaskResultRequest {
+            build_id: build_id.clone(),
+            result: Some(TaskResult {
+                task_path: ":test".to_string(),
+                outcome: "FROM_CACHE".to_string(),
+                duration_ms: 5,
+                did_work: false,
+                cache_key: "ck-test".to_string(),
+                start_time_ms: 1500,
+                end_time_ms: 1505,
+                failure_message: String::new(),
+                execution_reason: 0,
+            }),
+        }))
+        .await
+        .unwrap();
+
+    // Get build result — should aggregate correctly
+    let result = client
+        .get_build_result(Request::new(GetBuildResultRequest {
+            build_id: build_id.clone(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    let outcome = result.outcome.unwrap();
+    assert_eq!(outcome.overall_result, "SUCCESS");
+    assert_eq!(outcome.tasks_total, 3);
+    assert_eq!(outcome.tasks_executed, 1);
+    assert_eq!(outcome.tasks_up_to_date, 1);
+    assert_eq!(outcome.tasks_from_cache, 1);
+    assert_eq!(outcome.tasks_failed, 0);
+    assert_eq!(outcome.tasks_skipped, 0);
+    assert_eq!(outcome.total_duration_ms, 1505);
+
+    // Verify individual task results are returned
+    assert_eq!(result.task_results.len(), 3);
+
+    // Get task summary
+    let summary = client
+        .get_task_summary(Request::new(GetTaskSummaryRequest {
+            build_id: build_id.clone(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(summary.tasks.len(), 3);
+    assert_eq!(summary.total_duration_ms, 1505);
+
+    // Verify task summary entries are in order
+    let paths: Vec<&str> = summary.tasks.iter().map(|t| t.task_path.as_str()).collect();
+    assert!(paths.contains(&":compileJava"));
+    assert!(paths.contains(&":processResources"));
+    assert!(paths.contains(&":test"));
+
+    // Now report a build failure and verify outcome changes to FAILED
+    client
+        .report_build_failure(Request::new(ReportBuildFailureRequest {
+            build_id: build_id.clone(),
+            failure_type: "test_failure".to_string(),
+            failure_message: "org.example.MyTest.testFoo failed".to_string(),
+            failed_task_paths: vec![":test".to_string()],
+        }))
+        .await
+        .unwrap();
+
+    let result_after = client
+        .get_build_result(Request::new(GetBuildResultRequest {
+            build_id: build_id.clone(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(result_after.outcome.unwrap().overall_result, "FAILED");
+
+    // Verify empty build result for nonexistent build
+    let empty = client
+        .get_build_result(Request::new(GetBuildResultRequest {
+            build_id: "nonexistent-build".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    let empty_outcome = empty.outcome.unwrap();
+    assert_eq!(empty_outcome.overall_result, "SUCCESS"); // no failures = success
+    assert_eq!(empty_outcome.tasks_total, 0);
+}
+
+// ============================================================
+// Test 37: Task graph → build result → build comparison workflow
+// ============================================================
+
+#[tokio::test]
+async fn test_task_graph_to_build_result_workflow() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut graph_client = task_graph_service_client::TaskGraphServiceClient::new(channel.clone());
+    let mut result_client = build_result_service_client::BuildResultServiceClient::new(channel.clone());
+    let mut comparison_client = build_comparison_service_client::BuildComparisonServiceClient::new(channel.clone());
+
+    let build_id = "workflow-build".to_string();
+
+    // 1. Register tasks in the graph
+    let tasks = vec![
+        (":compileJava", "JavaCompile", vec![":compileKotlin".to_string()]),
+        (":compileKotlin", "KotlinCompile", vec![]),
+        (":processResources", "ProcessResources", vec![]),
+        (":classes", "Lifecycle", vec![":compileJava".to_string(), ":processResources".to_string()]),
+        (":test", "Test", vec![":classes".to_string()]),
+    ];
+
+    for (path, task_type, deps) in &tasks {
+        graph_client
+            .register_task(Request::new(RegisterTaskRequest {
+                task_path: path.to_string(),
+                depends_on: deps.clone(),
+                task_type: task_type.to_string(),
+                should_execute: true,
+            }))
+            .await
+            .unwrap();
+    }
+
+    // 2. Mark tasks as executing and finished
+    graph_client
+        .task_started(Request::new(TaskStartedRequest {
+            task_path: ":compileKotlin".to_string(),
+            start_time_ms: 0,
+        }))
+        .await
+        .unwrap();
+
+    graph_client
+        .task_finished(Request::new(TaskFinishedRequest {
+            task_path: ":compileKotlin".to_string(),
+            duration_ms: 300,
+            success: true,
+            outcome: "SUCCESS".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    graph_client
+        .task_started(Request::new(TaskStartedRequest {
+            task_path: ":compileJava".to_string(),
+            start_time_ms: 300,
+        }))
+        .await
+        .unwrap();
+
+    graph_client
+        .task_finished(Request::new(TaskFinishedRequest {
+            task_path: ":compileJava".to_string(),
+            duration_ms: 800,
+            success: true,
+            outcome: "SUCCESS".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    // 3. Report task results to build result service
+    result_client
+        .report_task_result(Request::new(ReportTaskResultRequest {
+            build_id: build_id.clone(),
+            result: Some(TaskResult {
+                task_path: ":compileKotlin".to_string(),
+                outcome: "SUCCESS".to_string(),
+                duration_ms: 300,
+                did_work: true,
+                cache_key: String::new(),
+                start_time_ms: 0,
+                end_time_ms: 300,
+                failure_message: String::new(),
+                execution_reason: 0,
+            }),
+        }))
+        .await
+        .unwrap();
+
+    result_client
+        .report_task_result(Request::new(ReportTaskResultRequest {
+            build_id: build_id.clone(),
+            result: Some(TaskResult {
+                task_path: ":compileJava".to_string(),
+                outcome: "SUCCESS".to_string(),
+                duration_ms: 800,
+                did_work: true,
+                cache_key: String::new(),
+                start_time_ms: 300,
+                end_time_ms: 1100,
+                failure_message: String::new(),
+                execution_reason: 0,
+            }),
+        }))
+        .await
+        .unwrap();
+
+    // 4. Record build data for comparison (must record before starting comparison)
+    let mut baseline_durations = std::collections::HashMap::new();
+    baseline_durations.insert(":compileKotlin".to_string(), 300);
+    baseline_durations.insert(":compileJava".to_string(), 800);
+    let mut baseline_outcomes = std::collections::HashMap::new();
+    baseline_outcomes.insert(":compileKotlin".to_string(), "SUCCESS".to_string());
+    baseline_outcomes.insert(":compileJava".to_string(), "SUCCESS".to_string());
+
+    comparison_client
+        .record_build_data(Request::new(RecordBuildDataRequest {
+            snapshot: Some(BuildDataSnapshot {
+                build_id: "baseline-build".to_string(),
+                start_time_ms: 0,
+                end_time_ms: 1100,
+                task_durations: baseline_durations,
+                task_outcomes: baseline_outcomes,
+                task_order: vec![":compileKotlin".to_string(), ":compileJava".to_string()],
+                root_dir: "/tmp".to_string(),
+                input_properties: vec![],
+            }),
+        }))
+        .await
+        .unwrap();
+
+    let mut candidate_durations = std::collections::HashMap::new();
+    candidate_durations.insert(":compileKotlin".to_string(), 300);
+    candidate_durations.insert(":compileJava".to_string(), 800);
+    let mut candidate_outcomes = std::collections::HashMap::new();
+    candidate_outcomes.insert(":compileKotlin".to_string(), "SUCCESS".to_string());
+    candidate_outcomes.insert(":compileJava".to_string(), "SUCCESS".to_string());
+
+    comparison_client
+        .record_build_data(Request::new(RecordBuildDataRequest {
+            snapshot: Some(BuildDataSnapshot {
+                build_id: build_id.clone(),
+                start_time_ms: 0,
+                end_time_ms: 1100,
+                task_durations: candidate_durations,
+                task_outcomes: candidate_outcomes,
+                task_order: vec![":compileKotlin".to_string(), ":compileJava".to_string()],
+                root_dir: "/tmp".to_string(),
+                input_properties: vec![],
+            }),
+        }))
+        .await
+        .unwrap();
+
+    // 5. Start comparison (both builds now exist)
+    let start_comp = comparison_client
+        .start_comparison(Request::new(StartComparisonRequest {
+            baseline_build_id: "baseline-build".to_string(),
+            candidate_build_id: build_id.clone(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(start_comp.started);
+    let comparison_id = start_comp.comparison_id;
+
+    // 5. Verify build result aggregation
+    let result = result_client
+        .get_build_result(Request::new(GetBuildResultRequest {
+            build_id: build_id.clone(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    let outcome = result.outcome.unwrap();
+    assert_eq!(outcome.overall_result, "SUCCESS");
+    assert_eq!(outcome.tasks_total, 2);
+    assert_eq!(outcome.tasks_executed, 2);
+    assert_eq!(outcome.total_duration_ms, 1100);
+
+    // 6. Verify comparison was stored
+    let comparison = comparison_client
+        .get_comparison_result(Request::new(GetComparisonResultRequest {
+            comparison_id,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(comparison.task_comparisons.len(), 2);
+
+    // 7. Verify task graph progress
+    let progress = graph_client
+        .get_progress(Request::new(GetProgressRequest {}))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(progress.tasks.len(), 5);
+}
+
+// ============================================================
+// Test 38: Build layout → work scheduling → build result pipeline
+// ============================================================
+
+#[tokio::test]
+async fn test_build_layout_to_work_pipeline() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut layout_client = build_layout_service_client::BuildLayoutServiceClient::new(channel.clone());
+    let mut work_client = work_service_client::WorkServiceClient::new(channel.clone());
+    let mut result_client = build_result_service_client::BuildResultServiceClient::new(channel.clone());
+    let mut ops_client = build_operations_service_client::BuildOperationsServiceClient::new(channel.clone());
+
+    // 1. Initialize build layout
+    let layout = layout_client
+        .init_build_layout(Request::new(InitBuildLayoutRequest {
+            root_dir: "/tmp/pipeline-project".to_string(),
+            settings_file: "/tmp/pipeline-project/settings.gradle".to_string(),
+            build_file: "build.gradle.kts".to_string(),
+            build_name: "pipeline-test".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    let build_id = layout.build_id;
+
+    // 2. Add subprojects
+    layout_client
+        .add_subproject(Request::new(AddSubprojectRequest {
+            build_id: build_id.clone(),
+            project_path: ":app".to_string(),
+            project_dir: "/tmp/pipeline-project/app".to_string(),
+            build_file: "/tmp/pipeline-project/app/build.gradle.kts".to_string(),
+            display_name: "app".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    layout_client
+        .add_subproject(Request::new(AddSubprojectRequest {
+            build_id: build_id.clone(),
+            project_path: ":lib".to_string(),
+            project_dir: "/tmp/pipeline-project/lib".to_string(),
+            build_file: "/tmp/pipeline-project/lib/build.gradle.kts".to_string(),
+            display_name: "lib".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    // 3. Verify project tree
+    let tree = layout_client
+        .get_project_tree(Request::new(GetProjectTreeRequest {
+            build_id: build_id.clone(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(tree.all_projects.len(), 2);
+    assert_eq!(tree.root.unwrap().children.len(), 2);
+
+    // 4. List projects
+    let projects = layout_client
+        .list_projects(Request::new(ListProjectsRequest {
+            build_id: build_id.clone(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(projects.project_paths.len(), 3); // root + :app + :lib
+
+    // 5. Evaluate work items (simulating task scheduling decisions)
+    let eval1 = work_client
+        .evaluate(Request::new(WorkEvaluateRequest {
+            task_path: ":lib:compileJava".to_string(),
+            input_properties: make_prop_map(vec![("source", "v1")]),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    // First evaluation should suggest execution (no history)
+    assert!(eval1.should_execute);
+
+    let eval2 = work_client
+        .evaluate(Request::new(WorkEvaluateRequest {
+            task_path: ":app:compileJava".to_string(),
+            input_properties: make_prop_map(vec![("source", "v2")]),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(eval2.should_execute);
+
+    // 6. Track operations
+    ops_client
+        .start_operation(Request::new(StartOperationRequest {
+            operation_id: "op-lib-compile".to_string(),
+            display_name: "Compile lib".to_string(),
+            operation_type: "TASK_EXECUTION".to_string(),
+            parent_id: String::new(),
+            start_time_ms: 100,
+            metadata: Default::default(),
+        }))
+        .await
+        .unwrap();
+
+    ops_client
+        .complete_operation(Request::new(CompleteOperationRequest {
+            operation_id: "op-lib-compile".to_string(),
+            duration_ms: 400,
+            success: true,
+            outcome: "SUCCESS".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    // 7. Report task results
+    result_client
+        .report_task_result(Request::new(ReportTaskResultRequest {
+            build_id: build_id.clone(),
+            result: Some(TaskResult {
+                task_path: ":lib:compileJava".to_string(),
+                outcome: "SUCCESS".to_string(),
+                duration_ms: 400,
+                did_work: true,
+                cache_key: String::new(),
+                start_time_ms: 100,
+                end_time_ms: 500,
+                failure_message: String::new(),
+                execution_reason: 0,
+            }),
+        }))
+        .await
+        .unwrap();
+
+    result_client
+        .report_task_result(Request::new(ReportTaskResultRequest {
+            build_id: build_id.clone(),
+            result: Some(TaskResult {
+                task_path: ":app:compileJava".to_string(),
+                outcome: "SUCCESS".to_string(),
+                duration_ms: 600,
+                did_work: true,
+                cache_key: String::new(),
+                start_time_ms: 500,
+                end_time_ms: 1100,
+                failure_message: String::new(),
+                execution_reason: 0,
+            }),
+        }))
+        .await
+        .unwrap();
+
+    // 8. Verify final build result
+    let result = result_client
+        .get_build_result(Request::new(GetBuildResultRequest {
+            build_id: build_id.clone(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    let outcome = result.outcome.unwrap();
+    assert_eq!(outcome.overall_result, "SUCCESS");
+    assert_eq!(outcome.tasks_total, 2);
+    assert_eq!(outcome.tasks_executed, 2);
+    assert_eq!(outcome.total_duration_ms, 1000);
+
+    // 9. Verify task summary
+    let summary = result_client
+        .get_task_summary(Request::new(GetTaskSummaryRequest {
+            build_id: build_id.clone(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(summary.tasks.len(), 2);
+    assert_eq!(summary.total_duration_ms, 1000);
+}
+
+// ============================================================
+// Test 39: Exec → build operations → build result workflow
+// ============================================================
+
+#[tokio::test]
+async fn test_exec_to_build_operations_workflow() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut exec_client = exec_service_client::ExecServiceClient::new(channel.clone());
+    let mut ops_client = build_operations_service_client::BuildOperationsServiceClient::new(channel.clone());
+    let mut result_client = build_result_service_client::BuildResultServiceClient::new(channel.clone());
+
+    let build_id = "exec-workflow-build".to_string();
+
+    // 1. Start a build operation tracking the exec
+    ops_client
+        .start_operation(Request::new(StartOperationRequest {
+            operation_id: "op-exec-test".to_string(),
+            display_name: "Run test process".to_string(),
+            operation_type: "TASK_EXECUTION".to_string(),
+            parent_id: String::new(),
+            start_time_ms: 0,
+            metadata: Default::default(),
+        }))
+        .await
+        .unwrap();
+
+    // 2. Spawn a process (echo "hello" on macOS/Linux)
+    let spawn_resp = exec_client
+        .spawn(Request::new(ExecSpawnRequest {
+            command: "echo".to_string(),
+            args: vec!["hello".to_string()],
+            environment: Default::default(),
+            working_dir: "/tmp".to_string(),
+            redirect_error_stream: false,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(spawn_resp.success);
+    let pid = spawn_resp.pid;
+
+    // 3. Wait for the process to complete
+    let start_time = std::time::Instant::now();
+    let wait_resp = exec_client
+        .wait(Request::new(ExecWaitRequest {
+            pid,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    let elapsed_ms = start_time.elapsed().as_millis() as i64;
+
+    // 4. Complete the operation
+    ops_client
+        .complete_operation(Request::new(CompleteOperationRequest {
+            operation_id: "op-exec-test".to_string(),
+            duration_ms: elapsed_ms,
+            success: wait_resp.exit_code == 0,
+            outcome: if wait_resp.exit_code == 0 { "SUCCESS".to_string() } else { "FAILED".to_string() },
+        }))
+        .await
+        .unwrap();
+
+    // 5. Report task result
+    result_client
+        .report_task_result(Request::new(ReportTaskResultRequest {
+            build_id: build_id.clone(),
+            result: Some(TaskResult {
+                task_path: ":runTests".to_string(),
+                outcome: if wait_resp.exit_code == 0 { "SUCCESS".to_string() } else { "FAILED".to_string() },
+                duration_ms: elapsed_ms,
+                did_work: true,
+                cache_key: String::new(),
+                start_time_ms: 0,
+                end_time_ms: elapsed_ms,
+                failure_message: String::new(),
+                execution_reason: 0,
+            }),
+        }))
+        .await
+        .unwrap();
+
+    // 6. Verify the build result reflects the exec outcome
+    let result = result_client
+        .get_build_result(Request::new(GetBuildResultRequest {
+            build_id: build_id.clone(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    let outcome = result.outcome.unwrap();
+    assert_eq!(outcome.tasks_total, 1);
+    assert_eq!(outcome.overall_result, "SUCCESS");
+    assert!(outcome.total_duration_ms >= 0);
+}
