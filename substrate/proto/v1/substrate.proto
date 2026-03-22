@@ -7,6 +7,8 @@ package gradle.substrate.v1;
 service ControlService {
   rpc Handshake(HandshakeRequest) returns (HandshakeResponse);
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+  rpc SetAuthoritativeMode(SetAuthoritativeModeRequest) returns (SetAuthoritativeModeResponse);
+  rpc GetAuthoritativeMode(GetAuthoritativeModeRequest) returns (GetAuthoritativeModeResponse);
 }
 
 message HandshakeRequest {
@@ -28,6 +30,27 @@ message ShutdownRequest {
 
 message ShutdownResponse {
   bool acknowledged = 1;
+}
+
+message SetAuthoritativeModeRequest {
+  string subsystem = 1;
+  bool authoritative = 2;
+}
+
+message SetAuthoritativeModeResponse {
+  bool accepted = 1;
+  string previous_mode = 2;
+}
+
+message GetAuthoritativeModeRequest {}
+
+message GetAuthoritativeModeResponse {
+  repeated SubsystemAuthStatus subsystems = 1;
+}
+
+message SubsystemAuthStatus {
+  string subsystem = 1;
+  bool authoritative = 2;
 }
 
 // -- Hash Service --
@@ -502,6 +525,7 @@ message RegisterTaskRequest {
   repeated string depends_on = 2;
   bool should_execute = 3;
   string task_type = 4; // e.g. "org.gradle.api.Task"
+  repeated string input_files = 10; // files this task depends on (for file-watch -> task invalidation)
 }
 
 message RegisterTaskResponse {

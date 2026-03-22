@@ -16,6 +16,7 @@ use super::execution_history::ExecutionHistoryServiceImpl;
 use super::scopes::BuildId;
 
 /// Task graph node stored internally.
+#[derive(Clone)]
 struct TaskNode {
     task_path: String,
     depends_on: Vec<String>,
@@ -35,6 +36,20 @@ pub struct TaskGraphServiceImpl {
     request_counter: AtomicI64,
     /// Optional reference to execution history for duration estimates.
     history: Option<Arc<ExecutionHistoryServiceImpl>>,
+    /// Reverse index: file path -> list of (build_id, task_path) that depend on it.
+    /// Used by file-watch integration to invalidate tasks when their inputs change.
+    file_to_tasks: DashMap<String, Vec<(BuildId, String)>>,
+}
+
+impl Clone for TaskGraphServiceImpl {
+    fn clone(&self) -> Self {
+        Self {
+            tasks: self.tasks.clone(),
+            request_counter: AtomicI64::new(self.request_counter.load(Ordering::Relaxed)),
+            history: self.history.clone(),
+            file_to_tasks: self.file_to_tasks.clone(),
+        }
+    }
 }
 
 impl Default for TaskGraphServiceImpl {
@@ -49,6 +64,7 @@ impl TaskGraphServiceImpl {
             tasks: DashMap::new(),
             request_counter: AtomicI64::new(0),
             history: None,
+            file_to_tasks: DashMap::new(),
         }
     }
 
@@ -57,6 +73,7 @@ impl TaskGraphServiceImpl {
             tasks: DashMap::new(),
             request_counter: AtomicI64::new(0),
             history: Some(history),
+            file_to_tasks: DashMap::new(),
         }
     }
 
@@ -66,6 +83,36 @@ impl TaskGraphServiceImpl {
             Some(h) => h.get_task_duration(task_path),
             None => 0,
         }
+    }
+
+    /// Invalidate tasks whose input files have changed.
+    /// Marks affected tasks as `should_execute = true` so they will be
+    /// included in the next execution plan. Returns the number of tasks invalidated.
+    pub fn invalidate_tasks_for_files(&self, changed_files: &[String]) -> usize {
+        let mut invalidated = std::collections::HashSet::new();
+        for file_path in changed_files {
+            if let Some(entries) = self.file_to_tasks.get(file_path) {
+                for (bid, task_path) in entries.iter() {
+                    let key = (bid.clone(), task_path.clone());
+                    if !invalidated.contains(&key) {
+                        if let Some(mut task) = self.tasks.get_mut(&key) {
+                            task.should_execute = true;
+                            invalidated.insert(key);
+                        }
+                    }
+                }
+            }
+        }
+        invalidated.len()
+    }
+
+    /// Remove all tasks and reverse-index entries for a given build_id.
+    pub fn cleanup_build(&self, build_id: &BuildId) {
+        self.tasks.retain(|(bid, _), _| bid != build_id);
+        self.file_to_tasks.retain(|_, tasks| {
+            tasks.retain(|(bid, _)| bid != build_id);
+            !tasks.is_empty()
+        });
     }
 
     /// Kahn's algorithm for topological sort with parallel scheduling.
@@ -282,9 +329,9 @@ impl TaskGraphService for TaskGraphServiceImpl {
         }
 
         self.tasks.insert(
-            (build_id, req.task_path.clone()),
+            (build_id.clone(), req.task_path.clone()),
             TaskNode {
-                task_path: req.task_path,
+                task_path: req.task_path.clone(),
                 depends_on: req.depends_on,
                 should_execute: req.should_execute,
                 task_type: req.task_type,
@@ -294,6 +341,16 @@ impl TaskGraphService for TaskGraphServiceImpl {
                 duration_ms: 0,
             },
         );
+
+        // Populate the reverse index: file -> tasks that depend on it
+        if !req.input_files.is_empty() {
+            for file_path in &req.input_files {
+                self.file_to_tasks
+                    .entry(file_path.clone())
+                    .or_default()
+                    .push((build_id.clone(), req.task_path.clone()));
+            }
+        }
 
         Ok(Response::new(RegisterTaskResponse { success: true }))
     }
@@ -558,6 +615,7 @@ mod tests {
             depends_on: vec![],
             should_execute: true,
             task_type: "Task".to_string(),
+            input_files: vec![],
         }))
         .await
         .unwrap();
@@ -568,6 +626,7 @@ mod tests {
             depends_on: vec![":a".to_string()],
             should_execute: true,
             task_type: "Task".to_string(),
+            input_files: vec![],
         }))
         .await
         .unwrap();
@@ -578,6 +637,7 @@ mod tests {
             depends_on: vec![":b".to_string()],
             should_execute: true,
             task_type: "Task".to_string(),
+            input_files: vec![],
         }))
         .await
         .unwrap();
@@ -611,6 +671,7 @@ mod tests {
             depends_on: vec![":a".to_string(), ":b".to_string(), ":c".to_string()],
             should_execute: true,
             task_type: "Task".to_string(),
+            input_files: vec![],
         }))
         .await
         .unwrap();
@@ -622,6 +683,7 @@ mod tests {
                 depends_on: vec![],
                 should_execute: true,
                 task_type: "Task".to_string(),
+                input_files: vec![],
             }))
             .await
             .unwrap();
@@ -657,6 +719,7 @@ mod tests {
             depends_on: vec![":b".to_string()],
             should_execute: true,
             task_type: "Task".to_string(),
+            input_files: vec![],
         }))
         .await
         .unwrap();
@@ -667,6 +730,7 @@ mod tests {
             depends_on: vec![":a".to_string()],
             should_execute: true,
             task_type: "Task".to_string(),
+            input_files: vec![],
         }))
         .await
         .unwrap();
@@ -692,6 +756,7 @@ mod tests {
             depends_on: vec![],
             should_execute: true,
             task_type: "Task".to_string(),
+            input_files: vec![],
         }))
         .await
         .unwrap();
@@ -754,6 +819,7 @@ mod tests {
             depends_on: vec![],
             should_execute: true,
             task_type: "Task".to_string(),
+            input_files: vec![],
         }))
         .await
         .unwrap();
@@ -764,6 +830,7 @@ mod tests {
             depends_on: vec![],
             should_execute: true,
             task_type: "Task".to_string(),
+            input_files: vec![],
         }))
         .await
         .unwrap();
@@ -774,6 +841,7 @@ mod tests {
             depends_on: vec![],
             should_execute: true,
             task_type: "Task".to_string(),
+            input_files: vec![],
         }))
         .await
         .unwrap();
@@ -839,6 +907,7 @@ mod tests {
                 depends_on: deps.into_iter().map(String::from).collect(),
                 should_execute: true,
                 task_type: "Task".to_string(),
+                input_files: vec![],
             }))
             .await
             .unwrap();
@@ -867,6 +936,7 @@ mod tests {
             depends_on: vec![],
             should_execute: true,
             task_type: "Task".to_string(),
+            input_files: vec![],
         }))
         .await
         .unwrap();
@@ -878,6 +948,7 @@ mod tests {
             depends_on: vec![":b".to_string()],
             should_execute: false,
             task_type: "Other".to_string(),
+            input_files: vec![],
         }))
         .await
         .unwrap();
@@ -976,6 +1047,7 @@ mod tests {
             depends_on: vec![":processResources".to_string()],
             should_execute: true,
             task_type: "JavaCompile".to_string(),
+            input_files: vec![],
         }))
         .await
         .unwrap();
@@ -986,6 +1058,7 @@ mod tests {
             depends_on: vec![],
             should_execute: true,
             task_type: "Copy".to_string(),
+            input_files: vec![],
         }))
         .await
         .unwrap();
@@ -997,6 +1070,7 @@ mod tests {
             depends_on: vec![],
             should_execute: true,
             task_type: "JavaCompile".to_string(),
+            input_files: vec![],
         }))
         .await
         .unwrap();

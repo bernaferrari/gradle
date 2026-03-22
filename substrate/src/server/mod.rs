@@ -1,3 +1,4 @@
+pub mod authoritative;
 pub mod event_dispatcher;
 pub mod scopes;
 pub mod control;
