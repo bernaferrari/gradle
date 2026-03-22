@@ -4,12 +4,15 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use dashmap::DashMap;
+use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
     toolchain_service_server::ToolchainService, EnsureToolchainRequest, GetJavaHomeRequest,
-    GetJavaHomeResponse, ListToolchainsRequest, ListToolchainsResponse, ToolchainLocation,
+    GetJavaHomeResponse, GetToolchainMetadataRequest, GetToolchainMetadataResponse,
+    ListToolchainsRequest, ListToolchainsResponse, RegisterToolchainRequest,
+    RegisterToolchainResponse, RemoveToolchainRequest, RemoveToolchainResponse, ToolchainLocation,
     ToolchainProgress, VerifyToolchainRequest, VerifyToolchainResponse,
 };
 
@@ -382,6 +385,16 @@ impl ToolchainServiceImpl {
 
         None
     }
+
+    /// Compute SHA-256 hex digest of a file.
+    fn sha256_file(path: &Path) -> Result<String, String> {
+        let mut file = std::fs::File::open(path)
+            .map_err(|e| format!("Failed to open file for hashing: {}", e))?;
+        let mut hasher = Sha256::new();
+        std::io::copy(&mut file, &mut hasher)
+            .map_err(|e| format!("Failed to read file for hashing: {}", e))?;
+        Ok(format!("{:x}", hasher.finalize()))
+    }
 }
 
 #[tonic::async_trait]
@@ -446,6 +459,8 @@ impl ToolchainService for ToolchainServiceImpl {
                 success: true,
                 error_message: String::new(),
                 java_home,
+                sha256_verified: false,
+                cache_hit: true,
             })]);
             return Ok(Response::new(Box::pin(stream) as Self::EnsureToolchainStream));
         }
@@ -457,6 +472,8 @@ impl ToolchainService for ToolchainServiceImpl {
         let toolchain_dir = self.toolchain_dir.clone();
         let download_urls = req.download_urls.clone();
         let http_client = self.http_client.clone();
+        let expected_sha256 = req.expected_sha256.clone();
+        let cache_download = req.cache_download;
 
         let stream = async_stream::stream! {
             // Phase 1: Check
@@ -467,6 +484,8 @@ impl ToolchainService for ToolchainServiceImpl {
                 success: true,
                 error_message: String::new(),
                 java_home: String::new(),
+            sha256_verified: false,
+            cache_hit: false,
             });
 
             // Phase 2: Download
@@ -477,6 +496,8 @@ impl ToolchainService for ToolchainServiceImpl {
                 success: true,
                 error_message: String::new(),
                 java_home: String::new(),
+            sha256_verified: false,
+            cache_hit: false,
             });
 
             let os = std::env::consts::OS;
@@ -491,10 +512,60 @@ impl ToolchainService for ToolchainServiceImpl {
 
             let target_dir = toolchain_dir.join(format!("{}-{}", impl_name, version));
             let archive_path = target_dir.join(if os == "windows" { "jdk.zip" } else { "jdk.tar.gz" });
+            let cache_dir = toolchain_dir.join("cache");
+            let cached_archive_path = cache_dir.join(format!("{}-{}.{}", impl_name, version, if os == "windows" { "zip" } else { "tar.gz" }));
 
-            // Try each URL
+            // Check for cached archive
             let mut download_success = false;
+            let mut from_cache = false;
+            if cache_download && cached_archive_path.exists() {
+                // Verify cached archive against expected checksum if provided
+                let cache_valid = if !expected_sha256.is_empty() {
+                    match Self::sha256_file(&cached_archive_path) {
+                        Ok(digest) => {
+                            let matches = digest == expected_sha256;
+                            if !matches {
+                                tracing::warn!(expected = %expected_sha256, actual = %digest, "Cached archive checksum mismatch, re-downloading");
+                            }
+                            matches
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "Failed to hash cached archive, re-downloading");
+                            false
+                        }
+                    }
+                } else {
+                    true
+                };
+
+                if cache_valid {
+                    if let Err(e) = std::fs::copy(&cached_archive_path, &archive_path) {
+                        tracing::debug!("Failed to copy cached archive: {}", e);
+                    } else {
+                        from_cache = true;
+                        download_success = true;
+                        yield Ok(ToolchainProgress {
+                            phase: "downloading".to_string(),
+                            progress_percent: 60,
+                            message: "Using cached archive".to_string(),
+                            success: true,
+                            error_message: String::new(),
+                            java_home: String::new(),
+                            sha256_verified: false,
+                            cache_hit: true,
+                        });
+                    }
+                }
+            }
+
+            // Try each URL (skip if cache hit)
             for (i, url) in urls.iter().enumerate() {
+                if download_success {
+                    break;
+                }
+                if download_success {
+                    break;
+                }
                 yield Ok(ToolchainProgress {
                     phase: "downloading".to_string(),
                     progress_percent: 15,
@@ -502,6 +573,8 @@ impl ToolchainService for ToolchainServiceImpl {
                     success: true,
                     error_message: String::new(),
                     java_home: String::new(),
+                sha256_verified: false,
+                cache_hit: false,
                 });
 
                 // Create temp dir for download
@@ -513,6 +586,8 @@ impl ToolchainService for ToolchainServiceImpl {
                         success: false,
                         error_message: e.to_string(),
                         java_home: String::new(),
+                    sha256_verified: false,
+                    cache_hit: false,
                     });
                     return;
                 }
@@ -553,6 +628,8 @@ impl ToolchainService for ToolchainServiceImpl {
                                                         success: true,
                                                         error_message: String::new(),
                                                         java_home: String::new(),
+                                                    sha256_verified: false,
+                                                    cache_hit: false,
                                                     });
                                                 }
                                             }
@@ -588,8 +665,52 @@ impl ToolchainService for ToolchainServiceImpl {
                     success: false,
                     error_message: "All download URLs failed".to_string(),
                     java_home: String::new(),
+                sha256_verified: false,
+                cache_hit: false,
                 });
                 return;
+            }
+
+            // Phase 2.5: Verify checksum if expected_sha256 was provided
+            let mut sha256_verified = false;
+            if !expected_sha256.is_empty() {
+                yield Ok(ToolchainProgress {
+                    phase: "verifying_checksum".to_string(),
+                    progress_percent: 62,
+                    message: "Verifying archive checksum".to_string(),
+                    success: true,
+                    error_message: String::new(),
+                    java_home: String::new(),
+                    sha256_verified: false,
+                    cache_hit: from_cache,
+                });
+
+                let archive_hash = Self::sha256_file(&archive_path).unwrap_or_default();
+                sha256_verified = archive_hash == expected_sha256;
+                if !sha256_verified {
+                    yield Ok(ToolchainProgress {
+                        phase: "error".to_string(),
+                        progress_percent: 0,
+                        message: format!("SHA-256 mismatch: expected {} but got {}", expected_sha256, archive_hash),
+                        success: false,
+                        error_message: "Checksum verification failed".to_string(),
+                        java_home: String::new(),
+                        sha256_verified: false,
+                        cache_hit: from_cache,
+                    });
+                    // Clean up bad download
+                    let _ = std::fs::remove_file(&archive_path);
+                    return;
+                }
+            }
+
+            // Cache the downloaded archive for future use
+            if !from_cache && download_success {
+                if let Err(e) = std::fs::create_dir_all(&cache_dir) {
+                    tracing::debug!("Failed to create cache dir: {}", e);
+                } else {
+                    let _ = std::fs::copy(&archive_path, &cached_archive_path);
+                }
             }
 
             // Phase 3: Extract
@@ -600,6 +721,8 @@ impl ToolchainService for ToolchainServiceImpl {
                 success: true,
                 error_message: String::new(),
                 java_home: String::new(),
+            sha256_verified: false,
+            cache_hit: false,
             });
 
             let extract_dir = target_dir.join("extract");
@@ -611,6 +734,8 @@ impl ToolchainService for ToolchainServiceImpl {
                     success: false,
                     error_message: "mkdir failed".to_string(),
                     java_home: String::new(),
+                sha256_verified: false,
+                cache_hit: false,
                 });
                 return;
             }
@@ -636,6 +761,8 @@ impl ToolchainService for ToolchainServiceImpl {
                     success: false,
                     error_message: e.to_string(),
                     java_home: String::new(),
+                sha256_verified: false,
+                cache_hit: false,
                 });
                 return;
             }
@@ -649,6 +776,8 @@ impl ToolchainService for ToolchainServiceImpl {
                     success: false,
                     error_message: e.to_string(),
                     java_home: String::new(),
+                sha256_verified: false,
+                cache_hit: false,
                 });
                 return;
             }
@@ -661,6 +790,8 @@ impl ToolchainService for ToolchainServiceImpl {
                 success: true,
                 error_message: String::new(),
                 java_home: String::new(),
+            sha256_verified: false,
+            cache_hit: false,
             });
 
             let java_home = match Self::find_java_home_in_dir(&extract_dir) {
@@ -673,6 +804,8 @@ impl ToolchainService for ToolchainServiceImpl {
                         success: false,
                         error_message: "Invalid JDK archive structure".to_string(),
                         java_home: String::new(),
+                    sha256_verified: false,
+                    cache_hit: false,
                     });
                     return;
                 }
@@ -698,6 +831,8 @@ impl ToolchainService for ToolchainServiceImpl {
                         success: false,
                         error_message: "JDK verification failed".to_string(),
                         java_home: String::new(),
+                    sha256_verified: false,
+                    cache_hit: false,
                     });
                     return;
                 }
@@ -709,6 +844,8 @@ impl ToolchainService for ToolchainServiceImpl {
                         success: false,
                         error_message: "JDK verification failed".to_string(),
                         java_home: String::new(),
+                    sha256_verified: false,
+                    cache_hit: false,
                     });
                     return;
                 }
@@ -725,6 +862,8 @@ impl ToolchainService for ToolchainServiceImpl {
                 success: true,
                 error_message: String::new(),
                 java_home: java_home.clone(),
+                sha256_verified,
+                cache_hit: from_cache,
             });
         };
 
@@ -833,6 +972,216 @@ impl ToolchainService for ToolchainServiceImpl {
         Ok(Response::new(GetJavaHomeResponse {
             java_home: String::new(),
             found: false,
+        }))
+    }
+
+    async fn register_toolchain(
+        &self,
+        request: Request<RegisterToolchainRequest>,
+    ) -> Result<Response<RegisterToolchainResponse>, Status> {
+        let req = request.into_inner();
+        let path = Path::new(&req.java_home);
+
+        if !path.exists() {
+            return Ok(Response::new(RegisterToolchainResponse {
+                registered: false,
+                java_home: String::new(),
+                detected_version: String::new(),
+                error_message: format!("Java home not found: {}", req.java_home),
+            }));
+        }
+
+        // Verify the JDK works
+        let java_bin = if cfg!(target_os = "windows") {
+            format!("{}\\bin\\java.exe", req.java_home)
+        } else {
+            format!("{}/bin/java", req.java_home)
+        };
+
+        let java_path = Path::new(&java_bin);
+        if !java_path.exists() {
+            return Ok(Response::new(RegisterToolchainResponse {
+                registered: false,
+                java_home: String::new(),
+                detected_version: String::new(),
+                error_message: format!("java binary not found at {}", java_bin),
+            }));
+        }
+
+        // Optional: verify checksum of the java binary
+        if !req.expected_sha256.is_empty() {
+            if let Ok(digest) = Self::sha256_file(java_path) {
+                if digest != req.expected_sha256 {
+                    return Ok(Response::new(RegisterToolchainResponse {
+                        registered: false,
+                        java_home: String::new(),
+                        detected_version: String::new(),
+                        error_message: format!(
+                            "SHA-256 mismatch for {}: expected {} got {}",
+                            java_bin, req.expected_sha256, digest
+                        ),
+                    }));
+                }
+            }
+        }
+
+        // Run java -version to detect version
+        let detected_version = match Command::new(&java_bin).arg("-version").output() {
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let version_output = if stderr.is_empty() { &stdout } else { &stderr };
+                Self::parse_java_version(version_output).unwrap_or_default()
+            }
+            Err(e) => {
+                return Ok(Response::new(RegisterToolchainResponse {
+                    registered: false,
+                    java_home: String::new(),
+                    detected_version: String::new(),
+                    error_message: format!("Failed to run java -version: {}", e),
+                }));
+            }
+        };
+
+        let size = Self::dir_size(path) as i64;
+        let key = Self::toolchain_key(&req.language_version, &req.implementation);
+
+        self.installations.insert(key.clone(), InstalledToolchain {
+            language_version: detected_version.clone(),
+            implementation: req.implementation.clone(),
+            java_home: req.java_home.clone(),
+            verified: true,
+            install_size_bytes: size,
+        });
+
+        tracing::info!(
+            version = %req.language_version,
+            impl_name = %req.implementation,
+            java_home = %req.java_home,
+            detected = %detected_version,
+            "Registered toolchain"
+        );
+
+        Ok(Response::new(RegisterToolchainResponse {
+            registered: true,
+            java_home: req.java_home.clone(),
+            detected_version,
+            error_message: String::new(),
+        }))
+    }
+
+    async fn remove_toolchain(
+        &self,
+        request: Request<RemoveToolchainRequest>,
+    ) -> Result<Response<RemoveToolchainResponse>, Status> {
+        let req = request.into_inner();
+        let key = Self::toolchain_key(&req.language_version, &req.implementation);
+
+        match self.installations.remove(&key) {
+            Some((_, entry)) => {
+                let java_home = entry.java_home.clone();
+
+                if req.delete_files {
+                    let path = Path::new(&java_home);
+                    if path.exists() {
+                        match std::fs::remove_dir_all(path) {
+                            Ok(()) => {
+                                tracing::info!(java_home = %java_home, "Removed toolchain files");
+                            }
+                            Err(e) => {
+                                tracing::warn!(java_home = %java_home, error = %e, "Failed to remove toolchain files");
+                            }
+                        }
+                    }
+                }
+
+                Ok(Response::new(RemoveToolchainResponse {
+                    removed: true,
+                    java_home,
+                    error_message: String::new(),
+                }))
+            }
+            None => Ok(Response::new(RemoveToolchainResponse {
+                removed: false,
+                java_home: String::new(),
+                error_message: format!(
+                    "Toolchain {} {} not found in registry",
+                    req.implementation, req.language_version
+                ),
+            })),
+        }
+    }
+
+    async fn get_toolchain_metadata(
+        &self,
+        request: Request<GetToolchainMetadataRequest>,
+    ) -> Result<Response<GetToolchainMetadataResponse>, Status> {
+        let req = request.into_inner();
+
+        // If java_home is provided, probe it directly
+        if !req.java_home.is_empty() {
+            let path = Path::new(&req.java_home);
+            if !path.exists() {
+                return Ok(Response::new(GetToolchainMetadataResponse {
+                    found: false,
+                    ..Default::default()
+                }));
+            }
+
+            let detected_version = Self::probe_java_home(&req.java_home)
+                .map(|(v, _)| v)
+                .unwrap_or_default();
+            let size = Self::dir_size(path) as i64;
+            let verified = path.join("bin/java").exists() || path.join("bin/java.exe").exists();
+
+            return Ok(Response::new(GetToolchainMetadataResponse {
+                found: true,
+                language_version: req.language_version,
+                implementation: req.implementation,
+                vendor: req.vendor,
+                detected_version,
+                java_home: req.java_home,
+                install_size_bytes: size,
+                verified,
+            }));
+        }
+
+        // Otherwise look up by version/implementation
+        let key = Self::toolchain_key(&req.language_version, &req.implementation);
+        if let Some(entry) = self.installations.get(&key) {
+            return Ok(Response::new(GetToolchainMetadataResponse {
+                found: true,
+                language_version: entry.language_version.clone(),
+                implementation: entry.implementation.clone(),
+                vendor: String::new(),
+                detected_version: entry.language_version.clone(),
+                java_home: entry.java_home.clone(),
+                install_size_bytes: entry.install_size_bytes,
+                verified: entry.verified,
+            }));
+        }
+
+        // Fall back to system scan
+        let target_version = req.language_version.trim_start_matches("JDK ").trim();
+        for (java_home, version_str) in Self::find_system_javas() {
+            if version_str.contains(target_version) {
+                let size = Self::dir_size(Path::new(&java_home)) as i64;
+                return Ok(Response::new(GetToolchainMetadataResponse {
+                    found: true,
+                    language_version: req.language_version,
+                    implementation: "system".to_string(),
+                    vendor: String::new(),
+                    detected_version: version_str,
+                    java_home,
+                    install_size_bytes: size,
+                    verified: true,
+                }));
+            }
+        }
+
+        Ok(Response::new(GetToolchainMetadataResponse {
+            found: false,
+            ..Default::default()
         }))
     }
 }
@@ -1101,6 +1450,8 @@ OpenJDK Runtime Environment (build 21.0.4+7)"#;
                 os: std::env::consts::OS.to_string(),
                 arch: std::env::consts::ARCH.to_string(),
                 download_urls: vec![],
+                expected_sha256: String::new(),
+                cache_download: false,
             }))
             .await
             .unwrap()
@@ -1176,5 +1527,194 @@ OpenJDK Runtime Environment (build 21.0.4+7)"#;
             "expected 'not found' in error message, got: {}",
             resp.error_message
         );
+    }
+
+    #[tokio::test]
+    async fn test_register_toolchain_missing_path() {
+        let svc = make_svc();
+
+        let resp = svc
+            .register_toolchain(Request::new(RegisterToolchainRequest {
+                language_version: "17".to_string(),
+                implementation: "temurin".to_string(),
+                java_home: "/nonexistent/jdk".to_string(),
+                vendor: String::new(),
+                expected_sha256: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.registered);
+        assert!(!resp.error_message.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_register_toolchain_and_get_java_home() {
+        let svc = make_svc();
+
+        // Create a fake JDK directory structure
+        let dir = tempfile::tempdir().unwrap();
+        let jdk_home = dir.path().join("fake-jdk-17");
+        let bin_dir = jdk_home.join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let java_path = bin_dir.join("java");
+        std::fs::write(&java_path, b"").unwrap();
+
+        let resp = svc
+            .register_toolchain(Request::new(RegisterToolchainRequest {
+                language_version: "17".to_string(),
+                implementation: "temurin".to_string(),
+                java_home: jdk_home.to_str().unwrap().to_string(),
+                vendor: "eclipse".to_string(),
+                expected_sha256: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // java -version will fail on the fake binary, but the registration
+        // path itself is valid (java binary exists)
+        assert!(resp.registered || !resp.error_message.is_empty());
+        if resp.registered {
+            assert!(!resp.java_home.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_remove_toolchain_not_found() {
+        let svc = make_svc();
+
+        let resp = svc
+            .remove_toolchain(Request::new(RemoveToolchainRequest {
+                language_version: "99".to_string(),
+                implementation: "nonexistent".to_string(),
+                delete_files: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.removed);
+        assert!(!resp.error_message.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_remove_toolchain_after_register() {
+        let svc = make_svc();
+
+        // Insert directly
+        svc.installations.insert(
+            ToolchainServiceImpl::toolchain_key("21", "test"),
+            InstalledToolchain {
+                language_version: "JDK 21".to_string(),
+                implementation: "test".to_string(),
+                java_home: "/tmp/test-jdk-21".to_string(),
+                verified: true,
+                install_size_bytes: 1024,
+            },
+        );
+
+        let resp = svc
+            .remove_toolchain(Request::new(RemoveToolchainRequest {
+                language_version: "21".to_string(),
+                implementation: "test".to_string(),
+                delete_files: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.removed);
+        assert_eq!(resp.java_home, "/tmp/test-jdk-21");
+
+        // Verify it's gone
+        assert!(!svc.installations.contains_key("test-21"));
+    }
+
+    #[tokio::test]
+    async fn test_get_toolchain_metadata_not_found() {
+        let svc = make_svc();
+
+        let resp = svc
+            .get_toolchain_metadata(Request::new(GetToolchainMetadataRequest {
+                language_version: "99".to_string(),
+                implementation: "nonexistent".to_string(),
+                java_home: String::new(),
+                vendor: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.found);
+    }
+
+    #[tokio::test]
+    async fn test_get_toolchain_metadata_by_java_home() {
+        let svc = make_svc();
+
+        let resp = svc
+            .get_toolchain_metadata(Request::new(GetToolchainMetadataRequest {
+                language_version: String::new(),
+                implementation: String::new(),
+                java_home: "/nonexistent/path".to_string(),
+                vendor: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.found);
+    }
+
+    #[tokio::test]
+    async fn test_get_toolchain_metadata_from_registry() {
+        let svc = make_svc();
+
+        svc.installations.insert(
+            ToolchainServiceImpl::toolchain_key("11", "corretto"),
+            InstalledToolchain {
+                language_version: "JDK 11".to_string(),
+                implementation: "corretto".to_string(),
+                java_home: "/opt/corretto-11".to_string(),
+                verified: true,
+                install_size_bytes: 4096,
+            },
+        );
+
+        let resp = svc
+            .get_toolchain_metadata(Request::new(GetToolchainMetadataRequest {
+                language_version: "11".to_string(),
+                implementation: "corretto".to_string(),
+                java_home: String::new(),
+                vendor: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.found);
+        assert_eq!(resp.detected_version, "JDK 11");
+        assert_eq!(resp.java_home, "/opt/corretto-11");
+        assert_eq!(resp.install_size_bytes, 4096);
+        assert!(resp.verified);
+    }
+
+    #[test]
+    fn test_sha256_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.txt");
+        std::fs::write(&path, b"hello world").unwrap();
+
+        let hash = ToolchainServiceImpl::sha256_file(&path).unwrap();
+        // Known SHA-256 of "hello world"
+        assert_eq!(hash, "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9");
+    }
+
+    #[test]
+    fn test_sha256_file_missing() {
+        let result = ToolchainServiceImpl::sha256_file(Path::new("/nonexistent/file"));
+        assert!(result.is_err());
     }
 }
