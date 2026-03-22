@@ -445,4 +445,95 @@ mod tests {
         assert_eq!(svc.total_operations.load(Ordering::Relaxed), 1);
         assert_eq!(svc.completed.len(), 1);
     }
+
+    #[tokio::test]
+    async fn test_complete_nonexistent_operation() {
+        let svc = BuildOperationsServiceImpl::new();
+
+        // Completing an operation that was never started should succeed
+        let resp = svc
+            .complete_operation(Request::new(CompleteOperationRequest {
+                operation_id: "nonexistent-op".to_string(),
+                duration_ms: 100,
+                success: true,
+                outcome: "SUCCESS".to_string(),
+            }))
+            .await
+        .unwrap()
+        .into_inner();
+
+        assert!(resp.success);
+    }
+
+    #[tokio::test]
+    async fn test_progress_nonexistent_operation() {
+        let svc = BuildOperationsServiceImpl::new();
+
+        // Reporting progress on nonexistent operation should succeed silently
+        let resp = svc
+            .report_progress(Request::new(ReportProgressRequest {
+                operation_id: "nonexistent-op".to_string(),
+                message: "doing stuff".to_string(),
+                progress: 0.5,
+                elapsed_ms: 100,
+            }))
+            .await
+        .unwrap()
+        .into_inner();
+
+        assert!(resp.acknowledged);
+    }
+
+    #[tokio::test]
+    async fn test_build_summary_initial_state() {
+        let svc = BuildOperationsServiceImpl::new();
+
+        let summary = svc
+            .get_build_summary(Request::new(GetBuildSummaryRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let s = summary.summary.unwrap();
+        assert_eq!(s.total_tasks, 0);
+        assert_eq!(s.executed_tasks, 0);
+        assert_eq!(s.outcome, "SUCCESS"); // no failures = success
+    }
+
+    #[tokio::test]
+    async fn test_multiple_concurrent_operations() {
+        let svc = BuildOperationsServiceImpl::new();
+
+        // Start multiple operations
+        for i in 0..5 {
+            svc.start_operation(Request::new(StartOperationRequest {
+                operation_id: format!("op-{}", i),
+                display_name: format!("Task {}", i),
+                operation_type: "Task".to_string(),
+                parent_id: String::new(),
+                start_time_ms: 0,
+                metadata: Default::default(),
+            }))
+            .await
+            .unwrap();
+        }
+
+        assert_eq!(svc.operations.len(), 5);
+
+        // Complete them in different order
+        for i in [2, 0, 4, 1, 3] {
+            svc.complete_operation(Request::new(CompleteOperationRequest {
+                operation_id: format!("op-{}", i),
+                duration_ms: 100,
+                success: true,
+                outcome: "EXECUTED".to_string(),
+            }))
+            .await
+            .unwrap();
+        }
+
+        assert_eq!(svc.operations.len(), 0);
+        assert_eq!(svc.completed.len(), 5);
+        assert_eq!(svc.total_operations.load(Ordering::Relaxed), 5);
+    }
 }

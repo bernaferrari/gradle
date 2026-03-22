@@ -306,4 +306,102 @@ mod tests {
         assert!(!resp.protocol_version.is_empty());
         assert_eq!(resp.max_parallelism, 8);
     }
+
+    #[tokio::test]
+    async fn test_duplicate_init_build() {
+        let svc = BootstrapServiceImpl::new();
+
+        svc.init_build(Request::new(InitBuildRequest {
+            build_id: "dup-build".to_string(),
+            project_dir: "/tmp/app".to_string(),
+            start_time_ms: 0,
+            requested_parallelism: 4,
+            system_properties: Default::default(),
+            requested_features: vec![],
+        }))
+        .await
+        .unwrap();
+
+        // Re-initializing same build_id should overwrite
+        svc.init_build(Request::new(InitBuildRequest {
+            build_id: "dup-build".to_string(),
+            project_dir: "/tmp/app2".to_string(),
+            start_time_ms: 0,
+            requested_parallelism: 8,
+            system_properties: Default::default(),
+            requested_features: vec![],
+        }))
+        .await
+        .unwrap();
+
+        assert_eq!(svc.sessions.len(), 1);
+        let health = svc
+            .health_check(Request::new(HealthCheckRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(health.active_builds, 1);
+    }
+
+    #[tokio::test]
+    async fn test_complete_same_build_twice() {
+        let svc = BootstrapServiceImpl::new();
+
+        svc.init_build(Request::new(InitBuildRequest {
+            build_id: "twice-build".to_string(),
+            project_dir: "/tmp".to_string(),
+            start_time_ms: 0,
+            requested_parallelism: 4,
+            system_properties: Default::default(),
+            requested_features: vec![],
+        }))
+        .await
+        .unwrap();
+
+        // First complete removes the session
+        svc.complete_build(Request::new(CompleteBuildRequest {
+            build_id: "twice-build".to_string(),
+            outcome: "SUCCESS".to_string(),
+            duration_ms: 100,
+        }))
+        .await
+        .unwrap();
+
+        assert_eq!(svc.sessions.len(), 0);
+
+        // Second complete should succeed (no-op)
+        let resp = svc
+            .complete_build(Request::new(CompleteBuildRequest {
+                build_id: "twice-build".to_string(),
+                outcome: "SUCCESS".to_string(),
+                duration_ms: 200,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.acknowledged);
+    }
+
+    #[tokio::test]
+    async fn test_substrate_info_increments() {
+        let svc = BootstrapServiceImpl::new();
+
+        let resp1 = svc
+            .get_substrate_info(Request::new(GetSubstrateInfoRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let total1 = resp1.total_requests;
+
+        // Call again — should increment
+        let resp2 = svc
+            .get_substrate_info(Request::new(GetSubstrateInfoRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp2.total_requests > total1);
+    }
 }

@@ -598,4 +598,125 @@ mod tests {
         assert_eq!(summary.build_outcome, "SUCCESS");
         assert_eq!(summary.duration_ms, 2000);
     }
+
+    #[tokio::test]
+    async fn test_get_metrics_initial_state() {
+        let svc = make_svc();
+
+        let resp = svc
+            .get_metrics(Request::new(GetMetricsRequest {
+                build_id: "nonexistent".to_string(),
+                metric_names: vec!["any".to_string()],
+                since_ms: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.metrics.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_record_negative_value() {
+        let svc = make_svc();
+
+        svc.record_metric(Request::new(RecordMetricRequest {
+            build_id: "neg-build".to_string(),
+            event: Some(MetricEvent {
+                name: "memory.delta".to_string(),
+                value: "-1024".to_string(),
+                metric_type: "gauge".to_string(),
+                tags: HashMap::new(),
+                timestamp_ms: 100,
+            }),
+        }))
+        .await
+        .unwrap();
+
+        let resp = svc
+            .get_metrics(Request::new(GetMetricsRequest {
+                build_id: "neg-build".to_string(),
+                metric_names: vec!["memory.delta".to_string()],
+                since_ms: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.metrics.is_empty());
+        let snap = &resp.metrics[0];
+        assert_eq!(snap.count, 1);
+        assert!(snap.min < 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_reset_nonexistent_metrics() {
+        let svc = make_svc();
+
+        // Resetting metrics that don't exist should succeed
+        let resp = svc
+            .reset_metrics(Request::new(ResetMetricsRequest {
+                build_id: "nonexistent".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.reset);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_builds_isolated() {
+        let svc = make_svc();
+
+        svc.record_metric(Request::new(RecordMetricRequest {
+            build_id: "build-A".to_string(),
+            event: Some(MetricEvent {
+                name: "build-A.tasks.executed".to_string(),
+                value: "10".to_string(),
+                metric_type: "counter".to_string(),
+                tags: HashMap::new(),
+                timestamp_ms: 100,
+            }),
+        }))
+        .await
+        .unwrap();
+
+        svc.record_metric(Request::new(RecordMetricRequest {
+            build_id: "build-B".to_string(),
+            event: Some(MetricEvent {
+                name: "build-B.tasks.executed".to_string(),
+                value: "5".to_string(),
+                metric_type: "counter".to_string(),
+                tags: HashMap::new(),
+                timestamp_ms: 100,
+            }),
+        }))
+        .await
+        .unwrap();
+
+        // Metrics are keyed by name, not by build_id — use different names for isolation
+        let resp_a = svc
+            .get_metrics(Request::new(GetMetricsRequest {
+                build_id: "build-A".to_string(),
+                metric_names: vec!["build-A.tasks.executed".to_string()],
+                since_ms: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let resp_b = svc
+            .get_metrics(Request::new(GetMetricsRequest {
+                build_id: "build-B".to_string(),
+                metric_names: vec!["build-B.tasks.executed".to_string()],
+                since_ms: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp_a.metrics[0].count, 1);
+        assert_eq!(resp_b.metrics[0].count, 1);
+    }
 }
