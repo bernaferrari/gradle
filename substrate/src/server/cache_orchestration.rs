@@ -9,7 +9,7 @@ use crate::proto::{
     ComputeCacheKeyRequest, ComputeCacheKeyResponse, ProbeCacheRequest, ProbeCacheResponse,
     StoreOutputsRequest, StoreOutputsResponse,
 };
-use crate::server::cache::LocalCacheStore;
+use crate::server::cache::{LocalCacheStore, hex};
 
 /// Maximum number of stored cache keys to track before eviction.
 const MAX_STORED_KEYS: usize = 50_000;
@@ -178,7 +178,9 @@ impl BuildCacheOrchestrationService for BuildCacheOrchestrationServiceImpl {
         if let Some(entry) = self.stored_keys.get(&key) {
             // If we have a local cache reference, verify the entry actually exists on disk
             if let Some(cache) = &self.local_cache {
-                match cache.contains(&key).await {
+                // The cache service hex-encodes keys, so we must match that format
+                let hex_key = hex::encode(&req.cache_key);
+                match cache.contains(&hex_key).await {
                     Ok(true) => {
                         self.cache_hits.fetch_add(1, Ordering::Relaxed);
                         return Ok(Response::new(ProbeCacheResponse {
@@ -217,7 +219,8 @@ impl BuildCacheOrchestrationService for BuildCacheOrchestrationServiceImpl {
 
         // Not in metadata — check local cache directly for entries stored before this session
         if let Some(cache) = &self.local_cache {
-            if let Ok(true) = cache.contains(&key).await {
+            let hex_key = hex::encode(&req.cache_key);
+            if let Ok(true) = cache.contains(&hex_key).await {
                 self.cache_hits.fetch_add(1, Ordering::Relaxed);
                 return Ok(Response::new(ProbeCacheResponse {
                     available: true,
