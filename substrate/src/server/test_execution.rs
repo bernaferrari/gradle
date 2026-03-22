@@ -3,6 +3,8 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
+use super::scopes::BuildId;
+
 use crate::proto::{
     test_execution_service_server::TestExecutionService, DetectFlakyTestsRequest,
     DetectFlakyTestsResponse, FlakyTestInfo as ProtoFlakyTestInfo, GetTestReportRequest,
@@ -34,7 +36,7 @@ struct TestHistory {
 #[derive(Default)]
 pub struct TestExecutionServiceImpl {
     suites: DashMap<String, TestSuite>,     // suite_id -> TestSuite
-    build_suites: DashMap<String, Vec<String>>, // build_id -> [suite_id]
+    build_suites: DashMap<BuildId, Vec<String>>, // build_id -> [suite_id]
     results_reported: AtomicI64,
     history: TestHistory,
 }
@@ -54,7 +56,7 @@ impl TestExecutionServiceImpl {
     }
 
     /// Detect flaky tests: tests that have both PASSED and FAILED outcomes.
-    fn detect_flaky_tests(&self, build_id: &str) -> Vec<InternalFlakyTestInfo> {
+    fn detect_flaky_tests(&self, build_id: &BuildId) -> Vec<InternalFlakyTestInfo> {
         let suite_ids = self
             .build_suites
             .get(build_id)
@@ -130,7 +132,7 @@ impl TestExecutionService for TestExecutionServiceImpl {
             .ok_or_else(|| Status::invalid_argument("TestSuiteDescriptor is required"))?;
 
         let suite_id = descriptor.suite_id.clone();
-        let build_id = req.build_id.clone();
+        let build_id = BuildId::from(req.build_id.clone());
 
         self.suites.insert(
             suite_id.clone(),
@@ -201,9 +203,10 @@ impl TestExecutionService for TestExecutionServiceImpl {
     ) -> Result<Response<GetTestReportResponse>, Status> {
         let req = request.into_inner();
 
+        let build_id = BuildId::from(req.build_id.clone());
         let suite_ids = self
             .build_suites
-            .get(&req.build_id)
+            .get(&build_id)
             .map(|s| s.clone())
             .unwrap_or_default();
 
@@ -265,9 +268,10 @@ impl TestExecutionService for TestExecutionServiceImpl {
     ) -> Result<Response<GetTestResultsByOutcomeResponse>, Status> {
         let req = request.into_inner();
 
+        let build_id = BuildId::from(req.build_id.clone());
         let suite_ids = self
             .build_suites
-            .get(&req.build_id)
+            .get(&build_id)
             .map(|s| s.clone())
             .unwrap_or_default();
 
@@ -294,9 +298,10 @@ impl TestExecutionService for TestExecutionServiceImpl {
     ) -> Result<Response<TestSummaryResponse>, Status> {
         let req = request.into_inner();
 
+        let build_id = BuildId::from(req.build_id.clone());
         let suite_ids = self
             .build_suites
-            .get(&req.build_id)
+            .get(&build_id)
             .map(|s| s.clone())
             .unwrap_or_default();
 
@@ -354,7 +359,8 @@ impl TestExecutionService for TestExecutionServiceImpl {
         request: Request<DetectFlakyTestsRequest>,
     ) -> Result<Response<DetectFlakyTestsResponse>, Status> {
         let req = request.into_inner();
-        let flaky = self.detect_flaky_tests(&req.build_id);
+        let build_id = BuildId::from(req.build_id);
+        let flaky = self.detect_flaky_tests(&build_id);
 
         Ok(Response::new(DetectFlakyTestsResponse {
             flaky_tests: flaky
@@ -607,7 +613,7 @@ mod tests {
         .await
         .unwrap();
 
-        let flaky = svc.detect_flaky_tests("build-flaky");
+        let flaky = svc.detect_flaky_tests(&BuildId::from("build-flaky".to_string()));
 
         // Only unstableTest should be flaky
         assert_eq!(flaky.len(), 1);
@@ -649,7 +655,7 @@ mod tests {
         .await
         .unwrap();
 
-        let flaky = svc.detect_flaky_tests("build-stable");
+        let flaky = svc.detect_flaky_tests(&BuildId::from("build-stable".to_string()));
         assert_eq!(flaky.len(), 0); // test1 always passes, test2 only fails
     }
 

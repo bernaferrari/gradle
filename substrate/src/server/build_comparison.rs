@@ -1,6 +1,7 @@
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
+use super::scopes::BuildId;
 use crate::proto::{
     build_comparison_service_server::BuildComparisonService, ComparisonSummary,
     GetComparisonResultRequest, GetComparisonResultResponse, RecordBuildDataRequest,
@@ -11,7 +12,7 @@ use crate::proto::BuildDataSnapshot;
 
 /// Stored build data for comparison.
 struct StoredBuildData {
-    build_id: String,
+    build_id: BuildId,
     task_durations: std::collections::HashMap<String, i64>,
     task_outcomes: std::collections::HashMap<String, String>,
     task_order: Vec<String>,
@@ -20,17 +21,17 @@ struct StoredBuildData {
 
 /// A comparison between two builds.
 struct Comparison {
-    comparison_id: String,
-    baseline_build_id: String,
-    candidate_build_id: String,
+    comparison_id: BuildId,
+    baseline_build_id: BuildId,
+    candidate_build_id: BuildId,
 }
 
 /// Rust-native build comparison service.
 /// Compares two build executions to identify differences in outputs,
 /// task graph, and execution times.
 pub struct BuildComparisonServiceImpl {
-    build_data: DashMap<String, StoredBuildData>,
-    comparisons: DashMap<String, Comparison>,
+    build_data: DashMap<BuildId, StoredBuildData>,
+    comparisons: DashMap<BuildId, Comparison>,
     next_comparison_id: std::sync::atomic::AtomicI64,
 }
 
@@ -58,14 +59,17 @@ impl BuildComparisonService for BuildComparisonServiceImpl {
     ) -> Result<Response<StartComparisonResponse>, Status> {
         let req = request.into_inner();
 
-        if !self.build_data.contains_key(&req.baseline_build_id) {
+        let baseline_key = BuildId::from(req.baseline_build_id.clone());
+        let candidate_key = BuildId::from(req.candidate_build_id.clone());
+
+        if !self.build_data.contains_key(&baseline_key) {
             return Err(Status::not_found(format!(
                 "Baseline build {} not found",
                 req.baseline_build_id
             )));
         }
 
-        if !self.build_data.contains_key(&req.candidate_build_id) {
+        if !self.build_data.contains_key(&candidate_key) {
             return Err(Status::not_found(format!(
                 "Candidate build {} not found",
                 req.candidate_build_id
@@ -73,18 +77,18 @@ impl BuildComparisonService for BuildComparisonServiceImpl {
         }
 
         // Validate that stored build_id matches the request key
-        let baseline_data = self.build_data.get(&req.baseline_build_id).unwrap();
-        if baseline_data.build_id != req.baseline_build_id {
+        let baseline_data = self.build_data.get(&baseline_key).unwrap();
+        if baseline_data.build_id.0 != req.baseline_build_id {
             return Err(Status::failed_precondition(format!(
                 "Baseline build_id mismatch: stored '{}' vs requested '{}'",
-                baseline_data.build_id, req.baseline_build_id
+                baseline_data.build_id.0, req.baseline_build_id
             )));
         }
-        let candidate_data = self.build_data.get(&req.candidate_build_id).unwrap();
-        if candidate_data.build_id != req.candidate_build_id {
+        let candidate_data = self.build_data.get(&candidate_key).unwrap();
+        if candidate_data.build_id.0 != req.candidate_build_id {
             return Err(Status::failed_precondition(format!(
                 "Candidate build_id mismatch: stored '{}' vs requested '{}'",
-                candidate_data.build_id, req.candidate_build_id
+                candidate_data.build_id.0, req.candidate_build_id
             )));
         }
 
@@ -93,12 +97,13 @@ impl BuildComparisonService for BuildComparisonServiceImpl {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let comparison_id = format!("cmp-{}", id);
 
+        let comparison_key = BuildId::from(comparison_id.clone());
         self.comparisons.insert(
-            comparison_id.clone(),
+            comparison_key.clone(),
             Comparison {
-                comparison_id: comparison_id.clone(),
-                baseline_build_id: req.baseline_build_id,
-                candidate_build_id: req.candidate_build_id,
+                comparison_id: comparison_key,
+                baseline_build_id: BuildId::from(req.baseline_build_id),
+                candidate_build_id: BuildId::from(req.candidate_build_id),
             },
         );
 
@@ -129,10 +134,11 @@ impl BuildComparisonService for BuildComparisonServiceImpl {
         let task_outcomes: std::collections::HashMap<String, String> =
             snapshot.task_outcomes.into_iter().collect();
 
+        let build_key = BuildId::from(snapshot.build_id.clone());
         self.build_data.insert(
-            snapshot.build_id.clone(),
+            build_key.clone(),
             StoredBuildData {
-                build_id: snapshot.build_id,
+                build_id: build_key,
                 task_durations,
                 task_outcomes,
                 task_order: snapshot.task_order,
@@ -149,9 +155,10 @@ impl BuildComparisonService for BuildComparisonServiceImpl {
     ) -> Result<Response<GetComparisonResultResponse>, Status> {
         let req = request.into_inner();
 
+        let comparison_key = BuildId::from(req.comparison_id.clone());
         let comparison = self
             .comparisons
-            .get(&req.comparison_id)
+            .get(&comparison_key)
             .ok_or_else(|| {
                 Status::not_found(format!("Comparison {} not found", req.comparison_id))
             })?;
@@ -259,9 +266,9 @@ impl BuildComparisonService for BuildComparisonServiceImpl {
         let total_diff = candidate.total_duration_ms - baseline.total_duration_ms;
 
         let summary = ComparisonSummary {
-            comparison_id: comparison.comparison_id.clone(),
-            baseline_build_id: comparison.baseline_build_id.clone(),
-            candidate_build_id: comparison.candidate_build_id.clone(),
+            comparison_id: comparison.comparison_id.0.clone(),
+            baseline_build_id: comparison.baseline_build_id.0.clone(),
+            candidate_build_id: comparison.candidate_build_id.0.clone(),
             baseline_total_ms: baseline.total_duration_ms,
             candidate_total_ms: candidate.total_duration_ms,
             total_diff_ms: total_diff,

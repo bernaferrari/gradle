@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
+use super::scopes::BuildId;
 use crate::proto::{
     problem_reporting_service_server::ProblemReportingService, ClearProblemsRequest,
     ClearProblemsResponse, GetProblemsBySeverityRequest, GetProblemsRequest,
@@ -13,7 +14,7 @@ use crate::proto::{
 /// Collects build problems, warnings, deprecations, and errors.
 /// Provides structured diagnostics for IDEs and CI dashboards.
 pub struct ProblemReportingServiceImpl {
-    problems: DashMap<String, Vec<ProblemDetails>>, // build_id -> [ProblemDetails]
+    problems: DashMap<BuildId, Vec<ProblemDetails>>, // build_id -> [ProblemDetails]
     next_problem_id: AtomicI32,
     problems_reported: AtomicI32,
 }
@@ -66,7 +67,7 @@ impl ProblemReportingService for ProblemReportingServiceImpl {
         let category = problem.category.clone();
 
         self.problems
-            .entry(req.build_id.clone())
+            .entry(BuildId::from(req.build_id.clone()))
             .or_default()
             .push(problem);
 
@@ -88,9 +89,10 @@ impl ProblemReportingService for ProblemReportingServiceImpl {
     ) -> Result<Response<GetProblemsResponse>, Status> {
         let req = request.into_inner();
 
+        let build_id = BuildId::from(req.build_id);
         let all_problems = self
             .problems
-            .get(&req.build_id)
+            .get(&build_id)
             .map(|p| p.iter().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
 
@@ -117,9 +119,10 @@ impl ProblemReportingService for ProblemReportingServiceImpl {
     ) -> Result<Response<GetProblemsResponse>, Status> {
         let req = request.into_inner();
 
+        let build_id = BuildId::from(req.build_id);
         let all_problems = self
             .problems
-            .get(&req.build_id)
+            .get(&build_id)
             .map(|p| {
                 p.iter()
                     .filter(|p| p.severity == req.severity)
@@ -147,7 +150,7 @@ impl ProblemReportingService for ProblemReportingServiceImpl {
         request: Request<ClearProblemsRequest>,
     ) -> Result<Response<ClearProblemsResponse>, Status> {
         let req = request.into_inner();
-        let cleared = if let Some((_, problems)) = self.problems.remove(&req.build_id) {
+        let cleared = if let Some((_, problems)) = self.problems.remove(&BuildId::from(req.build_id)) {
             problems.len() as i32
         } else {
             0

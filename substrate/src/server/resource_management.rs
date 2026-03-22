@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
+use super::scopes::BuildId;
 use crate::proto::{
     resource_management_service_server::ResourceManagementService, GetResourceLimitsRequest,
     GetResourceLimitsResponse, GetResourceUsageRequest, GetResourceUsageResponse,
@@ -31,7 +32,7 @@ struct ResourceSlot {
 pub struct ResourceManagementServiceImpl {
     reservations: DashMap<String, Reservation>,
     resources: DashMap<String, ResourceSlot>,
-    build_limits: DashMap<String, DashMap<String, ResourceLimit>>,
+    build_limits: DashMap<BuildId, DashMap<String, ResourceLimit>>,
     next_reservation_id: AtomicI64,
     reservations_total: AtomicI64,
 }
@@ -522,7 +523,7 @@ impl ResourceManagementService for ResourceManagementServiceImpl {
             // Store per-build limits
             if !req.build_id.is_empty() {
                 self.build_limits
-                    .entry(req.build_id.clone())
+                    .entry(BuildId::from(req.build_id.clone()))
                     .or_default()
                     .insert(limit.resource_type.clone(), limit);
             }
