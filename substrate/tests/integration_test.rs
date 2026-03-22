@@ -3077,3 +3077,661 @@ async fn test_exec_to_build_operations_workflow() {
     assert_eq!(outcome.overall_result, "SUCCESS");
     assert!(outcome.total_duration_ms >= 0);
 }
+
+// ============================================================
+// Test 40: Build metrics -> cache orchestration -> performance summary
+// ============================================================
+
+#[tokio::test]
+async fn test_build_metrics_to_cache_orchestration_workflow() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+
+    let mut metrics_client = build_metrics_service_client::BuildMetricsServiceClient::new(channel.clone());
+    let mut orch_client =
+        build_cache_orchestration_service_client::BuildCacheOrchestrationServiceClient::new(channel.clone());
+
+    let build_id = "metrics-cache-workflow".to_string();
+
+    // Step 1: Record build metrics (tasks.total, tasks.cached, cache.hits, cache.misses, build.start, build.end)
+    let metric_names = vec![
+        "tasks.total".to_string(),
+        "tasks.cached".to_string(),
+        "cache.hits".to_string(),
+        "cache.misses".to_string(),
+        "build.start".to_string(),
+        "build.end".to_string(),
+    ];
+    let metric_values = vec!["10", "4", "4", "6", "1000", "5000"];
+
+    for (name, value) in metric_names.iter().zip(metric_values.iter()) {
+        let record_resp = metrics_client
+            .record_metric(Request::new(RecordMetricRequest {
+                build_id: build_id.clone(),
+                event: Some(MetricEvent {
+                    name: name.clone(),
+                    value: value.to_string(),
+                    metric_type: "counter".to_string(),
+                    tags: std::collections::HashMap::new(),
+                    timestamp_ms: 0,
+                }),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(record_resp.recorded);
+    }
+
+    // Step 2: Use cache orchestration to check/record cache entries
+    // Compute cache key for a task
+    let cache_key_resp = orch_client
+        .compute_cache_key(Request::new(ComputeCacheKeyRequest {
+            work_identity: ":compileJava".to_string(),
+            implementation_hash: "impl-hash-abc".to_string(),
+            input_property_hashes: make_prop_map(vec![("source", "h1"), ("target", "h2")]),
+            input_file_hashes: make_prop_map(vec![("classpath", "h3")]),
+            output_property_names: vec!["classes".to_string()],
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(!cache_key_resp.cache_key.is_empty());
+
+    // Probe cache — should miss initially
+    let probe_miss = orch_client
+        .probe_cache(Request::new(ProbeCacheRequest {
+            cache_key: cache_key_resp.cache_key.clone(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(!probe_miss.available);
+
+    // Store outputs in cache
+    let store_resp = orch_client
+        .store_outputs(Request::new(StoreOutputsRequest {
+            cache_key: cache_key_resp.cache_key.clone(),
+            execution_time_ms: 500,
+            output_properties: vec!["classes".to_string()],
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(store_resp.success);
+
+    // Probe cache — should hit now
+    let probe_hit = orch_client
+        .probe_cache(Request::new(ProbeCacheRequest {
+            cache_key: cache_key_resp.cache_key.clone(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(probe_hit.available);
+    assert_eq!(probe_hit.location, "local");
+
+    // Step 3: Get performance summary and verify aggregated metrics
+    let summary_resp = metrics_client
+        .get_performance_summary(Request::new(GetPerformanceSummaryRequest {
+            build_id: build_id.clone(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(summary_resp.summary.is_some());
+    let summary = summary_resp.summary.unwrap();
+    assert_eq!(summary.build_id, build_id);
+
+    // Verify the metrics we recorded are retrievable
+    let get_resp = metrics_client
+        .get_metrics(Request::new(GetMetricsRequest {
+            build_id: build_id.clone(),
+            metric_names: vec![
+                "tasks.total".to_string(),
+                "tasks.cached".to_string(),
+                "cache.hits".to_string(),
+                "cache.misses".to_string(),
+                "build.start".to_string(),
+                "build.end".to_string(),
+            ],
+            since_ms: 0,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(get_resp.metrics.len() >= 6);
+
+    // Verify we can find each metric by name
+    let metric_map: std::collections::HashMap<String, &MetricSnapshot> = get_resp
+        .metrics
+        .iter()
+        .map(|m| (m.name.clone(), m))
+        .collect();
+
+    assert!(metric_map.contains_key("tasks.total"));
+    assert!(metric_map.contains_key("tasks.cached"));
+    assert!(metric_map.contains_key("cache.hits"));
+    assert!(metric_map.contains_key("cache.misses"));
+    assert!(metric_map.contains_key("build.start"));
+    assert!(metric_map.contains_key("build.end"));
+}
+
+// ============================================================
+// Test 41: Toolchain -> exec -> process pipeline
+// ============================================================
+
+#[tokio::test]
+async fn test_toolchain_to_exec_pipeline() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+
+    let mut toolchain_client = toolchain_service_client::ToolchainServiceClient::new(channel.clone());
+    let mut exec_client = exec_service_client::ExecServiceClient::new(channel.clone());
+
+    // Step 1: Register/verify a Java toolchain by requesting its Java home
+    let _java_home_resp = toolchain_client
+        .get_java_home(Request::new(GetJavaHomeRequest {
+            language_version: "17".to_string(),
+            implementation: "jvm".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    // Step 2: Spawn a process using the exec service
+    // Use 'true' command (always exits 0) as a simple cross-platform test
+    let spawn_resp = exec_client
+        .spawn(Request::new(ExecSpawnRequest {
+            command: "true".to_string(),
+            args: vec![],
+            environment: Default::default(),
+            working_dir: "/tmp".to_string(),
+            redirect_error_stream: false,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(spawn_resp.success);
+    let pid = spawn_resp.pid;
+
+    // Step 3: Wait for the process to complete
+    let wait_resp = exec_client
+        .wait(Request::new(ExecWaitRequest { pid }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    // 'true' always exits with code 0
+    assert_eq!(wait_resp.exit_code, 0);
+    assert!(wait_resp.error_message.is_empty());
+
+    // Step 4: Spawn 'false' command (always exits with code 1) to verify non-zero exit
+    let spawn_false = exec_client
+        .spawn(Request::new(ExecSpawnRequest {
+            command: "false".to_string(),
+            args: vec![],
+            environment: Default::default(),
+            working_dir: "/tmp".to_string(),
+            redirect_error_stream: false,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(spawn_false.success);
+
+    let wait_false = exec_client
+        .wait(Request::new(ExecWaitRequest { pid: spawn_false.pid }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    // 'false' always exits with code 1
+    assert_eq!(wait_false.exit_code, 1);
+
+    // Step 5: Spawn 'echo' and verify it runs successfully
+    let spawn_echo = exec_client
+        .spawn(Request::new(ExecSpawnRequest {
+            command: "echo".to_string(),
+            args: vec!["integration".to_string(), "test".to_string()],
+            environment: Default::default(),
+            working_dir: "/tmp".to_string(),
+            redirect_error_stream: false,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(spawn_echo.success);
+
+    let wait_echo = exec_client
+        .wait(Request::new(ExecWaitRequest { pid: spawn_echo.pid }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(wait_echo.exit_code, 0);
+}
+
+// ============================================================
+// Test 42: Configuration -> build init flow
+// ============================================================
+
+#[tokio::test]
+async fn test_configuration_to_build_init_flow() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+
+    let mut config_client = configuration_service_client::ConfigurationServiceClient::new(channel.clone());
+    let mut init_client = build_init_service_client::BuildInitServiceClient::new(channel.clone());
+
+    let build_id = "config-init-flow".to_string();
+
+    // Step 1: Register a project with properties via configuration service
+    let register_resp = config_client
+        .register_project(Request::new(RegisterProjectRequest {
+            project_path: ":app".to_string(),
+            project_dir: "/tmp/config-init-app".to_string(),
+            properties: make_prop_map(vec![
+                ("version", "3.0.0"),
+                ("group", "com.example.flow"),
+                ("sourceCompatibility", "17"),
+            ]),
+            applied_plugins: vec!["java".to_string(), "application".to_string()],
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(register_resp.success);
+
+    // Step 2: Resolve configuration properties
+    let version_resp = config_client
+        .resolve_property(Request::new(ResolvePropertyRequest {
+            project_path: ":app".to_string(),
+            property_name: "version".to_string(),
+            requested_by: "build-init-test".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(version_resp.found);
+    assert_eq!(version_resp.value, "3.0.0");
+
+    let group_resp = config_client
+        .resolve_property(Request::new(ResolvePropertyRequest {
+            project_path: ":app".to_string(),
+            property_name: "group".to_string(),
+            requested_by: "build-init-test".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(group_resp.found);
+    assert_eq!(group_resp.value, "com.example.flow");
+
+    let compat_resp = config_client
+        .resolve_property(Request::new(ResolvePropertyRequest {
+            project_path: ":app".to_string(),
+            property_name: "sourceCompatibility".to_string(),
+            requested_by: "build-init-test".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(compat_resp.found);
+    assert_eq!(compat_resp.value, "17");
+
+    // Step 3: Cache the configuration state
+    let cache_resp = config_client
+        .cache_configuration(Request::new(CacheConfigurationRequest {
+            project_path: ":app".to_string(),
+            config_hash: vec![1, 2, 3, 4],
+            timestamp_ms: 5000,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(cache_resp.cached);
+
+    // Step 4: Init a build via build init service
+    let init_resp = init_client
+        .init_build_settings(Request::new(InitBuildSettingsRequest {
+            build_id: build_id.clone(),
+            root_dir: "/tmp/config-init-app".to_string(),
+            settings_file: "/tmp/config-init-app/settings.gradle".to_string(),
+            gradle_user_home: String::new(),
+            init_scripts: vec![],
+            requested_build_features: vec!["configuration-cache".to_string()],
+            current_dir: "/tmp/config-init-app".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(init_resp.initialized);
+
+    // Step 5: Record settings details from the resolved configuration properties
+    init_client
+        .record_settings_detail(Request::new(RecordSettingsDetailRequest {
+            build_id: build_id.clone(),
+            detail: Some(SettingsDetailEntry {
+                key: "projectVersion".to_string(),
+                value: "3.0.0".to_string(),
+            }),
+        }))
+        .await
+        .unwrap();
+
+    init_client
+        .record_settings_detail(Request::new(RecordSettingsDetailRequest {
+            build_id: build_id.clone(),
+            detail: Some(SettingsDetailEntry {
+                key: "projectGroup".to_string(),
+                value: "com.example.flow".to_string(),
+            }),
+        }))
+        .await
+        .unwrap();
+
+    init_client
+        .record_settings_detail(Request::new(RecordSettingsDetailRequest {
+            build_id: build_id.clone(),
+            detail: Some(SettingsDetailEntry {
+                key: "sourceCompatibility".to_string(),
+                value: "17".to_string(),
+            }),
+        }))
+        .await
+        .unwrap();
+
+    // Step 6: Get build init status and verify the details are present
+    let status_resp = init_client
+        .get_build_init_status(Request::new(GetBuildInitStatusRequest {
+            build_id: build_id.clone(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(status_resp.status.is_some());
+    let status = status_resp.status.unwrap();
+    assert!(status.initialized);
+    assert_eq!(status.build_id, build_id);
+
+    // Verify the settings details we recorded are present
+    let details: std::collections::HashMap<&str, &str> = status
+        .settings_details
+        .iter()
+        .map(|d| (d.key.as_str(), d.value.as_str()))
+        .collect();
+
+    assert_eq!(details.get("projectVersion").copied(), Some("3.0.0"));
+    assert_eq!(details.get("projectGroup").copied(), Some("com.example.flow"));
+    assert_eq!(details.get("sourceCompatibility").copied(), Some("17"));
+}
+
+// ============================================================
+// Test 43: Plugin -> dependency resolution chain
+// ============================================================
+
+#[tokio::test]
+async fn test_plugin_to_dependency_resolution_chain() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+
+    let mut plugin_client = plugin_service_client::PluginServiceClient::new(channel.clone());
+    let mut dep_client =
+        dependency_resolution_service_client::DependencyResolutionServiceClient::new(channel.clone());
+
+    let project_path = ":chain-test".to_string();
+
+    // Step 1: Register plugins
+    plugin_client
+        .register_plugin(Request::new(RegisterPluginRequest {
+            plugin_id: "java".to_string(),
+            plugin_class: "org.gradle.api.plugins.JavaPlugin".to_string(),
+            version: "1.0".to_string(),
+            is_imperative: false,
+            applies_to: vec![],
+            requires: vec![],
+            conflicts_with: vec![],
+        }))
+        .await
+        .unwrap();
+
+    plugin_client
+        .register_plugin(Request::new(RegisterPluginRequest {
+            plugin_id: "application".to_string(),
+            plugin_class: "org.gradle.api.plugins.ApplicationPlugin".to_string(),
+            version: "1.0".to_string(),
+            is_imperative: false,
+            applies_to: vec![],
+            requires: vec!["java".to_string()],
+            conflicts_with: vec![],
+        }))
+        .await
+        .unwrap();
+
+    // Step 2: Apply plugins in order
+    let apply_java = plugin_client
+        .apply_plugin(Request::new(ApplyPluginRequest {
+            plugin_id: "java".to_string(),
+            project_path: project_path.clone(),
+            apply_order: 0,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(apply_java.success);
+
+    let apply_app = plugin_client
+        .apply_plugin(Request::new(ApplyPluginRequest {
+            plugin_id: "application".to_string(),
+            project_path: project_path.clone(),
+            apply_order: 1,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(apply_app.success);
+
+    // Step 3: Verify both plugins are applied
+    let has_java = plugin_client
+        .has_plugin(Request::new(HasPluginRequest {
+            plugin_id: "java".to_string(),
+            project_path: project_path.clone(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(has_java.has_plugin);
+
+    let has_app = plugin_client
+        .has_plugin(Request::new(HasPluginRequest {
+            plugin_id: "application".to_string(),
+            project_path: project_path.clone(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(has_app.has_plugin);
+
+    // Step 4: Record dependency resolution for configurations used by those plugins
+    // The java plugin adds "implementation" and "api" configurations
+    dep_client
+        .record_resolution(Request::new(RecordResolutionRequest {
+            configuration_name: "implementation".to_string(),
+            dependency_count: 5,
+            resolution_time_ms: 200,
+            success: true,
+            cache_hits: 3,
+        }))
+        .await
+        .unwrap();
+
+    // The application plugin also adds "runtimeClasspath"
+    dep_client
+        .record_resolution(Request::new(RecordResolutionRequest {
+            configuration_name: "runtimeClasspath".to_string(),
+            dependency_count: 8,
+            resolution_time_ms: 350,
+            success: true,
+            cache_hits: 5,
+        }))
+        .await
+        .unwrap();
+
+    // "api" configuration from java plugin
+    dep_client
+        .record_resolution(Request::new(RecordResolutionRequest {
+            configuration_name: "api".to_string(),
+            dependency_count: 2,
+            resolution_time_ms: 100,
+            success: true,
+            cache_hits: 2,
+        }))
+        .await
+        .unwrap();
+
+    // A test configuration resolution
+    dep_client
+        .record_resolution(Request::new(RecordResolutionRequest {
+            configuration_name: "testImplementation".to_string(),
+            dependency_count: 4,
+            resolution_time_ms: 150,
+            success: true,
+            cache_hits: 1,
+        }))
+        .await
+        .unwrap();
+
+    // Step 5: Use resolve_dependencies to drive total_resolutions stats
+    // (record_resolution only acknowledges; resolve_dependencies increments counters)
+    let resolve_resp = dep_client
+        .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+            configuration_name: "implementation".to_string(),
+            dependencies: vec![DependencyDescriptor {
+                group: "org.slf4j".to_string(),
+                name: "slf4j-api".to_string(),
+                version: "2.0.9".to_string(),
+                classifier: String::new(),
+                extension: "jar".to_string(),
+                transitive: false,
+            }],
+            repositories: vec![],
+            attributes: vec![],
+            lenient: true,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(resolve_resp.success);
+    assert_eq!(resolve_resp.total_artifacts, 1);
+
+    // Step 6: Add artifacts to cache and check them (drives artifact_cache_hits)
+    dep_client
+        .add_artifact_to_cache(Request::new(AddArtifactToCacheRequest {
+            group: "org.slf4j".to_string(),
+            name: "slf4j-api".to_string(),
+            version: "2.0.9".to_string(),
+            classifier: String::new(),
+            local_path: "/tmp/slf4j-api-2.0.9.jar".to_string(),
+            size: 4096,
+            sha256: "abcdef".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    dep_client
+        .add_artifact_to_cache(Request::new(AddArtifactToCacheRequest {
+            group: "org.junit.jupiter".to_string(),
+            name: "junit-jupiter-api".to_string(),
+            version: "5.10.0".to_string(),
+            classifier: String::new(),
+            local_path: "/tmp/junit-jupiter-api-5.10.0.jar".to_string(),
+            size: 8192,
+            sha256: "fedcba".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    // Check artifact cache (should hit)
+    let check1 = dep_client
+        .check_artifact_cache(Request::new(CheckArtifactCacheRequest {
+            group: "org.slf4j".to_string(),
+            name: "slf4j-api".to_string(),
+            version: "2.0.9".to_string(),
+            classifier: String::new(),
+            sha256: String::new(),
+            extension: String::new(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(check1.cached);
+
+    let check2 = dep_client
+        .check_artifact_cache(Request::new(CheckArtifactCacheRequest {
+            group: "org.junit.jupiter".to_string(),
+            name: "junit-jupiter-api".to_string(),
+            version: "5.10.0".to_string(),
+            classifier: String::new(),
+            sha256: String::new(),
+            extension: String::new(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(check2.cached);
+
+    // Step 7: Get resolution stats and verify aggregated data
+    let stats = dep_client
+        .get_resolution_stats(Request::new(GetResolutionStatsRequest {}))
+        .await
+        .unwrap()
+        .into_inner();
+
+    // resolve_dependencies incremented total_resolutions by 1
+    assert_eq!(stats.total_resolutions, 1);
+    // Two cache hits from check_artifact_cache
+    assert_eq!(stats.artifact_cache_hits, 2);
+    // Two artifacts in cache
+    assert_eq!(stats.cached_artifacts, 2);
+    // total_resolution_time_ms should be >= 0 (from the resolve_dependencies call)
+    assert!(stats.total_resolution_time_ms >= 0);
+    // avg_resolution_time_ms = total / count
+    assert!(stats.avg_resolution_time_ms >= 0.0);
+
+    // Step 6: Verify applied plugins list
+    let applied = plugin_client
+        .get_applied_plugins(Request::new(GetAppliedPluginsRequest {
+            project_path: project_path.clone(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(applied.plugins.len(), 2);
+    assert_eq!(applied.plugins[0].plugin_id, "java");
+    assert_eq!(applied.plugins[1].plugin_id, "application");
+}
