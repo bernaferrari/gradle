@@ -860,6 +860,8 @@ message InitBuildRequest {
   int32 requested_parallelism = 4;
   map<string, string> system_properties = 5;
   repeated string requested_features = 6;
+  // Optional session ID for scope tracking (backward-compatible).
+  string session_id = 7;
 }
 
 message InitBuildResponse {
@@ -2081,6 +2083,8 @@ message InitBuildSettingsRequest {
   repeated string init_scripts = 5;
   repeated string requested_build_features = 6;
   string current_dir = 7;           // directory where gradle was invoked
+  // Optional session ID for scope tracking (backward-compatible).
+  string session_id = 8;
 }
 
 message InitBuildSettingsResponse {

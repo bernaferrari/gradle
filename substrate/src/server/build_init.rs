@@ -1,9 +1,10 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
-use super::scopes::BuildId;
+use super::scopes::{BuildId, ScopeRegistry, SessionId};
 
 use crate::proto::{
     build_init_service_server::BuildInitService, BuildInitStatus, GetBuildInitStatusRequest,
@@ -39,12 +40,21 @@ struct InitScriptRecord {
 #[derive(Default)]
 pub struct BuildInitServiceImpl {
     builds: DashMap<BuildId, BuildInitState>,
+    scope_registry: Option<Arc<ScopeRegistry>>,
 }
 
 impl BuildInitServiceImpl {
     pub fn new() -> Self {
         Self {
             builds: DashMap::new(),
+            scope_registry: None,
+        }
+    }
+
+    pub fn with_scope_registry(scope_registry: Arc<ScopeRegistry>) -> Self {
+        Self {
+            builds: DashMap::new(),
+            scope_registry: Some(scope_registry),
         }
     }
 
@@ -341,6 +351,21 @@ impl BuildInitService for BuildInitServiceImpl {
 
         let build_key = BuildId::from(build_id.clone());
 
+        // Register build in scope registry if session_id is provided
+        if let Some(ref registry) = self.scope_registry {
+            if !req.session_id.is_empty() {
+                registry.register_build(
+                    SessionId::from(req.session_id.clone()),
+                    build_key.clone(),
+                );
+                tracing::debug!(
+                    build_id = %build_id,
+                    session_id = %req.session_id,
+                    "Registered build in scope registry (build-init)"
+                );
+            }
+        }
+
         self.builds.insert(
             build_key,
             BuildInitState {
@@ -484,6 +509,7 @@ mod tests {
             init_scripts: vec![],
             requested_build_features: vec![],
             current_dir: "/tmp/project".to_string(),
+            session_id: String::new(),
         }))
         .await
         .unwrap();
@@ -513,6 +539,7 @@ mod tests {
             init_scripts: vec![],
             requested_build_features: vec![],
             current_dir: String::new(),
+            session_id: String::new(),
         }))
         .await
         .unwrap();
@@ -580,6 +607,7 @@ mod tests {
             init_scripts: vec![],
             requested_build_features: vec![],
             current_dir: String::new(),
+            session_id: String::new(),
         }))
         .await
         .unwrap();
@@ -717,6 +745,7 @@ include ':core'
             init_scripts: vec![],
             requested_build_features: vec![],
             current_dir: dir.path().to_str().unwrap().to_string(),
+            session_id: String::new(),
         }))
         .await
         .unwrap();
@@ -797,6 +826,7 @@ include ':core'
             init_scripts: vec![],
             requested_build_features: vec![],
             current_dir: String::new(),
+            session_id: String::new(),
         }))
         .await
         .unwrap();
@@ -852,6 +882,7 @@ include ':core'
             init_scripts: vec![],
             requested_build_features: vec![],
             current_dir: String::new(),
+            session_id: String::new(),
         }))
         .await
         .unwrap();
@@ -865,6 +896,7 @@ include ':core'
             init_scripts: vec![],
             requested_build_features: vec![],
             current_dir: String::new(),
+            session_id: String::new(),
         }))
         .await
         .unwrap();
