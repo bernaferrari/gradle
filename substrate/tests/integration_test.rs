@@ -66,6 +66,8 @@ async fn spawn_test_server() -> (String, tempfile::TempDir) {
     let control = ControlServiceImpl::new(shutdown_tx);
     let hash = HashServiceImpl;
     let cache = CacheServiceImpl::new(cache_dir.clone());
+    // Get local store reference before cache is moved into Server
+    let cache_local_store = cache.local_store();
     let exec = ExecServiceImpl::new();
     let work_scheduler = Arc::new(WorkerScheduler::new(4));
     let work = WorkServiceImpl::new(work_scheduler.clone());
@@ -75,7 +77,8 @@ async fn spawn_test_server() -> (String, tempfile::TempDir) {
         work_scheduler.clone(),
         Arc::clone(&shared_history),
     );
-    let cache_orchestration = BuildCacheOrchestrationServiceImpl::new();
+    // Cache orchestration wired to real local cache for probing
+    let cache_orchestration = BuildCacheOrchestrationServiceImpl::with_local_cache(cache_local_store);
     let file_fingerprint = FileFingerprintServiceImpl::new();
     let value_snapshot = ValueSnapshotServiceImpl::new();
     let task_graph = TaskGraphServiceImpl::with_history(Arc::clone(&shared_history));
@@ -341,17 +344,19 @@ async fn test_cache_orchestration_e2e() {
 
     assert!(store_resp.success);
 
-    // Probe: should hit now
-    let probe_hit = client
+    // Probe: metadata says stored but real cache doesn't have the entry yet
+    // (because we only called store_outputs, not the actual cache store_entry)
+    // With real cache wiring, probe returns miss when the actual cache file is absent
+    let probe_metadata_only = client
         .probe_cache(Request::new(ProbeCacheRequest {
-            cache_key: compute_resp.cache_key,
+            cache_key: compute_resp.cache_key.clone(),
         }))
         .await
         .unwrap()
         .into_inner();
 
-    assert!(probe_hit.available);
-    assert_eq!(probe_hit.location, "local");
+    assert!(!probe_metadata_only.available,
+        "Probe should return miss when metadata exists but real cache entry is absent");
 }
 
 // ============================================================
@@ -3163,8 +3168,9 @@ async fn test_build_metrics_to_cache_orchestration_workflow() {
 
     assert!(store_resp.success);
 
-    // Probe cache — should hit now
-    let probe_hit = orch_client
+    // Probe cache — metadata says stored but real cache doesn't have the entry
+    // With real cache wiring, probe returns miss when actual cache file is absent
+    let probe_after_store = orch_client
         .probe_cache(Request::new(ProbeCacheRequest {
             cache_key: cache_key_resp.cache_key.clone(),
         }))
@@ -3172,8 +3178,8 @@ async fn test_build_metrics_to_cache_orchestration_workflow() {
         .unwrap()
         .into_inner();
 
-    assert!(probe_hit.available);
-    assert_eq!(probe_hit.location, "local");
+    assert!(!probe_after_store.available,
+        "Probe should return miss when metadata exists but real cache entry is absent");
 
     // Step 3: Get performance summary and verify aggregated metrics
     let summary_resp = metrics_client
@@ -3878,4 +3884,132 @@ async fn test_cache_service_hit_and_miss() {
         miss_received_any = true;
     }
     assert!(!miss_received_any, "Expected no chunks for a cache miss");
+}
+
+/// Cross-service integration: cache orchestration probes the real local cache.
+#[tokio::test]
+async fn test_cache_orchestration_probes_real_cache() {
+    let (socket_path, _dir) = spawn_test_server().await;
+
+    let channel = connect(&socket_path).await;
+
+    let mut cache_client = cache_service_client::CacheServiceClient::new(channel.clone());
+    let mut orchestration_client =
+        build_cache_orchestration_service_client::BuildCacheOrchestrationServiceClient::new(channel);
+
+    // Step 1: Store an entry in the real cache
+    let cache_key = "orchestration-test-key";
+    let cache_value = b"cached-build-output-data";
+
+    use futures_util::StreamExt;
+    let (mut tx, rx) = tokio::sync::mpsc::channel(2);
+    tx.send(CacheStoreChunk {
+        payload: Some(cache_store_chunk::Payload::Init(CacheStoreInit {
+            key: cache_key.as_bytes().to_vec(),
+            total_size: cache_value.len() as i64,
+        })),
+    })
+    .await
+    .unwrap();
+    tx.send(CacheStoreChunk {
+        payload: Some(cache_store_chunk::Payload::Data(
+            cache_value.to_vec(),
+        )),
+    })
+    .await
+    .unwrap();
+    drop(tx);
+
+    let store_response = cache_client
+        .store_entry(tokio_stream::wrappers::ReceiverStream::new(rx))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(store_response.success, "Cache store should succeed");
+
+    // Step 2: Mark it as stored in orchestration
+    let store_outputs = orchestration_client
+        .store_outputs(Request::new(StoreOutputsRequest {
+            cache_key: cache_key.as_bytes().to_vec(),
+            execution_time_ms: 350,
+            output_properties: vec!["classes".to_string()],
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(store_outputs.success, "Orchestration store_outputs should succeed");
+
+    // Step 3: Probe should find it (both metadata AND real cache agree)
+    let probe = orchestration_client
+        .probe_cache(Request::new(ProbeCacheRequest {
+            cache_key: cache_key.as_bytes().to_vec(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(probe.available, "Probe should find the entry in both metadata and real cache");
+    assert_eq!(probe.location, "local");
+    assert_eq!(probe.execution_time_ms, 350);
+    assert!(probe.output_properties.contains(&"classes".to_string()));
+
+    // Step 4: Probe a key that doesn't exist anywhere
+    let probe_miss = orchestration_client
+        .probe_cache(Request::new(ProbeCacheRequest {
+            cache_key: b"nonexistent-key".to_vec(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(!probe_miss.available, "Probe should not find nonexistent key");
+}
+
+/// Cross-service integration: task graph benefits from execution history duration estimates.
+#[tokio::test]
+async fn test_task_graph_with_execution_history_integration() {
+    let (socket_path, _dir) = spawn_test_server().await;
+
+    let channel = connect(&socket_path).await;
+
+    let mut history_client =
+        execution_history_service_client::ExecutionHistoryServiceClient::new(channel.clone());
+    let mut task_graph_client =
+        task_graph_service_client::TaskGraphServiceClient::new(channel);
+
+    // Step 1: Store execution history for a task
+    let task_path = ":app:compileJava";
+    history_client
+        .store_history(Request::new(StoreHistoryRequest {
+            work_identity: format!("task_duration:{}", task_path),
+            state: vec![],
+            timestamp_ms: 1000,
+        }))
+        .await
+        .unwrap();
+
+    // Step 2: Register a task with the task graph
+    task_graph_client
+        .register_task(Request::new(RegisterTaskRequest {
+            task_path: task_path.to_string(),
+            depends_on: vec![],
+            should_execute: true,
+            task_type: "JavaCompile".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    // Step 3: Resolve execution plan — task graph should be usable
+    let plan = task_graph_client
+        .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
+            build_id: "integration-test-build".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    // The registered task should appear in the execution plan
+    assert!(
+        plan.execution_order.iter().any(|n| n.task_path == task_path),
+        "Registered task should be in the execution plan"
+    );
 }
