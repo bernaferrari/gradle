@@ -1,8 +1,11 @@
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 
 use dashmap::DashMap;
 use tokio::sync::broadcast;
 use tonic::{Request, Response, Status};
+
+use super::event_dispatcher::EventDispatcher;
 
 use super::scopes::BuildId;
 
@@ -32,6 +35,8 @@ pub struct BuildEventStreamServiceImpl {
     events_sent: AtomicI64,
     events_received: AtomicI64,
     events_evicted: AtomicI64,
+    /// Registered event dispatchers for automatic cross-service fan-out.
+    dispatchers: Vec<Arc<dyn EventDispatcher>>,
 }
 
 impl BuildEventStreamServiceImpl {
@@ -43,6 +48,16 @@ impl BuildEventStreamServiceImpl {
             events_sent: AtomicI64::new(0),
             events_received: AtomicI64::new(0),
             events_evicted: AtomicI64::new(0),
+            dispatchers: Vec::new(),
+        }
+    }
+
+    /// Create a new event stream service with event dispatchers wired for
+    /// automatic cross-service fan-out (e.g., events → console, events → metrics).
+    pub fn with_dispatchers(dispatchers: Vec<Arc<dyn EventDispatcher>>) -> Self {
+        Self {
+            dispatchers,
+            ..Self::new()
         }
     }
 
@@ -178,6 +193,11 @@ impl BuildEventStreamService for BuildEventStreamServiceImpl {
                 .entry(build_id.clone())
                 .or_default()
                 .push(event.clone());
+        }
+
+        // Fan out to registered dispatchers (e.g., console, build_metrics)
+        for dispatcher in &self.dispatchers {
+            dispatcher.dispatch_event(&event);
         }
 
         // Broadcast to live subscribers

@@ -92,19 +92,22 @@ async fn spawn_test_server() -> (String, tempfile::TempDir) {
     let file_watch = FileWatchServiceImpl::new();
     let config_cache = ConfigurationCacheServiceImpl::new(config_cache_dir.clone());
     let toolchain = ToolchainServiceImpl::new(toolchain_dir);
-    let build_event_stream = BuildEventStreamServiceImpl::new();
+    let console = std::sync::Arc::new(ConsoleServiceImpl::new());
+    let build_metrics = std::sync::Arc::new(BuildMetricsServiceImpl::new());
+    let build_event_stream = BuildEventStreamServiceImpl::with_dispatchers(vec![
+        std::sync::Arc::clone(&console) as Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
+        std::sync::Arc::clone(&build_metrics) as Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
+    ]);
     let worker_process = WorkerProcessServiceImpl::new();
     let build_layout = BuildLayoutServiceImpl::new();
     let build_result = BuildResultServiceImpl::new();
     let problem_reporting = ProblemReportingServiceImpl::new();
     let resource_management = ResourceManagementServiceImpl::new();
     let build_comparison = BuildComparisonServiceImpl::new();
-    let console = ConsoleServiceImpl::new();
     let test_execution = TestExecutionServiceImpl::new();
     let artifact_publishing = ArtifactPublishingServiceImpl::new();
     let build_init = BuildInitServiceImpl::new();
     let incremental_compilation = IncrementalCompilationServiceImpl::new();
-    let build_metrics = BuildMetricsServiceImpl::new();
     let garbage_collection = GarbageCollectionServiceImpl::new(
         cache_dir.clone(),
         history_dir.clone(),
@@ -142,12 +145,12 @@ async fn spawn_test_server() -> (String, tempfile::TempDir) {
             .add_service(problem_reporting_service_server::ProblemReportingServiceServer::new(problem_reporting))
             .add_service(resource_management_service_server::ResourceManagementServiceServer::new(resource_management))
             .add_service(build_comparison_service_server::BuildComparisonServiceServer::new(build_comparison))
-            .add_service(console_service_server::ConsoleServiceServer::new(console))
+            .add_service(console_service_server::ConsoleServiceServer::new((*console).clone()))
             .add_service(test_execution_service_server::TestExecutionServiceServer::new(test_execution))
             .add_service(artifact_publishing_service_server::ArtifactPublishingServiceServer::new(artifact_publishing))
             .add_service(build_init_service_server::BuildInitServiceServer::new(build_init))
             .add_service(incremental_compilation_service_server::IncrementalCompilationServiceServer::new(incremental_compilation))
-            .add_service(build_metrics_service_server::BuildMetricsServiceServer::new(build_metrics))
+            .add_service(build_metrics_service_server::BuildMetricsServiceServer::new((*build_metrics).clone()))
             .add_service(garbage_collection_service_server::GarbageCollectionServiceServer::new(garbage_collection))
             .serve_with_incoming(UnixListenerStream::new(listener))
             .await;

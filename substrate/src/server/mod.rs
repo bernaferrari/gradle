@@ -1,3 +1,4 @@
+pub mod event_dispatcher;
 pub mod scopes;
 pub mod control;
 pub mod hash;
