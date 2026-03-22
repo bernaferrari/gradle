@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
+use super::event_dispatcher::EventDispatcher;
 use super::scopes::BuildId;
 
 use crate::proto::{
@@ -15,6 +16,7 @@ use crate::proto::{
 const MAX_LOG_BUFFER: usize = 1000;
 
 /// A tracked progress operation.
+#[derive(Clone)]
 struct ProgressEntry {
     operation_id: String,
     description: String,
@@ -177,6 +179,20 @@ pub struct ConsoleServiceImpl {
     logs_evicted: AtomicI64,
 }
 
+impl Clone for ConsoleServiceImpl {
+    fn clone(&self) -> Self {
+        // DashMap and ProgressEntry are Clone; atomics are reset
+        Self {
+            progress_ops: self.progress_ops.clone(),
+            build_descriptions: self.build_descriptions.clone(),
+            log_buffer: self.log_buffer.clone(),
+            log_counts: AtomicI64::new(self.log_counts.load(Ordering::Relaxed)),
+            progress_updates: AtomicI64::new(self.progress_updates.load(Ordering::Relaxed)),
+            logs_evicted: AtomicI64::new(self.logs_evicted.load(Ordering::Relaxed)),
+        }
+    }
+}
+
 impl ConsoleServiceImpl {
     pub fn new() -> Self {
         Self {
@@ -250,7 +266,7 @@ impl ConsoleServiceImpl {
     }
 
     /// Buffer a log message and evict if at capacity.
-    fn buffer_log(&self, build_id: &BuildId, level: &str, category: &str, message: &str) {
+    pub fn buffer_log(&self, build_id: &BuildId, level: &str, category: &str, message: &str) {
         let build_id_str = build_id.to_string();
         if let Some(mut buf) = self.log_buffer.get_mut(build_id) {
             if buf.len() >= MAX_LOG_BUFFER {
@@ -476,6 +492,78 @@ impl ConsoleService for ConsoleServiceImpl {
         );
 
         Ok(Response::new(SetBuildDescriptionResponse { accepted: true }))
+    }
+}
+
+impl EventDispatcher for ConsoleServiceImpl {
+    fn dispatch_event(&self, event: &crate::proto::BuildEventMessage) {
+        let build_id = BuildId::from(event.build_id.clone());
+
+        match event.event_type.as_str() {
+            "task_start" => {
+                self.buffer_log(
+                    &build_id,
+                    "lifecycle",
+                    "task",
+                    &format!("> {} ...", event.display_name),
+                );
+            }
+            "task_finish" => {
+                let outcome = event
+                    .properties
+                    .get("outcome")
+                    .map(|s| s.as_str())
+                    .unwrap_or("UNKNOWN");
+                let duration = event
+                    .properties
+                    .get("duration_ms")
+                    .map(|s| format!("({}ms)", s))
+                    .unwrap_or_default();
+                let level = if outcome == "FAILED" {
+                    "error"
+                } else {
+                    "lifecycle"
+                };
+                self.buffer_log(
+                    &build_id,
+                    level,
+                    "task",
+                    &format!("{} {} {}", outcome, event.display_name, duration),
+                );
+            }
+            "build_start" => {
+                self.buffer_log(
+                    &build_id,
+                    "lifecycle",
+                    "build",
+                    &format!("Build started: {}", event.display_name),
+                );
+            }
+            "build_finish" => {
+                let outcome = event
+                    .properties
+                    .get("outcome")
+                    .map(|s| s.as_str())
+                    .unwrap_or("SUCCESS");
+                let duration = event
+                    .properties
+                    .get("duration_ms")
+                    .map(|s| format!("{}ms", s))
+                    .unwrap_or_else(|| "unknown time".to_string());
+                let level = if outcome == "FAILED" {
+                    "error"
+                } else {
+                    "lifecycle"
+                };
+                self.buffer_log(
+                    &build_id,
+                    level,
+                    "build",
+                    &format!("Build {} in {}", outcome, duration),
+                );
+            }
+            _ => {}
+        }
     }
 }
 

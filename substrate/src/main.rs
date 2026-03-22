@@ -250,8 +250,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let toolchain_dir = PathBuf::from(&args.toolchain_dir);
     let toolchain = ToolchainServiceImpl::new(toolchain_dir);
 
-    // Phase 24: Build event streaming
-    let build_event_stream = BuildEventStreamServiceImpl::new();
+    // Phase 24: Build event streaming (wired to console + metrics for auto fan-out)
+    let console = Arc::new(ConsoleServiceImpl::new());
+    let build_metrics = Arc::new(BuildMetricsServiceImpl::new());
+    let build_event_stream = BuildEventStreamServiceImpl::with_dispatchers(vec![
+        Arc::clone(&console) as Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
+        Arc::clone(&build_metrics) as Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
+    ]);
 
     // Phase 25: Worker process management
     let worker_process = WorkerProcessServiceImpl::new();
@@ -271,9 +276,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 31: Build comparison
     let build_comparison = BuildComparisonServiceImpl::new();
 
-    // Phase 32: Console / rich output
-    let console = ConsoleServiceImpl::new();
-
     // Phase 33: Test execution
     let test_execution = TestExecutionServiceImpl::new();
 
@@ -285,9 +287,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Phase 36: Incremental compilation
     let incremental_compilation = IncrementalCompilationServiceImpl::new();
-
-    // Phase 37: Build metrics
-    let build_metrics = BuildMetricsServiceImpl::new();
 
     // Phase 38: Garbage collection
     let garbage_collection = GarbageCollectionServiceImpl::new(
@@ -330,12 +329,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(ProblemReportingServiceServer::new(problem_reporting))
         .add_service(ResourceManagementServiceServer::new(resource_management))
         .add_service(BuildComparisonServiceServer::new(build_comparison))
-        .add_service(ConsoleServiceServer::new(console))
+        .add_service(ConsoleServiceServer::new((*console).clone()))
         .add_service(TestExecutionServiceServer::new(test_execution))
         .add_service(ArtifactPublishingServiceServer::new(artifact_publishing))
         .add_service(BuildInitServiceServer::new(build_init))
         .add_service(IncrementalCompilationServiceServer::new(incremental_compilation))
-        .add_service(BuildMetricsServiceServer::new(build_metrics))
+        .add_service(BuildMetricsServiceServer::new((*build_metrics).clone()))
         .add_service(GarbageCollectionServiceServer::new(garbage_collection))
         .serve_with_incoming_shutdown(tokio_stream::wrappers::UnixListenerStream::new(listener), shutdown_signal())
         .await?;

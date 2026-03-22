@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
+use super::event_dispatcher::EventDispatcher;
 use super::scopes::BuildId;
 
 use crate::proto::{
@@ -24,6 +25,21 @@ struct MetricData {
     max: AtomicI64,
     last: AtomicI64,
     tags: std::sync::Mutex<HashMap<String, String>>,
+}
+
+impl Clone for MetricData {
+    fn clone(&self) -> Self {
+        Self {
+            count: AtomicI64::new(self.count.load(Ordering::Relaxed)),
+            sum: AtomicU64::new(self.sum.load(Ordering::Relaxed)),
+            min: AtomicI64::new(self.min.load(Ordering::Relaxed)),
+            max: AtomicI64::new(self.max.load(Ordering::Relaxed)),
+            last: AtomicI64::new(self.last.load(Ordering::Relaxed)),
+            tags: std::sync::Mutex::new(
+                self.tags.lock().map(|g| g.clone()).unwrap_or_default(),
+            ),
+        }
+    }
 }
 
 impl MetricData {
@@ -68,6 +84,19 @@ pub struct BuildMetricsServiceImpl {
     builds: DashMap<BuildId, BuildSummaryData>,
 }
 
+impl Clone for BuildMetricsServiceImpl {
+    fn clone(&self) -> Self {
+        // DashMap is Clone; atomics are reset (shared state lives in the Arc-wrapped instance)
+        Self {
+            metrics: self.metrics.clone(),
+            builds: self.builds.clone(),
+        }
+    }
+}
+
+impl BuildMetricsServiceImpl {
+}
+
 #[derive(Default)]
 struct BuildSummaryData {
     total_tasks: AtomicI64,
@@ -89,6 +118,32 @@ struct BuildSummaryData {
     outcome: std::sync::Mutex<String>,
 }
 
+impl Clone for BuildSummaryData {
+    fn clone(&self) -> Self {
+        Self {
+            total_tasks: AtomicI64::new(self.total_tasks.load(Ordering::Relaxed)),
+            cached_tasks: AtomicI64::new(self.cached_tasks.load(Ordering::Relaxed)),
+            up_to_date_tasks: AtomicI64::new(self.up_to_date_tasks.load(Ordering::Relaxed)),
+            executed_tasks: AtomicI64::new(self.executed_tasks.load(Ordering::Relaxed)),
+            failed_tasks: AtomicI64::new(self.failed_tasks.load(Ordering::Relaxed)),
+            cache_hits: AtomicI64::new(self.cache_hits.load(Ordering::Relaxed)),
+            cache_misses: AtomicI64::new(self.cache_misses.load(Ordering::Relaxed)),
+            total_bytes_stored: AtomicI64::new(self.total_bytes_stored.load(Ordering::Relaxed)),
+            total_bytes_loaded: AtomicI64::new(self.total_bytes_loaded.load(Ordering::Relaxed)),
+            config_cache_hits: AtomicI64::new(self.config_cache_hits.load(Ordering::Relaxed)),
+            config_cache_misses: AtomicI64::new(self.config_cache_misses.load(Ordering::Relaxed)),
+            history_entries_stored: AtomicI64::new(self.history_entries_stored.load(Ordering::Relaxed)),
+            history_entries_loaded: AtomicI64::new(self.history_entries_loaded.load(Ordering::Relaxed)),
+            workers_used: AtomicI64::new(self.workers_used.load(Ordering::Relaxed)),
+            start_time_ms: AtomicI64::new(self.start_time_ms.load(Ordering::Relaxed)),
+            end_time_ms: AtomicI64::new(self.end_time_ms.load(Ordering::Relaxed)),
+            outcome: std::sync::Mutex::new(
+                self.outcome.lock().map(|g| g.clone()).unwrap_or_default(),
+            ),
+        }
+    }
+}
+
 impl BuildMetricsServiceImpl {
     pub fn new() -> Self {
         Self {
@@ -108,6 +163,50 @@ impl BuildMetricsServiceImpl {
         if !self.builds.contains_key(build_id) {
             self.builds
                 .insert(build_id.clone(), BuildSummaryData::default());
+        }
+    }
+
+    /// Record a metric directly (for internal cross-service calls, bypassing gRPC).
+    pub fn record_metric_direct(
+        &self,
+        build_id: &BuildId,
+        name: &str,
+        value: f64,
+        timestamp_ms: i64,
+    ) {
+        self.ensure_metric(build_id, name);
+        if let Some(metric) = self.metrics.get(&(build_id.clone(), name.to_string())) {
+            metric.record(value, HashMap::new());
+        }
+
+        if !build_id.0.is_empty() {
+            self.ensure_build(build_id);
+            if let Some(build) = self.builds.get(build_id) {
+                match name {
+                    "tasks.total" => {
+                        build.total_tasks.fetch_add(1, Ordering::Relaxed);
+                    }
+                    "tasks.cached" => {
+                        build.cached_tasks.fetch_add(1, Ordering::Relaxed);
+                    }
+                    "tasks.up_to_date" => {
+                        build.up_to_date_tasks.fetch_add(1, Ordering::Relaxed);
+                    }
+                    "tasks.executed" => {
+                        build.executed_tasks.fetch_add(1, Ordering::Relaxed);
+                    }
+                    "tasks.failed" => {
+                        build.failed_tasks.fetch_add(1, Ordering::Relaxed);
+                    }
+                    "build.start" => {
+                        build.start_time_ms.store(timestamp_ms, Ordering::Relaxed);
+                    }
+                    "build.end" => {
+                        build.end_time_ms.store(timestamp_ms, Ordering::Relaxed);
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 }
@@ -314,6 +413,50 @@ impl BuildMetricsService for BuildMetricsServiceImpl {
                 reset: true,
                 metrics_cleared: cleared,
             }))
+        }
+    }
+}
+
+impl EventDispatcher for BuildMetricsServiceImpl {
+    fn dispatch_event(&self, event: &crate::proto::BuildEventMessage) {
+        let build_id = BuildId::from(event.build_id.clone());
+
+        match event.event_type.as_str() {
+            "task_start" => {
+                self.record_metric_direct(&build_id, "tasks.total", 1.0, event.timestamp_ms);
+            }
+            "task_finish" => {
+                let outcome = event
+                    .properties
+                    .get("outcome")
+                    .map(|s| s.as_str())
+                    .unwrap_or("UNKNOWN");
+                let metric_name = match outcome {
+                    "FROM_CACHE" => "tasks.cached",
+                    "UP_TO_DATE" => "tasks.up_to_date",
+                    "FAILED" => "tasks.failed",
+                    _ => "tasks.executed",
+                };
+                self.record_metric_direct(&build_id, metric_name, 1.0, event.timestamp_ms);
+            }
+            "build_start" => {
+                self.record_metric_direct(&build_id, "build.start", 0.0, event.timestamp_ms);
+            }
+            "build_finish" => {
+                self.record_metric_direct(&build_id, "build.end", 0.0, event.timestamp_ms);
+                let outcome = event
+                    .properties
+                    .get("outcome")
+                    .map(|s| s.as_str())
+                    .unwrap_or("SUCCESS");
+                self.ensure_build(&build_id);
+                if let Some(build) = self.builds.get(&build_id) {
+                    if let Ok(mut guard) = build.outcome.lock() {
+                        *guard = outcome.to_string();
+                    }
+                }
+            }
+            _ => {}
         }
     }
 }
