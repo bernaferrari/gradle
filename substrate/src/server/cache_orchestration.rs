@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 
 use md5::{Digest, Md5};
 use tonic::{Request, Response, Status};
@@ -8,6 +9,7 @@ use crate::proto::{
     ComputeCacheKeyRequest, ComputeCacheKeyResponse, ProbeCacheRequest, ProbeCacheResponse,
     StoreOutputsRequest, StoreOutputsResponse,
 };
+use crate::server::cache::LocalCacheStore;
 
 /// Maximum number of stored cache keys to track before eviction.
 const MAX_STORED_KEYS: usize = 50_000;
@@ -36,6 +38,8 @@ pub struct BuildCacheOrchestrationServiceImpl {
     cache_hits: AtomicI64,
     /// Total number of cache misses.
     cache_misses: AtomicI64,
+    /// Optional reference to the local cache store for real probe operations.
+    local_cache: Option<Arc<LocalCacheStore>>,
 }
 
 impl BuildCacheOrchestrationServiceImpl {
@@ -46,6 +50,15 @@ impl BuildCacheOrchestrationServiceImpl {
             keys_evicted: AtomicI64::new(0),
             cache_hits: AtomicI64::new(0),
             cache_misses: AtomicI64::new(0),
+            local_cache: None,
+        }
+    }
+
+    /// Create with a reference to the local cache store for real cache probing.
+    pub fn with_local_cache(local_cache: Arc<LocalCacheStore>) -> Self {
+        Self {
+            local_cache: Some(local_cache),
+            ..Self::new()
         }
     }
 
@@ -161,23 +174,67 @@ impl BuildCacheOrchestrationService for BuildCacheOrchestrationServiceImpl {
         let req = request.into_inner();
         let key = String::from_utf8_lossy(&req.cache_key).to_string();
 
+        // First check the metadata index (tracks what was stored this session)
         if let Some(entry) = self.stored_keys.get(&key) {
+            // If we have a local cache reference, verify the entry actually exists on disk
+            if let Some(cache) = &self.local_cache {
+                match cache.contains(&key).await {
+                    Ok(true) => {
+                        self.cache_hits.fetch_add(1, Ordering::Relaxed);
+                        return Ok(Response::new(ProbeCacheResponse {
+                            available: true,
+                            location: "local".to_string(),
+                            output_properties: entry.output_properties.clone(),
+                            execution_time_ms: entry.execution_time_ms,
+                        }));
+                    }
+                    Ok(false) => {
+                        // Metadata says stored but actual cache entry is gone (GC'd, etc.)
+                        tracing::debug!(cache_key = %key, "Cache metadata present but entry missing from disk");
+                        self.cache_misses.fetch_add(1, Ordering::Relaxed);
+                        return Ok(Response::new(ProbeCacheResponse {
+                            available: false,
+                            location: String::new(),
+                            output_properties: Vec::new(),
+                            execution_time_ms: 0,
+                        }));
+                    }
+                    Err(e) => {
+                        tracing::debug!(cache_key = %key, error = %e, "Cache probe error, falling back to metadata");
+                    }
+                }
+            }
+
+            // No local cache reference — trust metadata only
             self.cache_hits.fetch_add(1, Ordering::Relaxed);
-            Ok(Response::new(ProbeCacheResponse {
+            return Ok(Response::new(ProbeCacheResponse {
                 available: true,
                 location: "local".to_string(),
                 output_properties: entry.output_properties.clone(),
                 execution_time_ms: entry.execution_time_ms,
-            }))
-        } else {
-            self.cache_misses.fetch_add(1, Ordering::Relaxed);
-            Ok(Response::new(ProbeCacheResponse {
-                available: false,
-                location: String::new(),
-                output_properties: Vec::new(),
-                execution_time_ms: 0,
-            }))
+            }));
         }
+
+        // Not in metadata — check local cache directly for entries stored before this session
+        if let Some(cache) = &self.local_cache {
+            if let Ok(true) = cache.contains(&key).await {
+                self.cache_hits.fetch_add(1, Ordering::Relaxed);
+                return Ok(Response::new(ProbeCacheResponse {
+                    available: true,
+                    location: "local".to_string(),
+                    output_properties: Vec::new(),
+                    execution_time_ms: 0,
+                }));
+            }
+        }
+
+        self.cache_misses.fetch_add(1, Ordering::Relaxed);
+        Ok(Response::new(ProbeCacheResponse {
+            available: false,
+            location: String::new(),
+            output_properties: Vec::new(),
+            execution_time_ms: 0,
+        }))
     }
 
     async fn store_outputs(

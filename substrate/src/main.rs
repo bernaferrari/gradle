@@ -208,8 +208,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let execution_plan = ExecutionPlanServiceImpl::with_persistent_history(work_scheduler, execution_history.clone());
     execution_plan.load_persistent_history();
 
-    // Phase 8: Build cache orchestration
-    let cache_orchestration = BuildCacheOrchestrationServiceImpl::new();
+    // Phase 8: Build cache orchestration (wired to local cache for real probe operations)
+    let cache_orchestration = BuildCacheOrchestrationServiceImpl::with_local_cache(cache.local_store());
 
     // Phase 9: File fingerprinting
     let file_fingerprint = FileFingerprintServiceImpl::new();
