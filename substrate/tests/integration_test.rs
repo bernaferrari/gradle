@@ -961,6 +961,7 @@ async fn test_build_operations_e2e() {
     // Start an operation
     let start_resp = client
         .start_operation(Request::new(StartOperationRequest {
+            build_id: "test".to_string(),
             operation_id: "op-1".to_string(),
             display_name: "compileJava".to_string(),
             operation_type: "TASK".to_string(),
@@ -977,6 +978,7 @@ async fn test_build_operations_e2e() {
     // Complete the operation
     let complete_resp = client
         .complete_operation(Request::new(CompleteOperationRequest {
+            build_id: "test".to_string(),
             operation_id: "op-1".to_string(),
             duration_ms: 150,
             success: true,
@@ -991,7 +993,7 @@ async fn test_build_operations_e2e() {
     // Get build summary — may or may not contain the operation
     // since each test spawns a fresh server
     let summary_resp = client
-        .get_build_summary(Request::new(GetBuildSummaryRequest {}))
+        .get_build_summary(Request::new(GetBuildSummaryRequest { build_id: "test".to_string() }))
         .await
         .unwrap()
         .into_inner();
@@ -1127,6 +1129,7 @@ async fn test_build_operations_full_flow_e2e() {
     // Start operations
     ops_client
         .start_operation(Request::new(StartOperationRequest {
+            build_id: "test".to_string(),
             operation_id: "op-compile".to_string(),
             display_name: "Compile Java".to_string(),
             operation_type: "TASK_EXECUTION".to_string(),
@@ -1139,6 +1142,7 @@ async fn test_build_operations_full_flow_e2e() {
 
     ops_client
         .start_operation(Request::new(StartOperationRequest {
+            build_id: "test".to_string(),
             operation_id: "op-test".to_string(),
             display_name: "Run tests".to_string(),
             operation_type: "TASK_EXECUTION".to_string(),
@@ -1152,6 +1156,7 @@ async fn test_build_operations_full_flow_e2e() {
     // Complete operations
     ops_client
         .complete_operation(Request::new(CompleteOperationRequest {
+            build_id: "test".to_string(),
             operation_id: "op-compile".to_string(),
             duration_ms: 500,
             success: true,
@@ -1162,6 +1167,7 @@ async fn test_build_operations_full_flow_e2e() {
 
     ops_client
         .complete_operation(Request::new(CompleteOperationRequest {
+            build_id: "test".to_string(),
             operation_id: "op-test".to_string(),
             duration_ms: 1200,
             success: false,
@@ -1651,6 +1657,7 @@ async fn test_full_build_lifecycle() {
     let mut ops_client = build_operations_service_client::BuildOperationsServiceClient::new(channel.clone());
     ops_client
         .start_operation(Request::new(StartOperationRequest {
+            build_id: "test".to_string(),
             operation_id: "op-process".to_string(),
             display_name: ":processResources".to_string(),
             operation_type: "TASK".to_string(),
@@ -1663,6 +1670,7 @@ async fn test_full_build_lifecycle() {
 
     ops_client
         .complete_operation(Request::new(CompleteOperationRequest {
+            build_id: "test".to_string(),
             operation_id: "op-process".to_string(),
             duration_ms: 100,
             success: true,
@@ -1673,6 +1681,7 @@ async fn test_full_build_lifecycle() {
 
     ops_client
         .start_operation(Request::new(StartOperationRequest {
+            build_id: "test".to_string(),
             operation_id: "op-compile".to_string(),
             display_name: ":compileJava".to_string(),
             operation_type: "TASK".to_string(),
@@ -1685,6 +1694,7 @@ async fn test_full_build_lifecycle() {
 
     ops_client
         .complete_operation(Request::new(CompleteOperationRequest {
+            build_id: "test".to_string(),
             operation_id: "op-compile".to_string(),
             duration_ms: 2000,
             success: true,
@@ -1754,7 +1764,7 @@ async fn test_full_build_lifecycle() {
 
     // 11. Get build summary
     let summary = ops_client
-        .get_build_summary(Request::new(GetBuildSummaryRequest {}))
+        .get_build_summary(Request::new(GetBuildSummaryRequest { build_id: "test".to_string() }))
         .await
         .unwrap()
         .into_inner();
@@ -2911,6 +2921,7 @@ async fn test_build_layout_to_work_pipeline() {
     // 6. Track operations
     ops_client
         .start_operation(Request::new(StartOperationRequest {
+            build_id: "test".to_string(),
             operation_id: "op-lib-compile".to_string(),
             display_name: "Compile lib".to_string(),
             operation_type: "TASK_EXECUTION".to_string(),
@@ -2923,6 +2934,7 @@ async fn test_build_layout_to_work_pipeline() {
 
     ops_client
         .complete_operation(Request::new(CompleteOperationRequest {
+            build_id: "test".to_string(),
             operation_id: "op-lib-compile".to_string(),
             duration_ms: 400,
             success: true,
@@ -3013,6 +3025,7 @@ async fn test_exec_to_build_operations_workflow() {
     // 1. Start a build operation tracking the exec
     ops_client
         .start_operation(Request::new(StartOperationRequest {
+            build_id: "test".to_string(),
             operation_id: "op-exec-test".to_string(),
             display_name: "Run test process".to_string(),
             operation_type: "TASK_EXECUTION".to_string(),
@@ -3054,6 +3067,7 @@ async fn test_exec_to_build_operations_workflow() {
     // 4. Complete the operation
     ops_client
         .complete_operation(Request::new(CompleteOperationRequest {
+            build_id: "test".to_string(),
             operation_id: "op-exec-test".to_string(),
             duration_ms: elapsed_ms,
             success: wait_resp.exit_code == 0,
