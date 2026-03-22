@@ -3,6 +3,8 @@ use std::path::Path;
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
+use super::scopes::BuildId;
+
 use crate::proto::{
     build_init_service_server::BuildInitService, BuildInitStatus, GetBuildInitStatusRequest,
     GetBuildInitStatusResponse, InitBuildSettingsRequest, InitBuildSettingsResponse,
@@ -36,7 +38,7 @@ struct InitScriptRecord {
 /// Manages build startup, settings processing, init scripts, and settings file parsing.
 #[derive(Default)]
 pub struct BuildInitServiceImpl {
-    builds: DashMap<String, BuildInitState>,
+    builds: DashMap<BuildId, BuildInitState>,
 }
 
 impl BuildInitServiceImpl {
@@ -337,8 +339,10 @@ impl BuildInitService for BuildInitServiceImpl {
             });
         }
 
+        let build_key = BuildId::from(build_id.clone());
+
         self.builds.insert(
-            build_id.clone(),
+            build_key,
             BuildInitState {
                 build_id,
                 root_dir,
@@ -356,14 +360,14 @@ impl BuildInitService for BuildInitServiceImpl {
 
         let init_duration_ms = start.elapsed().as_millis() as i64;
 
-        if let Some(mut build) = self.builds.get_mut(&req.build_id) {
+        if let Some(mut build) = self.builds.get_mut(&BuildId::from(req.build_id.clone())) {
             build.init_duration_ms = init_duration_ms;
         }
 
         tracing::info!(
             build_id = %req.build_id,
             root_dir = %root_dir_log,
-            root_project = ?self.builds.get(&req.build_id).and_then(|b| b.root_project_name.clone()),
+            root_project = ?self.builds.get(&BuildId::from(req.build_id.clone())).and_then(|b| b.root_project_name.clone()),
             init_ms = init_duration_ms,
             "Build initialized"
         );
@@ -386,7 +390,7 @@ impl BuildInitService for BuildInitServiceImpl {
             .detail
             .ok_or_else(|| Status::invalid_argument("SettingsDetail is required"))?;
 
-        if let Some(mut build) = self.builds.get_mut(&req.build_id) {
+        if let Some(mut build) = self.builds.get_mut(&BuildId::from(req.build_id)) {
             // Update if key exists, else push
             if let Some(existing) = build.settings_details.iter_mut().find(|d| d.key == detail.key) {
                 existing.value = detail.value;
@@ -404,7 +408,7 @@ impl BuildInitService for BuildInitServiceImpl {
     ) -> Result<Response<GetBuildInitStatusResponse>, Status> {
         let req = request.into_inner();
 
-        if let Some(build) = self.builds.get(&req.build_id) {
+        if let Some(build) = self.builds.get(&BuildId::from(req.build_id)) {
             let script_infos: Vec<InitScriptInfo> = build
                 .init_scripts
                 .iter()
@@ -444,7 +448,7 @@ impl BuildInitService for BuildInitServiceImpl {
     ) -> Result<Response<RecordInitScriptResponse>, Status> {
         let req = request.into_inner();
 
-        if let Some(mut build) = self.builds.get_mut(&req.build_id) {
+        if let Some(mut build) = self.builds.get_mut(&BuildId::from(req.build_id)) {
             build.init_scripts.push(InitScriptRecord {
                 path: req.script_path.clone(),
                 success: req.success,

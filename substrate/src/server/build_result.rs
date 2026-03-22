@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
+use super::scopes::BuildId;
 use crate::proto::{
     build_result_service_server::BuildResultService, BuildOutcome, GetBuildResultRequest,
     GetBuildResultResponse, GetTaskSummaryRequest, GetTaskSummaryResponse, ReportBuildFailureRequest,
@@ -22,8 +23,8 @@ struct BuildState {
 /// Aggregates task results and build outcomes for structured reporting.
 #[derive(Default)]
 pub struct BuildResultServiceImpl {
-    task_results: DashMap<String, Vec<TaskResult>>, // build_id -> [TaskResult]
-    build_states: DashMap<String, BuildState>,
+    task_results: DashMap<BuildId, Vec<TaskResult>>, // build_id -> [TaskResult]
+    build_states: DashMap<BuildId, BuildState>,
     results_reported: AtomicI32,
 }
 
@@ -74,7 +75,7 @@ impl BuildResultService for BuildResultServiceImpl {
         let outcome = result.outcome.clone();
 
         self.task_results
-            .entry(req.build_id.clone())
+            .entry(BuildId::from(req.build_id.clone()))
             .or_default()
             .push(result);
 
@@ -97,7 +98,7 @@ impl BuildResultService for BuildResultServiceImpl {
         let req = request.into_inner();
 
         self.build_states.insert(
-            req.build_id.clone(),
+            BuildId::from(req.build_id.clone()),
             BuildState {
                 failed: true,
                 failure_type: req.failure_type,
@@ -122,14 +123,14 @@ impl BuildResultService for BuildResultServiceImpl {
 
         let results = self
             .task_results
-            .get(&req.build_id)
+            .get(&BuildId::from(req.build_id.clone()))
             .map(|r| r.iter().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
 
         let (executed, from_cache, up_to_date, failed, skipped) =
             Self::count_outcomes(&results);
 
-        let build_state = self.build_states.get(&req.build_id);
+        let build_state = self.build_states.get(&BuildId::from(req.build_id.clone()));
 
         let overall_result = if let Some(state) = &build_state {
             if state.failed {
@@ -189,7 +190,7 @@ impl BuildResultService for BuildResultServiceImpl {
 
         let results = self
             .task_results
-            .get(&req.build_id)
+            .get(&BuildId::from(req.build_id.clone()))
             .map(|r| r.iter().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
 
@@ -511,7 +512,7 @@ mod tests {
         // Also verify the internal build state stored the custom message correctly
         let state = svc
             .build_states
-            .get("build-custom-fail")
+            .get(&BuildId::from("build-custom-fail".to_string()))
             .expect("build state should exist");
         assert!(state.failed);
         assert_eq!(state.failure_type, "configuration_error");

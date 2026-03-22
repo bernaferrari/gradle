@@ -11,6 +11,7 @@ use crate::proto::{
     GetPublishingStatusRequest, GetPublishingStatusResponse, RecordUploadResultRequest,
     RecordUploadResultResponse, RegisterArtifactRequest, RegisterArtifactResponse,
 };
+use super::scopes::BuildId;
 
 /// Tracked artifact being published.
 struct TrackedArtifact {
@@ -31,7 +32,7 @@ struct RepoCredentials {
 /// Supports real HTTP PUT uploads with authentication.
 pub struct ArtifactPublishingServiceImpl {
     artifacts: DashMap<String, TrackedArtifact>,
-    build_artifacts: DashMap<String, Vec<String>>, // build_id -> [artifact_id]
+    build_artifacts: DashMap<BuildId, Vec<String>>, // build_id -> [artifact_id]
     artifacts_registered: AtomicI64,
     uploads_completed: AtomicI64,
     repos: DashMap<String, RepoCredentials>,
@@ -213,7 +214,7 @@ impl ArtifactPublishingService for ArtifactPublishingServiceImpl {
         );
 
         self.build_artifacts
-            .entry(build_id)
+            .entry(BuildId::from(build_id))
             .or_default()
             .push(artifact_id);
 
@@ -337,7 +338,7 @@ impl ArtifactPublishingService for ArtifactPublishingServiceImpl {
 
         let artifact_ids = self
             .build_artifacts
-            .get(&req.build_id)
+            .get(&BuildId::from(req.build_id))
             .map(|a| a.clone())
             .unwrap_or_default();
 

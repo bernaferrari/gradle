@@ -1,6 +1,7 @@
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
+use super::scopes::BuildId;
 use crate::proto::{
     build_layout_service_server::BuildLayoutService, AddSubprojectRequest, AddSubprojectResponse,
     GetBuildFilePathRequest, GetBuildFilePathResponse, GetProjectTreeRequest,
@@ -31,7 +32,7 @@ struct BuildLayout {
 /// and settings. Replaces the JVM-side SettingsProcessor.
 #[derive(Default)]
 pub struct BuildLayoutServiceImpl {
-    builds: DashMap<String, BuildLayout>,
+    builds: DashMap<BuildId, BuildLayout>,
     projects: DashMap<String, Project>, // keyed by "build_id:project_path"
 }
 
@@ -61,6 +62,7 @@ impl BuildLayoutService for BuildLayoutServiceImpl {
         }
 
         let build_id = format!("build-{}", uuid::Uuid::new_v4().to_string().split_off(8));
+        let build_key = BuildId::from(build_id.clone());
 
         let default_build_file = if req.build_file.is_empty() {
             "build.gradle".to_string()
@@ -82,7 +84,7 @@ impl BuildLayoutService for BuildLayoutServiceImpl {
             build_name: default_build_name.clone(),
         };
 
-        self.builds.insert(build_id.clone(), layout);
+        self.builds.insert(build_key.clone(), layout);
 
         // Register root project
         let root_project = Project {
@@ -100,9 +102,9 @@ impl BuildLayoutService for BuildLayoutServiceImpl {
 
         tracing::info!(
             build_id = %build_id,
-            root_dir = %self.builds.get(&build_id).unwrap().root_dir,
-            build_name = %self.builds.get(&build_id).unwrap().build_name,
-            settings_file = %self.builds.get(&build_id).unwrap().settings_file,
+            root_dir = %self.builds.get(&build_key).unwrap().root_dir,
+            build_name = %self.builds.get(&build_key).unwrap().build_name,
+            settings_file = %self.builds.get(&build_key).unwrap().settings_file,
             "Build layout initialized"
         );
 
@@ -118,8 +120,9 @@ impl BuildLayoutService for BuildLayoutServiceImpl {
         request: Request<AddSubprojectRequest>,
     ) -> Result<Response<AddSubprojectResponse>, Status> {
         let req = request.into_inner();
+        let build_key = BuildId::from(req.build_id.clone());
 
-        if !self.builds.contains_key(&req.build_id) {
+        if !self.builds.contains_key(&build_key) {
             return Ok(Response::new(AddSubprojectResponse {
                 added: false,
                 error_message: format!("Build {} not found", req.build_id),
@@ -136,7 +139,7 @@ impl BuildLayoutService for BuildLayoutServiceImpl {
         }
 
         // Validate that the subproject directory is under the build root
-        let layout = self.builds.get(&req.build_id).unwrap();
+        let layout = self.builds.get(&build_key).unwrap();
         if !req.project_dir.starts_with(&layout.root_dir) {
             return Ok(Response::new(AddSubprojectResponse {
                 added: false,
@@ -198,8 +201,9 @@ impl BuildLayoutService for BuildLayoutServiceImpl {
         request: Request<GetProjectTreeRequest>,
     ) -> Result<Response<GetProjectTreeResponse>, Status> {
         let req = request.into_inner();
+        let build_key = BuildId::from(req.build_id.clone());
 
-        if !self.builds.contains_key(&req.build_id) {
+        if !self.builds.contains_key(&build_key) {
             return Err(Status::not_found(format!(
                 "Build {} not found",
                 req.build_id
