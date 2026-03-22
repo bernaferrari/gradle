@@ -67,3 +67,15 @@ harness = false
 [[bench]]
 name = "cache_orchestration_bench"
 harness = false
+
+[[bench]]
+name = "task_graph_bench"
+harness = false
+
+[[bench]]
+name = "metrics_bench"
+harness = false
+
+[[bench]]
+name = "event_stream_bench"
+harness = false
