@@ -4,6 +4,8 @@ use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
+use super::scopes::BuildId;
+
 use crate::proto::{
     build_metrics_service_server::BuildMetricsService, GetMetricsRequest, GetMetricsResponse,
     GetPerformanceSummaryRequest, GetPerformanceSummaryResponse, MetricSnapshot,
@@ -63,7 +65,7 @@ impl MetricData {
 #[derive(Default)]
 pub struct BuildMetricsServiceImpl {
     metrics: DashMap<String, MetricData>,
-    builds: DashMap<String, BuildSummaryData>,
+    builds: DashMap<BuildId, BuildSummaryData>,
 }
 
 #[derive(Default)]
@@ -102,10 +104,10 @@ impl BuildMetricsServiceImpl {
         }
     }
 
-    fn ensure_build(&self, build_id: &str) {
+    fn ensure_build(&self, build_id: &BuildId) {
         if !self.builds.contains_key(build_id) {
             self.builds
-                .insert(build_id.to_string(), BuildSummaryData::default());
+                .insert(build_id.clone(), BuildSummaryData::default());
         }
     }
 }
@@ -129,8 +131,9 @@ impl BuildMetricsService for BuildMetricsServiceImpl {
 
         // Also update build summary if this is a known build metric
         if !req.build_id.is_empty() {
-            self.ensure_build(&req.build_id);
-            if let Some(build) = self.builds.get(&req.build_id) {
+            let build_id = BuildId::from(req.build_id.clone());
+            self.ensure_build(&build_id);
+            if let Some(build) = self.builds.get(&build_id) {
                 match event.name.as_str() {
                     "tasks.total" => { build.total_tasks.fetch_add(1, Ordering::Relaxed); }
                     "tasks.cached" => { build.cached_tasks.fetch_add(1, Ordering::Relaxed); }
@@ -209,7 +212,7 @@ impl BuildMetricsService for BuildMetricsServiceImpl {
     ) -> Result<Response<GetPerformanceSummaryResponse>, Status> {
         let req = request.into_inner();
 
-        if let Some(build) = self.builds.get(&req.build_id) {
+        if let Some(build) = self.builds.get(&BuildId::from(req.build_id.clone())) {
             let total_tasks = build.total_tasks.load(Ordering::Relaxed);
             let cache_hits = build.cache_hits.load(Ordering::Relaxed);
             let cache_misses = build.cache_misses.load(Ordering::Relaxed);
@@ -291,7 +294,7 @@ impl BuildMetricsService for BuildMetricsServiceImpl {
             }))
         } else {
             // Reset only for specific build
-            let cleared = if self.builds.remove(&req.build_id).is_some() {
+            let cleared = if self.builds.remove(&BuildId::from(req.build_id)).is_some() {
                 1
             } else {
                 0

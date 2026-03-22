@@ -10,6 +10,7 @@ use crate::proto::{
     HealthCheckResponse, InitBuildRequest, InitBuildResponse, SubstrateServiceInfo,
 };
 use crate::SERVER_VERSION;
+use super::scopes::BuildId;
 
 /// Active build session.
 struct BuildSession {
@@ -24,7 +25,7 @@ struct BuildSession {
 /// Rust-native bootstrap service.
 /// Coordinates Gradle initialization and provides the final JVM-Rust handoff.
 pub struct BootstrapServiceImpl {
-    sessions: DashMap<String, BuildSession>,
+    sessions: DashMap<BuildId, BuildSession>,
     request_counts: DashMap<String, AtomicI64>,
     start_time: Instant,
     health_status: std::sync::atomic::AtomicBool,
@@ -79,7 +80,8 @@ impl BootstrapService for BootstrapServiceImpl {
         let project_dir = req.project_dir.clone();
         let features_list: Vec<String> = req.requested_features.clone();
         let sys_prop_count = req.system_properties.len();
-        let build_id = req.build_id.clone();
+        let build_id = BuildId::from(req.build_id.clone());
+        let build_id_str = req.build_id.clone();
         let parallelism = req.requested_parallelism;
         let client_start_time_ms = req.start_time_ms;
 
@@ -96,7 +98,7 @@ impl BootstrapService for BootstrapServiceImpl {
         );
 
         tracing::info!(
-            build_id = %build_id,
+            build_id = %build_id_str,
             project_dir = %project_dir,
             parallelism = parallelism,
             features = ?features_list,
@@ -118,8 +120,9 @@ impl BootstrapService for BootstrapServiceImpl {
         request: Request<CompleteBuildRequest>,
     ) -> Result<Response<CompleteBuildResponse>, Status> {
         let req = request.into_inner();
+        let build_id = BuildId::from(req.build_id.clone());
 
-        if let Some((_key, session)) = self.sessions.remove(&req.build_id) {
+        if let Some((_key, session)) = self.sessions.remove(&build_id) {
             let server_duration_ms = session.start_time.elapsed().as_millis() as i64;
             let features_list = session
                 .requested_features
@@ -226,7 +229,7 @@ mod tests {
         assert_eq!(resp.build_id, "build-123");
         assert_eq!(resp.max_parallelism, 4);
 
-        assert!(svc.sessions.contains_key("build-123"));
+        assert!(svc.sessions.contains_key(&BuildId::from("build-123".to_string())));
 
         let resp2 = svc
             .complete_build(Request::new(CompleteBuildRequest {
@@ -239,7 +242,7 @@ mod tests {
             .into_inner();
 
         assert!(resp2.acknowledged);
-        assert!(!svc.sessions.contains_key("build-123"));
+        assert!(!svc.sessions.contains_key(&BuildId::from("build-123".to_string())));
     }
 
     #[tokio::test]
@@ -545,10 +548,10 @@ mod tests {
 
         assert_eq!(resp.build_id, "zero-para");
         assert_eq!(resp.max_parallelism, 0);
-        assert!(svc.sessions.contains_key("zero-para"));
+        assert!(svc.sessions.contains_key(&BuildId::from("zero-para".to_string())));
 
         // Verify the session stored the zero parallelism
-        let session = svc.sessions.get("zero-para").unwrap();
+        let session = svc.sessions.get(&BuildId::from("zero-para".to_string())).unwrap();
         assert_eq!(session.requested_parallelism, 0);
     }
 

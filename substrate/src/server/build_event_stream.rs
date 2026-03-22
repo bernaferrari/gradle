@@ -4,6 +4,8 @@ use dashmap::DashMap;
 use tokio::sync::broadcast;
 use tonic::{Request, Response, Status};
 
+use super::scopes::BuildId;
+
 use crate::proto::{
     build_event_stream_service_server::BuildEventStreamService, BuildEventMessage,
     GetEventLogRequest, GetEventLogResponse, SendBuildEventRequest, SendBuildEventResponse,
@@ -23,9 +25,9 @@ const BROADCAST_CAPACITY: usize = 256;
 /// Events are also buffered in memory for historical queries.
 #[derive(Default)]
 pub struct BuildEventStreamServiceImpl {
-    event_buffers: DashMap<String, Vec<BuildEventMessage>>,
+    event_buffers: DashMap<BuildId, Vec<BuildEventMessage>>,
     /// Broadcast channels per build_id for real-time streaming.
-    build_channels: DashMap<String, broadcast::Sender<BuildEventMessage>>,
+    build_channels: DashMap<BuildId, broadcast::Sender<BuildEventMessage>>,
     subscribers: AtomicI64,
     events_sent: AtomicI64,
     events_received: AtomicI64,
@@ -56,9 +58,9 @@ impl BuildEventStreamServiceImpl {
     }
 
     /// Get or create a broadcast sender for a build.
-    fn get_or_create_channel(&self, build_id: &str) -> broadcast::Sender<BuildEventMessage> {
+    fn get_or_create_channel(&self, build_id: BuildId) -> broadcast::Sender<BuildEventMessage> {
         self.build_channels
-            .entry(build_id.to_string())
+            .entry(build_id)
             .or_insert_with(|| {
                 let (tx, _) = broadcast::channel(BROADCAST_CAPACITY);
                 tx
@@ -72,7 +74,7 @@ impl BuildEventStreamServiceImpl {
     }
 
     /// Remove a build's channel and buffer (cleanup after build completes).
-    pub fn cleanup_build(&self, build_id: &str) {
+    pub fn cleanup_build(&self, build_id: &BuildId) {
         self.build_channels.remove(build_id);
         self.event_buffers.remove(build_id);
     }
@@ -89,11 +91,11 @@ impl BuildEventStreamService for BuildEventStreamServiceImpl {
         let req = request.into_inner();
         self.subscribers.fetch_add(1, Ordering::Relaxed);
 
-        let build_id = req.build_id.clone();
+        let build_id = BuildId::from(req.build_id.clone());
         let filter = req.event_types;
 
         // Get the broadcast receiver for this build
-        let rx = self.get_or_create_channel(&build_id).subscribe();
+        let rx = self.get_or_create_channel(build_id.clone()).subscribe();
 
         // Also replay buffered events
         let buffered_events: Vec<BuildEventMessage> = if let Some(buf) = self.event_buffers.get(&build_id) {
@@ -150,6 +152,8 @@ impl BuildEventStreamService for BuildEventStreamServiceImpl {
         let req = request.into_inner();
         self.events_received.fetch_add(1, Ordering::Relaxed);
 
+        let build_id = BuildId::from(req.build_id.clone());
+
         let event = BuildEventMessage {
             build_id: req.build_id.clone(),
             timestamp_ms: Self::now_ms(),
@@ -161,7 +165,7 @@ impl BuildEventStreamService for BuildEventStreamServiceImpl {
         };
 
         // Buffer the event
-        if let Some(mut buf) = self.event_buffers.get_mut(&req.build_id) {
+        if let Some(mut buf) = self.event_buffers.get_mut(&build_id) {
             if buf.len() >= MAX_EVENTS_PER_BUILD {
                 // Evict oldest events (keep the most recent half)
                 let evict_count = buf.len() / 2;
@@ -171,13 +175,13 @@ impl BuildEventStreamService for BuildEventStreamServiceImpl {
             buf.push(event.clone());
         } else {
             self.event_buffers
-                .entry(req.build_id.clone())
+                .entry(build_id.clone())
                 .or_default()
                 .push(event.clone());
         }
 
         // Broadcast to live subscribers
-        if let Some(tx) = self.build_channels.get(&req.build_id) {
+        if let Some(tx) = self.build_channels.get(&build_id) {
             // Ignore send errors — no subscribers or channel full
             let _ = tx.send(event);
         }
@@ -192,8 +196,9 @@ impl BuildEventStreamService for BuildEventStreamServiceImpl {
         request: Request<GetEventLogRequest>,
     ) -> Result<Response<GetEventLogResponse>, Status> {
         let req = request.into_inner();
+        let build_id = BuildId::from(req.build_id);
 
-        let events = if let Some(buf) = self.event_buffers.get(&req.build_id) {
+        let events = if let Some(buf) = self.event_buffers.get(&build_id) {
             let mut events: Vec<BuildEventMessage> = buf.iter().cloned().collect();
 
             // Filter by timestamp if requested
@@ -632,7 +637,7 @@ mod tests {
 
         assert_eq!(svc.active_build_count(), 1);
 
-        svc.cleanup_build("build-cleanup");
+        svc.cleanup_build(&BuildId::from("build-cleanup".to_string()));
 
         assert_eq!(svc.event_buffers.len(), 0);
         assert_eq!(svc.active_build_count(), 0);

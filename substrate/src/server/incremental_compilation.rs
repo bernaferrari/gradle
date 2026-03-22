@@ -3,6 +3,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
+use super::scopes::BuildId;
+
 use crate::proto::{
     incremental_compilation_service_server::IncrementalCompilationService, CompilationUnit,
     GetIncrementalStateRequest, GetIncrementalStateResponse, GetRebuildSetRequest,
@@ -28,7 +30,7 @@ struct SourceSet {
 #[derive(Default)]
 pub struct IncrementalCompilationServiceImpl {
     source_sets: DashMap<String, SourceSet>,     // source_set_id -> SourceSet
-    build_source_sets: DashMap<String, Vec<String>>, // build_id -> [source_set_id]
+    build_source_sets: DashMap<BuildId, Vec<String>>, // build_id -> [source_set_id]
 }
 
 impl IncrementalCompilationServiceImpl {
@@ -89,7 +91,7 @@ impl IncrementalCompilationService for IncrementalCompilationServiceImpl {
             .ok_or_else(|| Status::invalid_argument("SourceSetDescriptor is required"))?;
 
         let source_set_id = descriptor.source_set_id.clone();
-        let build_id = req.build_id.clone();
+        let build_id = BuildId::from(req.build_id.clone());
         let classpath_hash = descriptor.classpath_hash.clone();
 
         // Detect classpath change from previous registration

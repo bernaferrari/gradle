@@ -3,6 +3,8 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
+use super::scopes::BuildId;
+
 use crate::proto::{
     console_service_server::ConsoleService, LogMessageRequest, LogMessageResponse,
     RequestInputRequest, RequestInputResponse, SetBuildDescriptionRequest,
@@ -167,9 +169,9 @@ mod ansi {
 /// Manages console output, progress rendering, status lines, and log buffering.
 #[derive(Default)]
 pub struct ConsoleServiceImpl {
-    progress_ops: DashMap<String, ProgressEntry>, // operation_id -> entry
-    build_descriptions: DashMap<String, String>,  // build_id -> description
-    log_buffer: DashMap<String, Vec<BufferedLog>>, // build_id -> [logs]
+    progress_ops: DashMap<String, ProgressEntry>,    // operation_id -> entry
+    build_descriptions: DashMap<BuildId, String>,     // build_id -> description
+    log_buffer: DashMap<BuildId, Vec<BufferedLog>>,   // build_id -> [logs]
     log_counts: AtomicI64,
     progress_updates: AtomicI64,
     logs_evicted: AtomicI64,
@@ -212,7 +214,7 @@ impl ConsoleServiceImpl {
     }
 
     /// Get all buffered log messages for a build.
-    pub fn get_log_buffer(&self, build_id: &str) -> Vec<BufferedLog> {
+    pub fn get_log_buffer(&self, build_id: &BuildId) -> Vec<BufferedLog> {
         self.log_buffer
             .get(build_id)
             .map(|buf| buf.iter().cloned().collect())
@@ -220,7 +222,7 @@ impl ConsoleServiceImpl {
     }
 
     /// Get all buffered log messages for a build, formatted with ANSI colors and timestamps.
-    pub fn get_formatted_log_buffer(&self, build_id: &str) -> Vec<String> {
+    pub fn get_formatted_log_buffer(&self, build_id: &BuildId) -> Vec<String> {
         self.log_buffer
             .get(build_id)
             .map(|buf| buf.iter().map(|log| log.formatted()).collect())
@@ -228,7 +230,7 @@ impl ConsoleServiceImpl {
     }
 
     /// Flush (clear) the log buffer for a build, returning the evicted count.
-    pub fn flush_log_buffer(&self, build_id: &str) -> usize {
+    pub fn flush_log_buffer(&self, build_id: &BuildId) -> usize {
         if let Some((_, buf)) = self.log_buffer.remove(build_id) {
             buf.len()
         } else {
@@ -248,7 +250,8 @@ impl ConsoleServiceImpl {
     }
 
     /// Buffer a log message and evict if at capacity.
-    fn buffer_log(&self, build_id: &str, level: &str, category: &str, message: &str) {
+    fn buffer_log(&self, build_id: &BuildId, level: &str, category: &str, message: &str) {
+        let build_id_str = build_id.to_string();
         if let Some(mut buf) = self.log_buffer.get_mut(build_id) {
             if buf.len() >= MAX_LOG_BUFFER {
                 let evict = buf.len() / 2;
@@ -256,7 +259,7 @@ impl ConsoleServiceImpl {
                 self.logs_evicted.fetch_add(evict as i64, Ordering::Relaxed);
             }
             buf.push(BufferedLog {
-                build_id: build_id.to_string(),
+                build_id: build_id_str,
                 level: level.to_string(),
                 category: category.to_string(),
                 message: message.to_string(),
@@ -264,7 +267,7 @@ impl ConsoleServiceImpl {
             });
         } else {
             self.log_buffer
-                .entry(build_id.to_string())
+                .entry(build_id.clone())
                 .or_default()
                 .push(BufferedLog {
                     build_id: build_id.to_string(),
@@ -286,8 +289,10 @@ impl ConsoleService for ConsoleServiceImpl {
         let req = request.into_inner();
         self.log_counts.fetch_add(1, Ordering::Relaxed);
 
+        let build_id = BuildId::from(req.build_id.clone());
+
         // Buffer the log message
-        self.buffer_log(&req.build_id, &req.level, &req.category, &req.message);
+        self.buffer_log(&build_id, &req.level, &req.category, &req.message);
 
         // Format and log via tracing; use bold formatting for errors to make them stand out
         let formatted = match req.level.as_str() {
@@ -457,8 +462,10 @@ impl ConsoleService for ConsoleServiceImpl {
     ) -> Result<Response<SetBuildDescriptionResponse>, Status> {
         let req = request.into_inner();
 
+        let build_id = BuildId::from(req.build_id.clone());
+
         self.build_descriptions
-            .insert(req.build_id.clone(), req.description.clone());
+            .insert(build_id, req.description.clone());
 
         let total_ops = self.progress_ops.len();
         tracing::info!(
@@ -512,7 +519,7 @@ mod tests {
             .unwrap();
         }
 
-        let buffer = svc.get_log_buffer("build-buf");
+        let buffer = svc.get_log_buffer(&BuildId("build-buf".to_string()));
         assert_eq!(buffer.len(), 5);
         assert_eq!(buffer[0].message, "Message 0");
         assert_eq!(buffer[4].message, "Message 4");
@@ -542,8 +549,8 @@ mod tests {
         .await
         .unwrap();
 
-        let buf_a = svc.get_log_buffer("build-a");
-        let buf_b = svc.get_log_buffer("build-b");
+        let buf_a = svc.get_log_buffer(&BuildId("build-a".to_string()));
+        let buf_b = svc.get_log_buffer(&BuildId("build-b".to_string()));
 
         assert_eq!(buf_a.len(), 1);
         assert_eq!(buf_b.len(), 1);
@@ -700,7 +707,7 @@ mod tests {
         .await
         .unwrap();
 
-        let desc = svc.build_descriptions.get("build-4").unwrap();
+        let desc = svc.build_descriptions.get(&BuildId("build-4".to_string())).unwrap();
         assert_eq!(*desc, "Building my-app (42 tasks)");
     }
 
