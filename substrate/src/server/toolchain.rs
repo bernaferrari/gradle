@@ -950,4 +950,231 @@ OpenJDK Runtime Environment (build 21.0.4+7)"#;
 
         assert!(!resp.found);
     }
+
+    /// Getting a toolchain for an unknown language/implementation returns
+    /// the default (found=false, empty java_home). When no system JDK matches
+    /// and JAVA_HOME is not set, the response is a clean empty default.
+    #[tokio::test]
+    async fn test_get_java_home_unknown_language_returns_default() {
+        let svc = make_svc();
+
+        // Temporarily clear JAVA_HOME so we get a pure "not found" path
+        let original_java_home = std::env::var("JAVA_HOME").ok();
+        std::env::remove_var("JAVA_HOME");
+
+        let resp = svc
+            .get_java_home(Request::new(GetJavaHomeRequest {
+                language_version: "ruby".to_string(),
+                implementation: "unknown_impl".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.found, "expected found=false for unknown language");
+        assert!(
+            resp.java_home.is_empty(),
+            "expected empty java_home for unknown language, got: {}",
+            resp.java_home
+        );
+
+        // Restore JAVA_HOME if it was set
+        if let Some(val) = original_java_home {
+            std::env::set_var("JAVA_HOME", val);
+        }
+    }
+
+    /// Register multiple toolchains directly into the DashMap, then list
+    /// them and verify all appear in the response.
+    #[tokio::test]
+    async fn test_register_multiple_toolchains_and_list() {
+        let svc = make_svc();
+
+        // Insert several toolchains directly into the registry
+        svc.installations.insert(
+            ToolchainServiceImpl::toolchain_key("17", "temurin"),
+            InstalledToolchain {
+                language_version: "JDK 17".to_string(),
+                implementation: "temurin".to_string(),
+                java_home: "/opt/jdks/temurin-17".to_string(),
+                verified: true,
+                install_size_bytes: 350_000_000,
+            },
+        );
+        svc.installations.insert(
+            ToolchainServiceImpl::toolchain_key("21", "corretto"),
+            InstalledToolchain {
+                language_version: "JDK 21".to_string(),
+                implementation: "corretto".to_string(),
+                java_home: "/opt/jdks/corretto-21".to_string(),
+                verified: true,
+                install_size_bytes: 380_000_000,
+            },
+        );
+        svc.installations.insert(
+            ToolchainServiceImpl::toolchain_key("11", "temurin"),
+            InstalledToolchain {
+                language_version: "JDK 11".to_string(),
+                implementation: "temurin".to_string(),
+                java_home: "/opt/jdks/temurin-11".to_string(),
+                verified: false,
+                install_size_bytes: 300_000_000,
+            },
+        );
+
+        let resp = svc
+            .list_toolchains(Request::new(ListToolchainsRequest {
+                os: std::env::consts::OS.to_string(),
+                arch: std::env::consts::ARCH.to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // At minimum, our 3 registered toolchains must be present
+        // (system-detected JDKs may add more)
+        let registered: Vec<_> = resp
+            .toolchains
+            .iter()
+            .filter(|tc| tc.installed_via == "substrate")
+            .collect();
+
+        assert!(
+            registered.len() >= 3,
+            "expected at least 3 registered toolchains, got {}",
+            registered.len()
+        );
+
+        // Verify each registered toolchain has the correct fields
+        let versions: std::collections::HashSet<_> = registered
+            .iter()
+            .map(|tc| (tc.implementation.clone(), tc.language_version.clone()))
+            .collect();
+
+        assert!(versions.contains(&("temurin".to_string(), "JDK 17".to_string())));
+        assert!(versions.contains(&("corretto".to_string(), "JDK 21".to_string())));
+        assert!(versions.contains(&("temurin".to_string(), "JDK 11".to_string())));
+
+        // Check that the verified flag and install_size_bytes are preserved
+        let temurin_17 = registered
+            .iter()
+            .find(|tc| tc.implementation == "temurin" && tc.language_version == "JDK 17")
+            .unwrap();
+        assert!(temurin_17.verified);
+        assert_eq!(temurin_17.install_size_bytes, 350_000_000);
+        assert_eq!(temurin_17.java_home, "/opt/jdks/temurin-17");
+
+        // The JDK 11 entry should have verified=false
+        let temurin_11 = registered
+            .iter()
+            .find(|tc| tc.implementation == "temurin" && tc.language_version == "JDK 11")
+            .unwrap();
+        assert!(!temurin_11.verified);
+    }
+
+    /// Calling ensure_toolchain for a toolchain that is already in the
+    /// installations map should return a single "done" progress message
+    /// (idempotent install).
+    #[tokio::test]
+    async fn test_ensure_toolchain_already_installed_is_idempotent() {
+        let svc = make_svc();
+
+        // Pre-register a toolchain
+        let java_home = "/opt/jdks/temurin-17".to_string();
+        svc.installations.insert(
+            ToolchainServiceImpl::toolchain_key("17", "temurin"),
+            InstalledToolchain {
+                language_version: "JDK 17".to_string(),
+                implementation: "temurin".to_string(),
+                java_home: java_home.clone(),
+                verified: true,
+                install_size_bytes: 350_000_000,
+            },
+        );
+
+        // Request the same toolchain via ensure_toolchain
+        let response = svc
+            .ensure_toolchain(Request::new(EnsureToolchainRequest {
+                language_version: "17".to_string(),
+                implementation: "temurin".to_string(),
+                vendor: String::new(),
+                os: std::env::consts::OS.to_string(),
+                arch: std::env::consts::ARCH.to_string(),
+                download_urls: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Collect all progress messages from the stream
+        use futures_util::StreamExt;
+        let messages: Vec<ToolchainProgress> = response
+            .collect::<Vec<Result<ToolchainProgress, Status>>>()
+            .await
+            .into_iter()
+            .map(|r| r.unwrap())
+            .collect();
+
+        // Should be exactly one message: "already installed"
+        assert_eq!(
+            messages.len(),
+            1,
+            "expected exactly 1 progress message for already-installed toolchain, got {}",
+            messages.len()
+        );
+
+        let msg = &messages[0];
+        assert_eq!(msg.phase, "done");
+        assert_eq!(msg.progress_percent, 100);
+        assert!(msg.success);
+        assert!(msg.error_message.is_empty());
+        assert!(
+            msg.message.contains("already installed"),
+            "expected 'already installed' in message, got: {}",
+            msg.message
+        );
+        assert_eq!(msg.java_home, java_home);
+
+        // Verify that the downloads_total counter was NOT incremented
+        // (no new download was initiated)
+        assert_eq!(
+            svc.downloads_total.load(Ordering::Relaxed),
+            0,
+            "downloads_total should remain 0 for idempotent install"
+        );
+    }
+
+    /// Verifying a toolchain with an empty java_home path should be handled
+    /// gracefully -- the path does not exist, so valid=false with a
+    /// descriptive error message.
+    #[tokio::test]
+    async fn test_verify_toolchain_empty_path_graceful() {
+        let svc = make_svc();
+
+        let resp = svc
+            .verify_toolchain(Request::new(VerifyToolchainRequest {
+                java_home: String::new(),
+                expected_version: "17".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.valid, "empty path should not be valid");
+        assert!(
+            resp.detected_version.is_empty(),
+            "expected empty detected_version, got: {}",
+            resp.detected_version
+        );
+        assert!(
+            !resp.error_message.is_empty(),
+            "expected a non-empty error message for empty path"
+        );
+        // The error message should mention that the path was not found
+        assert!(
+            resp.error_message.contains("not found"),
+            "expected 'not found' in error message, got: {}",
+            resp.error_message
+        );
+    }
 }
