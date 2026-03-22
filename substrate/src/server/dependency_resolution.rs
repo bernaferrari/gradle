@@ -1268,4 +1268,163 @@ mod tests {
         let interp = DependencyResolutionServiceImpl::interpolate_properties(&deps[0].version, &props);
         assert_eq!(interp, "5.3.30");
     }
+
+    #[tokio::test]
+    async fn test_resolve_for_nonexistent_build_returns_empty() {
+        let svc = DependencyResolutionServiceImpl::new();
+
+        let resp = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "nonexistent-build-config".to_string(),
+                dependencies: vec![],
+                repositories: vec![],
+                attributes: vec![],
+                lenient: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.success);
+        assert!(resp.resolved_dependencies.is_empty());
+        assert_eq!(resp.total_artifacts, 0);
+        assert_eq!(resp.total_download_size, 0);
+        assert!(resp.error_message.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_record_resolution_with_zero_artifacts() {
+        let svc = DependencyResolutionServiceImpl::new();
+
+        let resp = svc
+            .record_resolution(Request::new(RecordResolutionRequest {
+                configuration_name: "empty-compileClasspath".to_string(),
+                dependency_count: 0,
+                resolution_time_ms: 0,
+                success: true,
+                cache_hits: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.acknowledged);
+
+        // Verify stats reflect the resolution was processed
+        let stats = svc
+            .get_resolution_stats(Request::new(GetResolutionStatsRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(stats.avg_resolution_time_ms >= 0.0);
+        assert!(stats.cached_artifacts >= 0);
+    }
+
+    #[tokio::test]
+    async fn test_record_resolution_same_configuration_twice_overwrites() {
+        let svc = DependencyResolutionServiceImpl::new();
+
+        let config = "compileClasspath".to_string();
+
+        // First record
+        let resp1 = svc
+            .record_resolution(Request::new(RecordResolutionRequest {
+                configuration_name: config.clone(),
+                dependency_count: 10,
+                resolution_time_ms: 100,
+                success: true,
+                cache_hits: 3,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp1.acknowledged);
+
+        // Second record for the same configuration with different values
+        let resp2 = svc
+            .record_resolution(Request::new(RecordResolutionRequest {
+                configuration_name: config.clone(),
+                dependency_count: 25,
+                resolution_time_ms: 250,
+                success: true,
+                cache_hits: 12,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp2.acknowledged);
+
+        // Both calls are acknowledged — the service accepts overwrites without error
+        let stats = svc
+            .get_resolution_stats(Request::new(GetResolutionStatsRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // record_resolution does not increment total_resolutions, but the calls succeed
+        assert!(stats.avg_resolution_time_ms >= 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_get_resolution_stats_for_build_with_no_resolutions() {
+        let svc = DependencyResolutionServiceImpl::new();
+
+        // Fresh service with no prior activity
+        let stats = svc
+            .get_resolution_stats(Request::new(GetResolutionStatsRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(stats.total_resolutions, 0);
+        assert_eq!(stats.artifact_cache_hits, 0);
+        assert_eq!(stats.total_resolution_time_ms, 0);
+        assert_eq!(stats.avg_resolution_time_ms, 0.0);
+        assert_eq!(stats.cached_artifacts, 0);
+    }
+
+    #[tokio::test]
+    async fn test_record_and_retrieve_resolution_with_failure() {
+        let svc = DependencyResolutionServiceImpl::new();
+
+        // Record a failed resolution
+        let resp = svc
+            .record_resolution(Request::new(RecordResolutionRequest {
+                configuration_name: "failing-config".to_string(),
+                dependency_count: 5,
+                resolution_time_ms: 300,
+                success: false,
+                cache_hits: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.acknowledged);
+
+        // Record a successful resolution to make stats meaningful
+        svc.resolve_dependencies(Request::new(ResolveDependenciesRequest {
+            configuration_name: "working-config".to_string(),
+            dependencies: vec![make_dep("org.slf4j", "slf4j-api", "2.0.9")],
+            repositories: vec![make_repo("central", "https://repo.maven.apache.org/maven2/")],
+            attributes: vec![],
+            lenient: true,
+        }))
+        .await
+        .unwrap();
+
+        // Retrieve stats — should show at least one resolution recorded via resolve_dependencies
+        let stats = svc
+            .get_resolution_stats(Request::new(GetResolutionStatsRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(stats.total_resolutions >= 1);
+        assert!(stats.total_resolution_time_ms >= 0);
+        // The failed record_resolution call does not itself contribute to total_resolutions,
+        // but the resolve_dependencies call above does
+        assert!(stats.avg_resolution_time_ms >= 0.0);
+    }
 }

@@ -374,4 +374,154 @@ mod tests {
 
         assert!(result.is_err());
     }
+
+    #[tokio::test]
+    async fn test_gRPC_nonexistent_file_returns_error_result() {
+        let svc = HashServiceImpl;
+
+        let resp = svc
+            .hash_batch(Request::new(HashBatchRequest {
+                files: vec![crate::proto::FileToHash {
+                    absolute_path: "/tmp/this_file_definitely_does_not_exist_12345".to_string(),
+                    length: 0,
+                    last_modified: 0,
+                }],
+                algorithm: "MD5".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.results.len(), 1);
+        assert!(resp.results[0].error, "expected error flag for non-existent file");
+        assert!(
+            !resp.results[0].error_message.is_empty(),
+            "expected a non-empty error message"
+        );
+        assert!(
+            resp.results[0].hash_bytes.is_empty(),
+            "expected empty hash bytes for non-existent file"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_gRPC_batch_mix_of_existing_and_nonexistent() {
+        let svc = HashServiceImpl;
+
+        let mut existing = NamedTempFile::new().unwrap();
+        write!(existing, "I exist").unwrap();
+
+        let resp = svc
+            .hash_batch(Request::new(HashBatchRequest {
+                files: vec![
+                    crate::proto::FileToHash {
+                        absolute_path: existing.path().to_string_lossy().to_string(),
+                        length: 0,
+                        last_modified: 0,
+                    },
+                    crate::proto::FileToHash {
+                        absolute_path: "/tmp/no_such_file_xyz_987".to_string(),
+                        length: 0,
+                        last_modified: 0,
+                    },
+                ],
+                algorithm: "MD5".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.results.len(), 2);
+
+        // First file: should succeed
+        assert!(
+            !resp.results[0].error,
+            "first file should succeed"
+        );
+        assert_eq!(resp.results[0].hash_bytes.len(), 16);
+        assert!(resp.results[0].error_message.is_empty());
+
+        // Second file: should fail gracefully
+        assert!(
+            resp.results[1].error,
+            "second file should have error flag"
+        );
+        assert!(resp.results[1].hash_bytes.is_empty());
+        assert!(
+            !resp.results[1].error_message.is_empty(),
+            "second file should have an error message"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_gRPC_hash_empty_file_via_service() {
+        let svc = HashServiceImpl;
+
+        let tmp = NamedTempFile::new().unwrap();
+
+        let resp = svc
+            .hash_batch(Request::new(HashBatchRequest {
+                files: vec![crate::proto::FileToHash {
+                    absolute_path: tmp.path().to_string_lossy().to_string(),
+                    length: 0,
+                    last_modified: 0,
+                }],
+                algorithm: "MD5".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.results.len(), 1);
+        assert!(!resp.results[0].error);
+        // An empty file still produces a 16-byte MD5 hash (the Gradle signature prefix alone)
+        assert_eq!(resp.results[0].hash_bytes.len(), 16);
+        // The hash of an empty file with Gradle signature should equal MD5(signature || empty)
+        let expected = {
+            let mut hasher = Md5::new();
+            hasher.update(compute_gradle_signature());
+            hasher.finalize().to_vec()
+        };
+        assert_eq!(resp.results[0].hash_bytes, expected);
+    }
+
+    #[tokio::test]
+    async fn test_gRPC_hash_same_file_twice_is_deterministic() {
+        let svc = HashServiceImpl;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "deterministic content for gRPC test").unwrap();
+
+        let path_str = tmp.path().to_string_lossy().to_string();
+
+        let request = HashBatchRequest {
+            files: vec![crate::proto::FileToHash {
+                absolute_path: path_str.clone(),
+                length: 0,
+                last_modified: 0,
+            }],
+            algorithm: "SHA-256".to_string(),
+        };
+
+        let resp1 = svc
+            .hash_batch(Request::new(request.clone()))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let resp2 = svc
+            .hash_batch(Request::new(request))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp1.results.len(), 1);
+        assert_eq!(resp2.results.len(), 1);
+        assert!(!resp1.results[0].error);
+        assert!(!resp2.results[0].error);
+        assert_eq!(
+            resp1.results[0].hash_bytes, resp2.results[0].hash_bytes,
+            "hashing the same file twice must produce identical results"
+        );
+    }
 }
