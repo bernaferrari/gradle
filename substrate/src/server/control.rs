@@ -1,25 +1,48 @@
+use std::sync::Arc;
+
 use tonic::{Request, Response, Status};
 
 use crate::{PROTOCOL_VERSION, SERVER_VERSION};
 use crate::proto::{
     control_service_server::ControlService, HandshakeRequest, HandshakeResponse,
-    ShutdownRequest, ShutdownResponse,
+    ShutdownRequest, ShutdownResponse, SetAuthoritativeModeRequest, SetAuthoritativeModeResponse,
+    GetAuthoritativeModeRequest, GetAuthoritativeModeResponse, SubsystemAuthStatus,
 };
+use super::authoritative::AuthoritativeConfig;
 
 pub struct ControlServiceImpl {
     shutdown_tx: tokio::sync::broadcast::Sender<()>,
+    authoritative_config: Arc<AuthoritativeConfig>,
 }
 
 impl Default for ControlServiceImpl {
     fn default() -> Self {
         let (tx, _) = tokio::sync::broadcast::channel(1);
-        Self::new(tx)
+        Self::with_config(tx, Arc::new(AuthoritativeConfig::new()))
     }
 }
 
 impl ControlServiceImpl {
     pub fn new(shutdown_tx: tokio::sync::broadcast::Sender<()>) -> Self {
-        Self { shutdown_tx }
+        Self::with_config(shutdown_tx, Arc::new(AuthoritativeConfig::new()))
+    }
+
+    pub fn with_config(
+        shutdown_tx: tokio::sync::broadcast::Sender<()>,
+        authoritative_config: Arc<AuthoritativeConfig>,
+    ) -> Self {
+        Self {
+            shutdown_tx,
+            authoritative_config,
+        }
+    }
+}
+
+fn mode_label(authoritative: bool) -> &'static str {
+    if authoritative {
+        "authoritative"
+    } else {
+        "shadow"
     }
 }
 
@@ -66,5 +89,177 @@ impl ControlService for ControlServiceImpl {
         Ok(Response::new(ShutdownResponse {
             acknowledged: true,
         }))
+    }
+
+    async fn set_authoritative_mode(
+        &self,
+        request: Request<SetAuthoritativeModeRequest>,
+    ) -> Result<Response<SetAuthoritativeModeResponse>, Status> {
+        let req = request.into_inner();
+        let subsystem = req.subsystem.trim();
+        let authoritative = req.authoritative;
+
+        if subsystem.is_empty() || subsystem == "all" {
+            self.authoritative_config.set_all(authoritative);
+            tracing::info!(mode = %mode_label(authoritative), "Set authoritative mode for all subsystems");
+            return Ok(Response::new(SetAuthoritativeModeResponse {
+                accepted: true,
+                previous_mode: String::new(), // "all" mode doesn't track individual previous state
+            }));
+        }
+
+        match self.authoritative_config.set_subsystem(subsystem, authoritative) {
+            Some(previous) => {
+                tracing::info!(
+                    subsystem = %subsystem,
+                    previous_mode = %mode_label(previous),
+                    new_mode = %mode_label(authoritative),
+                    "Set authoritative mode"
+                );
+                Ok(Response::new(SetAuthoritativeModeResponse {
+                    accepted: true,
+                    previous_mode: mode_label(previous).to_string(),
+                }))
+            }
+            None => {
+                let valid = super::authoritative::SubsystemModes::subsystem_names()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                Err(Status::invalid_argument(format!(
+                    "Unknown subsystem '{}'. Valid subsystems: {}",
+                    subsystem, valid
+                )))
+            }
+        }
+    }
+
+    async fn get_authoritative_mode(
+        &self,
+        _request: Request<GetAuthoritativeModeRequest>,
+    ) -> Result<Response<GetAuthoritativeModeResponse>, Status> {
+        let modes = self.authoritative_config.get_modes();
+        let subsystems = modes
+            .as_pairs()
+            .into_iter()
+            .map(|(name, authoritative)| SubsystemAuthStatus {
+                subsystem: name.to_string(),
+                authoritative,
+            })
+            .collect();
+
+        Ok(Response::new(GetAuthoritativeModeResponse { subsystems }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_service() -> ControlServiceImpl {
+        let (tx, _) = tokio::sync::broadcast::channel(1);
+        ControlServiceImpl::with_config(tx, Arc::new(AuthoritativeConfig::new()))
+    }
+
+    #[tokio::test]
+    async fn get_authoritative_mode_defaults() {
+        let svc = make_service();
+        let resp = svc
+            .get_authoritative_mode(Request::new(GetAuthoritativeModeRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(resp.subsystems.len(), 7);
+        for s in &resp.subsystems {
+            assert!(!s.authoritative, "{} should be shadow by default", s.subsystem);
+        }
+    }
+
+    #[tokio::test]
+    async fn set_authoritative_mode_single() {
+        let svc = make_service();
+        let resp = svc
+            .set_authoritative_mode(Request::new(SetAuthoritativeModeRequest {
+                subsystem: "hashing".to_string(),
+                authoritative: true,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp.accepted);
+        assert_eq!(resp.previous_mode, "shadow");
+
+        // Verify via get
+        let get_resp = svc
+            .get_authoritative_mode(Request::new(GetAuthoritativeModeRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        let hashing = get_resp.subsystems.iter().find(|s| s.subsystem == "hashing").unwrap();
+        assert!(hashing.authoritative);
+        let cache_keys = get_resp.subsystems.iter().find(|s| s.subsystem == "cache_keys").unwrap();
+        assert!(!cache_keys.authoritative);
+    }
+
+    #[tokio::test]
+    async fn set_authoritative_mode_all() {
+        let svc = make_service();
+        let resp = svc
+            .set_authoritative_mode(Request::new(SetAuthoritativeModeRequest {
+                subsystem: "all".to_string(),
+                authoritative: true,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp.accepted);
+
+        let get_resp = svc
+            .get_authoritative_mode(Request::new(GetAuthoritativeModeRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        for s in &get_resp.subsystems {
+            assert!(s.authoritative, "{} should be authoritative", s.subsystem);
+        }
+    }
+
+    #[tokio::test]
+    async fn set_authoritative_mode_unknown_subsystem() {
+        let svc = make_service();
+        let err = svc
+            .set_authoritative_mode(Request::new(SetAuthoritativeModeRequest {
+                subsystem: "nonexistent".to_string(),
+                authoritative: true,
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("Unknown subsystem"));
+    }
+
+    #[tokio::test]
+    async fn set_authoritative_mode_back_to_shadow() {
+        let svc = make_service();
+        // Set to authoritative
+        svc.set_authoritative_mode(Request::new(SetAuthoritativeModeRequest {
+            subsystem: "hashing".to_string(),
+            authoritative: true,
+        }))
+        .await
+        .unwrap();
+
+        // Set back to shadow
+        let resp = svc
+            .set_authoritative_mode(Request::new(SetAuthoritativeModeRequest {
+                subsystem: "hashing".to_string(),
+                authoritative: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp.accepted);
+        assert_eq!(resp.previous_mode, "authoritative");
     }
 }

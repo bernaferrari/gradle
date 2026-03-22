@@ -81,7 +81,7 @@ async fn spawn_test_server() -> (String, tempfile::TempDir) {
     let cache_orchestration = BuildCacheOrchestrationServiceImpl::with_local_cache(cache_local_store);
     let file_fingerprint = FileFingerprintServiceImpl::new();
     let value_snapshot = ValueSnapshotServiceImpl::new();
-    let task_graph = TaskGraphServiceImpl::with_history(Arc::clone(&shared_history));
+    let task_graph = Arc::new(TaskGraphServiceImpl::with_history(Arc::clone(&shared_history)));
     // Separate instance for the gRPC server (tonic needs concrete type, not Arc)
     let execution_history = ExecutionHistoryServiceImpl::new(history_dir.clone());
     let configuration = ConfigurationServiceImpl::new();
@@ -89,7 +89,7 @@ async fn spawn_test_server() -> (String, tempfile::TempDir) {
     let build_operations = BuildOperationsServiceImpl::new();
     let bootstrap = BootstrapServiceImpl::new();
     let dependency_resolution = DependencyResolutionServiceImpl::new();
-    let file_watch = FileWatchServiceImpl::new();
+    let file_watch = FileWatchServiceImpl::with_task_graph(Arc::clone(&task_graph));
     let config_cache = ConfigurationCacheServiceImpl::new(config_cache_dir.clone());
     let toolchain = ToolchainServiceImpl::new(toolchain_dir);
     let console = std::sync::Arc::new(ConsoleServiceImpl::new());
@@ -129,7 +129,7 @@ async fn spawn_test_server() -> (String, tempfile::TempDir) {
             .add_service(build_cache_orchestration_service_server::BuildCacheOrchestrationServiceServer::new(cache_orchestration))
             .add_service(file_fingerprint_service_server::FileFingerprintServiceServer::new(file_fingerprint))
             .add_service(value_snapshot_service_server::ValueSnapshotServiceServer::new(value_snapshot))
-            .add_service(task_graph_service_server::TaskGraphServiceServer::new(task_graph))
+            .add_service(task_graph_service_server::TaskGraphServiceServer::new((*task_graph).clone()))
             .add_service(configuration_service_server::ConfigurationServiceServer::new(configuration))
             .add_service(plugin_service_server::PluginServiceServer::new(plugin))
             .add_service(build_operations_service_server::BuildOperationsServiceServer::new(build_operations))
@@ -484,6 +484,7 @@ async fn test_task_graph_e2e() {
             task_path: ":compileJava".to_string(),
             depends_on: vec![":processResources".to_string()],
             task_type: "JavaCompile".to_string(),
+            input_files: vec![],
             should_execute: true,
         }))
         .await
@@ -495,6 +496,7 @@ async fn test_task_graph_e2e() {
             task_path: ":processResources".to_string(),
             depends_on: vec![],
             task_type: "ProcessResources".to_string(),
+            input_files: vec![],
             should_execute: true,
         }))
         .await
@@ -1632,6 +1634,7 @@ async fn test_full_build_lifecycle() {
             task_path: ":compileJava".to_string(),
             depends_on: vec![":processResources".to_string()],
             task_type: "JavaCompile".to_string(),
+            input_files: vec![],
             should_execute: true,
         }))
         .await
@@ -1643,6 +1646,7 @@ async fn test_full_build_lifecycle() {
             task_path: ":processResources".to_string(),
             depends_on: vec![],
             task_type: "Copy".to_string(),
+            input_files: vec![],
             should_execute: true,
         }))
         .await
@@ -2383,6 +2387,7 @@ async fn test_cross_service_execution_plan_with_history() {
             task_path: ":compileJava".to_string(),
             depends_on: vec![],
             task_type: "JavaCompile".to_string(),
+            input_files: vec![],
             should_execute: true,
         }))
         .await
@@ -2645,6 +2650,7 @@ async fn test_task_graph_to_build_result_workflow() {
                 task_path: path.to_string(),
                 depends_on: deps.clone(),
                 task_type: task_type.to_string(),
+                input_files: vec![],
                 should_execute: true,
             }))
             .await
@@ -4028,6 +4034,7 @@ async fn test_task_graph_with_execution_history_integration() {
             depends_on: vec![],
             should_execute: true,
             task_type: "JavaCompile".to_string(),
+            input_files: vec![],
         }))
         .await
         .unwrap()

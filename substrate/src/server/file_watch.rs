@@ -13,6 +13,8 @@ use crate::proto::{
     StopWatchingRequest, StopWatchingResponse,
 };
 
+use super::task_graph::TaskGraphServiceImpl;
+
 /// An active file watch session backed by a real OS file watcher.
 struct WatchSession {
     root_path: String,
@@ -32,6 +34,8 @@ struct WatchSession {
 pub struct FileWatchServiceImpl {
     watches: DashMap<String, WatchSession>,
     next_watch_id: AtomicI64,
+    /// Optional reference to the task graph for file-change -> task invalidation.
+    task_graph: Option<Arc<TaskGraphServiceImpl>>,
 }
 
 impl Default for FileWatchServiceImpl {
@@ -45,6 +49,15 @@ impl FileWatchServiceImpl {
         Self {
             watches: DashMap::new(),
             next_watch_id: AtomicI64::new(1),
+            task_graph: None,
+        }
+    }
+
+    pub fn with_task_graph(task_graph: Arc<TaskGraphServiceImpl>) -> Self {
+        Self {
+            watches: DashMap::new(),
+            next_watch_id: AtomicI64::new(1),
+            task_graph: Some(task_graph),
         }
     }
 
@@ -234,6 +247,7 @@ impl FileWatchService for FileWatchServiceImpl {
             let exclude = session.exclude_patterns.clone();
             let changes = Arc::new(AtomicI64::new(0));
             let changes_for_stream = changes.clone();
+            let task_graph_for_watcher = self.task_graph.clone();
 
             // Create a dedicated watcher for this polling stream
             let mut stream_watcher = RecommendedWatcher::new(
@@ -262,7 +276,19 @@ impl FileWatchService for FileWatchServiceImpl {
                             };
 
                             // Non-blocking send; drop event if receiver is gone
-                            let _ = tx.blocking_send(Ok(file_event));
+                            let _ = tx.blocking_send(Ok(file_event.clone()));
+
+                            // Invalidate tasks that depend on this file
+                            if let Some(tg) = &task_graph_for_watcher {
+                                let changed_path = file_event.path.clone();
+                                let count = tg.invalidate_tasks_for_files(&[changed_path]);
+                                if count > 0 {
+                                    tracing::info!(
+                                        tasks_invalidated = count,
+                                        "File changes invalidated dependent tasks"
+                                    );
+                                }
+                            }
                         }
                     }
                 },

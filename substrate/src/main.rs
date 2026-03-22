@@ -43,6 +43,7 @@ use gradle_substrate_daemon::{
         work_service_server::WorkServiceServer,
     },
     server::{
+        authoritative::AuthoritativeConfig,
         artifact_publishing::ArtifactPublishingServiceImpl,
         bootstrap::BootstrapServiceImpl, build_comparison::BuildComparisonServiceImpl,
         build_event_stream::BuildEventStreamServiceImpl, build_init::BuildInitServiceImpl,
@@ -167,8 +168,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(1);
 
+    // Authoritative mode configuration (shared across services)
+    let authoritative_config = Arc::new(AuthoritativeConfig::new());
+
     // Phase 0: Control
-    let control = ControlServiceImpl::new(shutdown_tx.clone());
+    let control = ControlServiceImpl::with_config(shutdown_tx.clone(), authoritative_config);
 
     // Phase 1: Hashing
     let hash = HashServiceImpl;
@@ -218,7 +222,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let value_snapshot = ValueSnapshotServiceImpl::new();
 
     // Phase 11: Task graph (wired to execution history for duration estimates)
-    let task_graph = TaskGraphServiceImpl::with_history(execution_history.clone());
+    let task_graph = Arc::new(TaskGraphServiceImpl::with_history(execution_history.clone()));
 
     // Phase 12: Configuration
     let configuration = ConfigurationServiceImpl::new();
@@ -238,8 +242,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 18: Dependency resolution
     let dependency_resolution = DependencyResolutionServiceImpl::new();
 
-    // Phase 19: File watching
-    let file_watch = FileWatchServiceImpl::new();
+    // Phase 19: File watching (wired to task graph for file-change -> task invalidation)
+    let file_watch = FileWatchServiceImpl::with_task_graph(Arc::clone(&task_graph));
 
     // Phase 20: Configuration cache
     let config_cache_dir = PathBuf::from(&args.config_cache_dir);
@@ -313,7 +317,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(BuildCacheOrchestrationServiceServer::new(cache_orchestration))
         .add_service(FileFingerprintServiceServer::new(file_fingerprint))
         .add_service(ValueSnapshotServiceServer::new(value_snapshot))
-        .add_service(TaskGraphServiceServer::new(task_graph))
+        .add_service(TaskGraphServiceServer::new((*task_graph).clone()))
         .add_service(ConfigurationServiceServer::new(configuration))
         .add_service(PluginServiceServer::new(plugin))
         .add_service(BuildOperationsServiceServer::new(build_operations))
