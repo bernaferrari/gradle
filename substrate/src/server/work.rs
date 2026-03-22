@@ -305,4 +305,143 @@ mod tests {
         assert!(resp2.should_execute);
         assert!(resp2.reason.contains("inputs changed"));
     }
+
+    #[tokio::test]
+    async fn test_evaluate_different_tasks_independent() {
+        let scheduler = std::sync::Arc::new(WorkerScheduler::new(4));
+        let svc = WorkServiceImpl::new(scheduler);
+
+        // Record execution for task A
+        let resp_a = svc
+            .evaluate(Request::new(WorkEvaluateRequest {
+                task_path: ":taskA".to_string(),
+                input_properties: Default::default(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        svc.record_execution(Request::new(WorkRecordRequest {
+            task_path: ":taskA".to_string(),
+            duration_ms: 100,
+            success: true,
+            input_hash: resp_a.input_hash,
+        }))
+        .await
+        .unwrap();
+
+        // Task B should still need execution (different task path)
+        let resp_b = svc
+            .evaluate(Request::new(WorkEvaluateRequest {
+                task_path: ":taskB".to_string(),
+                input_properties: Default::default(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp_b.should_execute);
+        assert!(resp_b.reason.contains("no previous"));
+    }
+
+    #[tokio::test]
+    async fn test_record_overwrites_previous() {
+        let scheduler = std::sync::Arc::new(WorkerScheduler::new(4));
+        let svc = WorkServiceImpl::new(scheduler);
+
+        // First evaluation + record
+        let resp1 = svc
+            .evaluate(Request::new(WorkEvaluateRequest {
+                task_path: ":compileJava".to_string(),
+                input_properties: Default::default(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        svc.record_execution(Request::new(WorkRecordRequest {
+            task_path: ":compileJava".to_string(),
+            duration_ms: 100,
+            success: true,
+            input_hash: resp1.input_hash.clone(),
+        }))
+        .await
+        .unwrap();
+
+        // Record again with same hash but different duration
+        svc.record_execution(Request::new(WorkRecordRequest {
+            task_path: ":compileJava".to_string(),
+            duration_ms: 999,
+            success: true,
+            input_hash: resp1.input_hash,
+        }))
+        .await
+        .unwrap();
+
+        // Should still be up-to-date but show the new duration
+        let resp2 = svc
+            .evaluate(Request::new(WorkEvaluateRequest {
+                task_path: ":compileJava".to_string(),
+                input_properties: Default::default(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp2.should_execute);
+        assert!(resp2.reason.contains("999ms"));
+    }
+
+    #[tokio::test]
+    async fn test_evaluate_input_hash_deterministic() {
+        let scheduler = std::sync::Arc::new(WorkerScheduler::new(4));
+        let svc = WorkServiceImpl::new(scheduler);
+
+        let mut props = std::collections::HashMap::new();
+        props.insert("b".to_string(), "2".to_string());
+        props.insert("a".to_string(), "1".to_string());
+
+        let resp1 = svc
+            .evaluate(Request::new(WorkEvaluateRequest {
+                task_path: ":test".to_string(),
+                input_properties: props.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Same properties in different insertion order should produce same hash
+        let mut props2 = std::collections::HashMap::new();
+        props2.insert("a".to_string(), "1".to_string());
+        props2.insert("b".to_string(), "2".to_string());
+
+        let resp2 = svc
+            .evaluate(Request::new(WorkEvaluateRequest {
+                task_path: ":test".to_string(),
+                input_properties: props2,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp1.input_hash, resp2.input_hash);
+    }
+
+    #[test]
+    fn test_scheduler_running_count() {
+        let scheduler = WorkerScheduler::new(3);
+
+        assert_eq!(scheduler.running_count(), 0);
+
+        scheduler.start_work(":t1".to_string(), 0);
+        scheduler.start_work(":t2".to_string(), 0);
+        assert_eq!(scheduler.running_count(), 2);
+
+        scheduler.complete_work(":t1");
+        assert_eq!(scheduler.running_count(), 1);
+
+        // Completing non-existent work is safe
+        scheduler.complete_work(":nonexistent");
+        assert_eq!(scheduler.running_count(), 1);
+    }
 }

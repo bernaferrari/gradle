@@ -619,4 +619,105 @@ mod tests {
         assert_eq!(resp.critical_path_ms, 350);
         assert!(!resp.has_cycles);
     }
+
+    #[tokio::test]
+    async fn test_register_duplicate_task() {
+        let svc = make_svc();
+
+        svc.register_task(Request::new(RegisterTaskRequest {
+            task_path: ":a".to_string(),
+            depends_on: vec![],
+            should_execute: true,
+            task_type: "Task".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        // Registering same task again should overwrite
+        svc.register_task(Request::new(RegisterTaskRequest {
+            task_path: ":a".to_string(),
+            depends_on: vec![":b".to_string()],
+            should_execute: false,
+            task_type: "Other".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        let resp = svc
+            .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
+                build_id: "test".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.total_tasks, 1);
+    }
+
+    #[tokio::test]
+    async fn test_task_started_without_register() {
+        let svc = make_svc();
+
+        // Starting a task that was never registered should succeed
+        let resp = svc
+            .task_started(Request::new(TaskStartedRequest {
+                task_path: ":nonexistent".to_string(),
+                start_time_ms: 100,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.acknowledged);
+    }
+
+    #[tokio::test]
+    async fn test_task_finished_without_register() {
+        let svc = make_svc();
+
+        // Finishing a task that was never registered should succeed
+        let resp = svc
+            .task_finished(Request::new(TaskFinishedRequest {
+                task_path: ":nonexistent".to_string(),
+                duration_ms: 100,
+                success: true,
+                outcome: "SUCCESS".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.acknowledged);
+    }
+
+    #[tokio::test]
+    async fn test_progress_empty_graph() {
+        let svc = make_svc();
+
+        let resp = svc
+            .get_progress(Request::new(GetProgressRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.tasks.len(), 0);
+        assert_eq!(resp.completed, 0);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_empty_graph() {
+        let svc = make_svc();
+
+        let resp = svc
+            .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
+                build_id: "empty".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.total_tasks, 0);
+        assert!(!resp.has_cycles);
+        assert!(resp.execution_order.is_empty());
+    }
 }
