@@ -54,7 +54,7 @@ bd close <id>         # Complete work
 
 ```bash
 cargo check                    # Check compilation
-cargo test                     # Run all 534 tests (481 unit + 3 cross-language + 47 integration + 3 E2E)
+cargo test                     # Run all 546 tests (481 unit + 12 differential + 3 cross-language + 47 integration + 3 E2E)
 cargo test --test integration_test  # Integration tests only (over Unix sockets)
 cargo test --test e2e_lifecycle_test   # E2E lifecycle tests (event fan-out validation)
 cargo clippy                   # Lint check (must be clean)

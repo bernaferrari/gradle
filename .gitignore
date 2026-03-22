@@ -128,3 +128,8 @@ atlassian-ide-plugin.xml
 # Rust
 # ----
 /target
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
