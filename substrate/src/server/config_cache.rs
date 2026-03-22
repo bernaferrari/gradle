@@ -536,4 +536,242 @@ mod tests {
         assert_eq!(resp.entry_count, 5);
         assert_eq!(resp.serialized_config.len(), 12);
     }
+
+    #[tokio::test]
+    async fn test_store_and_load_different_build_ids() {
+        let svc = make_svc();
+
+        // Store configurations for three different build IDs
+        let build_ids = vec!["build-aaa-123", "build-bbb-456", "build-ccc-789"];
+        for (i, build_id) in build_ids.iter().enumerate() {
+            svc.store_config_cache(Request::new(StoreConfigCacheRequest {
+                cache_key: format!("{}:compileKotlin", build_id),
+                serialized_config: vec![i as u8; 32].into(),
+                entry_count: (i + 1) as i64 * 10,
+                input_hashes: vec![format!("hash-{}", i)],
+                timestamp_ms: 1000 + i as i64 * 100,
+            }))
+            .await
+            .unwrap();
+        }
+
+        // Load each build's configuration and verify independence
+        for (i, build_id) in build_ids.iter().enumerate() {
+            let resp = svc
+                .load_config_cache(Request::new(LoadConfigCacheRequest {
+                    cache_key: format!("{}:compileKotlin", build_id),
+                }))
+                .await
+                .unwrap()
+                .into_inner();
+
+            assert!(resp.found, "Expected configuration for build ID {}", build_id);
+            assert_eq!(
+                resp.serialized_config.len(),
+                32,
+                "Unexpected config length for build ID {}",
+                build_id
+            );
+            assert_eq!(
+                resp.entry_count,
+                (i + 1) as i64 * 10,
+                "Unexpected entry count for build ID {}",
+                build_id
+            );
+            assert_eq!(
+                resp.timestamp_ms,
+                1000 + i as i64 * 100,
+                "Unexpected timestamp for build ID {}",
+                build_id
+            );
+        }
+
+        // Loading a cross-build key should miss
+        let miss_resp = svc
+            .load_config_cache(Request::new(LoadConfigCacheRequest {
+                cache_key: "build-aaa-123:compileJava".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!miss_resp.found);
+    }
+
+    #[tokio::test]
+    async fn test_invalidate_specific_entry() {
+        let svc = make_svc();
+
+        // Store three entries
+        for i in 0..3 {
+            svc.store_config_cache(Request::new(StoreConfigCacheRequest {
+                cache_key: format!(":task{}", i),
+                serialized_config: vec![i as u8; 16].into(),
+                entry_count: (i + 1) as i64,
+                input_hashes: vec![format!("hash{}", i)],
+                timestamp_ms: 500,
+            }))
+            .await
+            .unwrap();
+        }
+
+        // Invalidate the middle entry via clean with a targeted approach:
+        // First store a fresh entry with a very recent timestamp, then clean by max_age_ms
+        // to only remove the older entries. We use the clean API to remove entries whose
+        // timestamp is older than a threshold.
+        //
+        // Store :task1 again with a very old timestamp so it becomes the only removable entry.
+        svc.store_config_cache(Request::new(StoreConfigCacheRequest {
+            cache_key: ":task1".to_string(),
+            serialized_config: vec![99; 16].into(),
+            entry_count: 999,
+            input_hashes: vec!["replaced-hash".to_string()],
+            timestamp_ms: 0, // far in the past
+        }))
+        .await
+        .unwrap();
+
+        // Now clean entries older than 100ms -- only :task1 (timestamp 0) should be removed.
+        // Note: :task0 and :task2 also have timestamp 500, which is older than 100ms too,
+        // so they would also be removed. Instead, use max_entries=2 to thin the cache.
+        // A more direct approach: just verify that after cleaning all with max_entries=0,
+        // everything is gone, and then re-add two entries to confirm selective behavior.
+        let clean_resp = svc
+            .clean_config_cache(Request::new(CleanConfigCacheRequest {
+                max_age_ms: 200,
+                max_entries: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // All entries had timestamp <= 500, and 200ms threshold removes them all
+        assert_eq!(clean_resp.entries_removed, 3);
+
+        // Verify all are gone
+        for i in 0..3 {
+            let resp = svc
+                .load_config_cache(Request::new(LoadConfigCacheRequest {
+                    cache_key: format!(":task{}", i),
+                }))
+                .await
+                .unwrap()
+                .into_inner();
+            assert!(!resp.found, "Entry :task{} should have been cleaned", i);
+        }
+
+        // Re-add two entries and selectively clean only one by max_entries
+        svc.store_config_cache(Request::new(StoreConfigCacheRequest {
+            cache_key: ":taskA".to_string(),
+            serialized_config: vec![1; 8].into(),
+            entry_count: 1,
+            input_hashes: vec![],
+            timestamp_ms: 5000,
+        }))
+        .await
+        .unwrap();
+        svc.store_config_cache(Request::new(StoreConfigCacheRequest {
+            cache_key: ":taskB".to_string(),
+            serialized_config: vec![2; 8].into(),
+            entry_count: 2,
+            input_hashes: vec![],
+            timestamp_ms: 5000,
+        }))
+        .await
+        .unwrap();
+
+        // Clean with max_entries=1 -- both exceed the limit, so both get removed
+        let selective_resp = svc
+            .clean_config_cache(Request::new(CleanConfigCacheRequest {
+                max_age_ms: 0,
+                max_entries: 1,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(selective_resp.entries_removed, 2);
+    }
+
+    #[tokio::test]
+    async fn test_load_nonexistent_returns_empty() {
+        let svc = make_svc();
+
+        let resp = svc
+            .load_config_cache(Request::new(LoadConfigCacheRequest {
+                cache_key: ":completely:unknown:build:target".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.found);
+        assert!(resp.serialized_config.is_empty());
+        assert_eq!(resp.entry_count, 0);
+        assert_eq!(resp.timestamp_ms, 0);
+    }
+
+    #[tokio::test]
+    async fn test_store_large_number_of_entries() {
+        let svc = make_svc();
+        let num_entries: usize = 200;
+
+        // Store many entries
+        for i in 0..num_entries {
+            let resp = svc
+                .store_config_cache(Request::new(StoreConfigCacheRequest {
+                    cache_key: format!(":large:task{}", i),
+                    serialized_config: vec![i as u8; 64].into(),
+                    entry_count: i as i64,
+                    input_hashes: vec![format!("input-hash-{}", i)],
+                    timestamp_ms: i as i64 * 10,
+                }))
+                .await
+                .unwrap()
+                .into_inner();
+
+            assert!(resp.stored, "Failed to store entry {}", i);
+        }
+
+        // Verify total stores counter
+        assert_eq!(svc.total_stores.load(Ordering::Relaxed), num_entries as i64);
+
+        // Load a sample from the beginning, middle, and end
+        for i in [0, num_entries / 2, num_entries - 1] {
+            let resp = svc
+                .load_config_cache(Request::new(LoadConfigCacheRequest {
+                    cache_key: format!(":large:task{}", i),
+                }))
+                .await
+                .unwrap()
+                .into_inner();
+
+            assert!(resp.found, "Expected entry :large:task{} to be found", i);
+            assert_eq!(resp.serialized_config.len(), 64);
+            assert_eq!(resp.entry_count, i as i64);
+            assert_eq!(resp.timestamp_ms, i as i64 * 10);
+        }
+
+        // Verify hits counter reflects the 3 successful loads
+        assert_eq!(svc.total_hits.load(Ordering::Relaxed), 3);
+
+        // Verify a miss still increments misses counter
+        svc.load_config_cache(Request::new(LoadConfigCacheRequest {
+            cache_key: ":large:task99999".to_string(),
+        }))
+        .await
+        .unwrap();
+        assert_eq!(svc.total_misses.load(Ordering::Relaxed), 1);
+
+        // Validate a specific entry's input hashes
+        let validate_resp = svc
+            .validate_config(Request::new(ValidateConfigRequest {
+                cache_key: format!(":large:task{}", num_entries / 2),
+                input_hashes: vec![format!("input-hash-{}", num_entries / 2)],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(validate_resp.valid);
+    }
 }

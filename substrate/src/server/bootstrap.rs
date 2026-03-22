@@ -404,4 +404,228 @@ mod tests {
 
         assert!(resp2.total_requests > total1);
     }
+
+    #[tokio::test]
+    async fn test_health_check_active_builds_after_init_and_complete() {
+        let svc = BootstrapServiceImpl::new();
+
+        // Initially zero active builds
+        let health0 = svc
+            .health_check(Request::new(HealthCheckRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(health0.active_builds, 0);
+
+        // Init two builds
+        svc.init_build(Request::new(InitBuildRequest {
+            build_id: "hc-build-1".to_string(),
+            project_dir: "/tmp/a".to_string(),
+            start_time_ms: 0,
+            requested_parallelism: 2,
+            system_properties: Default::default(),
+            requested_features: vec![],
+        }))
+        .await
+        .unwrap();
+
+        svc.init_build(Request::new(InitBuildRequest {
+            build_id: "hc-build-2".to_string(),
+            project_dir: "/tmp/b".to_string(),
+            start_time_ms: 0,
+            requested_parallelism: 2,
+            system_properties: Default::default(),
+            requested_features: vec![],
+        }))
+        .await
+        .unwrap();
+
+        // Should report 2 active builds
+        let health1 = svc
+            .health_check(Request::new(HealthCheckRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(health1.active_builds, 2);
+
+        // Complete one build
+        svc.complete_build(Request::new(CompleteBuildRequest {
+            build_id: "hc-build-1".to_string(),
+            outcome: "SUCCESS".to_string(),
+            duration_ms: 3000,
+        }))
+        .await
+        .unwrap();
+
+        // Should report 1 active build
+        let health2 = svc
+            .health_check(Request::new(HealthCheckRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(health2.active_builds, 1);
+
+        // Complete the other build
+        svc.complete_build(Request::new(CompleteBuildRequest {
+            build_id: "hc-build-2".to_string(),
+            outcome: "SUCCESS".to_string(),
+            duration_ms: 4000,
+        }))
+        .await
+        .unwrap();
+
+        // Should report 0 active builds
+        let health3 = svc
+            .health_check(Request::new(HealthCheckRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(health3.active_builds, 0);
+    }
+
+    #[tokio::test]
+    async fn test_init_build_with_zero_parallelism() {
+        let svc = BootstrapServiceImpl::new();
+
+        let resp = svc
+            .init_build(Request::new(InitBuildRequest {
+                build_id: "zero-para".to_string(),
+                project_dir: "/tmp/sequential".to_string(),
+                start_time_ms: 0,
+                requested_parallelism: 0,
+                system_properties: Default::default(),
+                requested_features: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.build_id, "zero-para");
+        assert_eq!(resp.max_parallelism, 0);
+        assert!(svc.sessions.contains_key("zero-para"));
+
+        // Verify the session stored the zero parallelism
+        let session = svc.sessions.get("zero-para").unwrap();
+        assert_eq!(session.requested_parallelism, 0);
+    }
+
+    #[tokio::test]
+    async fn test_substrate_info_lists_expected_services() {
+        let svc = BootstrapServiceImpl::new();
+
+        let resp = svc
+            .get_substrate_info(Request::new(GetSubstrateInfoRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let expected_core_services = [
+            "hash", "cache", "exec", "work", "bootstrap", "control",
+            "configuration", "file-watch", "dependency-resolution",
+            "artifact-publishing", "worker-process", "build-event-stream",
+            "console", "plugin", "test-execution",
+        ];
+
+        // Collect the service names returned
+        let service_names: Vec<&str> = resp
+            .services
+            .iter()
+            .map(|s| s.service_name.as_str())
+            .collect();
+
+        // Every expected service must be present
+        for expected in &expected_core_services {
+            assert!(
+                service_names.contains(expected),
+                "Expected service '{}' not found in {:?}",
+                expected,
+                service_names
+            );
+        }
+
+        // All services should report "active" status
+        for svc_info in &resp.services {
+            assert_eq!(
+                svc_info.status, "active",
+                "Service '{}' should be active, got '{}'",
+                svc_info.service_name,
+                svc_info.status
+            );
+        }
+
+        // Each service should have exactly 1 request served (first call)
+        for svc_info in &resp.services {
+            assert_eq!(
+                svc_info.requests_served, 1,
+                "Service '{}' should have 1 request on first call, got {}",
+                svc_info.service_name,
+                svc_info.requests_served
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_complete_build_reduces_active_count() {
+        let svc = BootstrapServiceImpl::new();
+
+        // Init three builds
+        for id in &["dec-a", "dec-b", "dec-c"] {
+            svc.init_build(Request::new(InitBuildRequest {
+                build_id: id.to_string(),
+                project_dir: "/tmp".to_string(),
+                start_time_ms: 0,
+                requested_parallelism: 4,
+                system_properties: Default::default(),
+                requested_features: vec![],
+            }))
+            .await
+            .unwrap();
+        }
+
+        assert_eq!(svc.sessions.len(), 3);
+
+        let health_before = svc
+            .health_check(Request::new(HealthCheckRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(health_before.active_builds, 3);
+
+        // Complete two builds
+        for id in &["dec-a", "dec-c"] {
+            svc.complete_build(Request::new(CompleteBuildRequest {
+                build_id: id.to_string(),
+                outcome: "SUCCESS".to_string(),
+                duration_ms: 500,
+            }))
+            .await
+            .unwrap();
+        }
+
+        assert_eq!(svc.sessions.len(), 1);
+
+        let health_after = svc
+            .health_check(Request::new(HealthCheckRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(health_after.active_builds, 1);
+        assert_eq!(health_before.active_builds - health_after.active_builds, 2);
+
+        // Complete the last one and verify zero
+        svc.complete_build(Request::new(CompleteBuildRequest {
+            build_id: "dec-b".to_string(),
+            outcome: "SUCCESS".to_string(),
+            duration_ms: 600,
+        }))
+        .await
+        .unwrap();
+
+        let health_final = svc
+            .health_check(Request::new(HealthCheckRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(health_final.active_builds, 0);
+    }
 }
