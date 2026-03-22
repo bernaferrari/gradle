@@ -32,22 +32,22 @@ struct TaskNode {
 /// Manages dependency resolution and execution scheduling.
 /// Tasks are scoped by (BuildId, task_path) to prevent concurrent builds from mixing state.
 pub struct TaskGraphServiceImpl {
-    tasks: DashMap<(BuildId, String), TaskNode>,
-    request_counter: AtomicI64,
+    tasks: Arc<DashMap<(BuildId, String), TaskNode>>,
+    request_counter: Arc<AtomicI64>,
     /// Optional reference to execution history for duration estimates.
     history: Option<Arc<ExecutionHistoryServiceImpl>>,
     /// Reverse index: file path -> list of (build_id, task_path) that depend on it.
     /// Used by file-watch integration to invalidate tasks when their inputs change.
-    file_to_tasks: DashMap<String, Vec<(BuildId, String)>>,
+    file_to_tasks: Arc<DashMap<String, Vec<(BuildId, String)>>>,
 }
 
 impl Clone for TaskGraphServiceImpl {
     fn clone(&self) -> Self {
         Self {
-            tasks: self.tasks.clone(),
-            request_counter: AtomicI64::new(self.request_counter.load(Ordering::Relaxed)),
+            tasks: Arc::clone(&self.tasks),
+            request_counter: Arc::clone(&self.request_counter),
             history: self.history.clone(),
-            file_to_tasks: self.file_to_tasks.clone(),
+            file_to_tasks: Arc::clone(&self.file_to_tasks),
         }
     }
 }
@@ -61,19 +61,19 @@ impl Default for TaskGraphServiceImpl {
 impl TaskGraphServiceImpl {
     pub fn new() -> Self {
         Self {
-            tasks: DashMap::new(),
-            request_counter: AtomicI64::new(0),
+            tasks: Arc::new(DashMap::new()),
+            request_counter: Arc::new(AtomicI64::new(0)),
             history: None,
-            file_to_tasks: DashMap::new(),
+            file_to_tasks: Arc::new(DashMap::new()),
         }
     }
 
     pub fn with_history(history: Arc<ExecutionHistoryServiceImpl>) -> Self {
         Self {
-            tasks: DashMap::new(),
-            request_counter: AtomicI64::new(0),
+            tasks: Arc::new(DashMap::new()),
+            request_counter: Arc::new(AtomicI64::new(0)),
             history: Some(history),
-            file_to_tasks: DashMap::new(),
+            file_to_tasks: Arc::new(DashMap::new()),
         }
     }
 

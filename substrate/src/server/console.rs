@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
@@ -169,39 +170,43 @@ mod ansi {
 
 /// Rust-native console/rich output service.
 /// Manages console output, progress rendering, status lines, and log buffering.
-#[derive(Default)]
 pub struct ConsoleServiceImpl {
-    progress_ops: DashMap<String, ProgressEntry>,    // operation_id -> entry
-    build_descriptions: DashMap<BuildId, String>,     // build_id -> description
-    log_buffer: DashMap<BuildId, Vec<BufferedLog>>,   // build_id -> [logs]
-    log_counts: AtomicI64,
-    progress_updates: AtomicI64,
-    logs_evicted: AtomicI64,
+    progress_ops: Arc<DashMap<String, ProgressEntry>>,    // operation_id -> entry
+    build_descriptions: Arc<DashMap<BuildId, String>>,     // build_id -> description
+    log_buffer: Arc<DashMap<BuildId, Vec<BufferedLog>>>,   // build_id -> [logs]
+    log_counts: Arc<AtomicI64>,
+    progress_updates: Arc<AtomicI64>,
+    logs_evicted: Arc<AtomicI64>,
 }
 
 impl Clone for ConsoleServiceImpl {
     fn clone(&self) -> Self {
-        // DashMap and ProgressEntry are Clone; atomics are reset
         Self {
-            progress_ops: self.progress_ops.clone(),
-            build_descriptions: self.build_descriptions.clone(),
-            log_buffer: self.log_buffer.clone(),
-            log_counts: AtomicI64::new(self.log_counts.load(Ordering::Relaxed)),
-            progress_updates: AtomicI64::new(self.progress_updates.load(Ordering::Relaxed)),
-            logs_evicted: AtomicI64::new(self.logs_evicted.load(Ordering::Relaxed)),
+            progress_ops: Arc::clone(&self.progress_ops),
+            build_descriptions: Arc::clone(&self.build_descriptions),
+            log_buffer: Arc::clone(&self.log_buffer),
+            log_counts: Arc::clone(&self.log_counts),
+            progress_updates: Arc::clone(&self.progress_updates),
+            logs_evicted: Arc::clone(&self.logs_evicted),
         }
+    }
+}
+
+impl Default for ConsoleServiceImpl {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 impl ConsoleServiceImpl {
     pub fn new() -> Self {
         Self {
-            progress_ops: DashMap::new(),
-            build_descriptions: DashMap::new(),
-            log_buffer: DashMap::new(),
-            log_counts: AtomicI64::new(0),
-            progress_updates: AtomicI64::new(0),
-            logs_evicted: AtomicI64::new(0),
+            progress_ops: Arc::new(DashMap::new()),
+            build_descriptions: Arc::new(DashMap::new()),
+            log_buffer: Arc::new(DashMap::new()),
+            log_counts: Arc::new(AtomicI64::new(0)),
+            progress_updates: Arc::new(AtomicI64::new(0)),
+            logs_evicted: Arc::new(AtomicI64::new(0)),
         }
     }
 
