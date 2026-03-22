@@ -13,6 +13,7 @@ use crate::proto::{
 };
 
 use super::execution_history::ExecutionHistoryServiceImpl;
+use super::scopes::BuildId;
 
 /// Task graph node stored internally.
 struct TaskNode {
@@ -28,8 +29,9 @@ struct TaskNode {
 
 /// Rust-native task graph service.
 /// Manages dependency resolution and execution scheduling.
+/// Tasks are scoped by (BuildId, task_path) to prevent concurrent builds from mixing state.
 pub struct TaskGraphServiceImpl {
-    tasks: DashMap<String, TaskNode>,
+    tasks: DashMap<(BuildId, String), TaskNode>,
     request_counter: AtomicI64,
     /// Optional reference to execution history for duration estimates.
     history: Option<Arc<ExecutionHistoryServiceImpl>>,
@@ -69,15 +71,21 @@ impl TaskGraphServiceImpl {
     /// Kahn's algorithm for topological sort with parallel scheduling.
     /// Tasks with `should_execute == false` are excluded from the execution order
     /// since they are already resolved (UP-TO-DATE, SKIPPED, etc.).
-    fn resolve_plan(&self) -> (Vec<ExecutionNode>, i64, bool) {
+    /// Only resolves tasks belonging to the given build_id.
+    fn resolve_plan(&self, build_id: &BuildId) -> (Vec<ExecutionNode>, i64, bool) {
         let mut in_degree: HashMap<String, usize> = HashMap::new();
         let mut dependents: HashMap<String, Vec<String>> = HashMap::new();
         let mut all_tasks: HashSet<String> = HashSet::new();
         let mut skipped_count = 0usize;
         let mut task_type_counts: HashMap<String, usize> = HashMap::new();
 
-        // Build adjacency info
+        // Build adjacency info (only tasks for this build)
         for entry in self.tasks.iter() {
+            // Skip tasks from other builds
+            if entry.key().0 != *build_id {
+                continue;
+            }
+
             let path = entry.task_path.clone();
             all_tasks.insert(path.clone());
 
@@ -100,7 +108,7 @@ impl TaskGraphServiceImpl {
             in_degree.entry(path.clone()).or_insert(0);
 
             for dep in &entry.depends_on {
-                if self.tasks.contains_key(dep.as_str()) {
+                if self.tasks.contains_key(&(build_id.clone(), dep.clone())) {
                     *in_degree.entry(path.clone()).or_insert(0) += 1;
                     dependents.entry(dep.clone()).or_default().push(path.clone());
                 }
@@ -136,7 +144,7 @@ impl TaskGraphServiceImpl {
         while let Some(task) = queue.pop_front() {
             visited_count += 1;
 
-            if let Some(entry) = self.tasks.get(&task) {
+            if let Some(entry) = self.tasks.get(&(build_id.clone(), task.clone())) {
                 if entry.should_execute {
                     order += 1;
                     let estimated = entry.estimated_duration_ms;
@@ -166,7 +174,7 @@ impl TaskGraphServiceImpl {
             .iter()
             .filter(|t| {
                 self.tasks
-                    .get(*t)
+                    .get(&(build_id.clone(), (*t).clone()))
                     .map(|n| n.should_execute)
                     .unwrap_or(true)
             })
@@ -177,22 +185,27 @@ impl TaskGraphServiceImpl {
         }
 
         // Calculate critical path (longest path through DAG)
-        let critical_path_ms = self.calculate_critical_path();
+        let critical_path_ms = self.calculate_critical_path(build_id);
 
         (execution_order, critical_path_ms, has_cycles)
     }
 
-    fn calculate_critical_path(&self) -> i64 {
+    fn calculate_critical_path(&self, build_id: &BuildId) -> i64 {
         // Topological sort via Kahn's algorithm, then DP for longest path.
         // DashMap iteration order is non-deterministic, so we must sort first.
         let mut in_degree: HashMap<String, usize> = HashMap::new();
         let mut dependents: HashMap<String, Vec<String>> = HashMap::new();
 
         for entry in self.tasks.iter() {
+            // Skip tasks from other builds
+            if entry.key().0 != *build_id {
+                continue;
+            }
+
             let path = entry.task_path.clone();
             in_degree.entry(path.clone()).or_insert(0);
             for dep in &entry.depends_on {
-                if self.tasks.contains_key(dep.as_str()) {
+                if self.tasks.contains_key(&(build_id.clone(), dep.clone())) {
                     *in_degree.entry(path.clone()).or_insert(0) += 1;
                     dependents.entry(dep.clone()).or_default().push(path.clone());
                 }
@@ -223,7 +236,7 @@ impl TaskGraphServiceImpl {
         // DP: longest path in topological order
         let mut longest: HashMap<String, i64> = HashMap::new();
         for task in &topo_order {
-            if let Some(entry) = self.tasks.get(task) {
+            if let Some(entry) = self.tasks.get(&(build_id.clone(), task.clone())) {
                 let mut max_dep = 0i64;
                 for dep in &entry.depends_on {
                     max_dep = max_dep.max(longest.get(dep).copied().unwrap_or(0));
@@ -243,11 +256,13 @@ impl TaskGraphService for TaskGraphServiceImpl {
         request: Request<RegisterTaskRequest>,
     ) -> Result<Response<RegisterTaskResponse>, Status> {
         let req = request.into_inner();
+        let build_id = BuildId::from(req.build_id.clone());
 
         // Look up estimated duration from execution history
         let estimated = self.lookup_historical_duration(&req.task_path);
 
         tracing::debug!(
+            build_id = %req.build_id,
             task_path = %req.task_path,
             task_type = %req.task_type,
             should_execute = req.should_execute,
@@ -267,7 +282,7 @@ impl TaskGraphService for TaskGraphServiceImpl {
         }
 
         self.tasks.insert(
-            req.task_path.clone(),
+            (build_id, req.task_path.clone()),
             TaskNode {
                 task_path: req.task_path,
                 depends_on: req.depends_on,
@@ -288,17 +303,22 @@ impl TaskGraphService for TaskGraphServiceImpl {
         request: Request<ResolveExecutionPlanRequest>,
     ) -> Result<Response<ResolveExecutionPlanResponse>, Status> {
         let req = request.into_inner();
+        let build_id = BuildId::from(req.build_id.clone());
         self.request_counter.fetch_add(1, Ordering::Relaxed);
 
         tracing::debug!(build_id = %req.build_id, "Resolving execution plan");
 
-        let (execution_order, critical_path_ms, has_cycles) = self.resolve_plan();
+        let (execution_order, critical_path_ms, has_cycles) = self.resolve_plan(&build_id);
 
-        let total = self.tasks.len() as i32;
+        let total = self
+            .tasks
+            .iter()
+            .filter(|e| e.key().0 == build_id)
+            .count() as i32;
         let skipped = self
             .tasks
             .iter()
-            .filter(|e| !e.should_execute)
+            .filter(|e| e.key().0 == build_id && !e.should_execute)
             .count() as i32;
         let ready = execution_order
             .iter()
@@ -333,15 +353,35 @@ impl TaskGraphService for TaskGraphServiceImpl {
     ) -> Result<Response<TaskStartedResponse>, Status> {
         let req = request.into_inner();
 
-        if let Some(mut task) = self.tasks.get_mut(&req.task_path) {
-            task.status = "EXECUTING".to_string();
-            task.start_time_ms = req.start_time_ms;
-            tracing::debug!(
-                task_path = %req.task_path,
-                task_type = %task.task_type,
-                start_time_ms = req.start_time_ms,
-                "Task started executing"
-            );
+        if !req.build_id.is_empty() {
+            // Direct lookup via composite key
+            let build_id = BuildId::from(req.build_id.clone());
+            if let Some(mut entry) = self.tasks.get_mut(&(build_id, req.task_path.clone())) {
+                entry.status = "EXECUTING".to_string();
+                entry.start_time_ms = req.start_time_ms;
+                tracing::debug!(
+                    build_id = %req.build_id,
+                    task_path = %req.task_path,
+                    task_type = %entry.task_type,
+                    start_time_ms = req.start_time_ms,
+                    "Task started executing"
+                );
+            }
+        } else {
+            // Legacy: scan all builds when build_id not provided
+            for mut entry in self.tasks.iter_mut() {
+                if entry.task_path == req.task_path {
+                    entry.status = "EXECUTING".to_string();
+                    entry.start_time_ms = req.start_time_ms;
+                    tracing::debug!(
+                        task_path = %req.task_path,
+                        task_type = %entry.task_type,
+                        start_time_ms = req.start_time_ms,
+                        "Task started executing (legacy scan)"
+                    );
+                    break;
+                }
+            }
         }
 
         Ok(Response::new(TaskStartedResponse { acknowledged: true }))
@@ -353,34 +393,67 @@ impl TaskGraphService for TaskGraphServiceImpl {
     ) -> Result<Response<TaskFinishedResponse>, Status> {
         let req = request.into_inner();
 
-        if let Some(mut task) = self.tasks.get_mut(&req.task_path) {
-            task.status = if req.success {
-                req.outcome.clone()
-            } else {
-                "FAILED".to_string()
-            };
-            task.duration_ms = req.duration_ms;
-            // Update estimated duration for future scheduling
-            task.estimated_duration_ms = req.duration_ms;
+        if !req.build_id.is_empty() {
+            // Direct lookup via composite key
+            let build_id = BuildId::from(req.build_id.clone());
+            if let Some(mut entry) = self.tasks.get_mut(&(build_id, req.task_path.clone())) {
+                entry.status = if req.success {
+                    req.outcome.clone()
+                } else {
+                    "FAILED".to_string()
+                };
+                entry.duration_ms = req.duration_ms;
+                entry.estimated_duration_ms = req.duration_ms;
 
-            // Log with task_type and should_execute for observability
-            tracing::debug!(
-                task_path = %req.task_path,
-                task_type = %task.task_type,
-                outcome = %task.status,
-                duration_ms = req.duration_ms,
-                should_execute = task.should_execute,
-                "Task finished"
-            );
-
-            // Validate: a task marked as not-should-execute should not have been
-            // started in the first place. Log a warning if we see this inconsistency.
-            if !task.should_execute && task.status == "FAILED" {
-                tracing::warn!(
+                tracing::debug!(
+                    build_id = %req.build_id,
                     task_path = %req.task_path,
-                    task_type = %task.task_type,
-                    "Non-executing task reported failure; this may indicate a configuration issue"
+                    task_type = %entry.task_type,
+                    outcome = %entry.status,
+                    duration_ms = req.duration_ms,
+                    should_execute = entry.should_execute,
+                    "Task finished"
                 );
+
+                if !entry.should_execute && entry.status == "FAILED" {
+                    tracing::warn!(
+                        build_id = %req.build_id,
+                        task_path = %req.task_path,
+                        task_type = %entry.task_type,
+                        "Non-executing task reported failure; this may indicate a configuration issue"
+                    );
+                }
+            }
+        } else {
+            // Legacy: scan all builds when build_id not provided
+            for mut entry in self.tasks.iter_mut() {
+                if entry.task_path == req.task_path {
+                    entry.status = if req.success {
+                        req.outcome.clone()
+                    } else {
+                        "FAILED".to_string()
+                    };
+                    entry.duration_ms = req.duration_ms;
+                    entry.estimated_duration_ms = req.duration_ms;
+
+                    tracing::debug!(
+                        task_path = %req.task_path,
+                        task_type = %entry.task_type,
+                        outcome = %entry.status,
+                        duration_ms = req.duration_ms,
+                        should_execute = entry.should_execute,
+                        "Task finished (legacy scan)"
+                    );
+
+                    if !entry.should_execute && entry.status == "FAILED" {
+                        tracing::warn!(
+                            task_path = %req.task_path,
+                            task_type = %entry.task_type,
+                            "Non-executing task reported failure; this may indicate a configuration issue"
+                        );
+                    }
+                    break;
+                }
             }
         }
 
@@ -396,15 +469,26 @@ impl TaskGraphService for TaskGraphServiceImpl {
         &self,
         request: Request<GetProgressRequest>,
     ) -> Result<Response<GetProgressResponse>, Status> {
-        let _req = request.into_inner();
+        let req = request.into_inner();
+        let filter_build_id = if req.build_id.is_empty() {
+            None
+        } else {
+            Some(BuildId::from(req.build_id))
+        };
 
         let mut tasks = Vec::new();
         let mut completed = 0i32;
         let mut executing = 0i32;
         let mut skipped = 0i32;
-        let total = self.tasks.len() as i32;
 
         for entry in self.tasks.iter() {
+            // Filter by build_id if specified
+            if let Some(ref bid) = filter_build_id {
+                if entry.key().0 != *bid {
+                    continue;
+                }
+            }
+
             // Tasks marked as not-should-execute are already resolved
             if !entry.should_execute {
                 skipped += 1;
@@ -433,6 +517,8 @@ impl TaskGraphService for TaskGraphServiceImpl {
                 duration_ms: entry.duration_ms,
             });
         }
+
+        let total = tasks.len() as i32;
 
         if skipped > 0 {
             tracing::debug!(
@@ -467,6 +553,7 @@ mod tests {
         let svc = make_svc();
 
         svc.register_task(Request::new(RegisterTaskRequest {
+            build_id: "test".to_string(),
             task_path: ":a".to_string(),
             depends_on: vec![],
             should_execute: true,
@@ -476,6 +563,7 @@ mod tests {
         .unwrap();
 
         svc.register_task(Request::new(RegisterTaskRequest {
+            build_id: "test".to_string(),
             task_path: ":b".to_string(),
             depends_on: vec![":a".to_string()],
             should_execute: true,
@@ -485,6 +573,7 @@ mod tests {
         .unwrap();
 
         svc.register_task(Request::new(RegisterTaskRequest {
+            build_id: "test".to_string(),
             task_path: ":c".to_string(),
             depends_on: vec![":b".to_string()],
             should_execute: true,
@@ -517,6 +606,7 @@ mod tests {
         let svc = make_svc();
 
         svc.register_task(Request::new(RegisterTaskRequest {
+            build_id: "test".to_string(),
             task_path: ":root".to_string(),
             depends_on: vec![":a".to_string(), ":b".to_string(), ":c".to_string()],
             should_execute: true,
@@ -527,6 +617,7 @@ mod tests {
 
         for t in &[":a", ":b", ":c"] {
             svc.register_task(Request::new(RegisterTaskRequest {
+                build_id: "test".to_string(),
                 task_path: t.to_string(),
                 depends_on: vec![],
                 should_execute: true,
@@ -561,6 +652,7 @@ mod tests {
         let svc = make_svc();
 
         svc.register_task(Request::new(RegisterTaskRequest {
+            build_id: "test".to_string(),
             task_path: ":a".to_string(),
             depends_on: vec![":b".to_string()],
             should_execute: true,
@@ -570,6 +662,7 @@ mod tests {
         .unwrap();
 
         svc.register_task(Request::new(RegisterTaskRequest {
+            build_id: "test".to_string(),
             task_path: ":b".to_string(),
             depends_on: vec![":a".to_string()],
             should_execute: true,
@@ -594,6 +687,7 @@ mod tests {
         let svc = make_svc();
 
         svc.register_task(Request::new(RegisterTaskRequest {
+            build_id: "test".to_string(),
             task_path: ":compile".to_string(),
             depends_on: vec![],
             should_execute: true,
@@ -603,6 +697,7 @@ mod tests {
         .unwrap();
 
         svc.task_started(Request::new(TaskStartedRequest {
+            build_id: "test".to_string(),
             task_path: ":compile".to_string(),
             start_time_ms: 100,
         }))
@@ -610,7 +705,9 @@ mod tests {
         .unwrap();
 
         let progress = svc
-            .get_progress(Request::new(GetProgressRequest {}))
+            .get_progress(Request::new(GetProgressRequest {
+                build_id: String::new(),
+            }))
             .await
             .unwrap()
             .into_inner();
@@ -619,6 +716,7 @@ mod tests {
         assert_eq!(progress.tasks[0].status, "EXECUTING");
 
         svc.task_finished(Request::new(TaskFinishedRequest {
+            build_id: "test".to_string(),
             task_path: ":compile".to_string(),
             duration_ms: 500,
             success: true,
@@ -628,7 +726,9 @@ mod tests {
         .unwrap();
 
         let progress = svc
-            .get_progress(Request::new(GetProgressRequest {}))
+            .get_progress(Request::new(GetProgressRequest {
+                build_id: String::new(),
+            }))
             .await
             .unwrap()
             .into_inner();
@@ -649,6 +749,7 @@ mod tests {
 
         // Register tasks — they should pick up historical durations
         svc.register_task(Request::new(RegisterTaskRequest {
+            build_id: "test".to_string(),
             task_path: ":fast".to_string(),
             depends_on: vec![],
             should_execute: true,
@@ -658,6 +759,7 @@ mod tests {
         .unwrap();
 
         svc.register_task(Request::new(RegisterTaskRequest {
+            build_id: "test".to_string(),
             task_path: ":slow".to_string(),
             depends_on: vec![],
             should_execute: true,
@@ -667,6 +769,7 @@ mod tests {
         .unwrap();
 
         svc.register_task(Request::new(RegisterTaskRequest {
+            build_id: "test".to_string(),
             task_path: ":no_history".to_string(),
             depends_on: vec![],
             should_execute: true,
@@ -699,6 +802,7 @@ mod tests {
 
         // Now finish a task and verify duration is updated in history
         svc.task_finished(Request::new(TaskFinishedRequest {
+            build_id: "test".to_string(),
             task_path: ":fast".to_string(),
             duration_ms: 150,
             success: true,
@@ -730,6 +834,7 @@ mod tests {
             (":d", vec![]),
         ] {
             svc.register_task(Request::new(RegisterTaskRequest {
+                build_id: "test".to_string(),
                 task_path: path.to_string(),
                 depends_on: deps.into_iter().map(String::from).collect(),
                 should_execute: true,
@@ -757,6 +862,7 @@ mod tests {
         let svc = make_svc();
 
         svc.register_task(Request::new(RegisterTaskRequest {
+            build_id: "test".to_string(),
             task_path: ":a".to_string(),
             depends_on: vec![],
             should_execute: true,
@@ -767,6 +873,7 @@ mod tests {
 
         // Registering same task again should overwrite
         svc.register_task(Request::new(RegisterTaskRequest {
+            build_id: "test".to_string(),
             task_path: ":a".to_string(),
             depends_on: vec![":b".to_string()],
             should_execute: false,
@@ -793,6 +900,7 @@ mod tests {
         // Starting a task that was never registered should succeed
         let resp = svc
             .task_started(Request::new(TaskStartedRequest {
+                build_id: String::new(),
                 task_path: ":nonexistent".to_string(),
                 start_time_ms: 100,
             }))
@@ -810,6 +918,7 @@ mod tests {
         // Finishing a task that was never registered should succeed
         let resp = svc
             .task_finished(Request::new(TaskFinishedRequest {
+                build_id: String::new(),
                 task_path: ":nonexistent".to_string(),
                 duration_ms: 100,
                 success: true,
@@ -827,7 +936,9 @@ mod tests {
         let svc = make_svc();
 
         let resp = svc
-            .get_progress(Request::new(GetProgressRequest {}))
+            .get_progress(Request::new(GetProgressRequest {
+                build_id: String::new(),
+            }))
             .await
             .unwrap()
             .into_inner();
@@ -851,5 +962,110 @@ mod tests {
         assert_eq!(resp.total_tasks, 0);
         assert!(!resp.has_cycles);
         assert!(resp.execution_order.is_empty());
+    }
+
+    /// Concurrent builds with the same task paths must not interfere.
+    #[tokio::test]
+    async fn test_concurrent_builds_isolated() {
+        let svc = make_svc();
+
+        // Build 1 registers :compileJava → :processResources
+        svc.register_task(Request::new(RegisterTaskRequest {
+            build_id: "build-1".to_string(),
+            task_path: ":compileJava".to_string(),
+            depends_on: vec![":processResources".to_string()],
+            should_execute: true,
+            task_type: "JavaCompile".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        svc.register_task(Request::new(RegisterTaskRequest {
+            build_id: "build-1".to_string(),
+            task_path: ":processResources".to_string(),
+            depends_on: vec![],
+            should_execute: true,
+            task_type: "Copy".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        // Build 2 registers :compileJava with no dependencies (different graph)
+        svc.register_task(Request::new(RegisterTaskRequest {
+            build_id: "build-2".to_string(),
+            task_path: ":compileJava".to_string(),
+            depends_on: vec![],
+            should_execute: true,
+            task_type: "JavaCompile".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        // Build 1 plan should see 2 tasks with dependency
+        let plan1 = svc
+            .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
+                build_id: "build-1".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(plan1.total_tasks, 2);
+        assert_eq!(plan1.ready_to_execute, 1);
+        assert!(!plan1.has_cycles);
+
+        // Build 2 plan should see 1 task, no dependencies, ready immediately
+        let plan2 = svc
+            .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
+                build_id: "build-2".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(plan2.total_tasks, 1);
+        assert_eq!(plan2.ready_to_execute, 1);
+        assert!(!plan2.has_cycles);
+
+        // Finish :compileJava in build 2 — should not affect build 1
+        svc.task_finished(Request::new(TaskFinishedRequest {
+            build_id: "build-2".to_string(),
+            task_path: ":compileJava".to_string(),
+            duration_ms: 200,
+            success: true,
+            outcome: "EXECUTED".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        // Build 1 progress should still show :compileJava as PENDING (not EXECUTED)
+        let progress1 = svc
+            .get_progress(Request::new(GetProgressRequest {
+                build_id: "build-1".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(progress1.total, 2);
+        let compile_status: Vec<_> = progress1
+            .tasks
+            .iter()
+            .filter(|t| t.task_path == ":compileJava")
+            .collect();
+        assert_eq!(compile_status.len(), 1);
+        assert_eq!(compile_status[0].status, "PENDING");
+
+        // Build 2 progress should show :compileJava as completed
+        let progress2 = svc
+            .get_progress(Request::new(GetProgressRequest {
+                build_id: "build-2".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(progress2.total, 1);
+        assert_eq!(progress2.completed, 1);
     }
 }
