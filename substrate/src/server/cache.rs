@@ -490,4 +490,73 @@ mod tests {
         assert!(stats.total_bytes <= 30);
         assert!(stats.entry_count <= 3);
     }
+
+    #[tokio::test]
+    async fn test_cache_remove() {
+        let tmp = TempDir::new().unwrap();
+        let store = LocalCacheStore::new(tmp.path().to_path_buf());
+
+        store.store("ee1111111111", b"removeme").await.unwrap();
+        assert!(store.contains("ee1111111111").await.unwrap());
+
+        let removed = store.remove("ee1111111111").await.unwrap();
+        assert!(removed);
+        assert!(!store.contains("ee1111111111").await.unwrap());
+
+        // Remove nonexistent
+        let removed2 = store.remove("ee9999999999").await.unwrap();
+        assert!(!removed2);
+    }
+
+    #[tokio::test]
+    async fn test_cache_update_existing() {
+        let tmp = TempDir::new().unwrap();
+        let store = LocalCacheStore::new(tmp.path().to_path_buf());
+
+        store.store("ff1111111111", b"old_data").await.unwrap();
+        store.store("ff1111111111", b"new_data_longer").await.unwrap();
+
+        let loaded = store.load("ff1111111111").await.unwrap();
+        assert_eq!(loaded, Some(b"new_data_longer".to_vec()));
+
+        // Entry count should still be 1 (update, not insert)
+        let stats = store.get_stats();
+        assert_eq!(stats.entry_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_cache_hit_rate() {
+        let tmp = TempDir::new().unwrap();
+        let store = LocalCacheStore::new(tmp.path().to_path_buf());
+
+        // No lookups yet → hit_rate should be 1.0 (defined as 100% when no lookups)
+        let stats = store.get_stats();
+        assert!((stats.hit_rate - 1.0).abs() < 0.01);
+
+        store.store("gg1111111111", b"data").await.unwrap();
+        store.load("gg1111111111").await.unwrap(); // hit
+        store.load("gg9999999999").await.unwrap(); // miss
+        store.load("gg1111111111").await.unwrap(); // hit
+        store.load("gg8888888888").await.unwrap(); // miss
+
+        let stats = store.get_stats();
+        assert_eq!(stats.hits, 2);
+        assert_eq!(stats.misses, 2);
+        assert!((stats.hit_rate - 0.5).abs() < 0.01);
+    }
+
+    #[tokio::test]
+    async fn test_cache_no_max_size_unlimited() {
+        let tmp = TempDir::new().unwrap();
+        let store = LocalCacheStore::new(tmp.path().to_path_buf());
+        // Default max_size is 0 (unlimited)
+
+        for i in 0..10 {
+            store.store(&format!("hh{:08x}", i), &vec![0u8; 1000]).await.unwrap();
+        }
+
+        let stats = store.get_stats();
+        assert_eq!(stats.entry_count, 10);
+        assert_eq!(stats.total_bytes, 10_000);
+    }
 }

@@ -319,6 +319,101 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_clear_nonexistent_build() {
+        let svc = ProblemReportingServiceImpl::new();
+
+        let resp = svc
+            .clear_problems(Request::new(ClearProblemsRequest {
+                build_id: "nonexistent".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.cleared, 0);
+    }
+
+    #[tokio::test]
+    async fn test_filter_by_error_severity() {
+        let svc = ProblemReportingServiceImpl::new();
+
+        svc.report_problem(Request::new(ReportProblemRequest {
+            build_id: "build-err".to_string(),
+            problem: Some(make_problem("error", "compile", "Type error")),
+        }))
+        .await
+        .unwrap();
+
+        svc.report_problem(Request::new(ReportProblemRequest {
+            build_id: "build-err".to_string(),
+            problem: Some(make_problem("error", "compile", "Missing method")),
+        }))
+        .await
+        .unwrap();
+
+        svc.report_problem(Request::new(ReportProblemRequest {
+            build_id: "build-err".to_string(),
+            problem: Some(make_problem("warning", "lint", "Unused var")),
+        }))
+        .await
+        .unwrap();
+
+        let resp = svc
+            .get_problems_by_severity(Request::new(GetProblemsBySeverityRequest {
+                build_id: "build-err".to_string(),
+                severity: "error".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.total, 2);
+        assert_eq!(resp.error_count, 2);
+        assert_eq!(resp.warning_count, 0);
+        assert_eq!(resp.deprecation_count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_builds_isolated() {
+        let svc = ProblemReportingServiceImpl::new();
+
+        svc.report_problem(Request::new(ReportProblemRequest {
+            build_id: "build-x".to_string(),
+            problem: Some(make_problem("error", "test", "Build X error")),
+        }))
+        .await
+        .unwrap();
+
+        svc.report_problem(Request::new(ReportProblemRequest {
+            build_id: "build-y".to_string(),
+            problem: Some(make_problem("warning", "test", "Build Y warning")),
+        }))
+        .await
+        .unwrap();
+
+        let resp_x = svc
+            .get_problems(Request::new(GetProblemsRequest {
+                build_id: "build-x".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let resp_y = svc
+            .get_problems(Request::new(GetProblemsRequest {
+                build_id: "build-y".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp_x.total, 1);
+        assert_eq!(resp_x.error_count, 1);
+        assert_eq!(resp_y.total, 1);
+        assert_eq!(resp_y.warning_count, 1);
+    }
+
+    #[tokio::test]
     async fn test_empty_build() {
         let svc = ProblemReportingServiceImpl::new();
 
