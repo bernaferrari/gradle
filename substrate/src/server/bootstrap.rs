@@ -227,4 +227,83 @@ mod tests {
         assert!(resp.services.len() >= 31);
         assert!(resp.total_requests > 0);
     }
+
+    #[tokio::test]
+    async fn test_multiple_build_sessions() {
+        let svc = BootstrapServiceImpl::new();
+
+        for id in &["build-1", "build-2", "build-3"] {
+            svc.init_build(Request::new(InitBuildRequest {
+                build_id: id.to_string(),
+                project_dir: "/tmp/app".to_string(),
+                start_time_ms: 0,
+                requested_parallelism: 4,
+                system_properties: Default::default(),
+                requested_features: vec![],
+            }))
+            .await
+            .unwrap();
+        }
+
+        assert_eq!(svc.sessions.len(), 3);
+
+        let health = svc
+            .health_check(Request::new(HealthCheckRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(health.active_builds, 3);
+
+        // Complete one
+        svc.complete_build(Request::new(CompleteBuildRequest {
+            build_id: "build-2".to_string(),
+            outcome: "SUCCESS".to_string(),
+            duration_ms: 1000,
+        }))
+        .await
+        .unwrap();
+
+        assert_eq!(svc.sessions.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_complete_nonexistent_build() {
+        let svc = BootstrapServiceImpl::new();
+
+        // Completing a build that was never initialized should not fail
+        let resp = svc
+            .complete_build(Request::new(CompleteBuildRequest {
+                build_id: "nonexistent".to_string(),
+                outcome: "FAILED".to_string(),
+                duration_ms: 100,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.acknowledged);
+    }
+
+    #[tokio::test]
+    async fn test_init_build_returns_protocol_version() {
+        let svc = BootstrapServiceImpl::new();
+
+        let resp = svc
+            .init_build(Request::new(InitBuildRequest {
+                build_id: "v-test".to_string(),
+                project_dir: "/tmp".to_string(),
+                start_time_ms: 0,
+                requested_parallelism: 8,
+                system_properties: Default::default(),
+                requested_features: vec!["configuration-cache".to_string()],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.substrate_version.is_empty());
+        assert!(!resp.protocol_version.is_empty());
+        assert_eq!(resp.max_parallelism, 8);
+    }
 }
