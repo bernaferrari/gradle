@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use gradle_substrate_daemon::proto::{
     build_cache_orchestration_service_server::BuildCacheOrchestrationService,
     ComputeCacheKeyRequest,

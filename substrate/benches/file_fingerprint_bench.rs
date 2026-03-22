@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use gradle_substrate_daemon::proto::{
     file_fingerprint_service_server::FileFingerprintService,
     FileToFingerprint, FingerprintFilesRequest, FingerprintType,
