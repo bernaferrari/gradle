@@ -54,13 +54,28 @@ fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
         return None;
     }
 
-    // Minor + major version
+    // Minor + major version — included in ABI hash because class file version
+    // affects ABI compatibility (e.g., Java 8 vs 11 bytecode features)
     let mut version = [0u8; 4];
     cursor.read_exact(&mut version).ok()?;
 
     // Constant pool
     let cp_count = read_u16(&mut cursor)?;
     let cp_entries = read_constant_pool(&mut cursor, cp_count)?;
+
+    // Validate constant pool structural integrity
+    if let Err(validation_err) = validate_constant_pool(&cp_entries) {
+        tracing::debug!("Class file constant pool validation failed: {}", validation_err);
+        return None;
+    }
+
+    // Compute and log constant pool composition stats
+    let cp_stats = compute_cp_stats(&cp_entries);
+    tracing::debug!(
+        cp_count = cp_count,
+        stats = cp_stats.describe(),
+        "Parsed class file constant pool"
+    );
 
     // Access flags
     let access_flags = read_u16(&mut cursor)?;
@@ -121,6 +136,10 @@ fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
     // Build ABI hash from extracted information
     let mut hasher = Md5::new();
 
+    // Include class file version (major.minor) for ABI compatibility
+    hasher.update(b"version=");
+    hasher.update(version);
+
     // Include class access flags
     hasher.update(b"access=");
     hasher.update(access_flags.to_le_bytes());
@@ -160,12 +179,42 @@ fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
     hasher.update(b"methods=");
     hasher.update(public_method_abi.join(";").as_bytes());
 
+    // Include reference-type counts from the constant pool — these reflect
+    // the external API surface (field/method references, string constants, etc.)
+    // and ensure ABI changes involving added/removed references are detected.
+    hasher.update(b"refs=");
+    hasher.update(cp_stats.field_ref.to_string().as_bytes());
+    hasher.update(b",");
+    hasher.update(cp_stats.method_ref.to_string().as_bytes());
+    hasher.update(b",");
+    hasher.update(cp_stats.interface_method_ref.to_string().as_bytes());
+    hasher.update(b",");
+    hasher.update(cp_stats.string.to_string().as_bytes());
+    hasher.update(b",");
+    hasher.update(cp_stats.invoke_dynamic.to_string().as_bytes());
+    hasher.update(b",");
+    hasher.update(cp_stats.method_handle.to_string().as_bytes());
+    hasher.update(b",");
+    hasher.update(cp_stats.method_type.to_string().as_bytes());
+    hasher.update(b";");
+
+    // Include numeric constant pool counts for completeness — changes in
+    // compile-time constants (Integer, Float, Long, Double) can affect
+    // downstream compilation (e.g., constant folding, inlining).
+    hasher.update(b"num_consts=");
+    hasher.update(cp_stats.integer.to_string().as_bytes());
+    hasher.update(b",");
+    hasher.update(cp_stats.float_.to_string().as_bytes());
+    hasher.update(b",");
+    hasher.update(cp_stats.long.to_string().as_bytes());
+    hasher.update(b",");
+    hasher.update(cp_stats.double_.to_string().as_bytes());
+
     Some(hasher.finalize().to_vec())
 }
 
 /// Constant pool entry.
 #[derive(Debug)]
-#[allow(dead_code)]
 enum CpEntry {
     Utf8(String),
     Class(u16),             // name_index
@@ -266,6 +315,258 @@ fn read_constant_pool(cursor: &mut Cursor<&[u8]>, count: u16) -> Option<Vec<Opti
         }
     }
     Some(entries)
+}
+
+/// Counts constant pool entries by type for diagnostic logging and validation.
+struct CpEntryStats {
+    utf8: usize,
+    class: usize,
+    string: usize,
+    field_ref: usize,
+    method_ref: usize,
+    interface_method_ref: usize,
+    name_and_type: usize,
+    integer: usize,
+    float_: usize,
+    long: usize,
+    double_: usize,
+    method_handle: usize,
+    method_type: usize,
+    invoke_dynamic: usize,
+}
+
+impl CpEntryStats {
+    fn new() -> Self {
+        Self {
+            utf8: 0,
+            class: 0,
+            string: 0,
+            field_ref: 0,
+            method_ref: 0,
+            interface_method_ref: 0,
+            name_and_type: 0,
+            integer: 0,
+            float_: 0,
+            long: 0,
+            double_: 0,
+            method_handle: 0,
+            method_type: 0,
+            invoke_dynamic: 0,
+        }
+    }
+
+    fn total(&self) -> usize {
+        self.utf8 + self.class + self.string + self.field_ref + self.method_ref
+            + self.interface_method_ref + self.name_and_type + self.integer
+            + self.float_ + self.long + self.double_ + self.method_handle
+            + self.method_type + self.invoke_dynamic
+    }
+
+    fn describe(&self) -> String {
+        format!(
+            "CP entries: {} utf8, {} class, {} string, {} fieldref, {} methodref, {} ifmethodref, {} nat, {} int, {} float, {} long, {} double, {} methodhandle, {} methodtype, {} invokedynamic (total {})",
+            self.utf8, self.class, self.string, self.field_ref, self.method_ref,
+            self.interface_method_ref, self.name_and_type, self.integer,
+            self.float_, self.long, self.double_, self.method_handle,
+            self.method_type, self.invoke_dynamic, self.total(),
+        )
+    }
+}
+
+/// Counts every variant of CpEntry in the constant pool for diagnostic use.
+fn compute_cp_stats(cp: &[Option<CpEntry>]) -> CpEntryStats {
+    let mut stats = CpEntryStats::new();
+    for entry in cp.iter().flatten() {
+        match entry {
+            CpEntry::Utf8(_) => stats.utf8 += 1,
+            CpEntry::Class(_) => stats.class += 1,
+            CpEntry::String(_) => stats.string += 1,
+            CpEntry::FieldRef(_, _) => stats.field_ref += 1,
+            CpEntry::MethodRef(_, _) => stats.method_ref += 1,
+            CpEntry::InterfaceMethodRef(_, _) => stats.interface_method_ref += 1,
+            CpEntry::NameAndType(_, _) => stats.name_and_type += 1,
+            CpEntry::Integer(_) => stats.integer += 1,
+            CpEntry::Float(_) => stats.float_ += 1,
+            CpEntry::Long(_) => stats.long += 1,
+            CpEntry::Double(_) => stats.double_ += 1,
+            CpEntry::MethodHandle(_, _) => stats.method_handle += 1,
+            CpEntry::MethodType(_) => stats.method_type += 1,
+            CpEntry::InvokeDynamic(_, _) => stats.invoke_dynamic += 1,
+        }
+    }
+    stats
+}
+
+/// Validates structural integrity of the constant pool by checking that all
+/// index references point to valid entries of the expected type.
+/// Returns Ok(()) if valid, Err(description) otherwise.
+fn validate_constant_pool(cp: &[Option<CpEntry>]) -> Result<(), String> {
+    for (i, entry) in cp.iter().enumerate() {
+        let entry = match entry {
+            Some(e) => e,
+            None => continue,
+        };
+        match entry {
+            CpEntry::Class(name_idx) => {
+                if *name_idx == 0 || *name_idx as usize >= cp.len() {
+                    return Err(format!("Class entry at {} references invalid utf8 index {}", i, name_idx));
+                }
+                match &cp[*name_idx as usize] {
+                    Some(CpEntry::Utf8(_)) => {}
+                    other => return Err(format!(
+                        "Class entry at {} references non-utf8 at index {} (found {:?})",
+                        i, name_idx, other.as_ref().map(std::mem::discriminant)
+                    )),
+                }
+            }
+            CpEntry::NameAndType(name_idx, desc_idx) => {
+                for (label, idx) in [("name", name_idx), ("descriptor", desc_idx)] {
+                    if *idx == 0 || *idx as usize >= cp.len() {
+                        return Err(format!("NameAndType at {} references invalid {} index {}", i, label, idx));
+                    }
+                    match &cp[*idx as usize] {
+                        Some(CpEntry::Utf8(_)) => {}
+                        other => return Err(format!(
+                            "NameAndType at {} references non-utf8 {} at index {} (found {:?})",
+                            i, label, idx, other.as_ref().map(std::mem::discriminant)
+                        )),
+                    }
+                }
+            }
+            CpEntry::String(utf8_idx) => {
+                if *utf8_idx == 0 || *utf8_idx as usize >= cp.len() {
+                    return Err(format!("String entry at {} references invalid utf8 index {}", i, utf8_idx));
+                }
+                match &cp[*utf8_idx as usize] {
+                    Some(CpEntry::Utf8(_)) => {}
+                    other => return Err(format!(
+                        "String entry at {} references non-utf8 at index {} (found {:?})",
+                        i, utf8_idx, other.as_ref().map(std::mem::discriminant)
+                    )),
+                }
+            }
+            CpEntry::FieldRef(class_idx, nat_idx)
+            | CpEntry::MethodRef(class_idx, nat_idx)
+            | CpEntry::InterfaceMethodRef(class_idx, nat_idx) => {
+                if *class_idx == 0 || *class_idx as usize >= cp.len() {
+                    return Err(format!("Ref entry at {} references invalid class index {}", i, class_idx));
+                }
+                match &cp[*class_idx as usize] {
+                    Some(CpEntry::Class(_)) => {}
+                    other => return Err(format!(
+                        "Ref entry at {} references non-class at index {} (found {:?})",
+                        i, class_idx, other.as_ref().map(std::mem::discriminant)
+                    )),
+                }
+                if *nat_idx == 0 || *nat_idx as usize >= cp.len() {
+                    return Err(format!("Ref entry at {} references invalid nat index {}", i, nat_idx));
+                }
+                match &cp[*nat_idx as usize] {
+                    Some(CpEntry::NameAndType(_, _)) => {}
+                    other => return Err(format!(
+                        "Ref entry at {} references non-NameAndType at index {} (found {:?})",
+                        i, nat_idx, other.as_ref().map(std::mem::discriminant)
+                    )),
+                }
+            }
+            CpEntry::MethodHandle(kind, reference_idx) => {
+                // Validate kind is in the range 1..=9 (REF_getField through REF_invokeInterface)
+                const MH_KIND_MIN: u8 = 1;
+                const MH_KIND_MAX: u8 = 9;
+                if *kind < MH_KIND_MIN || *kind > MH_KIND_MAX {
+                    return Err(format!(
+                        "MethodHandle at {} has invalid kind {} (valid range 1-9)",
+                        i, kind
+                    ));
+                }
+                if *reference_idx == 0 || *reference_idx as usize >= cp.len() {
+                    return Err(format!("MethodHandle at {} references invalid index {}", i, reference_idx));
+                }
+                let is_field_ref = *kind <= 4; // REF_getField=1 .. REF_putStatic=4
+                let valid = if is_field_ref {
+                    matches!(&cp[*reference_idx as usize], Some(CpEntry::FieldRef(_, _)))
+                } else {
+                    matches!(
+                        &cp[*reference_idx as usize],
+                        Some(CpEntry::MethodRef(_, _))
+                        | Some(CpEntry::InterfaceMethodRef(_, _))
+                    )
+                };
+                if !valid {
+                    return Err(format!(
+                        "MethodHandle at {} (kind={}) references mismatched entry at index {}",
+                        i, kind, reference_idx
+                    ));
+                }
+            }
+            CpEntry::MethodType(desc_idx) => {
+                if *desc_idx == 0 || *desc_idx as usize >= cp.len() {
+                    return Err(format!("MethodType at {} references invalid utf8 index {}", i, desc_idx));
+                }
+                match &cp[*desc_idx as usize] {
+                    Some(CpEntry::Utf8(_)) => {}
+                    other => return Err(format!(
+                        "MethodType at {} references non-utf8 at index {} (found {:?})",
+                        i, desc_idx, other.as_ref().map(std::mem::discriminant)
+                    )),
+                }
+            }
+            CpEntry::InvokeDynamic(bootstrap_idx, nat_idx) => {
+                if *bootstrap_idx == 0 || *bootstrap_idx as usize >= cp.len() {
+                    return Err(format!("InvokeDynamic at {} references invalid bootstrap index {}", i, bootstrap_idx));
+                }
+                match &cp[*bootstrap_idx as usize] {
+                    Some(CpEntry::NameAndType(_, _)) | Some(CpEntry::MethodHandle(_, _)) => {}
+                    other => return Err(format!(
+                        "InvokeDynamic at {} references unexpected entry at index {} (found {:?})",
+                        i, bootstrap_idx, other.as_ref().map(std::mem::discriminant)
+                    )),
+                }
+                if *nat_idx == 0 || *nat_idx as usize >= cp.len() {
+                    return Err(format!("InvokeDynamic at {} references invalid nat index {}", i, nat_idx));
+                }
+                match &cp[*nat_idx as usize] {
+                    Some(CpEntry::NameAndType(_, _)) => {}
+                    other => return Err(format!(
+                        "InvokeDynamic at {} references non-NameAndType at index {} (found {:?})",
+                        i, nat_idx, other.as_ref().map(std::mem::discriminant)
+                    )),
+                }
+            }
+            // Utf8 has no cross-references to validate
+            CpEntry::Utf8(_) => {}
+            // Numeric entries: validate bit patterns for structural soundness
+            CpEntry::Integer(val) => {
+                // No cross-references, but check for obviously corrupt values
+                // (e.g., Integer.MIN_VALUE is valid, so no range check needed)
+                let _ = val; // acknowledged in validation pass
+            }
+            CpEntry::Float(val) => {
+                // Detect signaling NaN: NaN with the quiet bit cleared.
+                // A signaling NaN has exponent all 1s, fraction non-zero, and the
+                // highest fraction bit (quiet NaN bit) cleared.
+                if val.is_nan() && (val.to_bits() & 0x0040_0000) == 0 {
+                    return Err(format!(
+                        "Float entry at {} is a signaling NaN, indicating class file corruption",
+                        i
+                    ));
+                }
+            }
+            CpEntry::Long(val) => {
+                let _ = val; // acknowledged in validation pass
+            }
+            CpEntry::Double(val) => {
+                // Detect signaling NaN: NaN with the quiet bit cleared.
+                if val.is_nan() && (val.to_bits() & 0x0008_0000_0000_0000) == 0 {
+                    return Err(format!(
+                        "Double entry at {} is a signaling NaN, indicating class file corruption",
+                        i
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn get_utf8(cp: &[Option<CpEntry>], index: u16) -> Option<&str> {

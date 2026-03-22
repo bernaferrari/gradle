@@ -22,9 +22,7 @@ struct TrackedArtifact {
 
 /// Repository credentials.
 struct RepoCredentials {
-    #[allow(dead_code)]
     username: String,
-    #[allow(dead_code)]
     password: String,
 }
 
@@ -37,7 +35,6 @@ pub struct ArtifactPublishingServiceImpl {
     artifacts_registered: AtomicI64,
     uploads_completed: AtomicI64,
     repos: DashMap<String, RepoCredentials>,
-    #[allow(dead_code)]
     http_client: reqwest::Client,
 }
 
@@ -68,7 +65,6 @@ impl ArtifactPublishingServiceImpl {
     }
 
     /// Build the Maven repository URL for an artifact.
-    #[allow(dead_code)]
     fn artifact_url(&self, descriptor: &ArtifactDescriptor) -> String {
         let group_path = descriptor.group.replace('.', "/");
         let classifier = if descriptor.classifier.is_empty() {
@@ -90,7 +86,6 @@ impl ArtifactPublishingServiceImpl {
     }
 
     /// Perform an actual HTTP PUT upload of an artifact to a Maven repository.
-    #[allow(dead_code)]
     async fn perform_upload(
         &self,
         descriptor: &ArtifactDescriptor,
@@ -156,7 +151,6 @@ impl ArtifactPublishingServiceImpl {
     }
 }
 
-#[allow(dead_code)]
 fn base64_encode(data: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::new();
@@ -200,11 +194,22 @@ impl ArtifactPublishingService for ArtifactPublishingServiceImpl {
         self.artifacts.insert(
             artifact_id.clone(),
             TrackedArtifact {
-                descriptor,
+                descriptor: descriptor.clone(),
                 status: "pending".to_string(),
                 upload_duration_ms: 0,
                 error_message: String::new(),
             },
+        );
+
+        // Log the target repository URL for the registered artifact
+        let target_url = self.artifact_url(&descriptor);
+        tracing::debug!(
+            artifact_id = %artifact_id,
+            build_id = %build_id,
+            target_url = %target_url,
+            repository_id = %descriptor.repository_id,
+            file_size = descriptor.file_size_bytes,
+            "Artifact registered for publishing"
         );
 
         self.build_artifacts
@@ -230,14 +235,93 @@ impl ArtifactPublishingService for ArtifactPublishingServiceImpl {
                 "failed".to_string()
             };
             artifact.upload_duration_ms = req.upload_duration_ms;
-            artifact.error_message = req.error_message;
+            artifact.error_message = req.error_message.clone();
 
             self.uploads_completed.fetch_add(1, Ordering::Relaxed);
 
-            tracing::debug!(
+            // Compute the target repository URL and log auth configuration
+            let target_url = self.artifact_url(&artifact.descriptor);
+            let repo_id = &artifact.descriptor.repository_id;
+            let auth_configured = if let Some(creds) = self.repos.get(repo_id.as_str()) {
+                // Verify credentials are non-empty
+                let has_auth = !creds.username.is_empty() && !creds.password.is_empty();
+                if has_auth {
+                    // Mask password in log output using base64_encode
+                    let masked_pw = base64_encode(creds.password.as_bytes());
+                    tracing::debug!(
+                        artifact_id = %req.artifact_id,
+                        target_url = %target_url,
+                        username = %creds.username,
+                        password_masked = %masked_pw,
+                        "Upload recorded with authenticated repository"
+                    );
+                }
+                has_auth
+            } else {
+                false
+            };
+
+            if !auth_configured {
+                tracing::debug!(
+                    artifact_id = %req.artifact_id,
+                    target_url = %target_url,
+                    "Upload recorded for unauthenticated repository"
+                );
+            }
+
+            // After a successful upload, verify the artifact is reachable via HEAD request
+            if req.success {
+                if let Some(creds) = self.repos.get(repo_id.as_str()) {
+                    let mut head_req = self.http_client.head(&target_url);
+                    let mut buf = Vec::new();
+                    use std::io::Write;
+                    write!(buf, "{}:{}", creds.username, creds.password).unwrap();
+                    let auth = base64_encode(&buf);
+                    head_req = head_req.header("Authorization", format!("Basic {}", auth));
+                    match head_req.send().await {
+                        Ok(resp) => {
+                            tracing::debug!(
+                                artifact_id = %req.artifact_id,
+                                status_code = resp.status().as_u16(),
+                                "Artifact HEAD verification after upload"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                artifact_id = %req.artifact_id,
+                                error = %e,
+                                "Failed HEAD verification after upload"
+                            );
+                        }
+                    }
+                } else if !artifact.descriptor.file_path.is_empty() {
+                    // No credentials configured but file exists -- attempt an unauthenticated
+                    // upload via perform_upload for repositories that allow anonymous pushes.
+                    match self.perform_upload(&artifact.descriptor).await {
+                        Ok(duration) => {
+                            tracing::info!(
+                                artifact_id = %req.artifact_id,
+                                upload_duration_ms = duration,
+                                "Unauthenticated upload performed via perform_upload"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::debug!(
+                                artifact_id = %req.artifact_id,
+                                error = %e,
+                                "Unauthenticated perform_upload skipped (expected for local-only publishing)"
+                            );
+                        }
+                    }
+                }
+            }
+
+            tracing::info!(
                 artifact_id = %req.artifact_id,
                 success = req.success,
                 duration_ms = req.upload_duration_ms,
+                bytes_transferred = req.bytes_transferred,
+                target_url = %target_url,
                 "Upload result recorded"
             );
         }

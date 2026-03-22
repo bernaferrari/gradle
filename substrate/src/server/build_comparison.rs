@@ -11,11 +11,9 @@ use crate::proto::BuildDataSnapshot;
 
 /// Stored build data for comparison.
 struct StoredBuildData {
-    #[allow(dead_code)]
     build_id: String,
     task_durations: std::collections::HashMap<String, i64>,
     task_outcomes: std::collections::HashMap<String, String>,
-    #[allow(dead_code)]
     task_order: Vec<String>,
     total_duration_ms: i64,
 }
@@ -74,6 +72,22 @@ impl BuildComparisonService for BuildComparisonServiceImpl {
             )));
         }
 
+        // Validate that stored build_id matches the request key
+        let baseline_data = self.build_data.get(&req.baseline_build_id).unwrap();
+        if baseline_data.build_id != req.baseline_build_id {
+            return Err(Status::failed_precondition(format!(
+                "Baseline build_id mismatch: stored '{}' vs requested '{}'",
+                baseline_data.build_id, req.baseline_build_id
+            )));
+        }
+        let candidate_data = self.build_data.get(&req.candidate_build_id).unwrap();
+        if candidate_data.build_id != req.candidate_build_id {
+            return Err(Status::failed_precondition(format!(
+                "Candidate build_id mismatch: stored '{}' vs requested '{}'",
+                candidate_data.build_id, req.candidate_build_id
+            )));
+        }
+
         let id = self
             .next_comparison_id
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -103,6 +117,10 @@ impl BuildComparisonService for BuildComparisonServiceImpl {
         let snapshot = req
             .snapshot
             .ok_or_else(|| Status::invalid_argument("BuildDataSnapshot is required"))?;
+
+        if snapshot.build_id.is_empty() {
+            return Err(Status::invalid_argument("build_id must not be empty"));
+        }
 
         let total_duration_ms = snapshot.task_durations.values().sum();
 
@@ -219,8 +237,24 @@ impl BuildComparisonService for BuildComparisonServiceImpl {
             });
         }
 
-        // Sort by duration_diff descending (worst regressions first)
-        task_comparisons.sort_by(|a, b| b.duration_diff_ms.cmp(&a.duration_diff_ms));
+        // Sort by duration_diff descending (worst regressions first),
+        // with baseline task_order as a secondary tiebreaker for deterministic output.
+        let baseline_order_index: std::collections::HashMap<&str, usize> = baseline
+            .task_order
+            .iter()
+            .enumerate()
+            .map(|(i, t)| (t.as_str(), i))
+            .collect();
+
+        task_comparisons.sort_by(|a, b| {
+            let diff_cmp = b.duration_diff_ms.cmp(&a.duration_diff_ms);
+            if diff_cmp != std::cmp::Ordering::Equal {
+                return diff_cmp;
+            }
+            let ord_a = baseline_order_index.get(a.task_path.as_str()).copied().unwrap_or(usize::MAX);
+            let ord_b = baseline_order_index.get(b.task_path.as_str()).copied().unwrap_or(usize::MAX);
+            ord_a.cmp(&ord_b)
+        });
 
         let total_diff = candidate.total_duration_ms - baseline.total_duration_ms;
 

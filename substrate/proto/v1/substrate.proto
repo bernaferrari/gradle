@@ -577,6 +577,8 @@ service ConfigurationService {
   rpc CacheConfiguration(CacheConfigurationRequest) returns (CacheConfigurationResponse);
   // Check if configuration cache is valid.
   rpc ValidateConfigCache(ValidateConfigCacheRequest) returns (ValidateConfigCacheResponse);
+  // Retrieve registered project info.
+  rpc GetProjectInfo(GetProjectInfoRequest) returns (ProjectInfo);
 }
 
 message RegisterProjectRequest {
@@ -623,6 +625,18 @@ message ValidateConfigCacheRequest {
 message ValidateConfigCacheResponse {
   bool valid = 1;
   string reason = 2;
+  int64 cached_timestamp_ms = 3;
+}
+
+message GetProjectInfoRequest {
+  string project_path = 1;
+}
+
+message ProjectInfo {
+  string project_path = 1;
+  string project_dir = 2;
+  map<string, string> properties = 3;
+  repeated string applied_plugins = 4;
 }
 
 // -- Plugin Service (Phase 13) --
@@ -718,6 +732,8 @@ service BuildOperationsService {
   rpc StreamEvents(StreamEventsRequest) returns (stream BuildEvent);
   // Get build summary at completion.
   rpc GetBuildSummary(GetBuildSummaryRequest) returns (GetBuildSummaryResponse);
+  // Get details of a completed or active operation.
+  rpc GetOperationDetails(GetOperationDetailsRequest) returns (GetOperationDetailsResponse);
 }
 
 message StartOperationRequest {
@@ -742,6 +758,28 @@ message CompleteOperationRequest {
 
 message CompleteOperationResponse {
   bool success = 1;
+  optional string display_name = 2;
+  optional string operation_type = 3;
+  int64 duration_ms = 4;
+}
+
+message OperationDetail {
+  string operation_id = 1;
+  optional string display_name = 2;
+  optional string operation_type = 3;
+  optional string parent_id = 4;
+  int64 start_time_ms = 5;
+  int64 duration_ms = 6;
+  bool success = 7;
+  map<string, string> metadata = 8;
+}
+
+message GetOperationDetailsRequest {
+  string operation_id = 1;
+}
+
+message GetOperationDetailsResponse {
+  optional OperationDetail detail = 1;
 }
 
 message ReportProgressRequest {
@@ -780,6 +818,10 @@ message BuildSummary {
   int32 from_cache_tasks = 6;
   int32 failed_tasks = 7;
   string outcome = 8; // "SUCCESS", "FAILURE"
+  int32 total_operations = 9;
+  int64 total_operation_duration_ms = 10;
+  map<string, int32> operations_by_type = 11;
+  repeated OperationDetail completed_operations = 12;
 }
 
 message GetBuildSummaryResponse {
@@ -1469,6 +1511,9 @@ message BuildOutcome {
   int32 tasks_up_to_date = 7;
   int32 tasks_failed = 8;
   int32 tasks_skipped = 9;
+  optional string failure_type = 10;          // populated when overall_result == "FAILED"
+  optional string failure_message = 11;       // populated when overall_result == "FAILED"
+  repeated string failed_task_paths = 12;     // populated when overall_result == "FAILED"
 }
 
 message GetBuildResultRequest {
@@ -2052,14 +2097,23 @@ message GetBuildInitStatusRequest {
   string build_id = 1;
 }
 
+message InitScriptInfo {
+  string path = 1;
+  bool success = 2;
+  int64 duration_ms = 3;
+}
+
 message BuildInitStatus {
   string build_id = 1;
   string root_dir = 2;
   bool initialized = 3;
   int64 init_duration_ms = 4;
   repeated SettingsDetailEntry settings_details = 5;
-  repeated string executed_init_scripts = 6;
+  repeated InitScriptInfo executed_init_scripts = 6;
   repeated string included_projects = 7;
+  repeated string included_builds = 8;
+  bool settings_file_exists = 9;
+  optional string gradle_version = 10;
 }
 
 message GetBuildInitStatusResponse {

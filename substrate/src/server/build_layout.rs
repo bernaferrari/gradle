@@ -19,13 +19,10 @@ struct Project {
 
 /// A registered build layout.
 struct BuildLayout {
-    #[allow(dead_code)]
     build_id: String,
-    #[allow(dead_code)]
     root_dir: String,
-    #[allow(dead_code)]
+    settings_file: String,
     build_file: String,
-    #[allow(dead_code)]
     build_name: String,
 }
 
@@ -65,11 +62,24 @@ impl BuildLayoutService for BuildLayoutServiceImpl {
 
         let build_id = format!("build-{}", uuid::Uuid::new_v4().to_string().split_off(8));
 
+        let default_build_file = if req.build_file.is_empty() {
+            "build.gradle".to_string()
+        } else {
+            req.build_file.clone()
+        };
+
+        let default_build_name = if req.build_name.is_empty() {
+            "root project".to_string()
+        } else {
+            req.build_name.clone()
+        };
+
         let layout = BuildLayout {
             build_id: build_id.clone(),
             root_dir: req.root_dir.clone(),
-            build_file: req.build_file.clone(),
-            build_name: req.build_name.clone(),
+            settings_file: req.settings_file.clone(),
+            build_file: default_build_file.clone(),
+            build_name: default_build_name.clone(),
         };
 
         self.builds.insert(build_id.clone(), layout);
@@ -78,16 +88,8 @@ impl BuildLayoutService for BuildLayoutServiceImpl {
         let root_project = Project {
             project_path: ":".to_string(),
             project_dir: req.root_dir,
-            build_file: if req.build_file.is_empty() {
-                "build.gradle".to_string()
-            } else {
-                req.build_file
-            },
-            display_name: if req.build_name.is_empty() {
-                "root project".to_string()
-            } else {
-                req.build_name
-            },
+            build_file: default_build_file,
+            display_name: default_build_name,
             children: Vec::new(),
         };
 
@@ -98,6 +100,9 @@ impl BuildLayoutService for BuildLayoutServiceImpl {
 
         tracing::info!(
             build_id = %build_id,
+            root_dir = %self.builds.get(&build_id).unwrap().root_dir,
+            build_name = %self.builds.get(&build_id).unwrap().build_name,
+            settings_file = %self.builds.get(&build_id).unwrap().settings_file,
             "Build layout initialized"
         );
 
@@ -130,11 +135,37 @@ impl BuildLayoutService for BuildLayoutServiceImpl {
             }));
         }
 
+        // Validate that the subproject directory is under the build root
+        let layout = self.builds.get(&req.build_id).unwrap();
+        if !req.project_dir.starts_with(&layout.root_dir) {
+            return Ok(Response::new(AddSubprojectResponse {
+                added: false,
+                error_message: format!(
+                    "Project directory '{}' is not under build root '{}'",
+                    req.project_dir, layout.root_dir
+                ),
+            }));
+        }
+
+        // Use the build-level default build file if none specified for the subproject
+        let resolved_build_file = if req.build_file.is_empty() {
+            layout.build_file.clone()
+        } else {
+            req.build_file.clone()
+        };
+
+        let resolved_display_name = if req.display_name.is_empty() {
+            // Derive a display name from the project path, e.g. ":lib:utils" -> "lib:utils"
+            req.project_path.trim_start_matches(':').to_string()
+        } else {
+            req.display_name.clone()
+        };
+
         let project = Project {
             project_path: req.project_path.clone(),
             project_dir: req.project_dir.clone(),
-            build_file: req.build_file.clone(),
-            display_name: req.display_name.clone(),
+            build_file: resolved_build_file,
+            display_name: resolved_display_name,
             children: Vec::new(),
         };
 
@@ -150,8 +181,9 @@ impl BuildLayoutService for BuildLayoutServiceImpl {
         }
 
         tracing::debug!(
-            build_id = %req.build_id,
+            build_id = %layout.build_id,
             project_path = %req.project_path,
+            project_dir = %req.project_dir,
             "Subproject added"
         );
 

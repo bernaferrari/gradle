@@ -14,9 +14,7 @@ struct PluginEntry {
     plugin_id: String,
     plugin_class: String,
     version: String,
-    #[allow(dead_code)]
     is_imperative: bool,
-    #[allow(dead_code)]
     applies_to: Vec<String>,
     /// Plugins that must be applied before this one.
     requires: Vec<String>,
@@ -80,6 +78,29 @@ impl PluginServiceImpl {
                 return result;
             }
         };
+
+        // Check if the plugin's target scope includes this project
+        if !entry.applies_to.is_empty() {
+            let project_matches = entry
+                .applies_to
+                .iter()
+                .any(|target| project_path_matches(project_path, target));
+            if !project_matches {
+                result.errors.push(format!(
+                    "Plugin '{}' targets {:?} but is being applied to '{}'",
+                    plugin_id, entry.applies_to, project_path
+                ));
+                result.compatible = false;
+            }
+        }
+
+        // Warn about imperative (legacy) plugin application style
+        if entry.is_imperative {
+            result.warnings.push(format!(
+                "Plugin '{}' uses imperative 'plugins {{}}' application style; consider using the DSL 'plugins {{ id(\"{}\") }}' block instead",
+                plugin_id, plugin_id
+            ));
+        }
 
         // Check if already applied
         if let Some(applied_plugins) = self.applied.get(project_path) {
@@ -216,8 +237,14 @@ impl PluginService for PluginServiceImpl {
     ) -> Result<Response<RegisterPluginResponse>, Status> {
         let req = request.into_inner();
 
+        let plugin_id = req.plugin_id.clone();
+        let is_imperative = req.is_imperative;
+        let applies_to = req.applies_to.clone();
+        let requires = req.requires.clone();
+        let conflicts_with = req.conflicts_with.clone();
+
         self.registry.insert(
-            req.plugin_id.clone(),
+            plugin_id.clone(),
             PluginEntry {
                 plugin_id: req.plugin_id,
                 plugin_class: req.plugin_class,
@@ -227,6 +254,15 @@ impl PluginService for PluginServiceImpl {
                 requires: req.requires,
                 conflicts_with: req.conflicts_with,
             },
+        );
+
+        tracing::debug!(
+            plugin_id = %plugin_id,
+            is_imperative = is_imperative,
+            applies_to = ?applies_to,
+            requires = ?requires,
+            conflicts_with = ?conflicts_with,
+            "Registered plugin"
         );
 
         Ok(Response::new(RegisterPluginResponse { success: true }))
@@ -276,6 +312,8 @@ impl PluginService for PluginServiceImpl {
         tracing::debug!(
             plugin_id = %req.plugin_id,
             project = %req.project_path,
+            is_imperative = entry.is_imperative,
+            apply_order = *order,
             "Applied plugin"
         );
 
@@ -341,6 +379,26 @@ impl PluginService for PluginServiceImpl {
             warnings: result.warnings,
         }))
     }
+}
+
+/// Check whether a project path matches a plugin's target scope.
+///
+/// A target of `"*"` or `"all"` matches any project path.
+/// Otherwise the target is treated as a prefix — e.g. `"java"` matches
+/// `":app"` (since the colon indicates a subproject of a Java project)
+/// or `":core"` (any subproject). A bare prefix like `"java-app"` matches
+/// project paths that start with that prefix.
+fn project_path_matches(project_path: &str, target: &str) -> bool {
+    if target == "*" || target == "all" {
+        return true;
+    }
+    // An empty project path (root project) only matches wildcard targets.
+    if project_path.is_empty() {
+        return false;
+    }
+    // Extract the project name (strip leading ":")
+    let project_name = project_path.strip_prefix(':').unwrap_or(project_path);
+    target == project_name || project_name.starts_with(&format!("{}-", target))
 }
 
 fn chrono_now_ms() -> i64 {

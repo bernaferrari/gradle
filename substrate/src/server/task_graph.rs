@@ -18,9 +18,7 @@ use super::execution_history::ExecutionHistoryServiceImpl;
 struct TaskNode {
     task_path: String,
     depends_on: Vec<String>,
-    #[allow(dead_code)]
     should_execute: bool,
-    #[allow(dead_code)]
     task_type: String,
     estimated_duration_ms: i64,
     status: String,
@@ -69,15 +67,36 @@ impl TaskGraphServiceImpl {
     }
 
     /// Kahn's algorithm for topological sort with parallel scheduling.
+    /// Tasks with `should_execute == false` are excluded from the execution order
+    /// since they are already resolved (UP-TO-DATE, SKIPPED, etc.).
     fn resolve_plan(&self) -> (Vec<ExecutionNode>, i64, bool) {
         let mut in_degree: HashMap<String, usize> = HashMap::new();
         let mut dependents: HashMap<String, Vec<String>> = HashMap::new();
         let mut all_tasks: HashSet<String> = HashSet::new();
+        let mut skipped_count = 0usize;
+        let mut task_type_counts: HashMap<String, usize> = HashMap::new();
 
         // Build adjacency info
         for entry in self.tasks.iter() {
             let path = entry.task_path.clone();
             all_tasks.insert(path.clone());
+
+            // Track task type distribution for logging
+            *task_type_counts
+                .entry(entry.task_type.clone())
+                .or_default() += 1;
+
+            // Skip tasks that should not execute — they are pre-resolved
+            if !entry.should_execute {
+                skipped_count += 1;
+                tracing::debug!(
+                    task_path = %entry.task_path,
+                    task_type = %entry.task_type,
+                    "Excluding non-executing task from execution plan"
+                );
+                continue;
+            }
+
             in_degree.entry(path.clone()).or_insert(0);
 
             for dep in &entry.depends_on {
@@ -86,6 +105,19 @@ impl TaskGraphServiceImpl {
                     dependents.entry(dep.clone()).or_default().push(path.clone());
                 }
             }
+        }
+
+        if skipped_count > 0 {
+            tracing::info!(
+                skipped = skipped_count,
+                total = all_tasks.len(),
+                "Excluded non-executing tasks from execution plan"
+            );
+        }
+
+        // Log task type distribution
+        for (ty, count) in &task_type_counts {
+            tracing::debug!(task_type = %ty, count = *count, "Task type in graph");
         }
 
         // Initialize queue with tasks that have no dependencies
@@ -102,17 +134,19 @@ impl TaskGraphServiceImpl {
         let mut has_cycles = false;
 
         while let Some(task) = queue.pop_front() {
-            order += 1;
             visited_count += 1;
 
             if let Some(entry) = self.tasks.get(&task) {
-                let estimated = entry.estimated_duration_ms;
-                execution_order.push(ExecutionNode {
-                    task_path: entry.task_path.clone(),
-                    dependencies: entry.depends_on.clone(),
-                    execution_order: order,
-                    estimated_duration_ms: estimated,
-                });
+                if entry.should_execute {
+                    order += 1;
+                    let estimated = entry.estimated_duration_ms;
+                    execution_order.push(ExecutionNode {
+                        task_path: entry.task_path.clone(),
+                        dependencies: entry.depends_on.clone(),
+                        execution_order: order,
+                        estimated_duration_ms: estimated,
+                    });
+                }
             }
 
             // Reduce in-degree for dependents
@@ -127,7 +161,18 @@ impl TaskGraphServiceImpl {
             }
         }
 
-        if visited_count != all_tasks.len() {
+        // Only consider tasks that participate in the plan for cycle detection
+        let participating: HashSet<String> = all_tasks
+            .iter()
+            .filter(|t| {
+                self.tasks
+                    .get(*t)
+                    .map(|n| n.should_execute)
+                    .unwrap_or(true)
+            })
+            .cloned()
+            .collect();
+        if visited_count != participating.len() {
             has_cycles = true;
         }
 
@@ -202,6 +247,25 @@ impl TaskGraphService for TaskGraphServiceImpl {
         // Look up estimated duration from execution history
         let estimated = self.lookup_historical_duration(&req.task_path);
 
+        tracing::debug!(
+            task_path = %req.task_path,
+            task_type = %req.task_type,
+            should_execute = req.should_execute,
+            dependency_count = req.depends_on.len(),
+            estimated_duration_ms = estimated,
+            "Registered task in graph"
+        );
+
+        // Validate: if a task should not execute, its dependencies are irrelevant
+        // for scheduling but we still store them for graph consistency.
+        if !req.should_execute && !req.depends_on.is_empty() {
+            tracing::debug!(
+                task_path = %req.task_path,
+                dependency_count = req.depends_on.len(),
+                "Non-executing task has dependencies; they will still be scheduled independently"
+            );
+        }
+
         self.tasks.insert(
             req.task_path.clone(),
             TaskNode {
@@ -223,16 +287,36 @@ impl TaskGraphService for TaskGraphServiceImpl {
         &self,
         request: Request<ResolveExecutionPlanRequest>,
     ) -> Result<Response<ResolveExecutionPlanResponse>, Status> {
-        let _req = request.into_inner();
+        let req = request.into_inner();
         self.request_counter.fetch_add(1, Ordering::Relaxed);
+
+        tracing::debug!(build_id = %req.build_id, "Resolving execution plan");
 
         let (execution_order, critical_path_ms, has_cycles) = self.resolve_plan();
 
         let total = self.tasks.len() as i32;
+        let skipped = self
+            .tasks
+            .iter()
+            .filter(|e| !e.should_execute)
+            .count() as i32;
         let ready = execution_order
             .iter()
             .filter(|n| n.dependencies.is_empty())
             .count() as i32;
+
+        if skipped > 0 {
+            tracing::info!(
+                build_id = %req.build_id,
+                total_tasks = total,
+                skipped = skipped,
+                executable = total - skipped,
+                ready_to_execute = ready,
+                critical_path_ms = critical_path_ms,
+                has_cycles = has_cycles,
+                "Execution plan resolved with excluded tasks"
+            );
+        }
 
         Ok(Response::new(ResolveExecutionPlanResponse {
             execution_order,
@@ -252,6 +336,12 @@ impl TaskGraphService for TaskGraphServiceImpl {
         if let Some(mut task) = self.tasks.get_mut(&req.task_path) {
             task.status = "EXECUTING".to_string();
             task.start_time_ms = req.start_time_ms;
+            tracing::debug!(
+                task_path = %req.task_path,
+                task_type = %task.task_type,
+                start_time_ms = req.start_time_ms,
+                "Task started executing"
+            );
         }
 
         Ok(Response::new(TaskStartedResponse { acknowledged: true }))
@@ -272,6 +362,26 @@ impl TaskGraphService for TaskGraphServiceImpl {
             task.duration_ms = req.duration_ms;
             // Update estimated duration for future scheduling
             task.estimated_duration_ms = req.duration_ms;
+
+            // Log with task_type and should_execute for observability
+            tracing::debug!(
+                task_path = %req.task_path,
+                task_type = %task.task_type,
+                outcome = %task.status,
+                duration_ms = req.duration_ms,
+                should_execute = task.should_execute,
+                "Task finished"
+            );
+
+            // Validate: a task marked as not-should-execute should not have been
+            // started in the first place. Log a warning if we see this inconsistency.
+            if !task.should_execute && task.status == "FAILED" {
+                tracing::warn!(
+                    task_path = %req.task_path,
+                    task_type = %task.task_type,
+                    "Non-executing task reported failure; this may indicate a configuration issue"
+                );
+            }
         }
 
         // Persist duration to execution history for future builds
@@ -291,9 +401,21 @@ impl TaskGraphService for TaskGraphServiceImpl {
         let mut tasks = Vec::new();
         let mut completed = 0i32;
         let mut executing = 0i32;
+        let mut skipped = 0i32;
         let total = self.tasks.len() as i32;
 
         for entry in self.tasks.iter() {
+            // Tasks marked as not-should-execute are already resolved
+            if !entry.should_execute {
+                skipped += 1;
+                tasks.push(TaskProgress {
+                    task_path: entry.task_path.clone(),
+                    status: "SKIPPED".to_string(),
+                    duration_ms: 0,
+                });
+                continue;
+            }
+
             let is_completed = matches!(
                 entry.status.as_str(),
                 "SUCCEEDED" | "FAILED" | "SKIPPED" | "UP_TO_DATE" | "FROM_CACHE"
@@ -310,6 +432,16 @@ impl TaskGraphService for TaskGraphServiceImpl {
                 status: entry.status.clone(),
                 duration_ms: entry.duration_ms,
             });
+        }
+
+        if skipped > 0 {
+            tracing::debug!(
+                total = total,
+                completed = completed,
+                executing = executing,
+                skipped = skipped,
+                "Progress includes skipped (non-executing) tasks"
+            );
         }
 
         Ok(Response::new(GetProgressResponse {

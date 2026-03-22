@@ -13,13 +13,12 @@ use crate::SERVER_VERSION;
 
 /// Active build session.
 struct BuildSession {
-    #[allow(dead_code)]
     project_dir: String,
     start_time: Instant,
-    #[allow(dead_code)]
+    start_time_ms: i64,
     requested_parallelism: i32,
-    #[allow(dead_code)]
     requested_features: Vec<String>,
+    system_properties: std::collections::HashMap<String, String>,
 }
 
 /// Rust-native bootstrap service.
@@ -63,22 +62,46 @@ impl BootstrapService for BootstrapServiceImpl {
         request: Request<InitBuildRequest>,
     ) -> Result<Response<InitBuildResponse>, Status> {
         let req = request.into_inner();
+
+        // Validate inputs
+        if req.build_id.is_empty() {
+            return Err(Status::invalid_argument("build_id must not be empty"));
+        }
+        if req.project_dir.is_empty() {
+            return Err(Status::invalid_argument("project_dir must not be empty"));
+        }
+        if req.requested_parallelism < 0 {
+            return Err(Status::invalid_argument(
+                "requested_parallelism must be non-negative",
+            ));
+        }
+
         let project_dir = req.project_dir.clone();
+        let features_list: Vec<String> = req.requested_features.clone();
+        let sys_prop_count = req.system_properties.len();
+        let build_id = req.build_id.clone();
+        let parallelism = req.requested_parallelism;
+        let client_start_time_ms = req.start_time_ms;
 
         self.sessions.insert(
-            req.build_id.clone(),
+            build_id.clone(),
             BuildSession {
                 project_dir: req.project_dir,
                 start_time: Instant::now(),
-                requested_parallelism: req.requested_parallelism,
+                start_time_ms: client_start_time_ms,
+                requested_parallelism: parallelism,
                 requested_features: req.requested_features,
+                system_properties: req.system_properties,
             },
         );
 
         tracing::info!(
-            build_id = %req.build_id,
+            build_id = %build_id,
             project_dir = %project_dir,
-            parallelism = req.requested_parallelism,
+            parallelism = parallelism,
+            features = ?features_list,
+            system_properties_count = sys_prop_count,
+            client_start_time_ms = client_start_time_ms,
             "Build session initialized"
         );
 
@@ -97,12 +120,32 @@ impl BootstrapService for BootstrapServiceImpl {
         let req = request.into_inner();
 
         if let Some((_key, session)) = self.sessions.remove(&req.build_id) {
-            let duration = session.start_time.elapsed().as_millis() as i64;
+            let server_duration_ms = session.start_time.elapsed().as_millis() as i64;
+            let features_list = session
+                .requested_features
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>();
+            let sys_prop_count = session.system_properties.len();
+
             tracing::info!(
                 build_id = %req.build_id,
+                project_dir = %session.project_dir,
                 outcome = %req.outcome,
-                duration_ms = duration,
+                server_duration_ms = server_duration_ms,
+                client_reported_duration_ms = req.duration_ms,
+                requested_parallelism = session.requested_parallelism,
+                features = ?features_list,
+                system_properties_count = sys_prop_count,
+                client_start_time_ms = session.start_time_ms,
                 "Build completed"
+            );
+        } else {
+            tracing::warn!(
+                build_id = %req.build_id,
+                outcome = %req.outcome,
+                client_reported_duration_ms = req.duration_ms,
+                "CompleteBuild called for unknown session"
             );
         }
 

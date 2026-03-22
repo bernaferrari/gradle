@@ -13,9 +13,7 @@ use crate::proto::{
 
 /// A tracked resource reservation.
 struct Reservation {
-    #[allow(dead_code)]
     reservation_id: String,
-    #[allow(dead_code)]
     build_id: String,
     resources: Vec<(String, i64)>, // (resource_type, amount)
     created_at_ms: i64,
@@ -313,6 +311,11 @@ impl ResourceManagementServiceImpl {
         let cleaned = stale_ids.len() as i32;
         for id in &stale_ids {
             if let Some((_, reservation)) = self.reservations.remove(id) {
+                tracing::debug!(
+                    reservation_id = %reservation.reservation_id,
+                    build_id = %reservation.build_id,
+                    "Released stale reservation"
+                );
                 for (resource_type, amount) in &reservation.resources {
                     if let Some(mut slot) = self.resources.get_mut(resource_type) {
                         slot.used = (slot.used - amount).max(0);
@@ -414,7 +417,7 @@ impl ResourceManagementService for ResourceManagementServiceImpl {
     ) -> Result<Response<ReleaseResourcesResponse>, Status> {
         let req = request.into_inner();
 
-        if let Some((_key, reservation)) = self.reservations.remove(&req.reservation_id) {
+        if let Some((_, reservation)) = self.reservations.remove(&req.reservation_id) {
             for (resource_type, amount) in &reservation.resources {
                 if let Some(mut slot) = self.resources.get_mut(resource_type) {
                     slot.used = (slot.used - amount).max(0);
@@ -422,7 +425,8 @@ impl ResourceManagementService for ResourceManagementServiceImpl {
             }
 
             tracing::debug!(
-                reservation_id = %req.reservation_id,
+                reservation_id = %reservation.reservation_id,
+                build_id = %reservation.build_id,
                 "Resources released"
             );
 
