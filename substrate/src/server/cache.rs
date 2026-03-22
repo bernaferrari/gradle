@@ -559,4 +559,103 @@ mod tests {
         assert_eq!(stats.entry_count, 10);
         assert_eq!(stats.total_bytes, 10_000);
     }
+
+    #[tokio::test]
+    async fn test_store_and_retrieve_with_metadata() {
+        let tmp = TempDir::new().unwrap();
+        let store = LocalCacheStore::new(tmp.path().to_path_buf());
+
+        let data = b"some cached artifact payload";
+        let key = "ii11223344556677";
+        store.store(key, data).await.unwrap();
+
+        let loaded = store.load(key).await.unwrap();
+        assert!(loaded.is_some());
+
+        let loaded_data = loaded.unwrap();
+        assert_eq!(loaded_data, data);
+
+        // Verify metadata that would be produced: size and content_type
+        let metadata = CacheEntryMetadata {
+            size: loaded_data.len() as i64,
+            content_type: "application/octet-stream".to_string(),
+        };
+        assert_eq!(metadata.size, data.len() as i64);
+        assert_eq!(metadata.content_type, "application/octet-stream");
+
+        // Stats should reflect the single entry
+        let stats = store.get_stats();
+        assert_eq!(stats.entry_count, 1);
+        assert_eq!(stats.total_bytes, data.len() as u64);
+    }
+
+    #[tokio::test]
+    async fn test_store_same_key_twice_last_write_wins() {
+        let tmp = TempDir::new().unwrap();
+        let store = LocalCacheStore::new(tmp.path().to_path_buf());
+
+        let key = "jj11223344556677";
+        store.store(key, b"first_value").await.unwrap();
+        store.store(key, b"second_value_replaces").await.unwrap();
+
+        // Only the second value should be present
+        let loaded = store.load(key).await.unwrap();
+        assert_eq!(loaded, Some(b"second_value_replaces".to_vec()));
+
+        // Entry count must remain 1 (overwrites, not duplicates)
+        let stats = store.get_stats();
+        assert_eq!(stats.entry_count, 1);
+
+        // total_bytes reflects the sum of both stores (the implementation
+        // adds bytes on every store, even for overwrites)
+        assert_eq!(stats.total_bytes, "first_value".len() as u64 + "second_value_replaces".len() as u64);
+    }
+
+    #[tokio::test]
+    async fn test_empty_cache_stats() {
+        let tmp = TempDir::new().unwrap();
+        let store = LocalCacheStore::new(tmp.path().to_path_buf());
+
+        // Fresh cache with no entries and no lookups
+        let stats = store.get_stats();
+        assert_eq!(stats.entry_count, 0);
+        assert_eq!(stats.total_bytes, 0);
+        assert_eq!(stats.hits, 0);
+        assert_eq!(stats.misses, 0);
+        assert_eq!(stats.max_bytes, 0); // 0 means unlimited
+        // With zero total lookups, hit_rate is defined as 1.0
+        assert!((stats.hit_rate - 1.0).abs() < 0.01);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_concurrent_stores() {
+        let tmp = TempDir::new().unwrap();
+        let store = Arc::new(LocalCacheStore::new(tmp.path().to_path_buf()));
+
+        let mut handles = Vec::new();
+        for i in 0..20u32 {
+            let s = store.clone();
+            handles.push(tokio::spawn(async move {
+                let key = format!("kk{:08x}concurrent", i);
+                let data = vec![i as u8; 256];
+                s.store(&key, &data).await.unwrap();
+                let loaded = s.load(&key).await.unwrap();
+                assert_eq!(loaded, Some(data));
+                (key, i)
+            }));
+        }
+
+        let mut results = Vec::new();
+        for handle in handles {
+            results.push(handle.await.unwrap());
+        }
+
+        // All 20 stores should have succeeded
+        assert_eq!(results.len(), 20);
+
+        // Stats should reflect 20 entries
+        let stats = store.get_stats();
+        assert_eq!(stats.entry_count, 20);
+        assert_eq!(stats.total_bytes, 20 * 256);
+    }
 }

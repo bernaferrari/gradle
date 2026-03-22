@@ -536,4 +536,174 @@ mod tests {
         assert_eq!(svc.completed.len(), 5);
         assert_eq!(svc.total_operations.load(Ordering::Relaxed), 5);
     }
+
+    #[tokio::test]
+    async fn test_start_operation_with_parent_preserves_relationship() {
+        let svc = BuildOperationsServiceImpl::new();
+
+        // Start a parent operation
+        svc.start_operation(Request::new(StartOperationRequest {
+            operation_id: "parent-op".to_string(),
+            display_name: ":build".to_string(),
+            operation_type: "Lifecycle".to_string(),
+            parent_id: String::new(),
+            start_time_ms: 100,
+            metadata: Default::default(),
+        }))
+        .await
+        .unwrap();
+
+        // Start a child operation referencing the parent
+        svc.start_operation(Request::new(StartOperationRequest {
+            operation_id: "child-op".to_string(),
+            display_name: ":compileJava".to_string(),
+            operation_type: "Task".to_string(),
+            parent_id: "parent-op".to_string(),
+            start_time_ms: 200,
+            metadata: Default::default(),
+        }))
+        .await
+        .unwrap();
+
+        // Verify parent has no parent_id
+        let parent = svc.operations.get("parent-op").unwrap();
+        assert_eq!(parent.parent_id, "");
+        assert_eq!(parent.display_name, ":build");
+
+        // Verify child references the parent
+        let child = svc.operations.get("child-op").unwrap();
+        assert_eq!(child.parent_id, "parent-op");
+        assert_eq!(child.display_name, ":compileJava");
+        assert_eq!(child.operation_type, "Task");
+
+        // Both are tracked independently in the active map
+        assert_eq!(svc.operations.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_complete_operation_with_failure_records_failure() {
+        let svc = BuildOperationsServiceImpl::new();
+
+        svc.start_operation(Request::new(StartOperationRequest {
+            operation_id: "failing-op".to_string(),
+            display_name: ":compileBadCode".to_string(),
+            operation_type: "Task".to_string(),
+            parent_id: String::new(),
+            start_time_ms: 0,
+            metadata: Default::default(),
+        }))
+        .await
+        .unwrap();
+
+        svc.complete_operation(Request::new(CompleteOperationRequest {
+            operation_id: "failing-op".to_string(),
+            duration_ms: 300,
+            success: false,
+            outcome: "FAILED".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        // Verify the completed record marks it as failed
+        let completed = svc.completed.get("failing-op").unwrap();
+        assert!(!completed.success);
+        assert_eq!(completed.display_name, ":compileBadCode");
+
+        // Verify build summary reflects the failure
+        let summary = svc
+            .get_build_summary(Request::new(GetBuildSummaryRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        let s = summary.summary.unwrap();
+        assert_eq!(s.failed_tasks, 1);
+        assert_eq!(s.outcome, "FAILURE");
+    }
+
+    #[tokio::test]
+    async fn test_get_summary_for_nonexistent_operation_returns_empty() {
+        let svc = BuildOperationsServiceImpl::new();
+
+        // With no operations started at all, the summary should have defaults
+        let summary = svc
+            .get_build_summary(Request::new(GetBuildSummaryRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let s = summary.summary.unwrap();
+        assert_eq!(s.build_id, "");
+        assert_eq!(s.total_tasks, 0);
+        assert_eq!(s.executed_tasks, 0);
+        assert_eq!(s.up_to_date_tasks, 0);
+        assert_eq!(s.from_cache_tasks, 0);
+        assert_eq!(s.failed_tasks, 0);
+        assert_eq!(s.outcome, "SUCCESS");
+        assert_eq!(s.total_duration_ms, 0);
+
+        // Also verify no completed operations exist for a made-up ID
+        assert!(svc.completed.get("no-such-op").is_none());
+        assert!(!svc.operations.contains_key("no-such-op"));
+    }
+
+    #[tokio::test]
+    async fn test_same_name_different_ids_tracked_independently() {
+        let svc = BuildOperationsServiceImpl::new();
+
+        // Start two operations with the same display_name but different IDs
+        svc.start_operation(Request::new(StartOperationRequest {
+            operation_id: "task-run-1".to_string(),
+            display_name: ":test".to_string(),
+            operation_type: "Task".to_string(),
+            parent_id: String::new(),
+            start_time_ms: 100,
+            metadata: Default::default(),
+        }))
+        .await
+        .unwrap();
+
+        svc.start_operation(Request::new(StartOperationRequest {
+            operation_id: "task-run-2".to_string(),
+            display_name: ":test".to_string(),
+            operation_type: "Task".to_string(),
+            parent_id: String::new(),
+            start_time_ms: 200,
+            metadata: Default::default(),
+        }))
+        .await
+        .unwrap();
+
+        assert_eq!(svc.operations.len(), 2);
+
+        // Complete the first with success, the second with failure
+        svc.complete_operation(Request::new(CompleteOperationRequest {
+            operation_id: "task-run-1".to_string(),
+            duration_ms: 100,
+            success: true,
+            outcome: "EXECUTED".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        svc.complete_operation(Request::new(CompleteOperationRequest {
+            operation_id: "task-run-2".to_string(),
+            duration_ms: 50,
+            success: false,
+            outcome: "FAILED".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        // Both should be independently recorded in completed
+        assert_eq!(svc.completed.len(), 2);
+
+        let c1 = svc.completed.get("task-run-1").unwrap();
+        assert!(c1.success);
+
+        let c2 = svc.completed.get("task-run-2").unwrap();
+        assert!(!c2.success);
+
+        // Both should have the same display name but are separate entries
+        assert_eq!(c1.display_name, c2.display_name);
+    }
 }

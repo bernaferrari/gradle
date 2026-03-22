@@ -816,4 +816,263 @@ mod tests {
 
         assert!(result.is_err());
     }
+
+    #[tokio::test]
+    async fn test_acquire_and_release_in_sequence() {
+        let svc = ResourceManagementServiceImpl::new();
+
+        // Set a tight limit so we can observe capacity cycling
+        svc.set_resource_limits(Request::new(SetResourceLimitsRequest {
+            build_id: String::new(),
+            limits: vec![ResourceLimit {
+                resource_type: "cpu_cores".to_string(),
+                max_amount: 2,
+                soft_limit: 0,
+            }],
+        }))
+        .await
+        .unwrap();
+
+        // Acquire all available cores
+        let resp1 = svc
+            .reserve_resources(Request::new(ReserveResourcesRequest {
+                build_id: "build-seq".to_string(),
+                resources: vec![make_resource_req("cpu_cores", 2)],
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp1.granted);
+
+        let usage = svc
+            .get_resource_usage(Request::new(GetResourceUsageRequest {
+                build_id: "build-seq".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        let cpu = usage.usage.iter().find(|u| u.resource_type == "cpu_cores").unwrap();
+        assert_eq!(cpu.used, 2);
+        assert_eq!(cpu.available, 0);
+
+        // Release the first reservation
+        svc.release_resources(Request::new(ReleaseResourcesRequest {
+            reservation_id: resp1.reservation_id.clone(),
+        }))
+        .await
+        .unwrap();
+
+        // Now acquire again -- should succeed because capacity was freed
+        let resp2 = svc
+            .reserve_resources(Request::new(ReserveResourcesRequest {
+                build_id: "build-seq".to_string(),
+                resources: vec![make_resource_req("cpu_cores", 1)],
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp2.granted);
+
+        let usage = svc
+            .get_resource_usage(Request::new(GetResourceUsageRequest {
+                build_id: "build-seq".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        let cpu = usage.usage.iter().find(|u| u.resource_type == "cpu_cores").unwrap();
+        assert_eq!(cpu.used, 1);
+        assert_eq!(cpu.available, 1);
+    }
+
+    #[tokio::test]
+    async fn test_acquire_exceeds_max_available() {
+        let svc = ResourceManagementServiceImpl::new();
+
+        // Set a hard ceiling
+        svc.set_resource_limits(Request::new(SetResourceLimitsRequest {
+            build_id: String::new(),
+            limits: vec![ResourceLimit {
+                resource_type: "memory_mb".to_string(),
+                max_amount: 50,
+                soft_limit: 0,
+            }],
+        }))
+        .await
+        .unwrap();
+
+        // Request more than total capacity in a single reservation
+        let resp = svc
+            .reserve_resources(Request::new(ReserveResourcesRequest {
+                build_id: "build-exceed".to_string(),
+                resources: vec![make_resource_req("memory_mb", 100)],
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.granted);
+        assert!(resp.reservation_id.is_empty());
+        assert!(
+            resp.denial_reason.contains("Insufficient"),
+            "denial reason should mention Insufficient, got: {}",
+            resp.denial_reason
+        );
+        assert!(
+            resp.denial_reason.contains("100"),
+            "denial reason should mention requested amount 100, got: {}",
+            resp.denial_reason
+        );
+
+        // Verify no usage was recorded
+        let usage = svc
+            .get_resource_usage(Request::new(GetResourceUsageRequest {
+                build_id: "build-exceed".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        let mem = usage.usage.iter().find(|u| u.resource_type == "memory_mb").unwrap();
+        assert_eq!(mem.used, 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_status_for_nonexistent_resource() {
+        let svc = ResourceManagementServiceImpl::new();
+
+        // Query overall usage -- the built-in resources should be present
+        let usage = svc
+            .get_resource_usage(Request::new(GetResourceUsageRequest {
+                build_id: "build-ghost".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // A resource that was never registered should not appear
+        let ghost = usage
+            .usage
+            .iter()
+            .find(|u| u.resource_type == "nonexistent_resource_type");
+        assert!(
+            ghost.is_none(),
+            "nonexistent resource should not appear in usage list"
+        );
+
+        // Limits should also not contain the nonexistent resource
+        let limits = svc
+            .get_resource_limits(Request::new(GetResourceLimitsRequest {
+                build_id: "build-ghost".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        let ghost_limit = limits
+            .limits
+            .iter()
+            .find(|l| l.resource_type == "nonexistent_resource_type");
+        assert!(
+            ghost_limit.is_none(),
+            "nonexistent resource should not appear in limits list"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_multiple_concurrent_acquisitions_of_same_resource() {
+        let svc = ResourceManagementServiceImpl::new();
+
+        // Set a small capacity so contention is guaranteed
+        svc.set_resource_limits(Request::new(SetResourceLimitsRequest {
+            build_id: String::new(),
+            limits: vec![ResourceLimit {
+                resource_type: "threads".to_string(),
+                max_amount: 10,
+                soft_limit: 0,
+            }],
+        }))
+        .await
+        .unwrap();
+
+        // Spawn 10 concurrent reservation tasks, each requesting 1 thread
+        let svc_ref = &svc;
+        let handles: Vec<_> = (0..10)
+            .map(|i| {
+                let svc = svc_ref;
+                async move {
+                    svc.reserve_resources(Request::new(ReserveResourcesRequest {
+                        build_id: format!("build-concurrent-{}", i),
+                        resources: vec![make_resource_req("threads", 1)],
+                        timeout_ms: 5000,
+                    }))
+                    .await
+                    .unwrap()
+                    .into_inner()
+                }
+            })
+            .collect();
+
+        let results = futures_util::future::join_all(handles).await;
+
+        // All 10 should be granted since each requests 1 and total capacity is 10
+        let granted_count = results.iter().filter(|r| r.granted).count();
+        assert_eq!(
+            granted_count, 10,
+            "all 10 concurrent reservations of 1 thread each should succeed"
+        );
+
+        // Verify total usage is exactly 10
+        let usage = svc
+            .get_resource_usage(Request::new(GetResourceUsageRequest {
+                build_id: "build-concurrent".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        let threads = usage
+            .usage
+            .iter()
+            .find(|u| u.resource_type == "threads")
+            .unwrap();
+        assert_eq!(threads.used, 10);
+        assert_eq!(threads.available, 0);
+
+        // Now a further reservation should be denied
+        let resp = svc
+            .reserve_resources(Request::new(ReserveResourcesRequest {
+                build_id: "build-concurrent-extra".to_string(),
+                resources: vec![make_resource_req("threads", 1)],
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!resp.granted);
+
+        // Release all reservations and verify capacity is fully restored
+        for r in &results {
+            svc.release_resources(Request::new(ReleaseResourcesRequest {
+                reservation_id: r.reservation_id.clone(),
+            }))
+            .await
+            .unwrap();
+        }
+
+        let usage = svc
+            .get_resource_usage(Request::new(GetResourceUsageRequest {
+                build_id: "build-concurrent".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        let threads = usage
+            .usage
+            .iter()
+            .find(|u| u.resource_type == "threads")
+            .unwrap();
+        assert_eq!(threads.used, 0);
+        assert_eq!(threads.available, 10);
+    }
 }
