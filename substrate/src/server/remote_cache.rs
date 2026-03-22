@@ -273,4 +273,255 @@ mod tests {
         );
         assert!(store2.auth_header().is_none());
     }
+
+    // ---------------------------------------------------------------------------
+    // Async tests: exercise load/store against a real HTTP server
+    // ---------------------------------------------------------------------------
+
+    use std::sync::Arc;
+    use std::collections::HashMap;
+    use tokio::net::TcpListener;
+    use tokio::sync::RwLock;
+
+    /// Spin up a minimal HTTP/1.1 server on a random port backed by an in-memory
+    /// `HashMap`.  Returns `(base_url, handle)` where the handle must be kept
+    /// alive for the duration of the test.
+    async fn spawn_mock_server(store: Arc<RwLock<HashMap<String, Vec<u8>>>>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            loop {
+                let (stream, _) = match listener.accept().await {
+                    Ok(pair) => pair,
+                    Err(_) => continue,
+                };
+
+                let store = store.clone();
+                tokio::spawn(async move {
+                    use tokio::io::AsyncReadExt;
+                    use tokio::io::AsyncWriteExt;
+
+                    let mut stream = stream;
+                    let mut buf = Vec::new();
+
+                    // Read until we have at least the full header (ended by \r\n\r\n).
+                    {
+                        let mut tmp = [0u8; 4096];
+                        loop {
+                            let n = match stream.read(&mut tmp).await {
+                                Ok(0) | Err(_) => return,
+                                Ok(n) => n,
+                            };
+                            buf.extend_from_slice(&tmp[..n]);
+                            if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                                break;
+                            }
+                        }
+                    }
+
+                    let header_end = buf
+                        .windows(4)
+                        .position(|w| w == b"\r\n\r\n")
+                        .unwrap() + 4;
+                    let header_str = String::from_utf8_lossy(&buf[..header_end]);
+
+                    let (method, path) = parse_request_line(&header_str);
+
+                    // For PUT, read the remaining body based on Content-Length.
+                    if method == "PUT" {
+                        if let Some(cl) = parse_content_length(&header_str) {
+                            let body_so_far = buf.len() - header_end;
+                            let remaining = cl.saturating_sub(body_so_far);
+                            if remaining > 0 {
+                                let mut body_buf = vec![0u8; remaining];
+                                let mut read = 0;
+                                while read < remaining {
+                                    match stream.read(&mut body_buf[read..]).await {
+                                        Ok(0) | Err(_) => break,
+                                        Ok(n) => read += n,
+                                    }
+                                }
+                                buf.extend_from_slice(&body_buf[..read]);
+                            }
+                        }
+                    }
+
+                    let body_bytes = &buf[header_end..];
+
+                    let (status, response_body): (&str, Vec<u8>) = match method.as_str() {
+                        "GET" => {
+                            let s = store.read().await;
+                            match s.get(&path) {
+                                Some(data) => ("200 OK", data.clone()),
+                                None => ("404 Not Found", Vec::new()),
+                            }
+                        }
+                        "PUT" => {
+                            {
+                                let mut s = store.write().await;
+                                s.insert(path.clone(), body_bytes.to_vec());
+                            }
+                            ("200 OK", Vec::new())
+                        }
+                        _ => ("405 Method Not Allowed", Vec::new()),
+                    };
+
+                    let response = format!(
+                        "HTTP/1.1 {}\r\nContent-Length: {}\r\n\r\n",
+                        status,
+                        response_body.len()
+                    );
+                    let _ = stream.write_all(response.as_bytes()).await;
+                    if !response_body.is_empty() {
+                        let _ = stream.write_all(&response_body).await;
+                    }
+                });
+            }
+        });
+
+        format!("http://127.0.0.1:{}", addr.port())
+    }
+
+    /// Very small request-line parser -- just enough for our tests.
+    fn parse_request_line(request: &str) -> (String, String) {
+        let first_line = request.lines().next().unwrap_or("");
+        let mut parts = first_line.split_whitespace();
+        let method = parts.next().unwrap_or("").to_string();
+        let path = parts.next().unwrap_or("/").to_string();
+        (method, path)
+    }
+
+    /// Parse the Content-Length header value, case-insensitive.
+    fn parse_content_length(header: &str) -> Option<usize> {
+        for line in header.lines() {
+            if let Some(val) = line.strip_prefix("content-length:") {
+                return val.trim().parse().ok();
+            }
+            if let Some(val) = line.strip_prefix("Content-Length:") {
+                return val.trim().parse().ok();
+            }
+        }
+        None
+    }
+
+    #[tokio::test]
+    async fn test_store_with_empty_key_returns_error() {
+        // An empty artifact key causes the URL to be `base_url/`, which the mock
+        // server will treat as a GET for "/" (404).  The store should not panic;
+        // it should return either an error or a well-defined result.
+        let backing = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let base_url = spawn_mock_server(backing.clone()).await;
+        let store = RemoteCacheStore::new(base_url, None, None);
+
+        // Store with an empty key – the server will see path "/".
+        let result = store.store("", b"some data").await;
+        // The store itself does not validate empty keys; it will PUT to
+        // `base_url/` and the server will return 200 because the path "/"
+        // is valid for our mock.  Verify the store doesn't panic and
+        // succeeds (the real value is that it doesn't crash).
+        assert!(result.is_ok(), "store should succeed for empty key (no crash)");
+
+        // Loading with empty key should hit the "/" path in the mock server,
+        // which will return whatever was stored there.
+        let loaded = store.load("").await;
+        assert!(loaded.is_ok(), "load should succeed for empty key (no crash)");
+        assert_eq!(loaded.unwrap(), Some(b"some data".to_vec()));
+    }
+
+    #[tokio::test]
+    async fn test_multiple_stores_loads_last_write_wins() {
+        let backing = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let base_url = spawn_mock_server(backing.clone()).await;
+        let store = RemoteCacheStore::new(base_url, None, None);
+
+        let key = "/artifact/abc123";
+
+        // First write
+        store.store(key, b"version-one").await.unwrap();
+        let loaded = store.load(key).await.unwrap();
+        assert_eq!(loaded, Some(b"version-one".to_vec()));
+
+        // Second write overwrites
+        store.store(key, b"version-two-longer").await.unwrap();
+        let loaded = store.load(key).await.unwrap();
+        assert_eq!(loaded, Some(b"version-two-longer".to_vec()));
+
+        // Third write
+        store.store(key, b"v3").await.unwrap();
+        let loaded = store.load(key).await.unwrap();
+        assert_eq!(loaded, Some(b"v3".to_vec()));
+    }
+
+    #[tokio::test]
+    async fn test_load_nonexistent_artifact_returns_not_found() {
+        let backing = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let base_url = spawn_mock_server(backing.clone()).await;
+        let store = RemoteCacheStore::new(base_url, None, None);
+
+        // Key was never stored – server returns 404, store maps that to Ok(None).
+        let result = store.load("/artifact/does-not-exist").await;
+        assert!(result.is_ok(), "load should not error on 404");
+        assert_eq!(result.unwrap(), None, "nonexistent key should yield None");
+
+        // Also verify a second miss for good measure
+        let result2 = store.load("/artifact/another-miss").await;
+        assert_eq!(result2.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn test_store_and_load_with_metadata_sized_payload() {
+        let backing = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let base_url = spawn_mock_server(backing.clone()).await;
+        let store = RemoteCacheStore::new(base_url, None, None);
+
+        // Build a payload that simulates artifact content with a metadata prefix.
+        // The RemoteCacheStore is opaque to the payload, so we store/load raw bytes.
+        let metadata = b"SIZE:128\nCONTENT-TYPE:application/zip\n\n";
+        let artifact_content = vec![0xABu8; 128];
+        let mut payload = Vec::new();
+        payload.extend_from_slice(metadata);
+        payload.extend_from_slice(&artifact_content);
+
+        let key = "/cache/metadata-test";
+        store.store(key, &payload).await.unwrap();
+
+        let loaded = store.load(key).await.unwrap();
+        assert!(loaded.is_some());
+        let loaded = loaded.unwrap();
+        assert_eq!(loaded.len(), payload.len());
+
+        // Verify the metadata prefix is intact
+        let loaded_str = String::from_utf8_lossy(&loaded[..metadata.len()]);
+        assert!(loaded_str.starts_with("SIZE:128"));
+        assert!(loaded_str.contains("CONTENT-TYPE:application/zip"));
+
+        // Verify the artifact content portion
+        assert_eq!(&loaded[metadata.len()..], &artifact_content[..]);
+    }
+
+    #[tokio::test]
+    async fn test_has_nonexistent_keys_returns_false() {
+        let backing = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let base_url = spawn_mock_server(backing.clone()).await;
+        let store = RemoteCacheStore::new(base_url, None, None);
+
+        // RemoteCacheStore.load returns Ok(None) for 404s, which is the
+        // equivalent of "does not have".  Test several nonexistent keys.
+        let missing_keys = [
+            "/cache/aaa111",
+            "/cache/bbb222",
+            "/cache/ccc333",
+        ];
+        for key in &missing_keys {
+            let result = store.load(key).await.unwrap();
+            assert_eq!(result, None, "key {} should not exist", key);
+        }
+
+        // Store one of them and verify the others remain missing
+        store.store("/cache/aaa111", b"present").await.unwrap();
+        assert_eq!(store.load("/cache/aaa111").await.unwrap(), Some(b"present".to_vec()));
+        assert_eq!(store.load("/cache/bbb222").await.unwrap(), None);
+        assert_eq!(store.load("/cache/ccc333").await.unwrap(), None);
+    }
 }

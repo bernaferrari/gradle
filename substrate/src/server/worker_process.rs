@@ -838,4 +838,126 @@ mod tests {
         // On macOS this returns 0; on Linux it may return a real value
         assert!(mem >= 0);
     }
+
+    #[tokio::test]
+    async fn test_get_worker_info_for_nonexistent_worker_returns_default() {
+        let svc = WorkerProcessServiceImpl::new();
+
+        // Query status with a worker_key that no worker was registered under.
+        let status = svc
+            .get_worker_status(Request::new(GetWorkerStatusRequest {
+                worker_key: "nonexistent-key".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(status.workers.is_empty());
+        assert_eq!(status.pool_size, 0);
+        assert_eq!(status.idle_count, 0);
+        assert_eq!(status.busy_count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_list_workers_when_none_registered_returns_empty_list() {
+        let svc = WorkerProcessServiceImpl::new();
+
+        // Fresh service, no workers acquired yet. Query with empty worker_key (all workers).
+        let status = svc
+            .get_worker_status(Request::new(GetWorkerStatusRequest {
+                worker_key: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(status.workers.is_empty());
+        assert_eq!(status.pool_size, 0);
+        assert_eq!(status.idle_count, 0);
+        assert_eq!(status.busy_count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_release_worker_that_was_never_acquired_succeeds() {
+        let svc = WorkerProcessServiceImpl::new();
+
+        // Release a worker ID that was never acquired -- should succeed (accepted=true)
+        // without panicking or erroring, since the impl silently ignores unknown workers.
+        let resp = svc
+            .release_worker(Request::new(ReleaseWorkerRequest {
+                worker_id: "ghost-worker-42".to_string(),
+                healthy: true,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.accepted);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_workers_can_be_acquired_and_listed() {
+        let svc = WorkerProcessServiceImpl::new();
+
+        let spec_a = make_spec("compiler");
+        let spec_b = make_spec("tester");
+
+        // Acquire two workers of different types
+        let resp_a = svc
+            .acquire_worker(Request::new(AcquireWorkerRequest {
+                spec: Some(spec_a),
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let resp_b = svc
+            .acquire_worker(Request::new(AcquireWorkerRequest {
+                spec: Some(spec_b),
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp_a.worker.is_some());
+        assert!(resp_b.worker.is_some());
+        assert_ne!(
+            resp_a.worker.as_ref().unwrap().worker_id,
+            resp_b.worker.as_ref().unwrap().worker_id,
+            "two acquired workers should have distinct IDs"
+        );
+
+        // List all workers (empty worker_key = no filter)
+        let status = svc
+            .get_worker_status(Request::new(GetWorkerStatusRequest {
+                worker_key: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(status.workers.len(), 2);
+        assert_eq!(status.pool_size, 2);
+        assert_eq!(status.busy_count, 2);
+        assert_eq!(status.idle_count, 0);
+
+        // Both should be in "busy" state
+        for w in &status.workers {
+            assert_eq!(w.state, "busy");
+        }
+
+        // Filter by one key should return exactly one worker
+        let status_a = svc
+            .get_worker_status(Request::new(GetWorkerStatusRequest {
+                worker_key: "compiler".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(status_a.workers.len(), 1);
+        assert_eq!(status_a.workers[0].worker_key, "compiler");
+    }
 }
