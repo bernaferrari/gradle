@@ -64,7 +64,7 @@ impl MetricData {
 /// Tracks build performance metrics for monitoring and optimization.
 #[derive(Default)]
 pub struct BuildMetricsServiceImpl {
-    metrics: DashMap<String, MetricData>,
+    metrics: DashMap<(BuildId, String), MetricData>,
     builds: DashMap<BuildId, BuildSummaryData>,
 }
 
@@ -97,10 +97,10 @@ impl BuildMetricsServiceImpl {
         }
     }
 
-    fn ensure_metric(&self, name: &str) {
-        if !self.metrics.contains_key(name) {
-            self.metrics
-                .insert(name.to_string(), MetricData::new());
+    fn ensure_metric(&self, build_id: &BuildId, name: &str) {
+        let key = (build_id.clone(), name.to_string());
+        if !self.metrics.contains_key(&key) {
+            self.metrics.insert(key, MetricData::new());
         }
     }
 
@@ -123,15 +123,15 @@ impl BuildMetricsService for BuildMetricsServiceImpl {
 
         let value: f64 = event.value.parse().unwrap_or(0.0);
         let tags: HashMap<String, String> = event.tags.into_iter().collect();
+        let build_id = BuildId::from(req.build_id.clone());
 
-        self.ensure_metric(&event.name);
-        if let Some(metric) = self.metrics.get(&event.name) {
+        self.ensure_metric(&build_id, &event.name);
+        if let Some(metric) = self.metrics.get(&(build_id.clone(), event.name.clone())) {
             metric.record(value, tags);
         }
 
         // Also update build summary if this is a known build metric
         if !req.build_id.is_empty() {
-            let build_id = BuildId::from(req.build_id.clone());
             self.ensure_build(&build_id);
             if let Some(build) = self.builds.get(&build_id) {
                 match event.name.as_str() {
@@ -178,20 +178,31 @@ impl BuildMetricsService for BuildMetricsServiceImpl {
     ) -> Result<Response<GetMetricsResponse>, Status> {
         let req = request.into_inner();
         let name_filter: Vec<&str> = req.metric_names.iter().map(|s| s.as_str()).collect();
+        let filter_build_id = if req.build_id.is_empty() {
+            None
+        } else {
+            Some(BuildId::from(req.build_id))
+        };
 
         let snapshots: Vec<MetricSnapshot> = self
             .metrics
             .iter()
             .filter(|entry| {
+                // Filter by build_id if specified
+                if let Some(ref bid) = filter_build_id {
+                    if entry.key().0 != *bid {
+                        return false;
+                    }
+                }
                 if name_filter.is_empty() {
                     return true;
                 }
-                name_filter.contains(&entry.key().as_str())
+                name_filter.contains(&entry.key().1.as_str())
             })
             .map(|entry| {
                 let data = entry.value();
                 MetricSnapshot {
-                    name: entry.key().clone(),
+                    name: entry.key().1.clone(),
                     metric_type: "counter".to_string(),
                     count: data.count.load(Ordering::Relaxed),
                     sum: f64::from_bits(data.sum.load(Ordering::Relaxed)),
@@ -294,11 +305,11 @@ impl BuildMetricsService for BuildMetricsServiceImpl {
             }))
         } else {
             // Reset only for specific build
-            let cleared = if self.builds.remove(&BuildId::from(req.build_id)).is_some() {
-                1
-            } else {
-                0
-            };
+            let build_id = BuildId::from(req.build_id);
+            let before = self.metrics.len();
+            self.metrics.retain(|(bid, _), _| *bid != build_id);
+            self.builds.remove(&build_id);
+            let cleared = (before - self.metrics.len()) as i32;
             Ok(Response::new(ResetMetricsResponse {
                 reset: true,
                 metrics_cleared: cleared,
@@ -672,10 +683,11 @@ mod tests {
     async fn test_multiple_builds_isolated() {
         let svc = make_svc();
 
+        // Both builds record the same metric name — should be isolated by build_id
         svc.record_metric(Request::new(RecordMetricRequest {
             build_id: "build-A".to_string(),
             event: Some(MetricEvent {
-                name: "build-A.tasks.executed".to_string(),
+                name: "tasks.executed".to_string(),
                 value: "10".to_string(),
                 metric_type: "counter".to_string(),
                 tags: HashMap::new(),
@@ -688,7 +700,7 @@ mod tests {
         svc.record_metric(Request::new(RecordMetricRequest {
             build_id: "build-B".to_string(),
             event: Some(MetricEvent {
-                name: "build-B.tasks.executed".to_string(),
+                name: "tasks.executed".to_string(),
                 value: "5".to_string(),
                 metric_type: "counter".to_string(),
                 tags: HashMap::new(),
@@ -698,11 +710,10 @@ mod tests {
         .await
         .unwrap();
 
-        // Metrics are keyed by name, not by build_id — use different names for isolation
         let resp_a = svc
             .get_metrics(Request::new(GetMetricsRequest {
                 build_id: "build-A".to_string(),
-                metric_names: vec!["build-A.tasks.executed".to_string()],
+                metric_names: vec!["tasks.executed".to_string()],
                 since_ms: 0,
             }))
             .await
@@ -712,14 +723,20 @@ mod tests {
         let resp_b = svc
             .get_metrics(Request::new(GetMetricsRequest {
                 build_id: "build-B".to_string(),
-                metric_names: vec!["build-B.tasks.executed".to_string()],
+                metric_names: vec!["tasks.executed".to_string()],
                 since_ms: 0,
             }))
             .await
             .unwrap()
             .into_inner();
 
+        // Each build should see only its own metric
+        assert_eq!(resp_a.metrics.len(), 1);
         assert_eq!(resp_a.metrics[0].count, 1);
+        assert_eq!(resp_a.metrics[0].name, "tasks.executed");
+
+        assert_eq!(resp_b.metrics.len(), 1);
         assert_eq!(resp_b.metrics[0].count, 1);
+        assert_eq!(resp_b.metrics[0].name, "tasks.executed");
     }
 }
