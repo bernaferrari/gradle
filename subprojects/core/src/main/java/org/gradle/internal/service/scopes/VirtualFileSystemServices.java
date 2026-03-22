@@ -198,12 +198,21 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
             }
             FileHasher javaHasher = new DefaultFileHasher(streamHasher);
             RustGrpcFileHasher rustHasher = new RustGrpcFileHasher(substrateClient);
-            if (options.getOption(RustSubstrateOptions.SHADOW_HASHING).get()
-                && !options.getOption(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION).get()) {
+            boolean authoritative = options.getOption(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION).get();
+            if (options.getOption(RustSubstrateOptions.SHADOW_HASHING).get()) {
                 return new ShadowingFileHasher(
                     javaHasher,
                     rustHasher,
-                    new HashMismatchReporter(options.getOption(RustSubstrateOptions.REPORT_MISMATCHES).get())
+                    new HashMismatchReporter(options.getOption(RustSubstrateOptions.REPORT_MISMATCHES).get()),
+                    authoritative
+                );
+            }
+            if (authoritative) {
+                return new ShadowingFileHasher(
+                    javaHasher,
+                    rustHasher,
+                    new HashMismatchReporter(options.getOption(RustSubstrateOptions.REPORT_MISMATCHES).get()),
+                    true
                 );
             }
             return rustHasher;
@@ -394,12 +403,20 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
             } else {
                 FileHasher javaHasher = new DefaultFileHasher(streamHasher);
                 RustGrpcFileHasher rustHasher = new RustGrpcFileHasher(substrateClient);
-                if (options.getOption(RustSubstrateOptions.SHADOW_HASHING).get()
-                    && !options.getOption(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION).get()) {
+                boolean authoritative = options.getOption(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION).get();
+                if (options.getOption(RustSubstrateOptions.SHADOW_HASHING).get()) {
                     localDelegate = new ShadowingFileHasher(
                         javaHasher,
                         rustHasher,
-                        new HashMismatchReporter(options.getOption(RustSubstrateOptions.REPORT_MISMATCHES).get())
+                        new HashMismatchReporter(options.getOption(RustSubstrateOptions.REPORT_MISMATCHES).get()),
+                        authoritative
+                    );
+                } else if (authoritative) {
+                    localDelegate = new ShadowingFileHasher(
+                        javaHasher,
+                        rustHasher,
+                        new HashMismatchReporter(options.getOption(RustSubstrateOptions.REPORT_MISMATCHES).get()),
+                        true
                     );
                 } else {
                     localDelegate = rustHasher;
@@ -447,7 +464,8 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
 
             if (options.getOption(RustSubstrateOptions.ENABLE_RUST_FINGERPRINTING).get()
                 && rustFileFingerprintClient != null && mismatchReporter != null) {
-                return new ShadowingFileCollectionSnapshotter(javaSnapshotter, rustFileFingerprintClient, mismatchReporter);
+                boolean authoritative = options.getOption(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION).get();
+                return new ShadowingFileCollectionSnapshotter(javaSnapshotter, rustFileFingerprintClient, mismatchReporter, authoritative);
             }
 
             return javaSnapshotter;
