@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::Arc;
 
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
@@ -78,19 +79,23 @@ impl MetricData {
 }
 
 /// Tracks build performance metrics for monitoring and optimization.
-#[derive(Default)]
 pub struct BuildMetricsServiceImpl {
-    metrics: DashMap<(BuildId, String), MetricData>,
-    builds: DashMap<BuildId, BuildSummaryData>,
+    metrics: Arc<DashMap<(BuildId, String), MetricData>>,
+    builds: Arc<DashMap<BuildId, BuildSummaryData>>,
 }
 
 impl Clone for BuildMetricsServiceImpl {
     fn clone(&self) -> Self {
-        // DashMap is Clone; atomics are reset (shared state lives in the Arc-wrapped instance)
         Self {
-            metrics: self.metrics.clone(),
-            builds: self.builds.clone(),
+            metrics: Arc::clone(&self.metrics),
+            builds: Arc::clone(&self.builds),
         }
+    }
+}
+
+impl Default for BuildMetricsServiceImpl {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -147,8 +152,8 @@ impl Clone for BuildSummaryData {
 impl BuildMetricsServiceImpl {
     pub fn new() -> Self {
         Self {
-            metrics: DashMap::new(),
-            builds: DashMap::new(),
+            metrics: Arc::new(DashMap::new()),
+            builds: Arc::new(DashMap::new()),
         }
     }
 
