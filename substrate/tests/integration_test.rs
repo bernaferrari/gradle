@@ -3735,3 +3735,147 @@ async fn test_plugin_to_dependency_resolution_chain() {
     assert_eq!(applied.plugins[0].plugin_id, "java");
     assert_eq!(applied.plugins[1].plugin_id, "application");
 }
+
+// ============================================================
+// Test: Cache service store + load via streaming gRPC
+// ============================================================
+
+#[tokio::test]
+async fn test_cache_service_store_load() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client = cache_service_client::CacheServiceClient::new(channel);
+
+    // Step 1: Store a value via client-streaming StoreEntry.
+    // The key in the proto is `bytes`, and the server hex-encodes it to form the file path.
+    let cache_key = b"aa11223344556677";
+    let cache_value = b"hello cache world from integration test";
+
+    let (tx, rx) = tokio::sync::mpsc::channel(8);
+    tx.send(CacheStoreChunk {
+        payload: Some(cache_store_chunk::Payload::Init(CacheStoreInit {
+            key: cache_key.to_vec(),
+            total_size: cache_value.len() as i64,
+        })),
+    }).await.unwrap();
+    tx.send(CacheStoreChunk {
+        payload: Some(cache_store_chunk::Payload::Data(cache_value.to_vec())),
+    }).await.unwrap();
+    drop(tx); // close the stream so the server knows we're done sending
+
+    use tokio_stream::wrappers::ReceiverStream;
+    let store_response = client
+        .store_entry(Request::new(ReceiverStream::new(rx)))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(store_response.success, "store_entry failed: {}", store_response.error_message);
+    assert!(store_response.error_message.is_empty());
+
+    // Step 2: Load the value back via server-streaming LoadEntry.
+    let mut load_response = client
+        .load_entry(Request::new(CacheLoadRequest {
+            key: cache_key.to_vec(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    let mut metadata_seen = false;
+    let mut data_chunks = Vec::new();
+
+    use futures_util::StreamExt;
+    while let Some(chunk_result) = load_response.next().await {
+        let chunk = chunk_result.unwrap();
+        match chunk.payload {
+            Some(cache_load_chunk::Payload::Metadata(meta)) => {
+                metadata_seen = true;
+                assert_eq!(meta.size, cache_value.len() as i64);
+                assert_eq!(meta.content_type, "application/octet-stream");
+            }
+            Some(cache_load_chunk::Payload::Data(bytes)) => {
+                data_chunks.extend_from_slice(&bytes);
+            }
+            None => {}
+        }
+    }
+
+    assert!(metadata_seen, "Expected a metadata chunk from load_entry");
+    assert_eq!(data_chunks, cache_value);
+}
+
+// ============================================================
+// Test: Cache service hit (key exists) and miss (key absent)
+// ============================================================
+
+#[tokio::test]
+async fn test_cache_service_hit_and_miss() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client = cache_service_client::CacheServiceClient::new(channel);
+
+    // Step 1: Store an entry so we have something to hit.
+    let cache_key = b"bbdeadbeefcafe00";
+    let cache_value = b"cached artifact payload";
+
+    let (tx, rx) = tokio::sync::mpsc::channel(8);
+    tx.send(CacheStoreChunk {
+        payload: Some(cache_store_chunk::Payload::Init(CacheStoreInit {
+            key: cache_key.to_vec(),
+            total_size: cache_value.len() as i64,
+        })),
+    }).await.unwrap();
+    tx.send(CacheStoreChunk {
+        payload: Some(cache_store_chunk::Payload::Data(cache_value.to_vec())),
+    }).await.unwrap();
+    drop(tx);
+
+    use tokio_stream::wrappers::ReceiverStream;
+    let store_response = client
+        .store_entry(Request::new(ReceiverStream::new(rx)))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(store_response.success);
+
+    // Step 2: Load the existing key — should get data back (hit).
+    let mut load_hit = client
+        .load_entry(Request::new(CacheLoadRequest {
+            key: cache_key.to_vec(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    use futures_util::StreamExt;
+    let mut hit_chunks = Vec::new();
+    let mut got_metadata = false;
+    while let Some(chunk_result) = load_hit.next().await {
+        let chunk = chunk_result.unwrap();
+        match chunk.payload {
+            Some(cache_load_chunk::Payload::Metadata(_)) => got_metadata = true,
+            Some(cache_load_chunk::Payload::Data(bytes)) => hit_chunks.extend_from_slice(&bytes),
+            None => {}
+        }
+    }
+    assert!(got_metadata, "Expected metadata for existing key");
+    assert_eq!(hit_chunks, cache_value);
+
+    // Step 3: Load a key that was never stored — stream should produce zero chunks (miss).
+    let miss_key = b"ff00000000000000";
+    let mut load_miss = client
+        .load_entry(Request::new(CacheLoadRequest {
+            key: miss_key.to_vec(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    let mut miss_received_any = false;
+    while let Some(chunk_result) = load_miss.next().await {
+        let _chunk = chunk_result.unwrap();
+        miss_received_any = true;
+    }
+    assert!(!miss_received_any, "Expected no chunks for a cache miss");
+}
