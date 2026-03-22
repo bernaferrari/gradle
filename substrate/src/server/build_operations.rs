@@ -697,13 +697,15 @@ mod tests {
         // Both should be independently recorded in completed
         assert_eq!(svc.completed.len(), 2);
 
-        let c1 = svc.completed.get("task-run-1").unwrap();
-        assert!(c1.success);
+        let c1_success = svc.completed.get("task-run-1").unwrap().success;
+        assert!(c1_success);
 
-        let c2 = svc.completed.get("task-run-2").unwrap();
-        assert!(!c2.success);
+        let c2_success = svc.completed.get("task-run-2").unwrap().success;
+        assert!(!c2_success);
 
         // Both should have the same display name but are separate entries
-        assert_eq!(c1.display_name, c2.display_name);
+        let c1_name = svc.completed.get("task-run-1").unwrap().display_name.clone();
+        let c2_name = svc.completed.get("task-run-2").unwrap().display_name.clone();
+        assert_eq!(c1_name, c2_name);
     }
 }
