@@ -479,4 +479,212 @@ mod tests {
         .await
         .unwrap();
     }
+
+    #[tokio::test]
+    async fn test_start_multiple_watchers() {
+        let svc = FileWatchServiceImpl::new();
+
+        let dir1 = tempfile::tempdir().unwrap();
+        let dir2 = tempfile::tempdir().unwrap();
+        let dir3 = tempfile::tempdir().unwrap();
+        let path1 = dir1.path().to_string_lossy().to_string();
+        let path2 = dir2.path().to_string_lossy().to_string();
+        let path3 = dir3.path().to_string_lossy().to_string();
+
+        // Seed each directory with a file so files_watched > 0
+        std::fs::write(dir1.path().join("a.txt"), b"1").unwrap();
+        std::fs::write(dir2.path().join("b.txt"), b"2").unwrap();
+        std::fs::write(dir3.path().join("c.txt"), b"3").unwrap();
+
+        let resp1 = svc
+            .start_watching(Request::new(StartWatchingRequest {
+                root_path: path1.clone(),
+                include_patterns: vec![],
+                exclude_patterns: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let resp2 = svc
+            .start_watching(Request::new(StartWatchingRequest {
+                root_path: path2.clone(),
+                include_patterns: vec![],
+                exclude_patterns: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let resp3 = svc
+            .start_watching(Request::new(StartWatchingRequest {
+                root_path: path3.clone(),
+                include_patterns: vec![],
+                exclude_patterns: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // All three should be active with distinct IDs
+        assert!(resp1.watching);
+        assert!(resp2.watching);
+        assert!(resp3.watching);
+        assert_ne!(resp1.watch_id, resp2.watch_id);
+        assert_ne!(resp2.watch_id, resp3.watch_id);
+        assert_ne!(resp1.watch_id, resp3.watch_id);
+
+        // Stats for each should reflect the files in its respective directory
+        let stats1 = svc
+            .get_watch_stats(Request::new(GetWatchStatsRequest {
+                watch_id: resp1.watch_id.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let stats2 = svc
+            .get_watch_stats(Request::new(GetWatchStatsRequest {
+                watch_id: resp2.watch_id.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let stats3 = svc
+            .get_watch_stats(Request::new(GetWatchStatsRequest {
+                watch_id: resp3.watch_id.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(stats1.files_watched >= 1, "dir1 should have at least 1 file");
+        assert!(stats2.files_watched >= 1, "dir2 should have at least 1 file");
+        assert!(stats3.files_watched >= 1, "dir3 should have at least 1 file");
+        assert!(stats1.watch_start_time_ms > 0);
+        assert!(stats2.watch_start_time_ms > 0);
+        assert!(stats3.watch_start_time_ms > 0);
+
+        // Cleanup
+        svc.stop_watching(Request::new(StopWatchingRequest {
+            watch_id: resp1.watch_id,
+        }))
+        .await
+        .unwrap();
+        svc.stop_watching(Request::new(StopWatchingRequest {
+            watch_id: resp2.watch_id,
+        }))
+        .await
+        .unwrap();
+        svc.stop_watching(Request::new(StopWatchingRequest {
+            watch_id: resp3.watch_id,
+        }))
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_restart_watcher() {
+        let svc = FileWatchServiceImpl::new();
+
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = dir.path().to_string_lossy().to_string();
+
+        // First start
+        let resp1 = svc
+            .start_watching(Request::new(StartWatchingRequest {
+                root_path: dir_path.clone(),
+                include_patterns: vec![],
+                exclude_patterns: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp1.watching);
+        let first_id = resp1.watch_id.clone();
+
+        // Stop it
+        let stop1 = svc
+            .stop_watching(Request::new(StopWatchingRequest {
+                watch_id: first_id.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(stop1.stopped);
+
+        // Verify stats are empty for the old ID
+        let stats_after_stop = svc
+            .get_watch_stats(Request::new(GetWatchStatsRequest {
+                watch_id: first_id.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(stats_after_stop.files_watched, 0);
+        assert_eq!(stats_after_stop.watch_start_time_ms, 0);
+
+        // Restart with the same path — should get a new watch ID
+        let resp2 = svc
+            .start_watching(Request::new(StartWatchingRequest {
+                root_path: dir_path.clone(),
+                include_patterns: vec![],
+                exclude_patterns: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp2.watching);
+        assert_ne!(resp2.watch_id, first_id, "restarted watcher should have a new ID");
+
+        // Stats should be active again
+        let stats_restarted = svc
+            .get_watch_stats(Request::new(GetWatchStatsRequest {
+                watch_id: resp2.watch_id.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(stats_restarted.watch_start_time_ms > 0);
+
+        // Cleanup
+        svc.stop_watching(Request::new(StopWatchingRequest {
+            watch_id: resp2.watch_id,
+        }))
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_watch_nonexistent_dir() {
+        let svc = FileWatchServiceImpl::new();
+
+        // Use a path that is extremely unlikely to exist
+        let nonexistent = "/tmp/gradle_file_watch_test_nonexistent_dir_abcdef123456";
+
+        // Attempting to watch a nonexistent directory should return an error
+        let result = svc
+            .start_watching(Request::new(StartWatchingRequest {
+                root_path: nonexistent.to_string(),
+                include_patterns: vec![],
+                exclude_patterns: vec![],
+            }))
+            .await;
+
+        assert!(result.is_err(), "watching a nonexistent directory should fail");
+        let status = result.unwrap_err();
+        // The error should be an internal status from the notify watcher
+        assert_eq!(status.code(), tonic::Code::Internal);
+        assert!(
+            status.message().contains("Failed to watch path"),
+            "error message should mention the watch failure: {}",
+            status.message()
+        );
+    }
 }

@@ -631,4 +631,118 @@ mod tests {
         assert_eq!(resp.entries_removed, 2);
         assert_eq!(resp.entries_remaining, 2);
     }
+
+    #[tokio::test]
+    async fn test_gc_by_max_bytes() {
+        let dir = tempdir().unwrap();
+
+        // Create files with known sizes: 3 files of 200 bytes each = 600 total
+        for i in 0..3 {
+            let path = dir.path().join(format!("entry{}", i));
+            tokio::fs::write(&path, vec![0u8; 200])
+                .await
+                .unwrap();
+        }
+
+        let svc = GarbageCollectionServiceImpl::new(
+            dir.path().to_path_buf(),
+            dir.path().to_path_buf(),
+            dir.path().to_path_buf(),
+        );
+
+        // Set max_total_bytes to 200 (should keep at most 200 bytes on disk).
+        // max_age_ms=-1 means don't evict by age. The max_total_bytes field is
+        // present on GcBuildCacheRequest but not yet wired into gc_directory.
+        // When max_total_bytes is implemented, this GC should evict files until
+        // the remaining bytes fit within the limit.
+        // For now, verify that max_age_ms=-1 with max_total_bytes set still
+        // preserves files (no age-based eviction) since max_total_bytes is not
+        // yet acted upon.
+        let resp = svc
+            .gc_build_cache(Request::new(GcBuildCacheRequest {
+                max_age_ms: -1,
+                max_total_bytes: 200,
+                dry_run: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // max_total_bytes is not yet enforced; max_age_ms=-1 means no age eviction.
+        // All 3 files should remain untouched.
+        assert_eq!(resp.entries_removed, 0);
+        assert_eq!(resp.entries_remaining, 3);
+        assert_eq!(resp.bytes_remaining, 600);
+    }
+
+    #[tokio::test]
+    async fn test_gc_dry_run_returns_correct_count() {
+        let dir = tempdir().unwrap();
+
+        // Create a mix of files: some will be evicted by age, some won't.
+        // All files are created at roughly the same time, so max_age_ms=0
+        // evicts everything. Use a different approach: create files, sleep,
+        // then create one more. Use max_age_ms=0 to evict all.
+        for i in 0..4 {
+            let path = dir.path().join(format!("entry{}.bin", i));
+            tokio::fs::write(&path, vec![0u8; 50])
+                .await
+                .unwrap();
+        }
+
+        let svc = GarbageCollectionServiceImpl::new(
+            dir.path().to_path_buf(),
+            dir.path().to_path_buf(),
+            dir.path().to_path_buf(),
+        );
+
+        // Dry run with max_age_ms=0: should report all 4 files would be deleted
+        let dry_resp = svc
+            .gc_execution_history(Request::new(GcExecutionHistoryRequest {
+                max_age_ms: 0,
+                max_entries: 0,
+                dry_run: true,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Dry run reports the count of files that WOULD be removed
+        assert_eq!(dry_resp.entries_removed, 4);
+        assert_eq!(dry_resp.bytes_recovered, 200);
+        assert_eq!(dry_resp.entries_remaining, 0);
+
+        // Verify files still exist after dry run
+        for i in 0..4 {
+            assert!(
+                dir.path().join(format!("entry{}.bin", i)).exists(),
+                "entry{}.bin should still exist after dry run",
+                i
+            );
+        }
+
+        // Now run the actual GC (not dry run) and confirm the same count is removed
+        let real_resp = svc
+            .gc_execution_history(Request::new(GcExecutionHistoryRequest {
+                max_age_ms: 0,
+                max_entries: 0,
+                dry_run: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Actual removal should match dry run count
+        assert_eq!(real_resp.entries_removed, dry_resp.entries_removed);
+        assert_eq!(real_resp.bytes_recovered, dry_resp.bytes_recovered);
+
+        // Verify files are now gone
+        for i in 0..4 {
+            assert!(
+                !dir.path().join(format!("entry{}.bin", i)).exists(),
+                "entry{}.bin should be deleted after real GC",
+                i
+            );
+        }
+    }
 }
