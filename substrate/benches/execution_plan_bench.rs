@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use gradle_substrate_daemon::proto::{
     execution_plan_service_server::ExecutionPlanService,
     PredictOutcomeRequest, ResolvePlanRequest, WorkMetadata,
