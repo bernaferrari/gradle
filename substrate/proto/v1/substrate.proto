@@ -1190,6 +1190,12 @@ service ToolchainService {
   rpc VerifyToolchain(VerifyToolchainRequest) returns (VerifyToolchainResponse);
   // Get the current Java home for a given toolchain spec.
   rpc GetJavaHome(GetJavaHomeRequest) returns (GetJavaHomeResponse);
+  // Register a toolchain from an existing local installation path.
+  rpc RegisterToolchain(RegisterToolchainRequest) returns (RegisterToolchainResponse);
+  // Remove a previously registered toolchain.
+  rpc RemoveToolchain(RemoveToolchainRequest) returns (RemoveToolchainResponse);
+  // Get metadata for a registered or system toolchain.
+  rpc GetToolchainMetadata(GetToolchainMetadataRequest) returns (GetToolchainMetadataResponse);
 }
 
 message ToolchainDescriptor {
@@ -1225,6 +1231,8 @@ message EnsureToolchainRequest {
   string os = 4;
   string arch = 5;
   repeated string download_urls = 6; // fallback URLs in order
+  string expected_sha256 = 7;       // verify archive checksum after download
+  bool cache_download = 8;          // if true, reuse previously downloaded archive
 }
 
 message ToolchainProgress {
@@ -1234,6 +1242,8 @@ message ToolchainProgress {
   bool success = 4;
   string error_message = 5;
   string java_home = 6;     // set when done
+  bool sha256_verified = 7; // set when checksum verification passed
+  bool cache_hit = 8;       // set when download was served from cache
 }
 
 message VerifyToolchainRequest {
@@ -1255,6 +1265,51 @@ message GetJavaHomeRequest {
 message GetJavaHomeResponse {
   string java_home = 1;
   bool found = 2;
+}
+
+message RegisterToolchainRequest {
+  string language_version = 1;  // e.g. "17", "21"
+  string implementation = 2;   // e.g. "temurin", "corretto", "graalvm"
+  string java_home = 3;        // absolute path to existing JDK
+  string vendor = 4;           // optional vendor string
+  string expected_sha256 = 5;  // optional checksum to verify
+}
+
+message RegisterToolchainResponse {
+  bool registered = 1;
+  string java_home = 2;       // confirmed path
+  string detected_version = 3; // version from java -version
+  string error_message = 4;
+}
+
+message RemoveToolchainRequest {
+  string language_version = 1;
+  string implementation = 2;
+  bool delete_files = 3;      // if true, remove the JDK directory on disk
+}
+
+message RemoveToolchainResponse {
+  bool removed = 1;
+  string java_home = 2;       // path of the removed toolchain
+  string error_message = 3;
+}
+
+message GetToolchainMetadataRequest {
+  string language_version = 1;
+  string implementation = 2;
+  string java_home = 3;        // if set, probe this path directly
+  string vendor = 4;
+}
+
+message GetToolchainMetadataResponse {
+  bool found = 1;
+  string language_version = 2;
+  string implementation = 3;
+  string vendor = 4;
+  string detected_version = 5; // e.g. "JDK 17"
+  string java_home = 6;
+  int64 install_size_bytes = 7;
+  bool verified = 8;
 }
 
 // -- Build Event Streaming Service (Phase 24) --
