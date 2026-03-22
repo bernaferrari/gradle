@@ -13,11 +13,8 @@ use crate::proto::{
 /// A tracked build's aggregated state.
 struct BuildState {
     failed: bool,
-    #[allow(dead_code)]
     failure_type: String,
-    #[allow(dead_code)]
     failure_message: String,
-    #[allow(dead_code)]
     failed_task_paths: Vec<String>,
 }
 
@@ -148,6 +145,21 @@ impl BuildResultService for BuildResultServiceImpl {
 
         let total_duration_ms: i64 = results.iter().map(|r| r.duration_ms).sum();
 
+        let (failure_type, failure_message, failed_task_paths) =
+            if let Some(state) = &build_state {
+                if state.failed {
+                    (
+                        Some(state.failure_type.clone()),
+                        Some(state.failure_message.clone()),
+                        state.failed_task_paths.clone(),
+                    )
+                } else {
+                    (None, None, Vec::new())
+                }
+            } else {
+                (None, None, Vec::new())
+            };
+
         let outcome = BuildOutcome {
             build_id: req.build_id,
             overall_result: overall_result.to_string(),
@@ -158,6 +170,9 @@ impl BuildResultService for BuildResultServiceImpl {
             tasks_up_to_date: up_to_date,
             tasks_failed: failed,
             tasks_skipped: skipped,
+            failure_type,
+            failure_message,
+            failed_task_paths,
         };
 
         Ok(Response::new(GetBuildResultResponse {

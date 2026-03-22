@@ -28,7 +28,6 @@ impl PredictionStats {
         }
     }
 
-    #[allow(dead_code)]
     fn accuracy(&self, category: &str) -> f32 {
         let total = self.total.get(category).map(|r| *r).unwrap_or(0);
         let correct = self.correct.get(category).map(|r| *r).unwrap_or(0);
@@ -208,6 +207,8 @@ impl ExecutionPlanServiceImpl {
             predicted = predicted_name,
             actual = %actual_outcome,
             correct = prediction_correct,
+            overall_accuracy = self.stats.accuracy("overall"),
+            category_accuracy = self.stats.accuracy(predicted_name),
             "Recorded outcome for shadow comparison"
         );
     }
@@ -326,10 +327,20 @@ impl ExecutionPlanService for ExecutionPlanServiceImpl {
 
         let (predicted, reasoning, confidence) = self.predict(&work);
 
+        let predicted_name = match predicted {
+            PredictedOutcome::PredictedExecute => "execute",
+            PredictedOutcome::PredictedUpToDate => "up_to_date",
+            PredictedOutcome::PredictedFromCache => "from_cache",
+            PredictedOutcome::PredictedShortCircuited => "short_circuited",
+            PredictedOutcome::PredictedUnknown => "unknown",
+        };
+
         tracing::debug!(
             work = %work.display_name,
             ?predicted,
             confidence,
+            category_accuracy = self.stats.accuracy(predicted_name),
+            overall_accuracy = self.stats.accuracy("overall"),
             %reasoning,
             "Phase 5: Predicted outcome"
         );

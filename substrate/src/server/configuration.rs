@@ -6,9 +6,9 @@ use tonic::{Request, Response, Status};
 
 use crate::proto::{
     configuration_service_server::ConfigurationService, CacheConfigurationRequest,
-    CacheConfigurationResponse, RegisterProjectRequest, RegisterProjectResponse,
-    ResolvePropertyRequest, ResolvePropertyResponse, ValidateConfigCacheRequest,
-    ValidateConfigCacheResponse,
+    CacheConfigurationResponse, GetProjectInfoRequest, ProjectInfo, RegisterProjectRequest,
+    RegisterProjectResponse, ResolvePropertyRequest, ResolvePropertyResponse,
+    ValidateConfigCacheRequest, ValidateConfigCacheResponse,
 };
 
 /// Maximum number of cached configurations before eviction.
@@ -30,16 +30,13 @@ pub struct ConfigurationServiceImpl {
 }
 
 struct ProjectState {
-    #[allow(dead_code)]
     project_dir: String,
     properties: HashMap<String, String>,
-    #[allow(dead_code)]
     applied_plugins: Vec<String>,
 }
 
 struct ConfigCacheEntry {
     hash: Vec<u8>,
-    #[allow(dead_code)]
     timestamp_ms: i64,
 }
 
@@ -204,6 +201,26 @@ impl ConfigurationService for ConfigurationServiceImpl {
         Ok(Response::new(RegisterProjectResponse { success: true }))
     }
 
+    async fn get_project_info(
+        &self,
+        request: Request<GetProjectInfoRequest>,
+    ) -> Result<Response<ProjectInfo>, Status> {
+        let req = request.into_inner();
+
+        match self.projects.get(&req.project_path) {
+            Some(project) => Ok(Response::new(ProjectInfo {
+                project_path: req.project_path,
+                project_dir: project.project_dir.clone(),
+                properties: project.properties.clone(),
+                applied_plugins: project.applied_plugins.clone(),
+            })),
+            None => Err(Status::not_found(format!(
+                "Project not found: {}",
+                req.project_path
+            ))),
+        }
+    }
+
     async fn resolve_property(
         &self,
         request: Request<ResolvePropertyRequest>,
@@ -267,11 +284,13 @@ impl ConfigurationService for ConfigurationServiceImpl {
                 return Ok(Response::new(ValidateConfigCacheResponse {
                     valid: true,
                     reason: "Hash matches cached configuration".to_string(),
+                    cached_timestamp_ms: cached.timestamp_ms,
                 }));
             } else {
                 return Ok(Response::new(ValidateConfigCacheResponse {
                     valid: false,
                     reason: "Configuration hash mismatch".to_string(),
+                    cached_timestamp_ms: cached.timestamp_ms,
                 }));
             }
         }
@@ -279,6 +298,7 @@ impl ConfigurationService for ConfigurationServiceImpl {
         Ok(Response::new(ValidateConfigCacheResponse {
             valid: false,
             reason: "No cached configuration found".to_string(),
+            cached_timestamp_ms: 0,
         }))
     }
 }
