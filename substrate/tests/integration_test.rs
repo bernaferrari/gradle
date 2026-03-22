@@ -872,6 +872,7 @@ include ':app', ':lib'
             init_scripts: vec![],
             requested_build_features: vec![],
             current_dir: dir.path().to_str().unwrap().to_string(),
+            session_id: String::new(),
         }))
         .await
         .unwrap()
@@ -1560,6 +1561,7 @@ async fn test_full_build_lifecycle() {
             requested_parallelism: 4,
             system_properties: Default::default(),
             requested_features: vec!["configuration-cache".to_string()],
+            session_id: String::new(),
         }))
         .await
         .unwrap()
@@ -1578,6 +1580,7 @@ async fn test_full_build_lifecycle() {
             init_scripts: vec![],
             requested_build_features: vec![],
             current_dir: "/tmp/lifecycle-test".to_string(),
+            session_id: String::new(),
         }))
         .await
         .unwrap();
@@ -3449,6 +3452,7 @@ async fn test_configuration_to_build_init_flow() {
             init_scripts: vec![],
             requested_build_features: vec!["configuration-cache".to_string()],
             current_dir: "/tmp/config-init-app".to_string(),
+            session_id: String::new(),
         }))
         .await
         .unwrap()

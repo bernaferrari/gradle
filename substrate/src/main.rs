@@ -57,10 +57,10 @@ use gradle_substrate_daemon::{
         file_watch::FileWatchServiceImpl, garbage_collection::GarbageCollectionServiceImpl,
         hash::HashServiceImpl, incremental_compilation::IncrementalCompilationServiceImpl,
         plugin::PluginServiceImpl, problem_reporting::ProblemReportingServiceImpl,
-        resource_management::ResourceManagementServiceImpl, task_graph::TaskGraphServiceImpl,
-        test_execution::TestExecutionServiceImpl, toolchain::ToolchainServiceImpl,
-        value_snapshot::ValueSnapshotServiceImpl, worker_process::WorkerProcessServiceImpl,
-        work::WorkServiceImpl,
+        resource_management::ResourceManagementServiceImpl, scopes::ScopeRegistry,
+        task_graph::TaskGraphServiceImpl, test_execution::TestExecutionServiceImpl,
+        toolchain::ToolchainServiceImpl, value_snapshot::ValueSnapshotServiceImpl,
+        worker_process::WorkerProcessServiceImpl, work::WorkServiceImpl,
     },
     PROTOCOL_VERSION,
 };
@@ -229,8 +229,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 14: Build operations
     let build_operations = BuildOperationsServiceImpl::new();
 
-    // Phase 15: Bootstrap
-    let bootstrap = BootstrapServiceImpl::new();
+    // Scope registry — tracks session→build membership for proper scope isolation
+    let scope_registry = Arc::new(ScopeRegistry::new());
+
+    // Phase 15: Bootstrap (wired to scope registry for session tracking)
+    let bootstrap = BootstrapServiceImpl::with_scope_registry(scope_registry.clone());
 
     // Phase 18: Dependency resolution
     let dependency_resolution = DependencyResolutionServiceImpl::new();
@@ -277,8 +280,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 34: Artifact publishing
     let artifact_publishing = ArtifactPublishingServiceImpl::new();
 
-    // Phase 35: Build initialization
-    let build_init = BuildInitServiceImpl::new();
+    // Phase 35: Build initialization (wired to scope registry)
+    let build_init = BuildInitServiceImpl::with_scope_registry(scope_registry.clone());
 
     // Phase 36: Incremental compilation
     let incremental_compilation = IncrementalCompilationServiceImpl::new();

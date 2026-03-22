@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 use dashmap::DashMap;
@@ -10,7 +11,7 @@ use crate::proto::{
     HealthCheckResponse, InitBuildRequest, InitBuildResponse, SubstrateServiceInfo,
 };
 use crate::SERVER_VERSION;
-use super::scopes::BuildId;
+use super::scopes::{BuildId, ScopeRegistry, SessionId};
 
 /// Active build session.
 struct BuildSession {
@@ -29,6 +30,7 @@ pub struct BootstrapServiceImpl {
     request_counts: DashMap<String, AtomicI64>,
     start_time: Instant,
     health_status: std::sync::atomic::AtomicBool,
+    scope_registry: Option<Arc<ScopeRegistry>>,
 }
 
 impl Default for BootstrapServiceImpl {
@@ -44,6 +46,17 @@ impl BootstrapServiceImpl {
             request_counts: DashMap::new(),
             start_time: Instant::now(),
             health_status: std::sync::atomic::AtomicBool::new(true),
+            scope_registry: None,
+        }
+    }
+
+    pub fn with_scope_registry(scope_registry: Arc<ScopeRegistry>) -> Self {
+        Self {
+            sessions: DashMap::new(),
+            request_counts: DashMap::new(),
+            start_time: Instant::now(),
+            health_status: std::sync::atomic::AtomicBool::new(true),
+            scope_registry: Some(scope_registry),
         }
     }
 
@@ -96,6 +109,21 @@ impl BootstrapService for BootstrapServiceImpl {
                 system_properties: req.system_properties,
             },
         );
+
+        // Register build in scope registry if session_id is provided
+        if let Some(ref registry) = self.scope_registry {
+            if !req.session_id.is_empty() {
+                registry.register_build(
+                    SessionId::from(req.session_id.clone()),
+                    build_id.clone(),
+                );
+                tracing::debug!(
+                    build_id = %build_id_str,
+                    session_id = %req.session_id,
+                    "Registered build in scope registry"
+                );
+            }
+        }
 
         tracing::info!(
             build_id = %build_id_str,
@@ -150,6 +178,11 @@ impl BootstrapService for BootstrapServiceImpl {
                 client_reported_duration_ms = req.duration_ms,
                 "CompleteBuild called for unknown session"
             );
+        }
+
+        // Clean up scope registry
+        if let Some(ref registry) = self.scope_registry {
+            registry.cleanup_build(&build_id);
         }
 
         Ok(Response::new(CompleteBuildResponse { acknowledged: true }))
@@ -221,6 +254,7 @@ mod tests {
                 requested_parallelism: 4,
                 system_properties: Default::default(),
                 requested_features: vec![],
+                session_id: String::new(),
             }))
             .await
             .unwrap()
@@ -286,6 +320,7 @@ mod tests {
                 requested_parallelism: 4,
                 system_properties: Default::default(),
                 requested_features: vec![],
+                session_id: String::new(),
             }))
             .await
             .unwrap();
@@ -343,6 +378,7 @@ mod tests {
                 requested_parallelism: 8,
                 system_properties: Default::default(),
                 requested_features: vec!["configuration-cache".to_string()],
+                session_id: String::new(),
             }))
             .await
             .unwrap()
@@ -364,6 +400,7 @@ mod tests {
             requested_parallelism: 4,
             system_properties: Default::default(),
             requested_features: vec![],
+            session_id: String::new(),
         }))
         .await
         .unwrap();
@@ -376,6 +413,7 @@ mod tests {
             requested_parallelism: 8,
             system_properties: Default::default(),
             requested_features: vec![],
+            session_id: String::new(),
         }))
         .await
         .unwrap();
@@ -400,6 +438,7 @@ mod tests {
             requested_parallelism: 4,
             system_properties: Default::default(),
             requested_features: vec![],
+            session_id: String::new(),
         }))
         .await
         .unwrap();
@@ -471,6 +510,7 @@ mod tests {
             requested_parallelism: 2,
             system_properties: Default::default(),
             requested_features: vec![],
+            session_id: String::new(),
         }))
         .await
         .unwrap();
@@ -482,6 +522,7 @@ mod tests {
             requested_parallelism: 2,
             system_properties: Default::default(),
             requested_features: vec![],
+            session_id: String::new(),
         }))
         .await
         .unwrap();
@@ -541,6 +582,7 @@ mod tests {
                 requested_parallelism: 0,
                 system_properties: Default::default(),
                 requested_features: vec![],
+                session_id: String::new(),
             }))
             .await
             .unwrap()
@@ -623,6 +665,7 @@ mod tests {
                 requested_parallelism: 4,
                 system_properties: Default::default(),
                 requested_features: vec![],
+                session_id: String::new(),
             }))
             .await
             .unwrap();
