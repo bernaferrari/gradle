@@ -360,6 +360,89 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_skipped_outcome() {
+        let svc = BuildResultServiceImpl::new();
+
+        svc.report_task_result(Request::new(ReportTaskResultRequest {
+            build_id: "build-skip".to_string(),
+            result: Some(make_task_result(":compileJava", "SKIPPED", 0)),
+        }))
+        .await
+        .unwrap();
+
+        svc.report_task_result(Request::new(ReportTaskResultRequest {
+            build_id: "build-skip".to_string(),
+            result: Some(make_task_result(":test", "SUCCESS", 1000)),
+        }))
+        .await
+        .unwrap();
+
+        let result = svc
+            .get_build_result(Request::new(GetBuildResultRequest {
+                build_id: "build-skip".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let outcome = result.outcome.unwrap();
+        assert_eq!(outcome.tasks_total, 2);
+        assert_eq!(outcome.tasks_skipped, 1);
+        assert_eq!(outcome.tasks_executed, 1);
+    }
+
+    #[tokio::test]
+    async fn test_empty_task_result_rejected() {
+        let svc = BuildResultServiceImpl::new();
+
+        let result = svc
+            .report_task_result(Request::new(ReportTaskResultRequest {
+                build_id: "build-empty".to_string(),
+                result: None,
+            }))
+            .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_task_summary_unknown_build() {
+        let svc = BuildResultServiceImpl::new();
+
+        let summary = svc
+            .get_task_summary(Request::new(GetTaskSummaryRequest {
+                build_id: "nonexistent".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(summary.tasks.is_empty());
+        assert_eq!(summary.total_duration_ms, 0);
+    }
+
+    #[tokio::test]
+    async fn test_results_reported_counter() {
+        let svc = BuildResultServiceImpl::new();
+
+        svc.report_task_result(Request::new(ReportTaskResultRequest {
+            build_id: "build-count".to_string(),
+            result: Some(make_task_result(":a", "SUCCESS", 100)),
+        }))
+        .await
+        .unwrap();
+
+        svc.report_task_result(Request::new(ReportTaskResultRequest {
+            build_id: "build-count".to_string(),
+            result: Some(make_task_result(":b", "SUCCESS", 200)),
+        }))
+        .await
+        .unwrap();
+
+        assert_eq!(svc.results_reported.load(Ordering::Relaxed), 2);
+    }
+
+    #[tokio::test]
     async fn test_unknown_build() {
         let svc = BuildResultServiceImpl::new();
 

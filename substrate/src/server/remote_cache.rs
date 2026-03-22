@@ -219,4 +219,58 @@ mod tests {
         );
         assert!(store.auth_header().is_none());
     }
+
+    #[test]
+    fn test_base64_known_vectors() {
+        // RFC 4648 test vectors
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
+        assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn test_auth_header_value() {
+        let store = RemoteCacheStore::new(
+            "https://cache.example.com".to_string(),
+            Some("myuser".to_string()),
+            Some("mypass".to_string()),
+        );
+        let auth = store.auth_header().unwrap();
+        // "myuser:mypass" base64 encoded
+        let expected = base64_encode(b"myuser:mypass");
+        assert_eq!(auth, format!("Basic {}", expected));
+    }
+
+    #[test]
+    fn test_trailing_slash_trimmed() {
+        let store = RemoteCacheStore::new(
+            "https://example.com/cache/".to_string(),
+            None,
+            None,
+        );
+        assert_eq!(store.base_url, "https://example.com/cache");
+    }
+
+    #[test]
+    fn test_partial_credentials() {
+        // Only username, no password
+        let store = RemoteCacheStore::new(
+            "https://example.com".to_string(),
+            Some("user".to_string()),
+            None,
+        );
+        assert!(store.auth_header().is_none());
+
+        // Only password, no username
+        let store2 = RemoteCacheStore::new(
+            "https://example.com".to_string(),
+            None,
+            Some("pass".to_string()),
+        );
+        assert!(store2.auth_header().is_none());
+    }
 }

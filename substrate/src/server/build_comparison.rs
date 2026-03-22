@@ -395,6 +395,156 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_comparison_regression_detection() {
+        let svc = BuildComparisonServiceImpl::new();
+
+        svc.record_build_data(Request::new(RecordBuildDataRequest {
+            snapshot: Some(make_snapshot(
+                "base-reg",
+                vec![(":compileJava", "SUCCESS", 1000)],
+            )),
+        }))
+        .await
+        .unwrap();
+
+        // Candidate is > 20% slower → regression
+        svc.record_build_data(Request::new(RecordBuildDataRequest {
+            snapshot: Some(make_snapshot(
+                "cand-reg",
+                vec![(":compileJava", "SUCCESS", 2000)],
+            )),
+        }))
+        .await
+        .unwrap();
+
+        let cmp = svc
+            .start_comparison(Request::new(StartComparisonRequest {
+                baseline_build_id: "base-reg".to_string(),
+                candidate_build_id: "cand-reg".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let result = svc
+            .get_comparison_result(Request::new(GetComparisonResultRequest {
+                comparison_id: cmp.comparison_id,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let summary = result.summary.unwrap();
+        assert_eq!(summary.tasks_with_regression, 1);
+        assert_eq!(summary.tasks_with_improvement, 0);
+    }
+
+    #[tokio::test]
+    async fn test_comparison_identical_builds() {
+        let svc = BuildComparisonServiceImpl::new();
+
+        svc.record_build_data(Request::new(RecordBuildDataRequest {
+            snapshot: Some(make_snapshot(
+                "base-same",
+                vec![(":a", "SUCCESS", 100), (":b", "SUCCESS", 200)],
+            )),
+        }))
+        .await
+        .unwrap();
+
+        svc.record_build_data(Request::new(RecordBuildDataRequest {
+            snapshot: Some(make_snapshot(
+                "cand-same",
+                vec![(":a", "SUCCESS", 100), (":b", "SUCCESS", 200)],
+            )),
+        }))
+        .await
+        .unwrap();
+
+        let cmp = svc
+            .start_comparison(Request::new(StartComparisonRequest {
+                baseline_build_id: "base-same".to_string(),
+                candidate_build_id: "cand-same".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let result = svc
+            .get_comparison_result(Request::new(GetComparisonResultRequest {
+                comparison_id: cmp.comparison_id,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let summary = result.summary.unwrap();
+        assert_eq!(summary.total_diff_ms, 0);
+        assert_eq!(summary.tasks_with_changed_outcome, 0);
+        assert_eq!(summary.tasks_with_regression, 0);
+        assert_eq!(summary.tasks_with_improvement, 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_nonexistent_comparison() {
+        let svc = BuildComparisonServiceImpl::new();
+
+        let result = svc
+            .get_comparison_result(Request::new(GetComparisonResultRequest {
+                comparison_id: "nonexistent".to_string(),
+            }))
+            .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_task_comparisons_sorted_by_diff() {
+        let svc = BuildComparisonServiceImpl::new();
+
+        svc.record_build_data(Request::new(RecordBuildDataRequest {
+            snapshot: Some(make_snapshot(
+                "base-sort",
+                vec![(":slow", "SUCCESS", 100), (":fast", "SUCCESS", 1000)],
+            )),
+        }))
+        .await
+        .unwrap();
+
+        svc.record_build_data(Request::new(RecordBuildDataRequest {
+            snapshot: Some(make_snapshot(
+                "cand-sort",
+                vec![(":slow", "SUCCESS", 500), (":fast", "SUCCESS", 100)],
+            )),
+        }))
+        .await
+        .unwrap();
+
+        let cmp = svc
+            .start_comparison(Request::new(StartComparisonRequest {
+                baseline_build_id: "base-sort".to_string(),
+                candidate_build_id: "cand-sort".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let result = svc
+            .get_comparison_result(Request::new(GetComparisonResultRequest {
+                comparison_id: cmp.comparison_id,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Sorted by duration_diff descending (worst first)
+        assert_eq!(result.task_comparisons[0].task_path, ":slow");
+        assert_eq!(result.task_comparisons[0].duration_diff_ms, 400);
+        assert_eq!(result.task_comparisons[1].task_path, ":fast");
+        assert_eq!(result.task_comparisons[1].duration_diff_ms, -900);
+    }
+
+    #[tokio::test]
     async fn test_comparison_different_tasks() {
         let svc = BuildComparisonServiceImpl::new();
 
