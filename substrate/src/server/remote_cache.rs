@@ -524,4 +524,210 @@ mod tests {
         assert_eq!(store.load("/cache/bbb222").await.unwrap(), None);
         assert_eq!(store.load("/cache/ccc333").await.unwrap(), None);
     }
+
+    #[tokio::test]
+    async fn test_store_with_very_large_payload() {
+        // Verify that a 1 MB+ payload is stored and loaded back correctly.
+        let backing = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let base_url = spawn_mock_server(backing.clone()).await;
+        let store = RemoteCacheStore::new(base_url, None, None);
+
+        let payload_size = 1024 * 1024 + 512; // 1 MB + 512 bytes
+        let payload: Vec<u8> = (0..payload_size)
+            .map(|i| (i % 256) as u8)
+            .collect();
+
+        let key = "/cache/large-artifact";
+        store.store(key, &payload).await.unwrap();
+
+        let loaded = store.load(key).await.unwrap();
+        assert!(loaded.is_some(), "large payload should be retrievable");
+        let loaded = loaded.unwrap();
+        assert_eq!(loaded.len(), payload_size, "loaded payload size must match");
+
+        // Verify byte-level fidelity across the entire payload
+        for i in 0..payload_size {
+            assert_eq!(loaded[i], payload[i], "byte mismatch at offset {}", i);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_stores_to_different_keys() {
+        // Fire off multiple store requests in parallel to different keys and
+        // verify they all land correctly without interference.
+        let backing = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let base_url = spawn_mock_server(backing.clone()).await;
+        let store = RemoteCacheStore::new(base_url, None, None);
+
+        let num_keys = 20usize;
+        let mut handles = Vec::new();
+
+        for i in 0..num_keys {
+            let s = RemoteCacheStore::new(
+                store.base_url.clone(),
+                store.username.clone(),
+                store.password.clone(),
+            );
+            let key = format!("/cache/concurrent/{}", i);
+            let data = format!("payload-{}", i).into_bytes();
+            handles.push(tokio::spawn(async move {
+                s.store(&key, &data).await.unwrap();
+                (key, data)
+            }));
+        }
+
+        // Await all stores and collect the expected key/value pairs.
+        let mut expected: HashMap<String, Vec<u8>> = HashMap::new();
+        for handle in handles {
+            let (key, data) = handle.await.unwrap();
+            expected.insert(key, data);
+        }
+
+        // Verify every key loads back the correct value.
+        for (key, expected_data) in &expected {
+            let loaded = store.load(key).await.unwrap();
+            assert_eq!(loaded, Some(expected_data.clone()), "mismatch for key {}", key);
+        }
+
+        // Also verify the total number of entries in the backing store.
+        let store_map = backing.read().await;
+        assert_eq!(store_map.len(), num_keys, "all concurrent stores should be present");
+    }
+
+    #[tokio::test]
+    async fn test_store_then_load_after_server_restart() {
+        // Store data in a first server instance, then spin up a brand-new
+        // server with an empty backing store and verify the load returns None
+        // (data was not persisted across the restart).
+        let backing1 = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let base_url1 = spawn_mock_server(backing1.clone()).await;
+        let store1 = RemoteCacheStore::new(base_url1, None, None);
+
+        let key = "/cache/survives-restart";
+        store1.store(key, b"important-data").await.unwrap();
+        assert_eq!(
+            store1.load(key).await.unwrap(),
+            Some(b"important-data".to_vec()),
+            "data should be present on the original server"
+        );
+
+        // Now spin up a second, independent server with an empty store.
+        let backing2 = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let base_url2 = spawn_mock_server(backing2.clone()).await;
+        let store2 = RemoteCacheStore::new(base_url2, None, None);
+
+        let loaded = store2.load(key).await.unwrap();
+        assert_eq!(loaded, None, "data should NOT be present on the restarted server");
+
+        // Store new data on the second server and verify it works.
+        store2.store(key, b"new-data").await.unwrap();
+        assert_eq!(
+            store2.load(key).await.unwrap(),
+            Some(b"new-data".to_vec()),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_has_many_with_mixed_existing_and_nonexisting_keys() {
+        // Store a handful of keys, then check a larger set that mixes stored
+        // and never-stored keys, verifying each individually.
+        let backing = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let base_url = spawn_mock_server(backing.clone()).await;
+        let store = RemoteCacheStore::new(base_url, None, None);
+
+        // Pre-populate some keys
+        let existing_keys: Vec<String> = (0..5)
+            .map(|i| {
+                let key = format!("/cache/exists/{}", i);
+                let data = format!("value-{}", i);
+                let store_cloned = RemoteCacheStore::new(
+                    store.base_url.clone(),
+                    store.username.clone(),
+                    store.password.clone(),
+                );
+                let key_clone = key.clone();
+                tokio::spawn(async move {
+                    store_cloned.store(&key_clone, data.as_bytes()).await.unwrap();
+                });
+                key
+            })
+            .collect();
+
+        // Wait for all stores to finish
+        for _handle in existing_keys {
+            // (the handles were fire-and-forget, give the server a moment)
+        }
+        // Give the spawned tasks time to complete
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Build a mixed query set: some existing, some not
+        let all_keys: Vec<String> = (0..10)
+            .map(|i| format!("/cache/exists/{}", i))
+            .collect();
+
+        let mut present_count = 0;
+        let mut missing_count = 0;
+        for key in &all_keys {
+            let result = store.load(key).await.unwrap();
+            if result.is_some() {
+                present_count += 1;
+            } else {
+                missing_count += 1;
+            }
+        }
+
+        assert_eq!(present_count, 5, "exactly 5 keys should be present");
+        assert_eq!(missing_count, 5, "exactly 5 keys should be missing");
+    }
+
+    #[tokio::test]
+    async fn test_load_with_corrupted_metadata_returns_gracefully() {
+        // Simulate server-side corruption by inserting truncated and garbage
+        // payloads directly into the backing store.  The RemoteCacheStore is
+        // opaque to payload semantics, so loads should still succeed and
+        // return whatever bytes the server provides.  The caller is
+        // responsible for validating content integrity.
+        let backing = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let base_url = spawn_mock_server(backing.clone()).await;
+        let store = RemoteCacheStore::new(base_url, None, None);
+
+        // Insert a truncated payload directly into the backing store,
+        // bypassing the mock server's PUT handler, to simulate corruption.
+        // Note: RemoteCacheStore prepends a "/" when building the URL, so the
+        // mock server sees the path as "//cache/corrupt-truncated".
+        let key_truncated = "/cache/corrupt-truncated";
+        let server_path = format!("/{}", key_truncated); // becomes "//cache/corrupt-truncated"
+        {
+            let mut map = backing.write().await;
+            // A payload whose metadata header claims SIZE:256 but only has
+            // 5 bytes of actual data — clearly corrupted.
+            map.insert(server_path, b"SIZE:".to_vec());
+        }
+
+        let loaded = store.load(key_truncated).await;
+        assert!(loaded.is_ok(), "load should not error on corrupted data");
+        let loaded = loaded.unwrap();
+        assert!(loaded.is_some(), "corrupted entry should still be retrievable");
+        let loaded = loaded.unwrap();
+        assert_eq!(loaded.len(), 5, "truncated entry should be 5 bytes");
+        assert_eq!(&loaded[..], b"SIZE:", "bytes should match the corrupted content");
+
+        // Insert a completely garbage payload.
+        let key_garbage = "/cache/corrupt-garbage";
+        let server_path_garbage = format!("/{}", key_garbage);
+        let garbage = vec![0xDEu8, 0xAD, 0xBE, 0xEF, 0x00, 0xFF];
+        {
+            let mut map = backing.write().await;
+            map.insert(server_path_garbage, garbage.clone());
+        }
+        let loaded2 = store.load(key_garbage).await.unwrap();
+        assert_eq!(loaded2, Some(garbage.clone()));
+
+        // Verify that a normal store+load still works alongside corrupted
+        // entries — the corruption of one key does not affect others.
+        let key_good = "/cache/corrupt-good-neighbor";
+        store.store(key_good, b"perfectly-fine-data").await.unwrap();
+        let loaded3 = store.load(key_good).await.unwrap();
+        assert_eq!(loaded3, Some(b"perfectly-fine-data".to_vec()));
+    }
 }

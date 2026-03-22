@@ -524,4 +524,265 @@ mod tests {
             "hashing the same file twice must produce identical results"
         );
     }
+
+    #[tokio::test]
+    async fn test_gRPC_hash_large_file_1mb_produces_non_empty_hash() {
+        let svc = HashServiceImpl;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        // Write 1 MB of pseudo-random-looking data
+        let data: Vec<u8> = (0..1_048_576).map(|i| (i % 256) as u8).collect();
+        tmp.write_all(&data).unwrap();
+
+        let resp = svc
+            .hash_batch(Request::new(HashBatchRequest {
+                files: vec![crate::proto::FileToHash {
+                    absolute_path: tmp.path().to_string_lossy().to_string(),
+                    length: 0,
+                    last_modified: 0,
+                }],
+                algorithm: "MD5".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.results.len(), 1);
+        assert!(!resp.results[0].error, "large file should hash without error");
+        assert_eq!(resp.results[0].hash_bytes.len(), 16, "MD5 hash must be 16 bytes");
+        // Verify at least one byte is non-zero (the hash of 1MB of data should not be all zeros)
+        assert!(
+            resp.results[0].hash_bytes.iter().any(|&b| b != 0),
+            "hash of 1 MB file should not be all zeros"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_gRPC_hash_batch_duplicate_paths_returns_consistent_results() {
+        let svc = HashServiceImpl;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "duplicate path content").unwrap();
+
+        let path_str = tmp.path().to_string_lossy().to_string();
+
+        let resp = svc
+            .hash_batch(Request::new(HashBatchRequest {
+                files: vec![
+                    crate::proto::FileToHash {
+                        absolute_path: path_str.clone(),
+                        length: 0,
+                        last_modified: 0,
+                    },
+                    crate::proto::FileToHash {
+                        absolute_path: path_str.clone(),
+                        length: 0,
+                        last_modified: 0,
+                    },
+                    crate::proto::FileToHash {
+                        absolute_path: path_str,
+                        length: 0,
+                        last_modified: 0,
+                    },
+                ],
+                algorithm: "SHA-256".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.results.len(), 3);
+        // All three results should succeed and produce identical hashes
+        for result in &resp.results {
+            assert!(!result.error, "duplicate path entry should succeed");
+            assert_eq!(result.hash_bytes.len(), 32, "SHA-256 hash must be 32 bytes");
+        }
+        assert_eq!(
+            resp.results[0].hash_bytes, resp.results[1].hash_bytes,
+            "first and second duplicate must match"
+        );
+        assert_eq!(
+            resp.results[0].hash_bytes, resp.results[2].hash_bytes,
+            "first and third duplicate must match"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_gRPC_hash_batch_sha256_produces_32_byte_hash() {
+        let svc = HashServiceImpl;
+
+        // Create three files with different content
+        let mut tmp1 = NamedTempFile::new().unwrap();
+        write!(tmp1, "alpha").unwrap();
+        let mut tmp2 = NamedTempFile::new().unwrap();
+        write!(tmp2, "beta").unwrap();
+        let mut tmp3 = NamedTempFile::new().unwrap();
+        write!(tmp3, "gamma").unwrap();
+
+        let resp = svc
+            .hash_batch(Request::new(HashBatchRequest {
+                files: vec![
+                    crate::proto::FileToHash {
+                        absolute_path: tmp1.path().to_string_lossy().to_string(),
+                        length: 0,
+                        last_modified: 0,
+                    },
+                    crate::proto::FileToHash {
+                        absolute_path: tmp2.path().to_string_lossy().to_string(),
+                        length: 0,
+                        last_modified: 0,
+                    },
+                    crate::proto::FileToHash {
+                        absolute_path: tmp3.path().to_string_lossy().to_string(),
+                        length: 0,
+                        last_modified: 0,
+                    },
+                ],
+                algorithm: "SHA-256".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.results.len(), 3);
+        for result in &resp.results {
+            assert!(!result.error, "each file should hash successfully with SHA-256");
+            assert_eq!(
+                result.hash_bytes.len(),
+                32,
+                "SHA-256 must always produce a 32-byte hash"
+            );
+        }
+        // Different content must produce different hashes
+        assert_ne!(resp.results[0].hash_bytes, resp.results[1].hash_bytes);
+        assert_ne!(resp.results[1].hash_bytes, resp.results[2].hash_bytes);
+        assert_ne!(resp.results[0].hash_bytes, resp.results[2].hash_bytes);
+    }
+
+    #[tokio::test]
+    async fn test_gRPC_hash_same_file_with_md5_and_sha256_produces_different_results() {
+        let svc = HashServiceImpl;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "multi-algorithm test data").unwrap();
+
+        let path_str = tmp.path().to_string_lossy().to_string();
+        let file_entry = crate::proto::FileToHash {
+            absolute_path: path_str,
+            length: 0,
+            last_modified: 0,
+        };
+
+        // Hash with MD5
+        let md5_resp = svc
+            .hash_batch(Request::new(HashBatchRequest {
+                files: vec![file_entry.clone()],
+                algorithm: "MD5".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Hash with SHA-256
+        let sha256_resp = svc
+            .hash_batch(Request::new(HashBatchRequest {
+                files: vec![file_entry],
+                algorithm: "SHA-256".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!md5_resp.results[0].error);
+        assert!(!sha256_resp.results[0].error);
+
+        // MD5 is 16 bytes, SHA-256 is 32 bytes -- different lengths
+        assert_eq!(md5_resp.results[0].hash_bytes.len(), 16);
+        assert_eq!(sha256_resp.results[0].hash_bytes.len(), 32);
+        assert_ne!(
+            md5_resp.results[0].hash_bytes,
+            sha256_resp.results[0].hash_bytes,
+            "MD5 and SHA-256 hashes must differ"
+        );
+
+        // Also hash with SHA-1 for good measure
+        let sha1_resp = svc
+            .hash_batch(Request::new(HashBatchRequest {
+                files: vec![crate::proto::FileToHash {
+                    absolute_path: tmp.path().to_string_lossy().to_string(),
+                    length: 0,
+                    last_modified: 0,
+                }],
+                algorithm: "SHA-1".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!sha1_resp.results[0].error);
+        assert_eq!(sha1_resp.results[0].hash_bytes.len(), 20);
+    }
+
+    #[tokio::test]
+    async fn test_gRPC_hash_file_with_special_characters_in_path() {
+        let svc = HashServiceImpl;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // Create files with spaces, unicode, and mixed characters in their names
+        let special_names = [
+            "file with spaces.txt",
+            "\u{00e9}ntrepr\u{00ee}se.txt", // "entreprise" with accented chars
+            "\u{4f60}\u{597d}\u{4e16}\u{754c}.txt", // "你好世界.txt" (Chinese)
+            "cafe\u{0301}.txt",             // "cafe\u{0301}.txt" with combining accent
+            "file with (parens) & ampersand.txt",
+        ];
+
+        let mut files_to_hash = Vec::new();
+        for name in &special_names {
+            let file_path = temp_dir.path().join(name);
+            let mut f = File::create(&file_path).unwrap();
+            write!(f, "content for {name}").unwrap();
+            files_to_hash.push(crate::proto::FileToHash {
+                absolute_path: file_path.to_string_lossy().to_string(),
+                length: 0,
+                last_modified: 0,
+            });
+        }
+
+        let resp = svc
+            .hash_batch(Request::new(HashBatchRequest {
+                files: files_to_hash,
+                algorithm: "MD5".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(
+            resp.results.len(),
+            special_names.len(),
+            "should have one result per file"
+        );
+        for result in &resp.results {
+            assert!(
+                !result.error,
+                "file at '{}' should hash without error: {}",
+                result.absolute_path,
+                result.error_message
+            );
+            assert_eq!(
+                result.hash_bytes.len(),
+                16,
+                "MD5 hash for '{}' must be 16 bytes",
+                result.absolute_path
+            );
+            // Each unique content must produce a non-zero hash
+            assert!(
+                result.hash_bytes.iter().any(|&b| b != 0),
+                "hash for '{}' should not be all zeros",
+                result.absolute_path
+            );
+        }
+    }
 }
