@@ -546,4 +546,110 @@ mod tests {
         svc.register_repo("my-repo".to_string(), "user".to_string(), "pass".to_string());
         assert!(svc.repos.contains_key("my-repo"));
     }
+
+    #[tokio::test]
+    async fn test_publishing_status_empty_build() {
+        let svc = ArtifactPublishingServiceImpl::new();
+
+        let status = svc
+            .get_publishing_status(Request::new(GetPublishingStatusRequest {
+                build_id: "nonexistent".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(status.total, 0);
+        assert_eq!(status.uploaded, 0);
+        assert_eq!(status.failed, 0);
+        assert_eq!(status.pending, 0);
+        assert!(status.artifacts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_checksums_nonexistent_artifact() {
+        let svc = ArtifactPublishingServiceImpl::new();
+
+        let checksums = svc
+            .get_artifact_checksums(Request::new(GetArtifactChecksumsRequest {
+                artifact_id: "nonexistent".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(checksums.md5.is_empty());
+        assert!(checksums.sha1.is_empty());
+        assert!(checksums.sha256.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_record_upload_nonexistent_artifact() {
+        let svc = ArtifactPublishingServiceImpl::new();
+
+        // Recording upload for nonexistent artifact should succeed
+        let resp = svc
+            .record_upload_result(Request::new(RecordUploadResultRequest {
+                artifact_id: "nonexistent".to_string(),
+                success: true,
+                error_message: String::new(),
+                upload_duration_ms: 100,
+                bytes_transferred: 0,
+            }))
+            .await
+        .unwrap()
+        .into_inner();
+
+        assert!(resp.accepted);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_builds_isolated() {
+        let svc = ArtifactPublishingServiceImpl::new();
+
+        svc.register_artifact(Request::new(RegisterArtifactRequest {
+            build_id: "build-A".to_string(),
+            artifact: Some(make_artifact("a-a1", "lib-a")),
+        }))
+        .await
+        .unwrap();
+
+        svc.register_artifact(Request::new(RegisterArtifactRequest {
+            build_id: "build-B".to_string(),
+            artifact: Some(make_artifact("a-b1", "lib-b")),
+        }))
+        .await
+        .unwrap();
+
+        svc.record_upload_result(Request::new(RecordUploadResultRequest {
+            artifact_id: "a-a1".to_string(),
+            success: true,
+            error_message: String::new(),
+            upload_duration_ms: 100,
+            bytes_transferred: 1024,
+        }))
+        .await
+        .unwrap();
+
+        let status_a = svc
+            .get_publishing_status(Request::new(GetPublishingStatusRequest {
+                build_id: "build-A".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let status_b = svc
+            .get_publishing_status(Request::new(GetPublishingStatusRequest {
+                build_id: "build-B".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(status_a.total, 1);
+        assert_eq!(status_a.uploaded, 1);
+        assert_eq!(status_b.total, 1);
+        assert_eq!(status_b.pending, 1);
+    }
 }

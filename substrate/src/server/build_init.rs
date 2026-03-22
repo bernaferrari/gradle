@@ -726,4 +726,138 @@ include ':core'
             .collect();
         assert_eq!(root_name, vec!["test-project"]);
     }
+
+    #[tokio::test]
+    async fn test_record_settings_detail_missing() {
+        let svc = BuildInitServiceImpl::new();
+
+        // Recording to nonexistent build should succeed (silently ignored)
+        let resp = svc
+            .record_settings_detail(Request::new(RecordSettingsDetailRequest {
+                build_id: "nonexistent".to_string(),
+                detail: Some(SettingsDetailEntry {
+                    key: "k".to_string(),
+                    value: "v".to_string(),
+                }),
+            }))
+            .await
+        .unwrap()
+        .into_inner();
+
+        assert!(resp.accepted);
+    }
+
+    #[tokio::test]
+    async fn test_record_init_script_missing_build() {
+        let svc = BuildInitServiceImpl::new();
+
+        // Recording init script for nonexistent build should succeed
+        let resp = svc
+            .record_init_script(Request::new(RecordInitScriptRequest {
+                build_id: "nonexistent".to_string(),
+                script_path: "/tmp/init.gradle".to_string(),
+                success: true,
+                error_message: String::new(),
+                duration_ms: 50,
+            }))
+            .await
+        .unwrap()
+        .into_inner();
+
+        assert!(resp.accepted);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_init_scripts() {
+        let svc = BuildInitServiceImpl::new();
+
+        svc.init_build_settings(Request::new(InitBuildSettingsRequest {
+            build_id: "multi-scripts".to_string(),
+            root_dir: "/tmp".to_string(),
+            settings_file: String::new(),
+            gradle_user_home: String::new(),
+            init_scripts: vec![],
+            requested_build_features: vec![],
+            current_dir: String::new(),
+        }))
+        .await
+        .unwrap();
+
+        svc.record_init_script(Request::new(RecordInitScriptRequest {
+            build_id: "multi-scripts".to_string(),
+            script_path: "/tmp/init1.gradle".to_string(),
+            success: true,
+            error_message: String::new(),
+            duration_ms: 10,
+        }))
+        .await
+        .unwrap();
+
+        svc.record_init_script(Request::new(RecordInitScriptRequest {
+            build_id: "multi-scripts".to_string(),
+            script_path: "/tmp/init2.gradle".to_string(),
+            success: false,
+            error_message: "boom".to_string(),
+            duration_ms: 5,
+        }))
+        .await
+        .unwrap();
+
+        let status = svc
+            .get_build_init_status(Request::new(GetBuildInitStatusRequest {
+                build_id: "multi-scripts".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner()
+            .status
+            .unwrap();
+
+        assert_eq!(status.executed_init_scripts.len(), 2);
+        assert_eq!(status.executed_init_scripts[0], "/tmp/init1.gradle");
+        assert_eq!(status.executed_init_scripts[1], "/tmp/init2.gradle");
+    }
+
+    #[tokio::test]
+    async fn test_reinit_build() {
+        let svc = BuildInitServiceImpl::new();
+
+        svc.init_build_settings(Request::new(InitBuildSettingsRequest {
+            build_id: "reinit".to_string(),
+            root_dir: "/tmp/old".to_string(),
+            settings_file: String::new(),
+            gradle_user_home: String::new(),
+            init_scripts: vec![],
+            requested_build_features: vec![],
+            current_dir: String::new(),
+        }))
+        .await
+        .unwrap();
+
+        // Re-init with different root_dir
+        svc.init_build_settings(Request::new(InitBuildSettingsRequest {
+            build_id: "reinit".to_string(),
+            root_dir: "/tmp/new".to_string(),
+            settings_file: String::new(),
+            gradle_user_home: String::new(),
+            init_scripts: vec![],
+            requested_build_features: vec![],
+            current_dir: String::new(),
+        }))
+        .await
+        .unwrap();
+
+        let status = svc
+            .get_build_init_status(Request::new(GetBuildInitStatusRequest {
+                build_id: "reinit".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner()
+            .status
+            .unwrap();
+
+        assert_eq!(status.root_dir, "/tmp/new");
+        assert!(status.initialized);
+    }
 }
