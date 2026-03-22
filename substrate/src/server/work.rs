@@ -218,4 +218,91 @@ mod tests {
         assert!(scheduler.can_accept_work());
         assert_eq!(scheduler.running_count(), 1);
     }
+
+    #[tokio::test]
+    async fn test_record_execution_then_evaluate() {
+        let scheduler = std::sync::Arc::new(WorkerScheduler::new(4));
+        let svc = WorkServiceImpl::new(scheduler);
+
+        // Evaluate with no history → must execute
+        let resp1 = svc
+            .evaluate(Request::new(WorkEvaluateRequest {
+                task_path: ":compileJava".to_string(),
+                input_properties: Default::default(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp1.should_execute);
+        let input_hash = resp1.input_hash;
+
+        // Record execution
+        let rec = svc
+            .record_execution(Request::new(WorkRecordRequest {
+                task_path: ":compileJava".to_string(),
+                duration_ms: 500,
+                success: true,
+                input_hash: input_hash.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(rec.acknowledged);
+
+        // Evaluate again with same inputs → up-to-date
+        let resp2 = svc
+            .evaluate(Request::new(WorkEvaluateRequest {
+                task_path: ":compileJava".to_string(),
+                input_properties: Default::default(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp2.should_execute);
+        assert!(resp2.reason.contains("UP_TO_DATE"));
+    }
+
+    #[tokio::test]
+    async fn test_evaluate_inputs_changed() {
+        let scheduler = std::sync::Arc::new(WorkerScheduler::new(4));
+        let svc = WorkServiceImpl::new(scheduler);
+
+        // Record execution with empty props
+        let resp1 = svc
+            .evaluate(Request::new(WorkEvaluateRequest {
+                task_path: ":compileJava".to_string(),
+                input_properties: Default::default(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        svc.record_execution(Request::new(WorkRecordRequest {
+            task_path: ":compileJava".to_string(),
+            duration_ms: 100,
+            success: true,
+            input_hash: resp1.input_hash,
+        }))
+        .await
+        .unwrap();
+
+        // Now evaluate with different inputs → must execute
+        let mut props = std::collections::HashMap::new();
+        props.insert("source".to_string(), "v2".to_string());
+
+        let resp2 = svc
+            .evaluate(Request::new(WorkEvaluateRequest {
+                task_path: ":compileJava".to_string(),
+                input_properties: props,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp2.should_execute);
+        assert!(resp2.reason.contains("inputs changed"));
+    }
 }
