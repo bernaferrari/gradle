@@ -742,6 +742,7 @@ service BuildOperationsService {
 }
 
 message StartOperationRequest {
+  string build_id = 7; // scopes operation to a specific build
   string operation_id = 1;
   string display_name = 2;
   string operation_type = 3;
@@ -755,6 +756,7 @@ message StartOperationResponse {
 }
 
 message CompleteOperationRequest {
+  string build_id = 5; // scopes operation to a specific build
   string operation_id = 1;
   int64 duration_ms = 2;
   bool success = 3;
@@ -780,6 +782,7 @@ message OperationDetail {
 }
 
 message GetOperationDetailsRequest {
+  string build_id = 2; // optional — filter by build
   string operation_id = 1;
 }
 
@@ -788,6 +791,7 @@ message GetOperationDetailsResponse {
 }
 
 message ReportProgressRequest {
+  string build_id = 5; // optional — filter by build
   string operation_id = 1;
   string message = 2;
   float progress = 3; // 0.0 - 1.0
@@ -812,7 +816,9 @@ message BuildEvent {
   bool success = 7;
 }
 
-message GetBuildSummaryRequest {}
+message GetBuildSummaryRequest {
+  string build_id = 1; // optional — filter summary to a specific build
+}
 
 message BuildSummary {
   string build_id = 1;
