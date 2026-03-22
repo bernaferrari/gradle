@@ -1,4 +1,5 @@
 pub mod authoritative;
+pub mod dag_executor;
 pub mod event_dispatcher;
 pub mod scopes;
 pub mod control;

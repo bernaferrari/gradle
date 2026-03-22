@@ -7,6 +7,7 @@ use tonic::Request;
 
 use gradle_substrate_daemon::proto::*;
 use gradle_substrate_daemon::server::{
+    dag_executor::DagExecutorServiceImpl,
     artifact_publishing::ArtifactPublishingServiceImpl,
     bootstrap::BootstrapServiceImpl,
     build_metrics::BuildMetricsServiceImpl,
@@ -94,10 +95,12 @@ async fn spawn_test_server() -> (String, tempfile::TempDir) {
     let toolchain = ToolchainServiceImpl::new(toolchain_dir);
     let console = std::sync::Arc::new(ConsoleServiceImpl::new());
     let build_metrics = std::sync::Arc::new(BuildMetricsServiceImpl::new());
-    let build_event_stream = BuildEventStreamServiceImpl::with_dispatchers(vec![
+    let event_dispatchers: Vec<Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>> = vec![
         std::sync::Arc::clone(&console) as Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
         std::sync::Arc::clone(&build_metrics) as Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
-    ]);
+    ];
+    let build_event_stream = BuildEventStreamServiceImpl::with_dispatchers(event_dispatchers.clone());
+    let dag_executor = DagExecutorServiceImpl::new(work_scheduler.clone(), Arc::clone(&task_graph), event_dispatchers);
     let worker_process = WorkerProcessServiceImpl::new();
     let build_layout = BuildLayoutServiceImpl::new();
     let build_result = BuildResultServiceImpl::new();
@@ -120,6 +123,7 @@ async fn spawn_test_server() -> (String, tempfile::TempDir) {
     tokio::spawn(async move {
         let _ = Server::builder()
             .add_service(control_service_server::ControlServiceServer::new(control))
+            .add_service(dag_executor_service_server::DagExecutorServiceServer::new(dag_executor))
             .add_service(hash_service_server::HashServiceServer::new(hash))
             .add_service(cache_service_server::CacheServiceServer::new(cache))
             .add_service(exec_service_server::ExecServiceServer::new(exec))
