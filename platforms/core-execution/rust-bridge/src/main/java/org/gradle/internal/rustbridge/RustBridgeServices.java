@@ -25,7 +25,10 @@ import org.gradle.internal.rustbridge.watch.RustFileWatchClient;
 import org.gradle.internal.rustbridge.work.WorkerSchedulerClient;
 import org.gradle.internal.rustbridge.bootstrap.RustBootstrapClient;
 import org.gradle.internal.rustbridge.bootstrap.BootstrapLifecycleListener;
+import org.gradle.internal.rustbridge.configcache.ConfigurationCacheShadowListener;
 import org.gradle.internal.rustbridge.configcache.RustConfigCacheClient;
+import org.gradle.internal.rustbridge.incrementalcompilation.IncrementalCompilationShadowListener;
+import org.gradle.internal.rustbridge.incremental.RustIncrementalCompilationClient;
 import org.gradle.internal.rustbridge.worker.RustWorkerProcessClient;
 import org.gradle.internal.rustbridge.publishing.RustArtifactPublishingClient;
 import org.gradle.internal.rustbridge.dependency.RustDependencyResolutionClient;
@@ -476,6 +479,31 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             TaskExecutionGraphShadowListener listener = new TaskExecutionGraphShadowListener(client);
             listenerManager.addListener(listener);
             return listener;
+        }
+
+        @Provides
+        @Nullable
+        ConfigurationCacheShadowListener createConfigurationCacheShadowListener(
+            RustConfigCacheClient rustConfigCacheClient,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!options.getOption(RustSubstrateOptions.ENABLE_SUBSTRATE).get()) {
+                return null;
+            }
+            return new ConfigurationCacheShadowListener(rustConfigCacheClient, mismatchReporter);
+        }
+
+        @Provides
+        @Nullable
+        IncrementalCompilationShadowListener createIncrementalCompilationShadowListener(
+            RustIncrementalCompilationClient rustIncrementalCompilationClient,
+            InternalOptions options
+        ) {
+            if (!options.getOption(RustSubstrateOptions.ENABLE_RUST_INCREMENTAL_COMPILATION).get()) {
+                return null;
+            }
+            return new IncrementalCompilationShadowListener(rustIncrementalCompilationClient);
         }
     }
 
