@@ -1,12 +1,17 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::Path;
 
 use dashmap::DashMap;
+use glob::glob;
 use tonic::{Request, Response, Status};
 
 use super::scopes::BuildId;
 
 use crate::proto::{
-    incremental_compilation_service_server::IncrementalCompilationService, CompilationUnit,
+    incremental_compilation_service_server::IncrementalCompilationService, AnalyzeClassDependenciesRequest,
+    AnalyzeClassDependenciesResponse, AnnotationProcessorChange, ClassDependencyInfo,
+    CompilationUnit, DetectAnnotationProcessorChangesRequest, DetectAnnotationProcessorChangesResponse,
+    DiscoveredSource, DiscoverSourcesRequest, DiscoverSourcesResponse,
     GetIncrementalStateRequest, GetIncrementalStateResponse, GetRebuildSetRequest,
     GetRebuildSetResponse, IncrementalState, RebuildDecision, RecordCompilationRequest,
     RecordCompilationResponse, RegisterSourceSetRequest, RegisterSourceSetResponse,
@@ -75,6 +80,157 @@ impl IncrementalCompilationServiceImpl {
         }
 
         affected
+    }
+
+    /// Discover source files in the given directories matching include patterns.
+    fn discover_sources_impl(
+        source_dirs: &[String],
+        include_patterns: &[String],
+        exclude_patterns: &[String],
+    ) -> Vec<DiscoveredSource> {
+        let mut sources = Vec::new();
+        let include_globs: Vec<String> = if include_patterns.is_empty() {
+            vec![
+                "**/*.java".to_string(),
+                "**/*.kt".to_string(),
+                "**/*.groovy".to_string(),
+                "**/*.scala".to_string(),
+            ]
+        } else {
+            include_patterns.to_vec()
+        };
+
+        for source_dir in source_dirs {
+            let dir_path = Path::new(source_dir);
+            for pattern in &include_globs {
+                let full_pattern = dir_path.join(pattern).to_string_lossy().to_string();
+                if let Ok(entries) = glob(&full_pattern) {
+                    for entry in entries.flatten() {
+                        let relative = entry
+                            .strip_prefix(dir_path)
+                            .unwrap_or(&entry)
+                            .to_string_lossy()
+                            .to_string();
+
+                        // Check exclude patterns
+                        let excluded = exclude_patterns.iter().any(|exc| {
+                            let full_exc = dir_path.join(exc).to_string_lossy().to_string();
+                            glob(&full_exc)
+                                .map(|e| e.flatten().any(|e| e == entry))
+                                .unwrap_or(false)
+                        });
+
+                        if excluded {
+                            continue;
+                        }
+
+                        let extension = entry
+                            .extension()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
+
+                        let metadata = std::fs::metadata(&entry);
+                        let (last_modified_ms, size_bytes) = match &metadata {
+                            Ok(m) => (
+                                m.modified()
+                                    .ok()
+                                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                    .map(|d| d.as_millis() as i64)
+                                    .unwrap_or(0),
+                                m.len() as i64,
+                            ),
+                            Err(_) => (0, 0),
+                        };
+
+                        sources.push(DiscoveredSource {
+                            path: relative,
+                            source_dir: source_dir.clone(),
+                            extension,
+                            last_modified_ms,
+                            size_bytes,
+                        });
+                    }
+                }
+            }
+        }
+
+        sources.sort_by(|a, b| a.path.cmp(&b.path));
+        sources.dedup_by(|a, b| a.path == b.path);
+        sources
+    }
+
+    /// Parse .class files to extract class references and annotations.
+    /// Uses a byte-level scanner to find ConstantPool #Class entries.
+    fn analyze_class_dependencies_impl(
+        output_dirs: &[String],
+        target_files: &[String],
+    ) -> Vec<ClassDependencyInfo> {
+        let mut results = Vec::new();
+
+        // Build set of files to analyze
+        let targets: HashSet<&str> = target_files.iter().map(|s| s.as_str()).collect();
+
+        for output_dir in output_dirs {
+            let dir = Path::new(output_dir);
+            if !dir.exists() {
+                continue;
+            }
+
+            for entry in walk_dir_recursive(dir).into_iter().flatten() {
+                if entry.extension().and_then(|e: &std::ffi::OsStr| e.to_str()) != Some("class") {
+                    continue;
+                }
+
+                // Skip if specific targets were requested and this isn't one
+                if !targets.is_empty() {
+                    let rel = entry
+                        .strip_prefix(dir)
+                        .unwrap_or(&entry)
+                        .to_string_lossy();
+                    if !targets.iter().any(|t| rel.contains(t) || rel.ends_with(t)) {
+                        continue;
+                    }
+                }
+
+                if let Ok(data) = std::fs::read(&entry) {
+                    let info = Self::parse_class_file(&data, &entry);
+                    results.push(info);
+                }
+            }
+        }
+
+        results
+    }
+
+    /// Parse a single .class file to extract references and annotations.
+    fn parse_class_file(data: &[u8], path: &Path) -> ClassDependencyInfo {
+        let class_name = extract_class_name(data).unwrap_or_else(|| {
+            path.file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default()
+        });
+
+        let references = extract_class_references(data);
+        let annotations = extract_annotations(data);
+
+        // Heuristic: if the class extends javax.annotation.processing.AbstractProcessor
+        // or has @SupportedAnnotationTypes, it's an annotation processor
+        let is_ap = references.iter().any(|r| {
+            r.contains("javax.annotation.processing.AbstractProcessor")
+                || r.contains("javax.annotation.processing.Processor")
+        }) || annotations
+            .iter()
+            .any(|a| a == "SupportedAnnotationTypes" || a == "SupportedSourceVersion");
+
+        ClassDependencyInfo {
+            class_file: path.to_string_lossy().to_string(),
+            class_name,
+            references,
+            annotations,
+            is_annotation_processor: is_ap,
+            has_generated_sources: false, // Would need source dir comparison
+        }
     }
 }
 
@@ -262,6 +418,300 @@ impl IncrementalCompilationService for IncrementalCompilationServiceImpl {
             Ok(Response::new(GetIncrementalStateResponse { state: None }))
         }
     }
+
+    async fn discover_sources(
+        &self,
+        request: Request<DiscoverSourcesRequest>,
+    ) -> Result<Response<DiscoverSourcesResponse>, Status> {
+        let req = request.into_inner();
+        let sources = Self::discover_sources_impl(
+            &req.source_dirs,
+            &req.include_patterns,
+            &req.exclude_patterns,
+        );
+        let total = sources.len() as i32;
+        tracing::debug!(
+            source_dirs = ?req.source_dirs,
+            total_discovered = total,
+            "Source discovery complete"
+        );
+        Ok(Response::new(DiscoverSourcesResponse {
+            sources,
+            total_discovered: total,
+        }))
+    }
+
+    async fn analyze_class_dependencies(
+        &self,
+        request: Request<AnalyzeClassDependenciesRequest>,
+    ) -> Result<Response<AnalyzeClassDependenciesResponse>, Status> {
+        let req = request.into_inner();
+        let dependencies = Self::analyze_class_dependencies_impl(
+            &req.output_dirs,
+            &req.class_files,
+        );
+        let total = dependencies.len() as i32;
+        tracing::debug!(
+            output_dirs = ?req.output_dirs,
+            total_analyzed = total,
+            "Class dependency analysis complete"
+        );
+        Ok(Response::new(AnalyzeClassDependenciesResponse {
+            dependencies,
+            total_analyzed: total,
+        }))
+    }
+
+    async fn detect_annotation_processor_changes(
+        &self,
+        request: Request<DetectAnnotationProcessorChangesRequest>,
+    ) -> Result<Response<DetectAnnotationProcessorChangesResponse>, Status> {
+        let req = request.into_inner();
+
+        // Analyze class files in the processor classpath to find current processors
+        let mut current_processors: HashSet<String> = HashSet::new();
+        for cp_entry in &req.annotation_processor_classpath {
+            if let Ok(entries) = glob(&format!("{}/**/*.class", cp_entry)) {
+                for entry in entries.flatten() {
+                    if let Ok(data) = std::fs::read(&entry) {
+                        if is_annotation_processor_class(&data) {
+                            if let Some(name) = extract_class_name(&data) {
+                                current_processors.insert(name);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let previous: HashSet<String> = req.previous_processor_classes.iter().cloned().collect();
+
+        let mut changes = Vec::new();
+        for added in current_processors.difference(&previous) {
+            changes.push(AnnotationProcessorChange {
+                processor_class: added.clone(),
+                change_type: "added".to_string(),
+                details: format!("New annotation processor: {}", added),
+            });
+        }
+        for removed in previous.difference(&current_processors) {
+            changes.push(AnnotationProcessorChange {
+                processor_class: removed.clone(),
+                change_type: "removed".to_string(),
+                details: format!("Annotation processor removed: {}", removed),
+            });
+        }
+
+        let processors_changed = !changes.is_empty();
+        // Any processor change requires full recompilation
+        let full_recompilation_required = processors_changed;
+
+        tracing::debug!(
+            processors_changed,
+            changes_count = changes.len(),
+            "Annotation processor change detection complete"
+        );
+
+        Ok(Response::new(DetectAnnotationProcessorChangesResponse {
+            processors_changed,
+            changes,
+            full_recompilation_required,
+        }))
+    }
+}
+
+// --- Helper functions for class file analysis ---
+
+/// Extract the class name from a .class file's ConstantPool.
+fn extract_class_name(data: &[u8]) -> Option<String> {
+    // Java class file format:
+    // u4 magic (0xCAFEBABE), u2 minor, u2 major, u2 constant_pool_count
+    if data.len() < 10 || data[0..4] != [0xCA, 0xFE, 0xBA, 0xBE] {
+        return None;
+    }
+
+    let cp_count = u16::from_be_bytes([data[8], data[9]]) as usize;
+    let mut offset = 10;
+    let mut utf8_strings: Vec<Option<String>> = Vec::with_capacity(cp_count);
+    utf8_strings.push(None); // index 0 unused
+
+    for _ in 1..cp_count {
+        if offset >= data.len() {
+            break;
+        }
+        let tag = data[offset];
+        offset += 1;
+
+        match tag {
+            1 => {
+                // CONSTANT_Utf8
+                if offset + 2 > data.len() {
+                    break;
+                }
+                let len = u16::from_be_bytes([data[offset], data[offset + 1]]) as usize;
+                offset += 2;
+                if offset + len > data.len() {
+                    break;
+                }
+                let s = String::from_utf8_lossy(&data[offset..offset + len]).to_string();
+                utf8_strings.push(Some(s));
+                offset += len;
+            }
+            3..=4 => {
+                // CONSTANT_Integer / CONSTANT_Float
+                offset += 4;
+                utf8_strings.push(None);
+            }
+            5..=6 => {
+                // CONSTANT_Long / CONSTANT_Double
+                offset += 8;
+                utf8_strings.push(None);
+                utf8_strings.push(None); // Takes two slots
+            }
+            7..=8 => {
+                // CONSTANT_Class / CONSTANT_String
+                offset += 2;
+                utf8_strings.push(None);
+            }
+            9..=12 => {
+                // CONSTANT_Fieldref / Methodref / InterfaceMethodref / NameAndType
+                offset += 4;
+                utf8_strings.push(None);
+            }
+            15..=16 | 18 => {
+                // CONSTANT_MethodHandle / CONSTANT_MethodType / CONSTANT_InvokeDynamic
+                offset += 3;
+                utf8_strings.push(None);
+            }
+            17 => {
+                // CONSTANT_Dynamic
+                offset += 4;
+                utf8_strings.push(None);
+            }
+            19 => {
+                // CONSTANT_Module / CONSTANT_Package
+                offset += 2;
+                utf8_strings.push(None);
+            }
+            _ => break,
+        }
+    }
+
+    // After constant pool: u2 access_flags, u2 this_class, u2 super_class
+    if offset + 6 > data.len() {
+        return None;
+    }
+    let this_class_idx = u16::from_be_bytes([data[offset + 2], data[offset + 3]]) as usize;
+    if this_class_idx < utf8_strings.len() {
+        // this_class points to a CONSTANT_Class, which points to a CONSTANT_Utf8
+        // For simplicity, return the index — full resolution would need another pass
+        utf8_strings.get(this_class_idx).cloned().flatten()
+    } else {
+        None
+    }
+}
+
+/// Extract class references (CONSTANT_Class entries) from a .class file.
+fn extract_class_references(data: &[u8]) -> Vec<String> {
+    let mut refs = Vec::new();
+
+    if data.len() < 10 || data[0..4] != [0xCA, 0xFE, 0xBA, 0xBE] {
+        return refs;
+    }
+
+    let cp_count = u16::from_be_bytes([data[8], data[9]]) as usize;
+    let mut offset = 10;
+    let mut utf8_strings: HashMap<usize, String> = HashMap::new();
+
+    for idx in 1..cp_count {
+        if offset >= data.len() {
+            break;
+        }
+        let tag = data[offset];
+        offset += 1;
+
+        match tag {
+            1 => {
+                if offset + 2 > data.len() {
+                    break;
+                }
+                let len = u16::from_be_bytes([data[offset], data[offset + 1]]) as usize;
+                offset += 2;
+                if offset + len > data.len() {
+                    break;
+                }
+                let s = String::from_utf8_lossy(&data[offset..offset + len]).to_string();
+                utf8_strings.insert(idx, s);
+                offset += len;
+            }
+            3 | 4 => offset += 4,
+            5 | 6 => {
+                offset += 8;
+            }
+            7 => {
+                // CONSTANT_Class — points to a Utf8 name
+                if offset + 2 > data.len() {
+                    break;
+                }
+                let name_idx = u16::from_be_bytes([data[offset], data[offset + 1]]) as usize;
+                offset += 2;
+                if let Some(name) = utf8_strings.get(&name_idx) {
+                    // Skip array types and primitives
+                    if !name.starts_with('[') && !is_primitive_descriptor(name) {
+                        refs.push(name.clone());
+                    }
+                }
+            }
+            8 => offset += 2,
+            9..=12 => offset += 4,
+            15 | 16 | 18 => offset += 3,
+            17 => offset += 4,
+            19 => offset += 2,
+            _ => break,
+        }
+    }
+
+    refs.sort();
+    refs.dedup();
+    refs
+}
+
+/// Extract annotation class names from RuntimeVisibleAnnotations attribute.
+fn extract_annotations(_data: &[u8]) -> Vec<String> {
+    // Full annotation extraction requires parsing attributes after the constant pool.
+    // For now, return empty — this would need a more complete class file parser.
+    // In production, this would parse the RuntimeVisibleAnnotations attribute.
+    Vec::new()
+}
+
+/// Check if a class extends AbstractProcessor.
+fn is_annotation_processor_class(data: &[u8]) -> bool {
+    let refs = extract_class_references(data);
+    refs.iter().any(|r| {
+        r.contains("javax.annotation.processing.AbstractProcessor")
+            || r.contains("javax.annotation.processing.Processor")
+    })
+}
+
+/// Check if a descriptor represents a primitive type.
+fn is_primitive_descriptor(s: &str) -> bool {
+    matches!(s, "B" | "C" | "D" | "F" | "I" | "J" | "S" | "Z" | "V")
+}
+
+/// Recursively walk a directory.
+fn walk_dir_recursive(dir: &Path) -> Vec<std::io::Result<std::path::PathBuf>> {
+    let mut entries = Vec::new();
+    if let Ok(read_dir) = std::fs::read_dir(dir) {
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                entries.extend(walk_dir_recursive(&path));
+            } else {
+                entries.push(Ok(path));
+            }
+        }
+    }
+    entries
 }
 
 #[cfg(test)]
@@ -821,5 +1271,187 @@ mod tests {
         assert_eq!(state.total_compiled, 1);
         assert_eq!(state.fully_recompiled, 1);
         assert_eq!(state.incrementally_compiled, 0);
+    }
+
+    // --- Tests for new RPCs ---
+
+    #[tokio::test]
+    async fn test_discover_sources() {
+        let svc = IncrementalCompilationServiceImpl::new();
+
+        // Create temp source directories
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src").join("main").join("java").join("com").join("example");
+        std::fs::create_dir_all(&src_dir).unwrap();
+
+        std::fs::write(src_dir.join("Foo.java"), "package com.example; class Foo {}").unwrap();
+        std::fs::write(src_dir.join("Bar.java"), "package com.example; class Bar {}").unwrap();
+        // Create a generated sources dir with exclusions
+        let gen_dir = tmp.path().join("build").join("generated");
+        std::fs::create_dir_all(&gen_dir).unwrap();
+        std::fs::write(gen_dir.join("Generated.java"), "// generated").unwrap();
+
+        let resp = svc
+            .discover_sources(Request::new(DiscoverSourcesRequest {
+                source_dirs: vec![
+                    src_dir.to_string_lossy().to_string(),
+                    gen_dir.to_string_lossy().to_string(),
+                ],
+                include_patterns: vec!["**/*.java".to_string()],
+                exclude_patterns: vec![format!(
+                    "{}/**/*.java",
+                    gen_dir.to_string_lossy()
+                )],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.total_discovered, 2);
+        let paths: Vec<&str> = resp.sources.iter().map(|s| s.path.as_str()).collect();
+        assert!(paths.contains(&"Foo.java"));
+        assert!(paths.contains(&"Bar.java"));
+    }
+
+    #[tokio::test]
+    async fn test_discover_sources_empty_dir() {
+        let svc = IncrementalCompilationServiceImpl::new();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let empty_dir = tmp.path().join("empty");
+
+        let resp = svc
+            .discover_sources(Request::new(DiscoverSourcesRequest {
+                source_dirs: vec![empty_dir.to_string_lossy().to_string()],
+                include_patterns: vec![],
+                exclude_patterns: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.total_discovered, 0);
+    }
+
+    #[tokio::test]
+    async fn test_discover_sources_default_patterns() {
+        let svc = IncrementalCompilationServiceImpl::new();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let java_dir = tmp.path().join("java");
+        let kt_dir = tmp.path().join("kotlin");
+        std::fs::create_dir_all(&java_dir).unwrap();
+        std::fs::create_dir_all(&kt_dir).unwrap();
+
+        std::fs::write(java_dir.join("A.java"), "class A {}").unwrap();
+        std::fs::write(kt_dir.join("B.kt"), "class B {}").unwrap();
+        std::fs::write(java_dir.join("C.txt"), "not a source").unwrap();
+
+        let resp = svc
+            .discover_sources(Request::new(DiscoverSourcesRequest {
+                source_dirs: vec![
+                    java_dir.to_string_lossy().to_string(),
+                    kt_dir.to_string_lossy().to_string(),
+                ],
+                include_patterns: vec![],  // Use defaults
+                exclude_patterns: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.total_discovered, 2);
+    }
+
+    #[tokio::test]
+    async fn test_analyze_class_dependencies_empty() {
+        let svc = IncrementalCompilationServiceImpl::new();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let empty_dir = tmp.path().join("classes");
+
+        let resp = svc
+            .analyze_class_dependencies(Request::new(AnalyzeClassDependenciesRequest {
+                output_dirs: vec![empty_dir.to_string_lossy().to_string()],
+                class_files: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.total_analyzed, 0);
+    }
+
+    #[tokio::test]
+    async fn test_detect_annotation_processor_changes_no_change() {
+        let svc = IncrementalCompilationServiceImpl::new();
+
+        let resp = svc
+            .detect_annotation_processor_changes(Request::new(
+                DetectAnnotationProcessorChangesRequest {
+                    source_set_id: "test-ss".to_string(),
+                    annotation_processor_classpath: vec![],
+                    previous_processor_classes: vec![],
+                },
+            ))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.processors_changed);
+        assert!(!resp.full_recompilation_required);
+        assert_eq!(resp.changes.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_detect_annotation_processor_changes_added() {
+        let svc = IncrementalCompilationServiceImpl::new();
+
+        let resp = svc
+            .detect_annotation_processor_changes(Request::new(
+                DetectAnnotationProcessorChangesRequest {
+                    source_set_id: "test-ss".to_string(),
+                    annotation_processor_classpath: vec![],
+                    previous_processor_classes: vec!["com.example.OldProcessor".to_string()],
+                },
+            ))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Old processor was removed (not found in empty classpath)
+        assert!(resp.processors_changed);
+        assert!(resp.full_recompilation_required);
+        assert!(resp.changes.iter().any(|c| c.change_type == "removed"));
+    }
+
+    // --- Unit tests for helper functions ---
+
+    #[test]
+    fn test_extract_class_references_empty() {
+        let refs = extract_class_references(&[]);
+        assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn test_extract_class_references_invalid_magic() {
+        let refs = extract_class_references(&[0x00, 0x00, 0x00, 0x00]);
+        assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn test_is_primitive_descriptor() {
+        assert!(is_primitive_descriptor("I"));
+        assert!(is_primitive_descriptor("Z"));
+        assert!(is_primitive_descriptor("V"));
+        assert!(!is_primitive_descriptor("Ljava/lang/Object;"));
+        assert!(!is_primitive_descriptor("com.example.Foo"));
+    }
+
+    #[test]
+    fn test_walk_dir_recursive_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let entries = walk_dir_recursive(&tmp.path().join("nonexistent"));
+        assert!(entries.is_empty());
     }
 }

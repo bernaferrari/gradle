@@ -10,6 +10,9 @@ service IncrementalCompilationService {
   rpc RecordCompilation(RecordCompilationRequest) returns (RecordCompilationResponse);
   rpc GetRebuildSet(GetRebuildSetRequest) returns (GetRebuildSetResponse);
   rpc GetIncrementalState(GetIncrementalStateRequest) returns (GetIncrementalStateResponse);
+  rpc DiscoverSources(DiscoverSourcesRequest) returns (DiscoverSourcesResponse);
+  rpc AnalyzeClassDependencies(AnalyzeClassDependenciesRequest) returns (AnalyzeClassDependenciesResponse);
+  rpc DetectAnnotationProcessorChanges(DetectAnnotationProcessorChangesRequest) returns (DetectAnnotationProcessorChangesResponse);
 }
 message SourceSetDescriptor {
   string source_set_id = 1;
@@ -73,4 +76,66 @@ message IncrementalState {
 }
 message GetIncrementalStateResponse {
   IncrementalState state = 1;
+}
+
+// --- Source Discovery ---
+
+message DiscoverSourcesRequest {
+  repeated string source_dirs = 1;
+  repeated string include_patterns = 2;  // e.g., ["**/*.java", "**/*.kt"]
+  repeated string exclude_patterns = 3;  // e.g., ["**/generated/**"]
+}
+
+message DiscoveredSource {
+  string path = 1;           // relative to source dir
+  string source_dir = 2;     // which source dir it came from
+  string extension = 3;      // "java", "kt", "groovy"
+  int64 last_modified_ms = 4;
+  int64 size_bytes = 5;
+}
+
+message DiscoverSourcesResponse {
+  repeated DiscoveredSource sources = 1;
+  int32 total_discovered = 2;
+}
+
+// --- Class Dependency Analysis ---
+
+message AnalyzeClassDependenciesRequest {
+  repeated string output_dirs = 1;   // directories containing .class files
+  repeated string class_files = 2;  // specific .class files to analyze
+}
+
+message ClassDependencyInfo {
+  string class_file = 1;
+  string class_name = 2;            // fully qualified, e.g., "com.example.Foo"
+  repeated string references = 3;   // classes referenced by this class
+  repeated string annotations = 4;  // annotations on this class
+  bool is_annotation_processor = 5;
+  bool has_generated_sources = 6;
+}
+
+message AnalyzeClassDependenciesResponse {
+  repeated ClassDependencyInfo dependencies = 1;
+  int32 total_analyzed = 2;
+}
+
+// --- Annotation Processor Change Detection ---
+
+message DetectAnnotationProcessorChangesRequest {
+  string source_set_id = 1;
+  repeated string annotation_processor_classpath = 2;  // processor jars
+  repeated string previous_processor_classes = 3;       // processor classes from last compile
+}
+
+message AnnotationProcessorChange {
+  string processor_class = 1;
+  string change_type = 2;   // "added", "removed", "modified"
+  string details = 3;
+}
+
+message DetectAnnotationProcessorChangesResponse {
+  bool processors_changed = 1;
+  repeated AnnotationProcessorChange changes = 2;
+  bool full_recompilation_required = 3;
 }
