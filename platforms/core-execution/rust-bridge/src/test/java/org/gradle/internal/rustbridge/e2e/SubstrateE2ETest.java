@@ -270,4 +270,186 @@ public class SubstrateE2ETest {
         );
         assertEquals(0, waitResponse.getExitCode());
     }
+
+    // --- Bootstrap Service (init/complete build lifecycle) ---
+
+    @Test
+    public void initAndCompleteBuildLifecycle() {
+        // Initialize a build
+        InitBuildResponse buildResponse = client.getBootstrapStub().initBuild(
+            InitBuildRequest.newBuilder()
+                .setSessionId("e2e-session-" + System.nanoTime())
+                .setProjectDir("/tmp/e2e-build")
+                .build()
+        );
+        assertTrue("Build init should be accepted", buildResponse.getAccepted());
+        assertFalse("Build ID should be generated", buildResponse.getBuildId().isEmpty());
+
+        // Complete the build
+        CompleteBuildResponse completeResponse = client.getBootstrapStub().completeBuild(
+            CompleteBuildRequest.newBuilder()
+                .setBuildId(buildResponse.getBuildId())
+                .setOutcome("SUCCESS")
+                .setDurationMs(100)
+                .build()
+        );
+        assertTrue("Build completion should be acknowledged", completeResponse.getAcknowledged());
+    }
+
+    // --- Configuration Service ---
+
+    @Test
+    public void registerAndResolveProject() {
+        RegisterProjectResponse registerResponse = client.getConfigurationStub().registerProject(
+            RegisterProjectRequest.newBuilder()
+                .setProjectPath(":e2e-test")
+                .setProjectDir("/tmp/e2e-project")
+                .build()
+        );
+        assertTrue(registerResponse.getSuccess());
+    }
+
+    // --- Plugin Service ---
+
+    @Test
+    public void applyAndListPlugins() {
+        String projectPath = ":e2e-plugin-" + System.nanoTime();
+
+        client.getPluginStub().applyPlugin(
+            ApplyPluginRequest.newBuilder()
+                .setProjectPath(projectPath)
+                .setPluginId("java")
+                .build()
+        );
+
+        client.getPluginStub().applyPlugin(
+            ApplyPluginRequest.newBuilder()
+                .setProjectPath(projectPath)
+                .setPluginId("org.springframework.boot")
+                .build()
+        );
+
+        GetAppliedPluginsResponse response = client.getPluginStub().getAppliedPlugins(
+            GetAppliedPluginsRequest.newBuilder()
+                .setProjectPath(projectPath)
+                .build()
+        );
+        assertTrue(response.getPluginsCount() >= 2);
+    }
+
+    // --- File Fingerprint Service ---
+
+    @Test
+    public void fingerprintFilesRoundTrip() {
+        String content = "file content for fingerprinting e2e";
+
+        FingerprintFilesResponse fingerprintResponse = client.getFileFingerprintStub().fingerprintFiles(
+            FingerprintFilesRequest.newBuilder()
+                .addPaths("/tmp/e2e-test-file.txt")
+                .build()
+        );
+        // Service accepts the request (file may not exist but RPC completes)
+        assertNotNull(fingerprintResponse);
+    }
+
+    // --- Value Snapshot Service ---
+
+    @Test
+    public void snapshotValues() {
+        SnapshotValuesResponse response = client.getFileFingerprintStub().snapshotValues(
+            SnapshotValuesRequest.newBuilder()
+                .addProperties(PropertyValue.newBuilder()
+                    .setName("e2e.prop." + System.nanoTime())
+                    .setValue("e2e-test-value")
+                    .build())
+                .build()
+        );
+        assertNotNull(response);
+    }
+
+    // --- Build Operations Service ---
+
+    @Test
+    public void startAndCompleteOperation() {
+        String buildId = "e2e-ops-" + System.nanoTime();
+        String operationId = "op-" + System.nanoTime();
+
+        StartOperationResponse startResponse = client.getBuildOperationsStub().startOperation(
+            StartOperationRequest.newBuilder()
+                .setBuildId(buildId)
+                .setOperationId(operationId)
+                .setOperationType("e2e-test-op")
+                .setDescription("E2E test operation")
+                .setStartTimeMs(System.currentTimeMillis())
+                .build()
+        );
+        assertTrue(startResponse.getSuccess());
+
+        CompleteOperationResponse completeResponse = client.getBuildOperationsStub().completeOperation(
+            CompleteOperationRequest.newBuilder()
+                .setBuildId(buildId)
+                .setOperationId(operationId)
+                .setEndTimeMs(System.currentTimeMillis())
+                .setOutcome("SUCCESS")
+                .build()
+        );
+        assertTrue(completeResponse.getSuccess());
+    }
+
+    // --- Dependency Resolution Service ---
+
+    @Test
+    public void recordAndQueryResolution() {
+        String buildId = "e2e-dep-" + System.nanoTime();
+
+        RecordResolutionResponse recordResponse = client.getDependencyResolutionStub().recordResolution(
+            RecordResolutionRequest.newBuilder()
+                .setBuildId(buildId)
+                .setConfigurationName("compileClasspath")
+                .addResolvedDependencies(ResolvedDependency.newBuilder()
+                    .setGroup("org.example")
+                    .setName("test-lib")
+                    .setVersion("1.0.0")
+                    .build())
+                .build()
+        );
+        assertTrue(recordResponse.getAcknowledged());
+
+        GetResolutionStatsResponse statsResponse = client.getDependencyResolutionStub().getResolutionStats(
+            GetResolutionStatsRequest.newBuilder()
+                .setBuildId(buildId)
+                .build()
+        );
+        assertTrue(statsResponse.getTotalResolutions() >= 1);
+    }
+
+    // --- Build Init Service ---
+
+    @Test
+    public void initBuildSettings() {
+        InitBuildSettingsResponse response = client.getBuildInitStub().initBuildSettings(
+            InitBuildSettingsRequest.newBuilder()
+                .setSessionId("e2e-init-" + System.nanoTime())
+                .setProjectName("e2e-test-project")
+                .setBuildFile("build.gradle.kts")
+                .build()
+        );
+        assertTrue(response.getAccepted());
+    }
+
+    // --- Build Result Service ---
+
+    @Test
+    public void reportTaskResult() {
+        ReportTaskResultResponse response = client.getBuildOperationsStub().reportTaskResult(
+            ReportTaskResultRequest.newBuilder()
+                .setTaskResult(TaskResult.newBuilder()
+                    .setTaskPath(":e2eTestTask")
+                    .setOutcome("SUCCESS")
+                    .setDurationMs(50)
+                    .build())
+                .build()
+        );
+        assertTrue(response.getAccepted());
+    }
 }

@@ -8,6 +8,7 @@ use tonic::transport::Server;
 
 use gradle_substrate_daemon::{
     client::jvm_host::JvmHostClient,
+    client::jvm_host_bridge::JvmHostBridge,
     proto::{
         artifact_publishing_service_server::ArtifactPublishingServiceServer,
         bootstrap_service_server::BootstrapServiceServer,
@@ -322,16 +323,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 6: JVM Compatibility Host
     // The JVM host socket path arrives via handshake, so we spawn a background task
     // to attempt connection after the first handshake registers the path.
+    let jvm_bridge = Arc::new(JvmHostBridge::new());
+    let jvm_bridge_for_connect = Arc::clone(&jvm_bridge);
     tokio::spawn(async move {
         // Wait briefly for the JVM client to connect and send handshake
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
         if let Some(jvm_socket) = control_for_jvm.get_jvm_host_socket_path().await {
             match JvmHostClient::connect(&jvm_socket).await {
-                Ok(_jvm_client) => {
+                Ok(jvm_client) => {
                     tracing::info!(path = %jvm_socket, "Connected to JVM host");
-                    // TODO: Wire jvm_client into services that need JVM callbacks
-                    // (bootstrap, configuration, build model)
+                    jvm_bridge_for_connect.set_client(jvm_client).await;
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "Failed to connect to JVM host, continuing without");
