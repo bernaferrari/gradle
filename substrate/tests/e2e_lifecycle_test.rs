@@ -58,7 +58,8 @@ async fn spawn_server_with_dispatchers() -> (String, tempfile::TempDir) {
     std::fs::create_dir_all(&config_cache_dir).unwrap();
     let toolchain_dir = dir.path().join("toolchains");
     std::fs::create_dir_all(&toolchain_dir).unwrap();
-
+    let artifact_store_dir = dir.path().join("artifacts");
+    std::fs::create_dir_all(&artifact_store_dir).unwrap();
     let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(1);
 
     let control = ControlServiceImpl::new(shutdown_tx);
@@ -82,7 +83,7 @@ async fn spawn_server_with_dispatchers() -> (String, tempfile::TempDir) {
     let plugin = PluginServiceImpl::new();
     let build_operations = BuildOperationsServiceImpl::new();
     let bootstrap = BootstrapServiceImpl::new();
-    let dependency_resolution = DependencyResolutionServiceImpl::new();
+    let dependency_resolution = DependencyResolutionServiceImpl::new(artifact_store_dir);
     let file_watch = FileWatchServiceImpl::with_task_graph(Arc::clone(&task_graph));
     let config_cache = ConfigurationCacheServiceImpl::new(config_cache_dir.clone());
     let toolchain = ToolchainServiceImpl::new(toolchain_dir);
