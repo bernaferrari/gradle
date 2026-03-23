@@ -1,10 +1,13 @@
 use std::fs::File;
 use std::io::{BufReader, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use blake3::Hasher as Blake3Hasher;
 use md5::{Digest, Md5};
+use rayon::prelude::*;
 use sha1::Sha1;
 use sha2::Sha256;
+use sha3::{Sha3_256, Sha3_512};
 use tonic::{Request, Response, Status};
 
 use crate::error::SubstrateError;
@@ -15,27 +18,56 @@ use crate::proto::{
 #[derive(Default)]
 pub struct HashServiceImpl;
 
+/// Minimum file count to trigger parallel hashing via rayon.
+const PARALLEL_THRESHOLD: usize = 16;
+
 /// Supported hash algorithms.
 #[derive(Debug, Clone, Copy)]
-enum HashAlgorithm {
+pub enum HashAlgorithm {
     Md5,
     Sha1,
     Sha256,
+    Sha3_256,
+    Sha3_512,
+    Blake3,
 }
 
 impl HashAlgorithm {
-    fn from_name(name: &str) -> Option<Self> {
+    pub fn from_name(name: &str) -> Option<Self> {
         match name.to_uppercase().as_str() {
             "" | "MD5" => Some(HashAlgorithm::Md5),
             "SHA-1" | "SHA1" => Some(HashAlgorithm::Sha1),
             "SHA-256" | "SHA256" => Some(HashAlgorithm::Sha256),
+            "SHA3-256" | "SHA3_256" => Some(HashAlgorithm::Sha3_256),
+            "SHA3-512" | "SHA3_512" => Some(HashAlgorithm::Sha3_512),
+            "BLAKE3" => Some(HashAlgorithm::Blake3),
             _ => None,
+        }
+    }
+
+    /// Expected output length in bytes for this algorithm.
+    #[cfg(test)]
+    fn output_len(&self) -> usize {
+        match self {
+            HashAlgorithm::Md5 => 16,
+            HashAlgorithm::Sha1 => 20,
+            HashAlgorithm::Sha256 => 32,
+            HashAlgorithm::Sha3_256 => 32,
+            HashAlgorithm::Sha3_512 => 64,
+            HashAlgorithm::Blake3 => 32,
         }
     }
 }
 
-/// Hash a file with the given algorithm, optionally with the Gradle signature prefix.
-fn hash_file_with_algorithm(path: &Path, algorithm: HashAlgorithm, with_signature: bool) -> Result<Vec<u8>, SubstrateError> {
+/// Hash a file using the given algorithm with streaming I/O.
+///
+/// Reads in 64KB chunks for good I/O throughput without loading entire files
+/// into memory. For small files (< 64KB), reads entirely in one call.
+fn hash_file_with_algorithm(
+    path: &Path,
+    algorithm: HashAlgorithm,
+    with_signature: bool,
+) -> Result<Vec<u8>, SubstrateError> {
     let file = File::open(path).map_err(|e| SubstrateError::Hash(format!(
         "Cannot open {}: {}",
         path.display(),
@@ -49,100 +81,109 @@ fn hash_file_with_algorithm(path: &Path, algorithm: HashAlgorithm, with_signatur
     )))?;
 
     let file_len = metadata.len() as usize;
+    let mut reader = BufReader::with_capacity(64 * 1024, file);
 
-    // Prepend Gradle signature if using MD5 with signature mode
-    let prefix = if with_signature && matches!(algorithm, HashAlgorithm::Md5) {
-        Some(compute_gradle_signature())
-    } else {
-        None
-    };
+    match algorithm {
+        HashAlgorithm::Md5 => {
+            let mut hasher = Md5::new();
+            if with_signature {
+                hasher.update(compute_gradle_signature());
+            }
+            stream_hash(&mut reader, &mut hasher, path, file_len)?;
+            Ok(hasher.finalize().to_vec())
+        }
+        HashAlgorithm::Sha1 => {
+            let mut hasher = Sha1::new();
+            stream_hash(&mut reader, &mut hasher, path, file_len)?;
+            Ok(hasher.finalize().to_vec())
+        }
+        HashAlgorithm::Sha256 => {
+            let mut hasher = Sha256::new();
+            stream_hash(&mut reader, &mut hasher, path, file_len)?;
+            Ok(hasher.finalize().to_vec())
+        }
+        HashAlgorithm::Sha3_256 => {
+            let mut hasher = Sha3_256::new();
+            stream_hash(&mut reader, &mut hasher, path, file_len)?;
+            Ok(hasher.finalize().to_vec())
+        }
+        HashAlgorithm::Sha3_512 => {
+            let mut hasher = Sha3_512::new();
+            stream_hash(&mut reader, &mut hasher, path, file_len)?;
+            Ok(hasher.finalize().to_vec())
+        }
+        HashAlgorithm::Blake3 => {
+            let mut hasher = Blake3Hasher::new();
+            stream_hash_blake3(&mut reader, &mut hasher, path, file_len)?;
+            Ok(hasher.finalize().as_bytes().to_vec())
+        }
+    }
+}
 
-    let mut reader = BufReader::with_capacity(8192, file);
-
-    // For small files (< 8KB), read entirely and hash in one call
-    if file_len < 8192 {
+/// Stream data from reader into a hasher implementing `Digest` trait.
+/// Uses 64KB chunks for efficient I/O on large files.
+fn stream_hash<D: Digest, R: Read>(
+    reader: &mut BufReader<R>,
+    hasher: &mut D,
+    path: &Path,
+    file_len: usize,
+) -> Result<(), SubstrateError> {
+    if file_len < 64 * 1024 {
         let mut buf = Vec::with_capacity(file_len);
         reader.read_to_end(&mut buf).map_err(|e| SubstrateError::Hash(format!(
             "Cannot read {}: {}",
             path.display(),
             e
         )))?;
-
-        match algorithm {
-            HashAlgorithm::Md5 => {
-                let mut hasher = Md5::new();
-                if let Some(sig) = prefix {
-                    hasher.update(sig);
-                }
-                hasher.update(&buf);
-                Ok(hasher.finalize().to_vec())
-            }
-            HashAlgorithm::Sha1 => {
-                let mut hasher = Sha1::new();
-                hasher.update(&buf);
-                Ok(hasher.finalize().to_vec())
-            }
-            HashAlgorithm::Sha256 => {
-                let mut hasher = Sha256::new();
-                hasher.update(&buf);
-                Ok(hasher.finalize().to_vec())
-            }
-        }
+        hasher.update(&buf);
     } else {
-        // For larger files, read in chunks
-        let mut buffer = [0u8; 8192];
-
-        match algorithm {
-            HashAlgorithm::Md5 => {
-                let mut hasher = Md5::new();
-                if let Some(sig) = prefix {
-                    hasher.update(sig);
-                }
-                loop {
-                    let n = reader.read(&mut buffer).map_err(|e| SubstrateError::Hash(format!(
-                        "Cannot read {}: {}",
-                        path.display(),
-                        e
-                    )))?;
-                    if n == 0 {
-                        break;
-                    }
-                    hasher.update(&buffer[..n]);
-                }
-                Ok(hasher.finalize().to_vec())
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            let n = reader.read(&mut buffer).map_err(|e| SubstrateError::Hash(format!(
+                "Cannot read {}: {}",
+                path.display(),
+                e
+            )))?;
+            if n == 0 {
+                break;
             }
-            HashAlgorithm::Sha1 => {
-                let mut hasher = Sha1::new();
-                loop {
-                    let n = reader.read(&mut buffer).map_err(|e| SubstrateError::Hash(format!(
-                        "Cannot read {}: {}",
-                        path.display(),
-                        e
-                    )))?;
-                    if n == 0 {
-                        break;
-                    }
-                    hasher.update(&buffer[..n]);
-                }
-                Ok(hasher.finalize().to_vec())
-            }
-            HashAlgorithm::Sha256 => {
-                let mut hasher = Sha256::new();
-                loop {
-                    let n = reader.read(&mut buffer).map_err(|e| SubstrateError::Hash(format!(
-                        "Cannot read {}: {}",
-                        path.display(),
-                        e
-                    )))?;
-                    if n == 0 {
-                        break;
-                    }
-                    hasher.update(&buffer[..n]);
-                }
-                Ok(hasher.finalize().to_vec())
-            }
+            hasher.update(&buffer[..n]);
         }
     }
+    Ok(())
+}
+
+/// Stream data from reader into a blake3 hasher.
+/// blake3 has its own `update` method (not the `Digest` trait).
+fn stream_hash_blake3<R: Read>(
+    reader: &mut BufReader<R>,
+    hasher: &mut Blake3Hasher,
+    path: &Path,
+    file_len: usize,
+) -> Result<(), SubstrateError> {
+    if file_len < 64 * 1024 {
+        let mut buf = Vec::with_capacity(file_len);
+        reader.read_to_end(&mut buf).map_err(|e| SubstrateError::Hash(format!(
+            "Cannot read {}: {}",
+            path.display(),
+            e
+        )))?;
+        hasher.update(&buf);
+    } else {
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            let n = reader.read(&mut buffer).map_err(|e| SubstrateError::Hash(format!(
+                "Cannot read {}: {}",
+                path.display(),
+                e
+            )))?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buffer[..n]);
+        }
+    }
+    Ok(())
 }
 
 /// Compute the Gradle DefaultStreamHasher signature prefix.
@@ -173,39 +214,65 @@ impl HashService for HashServiceImpl {
             Some(algo) => algo,
             None => {
                 return Err(Status::invalid_argument(format!(
-                    "Unsupported hash algorithm: '{}'. Supported: MD5, SHA-1, SHA-256",
+                    "Unsupported hash algorithm: '{}'. Supported: MD5, SHA-1, SHA-256, SHA3-256, SHA3-512, BLAKE3",
                     req.algorithm
                 )));
             }
         };
 
-        let mut results = Vec::with_capacity(req.files.len());
+        let files = req.files;
+        let use_parallel = files.len() >= PARALLEL_THRESHOLD;
 
-        for file in req.files {
-            let path = Path::new(&file.absolute_path);
-
-            // Use Gradle signature prefix for MD5 (default mode)
-            let with_signature = matches!(algorithm, HashAlgorithm::Md5);
-
-            match hash_file_with_algorithm(path, algorithm, with_signature) {
-                Ok(hash_bytes) => results.push(HashResult {
-                    absolute_path: file.absolute_path,
-                    hash_bytes,
-                    error: false,
-                    error_message: String::new(),
-                }),
-                Err(e) => results.push(HashResult {
-                    absolute_path: file.absolute_path,
-                    hash_bytes: Vec::new(),
-                    error: true,
-                    error_message: e.to_string(),
-                }),
-            }
-        }
+        let results: Vec<HashResult> = if use_parallel {
+            files
+                .into_par_iter()
+                .map(|file| {
+                    let path = Path::new(&file.absolute_path);
+                    let with_signature = matches!(algorithm, HashAlgorithm::Md5);
+                    match hash_file_with_algorithm(path, algorithm, with_signature) {
+                        Ok(hash_bytes) => HashResult {
+                            absolute_path: file.absolute_path,
+                            hash_bytes,
+                            error: false,
+                            error_message: String::new(),
+                        },
+                        Err(e) => HashResult {
+                            absolute_path: file.absolute_path,
+                            hash_bytes: Vec::new(),
+                            error: true,
+                            error_message: e.to_string(),
+                        },
+                    }
+                })
+                .collect()
+        } else {
+            files
+                .into_iter()
+                .map(|file| {
+                    let path = Path::new(&file.absolute_path);
+                    let with_signature = matches!(algorithm, HashAlgorithm::Md5);
+                    match hash_file_with_algorithm(path, algorithm, with_signature) {
+                        Ok(hash_bytes) => HashResult {
+                            absolute_path: file.absolute_path,
+                            hash_bytes,
+                            error: false,
+                            error_message: String::new(),
+                        },
+                        Err(e) => HashResult {
+                            absolute_path: file.absolute_path,
+                            hash_bytes: Vec::new(),
+                            error: true,
+                            error_message: e.to_string(),
+                        },
+                    }
+                })
+                .collect()
+        };
 
         tracing::debug!(
             count = results.len(),
             algorithm = %req.algorithm,
+            parallel = use_parallel,
             "Hashed files"
         );
 
@@ -229,6 +296,36 @@ pub fn hash_file_sha256(path: &Path) -> Result<Vec<u8>, SubstrateError> {
 /// Hash a file using SHA-1 (no signature prefix).
 pub fn hash_file_sha1(path: &Path) -> Result<Vec<u8>, SubstrateError> {
     hash_file_with_algorithm(path, HashAlgorithm::Sha1, false)
+}
+
+/// Hash a file using SHA3-256 (no signature prefix).
+pub fn hash_file_sha3_256(path: &Path) -> Result<Vec<u8>, SubstrateError> {
+    hash_file_with_algorithm(path, HashAlgorithm::Sha3_256, false)
+}
+
+/// Hash a file using SHA3-512 (no signature prefix).
+pub fn hash_file_sha3_512(path: &Path) -> Result<Vec<u8>, SubstrateError> {
+    hash_file_with_algorithm(path, HashAlgorithm::Sha3_512, false)
+}
+
+/// Hash a file using BLAKE3 (no signature prefix).
+pub fn hash_file_blake3(path: &Path) -> Result<Vec<u8>, SubstrateError> {
+    hash_file_with_algorithm(path, HashAlgorithm::Blake3, false)
+}
+
+/// Hash a batch of files in parallel using the given algorithm.
+/// Returns results in the same order as the input paths.
+pub fn hash_batch_parallel(
+    paths: &[PathBuf],
+    algorithm: HashAlgorithm,
+) -> Vec<Result<Vec<u8>, SubstrateError>> {
+    paths
+        .par_iter()
+        .map(|path| {
+            let with_signature = matches!(algorithm, HashAlgorithm::Md5);
+            hash_file_with_algorithm(path, algorithm, with_signature)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -311,6 +408,315 @@ mod tests {
         assert_eq!(sig1.len(), 16);
     }
 
+    // --- SHA3-256 tests ---
+
+    #[test]
+    fn test_sha3_256_hash() {
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "sha3-256 test content").unwrap();
+        let hash = hash_file_sha3_256(tmp.path()).unwrap();
+        assert_eq!(hash.len(), 32);
+    }
+
+    #[test]
+    fn test_sha3_256_deterministic() {
+        let mut tmp1 = NamedTempFile::new().unwrap();
+        let mut tmp2 = NamedTempFile::new().unwrap();
+        tmp1.write_all(b"sha3 determinism test").unwrap();
+        tmp2.write_all(b"sha3 determinism test").unwrap();
+        assert_eq!(
+            hash_file_sha3_256(tmp1.path()).unwrap(),
+            hash_file_sha3_256(tmp2.path()).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_sha3_256_differs_from_sha256() {
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "same content different algo").unwrap();
+        let sha256 = hash_file_sha256(tmp.path()).unwrap();
+        let sha3_256 = hash_file_sha3_256(tmp.path()).unwrap();
+        assert_eq!(sha256.len(), 32);
+        assert_eq!(sha3_256.len(), 32);
+        assert_ne!(sha256, sha3_256, "SHA-256 and SHA3-256 must produce different hashes");
+    }
+
+    #[test]
+    fn test_sha3_256_empty_file() {
+        let tmp = NamedTempFile::new().unwrap();
+        let hash = hash_file_sha3_256(tmp.path()).unwrap();
+        assert_eq!(hash.len(), 32);
+        // SHA3-256 of empty string is a known value: a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a
+        let hex_str: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+        assert_eq!(
+            hex_str,
+            "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"
+        );
+    }
+
+    // --- SHA3-512 tests ---
+
+    #[test]
+    fn test_sha3_512_hash() {
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "sha3-512 test content").unwrap();
+        let hash = hash_file_sha3_512(tmp.path()).unwrap();
+        assert_eq!(hash.len(), 64);
+    }
+
+    #[test]
+    fn test_sha3_512_deterministic() {
+        let mut tmp1 = NamedTempFile::new().unwrap();
+        let mut tmp2 = NamedTempFile::new().unwrap();
+        tmp1.write_all(b"sha3-512 determinism").unwrap();
+        tmp2.write_all(b"sha3-512 determinism").unwrap();
+        assert_eq!(
+            hash_file_sha3_512(tmp1.path()).unwrap(),
+            hash_file_sha3_512(tmp2.path()).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_sha3_512_differs_from_sha3_256() {
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "same content different sizes").unwrap();
+        let sha3_256 = hash_file_sha3_256(tmp.path()).unwrap();
+        let sha3_512 = hash_file_sha3_512(tmp.path()).unwrap();
+        assert_ne!(sha3_256, sha3_512);
+    }
+
+    #[test]
+    fn test_sha3_512_large_file() {
+        let mut tmp = NamedTempFile::new().unwrap();
+        let data = vec![0xCD_u8; 500_000];
+        tmp.write_all(&data).unwrap();
+        let hash = hash_file_sha3_512(tmp.path()).unwrap();
+        assert_eq!(hash.len(), 64);
+        assert!(hash.iter().any(|&b| b != 0));
+    }
+
+    // --- BLAKE3 tests ---
+
+    #[test]
+    fn test_blake3_hash() {
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "blake3 test content").unwrap();
+        let hash = hash_file_blake3(tmp.path()).unwrap();
+        assert_eq!(hash.len(), 32);
+    }
+
+    #[test]
+    fn test_blake3_deterministic() {
+        let mut tmp1 = NamedTempFile::new().unwrap();
+        let mut tmp2 = NamedTempFile::new().unwrap();
+        tmp1.write_all(b"blake3 determinism test").unwrap();
+        tmp2.write_all(b"blake3 determinism test").unwrap();
+        assert_eq!(
+            hash_file_blake3(tmp1.path()).unwrap(),
+            hash_file_blake3(tmp2.path()).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_blake3_empty_file() {
+        let tmp = NamedTempFile::new().unwrap();
+        let hash = hash_file_blake3(tmp.path()).unwrap();
+        assert_eq!(hash.len(), 32);
+        // BLAKE3 of empty string is a known value: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262
+        let hex_str: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+        assert_eq!(
+            hex_str,
+            "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"
+        );
+    }
+
+    #[test]
+    fn test_blake3_large_file() {
+        let mut tmp = NamedTempFile::new().unwrap();
+        let data = vec![0xEF_u8; 2_000_000];
+        tmp.write_all(&data).unwrap();
+        let hash = hash_file_blake3(tmp.path()).unwrap();
+        assert_eq!(hash.len(), 32);
+        assert!(hash.iter().any(|&b| b != 0));
+    }
+
+    #[test]
+    fn test_blake3_differs_from_all_sha_variants() {
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "cross-algorithm comparison content").unwrap();
+
+        let blake3_hash = hash_file_blake3(tmp.path()).unwrap();
+        let sha256_hash = hash_file_sha256(tmp.path()).unwrap();
+        let sha3_256_hash = hash_file_sha3_256(tmp.path()).unwrap();
+
+        assert_ne!(blake3_hash, sha256_hash);
+        assert_ne!(blake3_hash, sha3_256_hash);
+    }
+
+    // --- Algorithm name parsing tests ---
+
+    #[test]
+    fn test_algorithm_from_name_variants() {
+        assert!(HashAlgorithm::from_name("MD5").is_some());
+        assert!(HashAlgorithm::from_name("md5").is_some());
+        assert!(HashAlgorithm::from_name("").is_some()); // default = MD5
+        assert!(HashAlgorithm::from_name("SHA-1").is_some());
+        assert!(HashAlgorithm::from_name("SHA1").is_some());
+        assert!(HashAlgorithm::from_name("sha-1").is_some());
+        assert!(HashAlgorithm::from_name("SHA-256").is_some());
+        assert!(HashAlgorithm::from_name("SHA256").is_some());
+        assert!(HashAlgorithm::from_name("sha-256").is_some());
+        assert!(HashAlgorithm::from_name("SHA3-256").is_some());
+        assert!(HashAlgorithm::from_name("SHA3_256").is_some());
+        assert!(HashAlgorithm::from_name("sha3-256").is_some());
+        assert!(HashAlgorithm::from_name("SHA3-512").is_some());
+        assert!(HashAlgorithm::from_name("SHA3_512").is_some());
+        assert!(HashAlgorithm::from_name("BLAKE3").is_some());
+        assert!(HashAlgorithm::from_name("blake3").is_some());
+        assert!(HashAlgorithm::from_name("unknown").is_none());
+        assert!(HashAlgorithm::from_name("CRC32").is_none());
+    }
+
+    #[test]
+    fn test_algorithm_output_lengths() {
+        assert_eq!(HashAlgorithm::Md5.output_len(), 16);
+        assert_eq!(HashAlgorithm::Sha1.output_len(), 20);
+        assert_eq!(HashAlgorithm::Sha256.output_len(), 32);
+        assert_eq!(HashAlgorithm::Sha3_256.output_len(), 32);
+        assert_eq!(HashAlgorithm::Sha3_512.output_len(), 64);
+        assert_eq!(HashAlgorithm::Blake3.output_len(), 32);
+    }
+
+    // --- Streaming tests ---
+
+    #[test]
+    fn test_streaming_hash_large_file_consistent_with_known_value() {
+        // Verify streaming produces same result regardless of file size
+        let mut small_tmp = NamedTempFile::new().unwrap();
+        let mut large_tmp = NamedTempFile::new().unwrap();
+
+        let content = b"streaming consistency test data";
+        small_tmp.write_all(content).unwrap();
+
+        // Write same content padded to > 64KB to exercise chunked path
+        let mut large_data = content.to_vec();
+        large_data.extend(std::iter::repeat(0u8).take(100_000));
+        large_tmp.write_all(&large_data).unwrap();
+
+        // The small file hash should be deterministic
+        let hash1 = hash_file_sha256(small_tmp.path()).unwrap();
+        let hash2 = hash_file_sha256(small_tmp.path()).unwrap();
+        assert_eq!(hash1, hash2);
+
+        // The large file should also be deterministic
+        let large_hash1 = hash_file_sha256(large_tmp.path()).unwrap();
+        let large_hash2 = hash_file_sha256(large_tmp.path()).unwrap();
+        assert_eq!(large_hash1, large_hash2);
+
+        // Different content should produce different hashes
+        assert_ne!(hash1, large_hash1);
+    }
+
+    #[test]
+    fn test_streaming_all_algorithms_on_large_file() {
+        let mut tmp = NamedTempFile::new().unwrap();
+        let data = vec![0x42_u8; 200_000]; // > 64KB to exercise streaming
+        tmp.write_all(&data).unwrap();
+
+        // All algorithms should produce non-trivial hashes on large files
+        assert_eq!(hash_file_md5(tmp.path()).unwrap().len(), 16);
+        assert_eq!(hash_file_sha1(tmp.path()).unwrap().len(), 20);
+        assert_eq!(hash_file_sha256(tmp.path()).unwrap().len(), 32);
+        assert_eq!(hash_file_sha3_256(tmp.path()).unwrap().len(), 32);
+        assert_eq!(hash_file_sha3_512(tmp.path()).unwrap().len(), 64);
+        assert_eq!(hash_file_blake3(tmp.path()).unwrap().len(), 32);
+    }
+
+    // --- Parallel batch hashing tests ---
+
+    #[test]
+    fn test_parallel_batch_hashing() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths: Vec<std::path::PathBuf> = (0..20)
+            .map(|i| {
+                let path = dir.path().join(format!("file_{}.txt", i));
+                std::fs::write(&path, format!("content of file {}", i)).unwrap();
+                path
+            })
+            .collect();
+
+        let results = hash_batch_parallel(&paths, HashAlgorithm::Sha256);
+        assert_eq!(results.len(), 20);
+        for (i, result) in results.iter().enumerate() {
+            assert!(result.is_ok(), "file {} should hash successfully", i);
+            assert_eq!(result.as_ref().unwrap().len(), 32);
+        }
+
+        // Verify determinism: hash again, should get same results
+        let results2 = hash_batch_parallel(&paths, HashAlgorithm::Sha256);
+        for (r1, r2) in results.iter().zip(results2.iter()) {
+            assert_eq!(r1.as_ref().unwrap(), r2.as_ref().unwrap());
+        }
+    }
+
+    #[test]
+    fn test_parallel_batch_with_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths: Vec<std::path::PathBuf> = (0..20)
+            .map(|i| {
+                let path = dir.path().join(format!("file_{}.txt", i));
+                if i != 7 {
+                    std::fs::write(&path, format!("content {}", i)).unwrap();
+                }
+                path
+            })
+            .collect();
+
+        let results = hash_batch_parallel(&paths, HashAlgorithm::Md5);
+        assert_eq!(results.len(), 20);
+
+        // File index 7 should fail
+        assert!(results[7].is_err());
+        // All others should succeed
+        for (i, result) in results.iter().enumerate() {
+            if i != 7 {
+                assert!(result.is_ok(), "file {} should succeed", i);
+            }
+        }
+    }
+
+    #[test]
+    fn test_parallel_batch_all_algorithms() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths: Vec<std::path::PathBuf> = (0..20)
+            .map(|i| {
+                let path = dir.path().join(format!("f_{}.bin", i));
+                std::fs::write(&path, vec![i as u8; 1024]).unwrap();
+                path
+            })
+            .collect();
+
+        let algos = [
+            HashAlgorithm::Md5,
+            HashAlgorithm::Sha1,
+            HashAlgorithm::Sha256,
+            HashAlgorithm::Sha3_256,
+            HashAlgorithm::Sha3_512,
+            HashAlgorithm::Blake3,
+        ];
+
+        for algo in &algos {
+            let results = hash_batch_parallel(&paths, *algo);
+            assert_eq!(results.len(), 20, "all files should return a result for {:?}", algo);
+            for (i, result) in results.iter().enumerate() {
+                assert!(result.is_ok(), "file {} should hash with {:?}", i, algo);
+                assert_eq!(result.as_ref().unwrap().len(), algo.output_len());
+            }
+        }
+    }
+
+    // --- gRPC tests ---
+
     #[tokio::test]
     async fn test_gRPC_sha256_algorithm() {
         let svc = HashServiceImpl;
@@ -362,13 +768,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_gRPC_sha3_256_algorithm() {
+        let svc = HashServiceImpl;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "test sha3-256 via grpc").unwrap();
+
+        let resp = svc
+            .hash_batch(Request::new(HashBatchRequest {
+                files: vec![crate::proto::FileToHash {
+                    absolute_path: tmp.path().to_string_lossy().to_string(),
+                    length: 0,
+                    last_modified: 0,
+                }],
+                algorithm: "SHA3-256".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.results.len(), 1);
+        assert_eq!(resp.results[0].hash_bytes.len(), 32);
+        assert!(!resp.results[0].error);
+    }
+
+    #[tokio::test]
+    async fn test_gRPC_sha3_512_algorithm() {
+        let svc = HashServiceImpl;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "test sha3-512 via grpc").unwrap();
+
+        let resp = svc
+            .hash_batch(Request::new(HashBatchRequest {
+                files: vec![crate::proto::FileToHash {
+                    absolute_path: tmp.path().to_string_lossy().to_string(),
+                    length: 0,
+                    last_modified: 0,
+                }],
+                algorithm: "SHA3-512".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.results.len(), 1);
+        assert_eq!(resp.results[0].hash_bytes.len(), 64);
+        assert!(!resp.results[0].error);
+    }
+
+    #[tokio::test]
+    async fn test_gRPC_blake3_algorithm() {
+        let svc = HashServiceImpl;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "test blake3 via grpc").unwrap();
+
+        let resp = svc
+            .hash_batch(Request::new(HashBatchRequest {
+                files: vec![crate::proto::FileToHash {
+                    absolute_path: tmp.path().to_string_lossy().to_string(),
+                    length: 0,
+                    last_modified: 0,
+                }],
+                algorithm: "BLAKE3".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.results.len(), 1);
+        assert_eq!(resp.results[0].hash_bytes.len(), 32);
+        assert!(!resp.results[0].error);
+    }
+
+    #[tokio::test]
     async fn test_gRPC_unsupported_algorithm() {
         let svc = HashServiceImpl;
 
         let result = svc
             .hash_batch(Request::new(HashBatchRequest {
                 files: vec![],
-                algorithm: "BLAKE3".to_string(),
+                algorithm: "CRC32".to_string(),
             }))
             .await;
 
@@ -734,7 +1215,7 @@ mod tests {
             "file with spaces.txt",
             "\u{00e9}ntrepr\u{00ee}se.txt", // "entreprise" with accented chars
             "\u{4f60}\u{597d}\u{4e16}\u{754c}.txt", // "你好世界.txt" (Chinese)
-            "cafe\u{0301}.txt",             // "cafe\u{0301}.txt" with combining accent
+            "cafe\u{0301}.txt",             // "café.txt" with combining accent
             "file with (parens) & ampersand.txt",
         ];
 
@@ -783,6 +1264,108 @@ mod tests {
                 "hash for '{}' should not be all zeros",
                 result.absolute_path
             );
+        }
+    }
+
+    // --- Parallel batch gRPC tests ---
+
+    #[tokio::test]
+    async fn test_gRPC_parallel_batch_hashing_large_batch() {
+        let svc = HashServiceImpl;
+
+        let dir = tempfile::tempdir().unwrap();
+        let files_to_hash: Vec<crate::proto::FileToHash> = (0..20)
+            .map(|i| {
+                let path = dir.path().join(format!("par_file_{}.txt", i));
+                std::fs::write(&path, format!("parallel content {}", i)).unwrap();
+                crate::proto::FileToHash {
+                    absolute_path: path.to_string_lossy().to_string(),
+                    length: 0,
+                    last_modified: 0,
+                }
+            })
+            .collect();
+
+        let resp = svc
+            .hash_batch(Request::new(HashBatchRequest {
+                files: files_to_hash,
+                algorithm: "SHA-256".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.results.len(), 20);
+        for result in &resp.results {
+            assert!(!result.error);
+            assert_eq!(result.hash_bytes.len(), 32);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_gRPC_parallel_batch_with_blake3() {
+        let svc = HashServiceImpl;
+
+        let dir = tempfile::tempdir().unwrap();
+        let files_to_hash: Vec<crate::proto::FileToHash> = (0..20)
+            .map(|i| {
+                let path = dir.path().join(format!("blake3_{}.bin", i));
+                std::fs::write(&path, vec![i as u8; 2048]).unwrap();
+                crate::proto::FileToHash {
+                    absolute_path: path.to_string_lossy().to_string(),
+                    length: 0,
+                    last_modified: 0,
+                }
+            })
+            .collect();
+
+        let resp = svc
+            .hash_batch(Request::new(HashBatchRequest {
+                files: files_to_hash,
+                algorithm: "BLAKE3".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.results.len(), 20);
+        for result in &resp.results {
+            assert!(!result.error, "BLAKE3 parallel hash should succeed");
+            assert_eq!(result.hash_bytes.len(), 32);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_gRPC_small_batch_uses_sequential_path() {
+        let svc = HashServiceImpl;
+
+        let dir = tempfile::tempdir().unwrap();
+        // 5 files < PARALLEL_THRESHOLD (16) → sequential path
+        let files_to_hash: Vec<crate::proto::FileToHash> = (0..5)
+            .map(|i| {
+                let path = dir.path().join(format!("seq_{}.txt", i));
+                std::fs::write(&path, format!("sequential {}", i)).unwrap();
+                crate::proto::FileToHash {
+                    absolute_path: path.to_string_lossy().to_string(),
+                    length: 0,
+                    last_modified: 0,
+                }
+            })
+            .collect();
+
+        let resp = svc
+            .hash_batch(Request::new(HashBatchRequest {
+                files: files_to_hash,
+                algorithm: "SHA3-256".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.results.len(), 5);
+        for result in &resp.results {
+            assert!(!result.error);
+            assert_eq!(result.hash_bytes.len(), 32);
         }
     }
 }

@@ -772,7 +772,7 @@ mod tests {
         scheduler.build_graph();
 
         let s1 = scheduler.try_steal().await.unwrap();
-        let s2 = scheduler.try_steal().await.unwrap();
+        let _s2 = scheduler.try_steal().await.unwrap();
         assert_eq!(scheduler.executing_count(), 2);
 
         // Third task should be blocked by parallelism limit
@@ -1016,18 +1016,28 @@ mod tests {
         assert_eq!(sa.task_path, ":a");
         scheduler.complete_task(":a", 10, true).await;
 
-        // Steal and fail :b
-        let sb = scheduler.try_steal().await.unwrap();
-        scheduler.complete_task(&sb.task_path, 10, false).await;
+        // Steal one and fail it (either :b or :c, whichever comes first)
+        let first_stolen = scheduler.try_steal().await.unwrap();
+        assert!(
+            first_stolen.task_path == ":b" || first_stolen.task_path == ":c",
+            "expected :b or :c, got {}",
+            first_stolen.task_path
+        );
+        scheduler.complete_task(&first_stolen.task_path, 10, false).await;
 
-        // :d should be skipped (depends on failed :b)
+        // :d should be skipped (depends on failed task)
         let (_, _, _, _, _, skipped) = scheduler.status_counts();
         assert_eq!(skipped, 1); // :d
 
-        // Complete :c normally
-        let sc = scheduler.try_steal().await.unwrap();
-        assert_eq!(sc.task_path, ":c");
-        scheduler.complete_task(&sc.task_path, 10, true).await;
+        // Complete the other normally
+        let second_stolen = scheduler.try_steal().await.unwrap();
+        assert!(
+            second_stolen.task_path == ":b" || second_stolen.task_path == ":c",
+            "expected :b or :c, got {}",
+            second_stolen.task_path
+        );
+        assert_ne!(first_stolen.task_path, second_stolen.task_path);
+        scheduler.complete_task(&second_stolen.task_path, 10, true).await;
 
         assert!(scheduler.is_complete());
     }
