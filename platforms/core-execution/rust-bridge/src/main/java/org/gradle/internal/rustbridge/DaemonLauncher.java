@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Manages the lifecycle of the Rust substrate daemon process.
@@ -54,8 +55,18 @@ public class DaemonLauncher {
     }
 
     /**
+     * Get the JVM host service implementation, or null if JVM host is not enabled.
+     * Used by Build-scoped services to set the ProjectModelProvider.
+     */
+    @Nullable
+    public JvmHostServiceImpl getJvmHostServiceImpl() {
+        return jvmHostServer != null ? jvmHostServer.getServiceImpl() : null;
+    }
+
+    /**
      * Get the JVM host socket path, or null if JVM host is not enabled.
      */
+    @Nullable
     public String getJvmHostSocketPath() {
         if (jvmHostServer != null) {
             return jvmHostServer.getSocketPath();
