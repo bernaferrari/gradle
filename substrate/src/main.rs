@@ -101,6 +101,10 @@ struct Args {
     #[arg(long, default_value = "/tmp/gradle-substrate-toolchains")]
     toolchain_dir: String,
 
+    /// Path to the artifact store directory (Maven repository layout)
+    #[arg(long, default_value = "/tmp/gradle-substrate-artifacts")]
+    artifact_store_dir: String,
+
     /// Remote build cache URL (e.g., https://cache.example.com/build-cache)
     #[arg(long, env = "SUBSTRATE_REMOTE_CACHE_URL")]
     remote_cache_url: Option<String>,
@@ -242,7 +246,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bootstrap = BootstrapServiceImpl::with_scope_registry(scope_registry.clone());
 
     // Phase 18: Dependency resolution
-    let dependency_resolution = DependencyResolutionServiceImpl::new();
+    let artifact_store_dir = PathBuf::from(&args.artifact_store_dir);
+    let dependency_resolution = DependencyResolutionServiceImpl::new(artifact_store_dir);
 
     // Phase 19: File watching (wired to task graph for file-change -> task invalidation)
     let file_watch = FileWatchServiceImpl::with_task_graph(Arc::clone(&task_graph));
