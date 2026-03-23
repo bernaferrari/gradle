@@ -36,3 +36,4 @@ pub mod incremental_compilation;
 pub mod remote_cache;
 pub mod build_metrics;
 pub mod garbage_collection;
+pub mod task_executor;
