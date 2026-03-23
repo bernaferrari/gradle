@@ -1,11 +1,13 @@
 mod copy;
 mod delete;
+mod java_compile;
 mod mkdir_op;
 mod sync;
 mod symlink;
 
 pub use copy::CopyTaskExecutor;
 pub use delete::DeleteTaskExecutor;
+pub use java_compile::JavaCompileExecutor;
 pub use mkdir_op::MkdirTaskExecutor;
 pub use sync::SyncTaskExecutor;
 pub use symlink::SymlinkTaskExecutor;
@@ -63,7 +65,7 @@ impl TaskInput {
     pub fn is_native_supported(task_type: &str) -> bool {
         matches!(
             task_type,
-            "Copy" | "Delete" | "Sync" | "Mkdir" | "Symlink"
+            "Copy" | "Delete" | "Sync" | "Mkdir" | "Symlink" | "JavaCompile"
         )
     }
 }
@@ -107,6 +109,9 @@ impl TaskExecutorRegistry {
 
         let symlink = SymlinkTaskExecutor::new();
         executors.insert(symlink.task_type().to_string(), Box::new(symlink));
+
+        let java_compile = JavaCompileExecutor::new();
+        executors.insert(java_compile.task_type().to_string(), Box::new(java_compile));
 
         Self { executors }
     }
@@ -159,19 +164,20 @@ mod tests {
         assert!(types.contains(&"Sync"));
         assert!(types.contains(&"Mkdir"));
         assert!(types.contains(&"Symlink"));
+        assert!(types.contains(&"JavaCompile"));
     }
 
     #[test]
     fn test_registry_unknown_type() {
         let registry = TaskExecutorRegistry::new();
-        assert!(!registry.has_executor("JavaCompile"));
-        assert!(registry.get("JavaCompile").is_none());
+        assert!(!registry.has_executor("JavaCompiler"));
+        assert!(registry.get("JavaCompiler").is_none());
     }
 
     #[tokio::test]
     async fn test_execute_unknown_type_fails() {
         let registry = TaskExecutorRegistry::new();
-        let input = TaskInput::new("JavaCompile");
+        let input = TaskInput::new("JavaCompiler");
         let result = registry.execute(&input).await;
         assert!(!result.success);
         assert!(result.error_message.contains("No executor"));
@@ -184,7 +190,7 @@ mod tests {
         assert!(TaskInput::is_native_supported("Sync"));
         assert!(TaskInput::is_native_supported("Mkdir"));
         assert!(TaskInput::is_native_supported("Symlink"));
-        assert!(!TaskInput::is_native_supported("JavaCompile"));
+        assert!(TaskInput::is_native_supported("JavaCompile"));
         assert!(!TaskInput::is_native_supported("Test"));
     }
 }
