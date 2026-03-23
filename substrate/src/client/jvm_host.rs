@@ -90,3 +90,234 @@ impl JvmHostClient {
         Ok(response.into_inner())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+    use crate::proto::jvm_host_service_server::{JvmHostService, JvmHostServiceServer};
+    use tokio::net::UnixListener;
+    use tonic::transport::Server;
+    use tonic::Response;
+
+    /// Mock JVM host service that returns fixed responses.
+    struct MockJvmHostService;
+
+    #[tonic::async_trait]
+    impl JvmHostService for MockJvmHostService {
+        async fn evaluate_script(
+            &self,
+            _request: tonic::Request<crate::proto::EvaluateScriptRequest>,
+        ) -> Result<Response<crate::proto::EvaluateScriptResponse>, tonic::Status> {
+            Err(tonic::Status::unimplemented("not implemented"))
+        }
+
+        async fn get_build_model(
+            &self,
+            request: tonic::Request<crate::proto::GetBuildModelRequest>,
+        ) -> Result<Response<crate::proto::GetBuildModelResponse>, tonic::Status> {
+            let req = request.into_inner();
+            let response = crate::proto::GetBuildModelResponse {
+                projects: vec![
+                    crate::proto::ProjectModel {
+                        path: ":".to_string(),
+                        name: "root".to_string(),
+                        build_file: "/build.gradle.kts".to_string(),
+                        subprojects: vec![":app".to_string(), ":lib".to_string()],
+                    },
+                    crate::proto::ProjectModel {
+                        path: ":app".to_string(),
+                        name: "app".to_string(),
+                        build_file: "/app/build.gradle.kts".to_string(),
+                        subprojects: vec![],
+                    },
+                    crate::proto::ProjectModel {
+                        path: ":lib".to_string(),
+                        name: "lib".to_string(),
+                        build_file: "/lib/build.gradle".to_string(),
+                        subprojects: vec![],
+                    },
+                ],
+            };
+            tracing::debug!(build_id = %req.build_id, "Mock: returning build model");
+            Ok(Response::new(response))
+        }
+
+        async fn resolve_configuration(
+            &self,
+            request: tonic::Request<crate::proto::ResolveConfigRequest>,
+        ) -> Result<Response<crate::proto::ResolveConfigResponse>, tonic::Status> {
+            let req = request.into_inner();
+            let response = crate::proto::ResolveConfigResponse {
+                success: true,
+                artifacts: vec![
+                    crate::proto::ResolvedArtifact {
+                        group: "org.springframework".to_string(),
+                        name: "spring-core".to_string(),
+                        version: "6.1.0".to_string(),
+                        configuration: req.configuration_name.clone(),
+                    },
+                    crate::proto::ResolvedArtifact {
+                        group: "org.slf4j".to_string(),
+                        name: "slf4j-api".to_string(),
+                        version: "2.0.9".to_string(),
+                        configuration: req.configuration_name.clone(),
+                    },
+                ],
+                error_message: String::new(),
+            };
+            Ok(Response::new(response))
+        }
+
+        async fn get_build_environment(
+            &self,
+            _request: tonic::Request<crate::proto::GetBuildEnvironmentRequest>,
+        ) -> Result<Response<crate::proto::GetBuildEnvironmentResponse>, tonic::Status> {
+            let mut props = HashMap::new();
+            props.insert("java.vm.name".to_string(), "OpenJDK 64-Bit Server VM".to_string());
+            props.insert("user.timezone".to_string(), "UTC".to_string());
+            let response = crate::proto::GetBuildEnvironmentResponse {
+                java_version: "17.0.9".to_string(),
+                java_home: "/usr/lib/jvm/java-17".to_string(),
+                gradle_version: "8.5".to_string(),
+                os_name: "Linux".to_string(),
+                os_arch: "amd64".to_string(),
+                available_processors: 8,
+                max_memory_bytes: 4_294_967_296,
+                system_properties: props,
+            };
+            Ok(Response::new(response))
+        }
+    }
+
+    /// Spawn a mock JVM host server on a temp Unix socket, return the socket path and temp dir.
+    /// The TempDir must be held for the lifetime of the server.
+    async fn spawn_mock_server() -> (String, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let socket_path = dir.path().join("jvm-host-test.sock");
+
+        // Clean up stale socket
+        let _ = std::fs::remove_file(&socket_path);
+
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        let path_str = socket_path.to_string_lossy().to_string();
+
+        tokio::spawn(async move {
+            Server::builder()
+                .add_service(JvmHostServiceServer::new(MockJvmHostService))
+                .serve_with_incoming(tokio_stream::wrappers::UnixListenerStream::new(listener))
+                .await
+                .unwrap();
+        });
+
+        // Give the server a moment to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        (path_str, dir)
+    }
+
+    #[tokio::test]
+    async fn test_get_build_environment() {
+        let _guard = tracing_subscriber::fmt()
+            .with_test_writer()
+            .with_max_level(tracing::Level::DEBUG)
+            .try_init();
+
+        let (socket_path, _dir) = spawn_mock_server().await;
+        let mut client = JvmHostClient::connect(&socket_path).await.unwrap();
+
+        let env = client.get_build_environment().await.unwrap();
+
+        assert_eq!(env.java_version, "17.0.9");
+        assert_eq!(env.java_home, "/usr/lib/jvm/java-17");
+        assert_eq!(env.gradle_version, "8.5");
+        assert_eq!(env.os_name, "Linux");
+        assert_eq!(env.os_arch, "amd64");
+        assert_eq!(env.available_processors, 8);
+        assert_eq!(env.max_memory_bytes, 4_294_967_296);
+        assert_eq!(
+            env.system_properties.get("java.vm.name").unwrap(),
+            "OpenJDK 64-Bit Server VM"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_build_model() {
+        let (socket_path, _dir) = spawn_mock_server().await;
+        let mut client = JvmHostClient::connect(&socket_path).await.unwrap();
+
+        let model = client.get_build_model("build-123").await.unwrap();
+
+        assert_eq!(model.projects.len(), 3);
+        assert_eq!(model.projects[0].path, ":");
+        assert_eq!(model.projects[0].name, "root");
+        assert_eq!(model.projects[0].subprojects.len(), 2);
+        assert_eq!(model.projects[0].subprojects[0], ":app");
+        assert_eq!(model.projects[1].path, ":app");
+        assert_eq!(model.projects[1].build_file, "/app/build.gradle.kts");
+        assert_eq!(model.projects[2].build_file, "/lib/build.gradle");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_configuration() {
+        let (socket_path, _dir) = spawn_mock_server().await;
+        let mut client = JvmHostClient::connect(&socket_path).await.unwrap();
+
+        let result = client
+            .resolve_configuration("build-123", "compileClasspath", ":app")
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.artifacts.len(), 2);
+        assert_eq!(result.artifacts[0].group, "org.springframework");
+        assert_eq!(result.artifacts[0].name, "spring-core");
+        assert_eq!(result.artifacts[0].version, "6.1.0");
+        assert_eq!(result.artifacts[0].configuration, "compileClasspath");
+        assert_eq!(result.artifacts[1].group, "org.slf4j");
+        assert_eq!(result.error_message, "");
+    }
+
+    #[tokio::test]
+    async fn test_connect_to_nonexistent_socket_fails() {
+        let result = JvmHostClient::connect("/tmp/nonexistent-jvm-host-socket-xyz.sock").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_evaluate_script_returns_unimplemented() {
+        let (socket_path, _dir) = spawn_mock_server().await;
+        let mut client = JvmHostClient::connect(&socket_path).await.unwrap();
+
+        let result = client
+            .evaluate_script("build.gradle.kts", "plugins {}", "kotlin")
+            .await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Unimplemented);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_sequential_calls() {
+        let (socket_path, _dir) = spawn_mock_server().await;
+        let mut client = JvmHostClient::connect(&socket_path).await.unwrap();
+
+        // First call: get environment
+        let env = client.get_build_environment().await.unwrap();
+        assert_eq!(env.java_version, "17.0.9");
+
+        // Second call: get build model
+        let model = client.get_build_model("build-1").await.unwrap();
+        assert_eq!(model.projects.len(), 3);
+
+        // Third call: resolve configuration
+        let result = client
+            .resolve_configuration("build-1", "runtimeClasspath", ":app")
+            .await
+            .unwrap();
+        assert!(result.success);
+        assert_eq!(result.artifacts.len(), 2);
+    }
+}
