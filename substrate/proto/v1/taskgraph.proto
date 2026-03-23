@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service TaskGraphService {
+  rpc RegisterTask(RegisterTaskRequest) returns (RegisterTaskResponse);
+  rpc ResolveExecutionPlan(ResolveExecutionPlanRequest) returns (ResolveExecutionPlanResponse);
+  rpc TaskStarted(TaskStartedRequest) returns (TaskStartedResponse);
+  rpc TaskFinished(TaskFinishedRequest) returns (TaskFinishedResponse);
+  rpc GetProgress(GetProgressRequest) returns (GetProgressResponse);
+}
+
+message RegisterTaskRequest {
+  string build_id = 5;
+  string task_path = 1;
+  repeated string depends_on = 2;
+  bool should_execute = 3;
+  string task_type = 4;
+  repeated string input_files = 10;
+}
+message RegisterTaskResponse { bool success = 1; }
+message ResolveExecutionPlanRequest { string build_id = 1; }
+message ExecutionNode {
+  string task_path = 1;
+  repeated string dependencies = 2;
+  int64 execution_order = 3;
+  int64 estimated_duration_ms = 4;
+}
+message ResolveExecutionPlanResponse {
+  repeated ExecutionNode execution_order = 1;
+  int32 total_tasks = 2;
+  int32 ready_to_execute = 3;
+  int64 critical_path_ms = 4;
+  bool has_cycles = 5;
+}
+message TaskStartedRequest {
+  string build_id = 3;
+  string task_path = 1;
+  int64 start_time_ms = 2;
+}
+message TaskStartedResponse { bool acknowledged = 1; }
+message TaskFinishedRequest {
+  string build_id = 5;
+  string task_path = 1;
+  int64 duration_ms = 2;
+  bool success = 3;
+  string outcome = 4;
+}
+message TaskFinishedResponse { bool acknowledged = 1; }
+message GetProgressRequest { string build_id = 1; }
+message TaskProgress {
+  string task_path = 1;
+  string status = 2;
+  int64 duration_ms = 3;
+}
+message GetProgressResponse {
+  repeated TaskProgress tasks = 1;
+  int32 completed = 2;
+  int32 total = 3;
+  int32 executing = 4;
+  int64 elapsed_ms = 5;
+}

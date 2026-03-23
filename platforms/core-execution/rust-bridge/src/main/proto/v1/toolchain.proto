@@ -1,0 +1,130 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service ToolchainService {
+  rpc ListToolchains(ListToolchainsRequest) returns (ListToolchainsResponse);
+  rpc EnsureToolchain(EnsureToolchainRequest) returns (stream ToolchainProgress);
+  rpc VerifyToolchain(VerifyToolchainRequest) returns (VerifyToolchainResponse);
+  rpc GetJavaHome(GetJavaHomeRequest) returns (GetJavaHomeResponse);
+  rpc RegisterToolchain(RegisterToolchainRequest) returns (RegisterToolchainResponse);
+  rpc RemoveToolchain(RemoveToolchainRequest) returns (RemoveToolchainResponse);
+  rpc GetToolchainMetadata(GetToolchainMetadataRequest) returns (GetToolchainMetadataResponse);
+}
+
+message ToolchainDescriptor {
+  string language_version = 1;
+  string implementation = 2;
+  string vendor = 3;
+  string os = 4;
+  string arch = 5;
+}
+
+message ListToolchainsRequest {
+  string os = 1;
+  string arch = 2;
+}
+
+message ToolchainLocation {
+  string language_version = 1;
+  string implementation = 2;
+  string java_home = 3;
+  bool verified = 4;
+  int64 install_size_bytes = 5;
+  string installed_via = 6;
+}
+
+message ListToolchainsResponse {
+  repeated ToolchainLocation toolchains = 1;
+}
+
+message EnsureToolchainRequest {
+  string language_version = 1;
+  string implementation = 2;
+  string vendor = 3;
+  string os = 4;
+  string arch = 5;
+  repeated string download_urls = 6;
+  string expected_sha256 = 7;
+  bool cache_download = 8;
+}
+
+message ToolchainProgress {
+  string phase = 1;
+  int64 progress_percent = 2;
+  string message = 3;
+  bool success = 4;
+  string error_message = 5;
+  string java_home = 6;
+  bool sha256_verified = 7;
+  bool cache_hit = 8;
+}
+
+message VerifyToolchainRequest {
+  string java_home = 1;
+  string expected_version = 2;
+}
+
+message VerifyToolchainResponse {
+  bool valid = 1;
+  string detected_version = 2;
+  string error_message = 3;
+}
+
+message GetJavaHomeRequest {
+  string language_version = 1;
+  string implementation = 2;
+}
+
+message GetJavaHomeResponse {
+  string java_home = 1;
+  bool found = 2;
+}
+
+message RegisterToolchainRequest {
+  string language_version = 1;
+  string implementation = 2;
+  string java_home = 3;
+  string vendor = 4;
+  string expected_sha256 = 5;
+}
+
+message RegisterToolchainResponse {
+  bool registered = 1;
+  string java_home = 2;
+  string detected_version = 3;
+  string error_message = 4;
+}
+
+message RemoveToolchainRequest {
+  string language_version = 1;
+  string implementation = 2;
+  bool delete_files = 3;
+}
+
+message RemoveToolchainResponse {
+  bool removed = 1;
+  string java_home = 2;
+  string error_message = 3;
+}
+
+message GetToolchainMetadataRequest {
+  string language_version = 1;
+  string implementation = 2;
+  string java_home = 3;
+  string vendor = 4;
+}
+
+message GetToolchainMetadataResponse {
+  bool found = 1;
+  string language_version = 2;
+  string implementation = 3;
+  string vendor = 4;
+  string detected_version = 5;
+  string java_home = 6;
+  int64 install_size_bytes = 7;
+  bool verified = 8;
+}

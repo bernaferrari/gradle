@@ -3,21 +3,39 @@ package org.gradle.internal.buildoption;
 /**
  * Feature flags for the Rust execution substrate.
  *
- * These are internal options controlled via system properties:
+ * <h3>Umbrella mode (recommended)</h3>
+ * <pre>
+ *   -Dorg.gradle.rust.substrate.mode=shadow        # all services enabled in shadow mode
+ *   -Dorg.gradle.rust.substrate.mode=authoritative # all services enabled, Rust authoritative
+ * </pre>
+ *
+ * <h3>Per-service flags (backward compatible)</h3>
+ * <pre>
  *   -Dorg.gradle.rust.substrate.enabled=true
  *   -Dorg.gradle.rust.substrate.hashing.enabled=true
- *   -Dorg.gradle.rust.substrate.hashing.shadow=true
- *   -Dorg.gradle.rust.substrate.cache.enabled=true
- *   -Dorg.gradle.rust.substrate.exec.enabled=true
  *   -Dorg.gradle.rust.substrate.daemon.path=/path/to/daemon
- *   -Dorg.gradle.rust.substrate.shadow.report-mismatches=true
- *   -Dorg.gradle.rust.substrate.execution.advisory=true
- *   -Dorg.gradle.rust.substrate.execution.authoritative=true
- *   -Dorg.gradle.rust.substrate.history.enabled=true
- *   -Dorg.gradle.rust.substrate.fingerprint.enabled=true
- *   -Dorg.gradle.rust.substrate.snapshot.enabled=true
+ *   ...
+ * </pre>
+ *
+ * When {@code org.gradle.rust.substrate.mode} is set, it overrides all per-service
+ * flags. When not set, the system falls back to individual per-service flags.
  */
 public class RustSubstrateOptions {
+
+    /**
+     * Umbrella mode for the Rust substrate.
+     * Property: org.gradle.rust.substrate.mode
+     * Values: "" (not set = use per-service flags), "off", "shadow", "authoritative"
+     * Default: ""
+     */
+    public enum SubstrateMode {
+        OFF,
+        SHADOW,
+        AUTHORITATIVE
+    }
+
+    public static final InternalOption<String> SUBSTRATE_MODE =
+        StringInternalOption.of("org.gradle.rust.substrate.mode", "");
 
     /**
      * Master switch: enable the Rust substrate daemon.
@@ -77,7 +95,6 @@ public class RustSubstrateOptions {
 
     /**
      * Enable Phase 5: Advisory ExecutionEngine.
-     * Rust predicts outcomes, Java remains authoritative.
      * Property: org.gradle.rust.substrate.execution.advisory
      * Default: false
      */
@@ -86,7 +103,6 @@ public class RustSubstrateOptions {
 
     /**
      * Enable Phase 6: Authoritative ExecutionEngine.
-     * Rust drives work identity, caching, and up-to-date decisions.
      * Property: org.gradle.rust.substrate.execution.authoritative
      * Default: false
      */
@@ -302,15 +318,100 @@ public class RustSubstrateOptions {
         new InternalFlag("org.gradle.rust.substrate.gc.enabled", false);
 
     /**
-     * Enable Phase 6: JVM Compatibility Host — Java gRPC server for Rust callbacks.
-     * When enabled, a JvmHostServer is started alongside the Rust daemon,
-     * allowing the Rust daemon to call back into the JVM for script evaluation,
-     * build model access, and configuration resolution.
+     * Enable Phase 6: JVM Compatibility Host.
      * Property: org.gradle.rust.substrate.jvm.host.enabled
      * Default: false
      */
     public static final InternalFlag ENABLE_JVM_HOST =
         new InternalFlag("org.gradle.rust.substrate.jvm.host.enabled", false);
+
+    // --- Umbrella mode helpers ---
+
+    /**
+     * Resolve the effective substrate mode.
+     * Returns the mode from the umbrella flag, or null if not set (use per-service flags).
+     */
+    public static SubstrateMode getMode(InternalOptions options) {
+        String modeString = options.getOption(SUBSTRATE_MODE).get();
+        if (modeString == null || modeString.isEmpty()) {
+            return null; // not set — fall back to per-service flags
+        }
+        try {
+            return SubstrateMode.valueOf(modeString.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return null; // invalid value — fall back to per-service flags
+        }
+    }
+
+    /**
+     * Check whether a subsystem is enabled, considering both umbrella mode and per-service flags.
+     *
+     * <ul>
+     *   <li>If SUBSTRATE_MODE is "off" → false</li>
+     *   <li>If SUBSTRATE_MODE is "shadow" or "authoritative" → true</li>
+     *   <li>If SUBSTRATE_MODE is not set → check the per-service flag</li>
+     * </ul>
+     */
+    public static boolean isSubsystemEnabled(InternalOptions options, InternalFlag perServiceFlag) {
+        SubstrateMode mode = getMode(options);
+        if (mode != null) {
+            return mode != SubstrateMode.OFF;
+        }
+        // Fall back to per-service flag
+        return options.getOption(perServiceFlag).get();
+    }
+
+    /**
+     * Check whether the substrate is in authoritative mode.
+     *
+     * <ul>
+     *   <li>If SUBSTRATE_MODE is "authoritative" → true</li>
+     *   <li>Otherwise → check ENABLE_AUTHORITATIVE_EXECUTION flag</li>
+     * </ul>
+     */
+    public static boolean isAuthoritative(InternalOptions options) {
+        SubstrateMode mode = getMode(options);
+        if (mode == SubstrateMode.AUTHORITATIVE) {
+            return true;
+        }
+        if (mode != null) {
+            return false; // shadow or off
+        }
+        // Fall back to per-service flag
+        return options.getOption(ENABLE_AUTHORITATIVE_EXECUTION).get();
+    }
+
+    /**
+     * Check whether the substrate is in shadow mode (both Java and Rust run).
+     *
+     * <ul>
+     *   <li>If SUBSTRATE_MODE is "shadow" → true</li>
+     *   <li>Otherwise → check SHADOW_HASHING flag</li>
+     * </ul>
+     */
+    public static boolean isShadowMode(InternalOptions options) {
+        SubstrateMode mode = getMode(options);
+        if (mode == SubstrateMode.SHADOW) {
+            return true;
+        }
+        if (mode != null) {
+            return false; // authoritative or off
+        }
+        // Fall back to per-service flag
+        return options.getOption(SHADOW_HASHING).get();
+    }
+
+    /**
+     * Check whether the master substrate switch is on.
+     * Returns true if SUBSTRATE_MODE is shadow/authoritative, or if ENABLE_SUBSTRATE flag is true.
+     */
+    public static boolean isSubstrateEnabled(InternalOptions options) {
+        SubstrateMode mode = getMode(options);
+        if (mode != null) {
+            return mode != SubstrateMode.OFF;
+        }
+        return options.getOption(ENABLE_SUBSTRATE).get();
+    }
 
     private RustSubstrateOptions() {
         // utility class

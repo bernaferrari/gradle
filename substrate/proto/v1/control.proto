@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service ControlService {
+  rpc Handshake(HandshakeRequest) returns (HandshakeResponse);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+  rpc SetAuthoritativeMode(SetAuthoritativeModeRequest) returns (SetAuthoritativeModeResponse);
+  rpc GetAuthoritativeMode(GetAuthoritativeModeRequest) returns (GetAuthoritativeModeResponse);
+}
+
+message HandshakeRequest {
+  string client_version = 1;
+  string protocol_version = 2;
+  int32 client_pid = 3;
+  string jvm_host_socket_path = 4;
+}
+
+message HandshakeResponse {
+  bool accepted = 1;
+  string server_version = 2;
+  string protocol_version = 3;
+  string error_message = 4;
+}
+
+message ShutdownRequest { bool force = 1; }
+message ShutdownResponse { bool acknowledged = 1; }
+
+message SetAuthoritativeModeRequest {
+  string subsystem = 1;
+  bool authoritative = 2;
+}
+message SetAuthoritativeModeResponse {
+  bool accepted = 1;
+  string previous_mode = 2;
+}
+message GetAuthoritativeModeRequest {}
+message GetAuthoritativeModeResponse {
+  repeated SubsystemAuthStatus subsystems = 1;
+}
+message SubsystemAuthStatus {
+  string subsystem = 1;
+  bool authoritative = 2;
+}

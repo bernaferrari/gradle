@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service ExecService {
+  rpc Spawn(ExecSpawnRequest) returns (ExecSpawnResponse);
+  rpc Wait(ExecWaitRequest) returns (ExecWaitResponse);
+  rpc Signal(ExecSignalRequest) returns (ExecSignalResponse);
+  rpc KillTree(ExecKillTreeRequest) returns (ExecKillTreeResponse);
+  rpc SubscribeOutput(ExecOutputRequest) returns (stream ExecOutputChunk);
+}
+
+message ExecSpawnRequest {
+  string command = 1;
+  repeated string args = 2;
+  map<string, string> environment = 3;
+  string working_dir = 4;
+  bool redirect_error_stream = 5;
+}
+message ExecSpawnResponse {
+  int32 pid = 1;
+  bool success = 2;
+  string error_message = 3;
+}
+message ExecWaitRequest { int32 pid = 1; }
+message ExecWaitResponse {
+  int32 exit_code = 1;
+  string error_message = 2;
+}
+message ExecSignalRequest {
+  int32 pid = 1;
+  int32 signal = 2;
+}
+message ExecSignalResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+message ExecKillTreeRequest {
+  int32 pid = 1;
+  bool force = 2;
+}
+message ExecKillTreeResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+message ExecOutputRequest { int32 pid = 1; }
+message ExecOutputChunk {
+  bytes data = 1;
+  bool is_stderr = 2;
+}
+
+service WorkService {
+  rpc Evaluate(WorkEvaluateRequest) returns (WorkEvaluateResponse);
+  rpc RecordExecution(WorkRecordRequest) returns (WorkRecordResponse);
+}
+message WorkEvaluateRequest {
+  string task_path = 1;
+  map<string, string> input_properties = 2;
+}
+message WorkEvaluateResponse {
+  bool should_execute = 1;
+  string reason = 2;
+  string input_hash = 3;
+}
+message WorkRecordRequest {
+  string task_path = 1;
+  int64 duration_ms = 2;
+  bool success = 3;
+  string input_hash = 4;
+}
+message WorkRecordResponse { bool acknowledged = 1; }

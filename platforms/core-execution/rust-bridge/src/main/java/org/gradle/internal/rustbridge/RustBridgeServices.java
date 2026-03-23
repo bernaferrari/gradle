@@ -93,7 +93,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
         @Provides
         @org.gradle.internal.service.scopes.PrivateService
         DaemonLauncher createDaemonLauncher(InternalOptions options) {
-            if (!options.getOption(RustSubstrateOptions.ENABLE_SUBSTRATE).get()) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
                 return DaemonLauncher.noop();
             }
 
@@ -115,7 +115,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
                 ".gradle-substrate"
             );
 
-            boolean enableJvmHost = options.getOption(RustSubstrateOptions.ENABLE_JVM_HOST).get();
+            boolean enableJvmHost = RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_JVM_HOST);
 
             if (enableJvmHost) {
                 return DaemonLauncher.withJvmHost(daemonBinary, socketDirectory);
@@ -131,7 +131,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             DaemonLauncher launcher,
             InternalOptions options
         ) {
-            if (!options.getOption(RustSubstrateOptions.ENABLE_SUBSTRATE).get()) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
                 return SubstrateClient.noop();
             }
             try {
@@ -154,7 +154,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             BuildOperationListenerManager buildOpListenerManager,
             InternalOptions options
         ) {
-            if (!options.getOption(RustSubstrateOptions.ENABLE_SUBSTRATE).get()) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
                 return null;
             }
             BuildOperationShadowListener listener = new BuildOperationShadowListener(client);
@@ -315,7 +315,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             ListenerManager listenerManager,
             InternalOptions options
         ) {
-            if (!options.getOption(RustSubstrateOptions.ENABLE_SUBSTRATE).get()) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
                 return null;
             }
             BuildResultShadowListener listener = new BuildResultShadowListener(
@@ -332,7 +332,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             ListenerManager listenerManager,
             InternalOptions options
         ) {
-            if (!options.getOption(RustSubstrateOptions.ENABLE_RUST_DEPENDENCY_RESOLUTION).get()) {
+            if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_DEPENDENCY_RESOLUTION)) {
                 return null;
             }
             DependencyResolutionShadowListener listener =
@@ -347,7 +347,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             SubstrateClient client,
             InternalOptions options
         ) {
-            if (!options.getOption(RustSubstrateOptions.ENABLE_SUBSTRATE).get()) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
                 return null;
             }
             // TransformExecutionListener has @ServiceScope + @EventScope,
@@ -361,7 +361,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             SubstrateClient client,
             InternalOptions options
         ) {
-            if (!options.getOption(RustSubstrateOptions.ENABLE_SUBSTRATE).get()) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
                 return null;
             }
             // OutputChangeListener has @ServiceScope + @EventScope,
@@ -376,7 +376,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             ListenerManager listenerManager,
             InternalOptions options
         ) {
-            if (!options.getOption(RustSubstrateOptions.ENABLE_RUST_TEST_EXECUTION).get()) {
+            if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_TEST_EXECUTION)) {
                 return null;
             }
             // TestListener has @EventScope but NOT @ServiceScope,
@@ -402,7 +402,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             ListenerManager listenerManager,
             InternalOptions options
         ) {
-            if (!options.getOption(RustSubstrateOptions.ENABLE_SUBSTRATE).get()) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
                 return new BootstrapLifecycleListener(bootstrapClient, ".", 1);
             }
             int parallelism = Runtime.getRuntime().availableProcessors();
@@ -419,7 +419,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             HashMismatchReporter mismatchReporter,
             InternalOptions options
         ) {
-            boolean authoritative = options.getOption(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION).get();
+            boolean authoritative = RustSubstrateOptions.isAuthoritative(options);
             return new ShadowingBuildCacheKeyComputer(cacheOrchestrationClient, mismatchReporter, authoritative);
         }
 
@@ -431,7 +431,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             ListenerManager listenerManager,
             InternalOptions options
         ) {
-            if (!options.getOption(RustSubstrateOptions.ENABLE_RUST_TASK_GRAPH).get()) {
+            if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_TASK_GRAPH)) {
                 return null;
             }
             TaskGraphShadowListener listener = new TaskGraphShadowListener(
@@ -448,7 +448,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             ListenerManager listenerManager,
             InternalOptions options
         ) {
-            if (!options.getOption(RustSubstrateOptions.ENABLE_RUST_CONFIGURATION).get()) {
+            if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_CONFIGURATION)) {
                 return null;
             }
             PropertyShadowEvaluationListener listener = new PropertyShadowEvaluationListener(
@@ -464,7 +464,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             ListenerManager listenerManager,
             InternalOptions options
         ) {
-            if (!options.getOption(RustSubstrateOptions.ENABLE_SUBSTRATE).get()) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
                 return null;
             }
             ProjectEvaluationShadowListener listener = new ProjectEvaluationShadowListener(client);
@@ -479,7 +479,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             ListenerManager listenerManager,
             InternalOptions options
         ) {
-            if (!options.getOption(RustSubstrateOptions.ENABLE_SUBSTRATE).get()) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
                 return null;
             }
             TaskExecutionGraphShadowListener listener = new TaskExecutionGraphShadowListener(client);
@@ -494,7 +494,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             HashMismatchReporter mismatchReporter,
             InternalOptions options
         ) {
-            if (!options.getOption(RustSubstrateOptions.ENABLE_SUBSTRATE).get()) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
                 return null;
             }
             return new ConfigurationCacheShadowListener(rustConfigCacheClient, mismatchReporter);
@@ -506,7 +506,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             RustIncrementalCompilationClient rustIncrementalCompilationClient,
             InternalOptions options
         ) {
-            if (!options.getOption(RustSubstrateOptions.ENABLE_RUST_INCREMENTAL_COMPILATION).get()) {
+            if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_INCREMENTAL)) {
                 return null;
             }
             return new IncrementalCompilationShadowListener(rustIncrementalCompilationClient);
@@ -537,10 +537,10 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             HashMismatchReporter mismatchReporter,
             InternalOptions options
         ) {
-            if (!options.getOption(RustSubstrateOptions.ENABLE_RUST_SNAPSHOTTING).get()) {
+            if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_SNAPSHOTTING)) {
                 return null;
             }
-            boolean authoritative = options.getOption(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION).get();
+            boolean authoritative = RustSubstrateOptions.isAuthoritative(options);
             return new ShadowingValueSnapshotter(
                 new SnapshotHashDelegate(valueSnapshotter),
                 rustValueSnapshotClient,

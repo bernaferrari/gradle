@@ -1,5 +1,6 @@
 plugins {
     id("gradlebuild.distribution.api-java")
+    id("com.google.protobuf")
 }
 
 description = "gRPC bridge to the Rust execution substrate daemon"
@@ -24,6 +25,24 @@ dependencies {
     testImplementation(projects.baseServicesGroovy)
     testImplementation(testFixtures(projects.baseServices))
     testImplementation(testFixtures(projects.execution))
+}
+
+protobuf {
+    protoc {
+        artifact = "com.google.protobuf:protoc:3.25.3"
+    }
+    plugins {
+        create("grpc") {
+            artifact = "io.grpc:protoc-gen-grpc-java:1.62.2"
+        }
+    }
+    generateProtoTasks {
+        all().forEach { task ->
+            task.plugins {
+                create("grpc")
+            }
+        }
+    }
 }
 
 gradleModule {

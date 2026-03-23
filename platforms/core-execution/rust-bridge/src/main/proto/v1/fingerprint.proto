@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service FileFingerprintService {
+  rpc FingerprintFiles(FingerprintFilesRequest) returns (FingerprintFilesResponse);
+}
+
+message FileToFingerprint {
+  string absolute_path = 1;
+  FingerprintType type = 2;
+}
+
+enum FingerprintType {
+  FINGERPRINT_FILE = 0;
+  FINGERPRINT_DIRECTORY = 1;
+  FINGERPRINT_ROOT = 2;
+}
+
+message FingerprintFilesRequest {
+  repeated FileToFingerprint files = 1;
+  string normalization_strategy = 2;
+  repeated string ignore_patterns = 3;
+}
+message FileFingerprintEntry {
+  string path = 1;
+  bytes hash = 2;
+  int64 size = 3;
+  int64 last_modified = 4;
+  bool is_directory = 5;
+}
+message FingerprintFilesResponse {
+  repeated FileFingerprintEntry entries = 1;
+  bytes collection_hash = 2;
+  string error_message = 3;
+  bool success = 4;
+}
+
+service ValueSnapshotService {
+  rpc SnapshotValues(SnapshotValuesRequest) returns (SnapshotValuesResponse);
+}
+
+message PropertyValue {
+  string name = 1;
+  oneof value {
+    string string_value = 2;
+    int64 long_value = 3;
+    bool bool_value = 4;
+    bytes binary_value = 5;
+    string list_value = 6;
+    string map_value = 7;
+  }
+  string type_name = 8;
+}
+message SnapshotValuesRequest {
+  repeated PropertyValue values = 1;
+  string implementation_fingerprint = 2;
+}
+message ValueSnapshotResult {
+  string name = 1;
+  bytes fingerprint = 2;
+}
+message SnapshotValuesResponse {
+  repeated ValueSnapshotResult results = 1;
+  bytes composite_hash = 2;
+  string error_message = 3;
+  bool success = 4;
+}

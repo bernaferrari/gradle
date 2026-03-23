@@ -1,0 +1,114 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service BootstrapService {
+  rpc InitBuild(InitBuildRequest) returns (InitBuildResponse);
+  rpc CompleteBuild(CompleteBuildRequest) returns (CompleteBuildResponse);
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+  rpc GetSubstrateInfo(GetSubstrateInfoRequest) returns (GetSubstrateInfoResponse);
+}
+
+message InitBuildRequest {
+  string build_id = 1;
+  string project_dir = 2;
+  int64 start_time_ms = 3;
+  int32 requested_parallelism = 4;
+  map<string, string> system_properties = 5;
+  repeated string requested_features = 6;
+  string session_id = 7;
+}
+message InitBuildResponse {
+  string build_id = 1;
+  string substrate_version = 2;
+  string protocol_version = 3;
+  int32 max_parallelism = 4;
+}
+message CompleteBuildRequest {
+  string build_id = 1;
+  string outcome = 2;
+  int64 duration_ms = 3;
+}
+message CompleteBuildResponse { bool acknowledged = 1; }
+message HealthCheckRequest {}
+message HealthCheckResponse {
+  bool healthy = 1;
+  string version = 2;
+  string uptime = 3;
+  int64 active_builds = 4;
+}
+message GetSubstrateInfoRequest {}
+message SubstrateServiceInfo {
+  string service_name = 1;
+  string status = 2;
+  int64 requests_served = 3;
+}
+message GetSubstrateInfoResponse {
+  string daemon_version = 1;
+  repeated SubstrateServiceInfo services = 2;
+  int64 total_requests = 3;
+}
+
+service BuildInitService {
+  rpc InitBuildSettings(InitBuildSettingsRequest) returns (InitBuildSettingsResponse);
+  rpc RecordSettingsDetail(RecordSettingsDetailRequest) returns (RecordSettingsDetailResponse);
+  rpc GetBuildInitStatus(GetBuildInitStatusRequest) returns (GetBuildInitStatusResponse);
+  rpc RecordInitScript(RecordInitScriptRequest) returns (RecordInitScriptResponse);
+}
+message InitBuildSettingsRequest {
+  string build_id = 1;
+  string root_dir = 2;
+  string settings_file = 3;
+  string gradle_user_home = 4;
+  repeated string init_scripts = 5;
+  repeated string requested_build_features = 6;
+  string current_dir = 7;
+  string session_id = 8;
+}
+message InitBuildSettingsResponse {
+  string build_id = 1;
+  bool initialized = 2;
+  int64 init_duration_ms = 3;
+  string error_message = 4;
+}
+message SettingsDetailEntry {
+  string key = 1;
+  string value = 2;
+}
+message RecordSettingsDetailRequest {
+  string build_id = 1;
+  SettingsDetailEntry detail = 2;
+}
+message RecordSettingsDetailResponse { bool accepted = 1; }
+message GetBuildInitStatusRequest { string build_id = 1; }
+message InitScriptInfo {
+  string path = 1;
+  bool success = 2;
+  int64 duration_ms = 3;
+}
+message BuildInitStatus {
+  string build_id = 1;
+  string root_dir = 2;
+  bool initialized = 3;
+  int64 init_duration_ms = 4;
+  repeated SettingsDetailEntry settings_details = 5;
+  repeated InitScriptInfo executed_init_scripts = 6;
+  repeated string included_projects = 7;
+  repeated string included_builds = 8;
+  bool settings_file_exists = 9;
+  optional string gradle_version = 10;
+}
+message GetBuildInitStatusResponse {
+  BuildInitStatus status = 1;
+}
+message RecordInitScriptRequest {
+  string build_id = 1;
+  string script_path = 2;
+  bool success = 3;
+  string error_message = 4;
+  int64 duration_ms = 5;
+}
+message RecordInitScriptResponse { bool accepted = 1; }

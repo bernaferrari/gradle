@@ -1,0 +1,96 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service TestExecutionService {
+  rpc RegisterTestSuite(RegisterTestSuiteRequest) returns (RegisterTestSuiteResponse);
+  rpc ReportTestResult(ReportTestResultRequest) returns (ReportTestResultResponse);
+  rpc GetTestReport(GetTestReportRequest) returns (GetTestReportResponse);
+  rpc GetTestResultsByOutcome(GetTestResultsByOutcomeRequest) returns (GetTestResultsByOutcomeResponse);
+  rpc GetTestSummary(GetTestSummaryRequest) returns (TestSummaryResponse);
+  rpc DetectFlakyTests(DetectFlakyTestsRequest) returns (DetectFlakyTestsResponse);
+}
+message TestSuiteDescriptor {
+  string suite_id = 1;
+  string suite_name = 2;
+  string suite_type = 3;
+  int32 test_count = 4;
+  string module_path = 5;
+}
+message RegisterTestSuiteRequest {
+  string build_id = 1;
+  TestSuiteDescriptor suite = 2;
+}
+message RegisterTestSuiteResponse { bool accepted = 1; }
+message TestResultEntry {
+  string test_id = 1;
+  string suite_id = 2;
+  string test_name = 3;
+  string test_class = 4;
+  string outcome = 5;
+  int64 start_time_ms = 6;
+  int64 end_time_ms = 7;
+  int64 duration_ms = 8;
+  string failure_message = 9;
+  string failure_type = 10;
+  repeated string failure_stack_trace = 11;
+  bool rerun = 12;
+  int32 attempt = 13;
+}
+message ReportTestResultRequest {
+  string build_id = 1;
+  TestResultEntry result = 2;
+}
+message ReportTestResultResponse { bool accepted = 1; }
+message GetTestReportRequest { string build_id = 1; }
+message TestSuiteReport {
+  TestSuiteDescriptor suite = 1;
+  repeated TestResultEntry results = 2;
+  int32 passed = 3;
+  int32 failed = 4;
+  int32 skipped = 5;
+  int64 total_duration_ms = 6;
+}
+message GetTestReportResponse {
+  repeated TestSuiteReport suites = 1;
+  int32 total_tests = 2;
+  int32 total_passed = 3;
+  int32 total_failed = 4;
+  int32 total_skipped = 5;
+  int64 total_duration_ms = 6;
+}
+message GetTestResultsByOutcomeRequest {
+  string build_id = 1;
+  string outcome = 2;
+}
+message GetTestResultsByOutcomeResponse {
+  repeated TestResultEntry results = 1;
+  int32 count = 2;
+}
+message GetTestSummaryRequest { string build_id = 1; }
+message TestSummaryResponse {
+  int32 suites = 1;
+  int32 tests = 2;
+  int32 passed = 3;
+  int32 failed = 4;
+  int32 skipped = 5;
+  int32 aborted = 6;
+  int64 total_duration_ms = 7;
+  repeated string failed_test_names = 8;
+  double pass_rate = 9;
+}
+message DetectFlakyTestsRequest { string build_id = 1; }
+message FlakyTestInfo {
+  string test_id = 1;
+  string test_name = 2;
+  string test_class = 3;
+  int64 pass_count = 4;
+  int64 fail_count = 5;
+  double flake_rate = 6;
+}
+message DetectFlakyTestsResponse {
+  repeated FlakyTestInfo flaky_tests = 1;
+}
