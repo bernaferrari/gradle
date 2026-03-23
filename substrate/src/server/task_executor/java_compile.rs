@@ -339,7 +339,7 @@ src/main/java/Foo.java:5: warning: [unchecked] unchecked call
               ^
 1 warning
 "#;
-        let (errors, warnings, notes) = JavaCompileExecutor::parse_javac_output(output);
+        let (errors, warnings, _notes) = JavaCompileExecutor::parse_javac_output(output);
         assert!(errors.is_empty());
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("warning:"));
