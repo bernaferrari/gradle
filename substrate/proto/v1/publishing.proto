@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service ArtifactPublishingService {
+  rpc RegisterArtifact(RegisterArtifactRequest) returns (RegisterArtifactResponse);
+  rpc RecordUploadResult(RecordUploadResultRequest) returns (RecordUploadResultResponse);
+  rpc GetPublishingStatus(GetPublishingStatusRequest) returns (GetPublishingStatusResponse);
+  rpc GetArtifactChecksums(GetArtifactChecksumsRequest) returns (GetArtifactChecksumsResponse);
+}
+message ArtifactDescriptor {
+  string artifact_id = 1;
+  string group = 2;
+  string name = 3;
+  string version = 4;
+  string classifier = 5;
+  string extension = 6;
+  string file_path = 7;
+  int64 file_size_bytes = 8;
+  string repository_id = 9;
+}
+message RegisterArtifactRequest {
+  string build_id = 1;
+  ArtifactDescriptor artifact = 2;
+}
+message RegisterArtifactResponse { bool accepted = 1; }
+message RecordUploadResultRequest {
+  string artifact_id = 1;
+  bool success = 2;
+  string error_message = 3;
+  int64 upload_duration_ms = 4;
+  int64 bytes_transferred = 5;
+}
+message RecordUploadResultResponse { bool accepted = 1; }
+message GetPublishingStatusRequest { string build_id = 1; }
+message ArtifactPublishStatus {
+  ArtifactDescriptor artifact = 1;
+  string status = 2;
+  int64 upload_duration_ms = 3;
+  string error_message = 4;
+}
+message GetPublishingStatusResponse {
+  repeated ArtifactPublishStatus artifacts = 1;
+  int32 total = 2;
+  int32 uploaded = 3;
+  int32 failed = 4;
+  int32 pending = 5;
+}
+message GetArtifactChecksumsRequest { string artifact_id = 1; }
+message GetArtifactChecksumsResponse {
+  string md5 = 1;
+  string sha1 = 2;
+  string sha256 = 3;
+}

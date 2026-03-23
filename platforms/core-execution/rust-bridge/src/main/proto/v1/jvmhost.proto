@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service JvmHostService {
+  rpc EvaluateScript(EvaluateScriptRequest) returns (EvaluateScriptResponse);
+  rpc GetBuildModel(GetBuildModelRequest) returns (GetBuildModelResponse);
+  rpc ResolveConfiguration(ResolveConfigRequest) returns (ResolveConfigResponse);
+  rpc GetBuildEnvironment(GetBuildEnvironmentRequest) returns (GetBuildEnvironmentResponse);
+}
+message EvaluateScriptRequest {
+  string script_path = 1;
+  string script_content = 2;
+  string script_type = 3;
+  map<string, string> extra_properties = 4;
+}
+message EvaluateScriptResponse {
+  bool success = 1;
+  string error_message = 2;
+  repeated AppliedPlugin applied_plugins = 3;
+}
+message AppliedPlugin {
+  string plugin_id = 1;
+  string apply_order = 2;
+}
+message GetBuildModelRequest { string build_id = 1; }
+message GetBuildModelResponse {
+  repeated ProjectModel projects = 1;
+}
+message ProjectModel {
+  string path = 1;
+  string name = 2;
+  string build_file = 3;
+  repeated string subprojects = 4;
+}
+message ResolveConfigRequest {
+  string build_id = 1;
+  string configuration_name = 2;
+  string project_path = 3;
+}
+message ResolveConfigResponse {
+  bool success = 1;
+  repeated ResolvedArtifact artifacts = 2;
+  string error_message = 3;
+}
+message ResolvedArtifact {
+  string group = 1;
+  string name = 2;
+  string version = 3;
+  string configuration = 4;
+}
+message GetBuildEnvironmentRequest {}
+message GetBuildEnvironmentResponse {
+  string java_version = 1;
+  string java_home = 2;
+  string gradle_version = 3;
+  string os_name = 4;
+  string os_arch = 5;
+  int32 available_processors = 6;
+  int64 max_memory_bytes = 7;
+  map<string, string> system_properties = 8;
+}

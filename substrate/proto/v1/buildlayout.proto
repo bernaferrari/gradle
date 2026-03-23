@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service BuildLayoutService {
+  rpc InitBuildLayout(InitBuildLayoutRequest) returns (InitBuildLayoutResponse);
+  rpc AddSubproject(AddSubprojectRequest) returns (AddSubprojectResponse);
+  rpc GetProjectTree(GetProjectTreeRequest) returns (GetProjectTreeResponse);
+  rpc GetBuildFilePath(GetBuildFilePathRequest) returns (GetBuildFilePathResponse);
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
+}
+
+message InitBuildLayoutRequest {
+  string root_dir = 1;
+  string settings_file = 2;
+  string build_file = 3;
+  string build_name = 4;
+}
+
+message InitBuildLayoutResponse {
+  string build_id = 1;
+  bool initialized = 2;
+  string error_message = 3;
+}
+
+message AddSubprojectRequest {
+  string build_id = 1;
+  string project_path = 2;
+  string project_dir = 3;
+  string build_file = 4;
+  string display_name = 5;
+}
+
+message AddSubprojectResponse {
+  bool added = 1;
+  string error_message = 2;
+}
+
+message ProjectNode {
+  string project_path = 1;
+  string project_dir = 2;
+  string build_file = 3;
+  string display_name = 4;
+  repeated string children = 5;
+}
+
+message GetProjectTreeRequest { string build_id = 1; }
+
+message GetProjectTreeResponse {
+  ProjectNode root = 1;
+  repeated ProjectNode all_projects = 2;
+}
+
+message GetBuildFilePathRequest {
+  string build_id = 1;
+  string project_path = 2;
+}
+
+message GetBuildFilePathResponse {
+  string build_file_path = 1;
+  bool found = 2;
+}
+
+message ListProjectsRequest { string build_id = 1; }
+
+message ListProjectsResponse {
+  repeated string project_paths = 1;
+  repeated string project_dirs = 2;
+}

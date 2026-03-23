@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service ResourceManagementService {
+  rpc ReserveResources(ReserveResourcesRequest) returns (ReserveResourcesResponse);
+  rpc ReleaseResources(ReleaseResourcesRequest) returns (ReleaseResourcesResponse);
+  rpc GetResourceUsage(GetResourceUsageRequest) returns (GetResourceUsageResponse);
+  rpc GetResourceLimits(GetResourceLimitsRequest) returns (GetResourceLimitsResponse);
+  rpc SetResourceLimits(SetResourceLimitsRequest) returns (SetResourceLimitsResponse);
+}
+message ResourceRequest {
+  string resource_type = 1;
+  int64 amount = 2;
+  string requester_id = 3;
+}
+message ReserveResourcesRequest {
+  string build_id = 1;
+  repeated ResourceRequest resources = 2;
+  int64 timeout_ms = 3;
+}
+message ReserveResourcesResponse {
+  bool granted = 1;
+  string reservation_id = 2;
+  string denial_reason = 3;
+}
+message ReleaseResourcesRequest { string reservation_id = 1; }
+message ReleaseResourcesResponse { bool released = 1; }
+message ResourceUsageEntry {
+  string resource_type = 1;
+  int64 total_capacity = 2;
+  int64 used = 3;
+  int64 reserved = 4;
+  int64 available = 5;
+  int32 waiters = 6;
+}
+message GetResourceUsageRequest { string build_id = 1; }
+message GetResourceUsageResponse {
+  repeated ResourceUsageEntry usage = 1;
+  int64 total_memory_bytes = 2;
+  int64 used_memory_bytes = 3;
+  double cpu_usage_percent = 4;
+  int32 active_threads = 5;
+}
+message ResourceLimit {
+  string resource_type = 1;
+  int64 max_amount = 2;
+  int64 soft_limit = 3;
+}
+message GetResourceLimitsRequest { string build_id = 1; }
+message GetResourceLimitsResponse {
+  repeated ResourceLimit limits = 1;
+}
+message SetResourceLimitsRequest {
+  string build_id = 1;
+  repeated ResourceLimit limits = 2;
+}
+message SetResourceLimitsResponse { bool applied = 1; }
+
+service BuildComparisonService {
+  rpc StartComparison(StartComparisonRequest) returns (StartComparisonResponse);
+  rpc RecordBuildData(RecordBuildDataRequest) returns (RecordBuildDataResponse);
+  rpc GetComparisonResult(GetComparisonResultRequest) returns (GetComparisonResultResponse);
+}
+message BuildDataSnapshot {
+  string build_id = 1;
+  int64 start_time_ms = 2;
+  int64 end_time_ms = 3;
+  map<string, int64> task_durations = 4;
+  map<string, string> task_outcomes = 5;
+  repeated string task_order = 6;
+  string root_dir = 7;
+  repeated string input_properties = 8;
+}
+message StartComparisonRequest {
+  string baseline_build_id = 1;
+  string candidate_build_id = 2;
+}
+message StartComparisonResponse {
+  string comparison_id = 1;
+  bool started = 2;
+}
+message RecordBuildDataRequest {
+  BuildDataSnapshot snapshot = 1;
+}
+message RecordBuildDataResponse { bool accepted = 1; }
+message TaskComparison {
+  string task_path = 1;
+  string baseline_outcome = 2;
+  string candidate_outcome = 3;
+  int64 baseline_duration_ms = 4;
+  int64 candidate_duration_ms = 5;
+  int64 duration_diff_ms = 6;
+  double duration_ratio = 7;
+  bool outcome_changed = 8;
+}
+message ComparisonSummary {
+  string comparison_id = 1;
+  string baseline_build_id = 2;
+  string candidate_build_id = 3;
+  int64 baseline_total_ms = 4;
+  int64 candidate_total_ms = 5;
+  int64 total_diff_ms = 6;
+  int32 tasks_only_in_baseline = 7;
+  int32 tasks_only_in_candidate = 8;
+  int32 tasks_with_changed_outcome = 9;
+  int32 tasks_with_regression = 10;
+  int32 tasks_with_improvement = 11;
+}
+message GetComparisonResultRequest { string comparison_id = 1; }
+message GetComparisonResultResponse {
+  ComparisonSummary summary = 1;
+  repeated TaskComparison task_comparisons = 2;
+}
