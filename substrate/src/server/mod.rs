@@ -38,3 +38,4 @@ pub mod build_metrics;
 pub mod garbage_collection;
 pub mod task_executor;
 pub mod parallel_scheduler;
+pub mod build_script_parser;

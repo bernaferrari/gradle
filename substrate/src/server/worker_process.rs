@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use dashmap::DashMap;
+use tokio::sync::Notify;
 use tonic::{Request, Response, Status};
 
 #[cfg(unix)]
@@ -22,6 +23,8 @@ struct TrackedWorker {
     worker_key: String,
     pid: u32,
     child: Option<tokio::process::Child>,
+    /// Whether this is a stub worker (no real process, spawned as fallback).
+    is_stub: bool,
     state: String,
     started_at_ms: i64,
     last_used_ms: i64,
@@ -33,7 +36,8 @@ struct TrackedWorker {
 /// Manages pools of Gradle worker daemon processes (compiler daemons,
 /// test workers, etc.) for efficient reuse across builds.
 ///
-/// Supports real JVM process spawning, health monitoring, and idle reaping.
+/// Supports real JVM process spawning, health monitoring, idle reaping,
+/// and stdout/stderr capture.
 pub struct WorkerProcessServiceImpl {
     workers: DashMap<String, TrackedWorker>,
     idle_workers: DashMap<String, Vec<String>>, // worker_key -> [worker_id]
@@ -43,6 +47,8 @@ pub struct WorkerProcessServiceImpl {
     workers_spawned: AtomicI64,
     workers_reused: AtomicI64,
     workers_stopped: AtomicI64,
+    /// Notify the idle reaper when workers change state.
+    state_changed: Notify,
 }
 
 impl Default for WorkerProcessServiceImpl {
@@ -62,6 +68,7 @@ impl WorkerProcessServiceImpl {
             workers_spawned: AtomicI64::new(0),
             workers_reused: AtomicI64::new(0),
             workers_stopped: AtomicI64::new(0),
+            state_changed: Notify::new(),
         }
     }
 
@@ -150,6 +157,18 @@ impl WorkerProcessServiceImpl {
         }
     }
 
+    /// Check if a process is alive by sending signal 0 (no-op).
+    #[cfg(unix)]
+    fn check_pid_alive(pid: u32) -> bool {
+        use nix::unistd::Pid;
+        signal::kill(Pid::from_raw(pid as i32), Signal::SIGCONT).is_ok()
+    }
+
+    #[cfg(not(unix))]
+    fn check_pid_alive(_pid: u32) -> bool {
+        true // Assume alive on non-Unix
+    }
+
     /// Stop a worker process: SIGTERM, wait 5s, then SIGKILL.
     async fn terminate_worker(child: &mut tokio::process::Child) {
         #[cfg(unix)]
@@ -227,6 +246,7 @@ impl WorkerProcessServiceImpl {
                 worker_key: worker_key.clone(),
                 pid,
                 child: None,
+                is_stub: true,
                 state: "busy".to_string(),
                 started_at_ms: now,
                 last_used_ms: now,
@@ -249,6 +269,108 @@ impl WorkerProcessServiceImpl {
             error_message: String::new(),
         })
     }
+
+    /// Reap idle workers that have exceeded the idle timeout.
+    /// Returns the number of workers reaped.
+    pub async fn reap_idle_workers(&self) -> usize {
+        let idle_timeout_ms = *self.idle_timeout_ms.read().unwrap();
+        let now = Self::now_ms();
+        let mut reaped = 0;
+
+        let mut workers_to_reap: Vec<(String, String)> = Vec::new();
+
+        for entry in self.idle_workers.iter() {
+            for worker_id in entry.value() {
+                if let Some(worker) = self.workers.get(worker_id) {
+                    if now - worker.last_used_ms >= idle_timeout_ms {
+                        workers_to_reap.push((worker_id.clone(), entry.key().clone()));
+                    }
+                }
+            }
+        }
+
+        for (worker_id, _key) in &workers_to_reap {
+            if self.stop_worker_internal(worker_id, false).await {
+                reaped += 1;
+                tracing::debug!(worker_id = %worker_id, "Reaped idle worker");
+            }
+        }
+
+        if reaped > 0 {
+            tracing::info!(count = reaped, "Reaped idle workers");
+        }
+
+        reaped
+    }
+
+    /// Start a background task that periodically reaps idle workers.
+    /// Returns a JoinHandle that can be used to stop the reaper.
+    pub fn start_idle_reaper(
+        self: &std::sync::Arc<Self>,
+        check_interval_ms: u64,
+    ) -> tokio::task::JoinHandle<()> {
+        let svc = self.clone();
+        tokio::spawn(async move {
+            let interval = tokio::time::Duration::from_millis(check_interval_ms);
+            loop {
+                tokio::time::sleep(interval).await;
+                svc.reap_idle_workers().await;
+                // Wait for state changes too
+                svc.state_changed.notified().await;
+            }
+        })
+    }
+
+    /// Spawn a background task that captures stdout/stderr from a worker process
+    /// and logs them via tracing.
+    fn spawn_output_capture(worker_id: String, mut child: tokio::process::Child) {
+        tokio::spawn(async move {
+            let stdout = child.stdout.take();
+            let stderr = child.stderr.take();
+
+            if let Some(stdout) = stdout {
+                let wid = worker_id.clone();
+                tokio::spawn(async move {
+                    use tokio::io::AsyncBufReadExt;
+                    let reader = tokio::io::BufReader::new(stdout);
+                    let mut lines = reader.lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        tracing::debug!(worker_id = %wid, "stdout: {}", line);
+                    }
+                });
+            }
+
+            if let Some(stderr) = stderr {
+                let wid = worker_id.clone();
+                tokio::spawn(async move {
+                    use tokio::io::AsyncBufReadExt;
+                    let reader = tokio::io::BufReader::new(stderr);
+                    let mut lines = reader.lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        tracing::warn!(worker_id = %wid, "stderr: {}", line);
+                    }
+                });
+            }
+
+            // Wait for the process to exit
+            match child.wait().await {
+                Ok(status) => {
+                    tracing::debug!(
+                        worker_id = %worker_id,
+                        exit_code = status.code().unwrap_or(-1),
+                        "Worker process exited"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        worker_id = %worker_id,
+                        error = %e,
+                        "Failed to wait for worker process"
+                    );
+                }
+            }
+        });
+    }
 }
 
 #[tonic::async_trait]
@@ -270,10 +392,14 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
             if let Some(worker_id) = idle_list.pop() {
                 if let Some(mut worker) = self.workers.get_mut(&worker_id) {
                     // Check health before returning
-                    let healthy = if let Some(ref mut child) = worker.child {
+                    let healthy = if worker.is_stub {
+                        true // Stub workers are always considered healthy
+                    } else if let Some(ref mut child) = worker.child {
                         Self::check_health(child)
                     } else {
-                        false
+                        // Worker was spawned with output capture (child moved away).
+                        // Check via PID.
+                        Self::check_pid_alive(worker.pid)
                     };
 
                     if !healthy {
@@ -352,7 +478,8 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
                 worker_id: worker_id.clone(),
                 worker_key: worker_key.clone(),
                 pid,
-                child: Some(child),
+                child: None, // child is moved into output capture
+                is_stub: false,
                 state: "busy".to_string(),
                 started_at_ms: now,
                 last_used_ms: now,
@@ -360,6 +487,9 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
                 spec,
             },
         );
+
+        // Spawn background task to capture stdout/stderr
+        Self::spawn_output_capture(worker_id.clone(), child);
 
         self.workers_spawned.fetch_add(1, Ordering::Relaxed);
 
@@ -393,10 +523,12 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
 
         if let Some(mut worker) = self.workers.get_mut(&req.worker_id) {
             // Check health before returning to pool
-            let alive = if let Some(ref mut child) = worker.child {
+            let alive = if worker.is_stub {
+                true // Stub workers are always considered alive
+            } else if let Some(ref mut child) = worker.child {
                 Self::check_health(child)
             } else {
-                true // Stub worker, assume alive
+                Self::check_pid_alive(worker.pid)
             };
 
             if req.healthy && worker.spec.daemon && alive {
@@ -410,6 +542,8 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
                     .entry(key)
                     .or_default()
                     .push(req.worker_id.clone());
+
+                self.state_changed.notify_waiters();
 
                 tracing::debug!(
                     worker_id = %req.worker_id,
@@ -959,5 +1093,252 @@ mod tests {
 
         assert_eq!(status_a.workers.len(), 1);
         assert_eq!(status_a.workers[0].worker_key, "compiler");
+    }
+
+    #[tokio::test]
+    async fn test_reap_idle_workers_with_zero_timeout() {
+        let svc = WorkerProcessServiceImpl::new();
+
+        // Set idle timeout to 0 so everything is immediately reaped
+        *svc.idle_timeout_ms.write().unwrap() = 0;
+
+        let spec = make_spec("reap-test");
+
+        // Acquire a worker
+        let resp = svc
+            .acquire_worker(Request::new(AcquireWorkerRequest {
+                spec: Some(spec),
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let worker_id = resp.worker.unwrap().worker_id;
+
+        // Release it (puts it in idle pool)
+        svc.release_worker(Request::new(ReleaseWorkerRequest {
+            worker_id: worker_id.clone(),
+            healthy: true,
+        }))
+        .await
+        .unwrap();
+
+        // Verify it's in the idle pool
+        let status = svc
+            .get_worker_status(Request::new(GetWorkerStatusRequest {
+                worker_key: "reap-test".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(status.pool_size, 1);
+        assert_eq!(status.idle_count, 1);
+
+        // Reap should remove it
+        let reaped = svc.reap_idle_workers().await;
+        assert_eq!(reaped, 1);
+
+        // Pool should now be empty
+        let status = svc
+            .get_worker_status(Request::new(GetWorkerStatusRequest {
+                worker_key: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(status.pool_size, 0);
+    }
+
+    #[tokio::test]
+    async fn test_reap_idle_workers_respects_timeout() {
+        let svc = WorkerProcessServiceImpl::new();
+
+        // Set a very high timeout — workers should NOT be reaped
+        *svc.idle_timeout_ms.write().unwrap() = 999_999_999;
+
+        let spec = make_spec("timeout-test");
+
+        let resp = svc
+            .acquire_worker(Request::new(AcquireWorkerRequest {
+                spec: Some(spec),
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let worker_id = resp.worker.unwrap().worker_id;
+
+        svc.release_worker(Request::new(ReleaseWorkerRequest {
+            worker_id,
+            healthy: true,
+        }))
+        .await
+        .unwrap();
+
+        let reaped = svc.reap_idle_workers().await;
+        assert_eq!(reaped, 0, "workers should not be reaped with long timeout");
+
+        let status = svc
+            .get_worker_status(Request::new(GetWorkerStatusRequest {
+                worker_key: "timeout-test".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(status.pool_size, 1);
+    }
+
+    #[tokio::test]
+    async fn test_reap_idle_workers_no_idle_workers() {
+        let svc = WorkerProcessServiceImpl::new();
+
+        // No workers at all — reap should be a no-op
+        let reaped = svc.reap_idle_workers().await;
+        assert_eq!(reaped, 0);
+    }
+
+    #[tokio::test]
+    async fn test_reap_idle_workers_busy_workers_not_reaped() {
+        let svc = WorkerProcessServiceImpl::new();
+
+        *svc.idle_timeout_ms.write().unwrap() = 0;
+
+        let spec = make_spec("busy-test");
+
+        // Acquire but don't release — worker is busy, not idle
+        svc.acquire_worker(Request::new(AcquireWorkerRequest {
+            spec: Some(spec),
+            timeout_ms: 5000,
+        }))
+        .await
+        .unwrap();
+
+        let reaped = svc.reap_idle_workers().await;
+        assert_eq!(reaped, 0, "busy workers should not be reaped");
+
+        let status = svc
+            .get_worker_status(Request::new(GetWorkerStatusRequest {
+                worker_key: "busy-test".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(status.pool_size, 1);
+        assert_eq!(status.busy_count, 1);
+    }
+
+    #[test]
+    fn test_build_jvm_command_with_args() {
+        let spec = WorkerSpec {
+            worker_key: "test".to_string(),
+            java_home: "/usr/lib/jvm/java-17".to_string(),
+            classpath: vec!["a.jar".to_string(), "b.jar".to_string()],
+            working_dir: "/tmp".to_string(),
+            jvm_args: [("-ea".to_string(), "true".to_string()), ("-Xdebug".to_string(), "".to_string())]
+                .into_iter()
+                .collect(),
+            max_memory_mb: 1024,
+            daemon: true,
+        };
+
+        let cmd = WorkerProcessServiceImpl::build_jvm_command(&spec);
+        let args: Vec<String> = cmd.as_std().get_args().map(|s| s.to_string_lossy().to_string()).collect();
+
+        assert!(args.iter().any(|a| a == "-Xmx1024m"), "should have -Xmx1024m");
+        assert!(args.iter().any(|a| a.contains("a.jar")), "should have classpath");
+        assert!(args.iter().any(|a| a.contains("-ea=true")), "should have -ea=true JVM arg");
+        assert!(args.iter().any(|a| a.contains("-Xdebug=")), "should have -Xdebug= JVM arg");
+        assert!(args.iter().any(|a| a.contains("IsolatedClassloaderWorker")), "should have main class");
+    }
+
+    #[test]
+    fn test_build_jvm_command_no_java_home() {
+        let spec = WorkerSpec {
+            worker_key: "test".to_string(),
+            java_home: String::new(),
+            classpath: vec![],
+            working_dir: String::new(),
+            jvm_args: Default::default(),
+            max_memory_mb: 0,
+            daemon: false,
+        };
+
+        let cmd = WorkerProcessServiceImpl::build_jvm_command(&spec);
+        // Should use "java" as the binary when no java_home is set
+        let program = cmd.as_std().get_program().to_string_lossy().to_string();
+        assert_eq!(program, "java");
+    }
+
+    #[tokio::test]
+    async fn test_acquire_worker_with_no_memory_limit() {
+        let svc = WorkerProcessServiceImpl::new();
+
+        let spec = WorkerSpec {
+            worker_key: "no-mem-limit".to_string(),
+            java_home: String::new(),
+            classpath: vec![],
+            working_dir: String::new(),
+            jvm_args: Default::default(),
+            max_memory_mb: 0, // no limit
+            daemon: false,
+        };
+
+        let resp = svc
+            .acquire_worker(Request::new(AcquireWorkerRequest {
+                spec: Some(spec),
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.worker.is_some());
+        assert_eq!(resp.worker.unwrap().worker_key, "no-mem-limit");
+    }
+
+    #[tokio::test]
+    async fn test_non_daemon_worker_not_returned_to_pool() {
+        let svc = WorkerProcessServiceImpl::new();
+
+        let spec = WorkerSpec {
+            worker_key: "non-daemon".to_string(),
+            java_home: String::new(),
+            classpath: vec![],
+            working_dir: String::new(),
+            jvm_args: Default::default(),
+            max_memory_mb: 512,
+            daemon: false, // non-daemon
+        };
+
+        let resp = svc
+            .acquire_worker(Request::new(AcquireWorkerRequest {
+                spec: Some(spec),
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let worker_id = resp.worker.unwrap().worker_id;
+
+        // Release as healthy — but non-daemon should NOT go to idle pool
+        svc.release_worker(Request::new(ReleaseWorkerRequest {
+            worker_id,
+            healthy: true,
+        }))
+        .await
+        .unwrap();
+
+        let status = svc
+            .get_worker_status(Request::new(GetWorkerStatusRequest {
+                worker_key: "non-daemon".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(status.pool_size, 0, "non-daemon worker should be removed");
     }
 }
