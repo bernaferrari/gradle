@@ -1,0 +1,125 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service BuildMetricsService {
+  rpc RecordMetric(RecordMetricRequest) returns (RecordMetricResponse);
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+  rpc GetPerformanceSummary(GetPerformanceSummaryRequest) returns (GetPerformanceSummaryResponse);
+  rpc ResetMetrics(ResetMetricsRequest) returns (ResetMetricsResponse);
+}
+message MetricEvent {
+  string name = 1;
+  string value = 2;
+  string metric_type = 3;
+  map<string, string> tags = 4;
+  int64 timestamp_ms = 5;
+}
+message RecordMetricRequest {
+  string build_id = 1;
+  MetricEvent event = 2;
+}
+message RecordMetricResponse { bool recorded = 1; }
+message GetMetricsRequest {
+  string build_id = 1;
+  repeated string metric_names = 2;
+  int64 since_ms = 3;
+}
+message MetricSnapshot {
+  string name = 1;
+  string metric_type = 2;
+  int64 count = 3;
+  double sum = 4;
+  double min = 5;
+  double max = 6;
+  double last = 7;
+  map<string, string> tags = 8;
+}
+message GetMetricsResponse {
+  repeated MetricSnapshot metrics = 1;
+}
+message GetPerformanceSummaryRequest { string build_id = 1; }
+message PerformanceSummary {
+  string build_id = 1;
+  int64 start_time_ms = 2;
+  int64 end_time_ms = 3;
+  int64 duration_ms = 4;
+  int32 total_tasks_executed = 5;
+  int32 tasks_from_cache = 6;
+  int32 tasks_up_to_date = 7;
+  int32 tasks_executed = 8;
+  int32 tasks_failed = 9;
+  int64 build_cache_hits = 10;
+  int64 build_cache_misses = 11;
+  double build_cache_hit_rate = 12;
+  int64 total_bytes_stored = 13;
+  int64 total_bytes_loaded = 14;
+  int32 config_cache_hits = 15;
+  int32 config_cache_misses = 16;
+  int32 history_stored = 17;
+  int32 history_loaded = 18;
+  int32 workers_used = 19;
+  string build_outcome = 20;
+}
+message GetPerformanceSummaryResponse {
+  PerformanceSummary summary = 1;
+}
+message ResetMetricsRequest { string build_id = 1; }
+message ResetMetricsResponse {
+  bool reset = 1;
+  int32 metrics_cleared = 2;
+}
+
+service GarbageCollectionService {
+  rpc GcBuildCache(GcBuildCacheRequest) returns (GcBuildCacheResponse);
+  rpc GcExecutionHistory(GcExecutionHistoryRequest) returns (GcExecutionHistoryResponse);
+  rpc GcConfigCache(GcConfigCacheRequest) returns (GcConfigCacheResponse);
+  rpc GetStorageStats(GetStorageStatsRequest) returns (GetStorageStatsResponse);
+}
+message GcBuildCacheRequest {
+  int64 max_age_ms = 1;
+  int64 max_total_bytes = 2;
+  bool dry_run = 3;
+}
+message GcBuildCacheResponse {
+  int32 entries_removed = 1;
+  int64 bytes_recovered = 2;
+  int32 entries_remaining = 3;
+  int64 bytes_remaining = 4;
+}
+message GcExecutionHistoryRequest {
+  int64 max_age_ms = 1;
+  int32 max_entries = 2;
+  bool dry_run = 3;
+}
+message GcExecutionHistoryResponse {
+  int32 entries_removed = 1;
+  int64 bytes_recovered = 2;
+  int32 entries_remaining = 3;
+}
+message GcConfigCacheRequest {
+  int64 max_age_ms = 1;
+  int32 max_entries = 2;
+  bool dry_run = 3;
+}
+message GcConfigCacheResponse {
+  int32 entries_removed = 1;
+  int64 bytes_recovered = 2;
+  int32 entries_remaining = 3;
+}
+message StorageStats {
+  string store_name = 1;
+  int64 entries = 2;
+  int64 total_bytes = 3;
+  int64 oldest_entry_ms = 4;
+  int64 newest_entry_ms = 5;
+}
+message GetStorageStatsRequest {
+  repeated string store_names = 1;
+}
+message GetStorageStatsResponse {
+  repeated StorageStats stats = 1;
+}

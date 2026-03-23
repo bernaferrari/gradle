@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service IncrementalCompilationService {
+  rpc RegisterSourceSet(RegisterSourceSetRequest) returns (RegisterSourceSetResponse);
+  rpc RecordCompilation(RecordCompilationRequest) returns (RecordCompilationResponse);
+  rpc GetRebuildSet(GetRebuildSetRequest) returns (GetRebuildSetResponse);
+  rpc GetIncrementalState(GetIncrementalStateRequest) returns (GetIncrementalStateResponse);
+}
+message SourceSetDescriptor {
+  string source_set_id = 1;
+  string name = 2;
+  repeated string source_dirs = 3;
+  repeated string output_dirs = 4;
+  string classpath_hash = 5;
+}
+message RegisterSourceSetRequest {
+  string build_id = 1;
+  SourceSetDescriptor source_set = 2;
+}
+message RegisterSourceSetResponse { bool accepted = 1; }
+message CompilationUnit {
+  string source_set_id = 1;
+  string source_file = 2;
+  string output_class = 3;
+  string source_hash = 4;
+  string class_hash = 5;
+  repeated string dependencies = 6;
+  int64 compile_duration_ms = 7;
+}
+message RecordCompilationRequest {
+  string build_id = 1;
+  CompilationUnit unit = 2;
+}
+message RecordCompilationResponse {
+  bool accepted = 1;
+  bool changed = 2;
+}
+message GetRebuildSetRequest {
+  string build_id = 1;
+  string source_set_id = 2;
+  repeated string changed_files = 3;
+}
+message RebuildDecision {
+  string source_file = 1;
+  string reason = 2;
+  bool must_recompile = 3;
+}
+message GetRebuildSetResponse {
+  repeated RebuildDecision decisions = 3;
+  int32 total_sources = 4;
+  int32 must_recompile_count = 5;
+  int32 up_to_date_count = 6;
+}
+message GetIncrementalStateRequest {
+  string build_id = 1;
+  string source_set_id = 2;
+}
+message IncrementalState {
+  string source_set_id = 1;
+  int32 total_compiled = 2;
+  int32 incrementally_compiled = 3;
+  int32 fully_recompiled = 4;
+  int64 total_compile_time_ms = 5;
+  repeated CompilationUnit units = 6;
+  bool classpath_changed = 7;
+  string previous_classpath_hash = 8;
+  string current_classpath_hash = 9;
+}
+message GetIncrementalStateResponse {
+  IncrementalState state = 1;
+}

@@ -1,0 +1,154 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service ConfigurationService {
+  rpc RegisterProject(RegisterProjectRequest) returns (RegisterProjectResponse);
+  rpc ResolveProperty(ResolvePropertyRequest) returns (ResolvePropertyResponse);
+  rpc CacheConfiguration(CacheConfigurationRequest) returns (CacheConfigurationResponse);
+  rpc ValidateConfigCache(ValidateConfigCacheRequest) returns (ValidateConfigCacheResponse);
+  rpc GetProjectInfo(GetProjectInfoRequest) returns (ProjectInfo);
+}
+
+message RegisterProjectRequest {
+  string project_path = 1;
+  string project_dir = 2;
+  map<string, string> properties = 3;
+  repeated string applied_plugins = 4;
+}
+message RegisterProjectResponse { bool success = 1; }
+message ResolvePropertyRequest {
+  string project_path = 1;
+  string property_name = 2;
+  string requested_by = 3;
+}
+message ResolvePropertyResponse {
+  string value = 1;
+  string source = 2;
+  bool found = 3;
+}
+message CacheConfigurationRequest {
+  string project_path = 1;
+  bytes config_hash = 2;
+  int64 timestamp_ms = 3;
+}
+message CacheConfigurationResponse {
+  bool cached = 1;
+  bool hit = 2;
+}
+message ValidateConfigCacheRequest {
+  string project_path = 1;
+  bytes expected_hash = 2;
+  repeated string input_files = 3;
+  repeated string build_script_hashes = 4;
+}
+message ValidateConfigCacheResponse {
+  bool valid = 1;
+  string reason = 2;
+  int64 cached_timestamp_ms = 3;
+}
+message GetProjectInfoRequest { string project_path = 1; }
+message ProjectInfo {
+  string project_path = 1;
+  string project_dir = 2;
+  map<string, string> properties = 3;
+  repeated string applied_plugins = 4;
+}
+
+service PluginService {
+  rpc RegisterPlugin(RegisterPluginRequest) returns (RegisterPluginResponse);
+  rpc ApplyPlugin(ApplyPluginRequest) returns (ApplyPluginResponse);
+  rpc HasPlugin(HasPluginRequest) returns (HasPluginResponse);
+  rpc GetAppliedPlugins(GetAppliedPluginsRequest) returns (GetAppliedPluginsResponse);
+  rpc CheckPluginCompatibility(CheckPluginCompatibilityRequest) returns (CheckPluginCompatibilityResponse);
+}
+
+message RegisterPluginRequest {
+  string plugin_id = 1;
+  string plugin_class = 2;
+  string version = 3;
+  bool is_imperative = 4;
+  repeated string applies_to = 5;
+  repeated string requires = 6;
+  repeated string conflicts_with = 7;
+}
+message RegisterPluginResponse { bool success = 1; }
+message ApplyPluginRequest {
+  string plugin_id = 1;
+  string project_path = 2;
+  int64 apply_order = 3;
+}
+message ApplyPluginResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+message HasPluginRequest {
+  string plugin_id = 1;
+  string project_path = 2;
+}
+message HasPluginResponse { bool has_plugin = 1; }
+message GetAppliedPluginsRequest { string project_path = 1; }
+message GetAppliedPluginsResponse {
+  repeated PluginInfo plugins = 1;
+}
+message CheckPluginCompatibilityRequest {
+  string plugin_id = 1;
+  string project_path = 2;
+}
+message CheckPluginCompatibilityResponse {
+  bool compatible = 1;
+  repeated string errors = 2;
+  repeated string warnings = 3;
+}
+message PluginInfo {
+  string plugin_id = 1;
+  string plugin_class = 2;
+  string version = 3;
+  int64 applied_at_ms = 4;
+  int32 apply_order = 5;
+}
+
+service ConfigurationCacheService {
+  rpc StoreConfigCache(StoreConfigCacheRequest) returns (StoreConfigCacheResponse);
+  rpc LoadConfigCache(LoadConfigCacheRequest) returns (LoadConfigCacheResponse);
+  rpc ValidateConfig(ValidateConfigRequest) returns (ValidateConfigResponse);
+  rpc CleanConfigCache(CleanConfigCacheRequest) returns (CleanConfigCacheResponse);
+}
+
+message StoreConfigCacheRequest {
+  string cache_key = 1;
+  bytes serialized_config = 2;
+  int64 entry_count = 3;
+  repeated string input_hashes = 4;
+  int64 timestamp_ms = 5;
+}
+message StoreConfigCacheResponse {
+  bool stored = 1;
+  int64 storage_time_ms = 2;
+}
+message LoadConfigCacheRequest { string cache_key = 1; }
+message LoadConfigCacheResponse {
+  bool found = 2;
+  bytes serialized_config = 3;
+  int64 entry_count = 4;
+  int64 timestamp_ms = 5;
+}
+message ValidateConfigRequest {
+  string cache_key = 1;
+  repeated string input_hashes = 2;
+}
+message ValidateConfigResponse {
+  bool valid = 1;
+  string reason = 2;
+}
+message CleanConfigCacheRequest {
+  int64 max_age_ms = 1;
+  int32 max_entries = 2;
+}
+message CleanConfigCacheResponse {
+  int32 entries_removed = 1;
+  int64 space_recovered_bytes = 2;
+}

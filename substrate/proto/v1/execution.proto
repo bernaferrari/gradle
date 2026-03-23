@@ -1,0 +1,179 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service ExecutionPlanService {
+  rpc PredictOutcome(PredictOutcomeRequest) returns (PredictOutcomeResponse);
+  rpc ResolvePlan(ResolvePlanRequest) returns (ResolvePlanResponse);
+  rpc RecordOutcome(RecordOutcomeRequest) returns (RecordOutcomeResponse);
+}
+
+message WorkMetadata {
+  string work_identity = 1;
+  string display_name = 2;
+  string implementation_class = 3;
+  map<string, string> input_properties = 4;
+  map<string, string> input_file_fingerprints = 5;
+  bool caching_enabled = 6;
+  bool can_load_from_cache = 7;
+  bool has_previous_execution_state = 8;
+  repeated string rebuild_reasons = 9;
+}
+
+enum PredictedOutcome {
+  PREDICTED_UNKNOWN = 0;
+  PREDICTED_EXECUTE = 1;
+  PREDICTED_UP_TO_DATE = 2;
+  PREDICTED_FROM_CACHE = 3;
+  PREDICTED_SHORT_CIRCUITED = 4;
+}
+
+message PredictOutcomeRequest { WorkMetadata work = 1; }
+message PredictOutcomeResponse {
+  PredictedOutcome predicted_outcome = 1;
+  string reasoning = 2;
+  float confidence = 3;
+}
+
+enum PlanAction {
+  PLAN_ACTION_UNKNOWN = 0;
+  PLAN_ACTION_EXECUTE = 1;
+  PLAN_ACTION_SKIP_UP_TO_DATE = 2;
+  PLAN_ACTION_LOAD_FROM_CACHE = 3;
+  PLAN_ACTION_SHORT_CIRCUIT = 4;
+}
+
+message ResolvePlanRequest {
+  WorkMetadata work = 1;
+  bool authoritative = 2;
+}
+message ResolvePlanResponse {
+  PlanAction action = 1;
+  string reasoning = 2;
+  string cache_key_hint = 3;
+}
+message RecordOutcomeRequest {
+  string work_identity = 1;
+  PredictedOutcome predicted_outcome = 2;
+  string actual_outcome = 3;
+  bool prediction_correct = 4;
+  int64 duration_ms = 5;
+}
+message RecordOutcomeResponse { bool acknowledged = 1; }
+
+service ExecutionHistoryService {
+  rpc LoadHistory(LoadHistoryRequest) returns (LoadHistoryResponse);
+  rpc StoreHistory(StoreHistoryRequest) returns (StoreHistoryResponse);
+  rpc RemoveHistory(RemoveHistoryRequest) returns (RemoveHistoryResponse);
+  rpc GetHistoryStats(GetHistoryStatsRequest) returns (GetHistoryStatsResponse);
+}
+
+message LoadHistoryRequest { string work_identity = 1; }
+message LoadHistoryResponse {
+  bool found = 1;
+  bytes state = 2;
+  int64 timestamp_ms = 3;
+}
+message StoreHistoryRequest {
+  string work_identity = 1;
+  bytes state = 2;
+  int64 timestamp_ms = 3;
+}
+message StoreHistoryResponse { bool success = 1; }
+message RemoveHistoryRequest { string work_identity = 1; }
+message RemoveHistoryResponse { bool success = 1; }
+message GetHistoryStatsRequest {}
+message GetHistoryStatsResponse {
+  int64 entry_count = 1;
+  int64 total_bytes_stored = 2;
+  int64 load_hits = 3;
+  int64 load_misses = 4;
+  int64 stores = 5;
+  int64 removes = 6;
+  double hit_rate = 7;
+}
+
+service DagExecutorService {
+  rpc StartBuild(StartBuildRequest) returns (StartBuildResponse);
+  rpc CancelBuild(CancelBuildRequest) returns (CancelBuildResponse);
+  rpc GetNextTask(GetNextTaskRequest) returns (GetNextTaskResponse);
+  rpc NotifyTaskStarted(NotifyTaskStartedRequest) returns (NotifyTaskStartedResponse);
+  rpc NotifyTaskFinished(NotifyTaskFinishedRequest) returns (NotifyTaskFinishedResponse);
+  rpc GetBuildStatus(GetBuildStatusRequest) returns (GetBuildStatusResponse);
+  rpc AwaitBuildCompletion(AwaitBuildCompletionRequest) returns (AwaitBuildCompletionResponse);
+}
+
+message StartBuildRequest {
+  string build_id = 1;
+  int32 max_parallelism = 2;
+  repeated string task_filter = 3;
+}
+message StartBuildResponse {
+  bool accepted = 1;
+  string error_message = 2;
+  int32 total_tasks = 3;
+  int64 critical_path_ms = 4;
+}
+message CancelBuildRequest {
+  string build_id = 1;
+  string reason = 2;
+}
+message CancelBuildResponse { bool cancelled = 1; }
+message GetNextTaskRequest { string build_id = 1; }
+message GetNextTaskResponse {
+  string task_path = 1;
+  string task_type = 2;
+  int64 estimated_duration_ms = 3;
+}
+message NotifyTaskStartedRequest {
+  string build_id = 1;
+  string task_path = 2;
+  int64 start_time_ms = 3;
+}
+message NotifyTaskStartedResponse { bool acknowledged = 1; }
+message NotifyTaskFinishedRequest {
+  string build_id = 1;
+  string task_path = 2;
+  bool success = 3;
+  string outcome = 4;
+  int64 duration_ms = 5;
+  string failure_message = 6;
+}
+message NotifyTaskFinishedResponse {
+  bool acknowledged = 1;
+  repeated string newly_ready_tasks = 2;
+}
+message GetBuildStatusRequest { string build_id = 1; }
+message GetBuildStatusResponse {
+  string build_id = 1;
+  string status = 2;
+  int32 total_tasks = 3;
+  int32 completed_tasks = 4;
+  int32 executing_tasks = 5;
+  int32 pending_tasks = 6;
+  int32 failed_tasks = 7;
+  int32 skipped_tasks = 8;
+  int64 elapsed_ms = 9;
+  repeated TaskStatusEntry task_statuses = 10;
+}
+message TaskStatusEntry {
+  string task_path = 1;
+  string status = 2;
+  int64 duration_ms = 3;
+}
+message AwaitBuildCompletionRequest {
+  string build_id = 1;
+  int64 timeout_ms = 2;
+}
+message AwaitBuildCompletionResponse {
+  string build_id = 1;
+  string final_status = 2;
+  int32 tasks_succeeded = 3;
+  int32 tasks_failed = 4;
+  int32 tasks_skipped = 5;
+  int64 total_duration_ms = 6;
+  string failure_message = 7;
+}

@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service CacheService {
+  rpc LoadEntry(CacheLoadRequest) returns (stream CacheLoadChunk);
+  rpc StoreEntry(stream CacheStoreChunk) returns (CacheStoreResponse);
+}
+
+message CacheLoadRequest { bytes key = 1; }
+message CacheLoadChunk {
+  oneof payload {
+    CacheEntryMetadata metadata = 1;
+    bytes data = 2;
+  }
+}
+message CacheEntryMetadata {
+  int64 size = 1;
+  string content_type = 2;
+}
+message CacheStoreChunk {
+  oneof payload {
+    CacheStoreInit init = 1;
+    bytes data = 2;
+  }
+}
+message CacheStoreInit {
+  bytes key = 1;
+  int64 total_size = 2;
+}
+message CacheStoreResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+// -- Build Cache Orchestration Service --
+service BuildCacheOrchestrationService {
+  rpc ComputeCacheKey(ComputeCacheKeyRequest) returns (ComputeCacheKeyResponse);
+  rpc ProbeCache(ProbeCacheRequest) returns (ProbeCacheResponse);
+  rpc StoreOutputs(StoreOutputsRequest) returns (StoreOutputsResponse);
+}
+message ComputeCacheKeyRequest {
+  string work_identity = 1;
+  string implementation_hash = 2;
+  map<string, string> input_property_hashes = 3;
+  map<string, string> input_file_hashes = 4;
+  repeated string output_property_names = 5;
+}
+message ComputeCacheKeyResponse {
+  bytes cache_key = 1;
+  string cache_key_string = 2;
+}
+message ProbeCacheRequest { bytes cache_key = 1; }
+message ProbeCacheResponse {
+  bool available = 1;
+  string location = 2;
+  repeated string output_properties = 3;
+  int64 execution_time_ms = 4;
+}
+message StoreOutputsRequest {
+  bytes cache_key = 1;
+  int64 execution_time_ms = 2;
+  repeated string output_properties = 3;
+}
+message StoreOutputsResponse {
+  bool success = 1;
+  string error_message = 2;
+}

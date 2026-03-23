@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service FileWatchService {
+  rpc StartWatching(StartWatchingRequest) returns (StartWatchingResponse);
+  rpc StopWatching(StopWatchingRequest) returns (StopWatchingResponse);
+  rpc PollChanges(PollChangesRequest) returns (stream FileChangeEvent);
+  rpc GetWatchStats(GetWatchStatsRequest) returns (GetWatchStatsResponse);
+}
+
+message StartWatchingRequest {
+  string root_path = 1;
+  repeated string include_patterns = 2;
+  repeated string exclude_patterns = 3;
+}
+
+message StartWatchingResponse {
+  bool watching = 1;
+  string watch_id = 2;
+  int64 files_watched = 3;
+}
+
+message StopWatchingRequest { string watch_id = 1; }
+
+message StopWatchingResponse { bool stopped = 1; }
+
+message PollChangesRequest {
+  string watch_id = 1;
+  int64 since_timestamp_ms = 2;
+}
+
+message FileChangeEvent {
+  string path = 1;
+  string change_type = 2;
+  int64 timestamp_ms = 3;
+  int64 file_size = 4;
+  bool is_directory = 5;
+}
+
+message GetWatchStatsRequest { string watch_id = 1; }
+
+message GetWatchStatsResponse {
+  int64 files_watched = 1;
+  int64 changes_detected = 2;
+  int64 last_poll_time_ms = 3;
+  int64 watch_start_time_ms = 4;
+}

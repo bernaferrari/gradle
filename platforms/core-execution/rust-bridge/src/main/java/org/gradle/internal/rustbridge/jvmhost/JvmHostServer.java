@@ -8,7 +8,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import gradle.substrate.v1.JvmHostServiceGrpc;
+import gradle.substrate.v1.*;
 import io.grpc.Server;
 import io.grpc.stub.StreamObserver;
 
@@ -52,8 +52,8 @@ public class JvmHostServer implements Closeable {
             .addService(new JvmHostServiceGrpc.JvmHostServiceImplBase() {
                 @Override
                 public void evaluateScript(
-                    gradle.substrate.v1.Substrate.EvaluateScriptRequest request,
-                    StreamObserver<gradle.substrate.v1.Substrate.EvaluateScriptResponse> responseObserver) {
+                    EvaluateScriptRequest request,
+                    StreamObserver<EvaluateScriptResponse> responseObserver) {
                     LOGGER.debug("[substrate-jvmhost] evaluateScript called (UNIMPLEMENTED)");
                     responseObserver.onError(
                         io.grpc.Status.UNIMPLEMENTED
@@ -63,8 +63,8 @@ public class JvmHostServer implements Closeable {
 
                 @Override
                 public void getBuildModel(
-                    gradle.substrate.v1.Substrate.GetBuildModelRequest request,
-                    StreamObserver<gradle.substrate.v1.Substrate.GetBuildModelResponse> responseObserver) {
+                    GetBuildModelRequest request,
+                    StreamObserver<GetBuildModelResponse> responseObserver) {
                     LOGGER.debug("[substrate-jvmhost] getBuildModel called (UNIMPLEMENTED)");
                     responseObserver.onError(
                         io.grpc.Status.UNIMPLEMENTED
@@ -74,8 +74,8 @@ public class JvmHostServer implements Closeable {
 
                 @Override
                 public void resolveConfiguration(
-                    gradle.substrate.v1.Substrate.ResolveConfigRequest request,
-                    StreamObserver<gradle.substrate.v1.Substrate.ResolveConfigResponse> responseObserver) {
+                    ResolveConfigRequest request,
+                    StreamObserver<ResolveConfigResponse> responseObserver) {
                     LOGGER.debug("[substrate-jvmhost] resolveConfiguration called (UNIMPLEMENTED)");
                     responseObserver.onError(
                         io.grpc.Status.UNIMPLEMENTED
@@ -85,10 +85,10 @@ public class JvmHostServer implements Closeable {
 
                 @Override
                 public void getBuildEnvironment(
-                    gradle.substrate.v1.Substrate.GetBuildEnvironmentRequest request,
-                    StreamObserver<gradle.substrate.v1.Substrate.GetBuildEnvironmentResponse> responseObserver) {
-                    gradle.substrate.v1.Substrate.GetBuildEnvironmentResponse response =
-                        gradle.substrate.v1.Substrate.GetBuildEnvironmentResponse.newBuilder()
+                    GetBuildEnvironmentRequest request,
+                    StreamObserver<GetBuildEnvironmentResponse> responseObserver) {
+                    GetBuildEnvironmentResponse response =
+                        GetBuildEnvironmentResponse.newBuilder()
                             .setJavaVersion(serviceImpl.getJavaVersion())
                             .setJavaHome(serviceImpl.getJavaHome())
                             .setGradleVersion(serviceImpl.getGradleVersion())

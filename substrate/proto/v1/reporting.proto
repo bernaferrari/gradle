@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service ProblemReportingService {
+  rpc ReportProblem(ReportProblemRequest) returns (ReportProblemResponse);
+  rpc GetProblems(GetProblemsRequest) returns (GetProblemsResponse);
+  rpc GetProblemsBySeverity(GetProblemsBySeverityRequest) returns (GetProblemsResponse);
+  rpc ClearProblems(ClearProblemsRequest) returns (ClearProblemsResponse);
+}
+message ProblemDetails {
+  string problem_id = 1;
+  string severity = 2;
+  string category = 3;
+  string message = 4;
+  string details = 5;
+  string file_path = 6;
+  int32 line_number = 7;
+  int32 column = 8;
+  string contextual_label = 9;
+  string documentation_url = 10;
+  string additional_data = 11;
+  int64 timestamp_ms = 12;
+}
+message ReportProblemRequest {
+  string build_id = 1;
+  ProblemDetails problem = 2;
+}
+message ReportProblemResponse { bool accepted = 1; }
+message GetProblemsRequest { string build_id = 1; }
+message GetProblemsBySeverityRequest {
+  string build_id = 1;
+  string severity = 2;
+}
+message GetProblemsResponse {
+  repeated ProblemDetails problems = 1;
+  int32 total = 2;
+  int32 warning_count = 3;
+  int32 error_count = 4;
+  int32 deprecation_count = 5;
+}
+message ClearProblemsRequest { string build_id = 1; }
+message ClearProblemsResponse {
+  int32 cleared = 1;
+}
+
+service ConsoleService {
+  rpc LogMessage(LogMessageRequest) returns (LogMessageResponse);
+  rpc UpdateProgress(UpdateProgressRequest) returns (UpdateProgressResponse);
+  rpc RequestInput(RequestInputRequest) returns (RequestInputResponse);
+  rpc SetBuildDescription(SetBuildDescriptionRequest) returns (SetBuildDescriptionResponse);
+}
+message LogMessageRequest {
+  string build_id = 1;
+  string level = 2;
+  string category = 3;
+  string message = 4;
+  string throwable = 5;
+}
+message LogMessageResponse { bool accepted = 1; }
+message ProgressOperation {
+  string operation_id = 1;
+  string description = 2;
+  string status = 3;
+  int64 total_work = 4;
+  int64 completed_work = 5;
+  int64 start_time_ms = 6;
+  int64 end_time_ms = 7;
+  string header = 8;
+}
+message UpdateProgressRequest {
+  string build_id = 1;
+  repeated ProgressOperation operations = 2;
+}
+message UpdateProgressResponse { bool accepted = 1; }
+message RequestInputRequest {
+  string build_id = 1;
+  string prompt = 2;
+  string default_value = 3;
+  string input_id = 4;
+}
+message RequestInputResponse { string value = 1; }
+message SetBuildDescriptionRequest {
+  string build_id = 1;
+  string description = 2;
+}
+message SetBuildDescriptionResponse { bool accepted = 1; }
