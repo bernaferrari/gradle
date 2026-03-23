@@ -175,8 +175,6 @@ class CommandLineIntegrationTest extends AbstractIntegrationSpec {
             .run()
     }
 
-    @Requires([UnitTestPreconditions.NotEC2Agent, IntegTestPreconditions.NotEmbeddedExecutor])
-    @Issue('https://github.com/gradle/gradle-private/issues/2876')
     def "check default gradle user home"() {
         given:
         buildFile """
