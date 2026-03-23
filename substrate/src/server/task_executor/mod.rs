@@ -4,6 +4,7 @@ mod java_compile;
 mod mkdir_op;
 mod sync;
 mod symlink;
+mod test_exec;
 
 pub use copy::CopyTaskExecutor;
 pub use delete::DeleteTaskExecutor;
@@ -11,6 +12,7 @@ pub use java_compile::JavaCompileExecutor;
 pub use mkdir_op::MkdirTaskExecutor;
 pub use sync::SyncTaskExecutor;
 pub use symlink::SymlinkTaskExecutor;
+pub use test_exec::TestExecExecutor;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -65,7 +67,7 @@ impl TaskInput {
     pub fn is_native_supported(task_type: &str) -> bool {
         matches!(
             task_type,
-            "Copy" | "Delete" | "Sync" | "Mkdir" | "Symlink" | "JavaCompile"
+            "Copy" | "Delete" | "Sync" | "Mkdir" | "Symlink" | "JavaCompile" | "TestExec"
         )
     }
 }
@@ -112,6 +114,9 @@ impl TaskExecutorRegistry {
 
         let java_compile = JavaCompileExecutor::new();
         executors.insert(java_compile.task_type().to_string(), Box::new(java_compile));
+
+        let test_exec = TestExecExecutor::new();
+        executors.insert(test_exec.task_type().to_string(), Box::new(test_exec));
 
         Self { executors }
     }
@@ -165,6 +170,7 @@ mod tests {
         assert!(types.contains(&"Mkdir"));
         assert!(types.contains(&"Symlink"));
         assert!(types.contains(&"JavaCompile"));
+        assert!(types.contains(&"TestExec"));
     }
 
     #[test]
@@ -191,6 +197,7 @@ mod tests {
         assert!(TaskInput::is_native_supported("Mkdir"));
         assert!(TaskInput::is_native_supported("Symlink"));
         assert!(TaskInput::is_native_supported("JavaCompile"));
+        assert!(TaskInput::is_native_supported("TestExec"));
         assert!(!TaskInput::is_native_supported("Test"));
     }
 }
