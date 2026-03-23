@@ -4,7 +4,8 @@ use tonic::Status;
 
 use super::jvm_host::JvmHostClient;
 use crate::proto::{
-    GetBuildEnvironmentResponse, GetBuildModelResponse, ResolveConfigResponse,
+    EvaluateScriptResponse, GetBuildEnvironmentResponse, GetBuildModelResponse,
+    ResolveConfigResponse,
 };
 
 /// Shared bridge to the JVM host, allowing multiple services to call back
@@ -81,6 +82,25 @@ impl JvmHostBridge {
             .await?;
         Ok(Some(response))
     }
+
+    /// Evaluate a build script via the JVM and extract applied plugins.
+    /// Returns `None` if the JVM host is not connected.
+    pub async fn evaluate_script(
+        &self,
+        script_path: &str,
+        script_content: &str,
+        script_type: &str,
+    ) -> Result<Option<EvaluateScriptResponse>, Status> {
+        let mut guard = self.client.lock().await;
+        let client = match guard.as_mut() {
+            Some(c) => c,
+            None => return Ok(None),
+        };
+        let response = client
+            .evaluate_script(script_path, script_content, script_type)
+            .await?;
+        Ok(Some(response))
+    }
 }
 
 impl Default for JvmHostBridge {
@@ -117,6 +137,12 @@ mod tests {
             .await
             .unwrap();
         assert!(resolved.is_none());
+
+        let eval = bridge
+            .evaluate_script("build.gradle.kts", "plugins {}", "kotlin")
+            .await
+            .unwrap();
+        assert!(eval.is_none());
     }
 
     #[tokio::test]

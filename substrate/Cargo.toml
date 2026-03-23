@@ -41,6 +41,12 @@ tar = "0.4"
 flate2 = "1"
 hyper-util = "0.1"
 
+[features]
+default = ["remote-cache", "xml-parsing", "toolchain-download"]
+remote-cache = []
+xml-parsing = []
+toolchain-download = []
+
 [build-dependencies]
 tonic-build = "0.12"
 
@@ -51,3 +57,39 @@ tower.workspace = true
 hyper-util = "0.1"
 http-body-util = "0.1"
 tokio-stream = "0.1"
+
+[[bench]]
+name = "hash_bench"
+harness = false
+
+[[bench]]
+name = "cache_bench"
+harness = false
+
+[[bench]]
+name = "cache_orchestration_bench"
+harness = false
+
+[[bench]]
+name = "execution_plan_bench"
+harness = false
+
+[[bench]]
+name = "file_fingerprint_bench"
+harness = false
+
+[[bench]]
+name = "event_stream_bench"
+harness = false
+
+[[bench]]
+name = "task_graph_bench"
+harness = false
+
+[[bench]]
+name = "metrics_bench"
+harness = false
+
+[[bench]]
+name = "service_latency_bench"
+harness = false

@@ -120,6 +120,75 @@ public class SubstrateE2ETest {
         assertEquals(0, response.getHashesCount());
     }
 
+    @Test
+    public void hashAllAlgorithmsMatchKnownValues() {
+        String content = "The quick brown fox jumps over the lazy dog";
+
+        HashBatchResponse response = client.getHashStub().hashBatch(
+            HashBatchRequest.newBuilder()
+                .addHashInputs(HashInput.newBuilder().setAlgorithm("md5").setContent(content).build())
+                .addHashInputs(HashInput.newBuilder().setAlgorithm("sha1").setContent(content).build())
+                .addHashInputs(HashInput.newBuilder().setAlgorithm("sha256").setContent(content).build())
+                .addHashInputs(HashInput.newBuilder().setAlgorithm("sha3-256").setContent(content).build())
+                .addHashInputs(HashInput.newBuilder().setAlgorithm("blake3").setContent(content).build())
+                .build()
+        );
+
+        assertEquals(5, response.getHashesCount());
+        // MD5 known value for "The quick brown fox jumps over the lazy dog"
+        assertEquals("9e107d9d372bb6826bd81d3542a419d6", response.getHashes(0));
+        // SHA-1
+        assertEquals("2fd4e1c67a2d28fced849ee1bb76e7391b93eb12", response.getHashes(1));
+        // SHA-256
+        assertEquals("d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592", response.getHashes(2));
+        // SHA3-256
+        assertEquals("69070dda01975c8c12055b962bb624b5d0668658d7e5c2cbab9a7e0756e1e5ec", response.getHashes(3));
+        // BLAKE3
+        assertEquals("e4cfa39c05ee2e8b46e8f7e9c5fb055a0e4e3e1f68dc4c40b88e9f3ed18e02", response.getHashes(4));
+    }
+
+    @Test
+    public void hashLargeContentProducesConsistentResults() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 100000; i++) {
+            sb.append("Line ").append(i).append(": test content for hashing\n");
+        }
+        String largeContent = sb.toString();
+
+        HashBatchResponse response1 = client.getHashStub().hashBatch(
+            HashBatchRequest.newBuilder()
+                .addHashInputs(HashInput.newBuilder().setAlgorithm("sha256").setContent(largeContent).build())
+                .build()
+        );
+        HashBatchResponse response2 = client.getHashStub().hashBatch(
+            HashBatchRequest.newBuilder()
+                .addHashInputs(HashInput.newBuilder().setAlgorithm("sha256").setContent(largeContent).build())
+                .build()
+        );
+
+        // Same content must produce the same hash (deterministic)
+        assertEquals(response1.getHashes(0), response2.getHashes(0));
+        // Different from empty string hash
+        assertNotEquals(
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            response1.getHashes(0));
+    }
+
+    @Test
+    public void hashBatchMultipleInputs() {
+        HashBatchResponse response = client.getHashStub().hashBatch(
+            HashBatchRequest.newBuilder()
+                .addHashInputs(HashInput.newBuilder().setAlgorithm("sha256").setContent("aaa").build())
+                .addHashInputs(HashInput.newBuilder().setAlgorithm("sha256").setContent("bbb").build())
+                .addHashInputs(HashInput.newBuilder().setAlgorithm("sha256").setContent("ccc").build())
+                .build()
+        );
+
+        assertEquals(3, response.getHashesCount());
+        assertNotEquals(response.getHashes(0), response.getHashes(1));
+        assertNotEquals(response.getHashes(1), response.getHashes(2));
+    }
+
     // --- Cache Service ---
 
     @Test
@@ -451,5 +520,125 @@ public class SubstrateE2ETest {
                 .build()
         );
         assertTrue(response.getAccepted());
+    }
+
+    // --- Cache Round-Trip Validation ---
+
+    @Test
+    public void cacheLargePayloadRoundTrip() {
+        String key = "e2e-large-" + System.nanoTime();
+        byte[] largeValue = new byte[1024 * 1024]; // 1 MB
+        for (int i = 0; i < largeValue.length; i++) {
+            largeValue[i] = (byte) (i % 256);
+        }
+
+        client.getCacheStub().cachePut(
+            CachePutRequest.newBuilder()
+                .setKey(key)
+                .setValue(com.google.protobuf.ByteString.copyFrom(largeValue))
+                .setTtlSeconds(60)
+                .build()
+        );
+
+        CacheGetResponse getResponse = client.getCacheStub().cacheGet(
+            CacheGetRequest.newBuilder().setKey(key).build()
+        );
+        assertTrue(getResponse.getFound());
+        assertArrayEquals(largeValue, getResponse.getValue().toByteArray());
+    }
+
+    @Test
+    public void cacheOverwriteReturnsLatestValue() {
+        String key = "e2e-overwrite-" + System.nanoTime();
+
+        client.getCacheStub().cachePut(
+            CachePutRequest.newBuilder()
+                .setKey(key)
+                .setValue(com.google.protobuf.ByteString.copyFromUtf8("version-1"))
+                .setTtlSeconds(60)
+                .build()
+        );
+
+        client.getCacheStub().cachePut(
+            CachePutRequest.newBuilder()
+                .setKey(key)
+                .setValue(com.google.protobuf.ByteString.copyFromUtf8("version-2"))
+                .setTtlSeconds(60)
+                .build()
+        );
+
+        CacheGetResponse getResponse = client.getCacheStub().cacheGet(
+            CacheGetRequest.newBuilder().setKey(key).build()
+        );
+        assertTrue(getResponse.getFound());
+        assertEquals("version-2", getResponse.getValue().toStringUtf8());
+    }
+
+    // --- Full Build Lifecycle ---
+
+    @Test
+    public void fullBuildLifecycleWithMetrics() {
+        String sessionId = "e2e-lifecycle-" + System.nanoTime();
+
+        // Init build
+        InitBuildResponse buildResponse = client.getBootstrapStub().initBuild(
+            InitBuildRequest.newBuilder()
+                .setSessionId(sessionId)
+                .setProjectDir("/tmp/e2e-lifecycle")
+                .build()
+        );
+        assertTrue(buildResponse.getAccepted());
+        String buildId = buildResponse.getBuildId();
+        assertFalse(buildId.isEmpty());
+
+        // Record a metric
+        client.getBuildMetricsStub().recordMetric(
+            RecordMetricRequest.newBuilder()
+                .setMetric(MetricEvent.newBuilder()
+                    .setName("e2e.lifecycle.test")
+                    .setValue("100")
+                    .setMetricType("counter")
+                    .build())
+                .build()
+        );
+
+        // Report task results
+        client.getBuildOperationsStub().reportTaskResult(
+            ReportTaskResultRequest.newBuilder()
+                .setTaskResult(TaskResult.newBuilder()
+                    .setTaskPath(":compileJava")
+                    .setOutcome("SUCCESS")
+                    .setDurationMs(200)
+                    .build())
+                .build()
+        );
+        client.getBuildOperationsStub().reportTaskResult(
+            ReportTaskResultRequest.newBuilder()
+                .setTaskResult(TaskResult.newBuilder()
+                    .setTaskPath(":test")
+                    .setOutcome("SUCCESS")
+                    .setDurationMs(150)
+                    .build())
+                .build()
+        );
+
+        // Complete build
+        CompleteBuildResponse completeResponse = client.getBootstrapStub().completeBuild(
+            CompleteBuildRequest.newBuilder()
+                .setBuildId(buildId)
+                .setOutcome("SUCCESS")
+                .setDurationMs(350)
+                .build()
+        );
+        assertTrue(completeResponse.getAcknowledged());
+
+        // Verify metrics
+        GetMetricsResponse metricsResponse = client.getBuildMetricsStub().getMetrics(
+            GetMetricsRequest.newBuilder()
+                .addMetricNames("e2e.lifecycle.test")
+                .build()
+        );
+        assertEquals(1, metricsResponse.getMetricsCount());
+        assertEquals("100", metricsResponse.getMetrics(0).getValue());
     }
 }
