@@ -10,9 +10,11 @@ use crate::proto::{
 };
 use super::authoritative::AuthoritativeConfig;
 
+#[derive(Clone)]
 pub struct ControlServiceImpl {
     shutdown_tx: tokio::sync::broadcast::Sender<()>,
     authoritative_config: Arc<AuthoritativeConfig>,
+    jvm_host_socket_path: Arc<tokio::sync::RwLock<Option<String>>>,
 }
 
 impl Default for ControlServiceImpl {
@@ -34,7 +36,13 @@ impl ControlServiceImpl {
         Self {
             shutdown_tx,
             authoritative_config,
+            jvm_host_socket_path: Arc::new(tokio::sync::RwLock::new(None)),
         }
+    }
+
+    /// Get the JVM host socket path provided during handshake.
+    pub async fn get_jvm_host_socket_path(&self) -> Option<String> {
+        self.jvm_host_socket_path.read().await.clone()
     }
 }
 
@@ -71,6 +79,12 @@ impl ControlService for ControlServiceImpl {
             client_pid = req.client_pid,
             "Handshake successful"
         );
+
+        // Store JVM host socket path for reverse-direction RPC
+        if !req.jvm_host_socket_path.is_empty() {
+            *self.jvm_host_socket_path.write().await = Some(req.jvm_host_socket_path.clone());
+            tracing::info!(jvm_host_socket = %req.jvm_host_socket_path, "JVM host socket path registered");
+        }
 
         Ok(Response::new(HandshakeResponse {
             accepted: true,
@@ -261,5 +275,37 @@ mod tests {
             .into_inner();
         assert!(resp.accepted);
         assert_eq!(resp.previous_mode, "authoritative");
+    }
+
+    #[tokio::test]
+    async fn handshake_stores_jvm_host_socket_path() {
+        let svc = make_service();
+        assert!(svc.get_jvm_host_socket_path().await.is_none());
+
+        // Handshake with JVM host socket path
+        let resp = svc.handshake(Request::new(HandshakeRequest {
+            client_version: "test".to_string(),
+            protocol_version: PROTOCOL_VERSION.to_string(),
+            client_pid: 1234,
+            jvm_host_socket_path: "/tmp/jvm-host.sock".to_string(),
+        })).await.unwrap().into_inner();
+        assert!(resp.accepted);
+
+        let path = svc.get_jvm_host_socket_path().await;
+        assert_eq!(path.as_deref(), Some("/tmp/jvm-host.sock"));
+    }
+
+    #[tokio::test]
+    async fn handshake_without_jvm_host_path_stays_none() {
+        let svc = make_service();
+
+        svc.handshake(Request::new(HandshakeRequest {
+            client_version: "test".to_string(),
+            protocol_version: PROTOCOL_VERSION.to_string(),
+            client_pid: 1234,
+            jvm_host_socket_path: String::new(),
+        })).await.unwrap().into_inner();
+
+        assert!(svc.get_jvm_host_socket_path().await.is_none());
     }
 }

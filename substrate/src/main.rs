@@ -7,6 +7,7 @@ use tokio::signal;
 use tonic::transport::Server;
 
 use gradle_substrate_daemon::{
+    client::jvm_host::JvmHostClient,
     proto::{
         artifact_publishing_service_server::ArtifactPublishingServiceServer,
         bootstrap_service_server::BootstrapServiceServer,
@@ -179,6 +180,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Phase 0: Control
     let control = ControlServiceImpl::with_config(shutdown_tx.clone(), authoritative_config);
+    let control_for_jvm = control.clone();
 
     // Phase 1: Hashing
     let hash = HashServiceImpl;
@@ -316,6 +318,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Protocol version: {}", PROTOCOL_VERSION);
     println!("Listening on: {}", args.socket_path);
     println!("Services: control, dag-executor, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console, test-execution, artifact-publishing, build-init, incremental-compilation, build-metrics, garbage-collection");
+
+    // Phase 6: JVM Compatibility Host
+    // The JVM host socket path arrives via handshake, so we spawn a background task
+    // to attempt connection after the first handshake registers the path.
+    tokio::spawn(async move {
+        // Wait briefly for the JVM client to connect and send handshake
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+        if let Some(jvm_socket) = control_for_jvm.get_jvm_host_socket_path().await {
+            match JvmHostClient::connect(&jvm_socket).await {
+                Ok(_jvm_client) => {
+                    tracing::info!(path = %jvm_socket, "Connected to JVM host");
+                    // TODO: Wire jvm_client into services that need JVM callbacks
+                    // (bootstrap, configuration, build model)
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to connect to JVM host, continuing without");
+                }
+            }
+        } else {
+            tracing::info!("No JVM host socket path provided — running in standalone mode");
+        }
+    });
 
     Server::builder()
         .add_service(ControlServiceServer::new(control))

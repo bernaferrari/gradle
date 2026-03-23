@@ -54,7 +54,7 @@ bd close <id>         # Complete work
 
 ```bash
 cargo check                    # Check compilation
-cargo test                     # Run all 558 tests (493 unit + 12 differential + 3 cross-language + 47 integration + 3 E2E)
+cargo test                     # Run all 560 tests (495 unit + 12 differential + 3 cross-language + 47 integration + 3 E2E)
 cargo test --test integration_test  # Integration tests only (over Unix sockets)
 cargo test --test e2e_lifecycle_test   # E2E lifecycle tests (event fan-out validation)
 cargo clippy                   # Lint check (must be clean)
@@ -66,12 +66,14 @@ cargo bench                    # Run all 8 criterion benchmarks
 Strangler-fig migration of Gradle's execution substrate to Rust. Rust daemon (substrate/) communicates with JVM via gRPC over Unix domain sockets.
 
 **Key files:**
-- `substrate/src/main.rs` — Daemon binary, wires all 34 services
+- `substrate/src/main.rs` — Daemon binary, wires all 34 services + JVM host connection
 - `substrate/src/server/` — Service implementations (32 files)
-- `substrate/proto/v1/substrate.proto` — gRPC service + message definitions
+- `substrate/src/client/jvm_host.rs` — Rust client for JVM callback RPC
+- `substrate/proto/v1/substrate.proto` — gRPC service + message definitions (incl. JvmHostService)
 - `substrate/tests/` — Integration + E2E tests
 - `substrate/benches/` — Criterion benchmarks
 - `platforms/core-execution/rust-bridge/` — Java gRPC bridge clients
+- `platforms/core-execution/rust-bridge/jvmhost/` — JVM Compatibility Host server + impl
 - `platforms/core-runtime/build-option/` — Feature flags (RustSubstrateOptions.java)
 
 **Epic:** `gradle-fork-5bh` — Run `bd show gradle-fork-5bh` for full task breakdown.
