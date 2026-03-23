@@ -1951,6 +1951,7 @@ async fn test_control_handshake_e2e() {
             client_version: "test-1.0".to_string(),
             protocol_version: "1.0.0".to_string(),
             client_pid: std::process::id() as i32,
+            jvm_host_socket_path: String::new(),
         }))
         .await
         .unwrap()

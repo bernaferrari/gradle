@@ -3,6 +3,8 @@ package org.gradle.internal.rustbridge;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.util.Either;
 import org.slf4j.Logger;
+import org.gradle.internal.rustbridge.jvmhost.JvmHostServer;
+import org.gradle.internal.rustbridge.jvmhost.JvmHostServiceImpl;
 
 import java.io.File;
 import java.io.IOException;
@@ -12,34 +14,53 @@ import java.nio.file.Path;
 
 /**
  * Manages the lifecycle of the Rust substrate daemon process.
+ * Optionally starts a JVM Compatibility Host server for reverse-direction RPC.
  */
 public class DaemonLauncher {
 
     private static final Logger LOGGER = Logging.getLogger(DaemonLauncher.class);
     private static final String SOCKET_NAME = "substrate.sock";
+    private static final String JVM_HOST_SOCKET_NAME = "jvm-host.sock";
     private static final String SUBSTRATE_DIR_NAME = ".gradle-substrate";
 
     private final File daemonBinary;
     private final File socketDirectory;
     private final boolean noop;
+    private final boolean enableJvmHost;
     private Process daemonProcess;
+    private JvmHostServer jvmHostServer;
 
-    private DaemonLauncher(File daemonBinary, File socketDirectory, boolean noop) {
+    private DaemonLauncher(File daemonBinary, File socketDirectory, boolean noop, boolean enableJvmHost) {
         this.daemonBinary = daemonBinary;
         this.socketDirectory = socketDirectory;
         this.noop = noop;
+        this.enableJvmHost = enableJvmHost;
     }
 
     public static DaemonLauncher noop() {
-        return new DaemonLauncher(null, null, true);
+        return new DaemonLauncher(null, null, true, false);
     }
 
     public static DaemonLauncher of(File daemonBinary, File socketDirectory) {
-        return new DaemonLauncher(daemonBinary, socketDirectory, false);
+        return new DaemonLauncher(daemonBinary, socketDirectory, false, false);
+    }
+
+    public static DaemonLauncher withJvmHost(File daemonBinary, File socketDirectory) {
+        return new DaemonLauncher(daemonBinary, socketDirectory, false, true);
     }
 
     public String getSocketPath() {
         return new File(socketDirectory, SOCKET_NAME).getAbsolutePath();
+    }
+
+    /**
+     * Get the JVM host socket path, or null if JVM host is not enabled.
+     */
+    public String getJvmHostSocketPath() {
+        if (jvmHostServer != null) {
+            return jvmHostServer.getSocketPath();
+        }
+        return null;
     }
 
     /**
@@ -64,6 +85,20 @@ public class DaemonLauncher {
         if (!daemonBinary.exists()) {
             LOGGER.warn("[substrate] Daemon binary not found at {}, using no-op mode", daemonBinary);
             return SubstrateClient.noop();
+        }
+
+        // Phase 6: Start JVM Compatibility Host before launching the Rust daemon
+        String jvmHostSocketPath = null;
+        if (enableJvmHost) {
+            jvmHostSocketPath = new File(socketDirectory, JVM_HOST_SOCKET_NAME).getAbsolutePath();
+            try {
+                jvmHostServer = new JvmHostServer(jvmHostSocketPath, new JvmHostServiceImpl());
+                jvmHostServer.start();
+            } catch (IOException e) {
+                LOGGER.warn("[substrate] Failed to start JVM host server, continuing without: {}", e.getMessage());
+                jvmHostServer = null;
+                jvmHostSocketPath = null;
+            }
         }
 
         LOGGER.lifecycle("[substrate] Launching daemon from {}", daemonBinary);
@@ -99,7 +134,7 @@ public class DaemonLauncher {
         }
 
         LOGGER.lifecycle("[substrate] Daemon started successfully");
-        return SubstrateClient.connect(socketFile.toString());
+        return SubstrateClient.connect(socketFile.toString(), jvmHostSocketPath);
     }
 
     private void consumeStream(Process process) {
@@ -122,6 +157,11 @@ public class DaemonLauncher {
     }
 
     public void shutdownDaemon() {
+        // Shut down JVM host server first
+        if (jvmHostServer != null) {
+            jvmHostServer.close();
+            jvmHostServer = null;
+        }
         if (daemonProcess != null && daemonProcess.isAlive()) {
             daemonProcess.destroy();
             try {
