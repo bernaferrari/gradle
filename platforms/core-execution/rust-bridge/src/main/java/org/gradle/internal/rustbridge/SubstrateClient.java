@@ -192,7 +192,7 @@ public class SubstrateClient implements Closeable {
      * Creates a no-op client that does nothing. Used when the substrate is disabled.
      */
     public static SubstrateClient noop() {
-        return new SubstrateClient(null, true);
+        return new SubstrateClient(null, true, null);
     }
 
     public boolean isNoop() {

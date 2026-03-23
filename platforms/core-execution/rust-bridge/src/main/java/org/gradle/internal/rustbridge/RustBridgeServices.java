@@ -42,8 +42,10 @@ import org.gradle.internal.operations.BuildOperationListenerManager;
 import org.gradle.internal.rustbridge.plugin.RustPluginClient;
 import org.gradle.internal.rustbridge.buildops.RustBuildOperationsClient;
 import org.gradle.internal.rustbridge.toolchain.RustToolchainServiceClient;
+import org.gradle.internal.rustbridge.toolchain.ShadowingToolchainProvider;
 import org.gradle.internal.rustbridge.eventstream.RustBuildEventStreamClient;
 import org.gradle.internal.rustbridge.buildlayout.RustBuildLayoutClient;
+import org.gradle.internal.rustbridge.buildlayout.ShadowingBuildLayoutTracker;
 import org.gradle.internal.rustbridge.buildresult.RustBuildResultClient;
 import org.gradle.internal.rustbridge.problems.RustProblemReportingClient;
 import org.gradle.internal.rustbridge.resources.RustResourceManagementClient;
@@ -51,15 +53,20 @@ import org.gradle.internal.rustbridge.comparison.RustBuildComparisonClient;
 import org.gradle.internal.rustbridge.console.RustConsoleClient;
 import org.gradle.internal.rustbridge.testexec.RustTestExecutionClient;
 import org.gradle.internal.rustbridge.buildinit.RustBuildInitClient;
+import org.gradle.internal.rustbridge.buildinit.ShadowingBuildInitTracker;
 import org.gradle.internal.rustbridge.incremental.RustIncrementalCompilationClient;
 import org.gradle.internal.rustbridge.metrics.RustBuildMetricsClient;
 import org.gradle.internal.rustbridge.gc.RustGarbageCollectionClient;
+import org.gradle.internal.rustbridge.gc.ShadowingGarbageCollector;
+import org.gradle.internal.rustbridge.jvmhost.JvmHostServiceImpl;
+import org.gradle.internal.rustbridge.jvmhost.ProjectModelProviderAdapter;
 import org.gradle.internal.rustbridge.evaluation.ProjectEvaluationShadowListener;
 import org.gradle.internal.rustbridge.graph.TaskExecutionGraphShadowListener;
 import org.gradle.internal.service.Provides;
 import org.gradle.internal.service.ServiceRegistration;
 import org.gradle.internal.service.scopes.AbstractGradleModuleServices;
 import org.gradle.internal.snapshot.ValueSnapshotter;
+import org.gradle.api.internal.project.ProjectStateRegistry;
 import org.jspecify.annotations.Nullable;
 
 import java.io.File;
@@ -307,6 +314,23 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
         }
 
         @Provides
+        @org.gradle.internal.service.scopes.PrivateService
+        void wireProjectModelProvider(
+            DaemonLauncher daemonLauncher,
+            @Nullable ProjectStateRegistry projectStateRegistry,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+                return;
+            }
+            JvmHostServiceImpl serviceImpl = daemonLauncher.getJvmHostServiceImpl();
+            if (serviceImpl != null && projectStateRegistry != null) {
+                serviceImpl.setProjectModelProvider(
+                    new ProjectModelProviderAdapter(projectStateRegistry));
+            }
+        }
+
+        @Provides
         @Nullable
         BuildResultShadowListener createBuildResultShadowListener(
             RustBuildResultClient rustBuildResultClient,
@@ -510,6 +534,58 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
                 return null;
             }
             return new IncrementalCompilationShadowListener(rustIncrementalCompilationClient);
+        }
+
+        @Provides
+        @Nullable
+        ShadowingToolchainProvider createShadowingToolchainProvider(
+            RustToolchainServiceClient rustToolchainServiceClient,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+                return null;
+            }
+            return new ShadowingToolchainProvider(rustToolchainServiceClient, mismatchReporter);
+        }
+
+        @Provides
+        @Nullable
+        ShadowingBuildLayoutTracker createShadowingBuildLayoutTracker(
+            RustBuildLayoutClient rustBuildLayoutClient,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+                return null;
+            }
+            return new ShadowingBuildLayoutTracker(rustBuildLayoutClient, mismatchReporter);
+        }
+
+        @Provides
+        @Nullable
+        ShadowingBuildInitTracker createShadowingBuildInitTracker(
+            RustBuildInitClient rustBuildInitClient,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+                return null;
+            }
+            return new ShadowingBuildInitTracker(rustBuildInitClient, mismatchReporter);
+        }
+
+        @Provides
+        @Nullable
+        ShadowingGarbageCollector createShadowingGarbageCollector(
+            RustGarbageCollectionClient rustGarbageCollectionClient,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+                return null;
+            }
+            return new ShadowingGarbageCollector(rustGarbageCollectionClient, mismatchReporter);
         }
     }
 
