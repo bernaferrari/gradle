@@ -7,6 +7,10 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import gradle.substrate.v1.*;
 import io.grpc.Server;
@@ -20,8 +24,8 @@ import io.grpc.stub.StreamObserver;
  * the {@code JvmHostService} defined in {@code substrate.proto}.</p>
  *
  * <p>{@code GetBuildEnvironment}, {@code GetBuildModel}, and {@code ResolveConfiguration}
- * are implemented. {@code EvaluateScript} returns UNIMPLEMENTED (requires Gradle's
- * ScriptPluginFactory — deferred).</p>
+ * are fully implemented. {@code EvaluateScript} parses build script content to extract
+ * applied plugins without full script evaluation.</p>
  */
 public class JvmHostServer implements Closeable {
 
@@ -55,11 +59,46 @@ public class JvmHostServer implements Closeable {
                 public void evaluateScript(
                     EvaluateScriptRequest request,
                     StreamObserver<EvaluateScriptResponse> responseObserver) {
-                    LOGGER.debug("[substrate-jvmhost] evaluateScript called (UNIMPLEMENTED)");
-                    responseObserver.onError(
-                        io.grpc.Status.UNIMPLEMENTED
-                            .withDescription("Script evaluation not yet implemented")
-                            .asRuntimeException());
+                    try {
+                        String scriptPath = request.getScriptPath();
+                        String scriptContent = request.getScriptContent();
+                        String scriptType = request.getScriptType();
+
+                        LOGGER.debug("[substrate-jvmhost] evaluateScript called for {} (type={})",
+                            scriptPath.isEmpty() ? "<inline>" : scriptPath, scriptType);
+
+                        // Read script from file if content is empty and path is provided
+                        String content = scriptContent;
+                        if (content.isEmpty() && !scriptPath.isEmpty()) {
+                            Path p = Path.of(scriptPath);
+                            if (Files.exists(p)) {
+                                content = Files.readString(p);
+                            } else {
+                                responseObserver.onNext(EvaluateScriptResponse.newBuilder()
+                                    .setSuccess(false)
+                                    .setErrorMessage("Script file not found: " + scriptPath)
+                                    .build());
+                                responseObserver.onCompleted();
+                                return;
+                            }
+                        }
+
+                        // Extract applied plugins from the script content
+                        List<AppliedPlugin> plugins = extractPlugins(content);
+
+                        EvaluateScriptResponse response = EvaluateScriptResponse.newBuilder()
+                            .setSuccess(true)
+                            .addAllAppliedPlugins(plugins)
+                            .build();
+                        responseObserver.onNext(response);
+                        responseObserver.onCompleted();
+                    } catch (Exception e) {
+                        LOGGER.error("[substrate-jvmhost] evaluateScript failed", e);
+                        responseObserver.onError(
+                            io.grpc.Status.INTERNAL
+                                .withDescription("Script evaluation failed: " + e.getMessage())
+                                .asRuntimeException());
+                    }
                 }
 
                 @Override
@@ -189,6 +228,84 @@ public class JvmHostServer implements Closeable {
             } catch (IOException ignored) {
             }
             LOGGER.lifecycle("[substrate] JVM host server stopped");
+        }
+    }
+
+    // --- Plugin extraction ---
+
+    /**
+     * Extract applied plugins from build script content.
+     * Handles both Kotlin DSL ({@code plugins { id("foo") }}) and
+     * Groovy DSL ({@code apply plugin: "foo"} / {@code id "foo"}).
+     *
+     * @return list of applied plugins in declaration order
+     */
+    static List<AppliedPlugin> extractPlugins(String scriptContent) {
+        List<AppliedPlugin> plugins = new ArrayList<>();
+
+        // Kotlin DSL: plugins { id("plugin-id") ... } and plugins { id("plugin-id") version "1.0" ... }
+        Pattern kotlinIdPattern = Pattern.compile(
+            "id\\s*\\(\\s*\"([^\"]+)\"\\s*\\)");
+        Matcher kotlinMatcher = kotlinIdPattern.matcher(scriptContent);
+
+        // Groovy DSL: plugins { id "plugin-id" ... } and plugins { id "plugin-id" version "1.0" }
+        Pattern groovyIdPattern = Pattern.compile(
+            "id\\s+['\"]([^'\"]+)['\"]");
+        Matcher groovyMatcher = groovyIdPattern.matcher(scriptContent);
+
+        // Legacy Groovy: apply plugin: "plugin-id"
+        Pattern legacyPattern = Pattern.compile(
+            "apply\\s+plugin\\s*:\\s*['\"]([^'\"]+)['\"]");
+        Matcher legacyMatcher = legacyPattern.matcher(scriptContent);
+
+        // Also handle Kotlin DSL: kotlin("jvm"), kotlin("js"), etc.
+        Pattern kotlinPluginPattern = Pattern.compile(
+            "kotlin\\s*\\(\\s*\"([^\"]+)\"\\s*\\)");
+        Matcher kotlinPluginMatcher = kotlinPluginPattern.matcher(scriptContent);
+
+        // Collect with positions to maintain declaration order
+        List<PluginMatch> matches = new ArrayList<>();
+
+        while (kotlinMatcher.find()) {
+            matches.add(new PluginMatch(kotlinMatcher.start(), kotlinMatcher.group(1)));
+        }
+        while (groovyMatcher.find()) {
+            matches.add(new PluginMatch(groovyMatcher.start(), groovyMatcher.group(1)));
+        }
+        while (legacyMatcher.find()) {
+            matches.add(new PluginMatch(legacyMatcher.start(), legacyMatcher.group(1)));
+        }
+        while (kotlinPluginMatcher.find()) {
+            // Convert kotlin("jvm") to org.jetbrains.kotlin.jvm
+            String kotlinPlugin = kotlinPluginMatcher.group(1);
+            String resolvedId = "org.jetbrains.kotlin." + kotlinPlugin;
+            matches.add(new PluginMatch(kotlinPluginMatcher.start(), resolvedId));
+        }
+
+        // Sort by position to maintain declaration order
+        matches.sort((a, b) -> Integer.compare(a.position, b.position));
+
+        // Deduplicate (same plugin_id may appear in both patterns)
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (PluginMatch match : matches) {
+            if (seen.add(match.pluginId)) {
+                plugins.add(AppliedPlugin.newBuilder()
+                    .setPluginId(match.pluginId)
+                    .setApplyOrder(String.valueOf(seen.size()))
+                    .build());
+            }
+        }
+
+        return plugins;
+    }
+
+    private static class PluginMatch {
+        final int position;
+        final String pluginId;
+
+        PluginMatch(int position, String pluginId) {
+            this.position = position;
+            this.pluginId = pluginId;
         }
     }
 }

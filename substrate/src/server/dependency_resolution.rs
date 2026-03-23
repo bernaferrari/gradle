@@ -35,7 +35,7 @@ struct ResolutionStats {
 }
 
 /// Parsed dependency from a POM file.
-struct PomDependency {
+pub struct PomDependency {
     group: String,
     name: String,
     version: String,
@@ -383,7 +383,7 @@ impl DependencyResolutionServiceImpl {
     /// Parse a POM file and extract dependencies using a byte-level scanner.
     /// Handles property interpolation, version ranges, and excludes false matches
     /// like `<dependencyManagement>`.
-    fn parse_pom_dependencies(pom_content: &str) -> Vec<PomDependency> {
+    pub fn parse_pom_dependencies(pom_content: &str) -> Vec<PomDependency> {
         let mut dependencies = Vec::new();
         let bytes = pom_content.as_bytes();
         let len = bytes.len();
@@ -536,7 +536,7 @@ impl DependencyResolutionServiceImpl {
 
     /// Parse <dependencyManagement><dependencies> section from a POM.
     /// Returns a map of (groupId, artifactId) -> version for managed dependencies.
-    fn parse_dependency_management(pom_content: &str) -> std::collections::HashMap<(String, String), String> {
+    pub fn parse_dependency_management(pom_content: &str) -> std::collections::HashMap<(String, String), String> {
         let mut managed = std::collections::HashMap::new();
         let bytes = pom_content.as_bytes();
 
@@ -592,7 +592,7 @@ impl DependencyResolutionServiceImpl {
 
     /// Deduplicate resolved dependencies by (group, name), keeping the highest version.
     /// This implements Gradle's default conflict resolution strategy.
-    fn resolve_conflicts(deps: &mut Vec<ResolvedDependency>) {
+    pub fn resolve_conflicts(deps: &mut Vec<ResolvedDependency>) {
         let mut best: std::collections::HashMap<(String, String), usize> = std::collections::HashMap::new();
 
         for (idx, dep) in deps.iter().enumerate() {
@@ -643,7 +643,7 @@ impl DependencyResolutionServiceImpl {
     }
 
     /// Parse properties from <properties> section of a POM.
-    fn parse_pom_properties(pom_content: &str) -> std::collections::HashMap<String, String> {
+    pub fn parse_pom_properties(pom_content: &str) -> std::collections::HashMap<String, String> {
         let mut props = std::collections::HashMap::new();
         let bytes = pom_content.as_bytes();
 
@@ -710,7 +710,7 @@ impl DependencyResolutionServiceImpl {
     }
 
     /// Interpolate ${property.name} references in a string using the given properties map.
-    fn interpolate_properties(value: &str, properties: &std::collections::HashMap<String, String>) -> String {
+    pub fn interpolate_properties(value: &str, properties: &std::collections::HashMap<String, String>) -> String {
         let mut result = value.to_string();
         // Keep interpolating until no more ${...} references remain (handles nested refs)
         let mut max_iterations = 10;
@@ -996,6 +996,7 @@ impl DependencyResolutionServiceImpl {
     }
 
     /// Download an artifact with retry logic.
+    #[allow(dead_code)]
     async fn _download_with_retry(&self, url: &str, max_retries: u32) -> Result<Vec<u8>, String> {
         let mut attempt = 0;
         loop {
@@ -1103,7 +1104,7 @@ fn extract_tag_text(bytes: &[u8], parent_start: usize, tag: &[u8]) -> Option<Str
 /// Compare two semver-like version strings.
 /// Returns negative if a < b, 0 if a == b, positive if a > b.
 /// Handles numeric segments (1.2.3) and suffixes (-beta, -SNAPSHOT).
-fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
+pub fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
     let a_parts = split_version(a);
     let b_parts = split_version(b);
 

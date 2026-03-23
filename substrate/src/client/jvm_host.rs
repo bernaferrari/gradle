@@ -108,9 +108,52 @@ mod tests {
     impl JvmHostService for MockJvmHostService {
         async fn evaluate_script(
             &self,
-            _request: tonic::Request<crate::proto::EvaluateScriptRequest>,
+            request: tonic::Request<crate::proto::EvaluateScriptRequest>,
         ) -> Result<Response<crate::proto::EvaluateScriptResponse>, tonic::Status> {
-            Err(tonic::Status::unimplemented("not implemented"))
+            let req = request.into_inner();
+            let content = &req.script_content;
+            let mut plugins = Vec::new();
+            let mut order = 1u32;
+
+            // Simple mock: extract id("...") patterns using string scanning
+            let mut search_from = 0;
+            while search_from < content.len() {
+                if let Some(pos) = content[search_from..].find("id(\"") {
+                    let abs_pos = search_from + pos + 4; // after id("
+                    if let Some(end) = content[abs_pos..].find("\")") {
+                        let plugin_id = &content[abs_pos..abs_pos + end];
+                        plugins.push(crate::proto::AppliedPlugin {
+                            plugin_id: plugin_id.to_string(),
+                            apply_order: order.to_string(),
+                        });
+                        order += 1;
+                        search_from = abs_pos + end + 1;
+                    } else {
+                        break;
+                    }
+                } else if let Some(pos) = content[search_from..].find("apply plugin: \"") {
+                    let abs_pos = search_from + pos + 15; // after apply plugin: "
+                    if let Some(end) = content[abs_pos..].find("\"") {
+                        let plugin_id = &content[abs_pos..abs_pos + end];
+                        plugins.push(crate::proto::AppliedPlugin {
+                            plugin_id: plugin_id.to_string(),
+                            apply_order: order.to_string(),
+                        });
+                        order += 1;
+                        search_from = abs_pos + end + 1;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            Ok(Response::new(crate::proto::EvaluateScriptResponse {
+                success: true,
+                error_message: String::new(),
+                applied_plugins: plugins,
+            }))
         }
 
         async fn get_build_model(
@@ -286,17 +329,62 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_evaluate_script_returns_unimplemented() {
+    async fn test_evaluate_script_extracts_plugins() {
+        let (socket_path, _dir) = spawn_mock_server().await;
+        let mut client = JvmHostClient::connect(&socket_path).await.unwrap();
+
+        let script = r#"
+            plugins {
+                id("java")
+                id("org.springframework.boot") version "3.2.0"
+            }
+        "#;
+        let result = client
+            .evaluate_script("build.gradle.kts", script, "kotlin")
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.error_message, "");
+        assert_eq!(result.applied_plugins.len(), 2);
+        assert_eq!(result.applied_plugins[0].plugin_id, "java");
+        assert_eq!(result.applied_plugins[1].plugin_id, "org.springframework.boot");
+        assert_eq!(result.applied_plugins[0].apply_order, "1");
+        assert_eq!(result.applied_plugins[1].apply_order, "2");
+    }
+
+    #[tokio::test]
+    async fn test_evaluate_script_legacy_groovy_plugins() {
+        let (socket_path, _dir) = spawn_mock_server().await;
+        let mut client = JvmHostClient::connect(&socket_path).await.unwrap();
+
+        let script = r#"
+            apply plugin: "java"
+            apply plugin: "idea"
+        "#;
+        let result = client
+            .evaluate_script("build.gradle", script, "groovy")
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.applied_plugins.len(), 2);
+        assert_eq!(result.applied_plugins[0].plugin_id, "java");
+        assert_eq!(result.applied_plugins[1].plugin_id, "idea");
+    }
+
+    #[tokio::test]
+    async fn test_evaluate_script_empty_returns_no_plugins() {
         let (socket_path, _dir) = spawn_mock_server().await;
         let mut client = JvmHostClient::connect(&socket_path).await.unwrap();
 
         let result = client
-            .evaluate_script("build.gradle.kts", "plugins {}", "kotlin")
-            .await;
+            .evaluate_script("build.gradle.kts", "", "kotlin")
+            .await
+            .unwrap();
 
-        assert!(result.is_err());
-        let status = result.unwrap_err();
-        assert_eq!(status.code(), tonic::Code::Unimplemented);
+        assert!(result.success);
+        assert!(result.applied_plugins.is_empty());
     }
 
     #[tokio::test]
