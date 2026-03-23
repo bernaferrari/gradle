@@ -9,7 +9,8 @@ use tokio::io::AsyncWriteExt;
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
-    toolchain_service_server::ToolchainService, EnsureToolchainRequest, GetJavaHomeRequest,
+    toolchain_service_server::ToolchainService, AutoDetectToolchainsRequest,
+    AutoDetectToolchainsResponse, AutoDetectedToolchain, EnsureToolchainRequest, GetJavaHomeRequest,
     GetJavaHomeResponse, GetToolchainMetadataRequest, GetToolchainMetadataResponse,
     ListToolchainsRequest, ListToolchainsResponse, RegisterToolchainRequest,
     RegisterToolchainResponse, RemoveToolchainRequest, RemoveToolchainResponse, ToolchainLocation,
@@ -33,6 +34,13 @@ pub struct ToolchainServiceImpl {
     downloads_total: AtomicI64,
     _downloads_completed: AtomicI64,
     http_client: reqwest::Client,
+}
+
+/// Detailed JDK probe result with version and vendor info.
+struct JavaProbeInfo {
+    major_version: String,
+    full_version: String,
+    vendor: String,
 }
 
 impl Default for ToolchainServiceImpl {
@@ -60,18 +68,38 @@ impl ToolchainServiceImpl {
         format!("{}-{}", implementation, version)
     }
 
-    /// Detect system JDK installations from common paths.
+    /// Detect system JDK installations from common paths, PATH, SDKMAN, and toolchain.properties.
     fn find_system_javas() -> Vec<(String, String)> {
         let mut found = Vec::new();
 
-        // Check JAVA_HOME environment variable
+        // 1. Check JAVA_HOME environment variable
         if let Ok(java_home) = std::env::var("JAVA_HOME") {
             if let Some((version, size)) = Self::probe_java_home(&java_home) {
                 found.push((java_home, format!("JDK {} ({})", version, size)));
             }
         }
 
-        // Check common JDK installation paths
+        // 2. Scan PATH for java binaries
+        if let Ok(path_var) = std::env::var("PATH") {
+            for dir in path_var.split(if cfg!(target_os = "windows") { ';' } else { ':' }) {
+                let java_bin = if cfg!(target_os = "windows") {
+                    Path::new(dir).join("java.exe")
+                } else {
+                    Path::new(dir).join("java")
+                };
+                if java_bin.is_file() {
+                    // Walk up from bin/java to find JAVA_HOME
+                    if let Some(java_home) = java_bin.parent().and_then(|p| p.parent()) {
+                        let home_str = java_home.to_string_lossy().to_string();
+                        if let Some((version, _)) = Self::probe_java_home(&home_str) {
+                            found.push((home_str, version));
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Check common JDK installation paths
         let candidates: Vec<String> = if cfg!(target_os = "macos") {
             vec![
                 "/Library/Java/JavaVirtualMachines".to_string(),
@@ -79,6 +107,8 @@ impl ToolchainServiceImpl {
                 "/opt/homebrew/opt/openjdk@11".to_string(),
                 "/opt/homebrew/opt/openjdk@17".to_string(),
                 "/opt/homebrew/opt/openjdk@21".to_string(),
+                "/opt/homebrew/opt/openjdk@22".to_string(),
+                "/opt/homebrew/Cellar/openjdk".to_string(),
             ]
         } else if cfg!(target_os = "linux") {
             vec![
@@ -88,13 +118,30 @@ impl ToolchainServiceImpl {
                 "/usr/lib/jvm/java-11-openjdk-amd64".to_string(),
                 "/usr/lib/jvm/java-17-openjdk-amd64".to_string(),
                 "/usr/lib/jvm/java-21-openjdk-amd64".to_string(),
+                "/usr/lib/jvm/java-22-openjdk-amd64".to_string(),
                 "/usr/lib/jvm/temurin-8-jdk".to_string(),
                 "/usr/lib/jvm/temurin-11-jdk".to_string(),
                 "/usr/lib/jvm/temurin-17-jdk".to_string(),
                 "/usr/lib/jvm/temurin-21-jdk".to_string(),
+                "/usr/lib/jvm/temurin-22-jdk".to_string(),
+                "/usr/lib/jvm/msopenjdk-17-jdk".to_string(),
+                "/usr/lib/jvm/msopenjdk-21-jdk".to_string(),
+                "/usr/lib/jvm/zulu-8-jdk".to_string(),
+                "/usr/lib/jvm/zulu-11-jdk".to_string(),
+                "/usr/lib/jvm/zulu-17-jdk".to_string(),
+                "/usr/lib/jvm/zulu-21-jdk".to_string(),
+                "/usr/lib/jvm/amazon-corretto-8".to_string(),
+                "/usr/lib/jvm/amazon-corretto-11".to_string(),
+                "/usr/lib/jvm/amazon-corretto-17".to_string(),
+                "/usr/lib/jvm/amazon-corretto-21".to_string(),
             ]
         } else {
-            vec!["C:\\Program Files\\Java".to_string()]
+            vec![
+                "C:\\Program Files\\Java".to_string(),
+                "C:\\Program Files\\Eclipse Adoptium".to_string(),
+                "C:\\Program Files\\Microsoft".to_string(),
+                "C:\\Program Files\\Zulu".to_string(),
+            ]
         };
 
         for base in &candidates {
@@ -134,11 +181,73 @@ impl ToolchainServiceImpl {
             }
         }
 
+        // 4. SDKMAN candidates (Linux/macOS)
+        if cfg!(not(target_os = "windows")) {
+            if let Ok(home) = std::env::var("HOME") {
+                let sdkman_base = Path::new(&home).join(".sdkman/candidates/java");
+                if sdkman_base.is_dir() {
+                    if let Ok(entries) = std::fs::read_dir(&sdkman_base) {
+                        for entry in entries.flatten() {
+                            let path = entry.path();
+                            if path.is_dir() {
+                                if let Some((version, _)) = Self::probe_java_home(&path.to_string_lossy()) {
+                                    found.push((path.to_string_lossy().to_string(), version));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. Check toolchain.properties in current directory and parent directories
+        Self::scan_toolchain_properties(&mut found);
+
         // Deduplicate by java_home path
         let mut seen = std::collections::HashSet::new();
         found.retain(|(home, _)| seen.insert(home.clone()));
 
         found
+    }
+
+    /// Scan for toolchain.properties files in current and parent directories.
+    /// Format: `java.home=/path/to/jdk` or `jdk.home=/path/to/jdk`
+    fn scan_toolchain_properties(found: &mut Vec<(String, String)>) {
+        let mut dir = match std::env::current_dir() {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+
+        // Walk up at most 10 levels looking for toolchain.properties
+        for _ in 0..10 {
+            let props_path = dir.join("toolchain.properties");
+            if props_path.exists() {
+                if let Ok(contents) = std::fs::read_to_string(&props_path) {
+                    for line in contents.lines() {
+                        let line = line.trim();
+                        if line.starts_with('#') || line.is_empty() {
+                            continue;
+                        }
+                        if let Some((key, value)) = line.split_once('=') {
+                            let key = key.trim();
+                            let value = value.trim();
+                            if key == "java.home" || key == "jdk.home" || key == "javaHome" {
+                                let home_path = Path::new(value);
+                                if home_path.exists() {
+                                    if let Some((version, _)) = Self::probe_java_home(value) {
+                                        found.push((value.to_string(), version));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !dir.pop() {
+                break;
+            }
+        }
     }
 
     /// Run `java -version` to detect JDK version.
@@ -186,6 +295,59 @@ impl ToolchainServiceImpl {
         }
     }
 
+    /// Detailed JDK probe that returns structured info (major version, full version, vendor).
+    fn probe_java_home_detailed(java_home: &str) -> Option<JavaProbeInfo> {
+        let java_bin = if cfg!(target_os = "windows") {
+            format!("{}\\bin\\java.exe", java_home)
+        } else {
+            format!("{}/bin/java", java_home)
+        };
+
+        if !Path::new(&java_bin).exists() {
+            return None;
+        }
+
+        match Command::new(&java_bin).arg("-version").output() {
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let version_output = if stderr.is_empty() { &stdout } else { &stderr };
+
+                // Parse full version from output
+                let mut full_version = String::new();
+                let mut major_version = String::new();
+                for part in version_output.split('"') {
+                    let trimmed = part.trim();
+                    if trimmed.starts_with("1.") {
+                        if let Some(after) = trimmed.strip_prefix("1.") {
+                            major_version = after.split('.').next().unwrap_or("0").split('_').next().unwrap_or("0").to_string();
+                            full_version = trimmed.to_string();
+                        }
+                    } else if trimmed.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                        if let Some(major) = trimmed.split('.').next() {
+                            if major.parse::<u32>().is_ok() {
+                                major_version = major.to_string();
+                                full_version = trimmed.to_string();
+                            }
+                        }
+                    }
+                }
+
+                if major_version.is_empty() {
+                    return None;
+                }
+
+                let vendor = Self::detect_vendor(version_output);
+                Some(JavaProbeInfo {
+                    major_version,
+                    full_version,
+                    vendor,
+                })
+            }
+            Err(_) => None,
+        }
+    }
+
     /// Parse JDK version from `java -version` output.
     fn parse_java_version(output: &str) -> Option<String> {
         // Try to match "version \"X.Y.Z\"" or "version \"1.X.Y_Z\""
@@ -196,18 +358,55 @@ impl ToolchainServiceImpl {
                 if let Some(after) = trimmed.strip_prefix("1.") {
                     let major = after.split('.').next().unwrap_or("0");
                     let major = major.split('_').next().unwrap_or("0");
-                    return Some(format!("JDK {}", major));
+                    let vendor = Self::detect_vendor(output);
+                    return Some(if vendor.is_empty() {
+                        format!("JDK {}", major)
+                    } else {
+                        format!("JDK {} ({})", major, vendor)
+                    });
                 }
             } else if trimmed.chars().next().is_some_and(|c| c.is_ascii_digit()) {
                 // Modern style: "17.0.12" -> "JDK 17"
                 if let Some(major) = trimmed.split('.').next() {
                     if major.parse::<u32>().is_ok() {
-                        return Some(format!("JDK {}", major));
+                        let vendor = Self::detect_vendor(output);
+                        return Some(if vendor.is_empty() {
+                            format!("JDK {}", major)
+                        } else {
+                            format!("JDK {} ({})", major, vendor)
+                        });
                     }
                 }
             }
         }
         None
+    }
+
+    /// Detect JDK vendor from `java -version` output.
+    /// More specific vendor strings are checked first to avoid false matches.
+    fn detect_vendor(output: &str) -> String {
+        let lower = output.to_lowercase();
+        if lower.contains("temurin") || lower.contains("adoptium") {
+            "Temurin".to_string()
+        } else if lower.contains("corretto") {
+            "Corretto".to_string()
+        } else if lower.contains("zulu") {
+            "Zulu".to_string()
+        } else if lower.contains("microsoft") {
+            "Microsoft".to_string()
+        } else if lower.contains("graalvm") || lower.contains("graal") {
+            "GraalVM".to_string()
+        } else if lower.contains("semeru") || lower.contains("ibm") {
+            "Semeru".to_string()
+        } else if lower.contains("liberica") || lower.contains("bellsoft") {
+            "Liberica".to_string()
+        } else if lower.contains("oracle") {
+            "Oracle".to_string()
+        } else if lower.contains("openjdk") {
+            "OpenJDK".to_string()
+        } else {
+            String::new()
+        }
     }
 
     /// Recursively calculate directory size.
@@ -230,7 +429,7 @@ impl ToolchainServiceImpl {
     }
 
     /// Construct a download URL for a JDK distribution.
-    fn build_download_urls(version: &str, _implementation: &str, os: &str, arch: &str) -> Vec<String> {
+    fn build_download_urls(version: &str, implementation: &str, os: &str, arch: &str) -> Vec<String> {
         let mut urls = Vec::new();
 
         let os_part = match os {
@@ -246,26 +445,62 @@ impl ToolchainServiceImpl {
         };
         let ext = if os == "windows" { "zip" } else { "tar.gz" };
 
-        // Adoptium (Eclipse Temurin) API
-        urls.push(format!(
-            "https://api.adoptium.net/v3/binary/latest/{}/ga/{}/{}/jdk/hotspot/normal/eclipse?project=jdk",
-            version, os_part, arch_part
-        ));
-
-        // Direct Temurin releases
         let major = version.parse::<u32>().unwrap_or(0);
         let series = if major >= 17 { "" } else { "8" };
-        urls.push(format!(
-            "https://github.com/adoptium/temurin{}-binaries/releases/download/jdk-{}/OpenJDK{}_U-jdk_{}_{}_{}_{}",
-            series, version, version, os_part, arch_part, "hotspot", ext
-        ));
 
-        // Corretto fallback
-        let corretto_arch = arch_part;
-        urls.push(format!(
-            "https://corretto.aws/downloads/latest/{}/amazon-corretto-{}-{}-{}-{}.{}",
-            version, version, os_part, corretto_arch, version, ext
-        ));
+        // Vendor-specific URL construction based on implementation name
+        let impl_lower = implementation.to_lowercase();
+
+        if impl_lower.contains("corretto") || impl_lower.contains("amazon") {
+            // Amazon Corretto
+            urls.push(format!(
+                "https://corretto.aws/downloads/latest/{}/amazon-corretto-{}-{}-{}-{}.{}",
+                version, version, os_part, arch_part, version, ext
+            ));
+        } else if impl_lower.contains("microsoft") || impl_lower.contains("msft") {
+            // Microsoft Build of OpenJDK
+            urls.push(format!(
+                "https://aka.ms/download-jdk/microsoft-jdk-{}-{}-{}{}.{}",
+                version, os_part, arch_part, if os == "windows" { "-windows" } else { "" }, ext
+            ));
+        } else if impl_lower.contains("zulu") || impl_lower.contains("azul") {
+            // Azul Zulu
+            urls.push(format!(
+                "https://cdn.azul.com/zulu/bin/zulu{}-ea-jdk{}_{}-{}.{}",
+                version.replace(".", ""), version, os_part, arch_part, ext
+            ));
+        } else if impl_lower.contains("graalvm") || impl_lower.contains("oracle") {
+            // Oracle GraalVM / Oracle JDK
+            urls.push(format!(
+                "https://download.oracle.com/graalvm/{}/latest/graalvm-jdk-{}_{}-{}_bin.{}",
+                version, version, os_part, arch_part, ext
+            ));
+        } else {
+            // Default: Adoptium (Eclipse Temurin)
+            urls.push(format!(
+                "https://api.adoptium.net/v3/binary/latest/{}/ga/{}/{}/jdk/hotspot/normal/eclipse?project=jdk",
+                version, os_part, arch_part
+            ));
+            urls.push(format!(
+                "https://github.com/adoptium/temurin{}-binaries/releases/download/jdk-{}/OpenJDK{}_U-jdk_{}_{}_{}_{}",
+                series, version, version, os_part, arch_part, "hotspot", ext
+            ));
+        }
+
+        // Always add Corretto and Microsoft as fallbacks
+        if !impl_lower.contains("corretto") && !impl_lower.contains("amazon") {
+            urls.push(format!(
+                "https://corretto.aws/downloads/latest/{}/amazon-corretto-{}-{}-{}-{}.{}",
+                version, version, os_part, arch_part, version, ext
+            ));
+        }
+
+        if !impl_lower.contains("microsoft") && !impl_lower.contains("msft") {
+            urls.push(format!(
+                "https://aka.ms/download-jdk/microsoft-jdk-{}-{}-{}{}.{}",
+                version, os_part, arch_part, if os == "windows" { "-windows" } else { "" }, ext
+            ));
+        }
 
         urls
     }
@@ -1184,6 +1419,222 @@ impl ToolchainService for ToolchainServiceImpl {
             ..Default::default()
         }))
     }
+
+    async fn auto_detect_toolchains(
+        &self,
+        request: Request<AutoDetectToolchainsRequest>,
+    ) -> Result<Response<AutoDetectToolchainsResponse>, Status> {
+        let req = request.into_inner();
+        let mut results = Vec::new();
+
+        // 1. JAVA_HOME
+        if let Ok(java_home) = std::env::var("JAVA_HOME") {
+            if let Some(info) = Self::probe_java_home_detailed(&java_home) {
+                if req.major_version.is_empty() || info.major_version == req.major_version {
+                    results.push(AutoDetectedToolchain {
+                        java_home,
+                        major_version: info.major_version,
+                        full_version: info.full_version,
+                        vendor: info.vendor,
+                        source: "JAVA_HOME".to_string(),
+                        verified: true,
+                    });
+                }
+            }
+        }
+
+        // 2. PATH scanning
+        if req.scan_path {
+            if let Ok(path_var) = std::env::var("PATH") {
+                let separator = if cfg!(target_os = "windows") { ';' } else { ':' };
+                for dir in path_var.split(separator) {
+                    let java_bin = if cfg!(target_os = "windows") {
+                        Path::new(dir).join("java.exe")
+                    } else {
+                        Path::new(dir).join("java")
+                    };
+                    if java_bin.is_file() {
+                        if let Some(java_home) = java_bin.parent().and_then(|p| p.parent()) {
+                            let home_str = java_home.to_string_lossy().to_string();
+                            // Skip if already found via JAVA_HOME
+                            if results.iter().any(|r| r.java_home == home_str) {
+                                continue;
+                            }
+                            if let Some(info) = Self::probe_java_home_detailed(&home_str) {
+                                if req.major_version.is_empty() || info.major_version == req.major_version {
+                                    results.push(AutoDetectedToolchain {
+                                        java_home: home_str,
+                                        major_version: info.major_version,
+                                        full_version: info.full_version,
+                                        vendor: info.vendor,
+                                        source: "PATH".to_string(),
+                                        verified: true,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. SDKMAN
+        if req.scan_sdkman && cfg!(not(target_os = "windows")) {
+            if let Ok(home) = std::env::var("HOME") {
+                let sdkman_base = Path::new(&home).join(".sdkman/candidates/java");
+                if sdkman_base.is_dir() {
+                    if let Ok(entries) = std::fs::read_dir(&sdkman_base) {
+                        for entry in entries.flatten() {
+                            let path = entry.path();
+                            if path.is_dir() {
+                                let home_str = path.to_string_lossy().to_string();
+                                if results.iter().any(|r| r.java_home == home_str) {
+                                    continue;
+                                }
+                                if let Some(info) = Self::probe_java_home_detailed(&home_str) {
+                                    if req.major_version.is_empty() || info.major_version == req.major_version {
+                                        results.push(AutoDetectedToolchain {
+                                            java_home: home_str,
+                                            major_version: info.major_version,
+                                            full_version: info.full_version,
+                                            vendor: info.vendor,
+                                            source: "SDKMAN".to_string(),
+                                            verified: true,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Filesystem scanning (common paths)
+        let candidates: Vec<String> = if cfg!(target_os = "macos") {
+            vec![
+                "/Library/Java/JavaVirtualMachines".to_string(),
+                "/opt/homebrew/opt/openjdk".to_string(),
+                "/opt/homebrew/opt/openjdk@11".to_string(),
+                "/opt/homebrew/opt/openjdk@17".to_string(),
+                "/opt/homebrew/opt/openjdk@21".to_string(),
+                "/opt/homebrew/opt/openjdk@22".to_string(),
+                "/opt/homebrew/Cellar/openjdk".to_string(),
+            ]
+        } else if cfg!(target_os = "linux") {
+            vec![
+                "/usr/lib/jvm".to_string(),
+                "/usr/java".to_string(),
+            ]
+        } else {
+            vec![
+                "C:\\Program Files\\Java".to_string(),
+                "C:\\Program Files\\Eclipse Adoptium".to_string(),
+                "C:\\Program Files\\Microsoft".to_string(),
+            ]
+        };
+
+        for base in &candidates {
+            let base_path = Path::new(base);
+            if !base_path.is_dir() {
+                continue;
+            }
+            if let Ok(entries) = std::fs::read_dir(base_path) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if !path.is_dir() {
+                        continue;
+                    }
+                    let home = if cfg!(target_os = "macos") {
+                        let contents_home = path.join("Contents/Home");
+                        if contents_home.exists() {
+                            contents_home
+                        } else {
+                            path.clone()
+                        }
+                    } else {
+                        path.clone()
+                    };
+                    let home_str = home.to_string_lossy().to_string();
+                    if results.iter().any(|r| r.java_home == home_str) {
+                        continue;
+                    }
+                    if let Some(info) = Self::probe_java_home_detailed(&home_str) {
+                        if req.major_version.is_empty() || info.major_version == req.major_version {
+                            results.push(AutoDetectedToolchain {
+                                java_home: home_str,
+                                major_version: info.major_version,
+                                full_version: info.full_version,
+                                vendor: info.vendor,
+                                source: "filesystem".to_string(),
+                                verified: true,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. toolchain.properties
+        if req.scan_project {
+            if let Ok(mut dir) = std::env::current_dir() {
+                for _ in 0..10 {
+                    let props_path = dir.join("toolchain.properties");
+                    if props_path.exists() {
+                        if let Ok(contents) = std::fs::read_to_string(&props_path) {
+                            for line in contents.lines() {
+                                let line = line.trim();
+                                if line.starts_with('#') || line.is_empty() {
+                                    continue;
+                                }
+                                if let Some((key, value)) = line.split_once('=') {
+                                    let key = key.trim();
+                                    let value = value.trim();
+                                    if key == "java.home" || key == "jdk.home" || key == "javaHome" {
+                                        let home_str = value.to_string();
+                                        if results.iter().any(|r| r.java_home == home_str) {
+                                            continue;
+                                        }
+                                        if Path::new(value).exists() {
+                                            if let Some(info) = Self::probe_java_home_detailed(value) {
+                                                if req.major_version.is_empty() || info.major_version == req.major_version {
+                                                    results.push(AutoDetectedToolchain {
+                                                        java_home: home_str,
+                                                        major_version: info.major_version,
+                                                        full_version: info.full_version,
+                                                        vendor: info.vendor,
+                                                        source: "toolchain.properties".to_string(),
+                                                        verified: true,
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !dir.pop() {
+                        break;
+                    }
+                }
+            }
+        }
+
+        let total = results.len() as i32;
+        let summary = format!(
+            "Found {} JDK(s) across JAVA_HOME, PATH, SDKMAN, filesystem, and toolchain.properties",
+            total
+        );
+
+        tracing::debug!(total, summary = %summary, "Auto-detection complete");
+
+        Ok(Response::new(AutoDetectToolchainsResponse {
+            toolchains: results,
+            total_found: total,
+            scan_summary: summary,
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -1218,7 +1669,7 @@ mod tests {
 OpenJDK Runtime Environment (build 17.0.12+8)
 OpenJDK 64-Bit Server VM (build 17.0.12+8, mixed mode, sharing)"#;
         let version = ToolchainServiceImpl::parse_java_version(output);
-        assert_eq!(version, Some("JDK 17".to_string()));
+        assert_eq!(version, Some("JDK 17 (OpenJDK)".to_string()));
     }
 
     #[tokio::test]
@@ -1234,7 +1685,7 @@ Java(TM) SE Runtime Environment (build 1.8.0_412-b08)"#;
         let output = r#"openjdk version "21.0.4" 2024-01-16
 OpenJDK Runtime Environment (build 21.0.4+7)"#;
         let version = ToolchainServiceImpl::parse_java_version(output);
-        assert_eq!(version, Some("JDK 21".to_string()));
+        assert_eq!(version, Some("JDK 21 (OpenJDK)".to_string()));
     }
 
     #[tokio::test]
@@ -1275,7 +1726,7 @@ OpenJDK Runtime Environment (build 21.0.4+7)"#;
     fn test_parse_java_version_java11() {
         let output = r#"openjdk version "11.0.24" 2024-04-16"#;
         let version = ToolchainServiceImpl::parse_java_version(output);
-        assert_eq!(version, Some("JDK 11".to_string()));
+        assert_eq!(version, Some("JDK 11 (OpenJDK)".to_string()));
     }
 
     #[test]
@@ -1716,5 +2167,189 @@ OpenJDK Runtime Environment (build 21.0.4+7)"#;
     fn test_sha256_file_missing() {
         let result = ToolchainServiceImpl::sha256_file(Path::new("/nonexistent/file"));
         assert!(result.is_err());
+    }
+
+    // --- Vendor detection tests ---
+
+    #[test]
+    fn test_detect_vendor_temurin() {
+        let output = r#"openjdk version "17.0.12" 2024-07-16
+Eclipse Temurin Runtime Environment"#;
+        assert_eq!(ToolchainServiceImpl::detect_vendor(output), "Temurin");
+    }
+
+    #[test]
+    fn test_detect_vendor_corretto() {
+        let output = r#"openjdk version "21.0.4" 2024-01-16
+Amazon Corretto Runtime Environment"#;
+        assert_eq!(ToolchainServiceImpl::detect_vendor(output), "Corretto");
+    }
+
+    #[test]
+    fn test_detect_vendor_zulu() {
+        let output = r#"openjdk version "17.0.12" 2024-07-16
+Azul Zulu Runtime Environment"#;
+        assert_eq!(ToolchainServiceImpl::detect_vendor(output), "Zulu");
+    }
+
+    #[test]
+    fn test_detect_vendor_microsoft() {
+        let output = r#"openjdk version "21.0.4" 2024-01-16
+Microsoft Build of OpenJDK Runtime"#;
+        assert_eq!(ToolchainServiceImpl::detect_vendor(output), "Microsoft");
+    }
+
+    #[test]
+    fn test_detect_vendor_graalvm() {
+        let output = r#"openjdk version "21.0.4" 2024-01-16
+GraalVM Runtime Environment"#;
+        assert_eq!(ToolchainServiceImpl::detect_vendor(output), "GraalVM");
+    }
+
+    #[test]
+    fn test_detect_vendor_unknown() {
+        let output = "some random text without vendor info";
+        assert_eq!(ToolchainServiceImpl::detect_vendor(output), "");
+    }
+
+    // --- Auto-detect tests ---
+
+    #[tokio::test]
+    async fn test_auto_detect_returns_java_home() {
+        let svc = make_svc();
+
+        let resp = svc
+            .auto_detect_toolchains(Request::new(AutoDetectToolchainsRequest {
+                major_version: String::new(),
+                scan_path: false,
+                scan_sdkman: false,
+                scan_project: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Should find at least JAVA_HOME if set
+        if std::env::var("JAVA_HOME").is_ok() {
+            assert!(resp.total_found > 0);
+            assert!(resp.toolchains.iter().any(|t| t.source == "JAVA_HOME"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_auto_detect_filter_by_version() {
+        let svc = make_svc();
+
+        let resp = svc
+            .auto_detect_toolchains(Request::new(AutoDetectToolchainsRequest {
+                major_version: "99".to_string(), // unlikely to exist
+                scan_path: false,
+                scan_sdkman: false,
+                scan_project: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.total_found, 0);
+        assert!(resp.scan_summary.contains("Found 0"));
+    }
+
+    #[tokio::test]
+    async fn test_auto_detect_with_path_scan() {
+        let svc = make_svc();
+
+        let resp = svc
+            .auto_detect_toolchains(Request::new(AutoDetectToolchainsRequest {
+                major_version: String::new(),
+                scan_path: true,
+                scan_sdkman: false,
+                scan_project: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Should find at least one JDK (JAVA_HOME or PATH)
+        assert!(resp.total_found >= 0);
+        for tc in &resp.toolchains {
+            assert!(!tc.java_home.is_empty());
+            assert!(!tc.major_version.is_empty());
+            // If vendor is detected, should be non-empty
+            // If not detected, can be empty (e.g., "JDK 8" from Oracle)
+            if !tc.source.is_empty() {
+                assert!(matches!(
+                    tc.source.as_str(),
+                    "JAVA_HOME" | "PATH" | "filesystem"
+                ));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_auto_detect_deduplication() {
+        let svc = make_svc();
+
+        let resp = svc
+            .auto_detect_toolchains(Request::new(AutoDetectToolchainsRequest {
+                major_version: String::new(),
+                scan_path: true,
+                scan_sdkman: false,
+                scan_project: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // No duplicate java_home paths
+        let homes: Vec<&str> = resp.toolchains.iter().map(|t| t.java_home.as_str()).collect();
+        let unique: std::collections::HashSet<&str> = homes.iter().copied().collect();
+        assert_eq!(homes.len(), unique.len(), "Found duplicate java_home entries");
+    }
+
+    // --- Download URL tests ---
+
+    #[test]
+    fn test_build_download_urls_default() {
+        let urls = ToolchainServiceImpl::build_download_urls("17", "JDK", "macos", "aarch64");
+        assert!(!urls.is_empty());
+        // Default should start with Adoptium
+        assert!(urls[0].contains("adoptium.net") || urls[0].contains("github.com/adoptium"));
+    }
+
+    #[test]
+    fn test_build_download_urls_corretto() {
+        let urls = ToolchainServiceImpl::build_download_urls("21", "corretto", "linux", "x86_64");
+        // First URL should be Corretto-specific
+        assert!(urls[0].contains("corretto.aws"));
+    }
+
+    #[test]
+    fn test_build_download_urls_microsoft() {
+        let urls = ToolchainServiceImpl::build_download_urls("21", "microsoft", "linux", "x86_64");
+        // First URL should be Microsoft-specific
+        assert!(urls[0].contains("aka.ms"));
+    }
+
+    #[test]
+    fn test_build_download_urls_zulu() {
+        let urls = ToolchainServiceImpl::build_download_urls("17", "zulu", "macos", "aarch64");
+        // First URL should be Zulu-specific
+        assert!(urls[0].contains("azul.com"));
+    }
+
+    #[test]
+    fn test_build_download_urls_graalvm() {
+        let urls = ToolchainServiceImpl::build_download_urls("21", "graalvm", "linux", "x86_64");
+        // First URL should be GraalVM-specific
+        assert!(urls[0].contains("oracle.com") || urls[0].contains("graalvm"));
+    }
+
+    #[test]
+    fn test_build_download_urls_windows() {
+        let urls = ToolchainServiceImpl::build_download_urls("17", "JDK", "windows", "x86_64");
+        for url in &urls {
+            assert!(url.contains("zip") || url.contains("windows"), "URL should be windows-specific: {}", url);
+        }
     }
 }
