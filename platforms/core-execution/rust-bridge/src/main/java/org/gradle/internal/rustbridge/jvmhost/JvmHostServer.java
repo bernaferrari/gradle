@@ -19,8 +19,9 @@ import io.grpc.stub.StreamObserver;
  * <p>Listens on a Unix domain socket (e.g., {@code jvm-host.sock}) and serves
  * the {@code JvmHostService} defined in {@code substrate.proto}.</p>
  *
- * <p>Only {@code GetBuildEnvironment} is fully implemented; other RPCs return
- * UNIMPLEMENTED status until Phase 6 is complete.</p>
+ * <p>{@code GetBuildEnvironment}, {@code GetBuildModel}, and {@code ResolveConfiguration}
+ * are implemented. {@code EvaluateScript} returns UNIMPLEMENTED (requires Gradle's
+ * ScriptPluginFactory — deferred).</p>
  */
 public class JvmHostServer implements Closeable {
 
@@ -65,22 +66,59 @@ public class JvmHostServer implements Closeable {
                 public void getBuildModel(
                     GetBuildModelRequest request,
                     StreamObserver<GetBuildModelResponse> responseObserver) {
-                    LOGGER.debug("[substrate-jvmhost] getBuildModel called (UNIMPLEMENTED)");
-                    responseObserver.onError(
-                        io.grpc.Status.UNIMPLEMENTED
-                            .withDescription("Build model access not yet implemented")
-                            .asRuntimeException());
+                    try {
+                        LOGGER.debug("[substrate-jvmhost] getBuildModel called for build {}", request.getBuildId());
+                        GetBuildModelResponse.Builder responseBuilder = GetBuildModelResponse.newBuilder();
+                        for (JvmHostServiceImpl.ProjectModelEntry entry : serviceImpl.getProjectModels()) {
+                            ProjectModel.Builder pm = ProjectModel.newBuilder()
+                                .setPath(entry.getPath())
+                                .setName(entry.getName())
+                                .setBuildFile(entry.getBuildFile());
+                            pm.addAllSubprojects(entry.getSubprojects());
+                            responseBuilder.addProjects(pm);
+                        }
+                        responseObserver.onNext(responseBuilder.build());
+                        responseObserver.onCompleted();
+                    } catch (Exception e) {
+                        LOGGER.error("[substrate-jvmhost] getBuildModel failed", e);
+                        responseObserver.onError(
+                            io.grpc.Status.INTERNAL
+                                .withDescription("Failed to retrieve build model: " + e.getMessage())
+                                .asRuntimeException());
+                    }
                 }
 
                 @Override
                 public void resolveConfiguration(
                     ResolveConfigRequest request,
                     StreamObserver<ResolveConfigResponse> responseObserver) {
-                    LOGGER.debug("[substrate-jvmhost] resolveConfiguration called (UNIMPLEMENTED)");
-                    responseObserver.onError(
-                        io.grpc.Status.UNIMPLEMENTED
-                            .withDescription("Configuration resolution not yet implemented")
-                            .asRuntimeException());
+                    try {
+                        LOGGER.debug("[substrate-jvmhost] resolveConfiguration called for project {} config {}",
+                            request.getProjectPath(), request.getConfigurationName());
+                        ResolveConfigResponse.Builder responseBuilder = ResolveConfigResponse.newBuilder()
+                            .setSuccess(true);
+                        for (JvmHostServiceImpl.ResolvedArtifactEntry entry :
+                                serviceImpl.resolveArtifacts(
+                                    request.getProjectPath(),
+                                    request.getConfigurationName())) {
+                            ResolvedArtifact artifact = ResolvedArtifact.newBuilder()
+                                .setGroup(entry.getGroup())
+                                .setName(entry.getName())
+                                .setVersion(entry.getVersion())
+                                .setConfiguration(entry.getConfiguration())
+                                .build();
+                            responseBuilder.addArtifacts(artifact);
+                        }
+                        responseObserver.onNext(responseBuilder.build());
+                        responseObserver.onCompleted();
+                    } catch (Exception e) {
+                        LOGGER.error("[substrate-jvmhost] resolveConfiguration failed", e);
+                        responseObserver.onNext(ResolveConfigResponse.newBuilder()
+                            .setSuccess(false)
+                            .setErrorMessage("Configuration resolution failed: " + e.getMessage())
+                            .build());
+                        responseObserver.onCompleted();
+                    }
                 }
 
                 @Override
@@ -123,6 +161,14 @@ public class JvmHostServer implements Closeable {
      */
     public String getSocketPath() {
         return socketPath;
+    }
+
+    /**
+     * Get the service implementation backing this server.
+     * Used to set the ProjectModelProvider after construction.
+     */
+    public JvmHostServiceImpl getServiceImpl() {
+        return serviceImpl;
     }
 
     @Override
