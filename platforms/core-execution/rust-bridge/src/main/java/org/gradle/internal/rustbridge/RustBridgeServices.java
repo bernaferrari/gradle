@@ -115,6 +115,12 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
                 ".gradle-substrate"
             );
 
+            boolean enableJvmHost = options.getOption(RustSubstrateOptions.ENABLE_JVM_HOST).get();
+
+            if (enableJvmHost) {
+                return DaemonLauncher.withJvmHost(daemonBinary, socketDirectory);
+            }
+
             return DaemonLauncher.of(daemonBinary, socketDirectory);
         }
     }

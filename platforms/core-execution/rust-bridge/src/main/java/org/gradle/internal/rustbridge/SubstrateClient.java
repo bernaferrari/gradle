@@ -89,10 +89,13 @@ public class SubstrateClient implements Closeable {
     private final BuildMetricsServiceGrpc.BuildMetricsServiceBlockingStub buildMetricsStub;
     // Phase 38: Garbage collection
     private final GarbageCollectionServiceGrpc.GarbageCollectionServiceBlockingStub garbageCollectionStub;
+    // Phase 6: JVM Compatibility Host
+    private final String jvmHostSocketPath;
 
-    private SubstrateClient(ManagedChannel channel, boolean noop) {
+    private SubstrateClient(ManagedChannel channel, boolean noop, String jvmHostSocketPath) {
         this.channel = channel;
         this.noop = noop;
+        this.jvmHostSocketPath = jvmHostSocketPath;
         if (noop) {
             this.controlStub = null;
             this.hashStub = null;
@@ -170,11 +173,19 @@ public class SubstrateClient implements Closeable {
      * Creates a SubstrateClient connected to the given Unix socket path.
      */
     public static SubstrateClient connect(String socketPath) throws IOException {
+        return connect(socketPath, null);
+    }
+
+    /**
+     * Creates a SubstrateClient connected to the given Unix socket path,
+     * with an optional JVM host socket path for reverse-direction RPC.
+     */
+    public static SubstrateClient connect(String socketPath, String jvmHostSocketPath) throws IOException {
         ManagedChannel channel = NettyChannelBuilder
             .forAddress(new DomainSocketAddress(socketPath))
             .usePlaintext()
             .build();
-        return new SubstrateClient(channel, false);
+        return new SubstrateClient(channel, false, jvmHostSocketPath);
     }
 
     /**
@@ -186,6 +197,13 @@ public class SubstrateClient implements Closeable {
 
     public boolean isNoop() {
         return noop;
+    }
+
+    /**
+     * Get the JVM host socket path that will be passed in the handshake.
+     */
+    public String getJvmHostSocketPath() {
+        return jvmHostSocketPath;
     }
 
     // -- Stub getters --

@@ -301,6 +301,17 @@ public class RustSubstrateOptions {
     public static final InternalFlag ENABLE_RUST_GC =
         new InternalFlag("org.gradle.rust.substrate.gc.enabled", false);
 
+    /**
+     * Enable Phase 6: JVM Compatibility Host — Java gRPC server for Rust callbacks.
+     * When enabled, a JvmHostServer is started alongside the Rust daemon,
+     * allowing the Rust daemon to call back into the JVM for script evaluation,
+     * build model access, and configuration resolution.
+     * Property: org.gradle.rust.substrate.jvm.host.enabled
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_JVM_HOST =
+        new InternalFlag("org.gradle.rust.substrate.jvm.host.enabled", false);
+
     private RustSubstrateOptions() {
         // utility class
     }
