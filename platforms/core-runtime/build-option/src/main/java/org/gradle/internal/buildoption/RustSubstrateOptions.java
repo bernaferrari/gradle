@@ -382,6 +382,22 @@ public class RustSubstrateOptions {
         new InternalFlag("org.gradle.rust.substrate.exec.authoritative", false);
 
     /**
+     * Enable authoritative mode for Rust-backed file watching subsystem.
+     * Property: org.gradle.rust.substrate.filewatch.authoritative
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_AUTHORITATIVE_FILE_WATCH =
+        new InternalFlag("org.gradle.rust.substrate.filewatch.authoritative", false);
+
+    /**
+     * Enable authoritative mode for Rust-backed dependency resolution subsystem.
+     * Property: org.gradle.rust.substrate.dependency.authoritative
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_AUTHORITATIVE_DEPENDENCY_RESOLUTION =
+        new InternalFlag("org.gradle.rust.substrate.dependency.authoritative", false);
+
+    /**
      * Enable Phase 6: JVM Compatibility Host.
      * Property: org.gradle.rust.substrate.jvm.host.enabled
      * Default: false

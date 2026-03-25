@@ -45,37 +45,8 @@ public class RustFileWatchClient {
         List<String> includePatterns,
         List<String> excludePatterns
     ) {
-        if (client.isNoop()) {
-            return WatchResult.error("Substrate not available");
-        }
-
         try {
-            StartWatchingRequest.Builder builder = StartWatchingRequest.newBuilder()
-                .setRootPath(rootPath);
-
-            if (includePatterns != null) {
-                builder.addAllIncludePatterns(includePatterns);
-            }
-            if (excludePatterns != null) {
-                builder.addAllExcludePatterns(excludePatterns);
-            }
-
-            StartWatchingResponse response = client.getFileWatchStub()
-                .startWatching(builder.build());
-
-            if (response.getWatching()) {
-                LOGGER.debug("[substrate:watch] watching {} (id={}, {} files)",
-                    rootPath, response.getWatchId(), response.getFilesWatched());
-                return new WatchResult(
-                    response.getWatchId(),
-                    response.getWatching(),
-                    response.getFilesWatched(),
-                    true,
-                    ""
-                );
-            } else {
-                return WatchResult.error("Rust watcher returned not-watching");
-            }
+            return startWatchingStrict(rootPath, includePatterns, excludePatterns);
         } catch (Exception e) {
             LOGGER.debug("[substrate:watch] startWatching failed", e);
             return WatchResult.error("gRPC error: " + e.getMessage());
@@ -83,25 +54,75 @@ public class RustFileWatchClient {
     }
 
     /**
+     * Start watching a directory tree.
+     *
+     * @throws RuntimeException when substrate is unavailable or the RPC fails.
+     */
+    public WatchResult startWatchingStrict(
+        String rootPath,
+        List<String> includePatterns,
+        List<String> excludePatterns
+    ) {
+        if (client.isNoop()) {
+            throw new IllegalStateException("Substrate not available");
+        }
+
+        StartWatchingRequest.Builder builder = StartWatchingRequest.newBuilder()
+            .setRootPath(rootPath);
+
+        if (includePatterns != null) {
+            builder.addAllIncludePatterns(includePatterns);
+        }
+        if (excludePatterns != null) {
+            builder.addAllExcludePatterns(excludePatterns);
+        }
+
+        StartWatchingResponse response = client.getFileWatchStub()
+            .startWatching(builder.build());
+
+        if (response.getWatching()) {
+            LOGGER.debug("[substrate:watch] watching {} (id={}, {} files)",
+                rootPath, response.getWatchId(), response.getFilesWatched());
+            return new WatchResult(
+                response.getWatchId(),
+                response.getWatching(),
+                response.getFilesWatched(),
+                true,
+                ""
+            );
+        }
+        return WatchResult.error("Rust watcher returned not-watching");
+    }
+
+    /**
      * Stop watching a directory tree.
      */
     public boolean stopWatching(String watchId) {
-        if (client.isNoop()) {
-            return false;
-        }
-
         try {
-            StopWatchingResponse response = client.getFileWatchStub()
-                .stopWatching(StopWatchingRequest.newBuilder()
-                    .setWatchId(watchId)
-                    .build());
-
-            LOGGER.debug("[substrate:watch] stopped watching {}", watchId);
-            return response.getStopped();
+            return stopWatchingStrict(watchId);
         } catch (Exception e) {
             LOGGER.debug("[substrate:watch] stopWatching failed", e);
             return false;
         }
+    }
+
+    /**
+     * Stop watching a directory tree.
+     *
+     * @throws RuntimeException when substrate is unavailable or the RPC fails.
+     */
+    public boolean stopWatchingStrict(String watchId) {
+        if (client.isNoop()) {
+            throw new IllegalStateException("Substrate not available");
+        }
+
+        StopWatchingResponse response = client.getFileWatchStub()
+            .stopWatching(StopWatchingRequest.newBuilder()
+                .setWatchId(watchId)
+                .build());
+
+        LOGGER.debug("[substrate:watch] stopped watching {}", watchId);
+        return response.getStopped();
     }
 
     /**
