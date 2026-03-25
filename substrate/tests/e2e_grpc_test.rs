@@ -1,9 +1,10 @@
 //! End-to-end gRPC integration test for the substrate daemon.
 //!
 //! Prerequisites:
-//!   1. Build: CARGO_TARGET_DIR=/tmp/substrate-release cargo build --release
-//!   2. Start: ./gradle-substrate-daemon --socket-path /tmp/substrate-test.sock
-//!   3. Run:   RAYON_NUM_THREADS=2 cargo test --test e2e_grpc_test -- --nocapture
+//!   1. Build: cargo build --release --bin gradle-substrate-daemon
+//!   2. Run:   cargo test --test e2e_grpc_test -- --nocapture
+//!
+//! Or set SUBSTRATE_DAEMON_BIN to override the binary path.
 
 use gradle_substrate_daemon::proto::{
     control_service_client::ControlServiceClient, hash_service_client::HashServiceClient,
@@ -48,8 +49,18 @@ async fn ensure_daemon_running() {
     }
     eprintln!("[e2e] Starting daemon...");
 
-    let daemon_bin = std::env::var("SUBSTRATE_DAEMON_BIN")
-        .unwrap_or_else(|_| "./target/release/gradle-substrate-daemon".to_string());
+    let daemon_bin = std::env::var("SUBSTRATE_DAEMON_BIN").unwrap_or_else(|_| {
+        // CARGO_MANIFEST_DIR points to substrate/, workspace root is one level up.
+        let manifest = std::env::var("CARGO_MANIFEST_DIR")
+            .unwrap_or_else(|_| ".".to_string());
+        let workspace = Path::new(&manifest).parent().unwrap_or(Path::new("."));
+        workspace
+            .join("target")
+            .join("release")
+            .join("gradle-substrate-daemon")
+            .to_string_lossy()
+            .to_string()
+    });
 
     std::process::Command::new(&daemon_bin)
         .arg("--socket-path")
