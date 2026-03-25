@@ -3,11 +3,12 @@ package org.gradle.internal.rustbridge.dependency;
 import org.gradle.api.artifacts.DependencyResolutionListener;
 import org.gradle.api.artifacts.ResolvableDependencies;
 import org.gradle.api.artifacts.result.ResolutionResult;
+import org.gradle.api.artifacts.result.UnresolvedDependencyResult;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
 import org.slf4j.Logger;
 
-import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 
 /**
@@ -21,9 +22,10 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
 
     private final RustDependencyResolutionClient client;
     private final HashMismatchReporter mismatchReporter;
+    private final boolean authoritative;
 
     // Track resolution start times for timing measurement
-    private final Map<String, Long> resolutionStartTimes = new HashMap<>();
+    private final Map<String, Long> resolutionStartTimes = new ConcurrentHashMap<>();
     private final java.util.concurrent.atomic.AtomicLong totalResolutionTimeMs =
         new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong resolutionCount =
@@ -33,8 +35,17 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
         RustDependencyResolutionClient client,
         HashMismatchReporter mismatchReporter
     ) {
+        this(client, mismatchReporter, false);
+    }
+
+    public DependencyResolutionShadowListener(
+        RustDependencyResolutionClient client,
+        HashMismatchReporter mismatchReporter,
+        boolean authoritative
+    ) {
         this.client = client;
         this.mismatchReporter = mismatchReporter;
+        this.authoritative = authoritative;
     }
 
     @Override
@@ -59,7 +70,7 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
 
         try {
             String configName = dependencies.getName();
-            long startTime = resolutionStartTimes.remove(configName);
+            Long startTime = resolutionStartTimes.remove(configName);
             long durationMs = startTime != null
                 ? System.currentTimeMillis() - startTime
                 : 0;
@@ -77,9 +88,9 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
                 javaSuccess = result != null;
 
                 if (result != null) {
-                    artifactCount = result.getAllResolvedArtifacts().size();
-                    failureCount = result.getAllAttempts().stream()
-                        .mapToInt(a -> a.getFailure() != null ? 1 : 0)
+                    artifactCount = result.getAllComponents().size();
+                    failureCount = result.getAllDependencies().stream()
+                        .mapToInt(dep -> dep instanceof UnresolvedDependencyResult ? 1 : 0)
                         .sum();
                 }
             } catch (Exception e) {
@@ -87,19 +98,10 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
                 LOGGER.debug("[substrate:dep-resolve] could not extract resolution result", e);
             }
 
-            // Record the resolution event to Rust with real data
-            client.recordResolution(
-                configName,
-                durationMs,
-                artifactCount,
-                javaSuccess,
-                failureCount
-            );
-
-            mismatchReporter.reportMatch();
+            String source = recordResolutionInMode(configName, durationMs, artifactCount, javaSuccess, failureCount);
             LOGGER.debug(
-                "[substrate:dep-resolve] shadow OK: {} ({}ms, {} artifacts, {} failures)",
-                configName, durationMs, artifactCount, failureCount
+                "[substrate:dep-resolve] shadow OK: {} ({}ms, {} artifacts, {} failures, source={})",
+                configName, durationMs, artifactCount, failureCount, source
             );
         } catch (Exception e) {
             mismatchReporter.reportRustError(
@@ -122,5 +124,34 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
      */
     public long getResolutionCount() {
         return resolutionCount.get();
+    }
+
+    public boolean isAuthoritative() {
+        return authoritative;
+    }
+
+    private String recordResolutionInMode(
+        String configName,
+        long durationMs,
+        int artifactCount,
+        boolean javaSuccess,
+        long failureCount
+    ) {
+        if (authoritative) {
+            try {
+                client.recordResolutionStrict(configName, durationMs, artifactCount, javaSuccess, failureCount);
+                mismatchReporter.reportMatch();
+                return "rust";
+            } catch (Exception e) {
+                mismatchReporter.reportRustError("dep-resolve:" + configName, e);
+                // Listener side-effects must never fail the Java resolution path.
+                client.recordResolution(configName, durationMs, artifactCount, javaSuccess, failureCount);
+                return "java-fallback";
+            }
+        }
+
+        client.recordResolution(configName, durationMs, artifactCount, javaSuccess, failureCount);
+        mismatchReporter.reportMatch();
+        return "java-shadow";
     }
 }

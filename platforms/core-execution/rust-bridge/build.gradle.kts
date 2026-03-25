@@ -120,9 +120,7 @@ tasks.named<JavaCompile>("compileJava") {
         "src/main/java/org/gradle/internal/rustbridge/cache/RustBuildCacheService.java",
         "src/main/java/org/gradle/internal/rustbridge/cache/RustBuildCacheServiceFactory.java",
         "src/main/java/org/gradle/internal/rustbridge/cache/RustRemoteBuildCache.java",
-        "src/main/java/org/gradle/internal/rustbridge/cache/RustRemoteBuildCacheServiceFactory.java",
-        // Uses ResolutionResult.getAllResolvedArtifacts()/getAllAttempts() which don't exist
-        "src/main/java/org/gradle/internal/rustbridge/dependency/DependencyResolutionShadowListener.java"
+        "src/main/java/org/gradle/internal/rustbridge/cache/RustRemoteBuildCacheServiceFactory.java"
     )
     setSource(source.filter { file ->
         excludedDirs.none { file.absolutePath.contains(it) }
@@ -139,7 +137,6 @@ tasks.named<JavaCompile>("compileTestJava") {
 
 tasks.named<GroovyCompile>("compileTestGroovy") {
     exclude(
-        "**/dependency/DependencyResolutionShadowListenerTest.groovy",
         "**/bootstrap/BootstrapLifecycleListenerTest.groovy",
         "**/buildresult/BuildResultShadowListenerTest.groovy",
         "**/cache/RustBuildCacheServiceTest.groovy",

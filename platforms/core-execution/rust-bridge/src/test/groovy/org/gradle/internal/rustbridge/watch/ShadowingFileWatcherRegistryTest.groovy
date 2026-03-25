@@ -67,7 +67,7 @@ class ShadowingFileWatcherRegistryTest extends Specification {
         1 * rustClient.startWatching("/tmp/test-watch", [], []) >> watchResult
         1 * watchResult.isSuccess() >> true
         1 * watchResult.isWatching() >> true
-        1 * watchResult.getWatchId() >> "watch-42"
+        2 * watchResult.getWatchId() >> "watch-42"
         0 * reporter._
     }
 
@@ -108,6 +108,29 @@ class ShadowingFileWatcherRegistryTest extends Specification {
         1 * delegate.registerWatchableHierarchy(watchableDir, root)
         1 * rustClient.startWatching("/tmp/test-watch", [], []) >> { throw new RuntimeException("gRPC error") }
         1 * reporter.reportRustError("watch:/tmp/test-watch", _ as RuntimeException)
+    }
+
+    def "authoritative mode marks Rust watcher unhealthy on watch start failure"() {
+        given:
+        def delegate = Mock(FileWatcherRegistry)
+        def rustClient = Mock(RustFileWatchClient)
+        def reporter = Mock(HashMismatchReporter)
+        def registry = new ShadowingFileWatcherRegistry(delegate, rustClient, reporter, true)
+        def watchableDir = new File("/tmp/test-watch")
+        def root = Mock(org.gradle.internal.snapshot.SnapshotHierarchy)
+        def watchResult = Mock(RustFileWatchClient.WatchResult)
+
+        when:
+        registry.registerWatchableHierarchy(watchableDir, root)
+
+        then:
+        1 * delegate.registerWatchableHierarchy(watchableDir, root)
+        1 * rustClient.startWatching("/tmp/test-watch", [], []) >> watchResult
+        1 * watchResult.isSuccess() >> false
+        1 * watchResult.getErrorMessage() >> "watch failed"
+        1 * reporter.reportRustError("watch:/tmp/test-watch", _ as RuntimeException)
+        registry.isAuthoritative()
+        !registry.isRustWatchHealthy()
     }
 
     def "registerWatchableHierarchy skips Rust when rustClient is null"() {
@@ -151,7 +174,8 @@ class ShadowingFileWatcherRegistryTest extends Specification {
         def registry = new ShadowingFileWatcherRegistry(delegate, rustClient, reporter)
         def watchableDir = new File("/tmp/test-watch")
         def root = Mock(org.gradle.internal.snapshot.SnapshotHierarchy)
-        def watchResult = Mock(RustFileWatchClient.WatchResult)
+        def watchResult1 = Mock(RustFileWatchClient.WatchResult)
+        def watchResult2 = Mock(RustFileWatchClient.WatchResult)
 
         // Register two watches so close has something to stop
         when:
@@ -162,10 +186,14 @@ class ShadowingFileWatcherRegistryTest extends Specification {
         then:
         1 * delegate.registerWatchableHierarchy(watchableDir, root) >> { /* first call */ }
         1 * delegate.registerWatchableHierarchy(watchableDir, root) >> { /* second call */ }
-        2 * rustClient.startWatching("/tmp/test-watch", [], []) >> watchResult
-        2 * watchResult.isSuccess() >> true
-        2 * watchResult.isWatching() >> true
-        2 * watchResult.getWatchId() >> "watch-1", "watch-2"
+        1 * rustClient.startWatching("/tmp/test-watch", [], []) >> watchResult1
+        1 * rustClient.startWatching("/tmp/test-watch", [], []) >> watchResult2
+        1 * watchResult1.isSuccess() >> true
+        1 * watchResult1.isWatching() >> true
+        2 * watchResult1.getWatchId() >> "watch-1"
+        1 * watchResult2.isSuccess() >> true
+        1 * watchResult2.isWatching() >> true
+        2 * watchResult2.getWatchId() >> "watch-2"
         1 * rustClient.stopWatching("watch-1")
         1 * rustClient.stopWatching("watch-2")
         1 * delegate.close()
@@ -203,7 +231,7 @@ class ShadowingFileWatcherRegistryTest extends Specification {
         1 * rustClient.startWatching("/tmp/test-watch", [], []) >> watchResult
         1 * watchResult.isSuccess() >> true
         1 * watchResult.isWatching() >> true
-        1 * watchResult.getWatchId() >> "watch-fail"
+        2 * watchResult.getWatchId() >> "watch-fail"
         1 * rustClient.stopWatching("watch-fail") >> { throw new RuntimeException("connection lost") }
         1 * delegate.close()
     }
@@ -277,6 +305,31 @@ class ShadowingFileWatcherRegistryTest extends Specification {
         2 * delegate.updateVfsAfterBuildFinished(root) >> root
         // reportMatch called only once: the second call has zero accumulated changes
         1 * reporter.reportMatch()
+    }
+
+    def "authoritative mode suppresses shadow match reporting when Rust watcher is unhealthy"() {
+        given:
+        def delegate = Mock(FileWatcherRegistry)
+        def rustClient = Mock(RustFileWatchClient)
+        def reporter = Mock(HashMismatchReporter)
+        def registry = new ShadowingFileWatcherRegistry(delegate, rustClient, reporter, true)
+        def root = Mock(org.gradle.internal.snapshot.SnapshotHierarchy)
+        def watchableDir = new File("/tmp/test-watch")
+        def watchResult = Mock(RustFileWatchClient.WatchResult)
+
+        when:
+        registry.registerWatchableHierarchy(watchableDir, root) // make watcher unhealthy
+        registry.recordJavaChange()
+        registry.updateVfsAfterBuildFinished(root)
+
+        then:
+        1 * delegate.registerWatchableHierarchy(watchableDir, root)
+        1 * rustClient.startWatching("/tmp/test-watch", [], []) >> watchResult
+        1 * watchResult.isSuccess() >> false
+        1 * watchResult.getErrorMessage() >> "watch failed"
+        1 * delegate.updateVfsAfterBuildFinished(root) >> root
+        1 * reporter.reportRustError("watch:/tmp/test-watch", _ as RuntimeException)
+        0 * reporter.reportMatch()
     }
 
     def "getAndResetStatistics delegates to Java registry"() {

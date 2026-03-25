@@ -415,10 +415,15 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_FILE_WATCH)) {
                 return null;
             }
+            boolean authoritative = RustSubstrateOptions.isSubsystemAuthoritative(
+                options,
+                RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_FILE_WATCH
+            );
             return new ShadowingFileWatcherRegistryFactory(
                 delegateFactory,
                 rustFileWatchClient,
-                mismatchReporter
+                mismatchReporter,
+                authoritative
             );
         }
 
@@ -664,8 +669,12 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_DEPENDENCY_RESOLUTION)) {
                 return null;
             }
+            boolean authoritative = RustSubstrateOptions.isSubsystemAuthoritative(
+                options,
+                RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_DEPENDENCY_RESOLUTION
+            );
             DependencyResolutionShadowListener listener =
-                new DependencyResolutionShadowListener(rustDependencyResolutionClient, mismatchReporter);
+                new DependencyResolutionShadowListener(rustDependencyResolutionClient, mismatchReporter, authoritative);
             listenerManager.addListener(listener);
             return listener;
         }
@@ -748,7 +757,10 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             HashMismatchReporter mismatchReporter,
             InternalOptions options
         ) {
-            boolean authoritative = RustSubstrateOptions.isAuthoritative(options);
+            boolean authoritative = RustSubstrateOptions.isSubsystemAuthoritative(
+                options,
+                RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_CACHE
+            );
             return new ShadowingBuildCacheKeyComputer(cacheOrchestrationClient, mismatchReporter, authoritative);
         }
 

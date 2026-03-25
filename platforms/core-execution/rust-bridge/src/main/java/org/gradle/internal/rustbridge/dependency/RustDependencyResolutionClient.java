@@ -95,34 +95,8 @@ public class RustDependencyResolutionClient {
         List<RepositoryDescriptor> repositories,
         boolean lenient
     ) {
-        if (client.isNoop()) {
-            return new ResolutionResult(false, new ArrayList<>(), "Substrate not available", 0, 0, 0);
-        }
-
         try {
-            ResolveDependenciesResponse response = client.getDependencyResolutionStub()
-                .resolveDependencies(ResolveDependenciesRequest.newBuilder()
-                    .setConfigurationName(configurationName)
-                    .addAllDependencies(dependencies)
-                    .addAllRepositories(repositories)
-                    .setLenient(lenient)
-                    .build());
-
-            if (response.getSuccess()) {
-                LOGGER.debug("[substrate:dep-resolve] resolved {} deps in {}ms",
-                    response.getTotalArtifacts(), response.getResolutionTimeMs());
-            } else {
-                LOGGER.debug("[substrate:dep-resolve] resolution failed: {}", response.getErrorMessage());
-            }
-
-            return new ResolutionResult(
-                response.getSuccess(),
-                response.getResolvedDependenciesList(),
-                response.getErrorMessage(),
-                response.getResolutionTimeMs(),
-                response.getTotalArtifacts(),
-                response.getTotalDownloadSize()
-            );
+            return resolveDependenciesStrict(configurationName, dependencies, repositories, lenient);
         } catch (Exception e) {
             LOGGER.debug("[substrate:dep-resolve] gRPC call failed", e);
             return new ResolutionResult(false, new ArrayList<>(), e.getMessage(), 0, 0, 0);
@@ -130,26 +104,52 @@ public class RustDependencyResolutionClient {
     }
 
     /**
+     * Resolve a dependency graph via the Rust substrate daemon.
+     *
+     * @throws RuntimeException when substrate is unavailable or the RPC fails.
+     */
+    public ResolutionResult resolveDependenciesStrict(
+        String configurationName,
+        List<DependencyDescriptor> dependencies,
+        List<RepositoryDescriptor> repositories,
+        boolean lenient
+    ) {
+        if (client.isNoop()) {
+            throw new IllegalStateException("Substrate not available");
+        }
+
+        ResolveDependenciesResponse response = client.getDependencyResolutionStub()
+            .resolveDependencies(ResolveDependenciesRequest.newBuilder()
+                .setConfigurationName(configurationName)
+                .addAllDependencies(dependencies)
+                .addAllRepositories(repositories)
+                .setLenient(lenient)
+                .build());
+
+        if (response.getSuccess()) {
+            LOGGER.debug("[substrate:dep-resolve] resolved {} deps in {}ms",
+                response.getTotalArtifacts(), response.getResolutionTimeMs());
+        } else {
+            LOGGER.debug("[substrate:dep-resolve] resolution failed: {}", response.getErrorMessage());
+        }
+
+        return new ResolutionResult(
+            response.getSuccess(),
+            response.getResolvedDependenciesList(),
+            response.getErrorMessage(),
+            response.getResolutionTimeMs(),
+            response.getTotalArtifacts(),
+            response.getTotalDownloadSize()
+        );
+    }
+
+    /**
      * Check if an artifact is in the local cache.
      */
     public CacheCheckResult checkArtifactCache(String group, String name, String version,
                                                    String classifier, String sha256) {
-        if (client.isNoop()) {
-            return new CacheCheckResult(false, null, 0);
-        }
-
         try {
-            CheckArtifactCacheResponse response = client.getDependencyResolutionStub()
-                .checkArtifactCache(CheckArtifactCacheRequest.newBuilder()
-                    .setGroup(group).setName(name).setVersion(version)
-                    .setClassifier(classifier).setSha256(sha256)
-                    .build());
-
-            return new CacheCheckResult(
-                response.getCached(),
-                response.getLocalPath(),
-                response.getCachedSize_()
-            );
+            return checkArtifactCacheStrict(group, name, version, classifier, sha256);
         } catch (Exception e) {
             LOGGER.debug("[substrate:dep-resolve] cache check failed", e);
             return new CacheCheckResult(false, null, 0);
@@ -157,26 +157,78 @@ public class RustDependencyResolutionClient {
     }
 
     /**
-     * Record a resolution result for tracking.
+     * Check if an artifact is in the local cache.
+     *
+     * @throws RuntimeException when substrate is unavailable or the RPC fails.
      */
-    public void recordResolution(String configurationName, int dependencyCount,
-                                  long resolutionTimeMs, boolean success, long cacheHits) {
+    public CacheCheckResult checkArtifactCacheStrict(
+        String group,
+        String name,
+        String version,
+        String classifier,
+        String sha256
+    ) {
         if (client.isNoop()) {
-            return;
+            throw new IllegalStateException("Substrate not available");
         }
 
+        CheckArtifactCacheResponse response = client.getDependencyResolutionStub()
+            .checkArtifactCache(CheckArtifactCacheRequest.newBuilder()
+                .setGroup(group)
+                .setName(name)
+                .setVersion(version)
+                .setClassifier(classifier)
+                .setSha256(sha256)
+                .build());
+
+        return new CacheCheckResult(
+            response.getCached(),
+            response.getLocalPath(),
+            response.getCachedSize_()
+        );
+    }
+
+    /**
+     * Record a resolution result for tracking.
+     */
+    public void recordResolution(
+        String configurationName,
+        long resolutionTimeMs,
+        int dependencyCount,
+        boolean success,
+        long cacheHits
+    ) {
         try {
-            client.getDependencyResolutionStub()
-                .recordResolution(RecordResolutionRequest.newBuilder()
-                    .setConfigurationName(configurationName)
-                    .setDependencyCount(dependencyCount)
-                    .setResolutionTimeMs(resolutionTimeMs)
-                    .setSuccess(success)
-                    .setCacheHits(cacheHits)
-                    .build());
+            recordResolutionStrict(configurationName, resolutionTimeMs, dependencyCount, success, cacheHits);
         } catch (Exception e) {
             LOGGER.debug("[substrate:dep-resolve] record resolution failed", e);
         }
+    }
+
+    /**
+     * Record a resolution result for tracking.
+     *
+     * @throws RuntimeException when substrate is unavailable or the RPC fails.
+     */
+    public RecordResolutionResponse recordResolutionStrict(
+        String configurationName,
+        long resolutionTimeMs,
+        int dependencyCount,
+        boolean success,
+        long cacheHits
+    ) {
+        if (client.isNoop()) {
+            throw new IllegalStateException("Substrate not available");
+        }
+
+        return client.getDependencyResolutionStub()
+            .recordResolution(RecordResolutionRequest.newBuilder()
+                .setConfigurationName(configurationName)
+                .setDependencyCount(dependencyCount)
+                .setResolutionTimeMs(resolutionTimeMs)
+                .setSuccess(success)
+                .setCacheHits(cacheHits)
+                .build());
     }
 
     /**
@@ -185,22 +237,8 @@ public class RustDependencyResolutionClient {
     public boolean addArtifactToCache(String group, String name, String version,
                                        String classifier, String localPath,
                                        long size, String sha256) {
-        if (client.isNoop()) {
-            return false;
-        }
-
         try {
-            AddArtifactToCacheResponse response = client.getDependencyResolutionStub()
-                .addArtifactToCache(AddArtifactToCacheRequest.newBuilder()
-                    .setGroup(group)
-                    .setName(name)
-                    .setVersion(version)
-                    .setClassifier(classifier)
-                    .setLocalPath(localPath)
-                    .setSize(size)
-                    .setSha256(sha256)
-                    .build());
-            return response.getAccepted();
+            return addArtifactToCacheStrict(group, name, version, classifier, localPath, size, sha256);
         } catch (Exception e) {
             LOGGER.debug("[substrate:dep-resolve] add artifact to cache failed", e);
             return false;
@@ -208,19 +246,58 @@ public class RustDependencyResolutionClient {
     }
 
     /**
+     * Add an artifact to the Rust-side cache after download.
+     *
+     * @throws RuntimeException when substrate is unavailable or the RPC fails.
+     */
+    public boolean addArtifactToCacheStrict(
+        String group,
+        String name,
+        String version,
+        String classifier,
+        String localPath,
+        long size,
+        String sha256
+    ) {
+        if (client.isNoop()) {
+            throw new IllegalStateException("Substrate not available");
+        }
+
+        AddArtifactToCacheResponse response = client.getDependencyResolutionStub()
+            .addArtifactToCache(AddArtifactToCacheRequest.newBuilder()
+                .setGroup(group)
+                .setName(name)
+                .setVersion(version)
+                .setClassifier(classifier)
+                .setLocalPath(localPath)
+                .setSize(size)
+                .setSha256(sha256)
+                .build());
+        return response.getAccepted();
+    }
+
+    /**
      * Get resolution statistics from the Rust service.
      */
     public GetResolutionStatsResponse getResolutionStats() {
-        if (client.isNoop()) {
-            return GetResolutionStatsResponse.getDefaultInstance();
-        }
-
         try {
-            return client.getDependencyResolutionStub()
-                .getResolutionStats(GetResolutionStatsRequest.newBuilder().build());
+            return getResolutionStatsStrict();
         } catch (Exception e) {
             LOGGER.debug("[substrate:dep-resolve] get resolution stats failed", e);
             return GetResolutionStatsResponse.getDefaultInstance();
         }
+    }
+
+    /**
+     * Get resolution statistics from the Rust service.
+     *
+     * @throws RuntimeException when substrate is unavailable or the RPC fails.
+     */
+    public GetResolutionStatsResponse getResolutionStatsStrict() {
+        if (client.isNoop()) {
+            throw new IllegalStateException("Substrate not available");
+        }
+        return client.getDependencyResolutionStub()
+            .getResolutionStats(GetResolutionStatsRequest.newBuilder().build());
     }
 }

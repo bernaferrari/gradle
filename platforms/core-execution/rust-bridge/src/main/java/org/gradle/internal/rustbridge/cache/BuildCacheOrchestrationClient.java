@@ -37,26 +37,8 @@ public class BuildCacheOrchestrationClient {
         Map<String, String> inputFileHashes,
         List<String> outputNames
     ) {
-        if (client.isNoop()) {
-            return CacheKeyResult.error("Substrate not available");
-        }
-
         try {
-            ComputeCacheKeyResponse response = client.getCacheOrchestrationStub()
-                .computeCacheKey(ComputeCacheKeyRequest.newBuilder()
-                    .setWorkIdentity(workIdentity)
-                    .setImplementationHash(implHash)
-                    .putAllInputPropertyHashes(inputPropertyHashes)
-                    .putAllInputFileHashes(inputFileHashes)
-                    .addAllOutputPropertyNames(outputNames)
-                    .build());
-
-            return new CacheKeyResult(
-                response.getCacheKey().toByteArray(),
-                response.getCacheKeyString(),
-                true,
-                ""
-            );
+            return computeCacheKeyStrict(workIdentity, implHash, inputPropertyHashes, inputFileHashes, outputNames);
         } catch (Exception e) {
             LOGGER.debug("[substrate:cache-orch] computeCacheKey failed", e);
             return CacheKeyResult.error("gRPC error: " + e.getMessage());
@@ -64,20 +46,44 @@ public class BuildCacheOrchestrationClient {
     }
 
     /**
+     * Compute a deterministic cache key for the given work identity and input fingerprints.
+     *
+     * @throws RuntimeException when substrate is unavailable or the RPC fails.
+     */
+    public CacheKeyResult computeCacheKeyStrict(
+        String workIdentity,
+        String implHash,
+        Map<String, String> inputPropertyHashes,
+        Map<String, String> inputFileHashes,
+        List<String> outputNames
+    ) {
+        if (client.isNoop()) {
+            throw new IllegalStateException("Substrate not available");
+        }
+
+        ComputeCacheKeyResponse response = client.getCacheOrchestrationStub()
+            .computeCacheKey(ComputeCacheKeyRequest.newBuilder()
+                .setWorkIdentity(workIdentity)
+                .setImplementationHash(implHash)
+                .putAllInputPropertyHashes(inputPropertyHashes)
+                .putAllInputFileHashes(inputFileHashes)
+                .addAllOutputPropertyNames(outputNames)
+                .build());
+
+        return new CacheKeyResult(
+            response.getCacheKey().toByteArray(),
+            response.getCacheKeyString(),
+            true,
+            ""
+        );
+    }
+
+    /**
      * Check if a cache entry exists for the given key without loading it.
      */
     public ProbeResult probeCache(byte[] cacheKey) {
-        if (client.isNoop()) {
-            return ProbeResult.unavailable("Substrate not available");
-        }
-
         try {
-            ProbeCacheResponse response = client.getCacheOrchestrationStub()
-                .probeCache(ProbeCacheRequest.newBuilder()
-                    .setCacheKey(com.google.protobuf.ByteString.copyFrom(cacheKey))
-                    .build());
-
-            return new ProbeResult(response.getAvailable(), response.getLocation(), true);
+            return probeCacheStrict(cacheKey);
         } catch (Exception e) {
             LOGGER.debug("[substrate:cache-orch] probeCache failed", e);
             return ProbeResult.unavailable("gRPC error: " + e.getMessage());
@@ -85,25 +91,52 @@ public class BuildCacheOrchestrationClient {
     }
 
     /**
+     * Check if a cache entry exists for the given key without loading it.
+     *
+     * @throws RuntimeException when substrate is unavailable or the RPC fails.
+     */
+    public ProbeResult probeCacheStrict(byte[] cacheKey) {
+        if (client.isNoop()) {
+            throw new IllegalStateException("Substrate not available");
+        }
+
+        ProbeCacheResponse response = client.getCacheOrchestrationStub()
+            .probeCache(ProbeCacheRequest.newBuilder()
+                .setCacheKey(com.google.protobuf.ByteString.copyFrom(cacheKey))
+                .build());
+
+        return new ProbeResult(response.getAvailable(), response.getLocation(), true, "");
+    }
+
+    /**
      * Mark outputs as stored for the given cache key.
      */
     public boolean storeOutputs(byte[] cacheKey, long executionTimeMs) {
-        if (client.isNoop()) {
-            return false;
-        }
-
         try {
-            StoreOutputsResponse response = client.getCacheOrchestrationStub()
-                .storeOutputs(StoreOutputsRequest.newBuilder()
-                    .setCacheKey(com.google.protobuf.ByteString.copyFrom(cacheKey))
-                    .setExecutionTimeMs(executionTimeMs)
-                    .build());
-
-            return response.getSuccess();
+            return storeOutputsStrict(cacheKey, executionTimeMs);
         } catch (Exception e) {
             LOGGER.debug("[substrate:cache-orch] storeOutputs failed", e);
             return false;
         }
+    }
+
+    /**
+     * Mark outputs as stored for the given cache key.
+     *
+     * @throws RuntimeException when substrate is unavailable or the RPC fails.
+     */
+    public boolean storeOutputsStrict(byte[] cacheKey, long executionTimeMs) {
+        if (client.isNoop()) {
+            throw new IllegalStateException("Substrate not available");
+        }
+
+        StoreOutputsResponse response = client.getCacheOrchestrationStub()
+            .storeOutputs(StoreOutputsRequest.newBuilder()
+                .setCacheKey(com.google.protobuf.ByteString.copyFrom(cacheKey))
+                .setExecutionTimeMs(executionTimeMs)
+                .build());
+
+        return response.getSuccess();
     }
 
     /**
@@ -139,19 +172,22 @@ public class BuildCacheOrchestrationClient {
         private final boolean available;
         private final String location;
         private final boolean success;
+        private final String errorMessage;
 
-        private ProbeResult(boolean available, String location, boolean success) {
+        private ProbeResult(boolean available, String location, boolean success, String errorMessage) {
             this.available = available;
             this.location = location;
             this.success = success;
+            this.errorMessage = errorMessage;
         }
 
         public static ProbeResult unavailable(String reason) {
-            return new ProbeResult(false, "", false);
+            return new ProbeResult(false, "", false, reason);
         }
 
         public boolean isAvailable() { return available; }
         public String getLocation() { return location; }
         public boolean isSuccess() { return success; }
+        public String getErrorMessage() { return errorMessage; }
     }
 }
