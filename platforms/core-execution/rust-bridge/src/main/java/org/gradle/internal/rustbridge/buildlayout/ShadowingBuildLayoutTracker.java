@@ -1,8 +1,6 @@
 package org.gradle.internal.rustbridge.buildlayout;
 
-import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
-import org.slf4j.Logger;
 
 import java.util.List;
 
@@ -13,8 +11,6 @@ import java.util.List;
  * and compares against the Rust BuildLayoutService.</p>
  */
 public class ShadowingBuildLayoutTracker {
-
-    private static final Logger LOGGER = Logging.getLogger(ShadowingBuildLayoutTracker.class);
 
     private final RustBuildLayoutClient rustClient;
     private final HashMismatchReporter mismatchReporter;

@@ -112,7 +112,7 @@ public class RustWorkerProcessClient {
                     .build());
 
             if (response.hasWorker()) {
-                AcquireWorkerResponse.WorkerHandle w = response.getWorker();
+                gradle.substrate.v1.WorkerHandle w = response.getWorker();
                 WorkerHandle handle = new WorkerHandle(
                     w.getWorkerId(), w.getWorkerKey(), w.getPid(),
                     w.getConnectAddress(), w.getStartedAtMs(), w.getHealthy());

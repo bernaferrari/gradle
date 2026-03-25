@@ -9,7 +9,7 @@ use crate::proto::{
     ComputeCacheKeyRequest, ComputeCacheKeyResponse, ProbeCacheRequest, ProbeCacheResponse,
     StoreOutputsRequest, StoreOutputsResponse,
 };
-use crate::server::cache::{LocalCacheStore, hex};
+use crate::server::cache::{hex, LocalCacheStore};
 
 /// Maximum number of stored cache keys to track before eviction.
 const MAX_STORED_KEYS: usize = 50_000;
@@ -291,16 +291,22 @@ mod tests {
             ]
             .into_iter()
             .collect(),
-            input_file_hashes: vec![
-                ("classpath".to_string(), "hash3".to_string()),
-            ]
-            .into_iter()
-            .collect(),
+            input_file_hashes: vec![("classpath".to_string(), "hash3".to_string())]
+                .into_iter()
+                .collect(),
             output_property_names: vec!["classes".to_string()],
         };
 
-        let resp1 = svc.compute_cache_key(Request::new(make_req())).await.unwrap().into_inner();
-        let resp2 = svc.compute_cache_key(Request::new(make_req())).await.unwrap().into_inner();
+        let resp1 = svc
+            .compute_cache_key(Request::new(make_req()))
+            .await
+            .unwrap()
+            .into_inner();
+        let resp2 = svc
+            .compute_cache_key(Request::new(make_req()))
+            .await
+            .unwrap()
+            .into_inner();
 
         assert_eq!(resp1.cache_key_string, resp2.cache_key_string);
     }
@@ -309,21 +315,33 @@ mod tests {
     async fn test_compute_cache_key_different_inputs() {
         let svc = BuildCacheOrchestrationServiceImpl::new();
 
-        let resp1 = svc.compute_cache_key(Request::new(ComputeCacheKeyRequest {
-            work_identity: ":compileJava".to_string(),
-            implementation_hash: "abc".to_string(),
-            input_property_hashes: vec![("x".to_string(), "1".to_string())].into_iter().collect(),
-            input_file_hashes: HashMap::new(),
-            output_property_names: vec![],
-        })).await.unwrap().into_inner();
+        let resp1 = svc
+            .compute_cache_key(Request::new(ComputeCacheKeyRequest {
+                work_identity: ":compileJava".to_string(),
+                implementation_hash: "abc".to_string(),
+                input_property_hashes: vec![("x".to_string(), "1".to_string())]
+                    .into_iter()
+                    .collect(),
+                input_file_hashes: HashMap::new(),
+                output_property_names: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
 
-        let resp2 = svc.compute_cache_key(Request::new(ComputeCacheKeyRequest {
-            work_identity: ":compileJava".to_string(),
-            implementation_hash: "abc".to_string(),
-            input_property_hashes: vec![("x".to_string(), "2".to_string())].into_iter().collect(),
-            input_file_hashes: HashMap::new(),
-            output_property_names: vec![],
-        })).await.unwrap().into_inner();
+        let resp2 = svc
+            .compute_cache_key(Request::new(ComputeCacheKeyRequest {
+                work_identity: ":compileJava".to_string(),
+                implementation_hash: "abc".to_string(),
+                input_property_hashes: vec![("x".to_string(), "2".to_string())]
+                    .into_iter()
+                    .collect(),
+                input_file_hashes: HashMap::new(),
+                output_property_names: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
 
         assert_ne!(resp1.cache_key_string, resp2.cache_key_string);
     }
@@ -333,23 +351,35 @@ mod tests {
         let svc = BuildCacheOrchestrationServiceImpl::new();
 
         // Initially not available
-        let probe = svc.probe_cache(Request::new(ProbeCacheRequest {
-            cache_key: b"test-key".to_vec(),
-        })).await.unwrap().into_inner();
+        let probe = svc
+            .probe_cache(Request::new(ProbeCacheRequest {
+                cache_key: b"test-key".to_vec(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
         assert!(!probe.available);
 
         // Store
-        let store = svc.store_outputs(Request::new(StoreOutputsRequest {
-            cache_key: b"test-key".to_vec(),
-            execution_time_ms: 500,
-            output_properties: vec!["classes".to_string()],
-        })).await.unwrap().into_inner();
+        let store = svc
+            .store_outputs(Request::new(StoreOutputsRequest {
+                cache_key: b"test-key".to_vec(),
+                execution_time_ms: 500,
+                output_properties: vec!["classes".to_string()],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
         assert!(store.success);
 
         // Now available
-        let probe = svc.probe_cache(Request::new(ProbeCacheRequest {
-            cache_key: b"test-key".to_vec(),
-        })).await.unwrap().into_inner();
+        let probe = svc
+            .probe_cache(Request::new(ProbeCacheRequest {
+                cache_key: b"test-key".to_vec(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
         assert!(probe.available);
         assert_eq!(probe.location, "local");
     }
@@ -365,22 +395,32 @@ mod tests {
                 cache_key: key.as_bytes().to_vec(),
                 execution_time_ms: i as i64,
                 output_properties: Vec::new(),
-            })).await.unwrap();
+            }))
+            .await
+            .unwrap();
         }
 
         // After eviction, should be well below the max
         assert!(svc.stored_keys.len() <= MAX_STORED_KEYS);
 
         // Oldest keys should have been evicted
-        let probe = svc.probe_cache(Request::new(ProbeCacheRequest {
-            cache_key: b"key-0".to_vec(),
-        })).await.unwrap().into_inner();
+        let probe = svc
+            .probe_cache(Request::new(ProbeCacheRequest {
+                cache_key: b"key-0".to_vec(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
         assert!(!probe.available, "Oldest key should have been evicted");
 
         // Recent keys should still be present
-        let probe = svc.probe_cache(Request::new(ProbeCacheRequest {
-            cache_key: format!("key-{}", MAX_STORED_KEYS + 50).as_bytes().to_vec(),
-        })).await.unwrap().into_inner();
+        let probe = svc
+            .probe_cache(Request::new(ProbeCacheRequest {
+                cache_key: format!("key-{}", MAX_STORED_KEYS + 50).as_bytes().to_vec(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
         assert!(probe.available, "Recent key should still be present");
     }
 
@@ -393,12 +433,18 @@ mod tests {
             cache_key: b"key-outputs".to_vec(),
             execution_time_ms: 250,
             output_properties: vec!["classes".to_string(), "resources".to_string()],
-        })).await.unwrap();
+        }))
+        .await
+        .unwrap();
 
         // Probe should return the stored outputs
-        let probe = svc.probe_cache(Request::new(ProbeCacheRequest {
-            cache_key: b"key-outputs".to_vec(),
-        })).await.unwrap().into_inner();
+        let probe = svc
+            .probe_cache(Request::new(ProbeCacheRequest {
+                cache_key: b"key-outputs".to_vec(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
 
         assert!(probe.available);
         assert_eq!(probe.location, "local");
@@ -412,9 +458,13 @@ mod tests {
     async fn test_probe_miss_returns_empty_outputs() {
         let svc = BuildCacheOrchestrationServiceImpl::new();
 
-        let probe = svc.probe_cache(Request::new(ProbeCacheRequest {
-            cache_key: b"nonexistent".to_vec(),
-        })).await.unwrap().into_inner();
+        let probe = svc
+            .probe_cache(Request::new(ProbeCacheRequest {
+                cache_key: b"nonexistent".to_vec(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
 
         assert!(!probe.available);
         assert!(probe.output_properties.is_empty());
@@ -425,21 +475,29 @@ mod tests {
     async fn test_cache_key_includes_implementation_hash() {
         let svc = BuildCacheOrchestrationServiceImpl::new();
 
-        let resp1 = svc.compute_cache_key(Request::new(ComputeCacheKeyRequest {
-            work_identity: ":compileJava".to_string(),
-            implementation_hash: "impl-v1".to_string(),
-            input_property_hashes: HashMap::new(),
-            input_file_hashes: HashMap::new(),
-            output_property_names: vec![],
-        })).await.unwrap().into_inner();
+        let resp1 = svc
+            .compute_cache_key(Request::new(ComputeCacheKeyRequest {
+                work_identity: ":compileJava".to_string(),
+                implementation_hash: "impl-v1".to_string(),
+                input_property_hashes: HashMap::new(),
+                input_file_hashes: HashMap::new(),
+                output_property_names: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
 
-        let resp2 = svc.compute_cache_key(Request::new(ComputeCacheKeyRequest {
-            work_identity: ":compileJava".to_string(),
-            implementation_hash: "impl-v2".to_string(),
-            input_property_hashes: HashMap::new(),
-            input_file_hashes: HashMap::new(),
-            output_property_names: vec![],
-        })).await.unwrap().into_inner();
+        let resp2 = svc
+            .compute_cache_key(Request::new(ComputeCacheKeyRequest {
+                work_identity: ":compileJava".to_string(),
+                implementation_hash: "impl-v2".to_string(),
+                input_property_hashes: HashMap::new(),
+                input_file_hashes: HashMap::new(),
+                output_property_names: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
 
         assert_ne!(resp1.cache_key_string, resp2.cache_key_string);
     }
@@ -448,21 +506,29 @@ mod tests {
     async fn test_cache_key_includes_work_identity() {
         let svc = BuildCacheOrchestrationServiceImpl::new();
 
-        let resp1 = svc.compute_cache_key(Request::new(ComputeCacheKeyRequest {
-            work_identity: ":compileJava".to_string(),
-            implementation_hash: "impl".to_string(),
-            input_property_hashes: HashMap::new(),
-            input_file_hashes: HashMap::new(),
-            output_property_names: vec![],
-        })).await.unwrap().into_inner();
+        let resp1 = svc
+            .compute_cache_key(Request::new(ComputeCacheKeyRequest {
+                work_identity: ":compileJava".to_string(),
+                implementation_hash: "impl".to_string(),
+                input_property_hashes: HashMap::new(),
+                input_file_hashes: HashMap::new(),
+                output_property_names: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
 
-        let resp2 = svc.compute_cache_key(Request::new(ComputeCacheKeyRequest {
-            work_identity: ":test".to_string(),
-            implementation_hash: "impl".to_string(),
-            input_property_hashes: HashMap::new(),
-            input_file_hashes: HashMap::new(),
-            output_property_names: vec![],
-        })).await.unwrap().into_inner();
+        let resp2 = svc
+            .compute_cache_key(Request::new(ComputeCacheKeyRequest {
+                work_identity: ":test".to_string(),
+                implementation_hash: "impl".to_string(),
+                input_property_hashes: HashMap::new(),
+                input_file_hashes: HashMap::new(),
+                output_property_names: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
 
         assert_ne!(resp1.cache_key_string, resp2.cache_key_string);
     }
@@ -475,17 +541,25 @@ mod tests {
             cache_key: b"overwrite-key".to_vec(),
             execution_time_ms: 100,
             output_properties: vec!["old_output".to_string()],
-        })).await.unwrap();
+        }))
+        .await
+        .unwrap();
 
         svc.store_outputs(Request::new(StoreOutputsRequest {
             cache_key: b"overwrite-key".to_vec(),
             execution_time_ms: 200,
             output_properties: vec!["new_output".to_string()],
-        })).await.unwrap();
+        }))
+        .await
+        .unwrap();
 
-        let probe = svc.probe_cache(Request::new(ProbeCacheRequest {
-            cache_key: b"overwrite-key".to_vec(),
-        })).await.unwrap().into_inner();
+        let probe = svc
+            .probe_cache(Request::new(ProbeCacheRequest {
+                cache_key: b"overwrite-key".to_vec(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
 
         assert!(probe.available);
         assert_eq!(probe.execution_time_ms, 200);
@@ -497,26 +571,37 @@ mod tests {
         let svc = BuildCacheOrchestrationServiceImpl::new();
 
         // Miss
-        let _ = svc.probe_cache(Request::new(ProbeCacheRequest {
-            cache_key: b"miss-key".to_vec(),
-        })).await.unwrap();
+        let _ = svc
+            .probe_cache(Request::new(ProbeCacheRequest {
+                cache_key: b"miss-key".to_vec(),
+            }))
+            .await
+            .unwrap();
 
         // Store
         svc.store_outputs(Request::new(StoreOutputsRequest {
             cache_key: b"hit-key".to_vec(),
             execution_time_ms: 100,
             output_properties: vec![],
-        })).await.unwrap();
+        }))
+        .await
+        .unwrap();
 
         // Hit
-        let _ = svc.probe_cache(Request::new(ProbeCacheRequest {
-            cache_key: b"hit-key".to_vec(),
-        })).await.unwrap();
+        let _ = svc
+            .probe_cache(Request::new(ProbeCacheRequest {
+                cache_key: b"hit-key".to_vec(),
+            }))
+            .await
+            .unwrap();
 
         // Another miss
-        let _ = svc.probe_cache(Request::new(ProbeCacheRequest {
-            cache_key: b"miss-key-2".to_vec(),
-        })).await.unwrap();
+        let _ = svc
+            .probe_cache(Request::new(ProbeCacheRequest {
+                cache_key: b"miss-key-2".to_vec(),
+            }))
+            .await
+            .unwrap();
 
         assert_eq!(svc.cache_hits.load(Ordering::Relaxed), 1);
         assert_eq!(svc.cache_misses.load(Ordering::Relaxed), 2);

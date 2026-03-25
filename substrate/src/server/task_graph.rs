@@ -8,8 +8,8 @@ use tonic::{Request, Response, Status};
 use crate::proto::{
     task_graph_service_server::TaskGraphService, ExecutionNode, GetProgressRequest,
     GetProgressResponse, RegisterTaskRequest, RegisterTaskResponse, ResolveExecutionPlanRequest,
-    ResolveExecutionPlanResponse, TaskFinishedRequest, TaskFinishedResponse,
-    TaskProgress, TaskStartedRequest, TaskStartedResponse,
+    ResolveExecutionPlanResponse, TaskFinishedRequest, TaskFinishedResponse, TaskProgress,
+    TaskStartedRequest, TaskStartedResponse,
 };
 
 use super::execution_history::ExecutionHistoryServiceImpl;
@@ -137,9 +137,7 @@ impl TaskGraphServiceImpl {
             all_tasks.insert(path.clone());
 
             // Track task type distribution for logging
-            *task_type_counts
-                .entry(entry.task_type.clone())
-                .or_default() += 1;
+            *task_type_counts.entry(entry.task_type.clone()).or_default() += 1;
 
             // Skip tasks that should not execute — they are pre-resolved
             if !entry.should_execute {
@@ -157,7 +155,10 @@ impl TaskGraphServiceImpl {
             for dep in &entry.depends_on {
                 if self.tasks.contains_key(&(build_id.clone(), dep.clone())) {
                     *in_degree.entry(path.clone()).or_insert(0) += 1;
-                    dependents.entry(dep.clone()).or_default().push(path.clone());
+                    dependents
+                        .entry(dep.clone())
+                        .or_default()
+                        .push(path.clone());
                 }
             }
         }
@@ -254,7 +255,10 @@ impl TaskGraphServiceImpl {
             for dep in &entry.depends_on {
                 if self.tasks.contains_key(&(build_id.clone(), dep.clone())) {
                     *in_degree.entry(path.clone()).or_insert(0) += 1;
-                    dependents.entry(dep.clone()).or_default().push(path.clone());
+                    dependents
+                        .entry(dep.clone())
+                        .or_default()
+                        .push(path.clone());
                 }
             }
         }
@@ -367,11 +371,7 @@ impl TaskGraphService for TaskGraphServiceImpl {
 
         let (execution_order, critical_path_ms, has_cycles) = self.resolve_plan(&build_id);
 
-        let total = self
-            .tasks
-            .iter()
-            .filter(|e| e.key().0 == build_id)
-            .count() as i32;
+        let total = self.tasks.iter().filter(|e| e.key().0 == build_id).count() as i32;
         let skipped = self
             .tasks
             .iter()
@@ -559,8 +559,14 @@ impl TaskGraphService for TaskGraphServiceImpl {
 
             let is_completed = matches!(
                 entry.status.as_str(),
-                "SUCCEEDED" | "FAILED" | "SKIPPED" | "UP_TO_DATE" | "FROM_CACHE"
-                | "EXECUTED" | "EXECUTED_INCREMENTALLY" | "EXECUTED_NON_INCREMENTALLY"
+                "SUCCEEDED"
+                    | "FAILED"
+                    | "SKIPPED"
+                    | "UP_TO_DATE"
+                    | "FROM_CACHE"
+                    | "EXECUTED"
+                    | "EXECUTED_INCREMENTALLY"
+                    | "EXECUTED_NON_INCREMENTALLY"
             );
             if is_completed {
                 completed += 1;
@@ -855,15 +861,16 @@ mod tests {
             .into_inner();
 
         // Verify estimated durations are picked up from history
-        let mut durations: Vec<_> = resp.execution_order
+        let mut durations: Vec<_> = resp
+            .execution_order
             .iter()
             .map(|n| (n.task_path.as_str(), n.estimated_duration_ms))
             .collect();
         durations.sort_by_key(|(_, d)| *d);
 
-        assert_eq!(durations[0].1, 0);     // :no_history
-        assert_eq!(durations[1].1, 100);   // :fast
-        assert_eq!(durations[2].1, 5000);  // :slow
+        assert_eq!(durations[0].1, 0); // :no_history
+        assert_eq!(durations[1].1, 100); // :fast
+        assert_eq!(durations[2].1, 5000); // :slow
 
         // Critical path should reflect the longest path
         assert_eq!(resp.critical_path_ms, 5000);

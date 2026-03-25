@@ -97,7 +97,12 @@ impl BuildEventStreamServiceImpl {
 
 #[tonic::async_trait]
 impl BuildEventStreamService for BuildEventStreamServiceImpl {
-    type SubscribeBuildEventsStream = std::pin::Pin<Box<dyn tonic::codegen::tokio_stream::Stream<Item = Result<BuildEventMessage, Status>> + Send>>;
+    type SubscribeBuildEventsStream = std::pin::Pin<
+        Box<
+            dyn tonic::codegen::tokio_stream::Stream<Item = Result<BuildEventMessage, Status>>
+                + Send,
+        >,
+    >;
 
     async fn subscribe_build_events(
         &self,
@@ -113,14 +118,15 @@ impl BuildEventStreamService for BuildEventStreamServiceImpl {
         let rx = self.get_or_create_channel(build_id.clone()).subscribe();
 
         // Also replay buffered events
-        let buffered_events: Vec<BuildEventMessage> = if let Some(buf) = self.event_buffers.get(&build_id) {
-            buf.iter()
-                .filter(|e| Self::matches_filter(e, &filter))
-                .cloned()
-                .collect()
-        } else {
-            Vec::new()
-        };
+        let buffered_events: Vec<BuildEventMessage> =
+            if let Some(buf) = self.event_buffers.get(&build_id) {
+                buf.iter()
+                    .filter(|e| Self::matches_filter(e, &filter))
+                    .cloned()
+                    .collect()
+            } else {
+                Vec::new()
+            };
 
         let buffered_count = buffered_events.len();
 
@@ -157,7 +163,9 @@ impl BuildEventStreamService for BuildEventStreamServiceImpl {
             }
         };
 
-        Ok(Response::new(Box::pin(stream) as Self::SubscribeBuildEventsStream))
+        Ok(Response::new(
+            Box::pin(stream) as Self::SubscribeBuildEventsStream
+        ))
     }
 
     async fn send_build_event(
@@ -185,7 +193,8 @@ impl BuildEventStreamService for BuildEventStreamServiceImpl {
                 // Evict oldest events (keep the most recent half)
                 let evict_count = buf.len() / 2;
                 buf.drain(..evict_count);
-                self.events_evicted.fetch_add(evict_count as i64, Ordering::Relaxed);
+                self.events_evicted
+                    .fetch_add(evict_count as i64, Ordering::Relaxed);
             }
             buf.push(event.clone());
         } else {
@@ -477,7 +486,10 @@ mod tests {
 
         // Buffer should have shrunk, and the oldest event should be gone
         assert!(log2.total_events < MAX_EVENTS_PER_BUILD as i32);
-        assert_eq!(log2.events[0].event_type, format!("event_{}", MAX_EVENTS_PER_BUILD / 2));
+        assert_eq!(
+            log2.events[0].event_type,
+            format!("event_{}", MAX_EVENTS_PER_BUILD / 2)
+        );
     }
 
     #[tokio::test]

@@ -54,9 +54,15 @@ impl SubsystemModes {
             "hashing" => Some(std::mem::replace(&mut self.hashing, authoritative)),
             "cache_keys" => Some(std::mem::replace(&mut self.cache_keys, authoritative)),
             "value_snapshots" => Some(std::mem::replace(&mut self.value_snapshots, authoritative)),
-            "execution_history" => Some(std::mem::replace(&mut self.execution_history, authoritative)),
+            "execution_history" => Some(std::mem::replace(
+                &mut self.execution_history,
+                authoritative,
+            )),
             "task_graph" => Some(std::mem::replace(&mut self.task_graph, authoritative)),
-            "file_fingerprinting" => Some(std::mem::replace(&mut self.file_fingerprinting, authoritative)),
+            "file_fingerprinting" => Some(std::mem::replace(
+                &mut self.file_fingerprinting,
+                authoritative,
+            )),
             "execution_plan" => Some(std::mem::replace(&mut self.execution_plan, authoritative)),
             _ => None,
         }
@@ -166,6 +172,8 @@ mod tests {
         let pairs = modes.as_pairs();
         assert_eq!(pairs.len(), 7);
         assert!(pairs.iter().any(|(name, auth)| *name == "hashing" && *auth));
-        assert!(pairs.iter().any(|(name, auth)| *name == "cache_keys" && !*auth));
+        assert!(pairs
+            .iter()
+            .any(|(name, auth)| *name == "cache_keys" && !*auth));
     }
 }

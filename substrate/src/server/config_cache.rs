@@ -19,6 +19,8 @@ struct ConfigCacheEntry {
     input_hashes: Vec<String>,
     timestamp_ms: i64,
     storage_time_ms: i64,
+    #[serde(default)]
+    last_access_ms: i64,
 }
 
 /// Default maximum cache entries before LRU eviction kicks in.
@@ -68,7 +70,13 @@ impl ConfigurationCacheServiceImpl {
     fn disk_path(&self, cache_key: &str) -> PathBuf {
         let safe_key = cache_key
             .chars()
-            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect::<String>();
         self.cache_dir.join(format!("{}.bin", safe_key))
     }
@@ -107,6 +115,7 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
             input_hashes: req.input_hashes.into_iter().collect(),
             timestamp_ms: req.timestamp_ms,
             storage_time_ms: 0,
+            last_access_ms: Self::now_ms(),
         };
 
         let storage_time_ms = start.elapsed().as_millis() as i64;
@@ -119,22 +128,27 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
         let key = req.cache_key.clone();
         self.cache.insert(key.clone(), entry);
 
-        // LRU eviction: if cache is over capacity, remove the oldest entries
+        // LRU eviction: if cache is over capacity, remove the least-recently-accessed entries.
         if self.cache.len() > MAX_CACHE_ENTRIES {
             let to_remove = self.cache.len() - MAX_CACHE_ENTRIES / 2;
-            // Remove oldest entries (first entries in iteration order)
-            let keys_to_remove: Vec<String> = self
+            let mut candidates: Vec<(i64, String)> = self
                 .cache
                 .iter()
+                .map(|entry| (entry.value().last_access_ms, entry.key().clone()))
+                .collect();
+            candidates.sort_by_key(|(last_access_ms, _)| *last_access_ms);
+            let keys_to_remove: Vec<String> = candidates
+                .into_iter()
                 .take(to_remove)
-                .map(|entry| entry.key().clone())
+                .map(|(_, key)| key)
                 .collect();
             for k in &keys_to_remove {
                 if self.cache.remove(k).is_some() {
                     self.remove_from_disk(k);
                 }
             }
-            self.entries_evicted.fetch_add(keys_to_remove.len() as i64, Ordering::Relaxed);
+            self.entries_evicted
+                .fetch_add(keys_to_remove.len() as i64, Ordering::Relaxed);
         }
 
         // Persist to disk
@@ -164,7 +178,8 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
         let req = request.into_inner();
 
         // Check memory cache first
-        if let Some(entry) = self.cache.get(&req.cache_key) {
+        if let Some(mut entry) = self.cache.get_mut(&req.cache_key) {
+            entry.last_access_ms = Self::now_ms();
             self.total_hits.fetch_add(1, Ordering::Relaxed);
             return Ok(Response::new(LoadConfigCacheResponse {
                 found: true,
@@ -175,7 +190,8 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
         }
 
         // Check disk cache
-        if let Some(entry) = self.load_from_disk(&req.cache_key) {
+        if let Some(mut entry) = self.load_from_disk(&req.cache_key) {
+            entry.last_access_ms = Self::now_ms();
             self.total_hits.fetch_add(1, Ordering::Relaxed);
             let timestamp = entry.timestamp_ms;
             let count = entry.entry_count;
@@ -206,19 +222,15 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
         let req = request.into_inner();
 
         if let Some(entry) = self.cache.get(&req.cache_key) {
-            if entry.input_hashes.len() == req.input_hashes.len() {
-                let all_match = entry
-                    .input_hashes
-                    .iter()
-                    .zip(req.input_hashes.iter())
-                    .all(|(cached, requested)| cached == requested);
-
-                if all_match {
-                    return Ok(Response::new(ValidateConfigResponse {
-                        valid: true,
-                        reason: "All input hashes match".to_string(),
-                    }));
-                }
+            let mut cached = entry.input_hashes.clone();
+            let mut requested = req.input_hashes.clone();
+            cached.sort();
+            requested.sort();
+            if cached == requested {
+                return Ok(Response::new(ValidateConfigResponse {
+                    valid: true,
+                    reason: "All input hashes match".to_string(),
+                }));
             }
 
             return Ok(Response::new(ValidateConfigResponse {
@@ -246,8 +258,7 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
             .cache
             .iter()
             .filter(|entry| {
-                let too_old = req.max_age_ms > 0
-                    && now - entry.timestamp_ms > req.max_age_ms;
+                let too_old = req.max_age_ms > 0 && now - entry.timestamp_ms > req.max_age_ms;
                 let too_many = req.max_entries > 0 && self.cache.len() as i32 > req.max_entries;
                 too_old || too_many
             })
@@ -373,6 +384,32 @@ mod tests {
             .unwrap()
             .into_inner();
         assert!(!resp.valid);
+    }
+
+    #[tokio::test]
+    async fn test_validate_config_ignores_hash_order() {
+        let svc = make_svc();
+
+        svc.store_config_cache(Request::new(StoreConfigCacheRequest {
+            cache_key: ":ordered".to_string(),
+            serialized_config: vec![].into(),
+            entry_count: 1,
+            input_hashes: vec!["h1".to_string(), "h2".to_string(), "h3".to_string()],
+            timestamp_ms: 100,
+        }))
+        .await
+        .unwrap();
+
+        let resp = svc
+            .validate_config(Request::new(ValidateConfigRequest {
+                cache_key: ":ordered".to_string(),
+                input_hashes: vec!["h3".to_string(), "h1".to_string(), "h2".to_string()],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.valid, "same hashes in different order should validate");
     }
 
     #[tokio::test]
@@ -565,7 +602,11 @@ mod tests {
                 .unwrap()
                 .into_inner();
 
-            assert!(resp.found, "Expected configuration for build ID {}", build_id);
+            assert!(
+                resp.found,
+                "Expected configuration for build ID {}",
+                build_id
+            );
             assert_eq!(
                 resp.serialized_config.len(),
                 32,

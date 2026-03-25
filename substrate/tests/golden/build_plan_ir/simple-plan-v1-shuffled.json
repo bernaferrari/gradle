@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "build_id": "sample-build-1",
+  "projects": [
+    {
+      "path": ":app",
+      "name": "app",
+      "project_dir": "/repo/app"
+    },
+    {
+      "path": ":",
+      "name": "root",
+      "project_dir": "/repo"
+    }
+  ],
+  "tasks": [
+    {
+      "path": ":app:test",
+      "project_path": ":app",
+      "implementation_id": "org.gradle.api.tasks.testing.Test",
+      "depends_on": [
+        ":app:classes",
+        ":app:testClasses"
+      ],
+      "inputs": {
+        "forkEvery": "0",
+        "testFramework": "junit"
+      },
+      "outputs": [
+        "/repo/app/build/reports/tests/test",
+        "/repo/app/build/test-results/test"
+      ],
+      "worker_isolation": "process"
+    },
+    {
+      "path": ":app:compileJava",
+      "project_path": ":app",
+      "implementation_id": "org.gradle.api.tasks.compile.JavaCompile",
+      "depends_on": [
+        ":app:compileKotlin",
+        ":app:processResources"
+      ],
+      "inputs": {
+        "incremental": "true",
+        "targetCompatibility": "21",
+        "sourceCompatibility": "21"
+      },
+      "outputs": [
+        "/repo/app/build/classes/java/main"
+      ],
+      "worker_isolation": "process"
+    }
+  ],
+  "dependencies": [
+    {
+      "project_path": ":app",
+      "configuration": "testImplementation",
+      "notation": "org.junit.jupiter:junit-jupiter:5.10.2"
+    },
+    {
+      "project_path": ":app",
+      "configuration": "implementation",
+      "notation": "org.slf4j:slf4j-api:2.0.13"
+    }
+  ],
+  "toolchains": [
+    {
+      "language": "java",
+      "version": "21",
+      "vendor": "temurin",
+      "implementation": "jvm"
+    }
+  ],
+  "metadata": {
+    "requestedBy": "golden-test",
+    "gradleVersion": "9.0.0"
+  }
+}

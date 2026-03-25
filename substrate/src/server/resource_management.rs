@@ -202,7 +202,11 @@ impl ResourceManagementServiceImpl {
                 let cpu_count = num_cpus::get() as f64;
                 // Convert load average to percentage (capped at 100%)
                 let usage = load_avg / cpu_count;
-                if usage > 1.0 { 100.0 } else { usage * 100.0 }
+                if usage > 1.0 {
+                    100.0
+                } else {
+                    usage * 100.0
+                }
             })
             .unwrap_or(0.0)
     }
@@ -359,9 +363,7 @@ impl ResourceManagementService for ResourceManagementServiceImpl {
                         reservation_id: String::new(),
                         denial_reason: format!(
                             "Insufficient {}: requested {}, available {}",
-                            resource.resource_type,
-                            resource.amount,
-                            available
+                            resource.resource_type, resource.amount, available
                         ),
                     }));
                 }
@@ -571,7 +573,11 @@ mod tests {
             .unwrap()
             .into_inner();
 
-        let mem = usage.usage.iter().find(|u| u.resource_type == "memory_mb").unwrap();
+        let mem = usage
+            .usage
+            .iter()
+            .find(|u| u.resource_type == "memory_mb")
+            .unwrap();
         assert_eq!(mem.used, 512);
 
         // Release
@@ -589,7 +595,11 @@ mod tests {
             .unwrap()
             .into_inner();
 
-        let mem = usage.usage.iter().find(|u| u.resource_type == "memory_mb").unwrap();
+        let mem = usage
+            .usage
+            .iter()
+            .find(|u| u.resource_type == "memory_mb")
+            .unwrap();
         assert_eq!(mem.used, 0);
     }
 
@@ -696,7 +706,11 @@ mod tests {
             .into_inner();
 
         assert!(resp.limits.len() >= 4); // memory, cpu, fd, threads
-        let mem = resp.limits.iter().find(|l| l.resource_type == "memory_mb").unwrap();
+        let mem = resp
+            .limits
+            .iter()
+            .find(|l| l.resource_type == "memory_mb")
+            .unwrap();
         assert!(mem.max_amount > 0);
     }
 
@@ -730,11 +744,19 @@ mod tests {
             .unwrap()
             .into_inner();
 
-        let mem = resp.limits.iter().find(|l| l.resource_type == "memory_mb").unwrap();
+        let mem = resp
+            .limits
+            .iter()
+            .find(|l| l.resource_type == "memory_mb")
+            .unwrap();
         assert_eq!(mem.max_amount, 1024);
         assert_eq!(mem.soft_limit, 800);
 
-        let cpu = resp.limits.iter().find(|l| l.resource_type == "cpu_cores").unwrap();
+        let cpu = resp
+            .limits
+            .iter()
+            .find(|l| l.resource_type == "cpu_cores")
+            .unwrap();
         assert_eq!(cpu.max_amount, 4);
     }
 
@@ -764,7 +786,11 @@ mod tests {
             .unwrap()
             .into_inner();
 
-        let gpu = usage.usage.iter().find(|u| u.resource_type == "custom_gpu").unwrap();
+        let gpu = usage
+            .usage
+            .iter()
+            .find(|u| u.resource_type == "custom_gpu")
+            .unwrap();
         assert_eq!(gpu.used, 2);
     }
 
@@ -803,7 +829,11 @@ mod tests {
             .unwrap()
             .into_inner();
 
-        let mem = usage.usage.iter().find(|u| u.resource_type == "memory_mb").unwrap();
+        let mem = usage
+            .usage
+            .iter()
+            .find(|u| u.resource_type == "memory_mb")
+            .unwrap();
         assert_eq!(mem.used, 300);
     }
 
@@ -857,7 +887,11 @@ mod tests {
             .await
             .unwrap()
             .into_inner();
-        let cpu = usage.usage.iter().find(|u| u.resource_type == "cpu_cores").unwrap();
+        let cpu = usage
+            .usage
+            .iter()
+            .find(|u| u.resource_type == "cpu_cores")
+            .unwrap();
         assert_eq!(cpu.used, 2);
         assert_eq!(cpu.available, 0);
 
@@ -887,7 +921,11 @@ mod tests {
             .await
             .unwrap()
             .into_inner();
-        let cpu = usage.usage.iter().find(|u| u.resource_type == "cpu_cores").unwrap();
+        let cpu = usage
+            .usage
+            .iter()
+            .find(|u| u.resource_type == "cpu_cores")
+            .unwrap();
         assert_eq!(cpu.used, 1);
         assert_eq!(cpu.available, 1);
     }
@@ -940,7 +978,11 @@ mod tests {
             .await
             .unwrap()
             .into_inner();
-        let mem = usage.usage.iter().find(|u| u.resource_type == "memory_mb").unwrap();
+        let mem = usage
+            .usage
+            .iter()
+            .find(|u| u.resource_type == "memory_mb")
+            .unwrap();
         assert_eq!(mem.used, 0);
     }
 

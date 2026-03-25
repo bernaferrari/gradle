@@ -79,7 +79,8 @@ Strangler-fig migration of Gradle's execution substrate to Rust. Rust daemon (su
 **Epic:** `gradle-fork-5bh` — Run `bd show gradle-fork-5bh` for full task breakdown.
 
 **Completed phases (1-4, 7):** Core daemon, 33 service implementations, cross-service integration, testing/benchmarks, native DAG executor.
-**Current phase (5):** Java bridge clients — run `bd ready` to see next tasks.
+**Current phase (5):** Java bridge clients — all 34 services have clients; hash + 4 shadow listeners now wired.
+**Next steps:** Shadow validation across all subsystems, then authoritative flip per service.
 
 ## Conventions & Patterns
 

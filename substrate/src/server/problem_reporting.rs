@@ -6,8 +6,8 @@ use tonic::{Request, Response, Status};
 use super::scopes::BuildId;
 use crate::proto::{
     problem_reporting_service_server::ProblemReportingService, ClearProblemsRequest,
-    ClearProblemsResponse, GetProblemsBySeverityRequest, GetProblemsRequest,
-    GetProblemsResponse, ProblemDetails, ReportProblemRequest, ReportProblemResponse,
+    ClearProblemsResponse, GetProblemsBySeverityRequest, GetProblemsRequest, GetProblemsResponse,
+    ProblemDetails, ReportProblemRequest, ReportProblemResponse,
 };
 
 /// Rust-native problem/diagnostic reporting service.
@@ -97,8 +97,14 @@ impl ProblemReportingService for ProblemReportingServiceImpl {
             .unwrap_or_default();
 
         let total = all_problems.len() as i32;
-        let warning_count = all_problems.iter().filter(|p| p.severity == "warning").count() as i32;
-        let error_count = all_problems.iter().filter(|p| p.severity == "error").count() as i32;
+        let warning_count = all_problems
+            .iter()
+            .filter(|p| p.severity == "warning")
+            .count() as i32;
+        let error_count = all_problems
+            .iter()
+            .filter(|p| p.severity == "error")
+            .count() as i32;
         let deprecation_count = all_problems
             .iter()
             .filter(|p| p.severity == "deprecation")
@@ -134,7 +140,11 @@ impl ProblemReportingService for ProblemReportingServiceImpl {
         let total = all_problems.len() as i32;
         let warning_count = if req.severity == "warning" { total } else { 0 };
         let error_count = if req.severity == "error" { total } else { 0 };
-        let deprecation_count = if req.severity == "deprecation" { total } else { 0 };
+        let deprecation_count = if req.severity == "deprecation" {
+            total
+        } else {
+            0
+        };
 
         Ok(Response::new(GetProblemsResponse {
             problems: all_problems,
@@ -150,11 +160,12 @@ impl ProblemReportingService for ProblemReportingServiceImpl {
         request: Request<ClearProblemsRequest>,
     ) -> Result<Response<ClearProblemsResponse>, Status> {
         let req = request.into_inner();
-        let cleared = if let Some((_, problems)) = self.problems.remove(&BuildId::from(req.build_id)) {
-            problems.len() as i32
-        } else {
-            0
-        };
+        let cleared =
+            if let Some((_, problems)) = self.problems.remove(&BuildId::from(req.build_id)) {
+                problems.len() as i32
+            } else {
+                0
+            };
 
         Ok(Response::new(ClearProblemsResponse { cleared }))
     }
@@ -187,7 +198,11 @@ mod tests {
 
         svc.report_problem(Request::new(ReportProblemRequest {
             build_id: "build-1".to_string(),
-            problem: Some(make_problem("warning", "deprecated_feature", "Old API used")),
+            problem: Some(make_problem(
+                "warning",
+                "deprecated_feature",
+                "Old API used",
+            )),
         }))
         .await
         .unwrap();
@@ -201,7 +216,11 @@ mod tests {
 
         svc.report_problem(Request::new(ReportProblemRequest {
             build_id: "build-1".to_string(),
-            problem: Some(make_problem("deprecation", "property_override", "Property X is deprecated")),
+            problem: Some(make_problem(
+                "deprecation",
+                "property_override",
+                "Property X is deprecated",
+            )),
         }))
         .await
         .unwrap();

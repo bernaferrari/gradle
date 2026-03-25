@@ -39,11 +39,9 @@ impl TaskExecutor for SymlinkTaskExecutor {
                 input.source_files.get(1).unwrap().clone()
             } else {
                 // Multi-file mode: link created in target_dir with same name
-                input.target_dir.join(
-                    target
-                        .file_name()
-                        .unwrap_or_default(),
-                )
+                input
+                    .target_dir
+                    .join(target.file_name().unwrap_or_default())
             };
 
             // Remove existing link if present
@@ -111,7 +109,9 @@ mod tests {
     async fn test_symlink_to_dir() {
         let tmp = tempfile::tempdir().unwrap();
         let target = tmp.path().join("target_dir");
-        tokio::fs::create_dir_all(target.join("nested")).await.unwrap();
+        tokio::fs::create_dir_all(target.join("nested"))
+            .await
+            .unwrap();
         tokio::fs::write(target.join("file.txt"), b"data")
             .await
             .unwrap();

@@ -40,11 +40,9 @@ impl TaskExecutor for CopyTaskExecutor {
                 return result;
             }
 
-            let dest = input.target_dir.join(
-                source
-                    .file_name()
-                    .unwrap_or_default(),
-            );
+            let dest = input
+                .target_dir
+                .join(source.file_name().unwrap_or_default());
 
             match tokio::fs::copy(source, &dest).await {
                 Ok(bytes) => {
@@ -90,9 +88,7 @@ mod tests {
         assert_eq!(result.files_processed, 1);
         assert_eq!(result.output_files.len(), 1);
 
-        let content = tokio::fs::read(&dest_dir.join("test.txt"))
-            .await
-            .unwrap();
+        let content = tokio::fs::read(&dest_dir.join("test.txt")).await.unwrap();
         assert_eq!(content, b"hello world");
     }
 
@@ -110,15 +106,9 @@ mod tests {
 
         let executor = CopyTaskExecutor::new();
         let mut input = TaskInput::new("Copy");
-        input
-            .source_files
-            .push(src_dir.join("a.txt"));
-        input
-            .source_files
-            .push(src_dir.join("b.txt"));
-        input
-            .source_files
-            .push(src_dir.join("c.txt"));
+        input.source_files.push(src_dir.join("a.txt"));
+        input.source_files.push(src_dir.join("b.txt"));
+        input.source_files.push(src_dir.join("c.txt"));
         input.target_dir = dest_dir;
 
         let result = executor.execute(&input).await;
@@ -134,7 +124,9 @@ mod tests {
 
         let executor = CopyTaskExecutor::new();
         let mut input = TaskInput::new("Copy");
-        input.source_files.push(PathBuf::from("/nonexistent/file.txt"));
+        input
+            .source_files
+            .push(PathBuf::from("/nonexistent/file.txt"));
         input.target_dir = dest_dir;
 
         let result = executor.execute(&input).await;

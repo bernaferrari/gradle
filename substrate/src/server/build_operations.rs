@@ -7,12 +7,11 @@ use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
-    build_operations_service_server::BuildOperationsService, BuildEvent,
-    BuildSummary, CompleteOperationRequest,
-    CompleteOperationResponse, GetBuildSummaryRequest, GetBuildSummaryResponse,
-    GetOperationDetailsRequest, GetOperationDetailsResponse,
-    OperationDetail, ReportProgressRequest, ReportProgressResponse,
-    StartOperationRequest, StartOperationResponse, StreamEventsRequest,
+    build_operations_service_server::BuildOperationsService, BuildEvent, BuildSummary,
+    CompleteOperationRequest, CompleteOperationResponse, GetBuildSummaryRequest,
+    GetBuildSummaryResponse, GetOperationDetailsRequest, GetOperationDetailsResponse,
+    OperationDetail, ReportProgressRequest, ReportProgressResponse, StartOperationRequest,
+    StartOperationResponse, StreamEventsRequest,
 };
 
 use super::scopes::BuildId;
@@ -119,7 +118,8 @@ impl BuildOperationsServiceImpl {
 
 #[tonic::async_trait]
 impl BuildOperationsService for BuildOperationsServiceImpl {
-    type StreamEventsStream = std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<BuildEvent, Status>> + Send>>;
+    type StreamEventsStream =
+        std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<BuildEvent, Status>> + Send>>;
 
     async fn start_operation(
         &self,
@@ -130,12 +130,9 @@ impl BuildOperationsService for BuildOperationsServiceImpl {
         let build_id = BuildId::from(req.build_id);
 
         // Track build start on first operation
-        self.build_start_ms.compare_exchange(
-            0,
-            Self::now_ms(),
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        ).ok();
+        self.build_start_ms
+            .compare_exchange(0, Self::now_ms(), Ordering::Relaxed, Ordering::Relaxed)
+            .ok();
 
         self.operations.insert(
             (build_id, req.operation_id.clone()),
@@ -199,7 +196,8 @@ impl BuildOperationsService for BuildOperationsServiceImpl {
         );
 
         self.total_operations.fetch_add(1, Ordering::Relaxed);
-        self.total_operation_duration_ms.fetch_add(duration, Ordering::Relaxed);
+        self.total_operation_duration_ms
+            .fetch_add(duration, Ordering::Relaxed);
 
         // Record task outcome if the operation type suggests a task
         if !req.operation_id.is_empty() {
@@ -235,7 +233,10 @@ impl BuildOperationsService for BuildOperationsServiceImpl {
         let req = request.into_inner();
         let build_id = BuildId::from(req.build_id);
 
-        if let Some(mut op) = self.operations.get_mut(&(build_id, req.operation_id.clone())) {
+        if let Some(mut op) = self
+            .operations
+            .get_mut(&(build_id, req.operation_id.clone()))
+        {
             op.progress = req.progress;
         }
 
@@ -258,9 +259,12 @@ impl BuildOperationsService for BuildOperationsServiceImpl {
     ) -> Result<Response<Self::StreamEventsStream>, Status> {
         let _req = request.into_inner();
 
-        let rx = self.build_events_rx.lock().await.take().ok_or_else(|| {
-            Status::resource_exhausted("Event stream already consumed")
-        })?;
+        let rx = self
+            .build_events_rx
+            .lock()
+            .await
+            .take()
+            .ok_or_else(|| Status::resource_exhausted("Event stream already consumed"))?;
 
         let stream = ReceiverStream::new(rx).map(Ok);
         Ok(Response::new(Box::pin(stream) as Self::StreamEventsStream))
@@ -275,7 +279,10 @@ impl BuildOperationsService for BuildOperationsServiceImpl {
         let operation_id = &req.operation_id;
 
         // Check completed operations first
-        if let Some(op) = self.completed.get(&(build_id.clone(), operation_id.clone())) {
+        if let Some(op) = self
+            .completed
+            .get(&(build_id.clone(), operation_id.clone()))
+        {
             return Ok(Response::new(GetOperationDetailsResponse {
                 detail: Some(OperationDetail {
                     operation_id: operation_id.clone(),
@@ -354,7 +361,9 @@ impl BuildOperationsService for BuildOperationsServiceImpl {
             })
             .map(|entry| {
                 let op = entry.value();
-                *operations_by_type.entry(op.operation_type.clone()).or_insert(0i32) += 1;
+                *operations_by_type
+                    .entry(op.operation_type.clone())
+                    .or_insert(0i32) += 1;
                 OperationDetail {
                     operation_id: entry.key().1.clone(),
                     display_name: Some(op.display_name.clone()),
@@ -367,11 +376,7 @@ impl BuildOperationsService for BuildOperationsServiceImpl {
                     start_time_ms: op.start_time_ms,
                     duration_ms: op.duration_ms,
                     success: op.success,
-                    metadata: op
-                        .metadata
-                        .iter()
-                        .cloned()
-                        .collect(),
+                    metadata: op.metadata.iter().cloned().collect(),
                 }
             })
             .collect();
@@ -415,7 +420,9 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(svc.operations.contains_key(&(BuildId::from("test".to_string()), "op-1".to_string())));
+        assert!(svc
+            .operations
+            .contains_key(&(BuildId::from("test".to_string()), "op-1".to_string())));
 
         svc.complete_operation(Request::new(CompleteOperationRequest {
             build_id: "test".to_string(),
@@ -427,7 +434,9 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(!svc.operations.contains_key(&(BuildId::from("test".to_string()), "op-1".to_string())));
+        assert!(!svc
+            .operations
+            .contains_key(&(BuildId::from("test".to_string()), "op-1".to_string())));
     }
 
     #[tokio::test]
@@ -456,7 +465,10 @@ mod tests {
         .await
         .unwrap();
 
-        let op = svc.operations.get(&(BuildId::from("test".to_string()), "op-1".to_string())).unwrap();
+        let op = svc
+            .operations
+            .get(&(BuildId::from("test".to_string()), "op-1".to_string()))
+            .unwrap();
         assert!((op.progress - 0.5).abs() < 0.01);
     }
 
@@ -708,12 +720,18 @@ mod tests {
         .unwrap();
 
         // Verify parent has no parent_id
-        let parent = svc.operations.get(&(BuildId::from("test".to_string()), "parent-op".to_string())).unwrap();
+        let parent = svc
+            .operations
+            .get(&(BuildId::from("test".to_string()), "parent-op".to_string()))
+            .unwrap();
         assert_eq!(parent.parent_id, "");
         assert_eq!(parent.display_name, ":build");
 
         // Verify child references the parent
-        let child = svc.operations.get(&(BuildId::from("test".to_string()), "child-op".to_string())).unwrap();
+        let child = svc
+            .operations
+            .get(&(BuildId::from("test".to_string()), "child-op".to_string()))
+            .unwrap();
         assert_eq!(child.parent_id, "parent-op");
         assert_eq!(child.display_name, ":compileJava");
         assert_eq!(child.operation_type, "Task");
@@ -749,7 +767,10 @@ mod tests {
         .unwrap();
 
         // Verify the completed record marks it as failed
-        let completed = svc.completed.get(&(BuildId::from("test".to_string()), "failing-op".to_string())).unwrap();
+        let completed = svc
+            .completed
+            .get(&(BuildId::from("test".to_string()), "failing-op".to_string()))
+            .unwrap();
         assert!(!completed.success);
         assert_eq!(completed.display_name, ":compileBadCode");
 
@@ -790,8 +811,13 @@ mod tests {
         assert_eq!(s.total_duration_ms, 0);
 
         // Also verify no completed operations exist for a made-up ID
-        assert!(svc.completed.get(&(BuildId::from("test".to_string()), "no-such-op".to_string())).is_none());
-        assert!(!svc.operations.contains_key(&(BuildId::from("test".to_string()), "no-such-op".to_string())));
+        assert!(svc
+            .completed
+            .get(&(BuildId::from("test".to_string()), "no-such-op".to_string()))
+            .is_none());
+        assert!(!svc
+            .operations
+            .contains_key(&(BuildId::from("test".to_string()), "no-such-op".to_string())));
     }
 
     #[tokio::test]
@@ -849,15 +875,33 @@ mod tests {
         // Both should be independently recorded in completed
         assert_eq!(svc.completed.len(), 2);
 
-        let c1_success = svc.completed.get(&(BuildId::from("test".to_string()), "task-run-1".to_string())).unwrap().success;
+        let c1_success = svc
+            .completed
+            .get(&(BuildId::from("test".to_string()), "task-run-1".to_string()))
+            .unwrap()
+            .success;
         assert!(c1_success);
 
-        let c2_success = svc.completed.get(&(BuildId::from("test".to_string()), "task-run-2".to_string())).unwrap().success;
+        let c2_success = svc
+            .completed
+            .get(&(BuildId::from("test".to_string()), "task-run-2".to_string()))
+            .unwrap()
+            .success;
         assert!(!c2_success);
 
         // Both should have the same display name but are separate entries
-        let c1_name = svc.completed.get(&(BuildId::from("test".to_string()), "task-run-1".to_string())).unwrap().display_name.clone();
-        let c2_name = svc.completed.get(&(BuildId::from("test".to_string()), "task-run-2".to_string())).unwrap().display_name.clone();
+        let c1_name = svc
+            .completed
+            .get(&(BuildId::from("test".to_string()), "task-run-1".to_string()))
+            .unwrap()
+            .display_name
+            .clone();
+        let c2_name = svc
+            .completed
+            .get(&(BuildId::from("test".to_string()), "task-run-2".to_string()))
+            .unwrap()
+            .display_name
+            .clone();
         assert_eq!(c1_name, c2_name);
     }
 
@@ -907,12 +951,19 @@ mod tests {
         .unwrap();
 
         // Build 1's op-1 should be completed
-        assert!(svc.completed.contains_key(&(BuildId::from("build-1".to_string()), "op-1".to_string())));
-        let c1 = svc.completed.get(&(BuildId::from("build-1".to_string()), "op-1".to_string())).unwrap();
+        assert!(svc
+            .completed
+            .contains_key(&(BuildId::from("build-1".to_string()), "op-1".to_string())));
+        let c1 = svc
+            .completed
+            .get(&(BuildId::from("build-1".to_string()), "op-1".to_string()))
+            .unwrap();
         assert!(c1.success);
 
         // Build 2's op-1 should still be active
-        assert!(svc.operations.contains_key(&(BuildId::from("build-2".to_string()), "op-1".to_string())));
+        assert!(svc
+            .operations
+            .contains_key(&(BuildId::from("build-2".to_string()), "op-1".to_string())));
 
         // Complete build 2's op-1 with failure
         svc.complete_operation(Request::new(CompleteOperationRequest {
@@ -926,7 +977,10 @@ mod tests {
         .unwrap();
 
         // Build 2's op-1 should be completed with failure
-        let c2 = svc.completed.get(&(BuildId::from("build-2".to_string()), "op-1".to_string())).unwrap();
+        let c2 = svc
+            .completed
+            .get(&(BuildId::from("build-2".to_string()), "op-1".to_string()))
+            .unwrap();
         assert!(!c2.success);
 
         // Build 1 summary should only contain build-1's completed operations

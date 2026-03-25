@@ -13,10 +13,10 @@ use crate::proto::{
     dag_executor_service_server::DagExecutorService, task_graph_service_server::TaskGraphService,
     AwaitBuildCompletionRequest, AwaitBuildCompletionResponse, BuildEventMessage,
     CancelBuildRequest, CancelBuildResponse, GetBuildStatusRequest, GetBuildStatusResponse,
-    GetNextTaskRequest, GetNextTaskResponse, NotifyTaskFinishedRequest,
-    NotifyTaskFinishedResponse, NotifyTaskStartedRequest, NotifyTaskStartedResponse,
-    ResolveExecutionPlanRequest, StartBuildRequest, StartBuildResponse, TaskFinishedRequest,
-    TaskStartedRequest, TaskStatusEntry,
+    GetNextTaskRequest, GetNextTaskResponse, NotifyTaskFinishedRequest, NotifyTaskFinishedResponse,
+    NotifyTaskStartedRequest, NotifyTaskStartedResponse, ResolveExecutionPlanRequest,
+    StartBuildRequest, StartBuildResponse, TaskFinishedRequest, TaskStartedRequest,
+    TaskStatusEntry,
 };
 
 /// Sentinel value returned by GetNextTask when the build is complete.
@@ -79,10 +79,7 @@ impl BuildExecution {
     }
 
     fn failed_count(&self) -> i32 {
-        self.tasks
-            .values()
-            .filter(|t| t.status == "FAILED")
-            .count() as i32
+        self.tasks.values().filter(|t| t.status == "FAILED").count() as i32
     }
 
     fn skipped_count(&self) -> i32 {
@@ -97,10 +94,7 @@ impl BuildExecution {
     }
 
     fn is_terminal(&self) -> bool {
-        matches!(
-            self.status.as_str(),
-            "COMPLETED" | "FAILED" | "CANCELLED"
-        )
+        matches!(self.status.as_str(), "COMPLETED" | "FAILED" | "CANCELLED")
     }
 }
 
@@ -197,10 +191,7 @@ impl DagExecutorServiceImpl {
                             .tasks
                             .get(dep)
                             .map(|d| {
-                                matches!(
-                                    d.status.as_str(),
-                                    "SUCCEEDED" | "FAILED" | "SKIPPED"
-                                )
+                                matches!(d.status.as_str(), "SUCCEEDED" | "FAILED" | "SKIPPED")
                             })
                             .unwrap_or(true)
                     });
@@ -338,7 +329,10 @@ impl DagExecutorService for DagExecutorServiceImpl {
 
             // Build reverse adjacency
             for dep in &deps {
-                dependents.entry(dep.clone()).or_default().push(node.task_path.clone());
+                dependents
+                    .entry(dep.clone())
+                    .or_default()
+                    .push(node.task_path.clone());
             }
 
             tasks.insert(
@@ -598,7 +592,9 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 "Task started"
             );
 
-            Ok(Response::new(NotifyTaskStartedResponse { acknowledged: true }))
+            Ok(Response::new(NotifyTaskStartedResponse {
+                acknowledged: true,
+            }))
         } else {
             Ok(Response::new(NotifyTaskStartedResponse {
                 acknowledged: false,
@@ -671,7 +667,13 @@ impl DagExecutorService for DagExecutorServiceImpl {
             };
             let failure_msg = execution.failure_message.clone();
 
-            (true, newly_ready, build_just_finished, build_outcome_str, failure_msg)
+            (
+                true,
+                newly_ready,
+                build_just_finished,
+                build_outcome_str,
+                failure_msg,
+            )
         };
         // DashMap guard is dropped here.
 
@@ -795,9 +797,8 @@ impl DagExecutorService for DagExecutorServiceImpl {
         let notify = if let Some(execution) = self.builds.get(&build_id) {
             if execution.is_terminal() {
                 // Already done
-                let succeeded = execution.total_tasks
-                    - execution.failed_count()
-                    - execution.skipped_count();
+                let succeeded =
+                    execution.total_tasks - execution.failed_count() - execution.skipped_count();
                 return Ok(Response::new(AwaitBuildCompletionResponse {
                     build_id: req.build_id,
                     final_status: execution.status.clone(),
@@ -835,9 +836,8 @@ impl DagExecutorService for DagExecutorServiceImpl {
 
         // Read final state
         if let Some(execution) = self.builds.get(&build_id) {
-            let succeeded = execution.total_tasks
-                - execution.failed_count()
-                - execution.skipped_count();
+            let succeeded =
+                execution.total_tasks - execution.failed_count() - execution.skipped_count();
             Ok(Response::new(AwaitBuildCompletionResponse {
                 build_id: req.build_id,
                 final_status: execution.status.clone(),
@@ -1320,7 +1320,10 @@ mod tests {
         let svc = make_svc();
 
         // Register cycle: :a -> :b -> :a
-        for (path, deps) in &[(":a", vec![":b".to_string()]), (":b", vec![":a".to_string()])] {
+        for (path, deps) in &[
+            (":a", vec![":b".to_string()]),
+            (":b", vec![":a".to_string()]),
+        ] {
             let _ = svc
                 .task_graph
                 .register_task(Request::new(RegisterTaskRequest {

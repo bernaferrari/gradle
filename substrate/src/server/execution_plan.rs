@@ -115,7 +115,10 @@ impl ExecutionPlanServiceImpl {
             let key = entry.key();
             if key.starts_with("__exec_record__:") {
                 if let Ok(record) = bincode::deserialize::<ExecutionRecord>(&entry.value().state) {
-                    let work_identity = key.strip_prefix("__exec_record__:").unwrap_or(key).to_string();
+                    let work_identity = key
+                        .strip_prefix("__exec_record__:")
+                        .unwrap_or(key)
+                        .to_string();
                     self.history.entries.insert(work_identity, record);
                 }
             }
@@ -197,7 +200,9 @@ impl ExecutionPlanServiceImpl {
         };
 
         if let Some(record) = updated_record {
-            self.history.entries.insert(work_identity.to_string(), record.clone());
+            self.history
+                .entries
+                .insert(work_identity.to_string(), record.clone());
             // Persist to history service for cross-daemon-restart durability
             self.persist_record(work_identity, &record);
         }
@@ -272,11 +277,7 @@ impl ExecutionPlanServiceImpl {
                         entry.duration_ms, est_ms, entry.outcome, entry.consecutive_executions
                     );
                 }
-                return (
-                    PredictedOutcome::PredictedUpToDate,
-                    reasoning,
-                    0.99,
-                );
+                return (PredictedOutcome::PredictedUpToDate, reasoning, 0.99);
             } else {
                 // Inputs changed — check if this is a rebuild loop
                 let mut reasoning = format!(
@@ -290,11 +291,7 @@ impl ExecutionPlanServiceImpl {
                         reasoning, entry.consecutive_executions
                     );
                 }
-                return (
-                    PredictedOutcome::PredictedExecute,
-                    reasoning,
-                    0.95,
-                );
+                return (PredictedOutcome::PredictedExecute, reasoning, 0.95);
             }
         }
 
@@ -453,23 +450,27 @@ impl ExecutionPlanService for ExecutionPlanServiceImpl {
             req.duration_ms,
         );
 
-        Ok(Response::new(RecordOutcomeResponse {
-            acknowledged: true,
-        }))
+        Ok(Response::new(RecordOutcomeResponse { acknowledged: true }))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use crate::proto::WorkMetadata;
+    use std::collections::HashMap;
 
-    fn make_work(identity: &str, props: Vec<(&str, &str)>, file_fps: Vec<(&str, &str)>) -> WorkMetadata {
-        let input_properties: HashMap<String, String> = props.into_iter()
+    fn make_work(
+        identity: &str,
+        props: Vec<(&str, &str)>,
+        file_fps: Vec<(&str, &str)>,
+    ) -> WorkMetadata {
+        let input_properties: HashMap<String, String> = props
+            .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
-        let input_file_fingerprints: HashMap<String, String> = file_fps.into_iter()
+        let input_file_fingerprints: HashMap<String, String> = file_fps
+            .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
         WorkMetadata {
@@ -554,7 +555,8 @@ mod tests {
     async fn test_predict_with_rebuild_reasons() {
         let svc = make_service();
         let mut work = make_work(":compileJava", vec![], vec![]);
-        work.rebuild_reasons.push("Input file 'A.java' has changed".to_string());
+        work.rebuild_reasons
+            .push("Input file 'A.java' has changed".to_string());
 
         let (outcome, reason, _) = svc.predict(&work);
         assert_eq!(outcome, PredictedOutcome::PredictedExecute);
@@ -733,9 +735,11 @@ mod tests {
     #[test]
     fn test_record_outcome_tracks_consecutive() {
         let svc = ExecutionPlanServiceImpl::default();
-        let fp = ExecutionPlanServiceImpl::compute_fingerprint(
-            &make_work(":compileJava", vec![("x", "y")], vec![]),
-        );
+        let fp = ExecutionPlanServiceImpl::compute_fingerprint(&make_work(
+            ":compileJava",
+            vec![("x", "y")],
+            vec![],
+        ));
 
         // Seed initial history
         svc.history.entries.insert(
@@ -834,17 +838,22 @@ mod tests {
 
         // Should be in memory
         assert_eq!(svc.history.entries.len(), 1);
-        let record = svc.history.entries.get(":compileJava").map(|r| (
-            r.consecutive_executions,
-            r.total_consecutive_ms,
-            r.duration_ms,
-            r.outcome.clone(),
-        ));
+        let record = svc.history.entries.get(":compileJava").map(|r| {
+            (
+                r.consecutive_executions,
+                r.total_consecutive_ms,
+                r.duration_ms,
+                r.outcome.clone(),
+            )
+        });
         assert_eq!(record, Some((1, 500, 500, "EXECUTED".to_string())));
 
         // Should also be persisted in history service
         // Note: work_identity is ":compileJava", so key is "__exec_record__::compileJava"
-        let persisted = history.entries.get("__exec_record__::compileJava").map(|e| e.state.clone());
+        let persisted = history
+            .entries
+            .get("__exec_record__::compileJava")
+            .map(|e| e.state.clone());
         assert!(persisted.is_some());
         assert!(!persisted.unwrap().is_empty());
 
@@ -857,10 +866,11 @@ mod tests {
 
         // Should have restored the record
         assert_eq!(svc2.history.entries.len(), 1);
-        let restored = svc2.history.entries.get(":compileJava").map(|r| (
-            r.consecutive_executions,
-            r.duration_ms,
-        ));
+        let restored = svc2
+            .history
+            .entries
+            .get(":compileJava")
+            .map(|r| (r.consecutive_executions, r.duration_ms));
         assert_eq!(restored, Some((1, 500)));
 
         // Record another execution — should increment consecutive
@@ -872,11 +882,13 @@ mod tests {
             600,
         );
 
-        let record = svc2.history.entries.get(":compileJava").map(|r| (
-            r.consecutive_executions,
-            r.total_consecutive_ms,
-            r.duration_ms,
-        ));
+        let record = svc2.history.entries.get(":compileJava").map(|r| {
+            (
+                r.consecutive_executions,
+                r.total_consecutive_ms,
+                r.duration_ms,
+            )
+        });
         assert_eq!(record, Some((2, 1100, 600)));
     }
 }

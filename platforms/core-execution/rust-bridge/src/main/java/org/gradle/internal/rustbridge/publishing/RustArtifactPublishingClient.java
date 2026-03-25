@@ -1,6 +1,7 @@
 package org.gradle.internal.rustbridge.publishing;
 
 import gradle.substrate.v1.ArtifactDescriptor;
+import gradle.substrate.v1.ArtifactPublishStatus;
 import gradle.substrate.v1.ArtifactPublishingServiceGrpc;
 import gradle.substrate.v1.GetArtifactChecksumsRequest;
 import gradle.substrate.v1.GetArtifactChecksumsResponse;
@@ -53,10 +54,10 @@ public class RustArtifactPublishingClient {
         private final int uploaded;
         private final int failed;
         private final int pending;
-        private final List<GetPublishingStatusResponse.ArtifactPublishStatus> artifacts;
+        private final List<ArtifactPublishStatus> artifacts;
 
         private PublishingStatus(int total, int uploaded, int failed, int pending,
-                                 List<GetPublishingStatusResponse.ArtifactPublishStatus> artifacts) {
+                                 List<ArtifactPublishStatus> artifacts) {
             this.total = total;
             this.uploaded = uploaded;
             this.failed = failed;
@@ -68,7 +69,7 @@ public class RustArtifactPublishingClient {
         public int getUploaded() { return uploaded; }
         public int getFailed() { return failed; }
         public int getPending() { return pending; }
-        public List<GetPublishingStatusResponse.ArtifactPublishStatus> getArtifacts() { return artifacts; }
+        public List<ArtifactPublishStatus> getArtifacts() { return artifacts; }
     }
 
     /**
@@ -137,7 +138,7 @@ public class RustArtifactPublishingClient {
      */
     public PublishingStatus getPublishingStatus(String buildId) {
         if (client.isNoop()) {
-            return new PublishingStatus(0, 0, 0, 0, List.of());
+            return new PublishingStatus(0, 0, 0, 0, java.util.Collections.emptyList());
         }
 
         try {
@@ -155,7 +156,7 @@ public class RustArtifactPublishingClient {
             );
         } catch (Exception e) {
             LOGGER.debug("[substrate:publishing] get publishing status failed", e);
-            return new PublishingStatus(0, 0, 0, 0, List.of());
+            return new PublishingStatus(0, 0, 0, 0, java.util.Collections.emptyList());
         }
     }
 

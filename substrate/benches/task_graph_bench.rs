@@ -33,10 +33,7 @@ fn bench_register_1000_tasks(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 for task in &tasks {
-                    let _ = svc
-                        .register_task(Request::new(task.clone()))
-                        .await
-                        .unwrap();
+                    let _ = svc.register_task(Request::new(task.clone())).await.unwrap();
                 }
             })
         })
@@ -139,7 +136,10 @@ fn bench_task_finished(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 for finish in &finishes {
-                    let _ = svc.task_finished(Request::new(finish.clone())).await.unwrap();
+                    let _ = svc
+                        .task_finished(Request::new(finish.clone()))
+                        .await
+                        .unwrap();
                 }
             })
         })

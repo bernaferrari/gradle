@@ -10,7 +10,6 @@
 /// - Cache misses for nonexistent keys
 /// - Overwrite semantics (last-write-wins)
 /// - Concurrent put/get operations
-
 use std::fs;
 use std::sync::Arc;
 
@@ -21,39 +20,23 @@ use tonic::Request;
 
 use gradle_substrate_daemon::proto::*;
 use gradle_substrate_daemon::server::{
-    cache::CacheServiceImpl,
-    control::ControlServiceImpl,
-    dag_executor::DagExecutorServiceImpl,
-    event_dispatcher::EventDispatcher,
-    execution_history::ExecutionHistoryServiceImpl,
-    hash::HashServiceImpl,
-    work::WorkerScheduler,
-    artifact_publishing::ArtifactPublishingServiceImpl,
-    bootstrap::BootstrapServiceImpl,
-    build_comparison::BuildComparisonServiceImpl,
-    build_event_stream::BuildEventStreamServiceImpl,
-    build_init::BuildInitServiceImpl,
-    build_layout::BuildLayoutServiceImpl,
-    build_metrics::BuildMetricsServiceImpl,
-    build_operations::BuildOperationsServiceImpl,
-    build_result::BuildResultServiceImpl,
+    artifact_publishing::ArtifactPublishingServiceImpl, bootstrap::BootstrapServiceImpl,
+    build_comparison::BuildComparisonServiceImpl, build_event_stream::BuildEventStreamServiceImpl,
+    build_init::BuildInitServiceImpl, build_layout::BuildLayoutServiceImpl,
+    build_metrics::BuildMetricsServiceImpl, build_operations::BuildOperationsServiceImpl,
+    build_result::BuildResultServiceImpl, cache::CacheServiceImpl,
     cache_orchestration::BuildCacheOrchestrationServiceImpl,
-    config_cache::ConfigurationCacheServiceImpl,
-    configuration::ConfigurationServiceImpl,
-    console::ConsoleServiceImpl,
-    dependency_resolution::DependencyResolutionServiceImpl,
-    exec::ExecServiceImpl,
-    file_fingerprint::FileFingerprintServiceImpl,
-    file_watch::FileWatchServiceImpl,
-    garbage_collection::GarbageCollectionServiceImpl,
-    incremental_compilation::IncrementalCompilationServiceImpl,
-    plugin::PluginServiceImpl,
+    config_cache::ConfigurationCacheServiceImpl, configuration::ConfigurationServiceImpl,
+    console::ConsoleServiceImpl, control::ControlServiceImpl, dag_executor::DagExecutorServiceImpl,
+    dependency_resolution::DependencyResolutionServiceImpl, event_dispatcher::EventDispatcher,
+    exec::ExecServiceImpl, execution_history::ExecutionHistoryServiceImpl,
+    file_fingerprint::FileFingerprintServiceImpl, file_watch::FileWatchServiceImpl,
+    garbage_collection::GarbageCollectionServiceImpl, hash::HashServiceImpl,
+    incremental_compilation::IncrementalCompilationServiceImpl, plugin::PluginServiceImpl,
     problem_reporting::ProblemReportingServiceImpl,
-    resource_management::ResourceManagementServiceImpl,
-    task_graph::TaskGraphServiceImpl,
-    test_execution::TestExecutionServiceImpl,
-    toolchain::ToolchainServiceImpl,
-    value_snapshot::ValueSnapshotServiceImpl,
+    resource_management::ResourceManagementServiceImpl, task_graph::TaskGraphServiceImpl,
+    test_execution::TestExecutionServiceImpl, toolchain::ToolchainServiceImpl,
+    value_snapshot::ValueSnapshotServiceImpl, work::WorkerScheduler,
     worker_process::WorkerProcessServiceImpl,
 };
 
@@ -92,10 +75,13 @@ async fn spawn_server() -> (String, tempfile::TempDir) {
             work_scheduler.clone(),
             Arc::clone(&shared_history),
         );
-    let cache_orchestration = BuildCacheOrchestrationServiceImpl::with_local_cache(cache_local_store);
+    let cache_orchestration =
+        BuildCacheOrchestrationServiceImpl::with_local_cache(cache_local_store);
     let file_fingerprint = FileFingerprintServiceImpl::new();
     let value_snapshot = ValueSnapshotServiceImpl::new();
-    let task_graph = Arc::new(TaskGraphServiceImpl::with_history(Arc::clone(&shared_history)));
+    let task_graph = Arc::new(TaskGraphServiceImpl::with_history(Arc::clone(
+        &shared_history,
+    )));
     let execution_history = ExecutionHistoryServiceImpl::new(history_dir.clone());
     let configuration = ConfigurationServiceImpl::new();
     let plugin = PluginServiceImpl::new();
@@ -111,7 +97,8 @@ async fn spawn_server() -> (String, tempfile::TempDir) {
         Arc::clone(&console) as Arc<dyn EventDispatcher>,
         Arc::clone(&build_metrics) as Arc<dyn EventDispatcher>,
     ];
-    let build_event_stream = BuildEventStreamServiceImpl::with_dispatchers(event_dispatchers.clone());
+    let build_event_stream =
+        BuildEventStreamServiceImpl::with_dispatchers(event_dispatchers.clone());
     let dag_executor = DagExecutorServiceImpl::new(
         work_scheduler.clone(),
         Arc::clone(&task_graph),
@@ -138,7 +125,9 @@ async fn spawn_server() -> (String, tempfile::TempDir) {
     tokio::spawn(async move {
         let _ = Server::builder()
             .add_service(control_service_server::ControlServiceServer::new(control))
-            .add_service(dag_executor_service_server::DagExecutorServiceServer::new(dag_executor))
+            .add_service(dag_executor_service_server::DagExecutorServiceServer::new(
+                dag_executor,
+            ))
             .add_service(hash_service_server::HashServiceServer::new(hash))
             .add_service(cache_service_server::CacheServiceServer::new(cache))
             .add_service(exec_service_server::ExecServiceServer::new(exec))
@@ -151,11 +140,15 @@ async fn spawn_server() -> (String, tempfile::TempDir) {
                     execution_history,
                 ),
             )
-            .add_service(build_cache_orchestration_service_server::BuildCacheOrchestrationServiceServer::new(
-                cache_orchestration,
-            ))
             .add_service(
-                file_fingerprint_service_server::FileFingerprintServiceServer::new(file_fingerprint),
+                build_cache_orchestration_service_server::BuildCacheOrchestrationServiceServer::new(
+                    cache_orchestration,
+                ),
+            )
+            .add_service(
+                file_fingerprint_service_server::FileFingerprintServiceServer::new(
+                    file_fingerprint,
+                ),
             )
             .add_service(
                 value_snapshot_service_server::ValueSnapshotServiceServer::new(value_snapshot),
@@ -163,26 +156,34 @@ async fn spawn_server() -> (String, tempfile::TempDir) {
             .add_service(task_graph_service_server::TaskGraphServiceServer::new(
                 (*task_graph).clone(),
             ))
-            .add_service(configuration_service_server::ConfigurationServiceServer::new(
-                configuration,
-            ))
+            .add_service(
+                configuration_service_server::ConfigurationServiceServer::new(configuration),
+            )
             .add_service(plugin_service_server::PluginServiceServer::new(plugin))
             .add_service(
-                build_operations_service_server::BuildOperationsServiceServer::new(build_operations),
+                build_operations_service_server::BuildOperationsServiceServer::new(
+                    build_operations,
+                ),
             )
-            .add_service(bootstrap_service_server::BootstrapServiceServer::new(bootstrap))
+            .add_service(bootstrap_service_server::BootstrapServiceServer::new(
+                bootstrap,
+            ))
             .add_service(
                 dependency_resolution_service_server::DependencyResolutionServiceServer::new(
                     dependency_resolution,
                 ),
             )
-            .add_service(file_watch_service_server::FileWatchServiceServer::new(file_watch))
+            .add_service(file_watch_service_server::FileWatchServiceServer::new(
+                file_watch,
+            ))
             .add_service(
                 configuration_cache_service_server::ConfigurationCacheServiceServer::new(
                     config_cache,
                 ),
             )
-            .add_service(toolchain_service_server::ToolchainServiceServer::new(toolchain))
+            .add_service(toolchain_service_server::ToolchainServiceServer::new(
+                toolchain,
+            ))
             .add_service(
                 build_event_stream_service_server::BuildEventStreamServiceServer::new(
                     build_event_stream,
@@ -191,8 +192,12 @@ async fn spawn_server() -> (String, tempfile::TempDir) {
             .add_service(
                 worker_process_service_server::WorkerProcessServiceServer::new(worker_process),
             )
-            .add_service(build_layout_service_server::BuildLayoutServiceServer::new(build_layout))
-            .add_service(build_result_service_server::BuildResultServiceServer::new(build_result))
+            .add_service(build_layout_service_server::BuildLayoutServiceServer::new(
+                build_layout,
+            ))
+            .add_service(build_result_service_server::BuildResultServiceServer::new(
+                build_result,
+            ))
             .add_service(
                 problem_reporting_service_server::ProblemReportingServiceServer::new(
                     problem_reporting,
@@ -204,9 +209,13 @@ async fn spawn_server() -> (String, tempfile::TempDir) {
                 ),
             )
             .add_service(
-                build_comparison_service_server::BuildComparisonServiceServer::new(build_comparison),
+                build_comparison_service_server::BuildComparisonServiceServer::new(
+                    build_comparison,
+                ),
             )
-            .add_service(console_service_server::ConsoleServiceServer::new((*console).clone()))
+            .add_service(console_service_server::ConsoleServiceServer::new(
+                (*console).clone(),
+            ))
             .add_service(
                 test_execution_service_server::TestExecutionServiceServer::new(test_execution),
             )
@@ -215,14 +224,18 @@ async fn spawn_server() -> (String, tempfile::TempDir) {
                     artifact_publishing,
                 ),
             )
-            .add_service(build_init_service_server::BuildInitServiceServer::new(build_init))
+            .add_service(build_init_service_server::BuildInitServiceServer::new(
+                build_init,
+            ))
             .add_service(
                 incremental_compilation_service_server::IncrementalCompilationServiceServer::new(
                     incremental_compilation,
                 ),
             )
             .add_service(
-                build_metrics_service_server::BuildMetricsServiceServer::new((*build_metrics).clone()),
+                build_metrics_service_server::BuildMetricsServiceServer::new(
+                    (*build_metrics).clone(),
+                ),
             )
             .add_service(
                 garbage_collection_service_server::GarbageCollectionServiceServer::new(
@@ -346,7 +359,11 @@ async fn test_put_50_entries_byte_for_byte_equality() {
     // Store 50 entries
     for i in 0..num_entries {
         let key = format!("diff-test-key-{:04}", i);
-        let value = format!("cache value number {} with some unique content padding: {}", i, "x".repeat(i * 7));
+        let value = format!(
+            "cache value number {} with some unique content padding: {}",
+            i,
+            "x".repeat(i * 7)
+        );
         let key_bytes = key.as_bytes();
 
         let stored = cache_store_entry(&mut client, key_bytes, value.as_bytes()).await;
@@ -356,7 +373,11 @@ async fn test_put_50_entries_byte_for_byte_equality() {
     // Retrieve and verify all 50 entries
     for i in 0..num_entries {
         let key = format!("diff-test-key-{:04}", i);
-        let expected_value = format!("cache value number {} with some unique content padding: {}", i, "x".repeat(i * 7));
+        let expected_value = format!(
+            "cache value number {} with some unique content padding: {}",
+            i,
+            "x".repeat(i * 7)
+        );
         let key_bytes = key.as_bytes();
 
         let loaded = cache_load_entry(&mut client, key_bytes).await;
@@ -455,13 +476,22 @@ async fn test_overwrite_last_write_wins() {
     // Verify second value
     let loaded2 = cache_load_entry(&mut client, key).await;
     assert!(loaded2.is_some(), "Overwritten value should be retrievable");
-    assert_eq!(loaded2.unwrap().1, value2, "Overwritten value should match second write");
+    assert_eq!(
+        loaded2.unwrap().1,
+        value2,
+        "Overwritten value should match second write"
+    );
 
     // Ensure first value is gone (different lengths already prove they differ)
-    assert_ne!(value1.len(), value2.len(), "Test sanity: values should have different lengths");
+    assert_ne!(
+        value1.len(),
+        value2.len(),
+        "Test sanity: values should have different lengths"
+    );
     let loaded_final = cache_load_entry(&mut client, key).await;
     assert_eq!(
-        loaded_final.unwrap().1, value2,
+        loaded_final.unwrap().1,
+        value2,
         "Final read should return the second (overwritten) value"
     );
 }
@@ -498,7 +528,8 @@ async fn test_binary_data_roundtrip() {
         let (meta, data) = loaded.unwrap();
 
         assert_eq!(
-            data, *value,
+            data,
+            *value,
             "Binary roundtrip mismatch for '{}': expected {} bytes, got {} bytes",
             description,
             value.len(),
@@ -534,9 +565,17 @@ async fn test_large_entry_roundtrip() {
     assert!(loaded.is_some(), "Large entry load should succeed");
     let (meta, data) = loaded.unwrap();
 
-    assert_eq!(data.len(), large_value.len(), "Large entry data length mismatch");
+    assert_eq!(
+        data.len(),
+        large_value.len(),
+        "Large entry data length mismatch"
+    );
     assert_eq!(data, large_value, "Large entry byte-for-byte mismatch");
-    assert_eq!(meta.size, large_value.len() as i64, "Large entry metadata size mismatch");
+    assert_eq!(
+        meta.size,
+        large_value.len() as i64,
+        "Large entry metadata size mismatch"
+    );
 }
 
 // ============================================================
@@ -571,7 +610,12 @@ async fn test_concurrent_put_get() {
             let (meta, data) = loaded.unwrap();
 
             assert_eq!(data, value_bytes, "Concurrent entry {} mismatch", i);
-            assert_eq!(meta.size, value_bytes.len() as i64, "Concurrent entry {} size mismatch", i);
+            assert_eq!(
+                meta.size,
+                value_bytes.len() as i64,
+                "Concurrent entry {} size mismatch",
+                i
+            );
 
             (i, true)
         }));
@@ -641,13 +685,21 @@ async fn test_store_after_overwrite_consistency() {
         let loaded = cache_load_entry(&mut client, key).await;
         assert!(loaded.is_some(), "Load after store {} should succeed", i);
         let (_, data) = loaded.unwrap();
-        assert_eq!(data, *value, "After store {}, should read back value {}", i, i);
+        assert_eq!(
+            data, *value,
+            "After store {}, should read back value {}",
+            i, i
+        );
     }
 
     // Final read should return the last value
     let final_loaded = cache_load_entry(&mut client, key).await;
     assert!(final_loaded.is_some());
-    assert_eq!(final_loaded.unwrap().1, values[2], "Final value should be the third write");
+    assert_eq!(
+        final_loaded.unwrap().1,
+        values[2],
+        "Final value should be the third write"
+    );
 }
 
 // ============================================================

@@ -2,16 +2,16 @@ mod copy;
 mod delete;
 mod java_compile;
 mod mkdir_op;
-mod sync;
 mod symlink;
+mod sync;
 mod test_exec;
 
 pub use copy::CopyTaskExecutor;
 pub use delete::DeleteTaskExecutor;
 pub use java_compile::JavaCompileExecutor;
 pub use mkdir_op::MkdirTaskExecutor;
-pub use sync::SyncTaskExecutor;
 pub use symlink::SymlinkTaskExecutor;
+pub use sync::SyncTaskExecutor;
 pub use test_exec::TestExecExecutor;
 
 use std::collections::HashMap;

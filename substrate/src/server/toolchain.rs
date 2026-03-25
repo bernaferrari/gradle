@@ -10,11 +10,12 @@ use tonic::{Request, Response, Status};
 
 use crate::proto::{
     toolchain_service_server::ToolchainService, AutoDetectToolchainsRequest,
-    AutoDetectToolchainsResponse, AutoDetectedToolchain, EnsureToolchainRequest, GetJavaHomeRequest,
-    GetJavaHomeResponse, GetToolchainMetadataRequest, GetToolchainMetadataResponse,
-    ListToolchainsRequest, ListToolchainsResponse, RegisterToolchainRequest,
-    RegisterToolchainResponse, RemoveToolchainRequest, RemoveToolchainResponse, ToolchainLocation,
-    ToolchainProgress, VerifyToolchainRequest, VerifyToolchainResponse,
+    AutoDetectToolchainsResponse, AutoDetectedToolchain, EnsureToolchainRequest,
+    GetJavaHomeRequest, GetJavaHomeResponse, GetToolchainMetadataRequest,
+    GetToolchainMetadataResponse, ListToolchainsRequest, ListToolchainsResponse,
+    RegisterToolchainRequest, RegisterToolchainResponse, RemoveToolchainRequest,
+    RemoveToolchainResponse, ToolchainLocation, ToolchainProgress, VerifyToolchainRequest,
+    VerifyToolchainResponse,
 };
 
 /// Known toolchain installation.
@@ -81,7 +82,11 @@ impl ToolchainServiceImpl {
 
         // 2. Scan PATH for java binaries
         if let Ok(path_var) = std::env::var("PATH") {
-            for dir in path_var.split(if cfg!(target_os = "windows") { ';' } else { ':' }) {
+            for dir in path_var.split(if cfg!(target_os = "windows") {
+                ';'
+            } else {
+                ':'
+            }) {
                 let java_bin = if cfg!(target_os = "windows") {
                     Path::new(dir).join("java.exe")
                 } else {
@@ -168,7 +173,9 @@ impl ToolchainServiceImpl {
                                 path.clone()
                             };
 
-                            if let Some((version, _)) = Self::probe_java_home(&home.to_string_lossy()) {
+                            if let Some((version, _)) =
+                                Self::probe_java_home(&home.to_string_lossy())
+                            {
                                 found.push((home.to_string_lossy().to_string(), version));
                             }
                         }
@@ -190,7 +197,9 @@ impl ToolchainServiceImpl {
                         for entry in entries.flatten() {
                             let path = entry.path();
                             if path.is_dir() {
-                                if let Some((version, _)) = Self::probe_java_home(&path.to_string_lossy()) {
+                                if let Some((version, _)) =
+                                    Self::probe_java_home(&path.to_string_lossy())
+                                {
                                     found.push((path.to_string_lossy().to_string(), version));
                                 }
                             }
@@ -264,10 +273,7 @@ impl ToolchainServiceImpl {
         }
 
         // Try to run java -version
-        match Command::new(&java_bin)
-            .arg("-version")
-            .output()
-        {
+        match Command::new(&java_bin).arg("-version").output() {
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 let stdout = String::from_utf8_lossy(&output.stdout);
@@ -320,7 +326,14 @@ impl ToolchainServiceImpl {
                     let trimmed = part.trim();
                     if trimmed.starts_with("1.") {
                         if let Some(after) = trimmed.strip_prefix("1.") {
-                            major_version = after.split('.').next().unwrap_or("0").split('_').next().unwrap_or("0").to_string();
+                            major_version = after
+                                .split('.')
+                                .next()
+                                .unwrap_or("0")
+                                .split('_')
+                                .next()
+                                .unwrap_or("0")
+                                .to_string();
                             full_version = trimmed.to_string();
                         }
                     } else if trimmed.chars().next().is_some_and(|c| c.is_ascii_digit()) {
@@ -411,7 +424,11 @@ impl ToolchainServiceImpl {
 
     /// Recursively calculate directory size.
     fn dir_size(path: &Path) -> u64 {
-        if !path.exists() {
+        Self::dir_size_limited(path, 0, 10)
+    }
+
+    fn dir_size_limited(path: &Path, depth: u32, max_depth: u32) -> u64 {
+        if !path.exists() || depth > max_depth {
             return 0;
         }
 
@@ -422,14 +439,19 @@ impl ToolchainServiceImpl {
         let mut total = 0u64;
         if let Ok(entries) = std::fs::read_dir(path) {
             for entry in entries.flatten() {
-                total += Self::dir_size(&entry.path());
+                total += Self::dir_size_limited(&entry.path(), depth + 1, max_depth);
             }
         }
         total
     }
 
     /// Construct a download URL for a JDK distribution.
-    fn build_download_urls(version: &str, implementation: &str, os: &str, arch: &str) -> Vec<String> {
+    fn build_download_urls(
+        version: &str,
+        implementation: &str,
+        os: &str,
+        arch: &str,
+    ) -> Vec<String> {
         let mut urls = Vec::new();
 
         let os_part = match os {
@@ -461,13 +483,21 @@ impl ToolchainServiceImpl {
             // Microsoft Build of OpenJDK
             urls.push(format!(
                 "https://aka.ms/download-jdk/microsoft-jdk-{}-{}-{}{}.{}",
-                version, os_part, arch_part, if os == "windows" { "-windows" } else { "" }, ext
+                version,
+                os_part,
+                arch_part,
+                if os == "windows" { "-windows" } else { "" },
+                ext
             ));
         } else if impl_lower.contains("zulu") || impl_lower.contains("azul") {
             // Azul Zulu
             urls.push(format!(
                 "https://cdn.azul.com/zulu/bin/zulu{}-ea-jdk{}_{}-{}.{}",
-                version.replace(".", ""), version, os_part, arch_part, ext
+                version.replace(".", ""),
+                version,
+                os_part,
+                arch_part,
+                ext
             ));
         } else if impl_lower.contains("graalvm") || impl_lower.contains("oracle") {
             // Oracle GraalVM / Oracle JDK
@@ -498,7 +528,11 @@ impl ToolchainServiceImpl {
         if !impl_lower.contains("microsoft") && !impl_lower.contains("msft") {
             urls.push(format!(
                 "https://aka.ms/download-jdk/microsoft-jdk-{}-{}-{}{}.{}",
-                version, os_part, arch_part, if os == "windows" { "-windows" } else { "" }, ext
+                version,
+                os_part,
+                arch_part,
+                if os == "windows" { "-windows" } else { "" },
+                ext
             ));
         }
 
@@ -506,12 +540,10 @@ impl ToolchainServiceImpl {
     }
 
     /// Download a file from a URL to a local path, with progress reporting via a channel.
-    async fn _download_file(
-        &self,
-        url: &str,
-        dest: &Path,
-    ) -> Result<(), String> {
-        let response = self.http_client.get(url)
+    async fn _download_file(&self, url: &str, dest: &Path) -> Result<(), String> {
+        let response = self
+            .http_client
+            .get(url)
             .send()
             .await
             .map_err(|e| format!("Download request failed: {}", e))?;
@@ -523,14 +555,16 @@ impl ToolchainServiceImpl {
         let total_size = response.content_length().unwrap_or(0);
         let mut downloaded: u64 = 0;
 
-        let mut file = tokio::fs::File::create(dest).await
+        let mut file = tokio::fs::File::create(dest)
+            .await
             .map_err(|e| format!("Failed to create file: {}", e))?;
 
         let mut stream = response.bytes_stream();
         use futures_util::StreamExt;
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result.map_err(|e| format!("Stream error: {}", e))?;
-            file.write_all(&chunk).await
+            file.write_all(&chunk)
+                .await
                 .map_err(|e| format!("Write error: {}", e))?;
             downloaded += chunk.len() as u64;
 
@@ -540,7 +574,8 @@ impl ToolchainServiceImpl {
             }
         }
 
-        file.flush().await
+        file.flush()
+            .await
             .map_err(|e| format!("Flush error: {}", e))?;
 
         Ok(())
@@ -548,12 +583,13 @@ impl ToolchainServiceImpl {
 
     /// Extract a .tar.gz archive to a directory.
     fn extract_tar_gz(archive: &Path, dest: &Path) -> Result<(), String> {
-        let file = std::fs::File::open(archive)
-            .map_err(|e| format!("Failed to open archive: {}", e))?;
+        let file =
+            std::fs::File::open(archive).map_err(|e| format!("Failed to open archive: {}", e))?;
         let gz_decoder = flate2::read::GzDecoder::new(file);
         let mut archive = tar::Archive::new(gz_decoder);
 
-        archive.unpack(dest)
+        archive
+            .unpack(dest)
             .map_err(|e| format!("Failed to extract tar.gz: {}", e))?;
 
         Ok(())
@@ -561,13 +597,14 @@ impl ToolchainServiceImpl {
 
     /// Extract a .zip archive to a directory.
     fn extract_zip(archive: &Path, dest: &Path) -> Result<(), String> {
-        let file = std::fs::File::open(archive)
-            .map_err(|e| format!("Failed to open archive: {}", e))?;
-        let mut archive = zip::read::ZipArchive::new(file)
-            .map_err(|e| format!("Failed to read zip: {}", e))?;
+        let file =
+            std::fs::File::open(archive).map_err(|e| format!("Failed to open archive: {}", e))?;
+        let mut archive =
+            zip::read::ZipArchive::new(file).map_err(|e| format!("Failed to read zip: {}", e))?;
 
         for i in 0..archive.len() {
-            let mut entry = archive.by_index(i)
+            let mut entry = archive
+                .by_index(i)
                 .map_err(|e| format!("Failed to read entry {}: {}", i, e))?;
 
             let outpath = match entry.enclosed_name() {
@@ -612,7 +649,9 @@ impl ToolchainServiceImpl {
             let subdirs: Vec<_> = entries.flatten().filter(|e| e.path().is_dir()).collect();
             if subdirs.len() == 1 {
                 let candidate = subdirs[0].path();
-                if candidate.join("bin/java").exists() || candidate.join("Contents/Home/bin/java").exists() {
+                if candidate.join("bin/java").exists()
+                    || candidate.join("Contents/Home/bin/java").exists()
+                {
                     return Some(candidate);
                 }
             }
@@ -667,15 +706,17 @@ impl ToolchainService for ToolchainServiceImpl {
             });
         }
 
-        tracing::debug!(
-            count = toolchains.len(),
-            "Listed toolchains"
-        );
+        tracing::debug!(count = toolchains.len(), "Listed toolchains");
 
         Ok(Response::new(ListToolchainsResponse { toolchains }))
     }
 
-    type EnsureToolchainStream = std::pin::Pin<Box<dyn tonic::codegen::tokio_stream::Stream<Item = Result<ToolchainProgress, Status>> + Send>>;
+    type EnsureToolchainStream = std::pin::Pin<
+        Box<
+            dyn tonic::codegen::tokio_stream::Stream<Item = Result<ToolchainProgress, Status>>
+                + Send,
+        >,
+    >;
 
     async fn ensure_toolchain(
         &self,
@@ -690,14 +731,19 @@ impl ToolchainService for ToolchainServiceImpl {
             let stream = futures_util::stream::iter(vec![Ok(ToolchainProgress {
                 phase: "done".to_string(),
                 progress_percent: 100,
-                message: format!("Toolchain {} {} already installed", req.implementation, req.language_version),
+                message: format!(
+                    "Toolchain {} {} already installed",
+                    req.implementation, req.language_version
+                ),
                 success: true,
                 error_message: String::new(),
                 java_home,
                 sha256_verified: false,
                 cache_hit: true,
             })]);
-            return Ok(Response::new(Box::pin(stream) as Self::EnsureToolchainStream));
+            return Ok(Response::new(
+                Box::pin(stream) as Self::EnsureToolchainStream
+            ));
         }
 
         self.downloads_total.fetch_add(1, Ordering::Relaxed);
@@ -1102,7 +1148,9 @@ impl ToolchainService for ToolchainServiceImpl {
             });
         };
 
-        Ok(Response::new(Box::pin(stream) as Self::EnsureToolchainStream))
+        Ok(Response::new(
+            Box::pin(stream) as Self::EnsureToolchainStream
+        ))
     }
 
     async fn verify_toolchain(
@@ -1140,15 +1188,15 @@ impl ToolchainService for ToolchainServiceImpl {
                 let exit_code = output.status.code().unwrap_or(-1);
                 let valid = exit_code == 0;
 
-                let detected_version = Self::parse_java_version(version_output)
-                    .unwrap_or_default();
+                let detected_version = Self::parse_java_version(version_output).unwrap_or_default();
 
                 // Verify against expected version if provided
-                let version_match = if !req.expected_version.is_empty() && !detected_version.is_empty() {
-                    detected_version.contains(&req.expected_version)
-                } else {
-                    true
-                };
+                let version_match =
+                    if !req.expected_version.is_empty() && !detected_version.is_empty() {
+                        detected_version.contains(&req.expected_version)
+                    } else {
+                        true
+                    };
 
                 Ok(Response::new(VerifyToolchainResponse {
                     valid: valid && version_match,
@@ -1156,7 +1204,10 @@ impl ToolchainService for ToolchainServiceImpl {
                     error_message: if !valid {
                         format!("java -version exited with code {}", exit_code)
                     } else if !version_match {
-                        format!("Expected version {} but found {}", req.expected_version, detected_version)
+                        format!(
+                            "Expected version {} but found {}",
+                            req.expected_version, detected_version
+                        )
                     } else {
                         String::new()
                     },
@@ -1281,13 +1332,16 @@ impl ToolchainService for ToolchainServiceImpl {
         let size = Self::dir_size(path) as i64;
         let key = Self::toolchain_key(&req.language_version, &req.implementation);
 
-        self.installations.insert(key.clone(), InstalledToolchain {
-            language_version: detected_version.clone(),
-            implementation: req.implementation.clone(),
-            java_home: req.java_home.clone(),
-            verified: true,
-            install_size_bytes: size,
-        });
+        self.installations.insert(
+            key.clone(),
+            InstalledToolchain {
+                language_version: detected_version.clone(),
+                implementation: req.implementation.clone(),
+                java_home: req.java_home.clone(),
+                verified: true,
+                install_size_bytes: size,
+            },
+        );
 
         tracing::info!(
             version = %req.language_version,
@@ -1396,22 +1450,35 @@ impl ToolchainService for ToolchainServiceImpl {
             }));
         }
 
-        // Fall back to system scan
-        let target_version = req.language_version.trim_start_matches("JDK ").trim();
-        for (java_home, version_str) in Self::find_system_javas() {
-            if version_str.contains(target_version) {
-                let size = Self::dir_size(Path::new(&java_home)) as i64;
-                return Ok(Response::new(GetToolchainMetadataResponse {
-                    found: true,
-                    language_version: req.language_version,
-                    implementation: "system".to_string(),
-                    vendor: String::new(),
-                    detected_version: version_str,
-                    java_home,
-                    install_size_bytes: size,
-                    verified: true,
-                }));
-            }
+        // Fall back to system scan (runs on blocking thread pool to avoid
+        // starving the tokio runtime — find_system_javas spawns subprocesses
+        // and walks the filesystem).
+        let target_version = req
+            .language_version
+            .trim_start_matches("JDK ")
+            .trim()
+            .to_string();
+        let system_javas = tokio::task::spawn_blocking(move || {
+            Self::find_system_javas()
+                .into_iter()
+                .filter(|(_, v)| v.contains(&target_version))
+                .collect::<Vec<_>>()
+        })
+        .await
+        .unwrap_or_default();
+
+        if let Some((java_home, version_str)) = system_javas.into_iter().next() {
+            let size = Self::dir_size(Path::new(&java_home)) as i64;
+            return Ok(Response::new(GetToolchainMetadataResponse {
+                found: true,
+                language_version: req.language_version,
+                implementation: "system".to_string(),
+                vendor: String::new(),
+                detected_version: version_str,
+                java_home,
+                install_size_bytes: size,
+                verified: true,
+            }));
         }
 
         Ok(Response::new(GetToolchainMetadataResponse {
@@ -1425,80 +1492,60 @@ impl ToolchainService for ToolchainServiceImpl {
         request: Request<AutoDetectToolchainsRequest>,
     ) -> Result<Response<AutoDetectToolchainsResponse>, Status> {
         let req = request.into_inner();
-        let mut results = Vec::new();
 
-        // 1. JAVA_HOME
-        if let Ok(java_home) = std::env::var("JAVA_HOME") {
-            if let Some(info) = Self::probe_java_home_detailed(&java_home) {
-                if req.major_version.is_empty() || info.major_version == req.major_version {
-                    results.push(AutoDetectedToolchain {
-                        java_home,
-                        major_version: info.major_version,
-                        full_version: info.full_version,
-                        vendor: info.vendor,
-                        source: "JAVA_HOME".to_string(),
-                        verified: true,
-                    });
-                }
-            }
-        }
+        // All detection logic is synchronous (env vars, filesystem walks,
+        // subprocess spawns). Run on the blocking thread pool to avoid
+        // starving the tokio runtime.
+        let results = tokio::task::spawn_blocking(move || {
+            let mut results = Vec::new();
 
-        // 2. PATH scanning
-        if req.scan_path {
-            if let Ok(path_var) = std::env::var("PATH") {
-                let separator = if cfg!(target_os = "windows") { ';' } else { ':' };
-                for dir in path_var.split(separator) {
-                    let java_bin = if cfg!(target_os = "windows") {
-                        Path::new(dir).join("java.exe")
-                    } else {
-                        Path::new(dir).join("java")
-                    };
-                    if java_bin.is_file() {
-                        if let Some(java_home) = java_bin.parent().and_then(|p| p.parent()) {
-                            let home_str = java_home.to_string_lossy().to_string();
-                            // Skip if already found via JAVA_HOME
-                            if results.iter().any(|r| r.java_home == home_str) {
-                                continue;
-                            }
-                            if let Some(info) = Self::probe_java_home_detailed(&home_str) {
-                                if req.major_version.is_empty() || info.major_version == req.major_version {
-                                    results.push(AutoDetectedToolchain {
-                                        java_home: home_str,
-                                        major_version: info.major_version,
-                                        full_version: info.full_version,
-                                        vendor: info.vendor,
-                                        source: "PATH".to_string(),
-                                        verified: true,
-                                    });
-                                }
-                            }
-                        }
+            // 1. JAVA_HOME
+            if let Ok(java_home) = std::env::var("JAVA_HOME") {
+                if let Some(info) = Self::probe_java_home_detailed(&java_home) {
+                    if req.major_version.is_empty() || info.major_version == req.major_version {
+                        results.push(AutoDetectedToolchain {
+                            java_home,
+                            major_version: info.major_version,
+                            full_version: info.full_version,
+                            vendor: info.vendor,
+                            source: "JAVA_HOME".to_string(),
+                            verified: true,
+                        });
                     }
                 }
             }
-        }
 
-        // 3. SDKMAN
-        if req.scan_sdkman && cfg!(not(target_os = "windows")) {
-            if let Ok(home) = std::env::var("HOME") {
-                let sdkman_base = Path::new(&home).join(".sdkman/candidates/java");
-                if sdkman_base.is_dir() {
-                    if let Ok(entries) = std::fs::read_dir(&sdkman_base) {
-                        for entry in entries.flatten() {
-                            let path = entry.path();
-                            if path.is_dir() {
-                                let home_str = path.to_string_lossy().to_string();
+            // 2. PATH scanning
+            if req.scan_path {
+                if let Ok(path_var) = std::env::var("PATH") {
+                    let separator = if cfg!(target_os = "windows") {
+                        ';'
+                    } else {
+                        ':'
+                    };
+                    for dir in path_var.split(separator) {
+                        let java_bin = if cfg!(target_os = "windows") {
+                            Path::new(dir).join("java.exe")
+                        } else {
+                            Path::new(dir).join("java")
+                        };
+                        if java_bin.is_file() {
+                            if let Some(java_home) = java_bin.parent().and_then(|p| p.parent()) {
+                                let home_str = java_home.to_string_lossy().to_string();
+                                // Skip if already found via JAVA_HOME
                                 if results.iter().any(|r| r.java_home == home_str) {
                                     continue;
                                 }
                                 if let Some(info) = Self::probe_java_home_detailed(&home_str) {
-                                    if req.major_version.is_empty() || info.major_version == req.major_version {
+                                    if req.major_version.is_empty()
+                                        || info.major_version == req.major_version
+                                    {
                                         results.push(AutoDetectedToolchain {
                                             java_home: home_str,
                                             major_version: info.major_version,
                                             full_version: info.full_version,
                                             vendor: info.vendor,
-                                            source: "SDKMAN".to_string(),
+                                            source: "PATH".to_string(),
                                             verified: true,
                                         });
                                     }
@@ -1508,104 +1555,145 @@ impl ToolchainService for ToolchainServiceImpl {
                     }
                 }
             }
-        }
 
-        // 4. Filesystem scanning (common paths)
-        let candidates: Vec<String> = if cfg!(target_os = "macos") {
-            vec![
-                "/Library/Java/JavaVirtualMachines".to_string(),
-                "/opt/homebrew/opt/openjdk".to_string(),
-                "/opt/homebrew/opt/openjdk@11".to_string(),
-                "/opt/homebrew/opt/openjdk@17".to_string(),
-                "/opt/homebrew/opt/openjdk@21".to_string(),
-                "/opt/homebrew/opt/openjdk@22".to_string(),
-                "/opt/homebrew/Cellar/openjdk".to_string(),
-            ]
-        } else if cfg!(target_os = "linux") {
-            vec![
-                "/usr/lib/jvm".to_string(),
-                "/usr/java".to_string(),
-            ]
-        } else {
-            vec![
-                "C:\\Program Files\\Java".to_string(),
-                "C:\\Program Files\\Eclipse Adoptium".to_string(),
-                "C:\\Program Files\\Microsoft".to_string(),
-            ]
-        };
-
-        for base in &candidates {
-            let base_path = Path::new(base);
-            if !base_path.is_dir() {
-                continue;
-            }
-            if let Ok(entries) = std::fs::read_dir(base_path) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if !path.is_dir() {
-                        continue;
-                    }
-                    let home = if cfg!(target_os = "macos") {
-                        let contents_home = path.join("Contents/Home");
-                        if contents_home.exists() {
-                            contents_home
-                        } else {
-                            path.clone()
-                        }
-                    } else {
-                        path.clone()
-                    };
-                    let home_str = home.to_string_lossy().to_string();
-                    if results.iter().any(|r| r.java_home == home_str) {
-                        continue;
-                    }
-                    if let Some(info) = Self::probe_java_home_detailed(&home_str) {
-                        if req.major_version.is_empty() || info.major_version == req.major_version {
-                            results.push(AutoDetectedToolchain {
-                                java_home: home_str,
-                                major_version: info.major_version,
-                                full_version: info.full_version,
-                                vendor: info.vendor,
-                                source: "filesystem".to_string(),
-                                verified: true,
-                            });
+            // 3. SDKMAN
+            if req.scan_sdkman && cfg!(not(target_os = "windows")) {
+                if let Ok(home) = std::env::var("HOME") {
+                    let sdkman_base = Path::new(&home).join(".sdkman/candidates/java");
+                    if sdkman_base.is_dir() {
+                        if let Ok(entries) = std::fs::read_dir(&sdkman_base) {
+                            for entry in entries.flatten() {
+                                let path = entry.path();
+                                if path.is_dir() {
+                                    let home_str = path.to_string_lossy().to_string();
+                                    if results.iter().any(|r| r.java_home == home_str) {
+                                        continue;
+                                    }
+                                    if let Some(info) = Self::probe_java_home_detailed(&home_str) {
+                                        if req.major_version.is_empty()
+                                            || info.major_version == req.major_version
+                                        {
+                                            results.push(AutoDetectedToolchain {
+                                                java_home: home_str,
+                                                major_version: info.major_version,
+                                                full_version: info.full_version,
+                                                vendor: info.vendor,
+                                                source: "SDKMAN".to_string(),
+                                                verified: true,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // 5. toolchain.properties
-        if req.scan_project {
-            if let Ok(mut dir) = std::env::current_dir() {
-                for _ in 0..10 {
-                    let props_path = dir.join("toolchain.properties");
-                    if props_path.exists() {
-                        if let Ok(contents) = std::fs::read_to_string(&props_path) {
-                            for line in contents.lines() {
-                                let line = line.trim();
-                                if line.starts_with('#') || line.is_empty() {
-                                    continue;
-                                }
-                                if let Some((key, value)) = line.split_once('=') {
-                                    let key = key.trim();
-                                    let value = value.trim();
-                                    if key == "java.home" || key == "jdk.home" || key == "javaHome" {
-                                        let home_str = value.to_string();
-                                        if results.iter().any(|r| r.java_home == home_str) {
-                                            continue;
-                                        }
-                                        if Path::new(value).exists() {
-                                            if let Some(info) = Self::probe_java_home_detailed(value) {
-                                                if req.major_version.is_empty() || info.major_version == req.major_version {
-                                                    results.push(AutoDetectedToolchain {
-                                                        java_home: home_str,
-                                                        major_version: info.major_version,
-                                                        full_version: info.full_version,
-                                                        vendor: info.vendor,
-                                                        source: "toolchain.properties".to_string(),
-                                                        verified: true,
-                                                    });
+            // 4. Filesystem scanning (common paths)
+            let candidates: Vec<String> = if cfg!(target_os = "macos") {
+                vec![
+                    "/Library/Java/JavaVirtualMachines".to_string(),
+                    "/opt/homebrew/opt/openjdk".to_string(),
+                    "/opt/homebrew/opt/openjdk@11".to_string(),
+                    "/opt/homebrew/opt/openjdk@17".to_string(),
+                    "/opt/homebrew/opt/openjdk@21".to_string(),
+                    "/opt/homebrew/opt/openjdk@22".to_string(),
+                    "/opt/homebrew/Cellar/openjdk".to_string(),
+                ]
+            } else if cfg!(target_os = "linux") {
+                vec!["/usr/lib/jvm".to_string(), "/usr/java".to_string()]
+            } else {
+                vec![
+                    "C:\\Program Files\\Java".to_string(),
+                    "C:\\Program Files\\Eclipse Adoptium".to_string(),
+                    "C:\\Program Files\\Microsoft".to_string(),
+                ]
+            };
+
+            for base in &candidates {
+                let base_path = Path::new(base);
+                if !base_path.is_dir() {
+                    continue;
+                }
+                if let Ok(entries) = std::fs::read_dir(base_path) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if !path.is_dir() {
+                            continue;
+                        }
+                        let home = if cfg!(target_os = "macos") {
+                            let contents_home = path.join("Contents/Home");
+                            if contents_home.exists() {
+                                contents_home
+                            } else {
+                                path.clone()
+                            }
+                        } else {
+                            path.clone()
+                        };
+                        let home_str = home.to_string_lossy().to_string();
+                        if results.iter().any(|r| r.java_home == home_str) {
+                            continue;
+                        }
+                        if let Some(info) = Self::probe_java_home_detailed(&home_str) {
+                            if req.major_version.is_empty()
+                                || info.major_version == req.major_version
+                            {
+                                results.push(AutoDetectedToolchain {
+                                    java_home: home_str,
+                                    major_version: info.major_version,
+                                    full_version: info.full_version,
+                                    vendor: info.vendor,
+                                    source: "filesystem".to_string(),
+                                    verified: true,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 5. toolchain.properties
+            if req.scan_project {
+                if let Ok(mut dir) = std::env::current_dir() {
+                    for _ in 0..10 {
+                        let props_path = dir.join("toolchain.properties");
+                        if props_path.exists() {
+                            if let Ok(contents) = std::fs::read_to_string(&props_path) {
+                                for line in contents.lines() {
+                                    let line = line.trim();
+                                    if line.starts_with('#') || line.is_empty() {
+                                        continue;
+                                    }
+                                    if let Some((key, value)) = line.split_once('=') {
+                                        let key = key.trim();
+                                        let value = value.trim();
+                                        if key == "java.home"
+                                            || key == "jdk.home"
+                                            || key == "javaHome"
+                                        {
+                                            let home_str = value.to_string();
+                                            if results.iter().any(|r| r.java_home == home_str) {
+                                                continue;
+                                            }
+                                            if Path::new(value).exists() {
+                                                if let Some(info) =
+                                                    Self::probe_java_home_detailed(value)
+                                                {
+                                                    if req.major_version.is_empty()
+                                                        || info.major_version == req.major_version
+                                                    {
+                                                        results.push(AutoDetectedToolchain {
+                                                            java_home: home_str,
+                                                            major_version: info.major_version,
+                                                            full_version: info.full_version,
+                                                            vendor: info.vendor,
+                                                            source: "toolchain.properties"
+                                                                .to_string(),
+                                                            verified: true,
+                                                        });
+                                                    }
                                                 }
                                             }
                                         }
@@ -1613,13 +1701,17 @@ impl ToolchainService for ToolchainServiceImpl {
                                 }
                             }
                         }
-                    }
-                    if !dir.pop() {
-                        break;
+                        if !dir.pop() {
+                            break;
+                        }
                     }
                 }
             }
-        }
+
+            results
+        })
+        .await
+        .unwrap_or_default();
 
         let total = results.len() as i32;
         let summary = format!(
@@ -1701,9 +1793,7 @@ OpenJDK Runtime Environment (build 21.0.4+7)"#;
             .unwrap()
             .into_inner();
 
-        // Should find at least JAVA_HOME or system JDKs
-        // May be 0 in CI if no JDK is in standard paths
-        assert!(resp.toolchains.len() >= 0);
+        // May be 0 in CI if no JDK is in standard paths.
         for tc in &resp.toolchains {
             assert!(!tc.java_home.is_empty());
         }
@@ -1731,8 +1821,14 @@ OpenJDK Runtime Environment (build 21.0.4+7)"#;
 
     #[test]
     fn test_toolchain_key() {
-        assert_eq!(ToolchainServiceImpl::toolchain_key("17", "temurin"), "temurin-17");
-        assert_eq!(ToolchainServiceImpl::toolchain_key("21", "corretto"), "corretto-21");
+        assert_eq!(
+            ToolchainServiceImpl::toolchain_key("17", "temurin"),
+            "temurin-17"
+        );
+        assert_eq!(
+            ToolchainServiceImpl::toolchain_key("21", "corretto"),
+            "corretto-21"
+        );
     }
 
     #[tokio::test]
@@ -2160,7 +2256,10 @@ OpenJDK Runtime Environment (build 21.0.4+7)"#;
 
         let hash = ToolchainServiceImpl::sha256_file(&path).unwrap();
         // Known SHA-256 of "hello world"
-        assert_eq!(hash, "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9");
+        assert_eq!(
+            hash,
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+        );
     }
 
     #[test]
@@ -2302,9 +2401,17 @@ GraalVM Runtime Environment"#;
             .into_inner();
 
         // No duplicate java_home paths
-        let homes: Vec<&str> = resp.toolchains.iter().map(|t| t.java_home.as_str()).collect();
+        let homes: Vec<&str> = resp
+            .toolchains
+            .iter()
+            .map(|t| t.java_home.as_str())
+            .collect();
         let unique: std::collections::HashSet<&str> = homes.iter().copied().collect();
-        assert_eq!(homes.len(), unique.len(), "Found duplicate java_home entries");
+        assert_eq!(
+            homes.len(),
+            unique.len(),
+            "Found duplicate java_home entries"
+        );
     }
 
     // --- Download URL tests ---
@@ -2349,7 +2456,11 @@ GraalVM Runtime Environment"#;
     fn test_build_download_urls_windows() {
         let urls = ToolchainServiceImpl::build_download_urls("17", "JDK", "windows", "x86_64");
         for url in &urls {
-            assert!(url.contains("zip") || url.contains("windows"), "URL should be windows-specific: {}", url);
+            assert!(
+                url.contains("zip") || url.contains("windows"),
+                "URL should be windows-specific: {}",
+                url
+            );
         }
     }
 }

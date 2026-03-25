@@ -7,26 +7,26 @@ use tonic::Request;
 
 use gradle_substrate_daemon::proto::*;
 use gradle_substrate_daemon::server::{
-    dag_executor::DagExecutorServiceImpl,
     artifact_publishing::ArtifactPublishingServiceImpl,
     bootstrap::BootstrapServiceImpl,
-    build_metrics::BuildMetricsServiceImpl,
-    cache_orchestration::BuildCacheOrchestrationServiceImpl,
     build_comparison::BuildComparisonServiceImpl,
     build_event_stream::BuildEventStreamServiceImpl,
     build_init::BuildInitServiceImpl,
     build_layout::BuildLayoutServiceImpl,
+    build_metrics::BuildMetricsServiceImpl,
     build_operations::BuildOperationsServiceImpl,
     build_result::BuildResultServiceImpl,
     cache::CacheServiceImpl,
+    cache_orchestration::BuildCacheOrchestrationServiceImpl,
     config_cache::ConfigurationCacheServiceImpl,
     configuration::ConfigurationServiceImpl,
     console::ConsoleServiceImpl,
     control::ControlServiceImpl,
+    dag_executor::DagExecutorServiceImpl,
     dependency_resolution::DependencyResolutionServiceImpl,
+    exec::ExecServiceImpl,
     execution_history::ExecutionHistoryServiceImpl,
     execution_plan::ExecutionPlanServiceImpl,
-    exec::ExecServiceImpl,
     file_fingerprint::FileFingerprintServiceImpl,
     file_watch::FileWatchServiceImpl,
     garbage_collection::GarbageCollectionServiceImpl,
@@ -39,8 +39,8 @@ use gradle_substrate_daemon::server::{
     test_execution::TestExecutionServiceImpl,
     toolchain::ToolchainServiceImpl,
     value_snapshot::ValueSnapshotServiceImpl,
+    work::{WorkServiceImpl, WorkerScheduler},
     worker_process::WorkerProcessServiceImpl,
-    work::{WorkerScheduler, WorkServiceImpl},
 };
 
 /// Spawns a full gRPC server on a temp Unix socket and returns the socket path.
@@ -82,10 +82,13 @@ async fn spawn_test_server() -> (String, tempfile::TempDir) {
         Arc::clone(&shared_history),
     );
     // Cache orchestration wired to real local cache for probing
-    let cache_orchestration = BuildCacheOrchestrationServiceImpl::with_local_cache(cache_local_store);
+    let cache_orchestration =
+        BuildCacheOrchestrationServiceImpl::with_local_cache(cache_local_store);
     let file_fingerprint = FileFingerprintServiceImpl::new();
     let value_snapshot = ValueSnapshotServiceImpl::new();
-    let task_graph = Arc::new(TaskGraphServiceImpl::with_history(Arc::clone(&shared_history)));
+    let task_graph = Arc::new(TaskGraphServiceImpl::with_history(Arc::clone(
+        &shared_history,
+    )));
     // Separate instance for the gRPC server (tonic needs concrete type, not Arc)
     let execution_history = ExecutionHistoryServiceImpl::new(history_dir.clone());
     let configuration = ConfigurationServiceImpl::new();
@@ -98,12 +101,21 @@ async fn spawn_test_server() -> (String, tempfile::TempDir) {
     let toolchain = ToolchainServiceImpl::new(toolchain_dir);
     let console = std::sync::Arc::new(ConsoleServiceImpl::new());
     let build_metrics = std::sync::Arc::new(BuildMetricsServiceImpl::new());
-    let event_dispatchers: Vec<Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>> = vec![
-        std::sync::Arc::clone(&console) as Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
-        std::sync::Arc::clone(&build_metrics) as Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
+    let event_dispatchers: Vec<
+        Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
+    > = vec![
+        std::sync::Arc::clone(&console)
+            as Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
+        std::sync::Arc::clone(&build_metrics)
+            as Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
     ];
-    let build_event_stream = BuildEventStreamServiceImpl::with_dispatchers(event_dispatchers.clone());
-    let dag_executor = DagExecutorServiceImpl::new(work_scheduler.clone(), Arc::clone(&task_graph), event_dispatchers);
+    let build_event_stream =
+        BuildEventStreamServiceImpl::with_dispatchers(event_dispatchers.clone());
+    let dag_executor = DagExecutorServiceImpl::new(
+        work_scheduler.clone(),
+        Arc::clone(&task_graph),
+        event_dispatchers,
+    );
     let worker_process = WorkerProcessServiceImpl::new();
     let build_layout = BuildLayoutServiceImpl::new();
     let build_result = BuildResultServiceImpl::new();
@@ -126,39 +138,123 @@ async fn spawn_test_server() -> (String, tempfile::TempDir) {
     tokio::spawn(async move {
         let _ = Server::builder()
             .add_service(control_service_server::ControlServiceServer::new(control))
-            .add_service(dag_executor_service_server::DagExecutorServiceServer::new(dag_executor))
+            .add_service(dag_executor_service_server::DagExecutorServiceServer::new(
+                dag_executor,
+            ))
             .add_service(hash_service_server::HashServiceServer::new(hash))
             .add_service(cache_service_server::CacheServiceServer::new(cache))
             .add_service(exec_service_server::ExecServiceServer::new(exec))
             .add_service(work_service_server::WorkServiceServer::new(work))
-            .add_service(execution_plan_service_server::ExecutionPlanServiceServer::new(execution_plan))
-            .add_service(execution_history_service_server::ExecutionHistoryServiceServer::new(execution_history))
-            .add_service(build_cache_orchestration_service_server::BuildCacheOrchestrationServiceServer::new(cache_orchestration))
-            .add_service(file_fingerprint_service_server::FileFingerprintServiceServer::new(file_fingerprint))
-            .add_service(value_snapshot_service_server::ValueSnapshotServiceServer::new(value_snapshot))
-            .add_service(task_graph_service_server::TaskGraphServiceServer::new((*task_graph).clone()))
-            .add_service(configuration_service_server::ConfigurationServiceServer::new(configuration))
+            .add_service(
+                execution_plan_service_server::ExecutionPlanServiceServer::new(execution_plan),
+            )
+            .add_service(
+                execution_history_service_server::ExecutionHistoryServiceServer::new(
+                    execution_history,
+                ),
+            )
+            .add_service(
+                build_cache_orchestration_service_server::BuildCacheOrchestrationServiceServer::new(
+                    cache_orchestration,
+                ),
+            )
+            .add_service(
+                file_fingerprint_service_server::FileFingerprintServiceServer::new(
+                    file_fingerprint,
+                ),
+            )
+            .add_service(
+                value_snapshot_service_server::ValueSnapshotServiceServer::new(value_snapshot),
+            )
+            .add_service(task_graph_service_server::TaskGraphServiceServer::new(
+                (*task_graph).clone(),
+            ))
+            .add_service(
+                configuration_service_server::ConfigurationServiceServer::new(configuration),
+            )
             .add_service(plugin_service_server::PluginServiceServer::new(plugin))
-            .add_service(build_operations_service_server::BuildOperationsServiceServer::new(build_operations))
-            .add_service(bootstrap_service_server::BootstrapServiceServer::new(bootstrap))
-            .add_service(dependency_resolution_service_server::DependencyResolutionServiceServer::new(dependency_resolution))
-            .add_service(file_watch_service_server::FileWatchServiceServer::new(file_watch))
-            .add_service(configuration_cache_service_server::ConfigurationCacheServiceServer::new(config_cache))
-            .add_service(toolchain_service_server::ToolchainServiceServer::new(toolchain))
-            .add_service(build_event_stream_service_server::BuildEventStreamServiceServer::new(build_event_stream))
-            .add_service(worker_process_service_server::WorkerProcessServiceServer::new(worker_process))
-            .add_service(build_layout_service_server::BuildLayoutServiceServer::new(build_layout))
-            .add_service(build_result_service_server::BuildResultServiceServer::new(build_result))
-            .add_service(problem_reporting_service_server::ProblemReportingServiceServer::new(problem_reporting))
-            .add_service(resource_management_service_server::ResourceManagementServiceServer::new(resource_management))
-            .add_service(build_comparison_service_server::BuildComparisonServiceServer::new(build_comparison))
-            .add_service(console_service_server::ConsoleServiceServer::new((*console).clone()))
-            .add_service(test_execution_service_server::TestExecutionServiceServer::new(test_execution))
-            .add_service(artifact_publishing_service_server::ArtifactPublishingServiceServer::new(artifact_publishing))
-            .add_service(build_init_service_server::BuildInitServiceServer::new(build_init))
-            .add_service(incremental_compilation_service_server::IncrementalCompilationServiceServer::new(incremental_compilation))
-            .add_service(build_metrics_service_server::BuildMetricsServiceServer::new((*build_metrics).clone()))
-            .add_service(garbage_collection_service_server::GarbageCollectionServiceServer::new(garbage_collection))
+            .add_service(
+                build_operations_service_server::BuildOperationsServiceServer::new(
+                    build_operations,
+                ),
+            )
+            .add_service(bootstrap_service_server::BootstrapServiceServer::new(
+                bootstrap,
+            ))
+            .add_service(
+                dependency_resolution_service_server::DependencyResolutionServiceServer::new(
+                    dependency_resolution,
+                ),
+            )
+            .add_service(file_watch_service_server::FileWatchServiceServer::new(
+                file_watch,
+            ))
+            .add_service(
+                configuration_cache_service_server::ConfigurationCacheServiceServer::new(
+                    config_cache,
+                ),
+            )
+            .add_service(toolchain_service_server::ToolchainServiceServer::new(
+                toolchain,
+            ))
+            .add_service(
+                build_event_stream_service_server::BuildEventStreamServiceServer::new(
+                    build_event_stream,
+                ),
+            )
+            .add_service(
+                worker_process_service_server::WorkerProcessServiceServer::new(worker_process),
+            )
+            .add_service(build_layout_service_server::BuildLayoutServiceServer::new(
+                build_layout,
+            ))
+            .add_service(build_result_service_server::BuildResultServiceServer::new(
+                build_result,
+            ))
+            .add_service(
+                problem_reporting_service_server::ProblemReportingServiceServer::new(
+                    problem_reporting,
+                ),
+            )
+            .add_service(
+                resource_management_service_server::ResourceManagementServiceServer::new(
+                    resource_management,
+                ),
+            )
+            .add_service(
+                build_comparison_service_server::BuildComparisonServiceServer::new(
+                    build_comparison,
+                ),
+            )
+            .add_service(console_service_server::ConsoleServiceServer::new(
+                (*console).clone(),
+            ))
+            .add_service(
+                test_execution_service_server::TestExecutionServiceServer::new(test_execution),
+            )
+            .add_service(
+                artifact_publishing_service_server::ArtifactPublishingServiceServer::new(
+                    artifact_publishing,
+                ),
+            )
+            .add_service(build_init_service_server::BuildInitServiceServer::new(
+                build_init,
+            ))
+            .add_service(
+                incremental_compilation_service_server::IncrementalCompilationServiceServer::new(
+                    incremental_compilation,
+                ),
+            )
+            .add_service(
+                build_metrics_service_server::BuildMetricsServiceServer::new(
+                    (*build_metrics).clone(),
+                ),
+            )
+            .add_service(
+                garbage_collection_service_server::GarbageCollectionServiceServer::new(
+                    garbage_collection,
+                ),
+            )
             .serve_with_incoming(UnixListenerStream::new(listener))
             .await;
     });
@@ -192,7 +288,8 @@ fn make_test_file(dir: &std::path::Path, name: &str, content: &[u8]) -> String {
 }
 
 fn make_prop_map(pairs: Vec<(&str, &str)>) -> std::collections::HashMap<String, String> {
-    pairs.into_iter()
+    pairs
+        .into_iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect()
 }
@@ -229,10 +326,9 @@ async fn test_hash_service_e2e() {
     assert!(!response.results[0].error);
 
     // Verify hash matches direct computation
-    let direct_hash = gradle_substrate_daemon::server::hash::hash_file_md5(
-        std::path::Path::new(&file_path),
-    )
-    .unwrap();
+    let direct_hash =
+        gradle_substrate_daemon::server::hash::hash_file_md5(std::path::Path::new(&file_path))
+            .unwrap();
     assert_eq!(response.results[0].hash_bytes, direct_hash);
 }
 
@@ -312,7 +408,9 @@ async fn test_cache_orchestration_e2e() {
     let (socket_path, _dir) = spawn_test_server().await;
     let channel = connect(&socket_path).await;
     let mut client =
-        build_cache_orchestration_service_client::BuildCacheOrchestrationServiceClient::new(channel);
+        build_cache_orchestration_service_client::BuildCacheOrchestrationServiceClient::new(
+            channel,
+        );
 
     // Compute cache key
     let compute_resp = client
@@ -365,8 +463,10 @@ async fn test_cache_orchestration_e2e() {
         .unwrap()
         .into_inner();
 
-    assert!(!probe_metadata_only.available,
-        "Probe should return miss when metadata exists but real cache entry is absent");
+    assert!(
+        !probe_metadata_only.available,
+        "Probe should return miss when metadata exists but real cache entry is absent"
+    );
 }
 
 // ============================================================
@@ -377,8 +477,7 @@ async fn test_cache_orchestration_e2e() {
 async fn test_file_fingerprint_e2e() {
     let (socket_path, _dir) = spawn_test_server().await;
     let channel = connect(&socket_path).await;
-    let mut client =
-        file_fingerprint_service_client::FileFingerprintServiceClient::new(channel);
+    let mut client = file_fingerprint_service_client::FileFingerprintServiceClient::new(channel);
 
     let dir = tempfile::tempdir().unwrap();
     let file_path = make_test_file(dir.path(), "test.txt", b"file fingerprint content");
@@ -410,8 +509,7 @@ async fn test_file_fingerprint_e2e() {
 async fn test_value_snapshot_e2e() {
     let (socket_path, _dir) = spawn_test_server().await;
     let channel = connect(&socket_path).await;
-    let mut client =
-        value_snapshot_service_client::ValueSnapshotServiceClient::new(channel);
+    let mut client = value_snapshot_service_client::ValueSnapshotServiceClient::new(channel);
 
     let response = client
         .snapshot_values(Request::new(SnapshotValuesRequest {
@@ -534,10 +632,9 @@ async fn test_multi_service_sequence() {
     // Step 1: Hash a file via direct service call
     let dir = tempfile::tempdir().unwrap();
     let file_path = make_test_file(dir.path(), "seq.txt", b"multi-service test data");
-    let direct_hash = gradle_substrate_daemon::server::hash::hash_file_md5(
-        std::path::Path::new(&file_path),
-    )
-    .unwrap();
+    let direct_hash =
+        gradle_substrate_daemon::server::hash::hash_file_md5(std::path::Path::new(&file_path))
+            .unwrap();
     let file_hash: String = direct_hash.iter().map(|b| format!("{:02x}", b)).collect();
     assert!(!file_hash.is_empty());
 
@@ -626,9 +723,21 @@ async fn test_hash_batch_multiple_files() {
     let response = client
         .hash_batch(Request::new(HashBatchRequest {
             files: vec![
-                FileToHash { absolute_path: file1, length: 0, last_modified: 0 },
-                FileToHash { absolute_path: file2, length: 0, last_modified: 0 },
-                FileToHash { absolute_path: file3, length: 0, last_modified: 0 },
+                FileToHash {
+                    absolute_path: file1,
+                    length: 0,
+                    last_modified: 0,
+                },
+                FileToHash {
+                    absolute_path: file2,
+                    length: 0,
+                    last_modified: 0,
+                },
+                FileToHash {
+                    absolute_path: file3,
+                    length: 0,
+                    last_modified: 0,
+                },
             ],
             algorithm: String::new(),
         }))
@@ -719,7 +828,8 @@ async fn test_build_metrics_e2e() {
 async fn test_garbage_collection_e2e() {
     let (socket_path, _dir) = spawn_test_server().await;
     let channel = connect(&socket_path).await;
-    let mut client = garbage_collection_service_client::GarbageCollectionServiceClient::new(channel);
+    let mut client =
+        garbage_collection_service_client::GarbageCollectionServiceClient::new(channel);
 
     // Get storage stats (should work on empty cache)
     let stats_resp = client
@@ -902,7 +1012,10 @@ include ':app', ':lib'
 
     assert!(status.status.is_some());
     let status = status.status.unwrap();
-    assert_eq!(status.included_projects, vec![":app".to_string(), ":lib".to_string()]);
+    assert_eq!(
+        status.included_projects,
+        vec![":app".to_string(), ":lib".to_string()]
+    );
 
     // Check root project name was parsed
     let root_name: Option<&str> = status
@@ -1006,7 +1119,9 @@ async fn test_build_operations_e2e() {
     // Get build summary — may or may not contain the operation
     // since each test spawns a fresh server
     let summary_resp = client
-        .get_build_summary(Request::new(GetBuildSummaryRequest { build_id: "test".to_string() }))
+        .get_build_summary(Request::new(GetBuildSummaryRequest {
+            build_id: "test".to_string(),
+        }))
         .await
         .unwrap()
         .into_inner();
@@ -1061,7 +1176,8 @@ async fn test_execution_history_stats_e2e() {
 async fn test_dependency_resolution_cache_e2e() {
     let (socket_path, _dir) = spawn_test_server().await;
     let channel = connect(&socket_path).await;
-    let mut client = dependency_resolution_service_client::DependencyResolutionServiceClient::new(channel);
+    let mut client =
+        dependency_resolution_service_client::DependencyResolutionServiceClient::new(channel);
 
     // Initially not cached
     let check = client
@@ -1125,8 +1241,10 @@ async fn test_dependency_resolution_cache_e2e() {
 async fn test_build_operations_full_flow_e2e() {
     let (socket_path, _dir) = spawn_test_server().await;
     let channel = connect(&socket_path).await;
-    let mut ops_client = build_operations_service_client::BuildOperationsServiceClient::new(channel.clone());
-    let mut result_client = build_result_service_client::BuildResultServiceClient::new(channel.clone());
+    let mut ops_client =
+        build_operations_service_client::BuildOperationsServiceClient::new(channel.clone());
+    let mut result_client =
+        build_result_service_client::BuildResultServiceClient::new(channel.clone());
 
     // Record a build failure
     result_client
@@ -1401,7 +1519,8 @@ async fn test_console_logging_e2e() {
 async fn test_resource_management_e2e() {
     let (socket_path, _dir) = spawn_test_server().await;
     let channel = connect(&socket_path).await;
-    let mut client = resource_management_service_client::ResourceManagementServiceClient::new(channel);
+    let mut client =
+        resource_management_service_client::ResourceManagementServiceClient::new(channel);
 
     // Get initial resource limits
     let limits = client
@@ -1463,7 +1582,8 @@ async fn test_resource_management_e2e() {
 async fn test_garbage_collection_extended_e2e() {
     let (socket_path, _dir) = spawn_test_server().await;
     let channel = connect(&socket_path).await;
-    let mut client = garbage_collection_service_client::GarbageCollectionServiceClient::new(channel);
+    let mut client =
+        garbage_collection_service_client::GarbageCollectionServiceClient::new(channel);
 
     // Run GC on build cache
     let gc_cache = client
@@ -1564,7 +1684,8 @@ async fn test_full_build_lifecycle() {
     let channel = connect(&socket_path).await;
 
     // 1. Bootstrap: init build
-    let mut bootstrap_client = bootstrap_service_client::BootstrapServiceClient::new(channel.clone());
+    let mut bootstrap_client =
+        bootstrap_service_client::BootstrapServiceClient::new(channel.clone());
     let init = bootstrap_client
         .init_build(Request::new(InitBuildRequest {
             build_id: "lifecycle-build".to_string(),
@@ -1598,7 +1719,8 @@ async fn test_full_build_lifecycle() {
         .unwrap();
 
     // 3. Configuration: register projects
-    let mut config_client = configuration_service_client::ConfigurationServiceClient::new(channel.clone());
+    let mut config_client =
+        configuration_service_client::ConfigurationServiceClient::new(channel.clone());
     config_client
         .register_project(Request::new(RegisterProjectRequest {
             project_path: ":app".to_string(),
@@ -1671,7 +1793,8 @@ async fn test_full_build_lifecycle() {
     assert!(!plan.has_cycles);
 
     // 6. Build operations: track task execution
-    let mut ops_client = build_operations_service_client::BuildOperationsServiceClient::new(channel.clone());
+    let mut ops_client =
+        build_operations_service_client::BuildOperationsServiceClient::new(channel.clone());
     ops_client
         .start_operation(Request::new(StartOperationRequest {
             build_id: "test".to_string(),
@@ -1734,7 +1857,8 @@ async fn test_full_build_lifecycle() {
         .unwrap();
 
     // 8. Build result: report outcome
-    let mut result_client = build_result_service_client::BuildResultServiceClient::new(channel.clone());
+    let mut result_client =
+        build_result_service_client::BuildResultServiceClient::new(channel.clone());
     result_client
         .report_task_result(Request::new(ReportTaskResultRequest {
             build_id: "lifecycle-build".to_string(),
@@ -1781,7 +1905,9 @@ async fn test_full_build_lifecycle() {
 
     // 11. Get build summary
     let summary = ops_client
-        .get_build_summary(Request::new(GetBuildSummaryRequest { build_id: "test".to_string() }))
+        .get_build_summary(Request::new(GetBuildSummaryRequest {
+            build_id: "test".to_string(),
+        }))
         .await
         .unwrap()
         .into_inner();
@@ -1799,7 +1925,8 @@ async fn test_full_build_lifecycle() {
 async fn test_config_cache_e2e() {
     let (socket_path, _dir) = spawn_test_server().await;
     let channel = connect(&socket_path).await;
-    let mut client = configuration_cache_service_client::ConfigurationCacheServiceClient::new(channel);
+    let mut client =
+        configuration_cache_service_client::ConfigurationCacheServiceClient::new(channel);
 
     // Store config cache
     let store = client
@@ -1933,7 +2060,10 @@ async fn test_build_layout_e2e() {
         .unwrap()
         .into_inner();
 
-    assert_eq!(build_file.build_file_path, "/tmp/layout-test/app/build.gradle");
+    assert_eq!(
+        build_file.build_file_path,
+        "/tmp/layout-test/app/build.gradle"
+    );
 }
 
 // ============================================================
@@ -2165,7 +2295,9 @@ async fn test_test_execution_e2e() {
                 duration_ms: 100,
                 failure_message: "assertion failed".to_string(),
                 failure_type: "AssertionError".to_string(),
-                failure_stack_trace: vec!["at com.example.MyTest.testFailure(MyTest.java:42)".to_string()],
+                failure_stack_trace: vec![
+                    "at com.example.MyTest.testFailure(MyTest.java:42)".to_string()
+                ],
                 rerun: false,
                 attempt: 1,
             }),
@@ -2233,7 +2365,8 @@ async fn test_test_execution_e2e() {
 async fn test_artifact_publishing_e2e() {
     let (socket_path, _dir) = spawn_test_server().await;
     let channel = connect(&socket_path).await;
-    let mut client = artifact_publishing_service_client::ArtifactPublishingServiceClient::new(channel);
+    let mut client =
+        artifact_publishing_service_client::ArtifactPublishingServiceClient::new(channel);
 
     // Register artifact
     let reg_resp = client
@@ -2296,10 +2429,12 @@ async fn test_build_comparison_e2e() {
     let mut client = build_comparison_service_client::BuildComparisonServiceClient::new(channel);
 
     // Record baseline build data FIRST (start_comparison requires both to exist)
-    let mut baseline_durations: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    let mut baseline_durations: std::collections::HashMap<String, i64> =
+        std::collections::HashMap::new();
     baseline_durations.insert(":compileJava".to_string(), 1000);
     baseline_durations.insert(":test".to_string(), 2000);
-    let mut baseline_outcomes: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut baseline_outcomes: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     baseline_outcomes.insert(":compileJava".to_string(), "SUCCESS".to_string());
     baseline_outcomes.insert(":test".to_string(), "SUCCESS".to_string());
 
@@ -2320,10 +2455,12 @@ async fn test_build_comparison_e2e() {
         .unwrap();
 
     // Record candidate build data (slower)
-    let mut candidate_durations: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    let mut candidate_durations: std::collections::HashMap<String, i64> =
+        std::collections::HashMap::new();
     candidate_durations.insert(":compileJava".to_string(), 1200);
     candidate_durations.insert(":test".to_string(), 2500);
-    let mut candidate_outcomes: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut candidate_outcomes: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     candidate_outcomes.insert(":compileJava".to_string(), "SUCCESS".to_string());
     candidate_outcomes.insert(":test".to_string(), "SUCCESS".to_string());
 
@@ -2384,8 +2521,10 @@ async fn test_cross_service_execution_plan_with_history() {
     let (socket_path, _dir) = spawn_test_server().await;
     let channel = connect(&socket_path).await;
 
-    let mut plan_client = execution_plan_service_client::ExecutionPlanServiceClient::new(channel.clone());
-    let mut history_client = execution_history_service_client::ExecutionHistoryServiceClient::new(channel.clone());
+    let mut plan_client =
+        execution_plan_service_client::ExecutionPlanServiceClient::new(channel.clone());
+    let mut history_client =
+        execution_history_service_client::ExecutionHistoryServiceClient::new(channel.clone());
     let mut graph_client = task_graph_service_client::TaskGraphServiceClient::new(channel.clone());
 
     // Register a task in the graph
@@ -2470,7 +2609,10 @@ async fn test_cross_service_execution_plan_with_history() {
         .into_inner();
 
     // Record was found (history exists) but fingerprint mismatch → PredictedExecute
-    assert_eq!(predict_resp2.predicted_outcome, PredictedOutcome::PredictedExecute as i32);
+    assert_eq!(
+        predict_resp2.predicted_outcome,
+        PredictedOutcome::PredictedExecute as i32
+    );
     assert!(predict_resp2.reasoning.contains("Inputs changed"));
 
     // Note: The execution_history gRPC service is a separate instance from the one
@@ -2637,17 +2779,27 @@ async fn test_task_graph_to_build_result_workflow() {
     let (socket_path, _dir) = spawn_test_server().await;
     let channel = connect(&socket_path).await;
     let mut graph_client = task_graph_service_client::TaskGraphServiceClient::new(channel.clone());
-    let mut result_client = build_result_service_client::BuildResultServiceClient::new(channel.clone());
-    let mut comparison_client = build_comparison_service_client::BuildComparisonServiceClient::new(channel.clone());
+    let mut result_client =
+        build_result_service_client::BuildResultServiceClient::new(channel.clone());
+    let mut comparison_client =
+        build_comparison_service_client::BuildComparisonServiceClient::new(channel.clone());
 
     let build_id = "workflow-build".to_string();
 
     // 1. Register tasks in the graph
     let tasks = vec![
-        (":compileJava", "JavaCompile", vec![":compileKotlin".to_string()]),
+        (
+            ":compileJava",
+            "JavaCompile",
+            vec![":compileKotlin".to_string()],
+        ),
         (":compileKotlin", "KotlinCompile", vec![]),
         (":processResources", "ProcessResources", vec![]),
-        (":classes", "Lifecycle", vec![":compileJava".to_string(), ":processResources".to_string()]),
+        (
+            ":classes",
+            "Lifecycle",
+            vec![":compileJava".to_string(), ":processResources".to_string()],
+        ),
         (":test", "Test", vec![":classes".to_string()]),
     ];
 
@@ -2820,9 +2972,7 @@ async fn test_task_graph_to_build_result_workflow() {
 
     // 6. Verify comparison was stored
     let comparison = comparison_client
-        .get_comparison_result(Request::new(GetComparisonResultRequest {
-            comparison_id,
-        }))
+        .get_comparison_result(Request::new(GetComparisonResultRequest { comparison_id }))
         .await
         .unwrap()
         .into_inner();
@@ -2849,10 +2999,13 @@ async fn test_task_graph_to_build_result_workflow() {
 async fn test_build_layout_to_work_pipeline() {
     let (socket_path, _dir) = spawn_test_server().await;
     let channel = connect(&socket_path).await;
-    let mut layout_client = build_layout_service_client::BuildLayoutServiceClient::new(channel.clone());
+    let mut layout_client =
+        build_layout_service_client::BuildLayoutServiceClient::new(channel.clone());
     let mut work_client = work_service_client::WorkServiceClient::new(channel.clone());
-    let mut result_client = build_result_service_client::BuildResultServiceClient::new(channel.clone());
-    let mut ops_client = build_operations_service_client::BuildOperationsServiceClient::new(channel.clone());
+    let mut result_client =
+        build_result_service_client::BuildResultServiceClient::new(channel.clone());
+    let mut ops_client =
+        build_operations_service_client::BuildOperationsServiceClient::new(channel.clone());
 
     // 1. Initialize build layout
     let layout = layout_client
@@ -3037,8 +3190,10 @@ async fn test_exec_to_build_operations_workflow() {
     let (socket_path, _dir) = spawn_test_server().await;
     let channel = connect(&socket_path).await;
     let mut exec_client = exec_service_client::ExecServiceClient::new(channel.clone());
-    let mut ops_client = build_operations_service_client::BuildOperationsServiceClient::new(channel.clone());
-    let mut result_client = build_result_service_client::BuildResultServiceClient::new(channel.clone());
+    let mut ops_client =
+        build_operations_service_client::BuildOperationsServiceClient::new(channel.clone());
+    let mut result_client =
+        build_result_service_client::BuildResultServiceClient::new(channel.clone());
 
     let build_id = "exec-workflow-build".to_string();
 
@@ -3075,9 +3230,7 @@ async fn test_exec_to_build_operations_workflow() {
     // 3. Wait for the process to complete
     let start_time = std::time::Instant::now();
     let wait_resp = exec_client
-        .wait(Request::new(ExecWaitRequest {
-            pid,
-        }))
+        .wait(Request::new(ExecWaitRequest { pid }))
         .await
         .unwrap()
         .into_inner();
@@ -3091,7 +3244,11 @@ async fn test_exec_to_build_operations_workflow() {
             operation_id: "op-exec-test".to_string(),
             duration_ms: elapsed_ms,
             success: wait_resp.exit_code == 0,
-            outcome: if wait_resp.exit_code == 0 { "SUCCESS".to_string() } else { "FAILED".to_string() },
+            outcome: if wait_resp.exit_code == 0 {
+                "SUCCESS".to_string()
+            } else {
+                "FAILED".to_string()
+            },
         }))
         .await
         .unwrap();
@@ -3102,7 +3259,11 @@ async fn test_exec_to_build_operations_workflow() {
             build_id: build_id.clone(),
             result: Some(TaskResult {
                 task_path: ":runTests".to_string(),
-                outcome: if wait_resp.exit_code == 0 { "SUCCESS".to_string() } else { "FAILED".to_string() },
+                outcome: if wait_resp.exit_code == 0 {
+                    "SUCCESS".to_string()
+                } else {
+                    "FAILED".to_string()
+                },
                 duration_ms: elapsed_ms,
                 did_work: true,
                 cache_key: String::new(),
@@ -3139,9 +3300,12 @@ async fn test_build_metrics_to_cache_orchestration_workflow() {
     let (socket_path, _dir) = spawn_test_server().await;
     let channel = connect(&socket_path).await;
 
-    let mut metrics_client = build_metrics_service_client::BuildMetricsServiceClient::new(channel.clone());
+    let mut metrics_client =
+        build_metrics_service_client::BuildMetricsServiceClient::new(channel.clone());
     let mut orch_client =
-        build_cache_orchestration_service_client::BuildCacheOrchestrationServiceClient::new(channel.clone());
+        build_cache_orchestration_service_client::BuildCacheOrchestrationServiceClient::new(
+            channel.clone(),
+        );
 
     let build_id = "metrics-cache-workflow".to_string();
 
@@ -3225,8 +3389,10 @@ async fn test_build_metrics_to_cache_orchestration_workflow() {
         .unwrap()
         .into_inner();
 
-    assert!(!probe_after_store.available,
-        "Probe should return miss when metadata exists but real cache entry is absent");
+    assert!(
+        !probe_after_store.available,
+        "Probe should return miss when metadata exists but real cache entry is absent"
+    );
 
     // Step 3: Get performance summary and verify aggregated metrics
     let summary_resp = metrics_client
@@ -3285,7 +3451,8 @@ async fn test_toolchain_to_exec_pipeline() {
     let (socket_path, _dir) = spawn_test_server().await;
     let channel = connect(&socket_path).await;
 
-    let mut toolchain_client = toolchain_service_client::ToolchainServiceClient::new(channel.clone());
+    let mut toolchain_client =
+        toolchain_service_client::ToolchainServiceClient::new(channel.clone());
     let mut exec_client = exec_service_client::ExecServiceClient::new(channel.clone());
 
     // Step 1: Register/verify a Java toolchain by requesting its Java home
@@ -3342,7 +3509,9 @@ async fn test_toolchain_to_exec_pipeline() {
     assert!(spawn_false.success);
 
     let wait_false = exec_client
-        .wait(Request::new(ExecWaitRequest { pid: spawn_false.pid }))
+        .wait(Request::new(ExecWaitRequest {
+            pid: spawn_false.pid,
+        }))
         .await
         .unwrap()
         .into_inner();
@@ -3366,7 +3535,9 @@ async fn test_toolchain_to_exec_pipeline() {
     assert!(spawn_echo.success);
 
     let wait_echo = exec_client
-        .wait(Request::new(ExecWaitRequest { pid: spawn_echo.pid }))
+        .wait(Request::new(ExecWaitRequest {
+            pid: spawn_echo.pid,
+        }))
         .await
         .unwrap()
         .into_inner();
@@ -3383,7 +3554,8 @@ async fn test_configuration_to_build_init_flow() {
     let (socket_path, _dir) = spawn_test_server().await;
     let channel = connect(&socket_path).await;
 
-    let mut config_client = configuration_service_client::ConfigurationServiceClient::new(channel.clone());
+    let mut config_client =
+        configuration_service_client::ConfigurationServiceClient::new(channel.clone());
     let mut init_client = build_init_service_client::BuildInitServiceClient::new(channel.clone());
 
     let build_id = "config-init-flow".to_string();
@@ -3533,7 +3705,10 @@ async fn test_configuration_to_build_init_flow() {
         .collect();
 
     assert_eq!(details.get("projectVersion").copied(), Some("3.0.0"));
-    assert_eq!(details.get("projectGroup").copied(), Some("com.example.flow"));
+    assert_eq!(
+        details.get("projectGroup").copied(),
+        Some("com.example.flow")
+    );
     assert_eq!(details.get("sourceCompatibility").copied(), Some("17"));
 }
 
@@ -3548,7 +3723,9 @@ async fn test_plugin_to_dependency_resolution_chain() {
 
     let mut plugin_client = plugin_service_client::PluginServiceClient::new(channel.clone());
     let mut dep_client =
-        dependency_resolution_service_client::DependencyResolutionServiceClient::new(channel.clone());
+        dependency_resolution_service_client::DependencyResolutionServiceClient::new(
+            channel.clone(),
+        );
 
     let project_path = ":chain-test".to_string();
 
@@ -3811,10 +3988,14 @@ async fn test_cache_service_store_load() {
             key: cache_key.to_vec(),
             total_size: cache_value.len() as i64,
         })),
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
     tx.send(CacheStoreChunk {
         payload: Some(cache_store_chunk::Payload::Data(cache_value.to_vec())),
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
     drop(tx); // close the stream so the server knows we're done sending
 
     use tokio_stream::wrappers::ReceiverStream;
@@ -3824,7 +4005,11 @@ async fn test_cache_service_store_load() {
         .unwrap()
         .into_inner();
 
-    assert!(store_response.success, "store_entry failed: {}", store_response.error_message);
+    assert!(
+        store_response.success,
+        "store_entry failed: {}",
+        store_response.error_message
+    );
     assert!(store_response.error_message.is_empty());
 
     // Step 2: Load the value back via server-streaming LoadEntry.
@@ -3879,10 +4064,14 @@ async fn test_cache_service_hit_and_miss() {
             key: cache_key.to_vec(),
             total_size: cache_value.len() as i64,
         })),
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
     tx.send(CacheStoreChunk {
         payload: Some(cache_store_chunk::Payload::Data(cache_value.to_vec())),
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
     drop(tx);
 
     use tokio_stream::wrappers::ReceiverStream;
@@ -3943,14 +4132,15 @@ async fn test_cache_orchestration_probes_real_cache() {
 
     let mut cache_client = cache_service_client::CacheServiceClient::new(channel.clone());
     let mut orchestration_client =
-        build_cache_orchestration_service_client::BuildCacheOrchestrationServiceClient::new(channel);
+        build_cache_orchestration_service_client::BuildCacheOrchestrationServiceClient::new(
+            channel,
+        );
 
     // Step 1: Store an entry in the real cache
     let cache_key = "orchestration-test-key";
     let cache_value = b"cached-build-output-data";
 
-    use futures_util::StreamExt;
-    let (mut tx, rx) = tokio::sync::mpsc::channel(2);
+    let (tx, rx) = tokio::sync::mpsc::channel(2);
     tx.send(CacheStoreChunk {
         payload: Some(cache_store_chunk::Payload::Init(CacheStoreInit {
             key: cache_key.as_bytes().to_vec(),
@@ -3960,9 +4150,7 @@ async fn test_cache_orchestration_probes_real_cache() {
     .await
     .unwrap();
     tx.send(CacheStoreChunk {
-        payload: Some(cache_store_chunk::Payload::Data(
-            cache_value.to_vec(),
-        )),
+        payload: Some(cache_store_chunk::Payload::Data(cache_value.to_vec())),
     })
     .await
     .unwrap();
@@ -3985,7 +4173,10 @@ async fn test_cache_orchestration_probes_real_cache() {
         .await
         .unwrap()
         .into_inner();
-    assert!(store_outputs.success, "Orchestration store_outputs should succeed");
+    assert!(
+        store_outputs.success,
+        "Orchestration store_outputs should succeed"
+    );
 
     // Step 3: Probe should find it (both metadata AND real cache agree)
     let probe = orchestration_client
@@ -3995,7 +4186,10 @@ async fn test_cache_orchestration_probes_real_cache() {
         .await
         .unwrap()
         .into_inner();
-    assert!(probe.available, "Probe should find the entry in both metadata and real cache");
+    assert!(
+        probe.available,
+        "Probe should find the entry in both metadata and real cache"
+    );
     assert_eq!(probe.location, "local");
     assert_eq!(probe.execution_time_ms, 350);
     assert!(probe.output_properties.contains(&"classes".to_string()));
@@ -4008,7 +4202,10 @@ async fn test_cache_orchestration_probes_real_cache() {
         .await
         .unwrap()
         .into_inner();
-    assert!(!probe_miss.available, "Probe should not find nonexistent key");
+    assert!(
+        !probe_miss.available,
+        "Probe should not find nonexistent key"
+    );
 }
 
 /// Cross-service integration: task graph benefits from execution history duration estimates.
@@ -4020,8 +4217,7 @@ async fn test_task_graph_with_execution_history_integration() {
 
     let mut history_client =
         execution_history_service_client::ExecutionHistoryServiceClient::new(channel.clone());
-    let mut task_graph_client =
-        task_graph_service_client::TaskGraphServiceClient::new(channel);
+    let mut task_graph_client = task_graph_service_client::TaskGraphServiceClient::new(channel);
 
     // Step 1: Store execution history for a task
     let task_path = ":app:compileJava";
@@ -4059,7 +4255,9 @@ async fn test_task_graph_with_execution_history_integration() {
 
     // The registered task should appear in the execution plan
     assert!(
-        plan.execution_order.iter().any(|n| n.task_path == task_path),
+        plan.execution_order
+            .iter()
+            .any(|n| n.task_path == task_path),
         "Registered task should be in the execution plan"
     );
 }

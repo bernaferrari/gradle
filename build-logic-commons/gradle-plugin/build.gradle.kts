@@ -25,4 +25,5 @@ dependencies {
     implementation(buildLibs.detektPlugin) {
         exclude(group = "org.gradle.experimental", module = "gradle-public-api")
     }
+    implementation(buildLibs.protobufPlugin)
 }

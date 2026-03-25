@@ -214,7 +214,8 @@ impl ExecutionHistoryService for ExecutionHistoryServiceImpl {
             timestamp_ms: req.timestamp_ms,
         };
 
-        self.entries.insert(req.work_identity.clone(), entry.clone());
+        self.entries
+            .insert(req.work_identity.clone(), entry.clone());
         self.persist_to_disk(&req.work_identity, &entry).await;
         self.maybe_evict(10_000);
         self.stores.fetch_add(1, Ordering::Relaxed);
@@ -557,7 +558,8 @@ mod tests {
         // Regular state should not be confused with duration
         // (state length is 3, not 8, so duration would return 0)
         assert_eq!(
-            svc.get_task_duration(":compileJava"), 500,
+            svc.get_task_duration(":compileJava"),
+            500,
             "Duration should be from dedicated prefix, not regular state"
         );
     }

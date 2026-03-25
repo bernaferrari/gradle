@@ -2,7 +2,7 @@ package org.gradle.internal.rustbridge.configuration
 
 import org.gradle.api.Project
 import org.gradle.api.ProjectState
-import org.gradle.api.plugins.Plugin
+import org.gradle.api.Plugin
 import spock.lang.Specification
 
 class PropertyShadowEvaluationListenerTest extends Specification {

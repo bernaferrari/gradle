@@ -1,8 +1,6 @@
 package org.gradle.internal.rustbridge.gc;
 
-import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
-import org.slf4j.Logger;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -12,8 +10,6 @@ import org.jspecify.annotations.Nullable;
  * entries-removed and bytes-recovered counts.</p>
  */
 public class ShadowingGarbageCollector {
-
-    private static final Logger LOGGER = Logging.getLogger(ShadowingGarbageCollector.class);
 
     private final RustGarbageCollectionClient rustClient;
     private final HashMismatchReporter mismatchReporter;

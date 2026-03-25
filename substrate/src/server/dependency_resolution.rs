@@ -168,11 +168,17 @@ impl DependencyResolutionServiceImpl {
     #[allow(dead_code)]
     async fn fetch_checksum_file(&self, artifact_url: &str, algo: &str) -> Result<String, String> {
         let checksum_url = format!("{}.{}", artifact_url, algo);
-        let resp = self.http_client.get(&checksum_url).send().await
+        let resp = self
+            .http_client
+            .get(&checksum_url)
+            .send()
+            .await
             .map_err(|e| format!("Failed to fetch {} checksum: {}", algo, e))?;
 
         match resp.status().as_u16() {
-            200 => resp.text().await
+            200 => resp
+                .text()
+                .await
                 .map(|s| Self::parse_checksum_value(&s))
                 .map_err(|e| format!("Failed to read {} checksum: {}", algo, e)),
             404 => Err(format!("No {} checksum available", algo)),
@@ -215,11 +221,7 @@ impl DependencyResolutionServiceImpl {
     }
 
     /// Build an authenticated request for a repository.
-    fn build_request(
-        &self,
-        repo: &RepositoryDescriptor,
-        path: &str,
-    ) -> reqwest::RequestBuilder {
+    fn build_request(&self, repo: &RepositoryDescriptor, path: &str) -> reqwest::RequestBuilder {
         let base = repo.url.trim_end_matches('/');
         let mut url = format!("{}/{}", base, path);
 
@@ -282,12 +284,18 @@ impl DependencyResolutionServiceImpl {
                                 local_copy: false,
                             };
                         }
-                        _ => current_tag = std::str::from_utf8(name.local_name().as_ref()).unwrap_or_default().to_string(),
+                        _ => {
+                            current_tag = std::str::from_utf8(name.local_name().as_ref())
+                                .unwrap_or_default()
+                                .to_string()
+                        }
                     }
                 }
                 Ok(Event::Empty(ref e)) => {
                     let name = e.name();
-                    current_tag = std::str::from_utf8(name.local_name().as_ref()).unwrap_or_default().to_string();
+                    current_tag = std::str::from_utf8(name.local_name().as_ref())
+                        .unwrap_or_default()
+                        .to_string();
                 }
                 Ok(Event::Text(ref e)) => {
                     let text = e.unescape().unwrap_or_default().to_string();
@@ -343,12 +351,16 @@ impl DependencyResolutionServiceImpl {
         let path = format!("{}/{}/maven-metadata.xml", group_path, name);
         let req = self.build_request(repo, &path);
 
-        let resp = req.send().await
+        let resp = req
+            .send()
+            .await
             .map_err(|e| format!("Failed to fetch maven-metadata.xml: {}", e))?;
 
         match resp.status().as_u16() {
             200 => {
-                let body = resp.text().await
+                let body = resp
+                    .text()
+                    .await
                     .map_err(|e| format!("Failed to read metadata response: {}", e))?;
                 Self::parse_maven_metadata(&body)
             }
@@ -362,18 +374,29 @@ impl DependencyResolutionServiceImpl {
     }
 
     /// Fetch a POM file from a Maven repository and parse it.
-    async fn fetch_pom(&self, group: &str, name: &str, version: &str, repo: &RepositoryDescriptor) -> Result<String, String> {
+    async fn fetch_pom(
+        &self,
+        group: &str,
+        name: &str,
+        version: &str,
+        repo: &RepositoryDescriptor,
+    ) -> Result<String, String> {
         let group_path = group.replace('.', "/");
         let path = format!(
             "{}/{}/{}/{}-{}.pom",
             group_path, name, version, name, version
         );
 
-        let response = self.build_request(repo, &path).send().await
+        let response = self
+            .build_request(repo, &path)
+            .send()
+            .await
             .map_err(|e| format!("Failed to fetch POM: {}", e))?;
 
         match response.status().as_u16() {
-            200 => response.text().await
+            200 => response
+                .text()
+                .await
                 .map_err(|e| format!("Failed to read POM response: {}", e)),
             404 => Err(format!("POM not found: {}-{}.pom", name, version)),
             status => Err(format!("HTTP {} for POM", status)),
@@ -405,13 +428,15 @@ impl DependencyResolutionServiceImpl {
             let mut in_dep_mgmt = false;
             let mut scan = 0usize;
             while scan < pos {
-                if let Some(dm_start) = bytes[scan..pos].windows(dep_mgmt_open.len())
+                if let Some(dm_start) = bytes[scan..pos]
+                    .windows(dep_mgmt_open.len())
                     .position(|w| w == dep_mgmt_open)
                     .map(|p| scan + p)
                 {
                     // Check if there's a closing tag between dm_start and pos
                     let after_dm = dm_start + dep_mgmt_open.len();
-                    if bytes[after_dm..pos].windows(dep_mgmt_close.len())
+                    if bytes[after_dm..pos]
+                        .windows(dep_mgmt_close.len())
                         .any(|w| w == dep_mgmt_close)
                     {
                         scan = after_dm;
@@ -466,7 +491,11 @@ impl DependencyResolutionServiceImpl {
 
     /// Parse <exclusions> block within a single <dependency> element.
     /// Returns a list of (groupId, artifactId) pairs.
-    fn parse_pom_exclusions(bytes: &[u8], dep_start: usize, dep_end: usize) -> Vec<(String, String)> {
+    fn parse_pom_exclusions(
+        bytes: &[u8],
+        dep_start: usize,
+        dep_end: usize,
+    ) -> Vec<(String, String)> {
         let mut exclusions = Vec::new();
 
         // Find <exclusions> within this dependency block
@@ -536,7 +565,9 @@ impl DependencyResolutionServiceImpl {
 
     /// Parse <dependencyManagement><dependencies> section from a POM.
     /// Returns a map of (groupId, artifactId) -> version for managed dependencies.
-    pub fn parse_dependency_management(pom_content: &str) -> std::collections::HashMap<(String, String), String> {
+    pub fn parse_dependency_management(
+        pom_content: &str,
+    ) -> std::collections::HashMap<(String, String), String> {
         let mut managed = std::collections::HashMap::new();
         let bytes = pom_content.as_bytes();
 
@@ -593,7 +624,8 @@ impl DependencyResolutionServiceImpl {
     /// Deduplicate resolved dependencies by (group, name), keeping the highest version.
     /// This implements Gradle's default conflict resolution strategy.
     pub fn resolve_conflicts(deps: &mut Vec<ResolvedDependency>) {
-        let mut best: std::collections::HashMap<(String, String), usize> = std::collections::HashMap::new();
+        let mut best: std::collections::HashMap<(String, String), usize> =
+            std::collections::HashMap::new();
 
         for (idx, dep) in deps.iter().enumerate() {
             let key = (dep.group.clone(), dep.name.clone());
@@ -685,7 +717,8 @@ impl DependencyResolutionServiceImpl {
             // Extract the text content between <key> and </key>
             let close_tag = format!("</{}", std::str::from_utf8(tag_name).unwrap_or_default());
             let close_bytes = close_tag.as_bytes();
-            if let Some(val_end) = bytes[tag_end + 1..end].windows(close_bytes.len())
+            if let Some(val_end) = bytes[tag_end + 1..end]
+                .windows(close_bytes.len())
                 .position(|w| w == close_bytes)
                 .map(|p| tag_end + 1 + p)
             {
@@ -710,7 +743,10 @@ impl DependencyResolutionServiceImpl {
     }
 
     /// Interpolate ${property.name} references in a string using the given properties map.
-    pub fn interpolate_properties(value: &str, properties: &std::collections::HashMap<String, String>) -> String {
+    pub fn interpolate_properties(
+        value: &str,
+        properties: &std::collections::HashMap<String, String>,
+    ) -> String {
         let mut result = value.to_string();
         // Keep interpolating until no more ${...} references remain (handles nested refs)
         let mut max_iterations = 10;
@@ -722,13 +758,20 @@ impl DependencyResolutionServiceImpl {
                     let replacement = properties.get(key).cloned().unwrap_or_else(|| {
                         // Try common built-in properties
                         match key {
-                            "project.version" | "version" | "pom.version" => "0.0.0-unknown".to_string(),
+                            "project.version" | "version" | "pom.version" => {
+                                "0.0.0-unknown".to_string()
+                            }
                             "project.groupId" | "groupId" => "unknown".to_string(),
                             "project.artifactId" | "artifactId" => "unknown".to_string(),
                             _ => format!("${{{}}}", key), // Leave unresolved
                         }
                     });
-                    result = format!("{}{}{}", &result[..start], replacement, &result[start + end + 1..]);
+                    result = format!(
+                        "{}{}{}",
+                        &result[..start],
+                        replacement,
+                        &result[start + end + 1..]
+                    );
                 } else {
                     break;
                 }
@@ -742,7 +785,11 @@ impl DependencyResolutionServiceImpl {
     /// Resolve a version range to a concrete version.
     /// Supports: exact ("1.0"), soft range ("[1.0,2.0)", "(1.0,]", "[1.0]"), and "latest.release".
     /// Also supports "LATEST" and "RELEASE" via MavenMetadata.
-    fn resolve_version_range(range: &str, available: &[String], metadata: Option<&MavenMetadata>) -> Option<String> {
+    fn resolve_version_range(
+        range: &str,
+        available: &[String],
+        metadata: Option<&MavenMetadata>,
+    ) -> Option<String> {
         let range = range.trim();
 
         // Special versions: try metadata first, then fall back to available list
@@ -820,7 +867,12 @@ impl DependencyResolutionServiceImpl {
     }
 
     /// Fetch available versions for a dependency from maven-metadata.xml.
-    async fn fetch_available_versions(&self, group: &str, name: &str, repos: &[RepositoryDescriptor]) -> (Vec<String>, Option<MavenMetadata>) {
+    async fn fetch_available_versions(
+        &self,
+        group: &str,
+        name: &str,
+        repos: &[RepositoryDescriptor],
+    ) -> (Vec<String>, Option<MavenMetadata>) {
         for repo in repos {
             match self.fetch_maven_metadata(group, name, repo).await {
                 Ok(meta) => {
@@ -847,8 +899,11 @@ impl DependencyResolutionServiceImpl {
         let raw_version = dep.version.clone();
 
         // Resolve version ranges
-        let selected_version = if raw_version.contains(',') || raw_version.starts_with('[') || raw_version.starts_with('(')
-            || raw_version == "LATEST" || raw_version == "RELEASE"
+        let selected_version = if raw_version.contains(',')
+            || raw_version.starts_with('[')
+            || raw_version.starts_with('(')
+            || raw_version == "LATEST"
+            || raw_version == "RELEASE"
         {
             // Version range or special version — need to fetch available versions
             let (available, metadata) = self.fetch_available_versions(&group, &name, repos).await;
@@ -876,21 +931,28 @@ impl DependencyResolutionServiceImpl {
 
                         // Collect all exclusions from this POM's direct dependencies
                         // so we can filter transitive deps
-                        let all_exclusions: Vec<&(String, String)> = pom_deps
-                            .iter()
-                            .flat_map(|d| d.exclusions.iter())
-                            .collect();
+                        let all_exclusions: Vec<&(String, String)> =
+                            pom_deps.iter().flat_map(|d| d.exclusions.iter()).collect();
 
                         for pom_dep in &pom_deps {
                             // Skip test/provided scopes and optional deps
-                            if pom_dep.scope == "test" || pom_dep.scope == "provided" || pom_dep.optional {
+                            if pom_dep.scope == "test"
+                                || pom_dep.scope == "provided"
+                                || pom_dep.optional
+                            {
                                 continue;
                             }
 
                             // Check if this dependency is excluded by any sibling exclusion
-                            let is_excluded = all_exclusions.iter().any(|(excl_group, excl_name)| {
-                                Self::matches_exclusion(&pom_dep.group, &pom_dep.name, excl_group, excl_name)
-                            });
+                            let is_excluded =
+                                all_exclusions.iter().any(|(excl_group, excl_name)| {
+                                    Self::matches_exclusion(
+                                        &pom_dep.group,
+                                        &pom_dep.name,
+                                        excl_group,
+                                        excl_name,
+                                    )
+                                });
                             if is_excluded {
                                 tracing::debug!(
                                     group = %pom_dep.group,
@@ -901,8 +963,11 @@ impl DependencyResolutionServiceImpl {
                             }
 
                             // Resolve version: use dependency management if version is empty or a property that didn't resolve
-                            let raw_dep_version = Self::interpolate_properties(&pom_dep.version, &properties);
-                            let resolved_version = if raw_dep_version.is_empty() || raw_dep_version.starts_with("${") {
+                            let raw_dep_version =
+                                Self::interpolate_properties(&pom_dep.version, &properties);
+                            let resolved_version = if raw_dep_version.is_empty()
+                                || raw_dep_version.starts_with("${")
+                            {
                                 // Look up in managed versions
                                 managed_versions
                                     .get(&(pom_dep.group.clone(), pom_dep.name.clone()))
@@ -916,11 +981,18 @@ impl DependencyResolutionServiceImpl {
                                 continue;
                             }
 
-                            let ext = if pom_dep.type_field.is_empty() { "jar" } else { &pom_dep.type_field };
+                            let ext = if pom_dep.type_field.is_empty() {
+                                "jar"
+                            } else {
+                                &pom_dep.type_field
+                            };
                             let artifact_filename = if pom_dep.classifier.is_empty() {
                                 format!("{}-{}.{}", pom_dep.name, resolved_version, ext)
                             } else {
-                                format!("{}-{}-{}.{}", pom_dep.name, resolved_version, pom_dep.classifier, ext)
+                                format!(
+                                    "{}-{}-{}.{}",
+                                    pom_dep.name, resolved_version, pom_dep.classifier, ext
+                                )
                             };
                             let repo_base = repo.url.trim_end_matches('/');
                             let artifact_url = format!(
@@ -970,7 +1042,8 @@ impl DependencyResolutionServiceImpl {
         }
 
         // Compute artifact URL using the first repo (or default Maven Central)
-        let repo_base = repos.first()
+        let repo_base = repos
+            .first()
             .map(|r| r.url.trim_end_matches('/').to_string())
             .unwrap_or_else(|| "https://repo.maven.apache.org/maven2".to_string());
 
@@ -1004,7 +1077,9 @@ impl DependencyResolutionServiceImpl {
             match self.http_client.get(url).send().await {
                 Ok(resp) => match resp.status().as_u16() {
                     200..=299 => {
-                        return resp.bytes().await
+                        return resp
+                            .bytes()
+                            .await
                             .map(|b| b.to_vec())
                             .map_err(|e| format!("Failed to read response: {}", e));
                     }
@@ -1035,7 +1110,8 @@ fn find_open_tag_exact(bytes: &[u8], from: usize, tag: &[u8]) -> Option<usize> {
     let mut search_from = from;
 
     while search_from < bytes.len() {
-        if let Some(pos) = bytes[search_from..].windows(open_bytes.len())
+        if let Some(pos) = bytes[search_from..]
+            .windows(open_bytes.len())
             .position(|w| w == open_bytes)
             .map(|pos| search_from + pos)
         {
@@ -1043,7 +1119,12 @@ fn find_open_tag_exact(bytes: &[u8], from: usize, tag: &[u8]) -> Option<usize> {
             let after = pos + open_bytes.len();
             if after < bytes.len() {
                 let next_char = bytes[after];
-                if next_char == b'>' || next_char == b' ' || next_char == b'\n' || next_char == b'\r' || next_char == b'\t' {
+                if next_char == b'>'
+                    || next_char == b' '
+                    || next_char == b'\n'
+                    || next_char == b'\r'
+                    || next_char == b'\t'
+                {
                     return Some(pos);
                 }
                 // Not an exact match — e.g., <dependency> vs <dependencyManagement>
@@ -1067,7 +1148,8 @@ fn _find_tag(bytes: &[u8], from: usize, tag: &[u8]) -> Option<usize> {
 fn find_end_tag(bytes: &[u8], from: usize, tag: &[u8]) -> Option<usize> {
     let close = format!("</{}", std::str::from_utf8(tag).unwrap_or_default());
     let close_bytes = close.as_bytes();
-    bytes[from..].windows(close_bytes.len())
+    bytes[from..]
+        .windows(close_bytes.len())
         .position(|w| w == close_bytes)
         .map(|pos| from + pos)
 }
@@ -1081,20 +1163,30 @@ fn extract_tag_text(bytes: &[u8], parent_start: usize, tag: &[u8]) -> Option<Str
 
     // Find the opening tag after parent_start
     let search_from = parent_start;
-    if let Some(start_pos) = bytes[search_from..].windows(open_bytes.len())
+    if let Some(start_pos) = bytes[search_from..]
+        .windows(open_bytes.len())
         .position(|w| w == open_bytes)
         .map(|pos| search_from + pos)
     {
         let content_start = start_pos + open_bytes.len();
         // Skip the closing `>` of the opening tag
-        let content_start = content_start + bytes[content_start..].iter().position(|&b| b == b'>').unwrap_or(0) + 1;
+        let content_start = content_start
+            + bytes[content_start..]
+                .iter()
+                .position(|&b| b == b'>')
+                .unwrap_or(0)
+            + 1;
 
-        if let Some(end_pos) = bytes[content_start..].windows(close_bytes.len())
+        if let Some(end_pos) = bytes[content_start..]
+            .windows(close_bytes.len())
             .position(|w| w == close_bytes)
             .map(|pos| content_start + pos)
         {
             let content = &bytes[content_start..end_pos];
-            let text = std::str::from_utf8(content).unwrap_or_default().trim().to_string();
+            let text = std::str::from_utf8(content)
+                .unwrap_or_default()
+                .trim()
+                .to_string();
             return Some(text);
         }
     }
@@ -1110,18 +1202,14 @@ pub fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
 
     for (pa, pb) in a_parts.iter().zip(b_parts.iter()) {
         match (pa.parse::<u64>(), pb.parse::<u64>()) {
-            (Ok(na), Ok(nb)) => {
-                match na.cmp(&nb) {
-                    std::cmp::Ordering::Equal => continue,
-                    other => return other,
-                }
-            }
-            _ => {
-                match pa.cmp(pb) {
-                    std::cmp::Ordering::Equal => continue,
-                    other => return other,
-                }
-            }
+            (Ok(na), Ok(nb)) => match na.cmp(&nb) {
+                std::cmp::Ordering::Equal => continue,
+                other => return other,
+            },
+            _ => match pa.cmp(pb) {
+                std::cmp::Ordering::Equal => continue,
+                other => return other,
+            },
         }
     }
 
@@ -1159,13 +1247,17 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
         let req = request.into_inner();
         let start = std::time::Instant::now();
 
-        let repo_urls: Vec<RepositoryDescriptor> = req.repositories.iter().map(|r| RepositoryDescriptor {
-            id: r.id.clone(),
-            url: r.url.clone(),
-            m2compatible: r.m2compatible,
-            allow_insecure_protocol: r.allow_insecure_protocol,
-            credentials: r.credentials.clone(),
-        }).collect();
+        let repo_urls: Vec<RepositoryDescriptor> = req
+            .repositories
+            .iter()
+            .map(|r| RepositoryDescriptor {
+                id: r.id.clone(),
+                url: r.url.clone(),
+                m2compatible: r.m2compatible,
+                allow_insecure_protocol: r.allow_insecure_protocol,
+                credentials: r.credentials.clone(),
+            })
+            .collect();
         let default_repo = RepositoryDescriptor {
             id: "central".to_string(),
             url: "https://repo.maven.apache.org/maven2/".to_string(),
@@ -1173,7 +1265,11 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             allow_insecure_protocol: false,
             credentials: Default::default(),
         };
-        let repos = if repo_urls.is_empty() { vec![default_repo] } else { repo_urls };
+        let repos = if repo_urls.is_empty() {
+            vec![default_repo]
+        } else {
+            repo_urls
+        };
 
         let mut resolved = Vec::new();
         for dep in &req.dependencies {
@@ -1214,15 +1310,12 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
     ) -> Result<Response<CheckArtifactCacheResponse>, Status> {
         let req = request.into_inner();
 
-        let key = Self::artifact_cache_key(
-            &req.group,
-            &req.name,
-            &req.version,
-            &req.classifier,
-        );
+        let key = Self::artifact_cache_key(&req.group, &req.name, &req.version, &req.classifier);
 
         if let Some(cached) = self.artifact_cache.get(&key) {
-            self.resolution_stats.cache_hits.fetch_add(1, Ordering::Relaxed);
+            self.resolution_stats
+                .cache_hits
+                .fetch_add(1, Ordering::Relaxed);
 
             // Validate SHA-256 if the caller provided one
             if !req.sha256.is_empty() && !cached.sha256.is_empty() && req.sha256 != cached.sha256 {
@@ -1320,7 +1413,13 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
         }))
     }
 
-    type DownloadArtifactStream = std::pin::Pin<Box<dyn tonic::codegen::tokio_stream::Stream<Item = Result<crate::proto::DownloadArtifactChunk, Status>> + Send>>;
+    type DownloadArtifactStream = std::pin::Pin<
+        Box<
+            dyn tonic::codegen::tokio_stream::Stream<
+                    Item = Result<crate::proto::DownloadArtifactChunk, Status>,
+                > + Send,
+        >,
+    >;
 
     async fn download_artifact(
         &self,
@@ -1468,7 +1567,9 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             }
         };
 
-        Ok(Response::new(Box::pin(stream) as Self::DownloadArtifactStream))
+        Ok(Response::new(
+            Box::pin(stream) as Self::DownloadArtifactStream
+        ))
     }
 
     async fn record_resolution(
@@ -1502,7 +1603,10 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
         &self,
         _request: Request<GetResolutionStatsRequest>,
     ) -> Result<Response<GetResolutionStatsResponse>, Status> {
-        let total = self.resolution_stats.total_resolutions.load(Ordering::Relaxed);
+        let total = self
+            .resolution_stats
+            .total_resolutions
+            .load(Ordering::Relaxed);
         let cache_hits = self.resolution_stats.cache_hits.load(Ordering::Relaxed);
         let total_time = self.resolution_stats.total_time_ms.load(Ordering::Relaxed);
         let cached_artifacts = self.artifact_cache.len() as i64;
@@ -1555,8 +1659,11 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                 if let Ok(data) = tokio::fs::read(&store_path).await {
                     let sha256 = Self::compute_sha256(&data);
                     let sha_path = store_path.with_extension("sha256");
-                    let _ = tokio::fs::write(&sha_path, format!("{}  {}-{}.{}\n",
-                        sha256, name, version, extension)).await;
+                    let _ = tokio::fs::write(
+                        &sha_path,
+                        format!("{}  {}-{}.{}\n", sha256, name, version, extension),
+                    )
+                    .await;
                 }
 
                 store_path.to_string_lossy().to_string()
@@ -1637,9 +1744,10 @@ mod tests {
                     make_dep("org.springframework", "spring-core", "5.3.30"),
                     make_dep("com.google.guava", "guava", "32.1.3"),
                 ],
-                repositories: vec![
-                    make_repo("central", "https://repo.maven.apache.org/maven2/"),
-                ],
+                repositories: vec![make_repo(
+                    "central",
+                    "https://repo.maven.apache.org/maven2/",
+                )],
                 attributes: vec![],
                 lenient: false,
             }))
@@ -1735,8 +1843,8 @@ mod tests {
 
     #[test]
     fn test_artifact_cache_key() {
-        let key = DependencyResolutionServiceImpl::artifact_cache_key(
-            "com.example", "my-lib", "1.0", "");
+        let key =
+            DependencyResolutionServiceImpl::artifact_cache_key("com.example", "my-lib", "1.0", "");
         assert_eq!(key, "com.example:my-lib:1.0:");
     }
 
@@ -1745,14 +1853,18 @@ mod tests {
         let svc = make_svc();
 
         // Not cached initially
-        let miss = svc.check_artifact_cache(Request::new(CheckArtifactCacheRequest {
-            group: "com.example".to_string(),
-            name: "my-lib".to_string(),
-            version: "1.0".to_string(),
-            classifier: String::new(),
-            sha256: String::new(),
-            extension: String::new(),
-        })).await.unwrap().into_inner();
+        let miss = svc
+            .check_artifact_cache(Request::new(CheckArtifactCacheRequest {
+                group: "com.example".to_string(),
+                name: "my-lib".to_string(),
+                version: "1.0".to_string(),
+                classifier: String::new(),
+                sha256: String::new(),
+                extension: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
         assert!(!miss.cached);
 
         // Add to cache
@@ -1764,17 +1876,23 @@ mod tests {
             local_path: "/tmp/my-lib-1.0.jar".to_string(),
             size: 1024,
             sha256: "abc123".to_string(),
-        })).await.unwrap();
+        }))
+        .await
+        .unwrap();
 
         // Now cached
-        let hit = svc.check_artifact_cache(Request::new(CheckArtifactCacheRequest {
-            group: "com.example".to_string(),
-            name: "my-lib".to_string(),
-            version: "1.0".to_string(),
-            classifier: String::new(),
-            sha256: String::new(),
-            extension: String::new(),
-        })).await.unwrap().into_inner();
+        let hit = svc
+            .check_artifact_cache(Request::new(CheckArtifactCacheRequest {
+                group: "com.example".to_string(),
+                name: "my-lib".to_string(),
+                version: "1.0".to_string(),
+                classifier: String::new(),
+                sha256: String::new(),
+                extension: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
         assert!(hit.cached);
         assert_eq!(hit.local_path, "/tmp/my-lib-1.0.jar");
         assert_eq!(hit.cached_size, 1024);
@@ -1791,7 +1909,9 @@ mod tests {
             resolution_time_ms: 100,
             success: true,
             cache_hits: 5,
-        })).await.unwrap();
+        }))
+        .await
+        .unwrap();
 
         svc.record_resolution(Request::new(RecordResolutionRequest {
             configuration_name: "testRuntimeClasspath".to_string(),
@@ -1799,10 +1919,15 @@ mod tests {
             resolution_time_ms: 200,
             success: true,
             cache_hits: 15,
-        })).await.unwrap();
+        }))
+        .await
+        .unwrap();
 
-        let stats = svc.get_resolution_stats(Request::new(GetResolutionStatsRequest {}))
-            .await.unwrap().into_inner();
+        let stats = svc
+            .get_resolution_stats(Request::new(GetResolutionStatsRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
 
         // Note: record_resolution doesn't increment total_resolutions (resolve_dependencies does)
         // But artifact_cache_hits from check_artifact_cache should work
@@ -1861,7 +1986,10 @@ mod tests {
             "5.3.30"
         );
         assert_eq!(
-            DependencyResolutionServiceImpl::interpolate_properties("spring-core-${spring.version}", &props),
+            DependencyResolutionServiceImpl::interpolate_properties(
+                "spring-core-${spring.version}",
+                &props
+            ),
             "spring-core-5.3.30"
         );
         assert_eq!(
@@ -1888,7 +2016,8 @@ mod tests {
         // "1.0" has 2 segments, "1.0.0" has 3 — "1.0" is shorter, so Less
         assert!(compare_versions("1.0", "1.0.0") == std::cmp::Ordering::Less);
         assert!(compare_versions("1.2.3", "1.2.4") == std::cmp::Ordering::Less);
-        assert!(compare_versions("1.10.0", "1.9.0") == std::cmp::Ordering::Greater); // 10 > 9
+        assert!(compare_versions("1.10.0", "1.9.0") == std::cmp::Ordering::Greater);
+        // 10 > 9
     }
 
     #[test]
@@ -1903,11 +2032,18 @@ mod tests {
     #[test]
     fn test_resolve_version_range_soft() {
         let available = vec![
-            "1.0.0".to_string(), "1.5.0".to_string(), "2.0.0".to_string(), "2.5.0".to_string(),
+            "1.0.0".to_string(),
+            "1.5.0".to_string(),
+            "2.0.0".to_string(),
+            "2.5.0".to_string(),
         ];
         // [1.0.0,2.0.0) — should pick 1.5.0 (highest within range)
         assert_eq!(
-            DependencyResolutionServiceImpl::resolve_version_range("[1.0.0,2.0.0)", &available, None),
+            DependencyResolutionServiceImpl::resolve_version_range(
+                "[1.0.0,2.0.0)",
+                &available,
+                None
+            ),
             Some("1.5.0".to_string())
         );
     }
@@ -1915,7 +2051,9 @@ mod tests {
     #[test]
     fn test_resolve_version_range_open_ended() {
         let available = vec![
-            "1.0.0".to_string(), "2.0.0".to_string(), "3.0.0".to_string(),
+            "1.0.0".to_string(),
+            "2.0.0".to_string(),
+            "3.0.0".to_string(),
         ];
         // (1.0,) — should pick 3.0.0 (highest above 1.0)
         assert_eq!(
@@ -1928,7 +2066,11 @@ mod tests {
     fn test_resolve_version_range_latest() {
         let available = vec!["1.0.0".to_string(), "2.0.0".to_string()];
         assert_eq!(
-            DependencyResolutionServiceImpl::resolve_version_range("latest.release", &available, None),
+            DependencyResolutionServiceImpl::resolve_version_range(
+                "latest.release",
+                &available,
+                None
+            ),
             Some("2.0.0".to_string())
         );
     }
@@ -1955,7 +2097,8 @@ mod tests {
         assert_eq!(deps[0].version, "${spring.version}");
 
         // Verify interpolation resolves it
-        let interp = DependencyResolutionServiceImpl::interpolate_properties(&deps[0].version, &props);
+        let interp =
+            DependencyResolutionServiceImpl::interpolate_properties(&deps[0].version, &props);
         assert_eq!(interp, "5.3.30");
     }
 
@@ -2097,7 +2240,10 @@ mod tests {
         svc.resolve_dependencies(Request::new(ResolveDependenciesRequest {
             configuration_name: "working-config".to_string(),
             dependencies: vec![make_dep("org.slf4j", "slf4j-api", "2.0.9")],
-            repositories: vec![make_repo("central", "https://repo.maven.apache.org/maven2/")],
+            repositories: vec![make_repo(
+                "central",
+                "https://repo.maven.apache.org/maven2/",
+            )],
             attributes: vec![],
             lenient: true,
         }))
@@ -2123,7 +2269,10 @@ mod tests {
     #[test]
     fn test_compute_sha256() {
         let hash = DependencyResolutionServiceImpl::compute_sha256(b"hello world");
-        assert_eq!(hash, "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9");
+        assert_eq!(
+            hash,
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+        );
     }
 
     #[test]
@@ -2137,7 +2286,9 @@ mod tests {
     #[test]
     fn test_parse_checksum_with_trailing_filename() {
         assert_eq!(
-            DependencyResolutionServiceImpl::parse_checksum_value("abc123def456  artifact-1.0.jar\n"),
+            DependencyResolutionServiceImpl::parse_checksum_value(
+                "abc123def456  artifact-1.0.jar\n"
+            ),
             "abc123def456"
         );
         assert_eq!(
@@ -2207,7 +2358,8 @@ mod tests {
 
     #[test]
     fn test_parse_maven_metadata_empty() {
-        let result = DependencyResolutionServiceImpl::parse_maven_metadata("<not-metadata/>").unwrap();
+        let result =
+            DependencyResolutionServiceImpl::parse_maven_metadata("<not-metadata/>").unwrap();
         assert!(result.group_id.is_empty());
         assert!(result.artifact_id.is_empty());
         assert!(result.versioning.versions.is_empty());
@@ -2230,17 +2382,29 @@ mod tests {
 
         // RELEASE should use metadata.release
         assert_eq!(
-            DependencyResolutionServiceImpl::resolve_version_range("RELEASE", &available, Some(&meta)),
+            DependencyResolutionServiceImpl::resolve_version_range(
+                "RELEASE",
+                &available,
+                Some(&meta)
+            ),
             Some("1.5.0".to_string())
         );
         // LATEST should use metadata.latest
         assert_eq!(
-            DependencyResolutionServiceImpl::resolve_version_range("LATEST", &available, Some(&meta)),
+            DependencyResolutionServiceImpl::resolve_version_range(
+                "LATEST",
+                &available,
+                Some(&meta)
+            ),
             Some("2.0.0".to_string())
         );
         // latest.release should use metadata.release when available
         assert_eq!(
-            DependencyResolutionServiceImpl::resolve_version_range("latest.release", &available, Some(&meta)),
+            DependencyResolutionServiceImpl::resolve_version_range(
+                "latest.release",
+                &available,
+                Some(&meta)
+            ),
             Some("1.5.0".to_string())
         );
     }
@@ -2263,11 +2427,16 @@ mod tests {
             local_path: src.to_string_lossy().to_string(),
             size: 20,
             sha256: "abc123".to_string(),
-        })).await.unwrap();
+        }))
+        .await
+        .unwrap();
 
         // Verify file exists in Maven layout
         let expected = dir.path().join("com/example/test-lib/1.0/test-lib-1.0.jar");
-        assert!(expected.exists(), "Artifact should be stored at Maven layout path");
+        assert!(
+            expected.exists(),
+            "Artifact should be stored at Maven layout path"
+        );
         let content = std::fs::read(&expected).unwrap();
         assert_eq!(content, b"test artifact content");
 
@@ -2281,12 +2450,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let svc = DependencyResolutionServiceImpl::new(dir.path().to_path_buf());
         let path = svc.artifact_path("com.google.guava", "guava", "32.1.3", "", "jar");
-        let expected = dir.path().join("com/google/guava/guava/32.1.3/guava-32.1.3.jar");
+        let expected = dir
+            .path()
+            .join("com/google/guava/guava/32.1.3/guava-32.1.3.jar");
         assert_eq!(path, expected);
 
         // With classifier
         let path2 = svc.artifact_path("com.google.guava", "guava", "32.1.3", "sources", "jar");
-        let expected2 = dir.path().join("com/google/guava/guava/32.1.3/guava-32.1.3-sources.jar");
+        let expected2 = dir
+            .path()
+            .join("com/google/guava/guava/32.1.3/guava-32.1.3-sources.jar");
         assert_eq!(path2, expected2);
     }
 
@@ -2303,18 +2476,27 @@ mod tests {
         std::fs::write(&artifact_path, b"cold artifact data").unwrap();
 
         // DashMap should not have it
-        let key = DependencyResolutionServiceImpl::artifact_cache_key("com.example", "cold-lib", "1.0", "");
+        let key = DependencyResolutionServiceImpl::artifact_cache_key(
+            "com.example",
+            "cold-lib",
+            "1.0",
+            "",
+        );
         assert!(!svc.artifact_cache.contains_key(&key));
 
         // But check_artifact_cache should find it via filesystem
-        let resp = svc.check_artifact_cache(Request::new(CheckArtifactCacheRequest {
-            group: "com.example".to_string(),
-            name: "cold-lib".to_string(),
-            version: "1.0".to_string(),
-            classifier: String::new(),
-            sha256: String::new(),
-            extension: "jar".to_string(),
-        })).await.unwrap().into_inner();
+        let resp = svc
+            .check_artifact_cache(Request::new(CheckArtifactCacheRequest {
+                group: "com.example".to_string(),
+                name: "cold-lib".to_string(),
+                version: "1.0".to_string(),
+                classifier: String::new(),
+                sha256: String::new(),
+                extension: "jar".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
 
         assert!(resp.cached, "Should find artifact on filesystem");
         assert_eq!(resp.local_path, artifact_path.to_string_lossy().to_string());
@@ -2352,7 +2534,9 @@ mod tests {
         let data = b"test data for checksum";
 
         // No sidecar files exist, so verification should pass (no checksum available)
-        let result = svc.verify_artifact_checksum(data, "https://repo.example.com/test.jar").await;
+        let result = svc
+            .verify_artifact_checksum(data, "https://repo.example.com/test.jar")
+            .await;
         assert!(result.matched, "Should match when no sidecar is available");
         assert_eq!(result.algorithm, "sha256");
     }
@@ -2387,8 +2571,14 @@ mod tests {
         assert_eq!(deps[0].group, "com.example");
         assert_eq!(deps[0].name, "foo");
         assert_eq!(deps[0].exclusions.len(), 2);
-        assert_eq!(deps[0].exclusions[0], ("org.unwanted".to_string(), "bar".to_string()));
-        assert_eq!(deps[0].exclusions[1], ("org.unwanted".to_string(), "baz".to_string()));
+        assert_eq!(
+            deps[0].exclusions[0],
+            ("org.unwanted".to_string(), "bar".to_string())
+        );
+        assert_eq!(
+            deps[0].exclusions[1],
+            ("org.unwanted".to_string(), "baz".to_string())
+        );
     }
 
     #[test]
@@ -2467,9 +2657,15 @@ mod tests {
         let deps = DependencyResolutionServiceImpl::parse_pom_dependencies(pom);
         assert_eq!(deps.len(), 2);
         assert_eq!(deps[0].exclusions.len(), 1);
-        assert_eq!(deps[0].exclusions[0], ("org.unwanted".to_string(), "bar".to_string()));
+        assert_eq!(
+            deps[0].exclusions[0],
+            ("org.unwanted".to_string(), "bar".to_string())
+        );
         assert_eq!(deps[1].exclusions.len(), 1);
-        assert_eq!(deps[1].exclusions[0], ("org.transitive".to_string(), "lib".to_string()));
+        assert_eq!(
+            deps[1].exclusions[0],
+            ("org.transitive".to_string(), "lib".to_string())
+        );
     }
 
     #[test]
@@ -2530,11 +2726,15 @@ mod tests {
         let managed = DependencyResolutionServiceImpl::parse_dependency_management(pom);
         assert_eq!(managed.len(), 2);
         assert_eq!(
-            managed.get(&("org.springframework".to_string(), "spring-core".to_string())).unwrap(),
+            managed
+                .get(&("org.springframework".to_string(), "spring-core".to_string()))
+                .unwrap(),
             "5.3.30"
         );
         assert_eq!(
-            managed.get(&("org.slf4j".to_string(), "slf4j-api".to_string())).unwrap(),
+            managed
+                .get(&("org.slf4j".to_string(), "slf4j-api".to_string()))
+                .unwrap(),
             "2.0.9"
         );
 
@@ -2591,7 +2791,9 @@ mod tests {
         assert_eq!(managed.len(), 1);
         // Note: dependency management stores raw version strings; interpolation happens at resolution time
         assert_eq!(
-            managed.get(&("org.springframework".to_string(), "spring-core".to_string())).unwrap(),
+            managed
+                .get(&("org.springframework".to_string(), "spring-core".to_string()))
+                .unwrap(),
             "${spring.version}"
         );
     }
@@ -2821,48 +3023,61 @@ mod tests {
     #[test]
     fn test_matches_exclusion_exact() {
         assert!(DependencyResolutionServiceImpl::matches_exclusion(
-            "org.unwanted", "bar",
-            "org.unwanted", "bar"
+            "org.unwanted",
+            "bar",
+            "org.unwanted",
+            "bar"
         ));
         assert!(!DependencyResolutionServiceImpl::matches_exclusion(
-            "org.unwanted", "bar",
-            "org.other", "bar"
+            "org.unwanted",
+            "bar",
+            "org.other",
+            "bar"
         ));
         assert!(!DependencyResolutionServiceImpl::matches_exclusion(
-            "org.unwanted", "bar",
-            "org.unwanted", "other"
+            "org.unwanted",
+            "bar",
+            "org.unwanted",
+            "other"
         ));
     }
 
     #[test]
     fn test_matches_exclusion_wildcard_group() {
         assert!(DependencyResolutionServiceImpl::matches_exclusion(
-            "org.anything", "bar",
-            "*", "bar"
+            "org.anything",
+            "bar",
+            "*",
+            "bar"
         ));
         assert!(!DependencyResolutionServiceImpl::matches_exclusion(
-            "org.anything", "other",
-            "*", "bar"
+            "org.anything",
+            "other",
+            "*",
+            "bar"
         ));
     }
 
     #[test]
     fn test_matches_exclusion_wildcard_artifact() {
         assert!(DependencyResolutionServiceImpl::matches_exclusion(
-            "org.unwanted", "anything",
-            "org.unwanted", "*"
+            "org.unwanted",
+            "anything",
+            "org.unwanted",
+            "*"
         ));
         assert!(!DependencyResolutionServiceImpl::matches_exclusion(
-            "org.other", "anything",
-            "org.unwanted", "*"
+            "org.other",
+            "anything",
+            "org.unwanted",
+            "*"
         ));
     }
 
     #[test]
     fn test_matches_exclusion_wildcard_both() {
         assert!(DependencyResolutionServiceImpl::matches_exclusion(
-            "anything", "anything",
-            "*", "*"
+            "anything", "anything", "*", "*"
         ));
     }
 
@@ -2912,7 +3127,9 @@ mod tests {
         let managed = DependencyResolutionServiceImpl::parse_dependency_management(pom);
         assert_eq!(managed.len(), 1);
         assert_eq!(
-            managed.get(&("org.slf4j".to_string(), "slf4j-api".to_string())).unwrap(),
+            managed
+                .get(&("org.slf4j".to_string(), "slf4j-api".to_string()))
+                .unwrap(),
             "2.0.9"
         );
 
@@ -2924,7 +3141,10 @@ mod tests {
         assert_eq!(deps[0].group, "com.example");
         assert_eq!(deps[0].name, "app");
         assert_eq!(deps[0].exclusions.len(), 1);
-        assert_eq!(deps[0].exclusions[0], ("org.unwanted".to_string(), "transitive-lib".to_string()));
+        assert_eq!(
+            deps[0].exclusions[0],
+            ("org.unwanted".to_string(), "transitive-lib".to_string())
+        );
 
         // Verify slf4j is parsed (version may be picked up from dependencyManagement
         // by the byte-level scanner, or may be empty — either is acceptable)
@@ -2999,7 +3219,9 @@ mod tests {
         // HashMap — last write wins
         assert_eq!(managed.len(), 1);
         assert_eq!(
-            managed.get(&("org.example".to_string(), "lib".to_string())).unwrap(),
+            managed
+                .get(&("org.example".to_string(), "lib".to_string()))
+                .unwrap(),
             "2.0"
         );
     }
@@ -3023,7 +3245,12 @@ mod tests {
         assert_eq!(managed.len(), 1);
         // Raw property reference is stored — caller must interpolate
         assert_eq!(
-            managed.get(&("org.springframework".to_string(), "spring-beans".to_string())).unwrap(),
+            managed
+                .get(&(
+                    "org.springframework".to_string(),
+                    "spring-beans".to_string()
+                ))
+                .unwrap(),
             "${spring.version}"
         );
     }
@@ -3111,15 +3338,21 @@ mod tests {
         // All three should be parsed regardless of scope/optional
         assert_eq!(managed.len(), 3);
         assert_eq!(
-            managed.get(&("org.example".to_string(), "test-lib".to_string())).unwrap(),
+            managed
+                .get(&("org.example".to_string(), "test-lib".to_string()))
+                .unwrap(),
             "1.0"
         );
         assert_eq!(
-            managed.get(&("org.example".to_string(), "optional-lib".to_string())).unwrap(),
+            managed
+                .get(&("org.example".to_string(), "optional-lib".to_string()))
+                .unwrap(),
             "2.0"
         );
         assert_eq!(
-            managed.get(&("org.example".to_string(), "compile-lib".to_string())).unwrap(),
+            managed
+                .get(&("org.example".to_string(), "compile-lib".to_string()))
+                .unwrap(),
             "3.0"
         );
     }

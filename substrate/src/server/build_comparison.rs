@@ -2,13 +2,13 @@ use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
 use super::scopes::BuildId;
+#[cfg(test)]
+use crate::proto::BuildDataSnapshot;
 use crate::proto::{
     build_comparison_service_server::BuildComparisonService, ComparisonSummary,
     GetComparisonResultRequest, GetComparisonResultResponse, RecordBuildDataRequest,
     RecordBuildDataResponse, StartComparisonRequest, StartComparisonResponse, TaskComparison,
 };
-#[cfg(test)]
-use crate::proto::BuildDataSnapshot;
 
 /// Stored build data for comparison.
 struct StoredBuildData {
@@ -156,21 +156,12 @@ impl BuildComparisonService for BuildComparisonServiceImpl {
         let req = request.into_inner();
 
         let comparison_key = BuildId::from(req.comparison_id.clone());
-        let comparison = self
-            .comparisons
-            .get(&comparison_key)
-            .ok_or_else(|| {
-                Status::not_found(format!("Comparison {} not found", req.comparison_id))
-            })?;
+        let comparison = self.comparisons.get(&comparison_key).ok_or_else(|| {
+            Status::not_found(format!("Comparison {} not found", req.comparison_id))
+        })?;
 
-        let baseline = self
-            .build_data
-            .get(&comparison.baseline_build_id)
-            .unwrap();
-        let candidate = self
-            .build_data
-            .get(&comparison.candidate_build_id)
-            .unwrap();
+        let baseline = self.build_data.get(&comparison.baseline_build_id).unwrap();
+        let candidate = self.build_data.get(&comparison.candidate_build_id).unwrap();
 
         let mut task_comparisons = Vec::new();
         let mut only_baseline = 0i32;
@@ -189,7 +180,11 @@ impl BuildComparisonService for BuildComparisonServiceImpl {
 
         for task_path in &all_tasks {
             let base_dur = baseline.task_durations.get(task_path).copied().unwrap_or(0);
-            let cand_dur = candidate.task_durations.get(task_path).copied().unwrap_or(0);
+            let cand_dur = candidate
+                .task_durations
+                .get(task_path)
+                .copied()
+                .unwrap_or(0);
             let base_outcome = baseline
                 .task_outcomes
                 .get(task_path)
@@ -258,8 +253,14 @@ impl BuildComparisonService for BuildComparisonServiceImpl {
             if diff_cmp != std::cmp::Ordering::Equal {
                 return diff_cmp;
             }
-            let ord_a = baseline_order_index.get(a.task_path.as_str()).copied().unwrap_or(usize::MAX);
-            let ord_b = baseline_order_index.get(b.task_path.as_str()).copied().unwrap_or(usize::MAX);
+            let ord_a = baseline_order_index
+                .get(a.task_path.as_str())
+                .copied()
+                .unwrap_or(usize::MAX);
+            let ord_b = baseline_order_index
+                .get(b.task_path.as_str())
+                .copied()
+                .unwrap_or(usize::MAX);
             ord_a.cmp(&ord_b)
         });
 
@@ -291,10 +292,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    fn make_snapshot(
-        build_id: &str,
-        tasks: Vec<(&str, &str, i64)>,
-    ) -> BuildDataSnapshot {
+    fn make_snapshot(build_id: &str, tasks: Vec<(&str, &str, i64)>) -> BuildDataSnapshot {
         let mut task_durations = HashMap::new();
         let mut task_outcomes = HashMap::new();
         let mut task_order = Vec::new();
@@ -382,19 +380,13 @@ mod tests {
         let svc = BuildComparisonServiceImpl::new();
 
         svc.record_build_data(Request::new(RecordBuildDataRequest {
-            snapshot: Some(make_snapshot(
-                "base1",
-                vec![(":test", "SUCCESS", 2000)],
-            )),
+            snapshot: Some(make_snapshot("base1", vec![(":test", "SUCCESS", 2000)])),
         }))
         .await
         .unwrap();
 
         svc.record_build_data(Request::new(RecordBuildDataRequest {
-            snapshot: Some(make_snapshot(
-                "cand1",
-                vec![(":test", "FAILED", 100)],
-            )),
+            snapshot: Some(make_snapshot("cand1", vec![(":test", "FAILED", 100)])),
         }))
         .await
         .unwrap();
