@@ -432,6 +432,17 @@ pub(crate) mod hex {
     pub fn encode(bytes: &[u8]) -> String {
         bytes.iter().map(|b| format!("{:02x}", b)).collect()
     }
+
+    /// Decode a hex string into raw bytes. Returns None if the input is not valid hex.
+    pub fn decode(hex_str: &str) -> Option<Vec<u8>> {
+        if !hex_str.len().is_multiple_of(2) {
+            return None;
+        }
+        (0..hex_str.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex_str[i..i + 2], 16).ok())
+            .collect()
+    }
 }
 
 #[cfg(test)]
