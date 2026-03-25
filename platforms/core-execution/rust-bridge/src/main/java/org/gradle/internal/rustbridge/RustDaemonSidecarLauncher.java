@@ -87,7 +87,7 @@ public final class RustDaemonSidecarLauncher {
     }
 
     private static File resolveDaemonBinary(InternalOptions options) {
-        String configured = options.getOption(RustSubstrateOptions.DAEMON_BINARY_PATH).get().trim();
+        String configured = options.getValue(RustSubstrateOptions.DAEMON_BINARY_PATH).trim();
         if (!configured.isEmpty()) {
             return new File(configured);
         }
