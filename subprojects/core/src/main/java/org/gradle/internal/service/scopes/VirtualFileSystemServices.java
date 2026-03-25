@@ -56,8 +56,7 @@ import org.gradle.internal.rustbridge.hash.ShadowingFileHasher;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
 import org.gradle.internal.rustbridge.snapshot.ShadowingInputFingerprinter;
 import org.gradle.internal.rustbridge.snapshot.ShadowingValueSnapshotter;
-import org.gradle.internal.rustbridge.watch.RustFileWatchClient;
-import org.gradle.internal.rustbridge.watch.ShadowingFileWatcherRegistryFactory;
+import org.gradle.internal.rustbridge.watch.RustFileWatchWiring;
 import org.gradle.internal.classloader.ClasspathHasher;
 import org.gradle.internal.event.ListenerManager;
 import org.gradle.internal.execution.FileCollectionFingerprinterRegistry;
@@ -265,21 +264,7 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
                 fileEvents,
                 fileWatchingFilter::isImmutableLocation);
 
-            // Conditionally wrap with Rust shadow watcher
-            if (RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_FILE_WATCH)
-                && maybeFactory.isPresent() && substrateClient != null && !substrateClient.isNoop()) {
-                boolean authoritative = RustSubstrateOptions.isSubsystemAuthoritative(
-                    options,
-                    RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_FILE_WATCH
-                );
-                FileWatcherRegistryFactory shadowFactory = new ShadowingFileWatcherRegistryFactory(
-                    maybeFactory.get(),
-                    new RustFileWatchClient(substrateClient),
-                    new HashMismatchReporter(true),
-                    authoritative
-                );
-                maybeFactory = Optional.of(shadowFactory);
-            }
+            maybeFactory = RustFileWatchWiring.wrapIfEnabled(maybeFactory, options, substrateClient);
 
             BuildLifecycleAwareVirtualFileSystem virtualFileSystem = maybeFactory
                 .<BuildLifecycleAwareVirtualFileSystem>map(watcherRegistryFactory -> new WatchingVirtualFileSystem(

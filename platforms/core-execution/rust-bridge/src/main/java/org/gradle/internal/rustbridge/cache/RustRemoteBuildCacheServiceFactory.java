@@ -1,6 +1,5 @@
 package org.gradle.internal.rustbridge.cache;
 
-import org.gradle.api.Describer;
 import org.gradle.caching.BuildCacheService;
 import org.gradle.caching.BuildCacheServiceFactory;
 import org.gradle.internal.rustbridge.SubstrateClient;
@@ -18,7 +17,10 @@ public class RustRemoteBuildCacheServiceFactory implements BuildCacheServiceFact
     }
 
     @Override
-    public BuildCacheService createBuildCacheService(RustRemoteBuildCache configuration, Describer describer) {
+    public BuildCacheService createBuildCacheService(
+        RustRemoteBuildCache configuration,
+        BuildCacheServiceFactory.Describer describer
+    ) {
         describer.type("Rust Remote");
         describer.config("backend", "rust-remote-cache");
         return new RustRemoteBuildCacheService(client);

@@ -1,6 +1,5 @@
 package org.gradle.internal.rustbridge;
 
-import org.gradle.api.logging.Logging;
 import org.gradle.internal.buildoption.InternalOptions;
 import org.gradle.internal.buildoption.RustSubstrateOptions;
 import org.gradle.internal.event.ListenerManager;
@@ -16,9 +15,6 @@ import org.gradle.internal.service.ServiceRegistration;
 import org.gradle.internal.service.ServiceRegistrationProvider;
 import org.gradle.internal.service.scopes.AbstractGradleModuleServices;
 import org.jspecify.annotations.Nullable;
-import org.slf4j.Logger;
-
-import java.io.File;
 
 /**
  * Minimal compile-safe service wiring for the Rust bridge.
@@ -28,10 +24,6 @@ import java.io.File;
  * already stable in shadow/authoritative fallback mode.</p>
  */
 public class RustBridgeCoreServices extends AbstractGradleModuleServices {
-
-    private static final Logger LOGGER = Logging.getLogger(RustBridgeCoreServices.class);
-    private static final String DEFAULT_SOCKET_PATH = ".gradle-substrate/substrate.sock";
-    private static final String SOCKET_PATH_OPTION = "org.gradle.rust.substrate.socket.path";
 
     @Override
     public void registerGradleUserHomeServices(ServiceRegistration registration) {
@@ -51,25 +43,7 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
     private static class UserHomeServices implements ServiceRegistrationProvider {
         @Provides
         SubstrateClient createSubstrateClient(InternalOptions options) {
-            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
-                return SubstrateClient.noop();
-            }
-
-            String overrideSocket = System.getProperty(SOCKET_PATH_OPTION, "").trim();
-            String socketPath = overrideSocket.isEmpty()
-                ? new File(System.getProperty("user.home"), DEFAULT_SOCKET_PATH).getAbsolutePath()
-                : overrideSocket;
-            File socketFile = new File(socketPath);
-            if (!socketFile.exists()) {
-                LOGGER.debug("[substrate] socket not found at {}, using no-op client", socketPath);
-                return SubstrateClient.noop();
-            }
-            try {
-                return SubstrateClient.connect(socketPath);
-            } catch (Exception e) {
-                LOGGER.debug("[substrate] failed to connect to {}, using no-op client", socketPath, e);
-                return SubstrateClient.noop();
-            }
+            return RustDaemonSidecarLauncher.connectOrLaunch(options);
         }
     }
 
@@ -148,4 +122,3 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
         }
     }
 }
-
