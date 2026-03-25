@@ -249,7 +249,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let plugin = PluginServiceImpl::new();
 
     // Phase 13.5: Parser service (wraps groovy_parser + build_script_parser)
-    let parser = ParserServiceImpl::default();
+    let parser = ParserServiceImpl::new();
 
     // Phase 14: Build operations
     let build_operations = BuildOperationsServiceImpl::new();

@@ -15,8 +15,19 @@ use crate::proto::{
 use crate::server::build_script_parser;
 use crate::server::groovy_parser::{self, ast::Stmt};
 
-#[derive(Default)]
 pub struct ParserServiceImpl;
+
+impl ParserServiceImpl {
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for ParserServiceImpl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Extract the span (line, column) from a `Stmt` variant.
 fn statement_span(stmt: &Stmt) -> (u32, u32) {

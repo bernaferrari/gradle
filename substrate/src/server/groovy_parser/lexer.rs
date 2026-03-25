@@ -226,21 +226,12 @@ impl fmt::Display for Token {
 // ---------------------------------------------------------------------------
 
 /// Configuration for the lexer.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct LexerConfig {
     /// If true, whitespace tokens are emitted instead of being skipped.
     pub emit_whitespace: bool,
     /// If true, comment tokens are emitted instead of being skipped.
     pub emit_comments: bool,
-}
-
-impl Default for LexerConfig {
-    fn default() -> Self {
-        Self {
-            emit_whitespace: false,
-            emit_comments: false,
-        }
-    }
 }
 
 /// The lexer produces [`Token`] values from a Groovy/Kotlin DSL source string.
@@ -461,7 +452,7 @@ impl<'src> Lexer<'src> {
         }
 
         // Operators / punctuation (multi-char first, then single-char)
-        return self.lex_operator_or_punct();
+        self.lex_operator_or_punct()
     }
 
     // -- Whitespace --------------------------------------------------------
@@ -767,7 +758,7 @@ impl<'src> Lexer<'src> {
                 }
                 Some(c) if c == quote => {
                     // Check for closing triple quote
-                    let triple_quote: String = std::iter::repeat(quote).take(3).collect();
+                    let triple_quote: String = std::iter::repeat_n(quote, 3).collect();
                     let rest: String = self.src.chars().take(3).collect();
                     if rest == triple_quote {
                         for _ in 0..3 {
@@ -861,7 +852,7 @@ impl<'src> Lexer<'src> {
         if self.peek_char() == Some('.') {
             // Disambiguate from range operator '..' or method reference '::'
             let after_dot = self.peek2_char();
-            if after_dot.map_or(true, |c| c.is_ascii_digit()) {
+            if after_dot.is_none_or(|c| c.is_ascii_digit()) {
                 self.next_char(); // consume '.'
                 text.push('.');
                 text.push_str(&self.consume_while(|c| c.is_ascii_digit()));
@@ -1193,7 +1184,7 @@ pub fn tokenize(src: &str) -> Vec<Token> {
     let lexer = Lexer::new(src);
     let mut tokens: Vec<Token> = lexer.collect();
     // Ensure Eof is always present
-    if tokens.last().map_or(true, |t| t.kind != TokenKind::Eof) {
+    if tokens.last().is_none_or(|t| t.kind != TokenKind::Eof) {
         let eof = Token {
             kind: TokenKind::Eof,
             text: String::new(),
@@ -1219,7 +1210,7 @@ pub fn tokenize_with_comments(src: &str) -> Vec<Token> {
         },
     );
     let mut tokens: Vec<Token> = lexer.collect();
-    if tokens.last().map_or(true, |t| t.kind != TokenKind::Eof) {
+    if tokens.last().is_none_or(|t| t.kind != TokenKind::Eof) {
         tokens.push(Token {
             kind: TokenKind::Eof,
             text: String::new(),

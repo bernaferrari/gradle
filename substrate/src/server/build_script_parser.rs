@@ -736,9 +736,9 @@ fn parse_repositories_block(content: &str, result: &mut BuildScriptParseResult) 
                 if let Some(eq_pos) = after_url.find('=') {
                     let value = after_url[eq_pos + 1..].trim();
                     extract_string_literal(value)
-                } else if after_url.starts_with('(') {
-                    if let Some(close) = find_matching_paren(&after_url[1..]) {
-                        extract_string_literal(&after_url[1..close + 1])
+                } else if let Some(rest) = after_url.strip_prefix('(') {
+                    if let Some(_close) = find_matching_paren(rest) {
+                        extract_string_literal(rest)
                     } else {
                         None
                     }

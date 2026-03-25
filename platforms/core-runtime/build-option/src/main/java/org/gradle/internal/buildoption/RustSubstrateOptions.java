@@ -35,47 +35,47 @@ public class RustSubstrateOptions {
     }
 
     public static final InternalOption<String> SUBSTRATE_MODE =
-        StringInternalOption.of("org.gradle.rust.substrate.mode", "");
+        InternalOptions.ofString("org.gradle.rust.substrate.mode", "");
 
     /**
      * Master switch: enable the Rust substrate daemon.
      * Property: org.gradle.rust.substrate.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_SUBSTRATE =
-        new InternalFlag("org.gradle.rust.substrate.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_SUBSTRATE =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.enabled", false);
 
     /**
      * Enable Rust-backed hashing (requires ENABLE_SUBSTRATE).
      * Property: org.gradle.rust.substrate.hashing.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_HASHING =
-        new InternalFlag("org.gradle.rust.substrate.hashing.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_HASHING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.hashing.enabled", false);
 
     /**
      * Shadow mode for hashing: run both Java and Rust, compare results.
      * Property: org.gradle.rust.substrate.hashing.shadow
      * Default: true (when hashing is enabled, start in shadow mode)
      */
-    public static final InternalFlag SHADOW_HASHING =
-        new InternalFlag("org.gradle.rust.substrate.hashing.shadow", true);
+    public static final InternalOption<Boolean> SHADOW_HASHING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.hashing.shadow", true);
 
     /**
      * Enable Rust-backed build cache.
      * Property: org.gradle.rust.substrate.cache.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_CACHE =
-        new InternalFlag("org.gradle.rust.substrate.cache.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_CACHE =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.cache.enabled", false);
 
     /**
      * Enable Rust-backed process execution.
      * Property: org.gradle.rust.substrate.exec.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_EXEC =
-        new InternalFlag("org.gradle.rust.substrate.exec.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_EXEC =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.exec.enabled", false);
 
     /**
      * Path to the Rust daemon binary (for development).
@@ -83,327 +83,327 @@ public class RustSubstrateOptions {
      * Default: "" (auto-detect)
      */
     public static final InternalOption<String> DAEMON_BINARY_PATH =
-        StringInternalOption.of("org.gradle.rust.substrate.daemon.path", "");
+        InternalOptions.ofString("org.gradle.rust.substrate.daemon.path", "");
 
     /**
      * Report mismatches found during shadow mode.
      * Property: org.gradle.rust.substrate.shadow.report-mismatches
      * Default: true
      */
-    public static final InternalFlag REPORT_MISMATCHES =
-        new InternalFlag("org.gradle.rust.substrate.shadow.report-mismatches", true);
+    public static final InternalOption<Boolean> REPORT_MISMATCHES =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.shadow.report-mismatches", true);
 
     /**
      * Enable Phase 5: Advisory ExecutionEngine.
      * Property: org.gradle.rust.substrate.execution.advisory
      * Default: false
      */
-    public static final InternalFlag ENABLE_ADVISORY_EXECUTION =
-        new InternalFlag("org.gradle.rust.substrate.execution.advisory", false);
+    public static final InternalOption<Boolean> ENABLE_ADVISORY_EXECUTION =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.execution.advisory", false);
 
     /**
      * Enable Phase 6: Authoritative ExecutionEngine.
      * Property: org.gradle.rust.substrate.execution.authoritative
      * Default: false
      */
-    public static final InternalFlag ENABLE_AUTHORITATIVE_EXECUTION =
-        new InternalFlag("org.gradle.rust.substrate.execution.authoritative", false);
+    public static final InternalOption<Boolean> ENABLE_AUTHORITATIVE_EXECUTION =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.execution.authoritative", false);
 
     /**
      * Enable Phase 7: Rust-native execution history storage.
      * Property: org.gradle.rust.substrate.history.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_HISTORY =
-        new InternalFlag("org.gradle.rust.substrate.history.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_HISTORY =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.history.enabled", false);
 
     /**
      * Enable Phase 9: Rust-native file fingerprinting.
      * Property: org.gradle.rust.substrate.fingerprint.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_FINGERPRINTING =
-        new InternalFlag("org.gradle.rust.substrate.fingerprint.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_FINGERPRINTING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.fingerprint.enabled", false);
 
     /**
      * Enable Phase 10: Rust-native value snapshotting.
      * Property: org.gradle.rust.substrate.snapshot.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_SNAPSHOTTING =
-        new InternalFlag("org.gradle.rust.substrate.snapshot.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_SNAPSHOTTING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.snapshot.enabled", false);
 
     /**
      * Enable Phase 11: Rust-native task graph management.
      * Property: org.gradle.rust.substrate.taskgraph.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_TASK_GRAPH =
-        new InternalFlag("org.gradle.rust.substrate.taskgraph.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_TASK_GRAPH =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.taskgraph.enabled", false);
 
     /**
      * Enable Phase 12: Rust-native configuration model.
      * Property: org.gradle.rust.substrate.configuration.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_CONFIGURATION =
-        new InternalFlag("org.gradle.rust.substrate.configuration.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_CONFIGURATION =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.configuration.enabled", false);
 
     /**
      * Enable Phase 13: Rust-native plugin system.
      * Property: org.gradle.rust.substrate.plugin.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_PLUGIN =
-        new InternalFlag("org.gradle.rust.substrate.plugin.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_PLUGIN =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.plugin.enabled", false);
 
     /**
      * Enable Phase 14: Rust-native build operations.
      * Property: org.gradle.rust.substrate.buildops.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_BUILD_OPS =
-        new InternalFlag("org.gradle.rust.substrate.buildops.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_BUILD_OPS =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.buildops.enabled", false);
 
     /**
      * Enable Phase 15: Rust-native bootstrap (build session lifecycle).
      * Property: org.gradle.rust.substrate.bootstrap.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_BOOTSTRAP =
-        new InternalFlag("org.gradle.rust.substrate.bootstrap.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_BOOTSTRAP =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.bootstrap.enabled", false);
 
     /**
      * Enable Phase 18: Rust-native dependency resolution.
      * Property: org.gradle.rust.substrate.dependency.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_DEPENDENCY_RESOLUTION =
-        new InternalFlag("org.gradle.rust.substrate.dependency.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_DEPENDENCY_RESOLUTION =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.dependency.enabled", false);
 
     /**
      * Enable Phase 19: Rust-native file system watching.
      * Property: org.gradle.rust.substrate.filewatch.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_FILE_WATCH =
-        new InternalFlag("org.gradle.rust.substrate.filewatch.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_FILE_WATCH =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.filewatch.enabled", false);
 
     /**
      * Enable Phase 20: Rust-native configuration cache.
      * Property: org.gradle.rust.substrate.configcache.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_CONFIG_CACHE =
-        new InternalFlag("org.gradle.rust.substrate.configcache.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_CONFIG_CACHE =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.configcache.enabled", false);
 
     /**
      * Enable Phase 23: Rust-native toolchain management.
      * Property: org.gradle.rust.substrate.toolchain.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_TOOLCHAIN =
-        new InternalFlag("org.gradle.rust.substrate.toolchain.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_TOOLCHAIN =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.toolchain.enabled", false);
 
     /**
      * Enable Phase 24: Rust-native build event streaming.
      * Property: org.gradle.rust.substrate.eventstream.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_EVENT_STREAM =
-        new InternalFlag("org.gradle.rust.substrate.eventstream.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_EVENT_STREAM =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.eventstream.enabled", false);
 
     /**
      * Enable Phase 25: Rust-native worker process management.
      * Property: org.gradle.rust.substrate.worker.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_WORKER_PROCESS =
-        new InternalFlag("org.gradle.rust.substrate.worker.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_WORKER_PROCESS =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.worker.enabled", false);
 
     /**
      * Enable Phase 26: Rust-native build layout / project model.
      * Property: org.gradle.rust.substrate.buildlayout.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_BUILD_LAYOUT =
-        new InternalFlag("org.gradle.rust.substrate.buildlayout.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_BUILD_LAYOUT =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.buildlayout.enabled", false);
 
     /**
      * Enable Phase 28: Rust-native build result reporting.
      * Property: org.gradle.rust.substrate.buildresult.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_BUILD_RESULT =
-        new InternalFlag("org.gradle.rust.substrate.buildresult.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_BUILD_RESULT =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.buildresult.enabled", false);
 
     /**
      * Enable Phase 29: Rust-native problem/diagnostic reporting.
      * Property: org.gradle.rust.substrate.problems.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_PROBLEMS =
-        new InternalFlag("org.gradle.rust.substrate.problems.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_PROBLEMS =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.problems.enabled", false);
 
     /**
      * Enable Phase 30: Rust-native resource management.
      * Property: org.gradle.rust.substrate.resources.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_RESOURCES =
-        new InternalFlag("org.gradle.rust.substrate.resources.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_RESOURCES =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.resources.enabled", false);
 
     /**
      * Enable Phase 31: Rust-native build comparison.
      * Property: org.gradle.rust.substrate.comparison.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_COMPARISON =
-        new InternalFlag("org.gradle.rust.substrate.comparison.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_COMPARISON =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.comparison.enabled", false);
 
     /**
      * Enable Phase 32: Rust-native console / rich output.
      * Property: org.gradle.rust.substrate.console.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_CONSOLE =
-        new InternalFlag("org.gradle.rust.substrate.console.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_CONSOLE =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.console.enabled", false);
 
     /**
      * Enable Phase 33: Rust-native test execution.
      * Property: org.gradle.rust.substrate.testexec.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_TEST_EXECUTION =
-        new InternalFlag("org.gradle.rust.substrate.testexec.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_TEST_EXECUTION =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.testexec.enabled", false);
 
     /**
      * Enable Phase 34: Rust-native artifact publishing.
      * Property: org.gradle.rust.substrate.publishing.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_PUBLISHING =
-        new InternalFlag("org.gradle.rust.substrate.publishing.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_PUBLISHING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.publishing.enabled", false);
 
     /**
      * Enable Phase 35: Rust-native build initialization.
      * Property: org.gradle.rust.substrate.buildinit.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_BUILD_INIT =
-        new InternalFlag("org.gradle.rust.substrate.buildinit.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_BUILD_INIT =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.buildinit.enabled", false);
 
     /**
      * Enable Phase 36: Rust-native incremental compilation.
      * Property: org.gradle.rust.substrate.incremental.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_INCREMENTAL =
-        new InternalFlag("org.gradle.rust.substrate.incremental.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_INCREMENTAL =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.incremental.enabled", false);
 
     /**
      * Enable Phase 37: Rust-native build metrics tracking.
      * Property: org.gradle.rust.substrate.metrics.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_METRICS =
-        new InternalFlag("org.gradle.rust.substrate.metrics.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_METRICS =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.metrics.enabled", false);
 
     /**
      * Enable Phase 38: Rust-native garbage collection.
      * Property: org.gradle.rust.substrate.gc.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_GC =
-        new InternalFlag("org.gradle.rust.substrate.gc.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_GC =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.gc.enabled", false);
 
     /**
      * Enable authoritative mode for Rust-backed hashing subsystem.
      * Property: org.gradle.rust.substrate.hashing.authoritative
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_AUTHORITATIVE_HASHING =
-        new InternalFlag("org.gradle.rust.substrate.hashing.authoritative", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_AUTHORITATIVE_HASHING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.hashing.authoritative", false);
 
     /**
      * Enable authoritative mode for Rust-backed build cache subsystem.
      * Property: org.gradle.rust.substrate.cache.authoritative
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_AUTHORITATIVE_CACHE =
-        new InternalFlag("org.gradle.rust.substrate.cache.authoritative", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_AUTHORITATIVE_CACHE =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.cache.authoritative", false);
 
     /**
      * Enable authoritative mode for Rust-backed configuration cache subsystem.
      * Property: org.gradle.rust.substrate.configcache.authoritative
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_AUTHORITATIVE_CONFIG_CACHE =
-        new InternalFlag("org.gradle.rust.substrate.configcache.authoritative", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_AUTHORITATIVE_CONFIG_CACHE =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.configcache.authoritative", false);
 
     /**
      * Enable authoritative mode for Rust-backed file fingerprinting subsystem.
      * Property: org.gradle.rust.substrate.fingerprint.authoritative
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_AUTHORITATIVE_FINGERPRINTING =
-        new InternalFlag("org.gradle.rust.substrate.fingerprint.authoritative", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_AUTHORITATIVE_FINGERPRINTING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.fingerprint.authoritative", false);
 
     /**
      * Enable authoritative mode for Rust-backed value snapshotting subsystem.
      * Property: org.gradle.rust.substrate.snapshot.authoritative
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_AUTHORITATIVE_SNAPSHOTTING =
-        new InternalFlag("org.gradle.rust.substrate.snapshot.authoritative", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_AUTHORITATIVE_SNAPSHOTTING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.snapshot.authoritative", false);
 
     /**
      * Enable authoritative mode for Rust-backed task graph subsystem.
      * Property: org.gradle.rust.substrate.taskgraph.authoritative
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_AUTHORITATIVE_TASK_GRAPH =
-        new InternalFlag("org.gradle.rust.substrate.taskgraph.authoritative", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_AUTHORITATIVE_TASK_GRAPH =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.taskgraph.authoritative", false);
 
     /**
      * Enable authoritative mode for Rust-backed execution plan advisory subsystem.
      * Property: org.gradle.rust.substrate.executionplan.authoritative
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_AUTHORITATIVE_EXECUTION_PLAN =
-        new InternalFlag("org.gradle.rust.substrate.executionplan.authoritative", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_AUTHORITATIVE_EXECUTION_PLAN =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.executionplan.authoritative", false);
 
     /**
      * Enable authoritative mode for Rust-backed process execution subsystem.
      * Property: org.gradle.rust.substrate.exec.authoritative
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_AUTHORITATIVE_EXEC =
-        new InternalFlag("org.gradle.rust.substrate.exec.authoritative", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_AUTHORITATIVE_EXEC =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.exec.authoritative", false);
 
     /**
      * Enable authoritative mode for Rust-backed file watching subsystem.
      * Property: org.gradle.rust.substrate.filewatch.authoritative
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_AUTHORITATIVE_FILE_WATCH =
-        new InternalFlag("org.gradle.rust.substrate.filewatch.authoritative", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_AUTHORITATIVE_FILE_WATCH =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.filewatch.authoritative", false);
 
     /**
      * Enable authoritative mode for Rust-backed dependency resolution subsystem.
      * Property: org.gradle.rust.substrate.dependency.authoritative
      * Default: false
      */
-    public static final InternalFlag ENABLE_RUST_AUTHORITATIVE_DEPENDENCY_RESOLUTION =
-        new InternalFlag("org.gradle.rust.substrate.dependency.authoritative", false);
+    public static final InternalOption<Boolean> ENABLE_RUST_AUTHORITATIVE_DEPENDENCY_RESOLUTION =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.dependency.authoritative", false);
 
     /**
      * Enable Phase 6: JVM Compatibility Host.
      * Property: org.gradle.rust.substrate.jvm.host.enabled
      * Default: false
      */
-    public static final InternalFlag ENABLE_JVM_HOST =
-        new InternalFlag("org.gradle.rust.substrate.jvm.host.enabled", false);
+    public static final InternalOption<Boolean> ENABLE_JVM_HOST =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.jvm.host.enabled", false);
 
     // --- Umbrella mode helpers ---
 
@@ -412,7 +412,7 @@ public class RustSubstrateOptions {
      * Returns the mode from the umbrella flag, or null if not set (use per-service flags).
      */
     public static SubstrateMode getMode(InternalOptions options) {
-        String modeString = options.getOption(SUBSTRATE_MODE).get();
+        String modeString = options.getOptionValue(SUBSTRATE_MODE).get();
         if (modeString == null || modeString.isEmpty()) {
             return null; // not set — fall back to per-service flags
         }
@@ -432,13 +432,13 @@ public class RustSubstrateOptions {
      *   <li>If SUBSTRATE_MODE is not set → check the per-service flag</li>
      * </ul>
      */
-    public static boolean isSubsystemEnabled(InternalOptions options, InternalFlag perServiceFlag) {
+    public static boolean isSubsystemEnabled(InternalOptions options, InternalOption<Boolean> perServiceFlag) {
         SubstrateMode mode = getMode(options);
         if (mode != null) {
             return mode != SubstrateMode.OFF;
         }
         // Fall back to per-service flag
-        return options.getOption(perServiceFlag).get();
+        return options.getBoolean(perServiceFlag);
     }
 
     /**
@@ -458,7 +458,7 @@ public class RustSubstrateOptions {
             return false; // shadow or off
         }
         // Fall back to per-service flag
-        return options.getOption(ENABLE_AUTHORITATIVE_EXECUTION).get();
+        return options.getBoolean(ENABLE_AUTHORITATIVE_EXECUTION);
     }
 
     /**
@@ -471,7 +471,7 @@ public class RustSubstrateOptions {
      *   <li>If SUBSTRATE_MODE is "off" → false</li>
      * </ul>
      */
-    public static boolean isSubsystemAuthoritative(InternalOptions options, InternalFlag perServiceAuthFlag) {
+    public static boolean isSubsystemAuthoritative(InternalOptions options, InternalOption<Boolean> perServiceAuthFlag) {
         SubstrateMode mode = getMode(options);
         if (mode == SubstrateMode.AUTHORITATIVE) {
             return true;
@@ -480,7 +480,7 @@ public class RustSubstrateOptions {
             return false;
         }
         // shadow mode or not set — fall back to per-service authoritative flag
-        return options.getOption(perServiceAuthFlag).get();
+        return options.getBoolean(perServiceAuthFlag);
     }
 
     /**
@@ -500,7 +500,7 @@ public class RustSubstrateOptions {
             return false; // authoritative or off
         }
         // Fall back to per-service flag
-        return options.getOption(SHADOW_HASHING).get();
+        return options.getBoolean(SHADOW_HASHING);
     }
 
     /**
@@ -512,7 +512,7 @@ public class RustSubstrateOptions {
         if (mode != null) {
             return mode != SubstrateMode.OFF;
         }
-        return options.getOption(ENABLE_SUBSTRATE).get();
+        return options.getBoolean(ENABLE_SUBSTRATE);
     }
 
     private RustSubstrateOptions() {

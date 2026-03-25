@@ -130,7 +130,7 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
                 return DaemonLauncher.noop();
             }
 
-            String binaryPath = options.getOption(RustSubstrateOptions.DAEMON_BINARY_PATH).get();
+            String binaryPath = options.getValue(RustSubstrateOptions.DAEMON_BINARY_PATH);
             File daemonBinary;
             if (binaryPath.isEmpty()) {
                 String javaHome = System.getProperty("java.home");
