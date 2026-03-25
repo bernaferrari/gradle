@@ -924,6 +924,94 @@ impl DependencyResolutionServiceImpl {
         (Vec::new(), None)
     }
 
+    /// Resolve a SNAPSHOT version (e.g., `1.0-SNAPSHOT`) to its timestamped form
+    /// (e.g., `1.0-20240101.120000-1`) using maven-metadata.xml.
+    ///
+    /// Maven stores snapshot metadata in `maven-metadata.xml` with a `<snapshot>`
+    /// section containing `<timestamp>` and `<buildNumber>`. The resolved version
+    /// is `{baseVersion}-{timestamp}-{buildNumber}`.
+    async fn resolve_snapshot_version(
+        &self,
+        group: &str,
+        name: &str,
+        raw_version: &str,
+        repos: &[RepositoryDescriptor],
+    ) -> String {
+        for repo in repos {
+            match self.fetch_maven_metadata(group, name, repo).await {
+                Ok(meta) => {
+                    if let Some(ref snapshot) = meta.versioning.snapshot {
+                        // If localCopy is true, use the version as-is (don't re-resolve)
+                        if snapshot.local_copy {
+                            tracing::debug!(
+                                group = %group,
+                                name = %name,
+                                version = %raw_version,
+                                "SNAPSHOT marked as localCopy, using base version"
+                            );
+                            return raw_version.to_string();
+                        }
+
+                        let timestamp = snapshot.timestamp.as_deref().unwrap_or("");
+                        let build_number = snapshot.build_number.as_deref().unwrap_or("");
+
+                        if !timestamp.is_empty() && !build_number.is_empty() {
+                            let base = &raw_version[..raw_version.len() - "-SNAPSHOT".len()];
+                            let resolved = format!("{}-{}-{}", base, timestamp, build_number);
+                            tracing::debug!(
+                                group = %group,
+                                name = %name,
+                                raw_version = %raw_version,
+                                resolved = %resolved,
+                                "Resolved SNAPSHOT version"
+                            );
+                            return resolved;
+                        }
+                    }
+                    // No snapshot info — try to find the latest timestamped version from versions list
+                    if let Some(ts_version) = meta
+                        .versioning
+                        .versions
+                        .iter()
+                        .rfind(|v| {
+                            !v.ends_with("-SNAPSHOT")
+                                && v.starts_with(
+                                    &raw_version[..raw_version.len() - "-SNAPSHOT".len()],
+                                )
+                        })
+                    {
+                        tracing::debug!(
+                            group = %group,
+                            name = %name,
+                            resolved = %ts_version,
+                            "Resolved SNAPSHOT from versions list"
+                        );
+                        return ts_version.clone();
+                    }
+
+                    // No snapshot metadata available — fall through to next repo
+                    tracing::debug!(
+                        group = %group,
+                        name = %name,
+                        repo = %repo.url,
+                        "No snapshot metadata found, trying next repo"
+                    );
+                }
+                Err(e) => {
+                    tracing::debug!(
+                        group = %group,
+                        name = %name,
+                        repo = %repo.url,
+                        error = %e,
+                        "Failed to fetch maven-metadata.xml for SNAPSHOT"
+                    );
+                }
+            }
+        }
+        // Fallback: use the raw SNAPSHOT version
+        raw_version.to_string()
+    }
+
     /// Resolve a single dependency descriptor with real POM fetching.
     /// Handles property interpolation, version ranges, and recursive transitive resolution.
     async fn resolve_descriptor(
@@ -953,7 +1041,7 @@ impl DependencyResolutionServiceImpl {
         let name = dep.name.clone();
         let raw_version = dep.version.clone();
 
-        // Resolve version ranges
+        // Resolve version ranges, LATEST, RELEASE, and SNAPSHOT
         let selected_version = if raw_version.contains(',')
             || raw_version.starts_with('[')
             || raw_version.starts_with('(')
@@ -967,6 +1055,10 @@ impl DependencyResolutionServiceImpl {
             } else {
                 raw_version.clone()
             }
+        } else if raw_version.ends_with("-SNAPSHOT") {
+            // SNAPSHOT version — resolve to timestamped version via maven-metadata.xml
+            self.resolve_snapshot_version(&group, &name, &raw_version, repos)
+                .await
         } else {
             raw_version.clone()
         };
@@ -3957,5 +4049,131 @@ mod tests {
             .get(&("org.slf4j".to_string(), "slf4j-api".to_string()));
         assert!(managed_version.is_some());
         assert_eq!(managed_version.unwrap(), "2.0.9");
+    }
+
+    // ---- SNAPSHOT version resolution tests ----
+
+    #[test]
+    fn test_resolve_snapshot_version_with_metadata() {
+        let xml = r#"<?xml version="1.0"?>
+<metadata>
+  <groupId>com.example</groupId>
+  <artifactId>my-lib</artifactId>
+  <versioning>
+    <snapshot>
+      <timestamp>20240101.120000</timestamp>
+      <buildNumber>1</buildNumber>
+    </snapshot>
+    <versions>
+      <version>1.0-SNAPSHOT</version>
+    </versions>
+  </versioning>
+</metadata>"#;
+
+        let meta = DependencyResolutionServiceImpl::parse_maven_metadata(xml).unwrap();
+        assert!(meta.versioning.snapshot.is_some());
+
+        let snap = meta.versioning.snapshot.unwrap();
+        assert_eq!(snap.timestamp.as_deref(), Some("20240101.120000"));
+        assert_eq!(snap.build_number.as_deref(), Some("1"));
+        assert!(!snap.local_copy);
+
+        // Verify the expected resolved version
+        let base = "1.0-SNAPSHOT";
+        let base_ver = &base[..base.len() - "-SNAPSHOT".len()];
+        let resolved = format!(
+            "{}-{}-{}",
+            base_ver,
+            snap.timestamp.unwrap(),
+            snap.build_number.unwrap()
+        );
+        assert_eq!(resolved, "1.0-20240101.120000-1");
+    }
+
+    #[test]
+    fn test_resolve_snapshot_version_local_copy() {
+        let xml = r#"<?xml version="1.0"?>
+<metadata>
+  <groupId>com.example</groupId>
+  <artifactId>my-lib</artifactId>
+  <versioning>
+    <snapshot>
+      <timestamp>20240101.120000</timestamp>
+      <buildNumber>1</buildNumber>
+      <localCopy>true</localCopy>
+    </snapshot>
+    <versions>
+      <version>1.0-SNAPSHOT</version>
+    </versions>
+  </versioning>
+</metadata>"#;
+
+        let meta = DependencyResolutionServiceImpl::parse_maven_metadata(xml).unwrap();
+        assert!(meta.versioning.snapshot.as_ref().unwrap().local_copy);
+    }
+
+    #[test]
+    fn test_resolve_snapshot_version_no_snapshot_metadata() {
+        // Metadata exists but no <snapshot> section (release artifact)
+        let xml = r#"<?xml version="1.0"?>
+<metadata>
+  <groupId>com.example</groupId>
+  <artifactId>my-lib</artifactId>
+  <versioning>
+    <release>1.0.0</release>
+    <versions>
+      <version>1.0.0</version>
+    </versions>
+  </versioning>
+</metadata>"#;
+
+        let meta = DependencyResolutionServiceImpl::parse_maven_metadata(xml).unwrap();
+        assert!(meta.versioning.snapshot.is_none());
+    }
+
+    #[test]
+    fn test_snapshot_version_fallback_from_versions_list() {
+        // Simulate: no snapshot section, but versions list has timestamped versions
+        let meta = MavenMetadata {
+            group_id: "com.example".to_string(),
+            artifact_id: "my-lib".to_string(),
+            versioning: MavenVersioning {
+                latest: None,
+                release: None,
+                last_updated: None,
+                snapshot: None,
+                versions: vec![
+                    "1.0-SNAPSHOT".to_string(),
+                    "1.0-20240101.120000-1".to_string(),
+                    "1.0-20240215.090000-2".to_string(),
+                ],
+            },
+        };
+
+        // Find the latest non-SNAPSHOT version starting with "1.0"
+        let raw_version = "1.0-SNAPSHOT";
+        let base = &raw_version[..raw_version.len() - "-SNAPSHOT".len()];
+        let ts_version = meta
+            .versioning
+            .versions
+            .iter()
+            .rfind(|v| {
+                !v.ends_with("-SNAPSHOT") && v.starts_with(base)
+            })
+            .unwrap();
+        assert_eq!(ts_version, "1.0-20240215.090000-2");
+    }
+
+    #[test]
+    fn test_is_snapshot_detection() {
+        assert!("1.0-SNAPSHOT".ends_with("-SNAPSHOT"));
+        assert!("2.0.0-SNAPSHOT".ends_with("-SNAPSHOT"));
+        assert!(!"1.0.0".ends_with("-SNAPSHOT"));
+        assert!(!"1.0.0-BETA".ends_with("-SNAPSHOT"));
+
+        // Base version extraction
+        let v = "1.0-SNAPSHOT";
+        let base = &v[..v.len() - "-SNAPSHOT".len()];
+        assert_eq!(base, "1.0");
     }
 }
