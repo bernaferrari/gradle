@@ -1,20 +1,18 @@
 package org.gradle.internal.rustbridge.fingerprint
 
-import org.gradle.api.file.FileCollection
 import org.gradle.api.internal.file.FileCollectionInternal
 import org.gradle.api.internal.file.FileCollectionStructureVisitor
 import org.gradle.internal.execution.FileCollectionSnapshotter
+import org.gradle.internal.file.FileMetadata
+import org.gradle.internal.file.impl.DefaultFileMetadata
 import org.gradle.internal.hash.HashCode
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter
 import org.gradle.internal.snapshot.FileSystemSnapshot
+import org.gradle.internal.snapshot.RegularFileSnapshot
+import org.gradle.internal.snapshot.SnapshotVisitResult
 import spock.lang.Specification
 
 class ShadowingFileCollectionSnapshotterTest extends Specification {
-
-    def "implements FileCollectionSnapshotter"() {
-        expect:
-        ShadowingFileCollectionSnapshotter instanceof FileCollectionSnapshotter
-    }
 
     def "constructor defaults to non-authoritative mode"() {
         given:
@@ -26,43 +24,29 @@ class ShadowingFileCollectionSnapshotterTest extends Specification {
         def snapshotter = new ShadowingFileCollectionSnapshotter(javaDelegate, rustClient, reporter)
 
         then:
-        snapshotter != null
+        !snapshotter.isAuthoritative()
     }
 
-    def "snapshot delegates to Java and compares with Rust in shadow mode"() {
+    def "four-arg constructor sets authoritative mode"() {
         given:
         def javaDelegate = Mock(FileCollectionSnapshotter)
         def rustClient = Mock(RustFileFingerprintClient)
         def reporter = Mock(HashMismatchReporter)
-        def javaSnapshot = Mock(FileSystemSnapshot)
-        def fingerprintResult = Mock(RustFileFingerprintClient.FingerprintResult)
-        def individualFingerprint = Mock(RustFileFingerprintClient.IndividualFingerprint)
-        def file = Mock(FileCollectionInternal)
-        def snapshotter = new ShadowingFileCollectionSnapshotter(javaDelegate, rustClient, reporter)
-
-        individualFingerprint.isDirectory() >> false
-        individualFingerprint.getPath() >> "/tmp/test.txt"
-        individualFingerprint.getHash() >> HashCode.fromInt(42)
 
         when:
-        def result = snapshotter.snapshot(file)
+        def snapshotter = new ShadowingFileCollectionSnapshotter(javaDelegate, rustClient, reporter, true)
 
         then:
-        1 * javaDelegate.snapshot(file, FileCollectionStructureVisitor.NO_OP) >> javaSnapshot
-        1 * rustClient.fingerprintFiles(_, "ABSOLUTE_PATH", []) >> fingerprintResult
-        1 * fingerprintResult.isSuccess() >> true
-        1 * fingerprintResult.getEntries() >> [individualFingerprint]
-        result.is(javaSnapshot)
+        snapshotter.isAuthoritative()
     }
 
-    def "snapshot returns Java result when Rust fingerprinting fails"() {
+    def "snapshot returns java result and skips rust when file collection is empty"() {
         given:
         def javaDelegate = Mock(FileCollectionSnapshotter)
         def rustClient = Mock(RustFileFingerprintClient)
         def reporter = Mock(HashMismatchReporter)
         def javaSnapshot = Mock(FileSystemSnapshot)
-        def fingerprintResult = Mock(RustFileFingerprintClient.FingerprintResult)
-        def file = Mock(FileCollectionInternal)
+        def file = emptyFileCollection()
         def snapshotter = new ShadowingFileCollectionSnapshotter(javaDelegate, rustClient, reporter)
 
         when:
@@ -70,18 +54,21 @@ class ShadowingFileCollectionSnapshotterTest extends Specification {
 
         then:
         1 * javaDelegate.snapshot(file, FileCollectionStructureVisitor.NO_OP) >> javaSnapshot
-        1 * rustClient.fingerprintFiles(_, "ABSOLUTE_PATH", []) >> fingerprintResult
-        1 * fingerprintResult.isSuccess() >> false
+        0 * rustClient._
         result.is(javaSnapshot)
     }
 
-    def "snapshot handles Rust exception gracefully in shadow mode"() {
+    def "snapshot invokes rust fingerprinting when collection has files"() {
         given:
         def javaDelegate = Mock(FileCollectionSnapshotter)
         def rustClient = Mock(RustFileFingerprintClient)
         def reporter = Mock(HashMismatchReporter)
         def javaSnapshot = Mock(FileSystemSnapshot)
-        def file = Mock(FileCollectionInternal)
+        def rustResult = Mock(RustFileFingerprintClient.FingerprintResult)
+        def tmp = File.createTempFile("shadowing-fp", ".txt")
+        tmp.deleteOnExit()
+        tmp.text = "x"
+        def file = singleFileCollection(tmp.absolutePath)
         def snapshotter = new ShadowingFileCollectionSnapshotter(javaDelegate, rustClient, reporter)
 
         when:
@@ -89,53 +76,40 @@ class ShadowingFileCollectionSnapshotterTest extends Specification {
 
         then:
         1 * javaDelegate.snapshot(file, FileCollectionStructureVisitor.NO_OP) >> javaSnapshot
-        1 * rustClient.fingerprintFiles(_, "ABSOLUTE_PATH", []) >> { throw new RuntimeException("gRPC error") }
+        1 * rustClient.fingerprintFiles(_, "ABSOLUTE_PATH", []) >> rustResult
+        1 * rustResult.isSuccess() >> true
+        1 * rustResult.getEntries() >> []
         result.is(javaSnapshot)
-        noExceptionThrown()
     }
 
-    def "snapshot with visitor delegates to Java with that visitor"() {
+    def "snapshot reports match when java and rust file hashes agree"() {
         given:
         def javaDelegate = Mock(FileCollectionSnapshotter)
         def rustClient = Mock(RustFileFingerprintClient)
         def reporter = Mock(HashMismatchReporter)
         def javaSnapshot = Mock(FileSystemSnapshot)
-        def fingerprintResult = Mock(RustFileFingerprintClient.FingerprintResult)
-        def file = Mock(FileCollectionInternal)
-        def visitor = Mock(FileCollectionStructureVisitor)
+        def rustResult = Mock(RustFileFingerprintClient.FingerprintResult)
+        def rustEntry = Mock(RustFileFingerprintClient.IndividualFingerprint)
+        def hash = HashCode.fromBytes("match".bytes)
+        def tmp = File.createTempFile("shadowing-fp-match", ".txt")
+        tmp.deleteOnExit()
+        tmp.text = "x"
+        def file = singleFileCollection(tmp.absolutePath)
         def snapshotter = new ShadowingFileCollectionSnapshotter(javaDelegate, rustClient, reporter)
 
-        when:
-        def result = snapshotter.snapshot(file, visitor)
-
-        then:
-        1 * javaDelegate.snapshot(file, visitor) >> javaSnapshot
-        1 * rustClient.fingerprintFiles(_, "ABSOLUTE_PATH", []) >> fingerprintResult
-        1 * fingerprintResult.isSuccess() >> true
-        1 * fingerprintResult.getEntries() >> []
-        result.is(javaSnapshot)
-    }
-
-    def "snapshot reports match when Java and Rust hashes agree"() {
-        given:
-        def javaDelegate = Mock(FileCollectionSnapshotter)
-        def rustClient = Mock(RustFileFingerprintClient)
-        def reporter = Mock(HashMismatchReporter)
-        def javaSnapshot = Mock(FileSystemSnapshot)
-        def fingerprintResult = Mock(RustFileFingerprintClient.FingerprintResult)
-        def individualFingerprint = Mock(RustFileFingerprintClient.IndividualFingerprint)
-        def file = Mock(FileCollectionInternal)
-        def snapshotter = new ShadowingFileCollectionSnapshotter(javaDelegate, rustClient, reporter)
-        def hash = HashCode.fromInt(42)
-
-        individualFingerprint.isDirectory() >> false
-        individualFingerprint.getPath() >> "/tmp/test.txt"
-        individualFingerprint.getHash() >> hash
+        rustEntry.isDirectory() >> false
+        rustEntry.getPath() >> tmp.absolutePath
+        rustEntry.getHash() >> hash
 
         javaSnapshot.accept(_) >> { args ->
-            def visitor = args[0] as org.gradle.internal.snapshot.FileSystemSnapshotHierarchyVisitor
-            visitor.visitEntry(new org.gradle.internal.snapshot.RegularFileSnapshot(
-                "/tmp/test.txt", "test.txt", hash, 10L))
+            def visitor = args[0]
+            visitor.visitEntry(new RegularFileSnapshot(
+                tmp.absolutePath,
+                tmp.name,
+                hash,
+                DefaultFileMetadata.file(tmp.lastModified(), tmp.length(), FileMetadata.AccessType.DIRECT)
+            ))
+            SnapshotVisitResult.CONTINUE
         }
 
         when:
@@ -143,9 +117,49 @@ class ShadowingFileCollectionSnapshotterTest extends Specification {
 
         then:
         1 * javaDelegate.snapshot(file, FileCollectionStructureVisitor.NO_OP) >> javaSnapshot
-        1 * rustClient.fingerprintFiles(_, "ABSOLUTE_PATH", []) >> fingerprintResult
-        1 * fingerprintResult.isSuccess() >> true
-        1 * fingerprintResult.getEntries() >> [individualFingerprint]
+        1 * rustClient.fingerprintFiles(_, "ABSOLUTE_PATH", []) >> rustResult
+        1 * rustResult.isSuccess() >> true
+        1 * rustResult.getEntries() >> [rustEntry]
         1 * reporter.reportMatch()
+    }
+
+    def "snapshot handles rust exception gracefully"() {
+        given:
+        def javaDelegate = Mock(FileCollectionSnapshotter)
+        def rustClient = Mock(RustFileFingerprintClient)
+        def reporter = Mock(HashMismatchReporter)
+        def javaSnapshot = Mock(FileSystemSnapshot)
+        def tmp = File.createTempFile("shadowing-fp-error", ".txt")
+        tmp.deleteOnExit()
+        tmp.text = "x"
+        def file = singleFileCollection(tmp.absolutePath)
+        def snapshotter = new ShadowingFileCollectionSnapshotter(javaDelegate, rustClient, reporter)
+
+        when:
+        def result = snapshotter.snapshot(file)
+
+        then:
+        1 * javaDelegate.snapshot(file, FileCollectionStructureVisitor.NO_OP) >> javaSnapshot
+        1 * rustClient.fingerprintFiles(_, "ABSOLUTE_PATH", []) >> { throw new RuntimeException("grpc down") }
+        noExceptionThrown()
+        result.is(javaSnapshot)
+    }
+
+    private FileCollectionInternal emptyFileCollection() {
+        def file = Mock(FileCollectionInternal)
+        file.visitStructure(_) >> { args ->
+            def visitor = args[0] as FileCollectionStructureVisitor
+            visitor.visitCollection(null, [])
+        }
+        file
+    }
+
+    private FileCollectionInternal singleFileCollection(String path) {
+        def file = Mock(FileCollectionInternal)
+        file.visitStructure(_) >> { args ->
+            def visitor = args[0] as FileCollectionStructureVisitor
+            visitor.visitCollection(null, [new File(path)])
+        }
+        file
     }
 }

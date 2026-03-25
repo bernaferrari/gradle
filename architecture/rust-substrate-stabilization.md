@@ -61,6 +61,8 @@ Required checks:
    and per-build artifact partitioning.
 6. Configuration-cache authoritative-or-fallback bridge behavior must pass targeted
    regression tests.
+7. Fingerprinting, value snapshotting, task-graph, and execution-plan bridge tests must
+   verify authoritative-or-fallback behavior.
 
 Exit criteria:
 

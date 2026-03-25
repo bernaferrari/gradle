@@ -24,6 +24,12 @@ class ShadowingValueSnapshotterTest extends Specification {
         result == "java-hash".bytes
     }
 
+    def "exposes authoritative flag"() {
+        expect:
+        !new ShadowingValueSnapshotter(javaDelegate, rustClient, reporter, false).isAuthoritative()
+        new ShadowingValueSnapshotter(javaDelegate, rustClient, reporter, true).isAuthoritative()
+    }
+
     def "reports match when Java and Rust hashes are equal"() {
         given:
         def snapshotter = new ShadowingValueSnapshotter(javaDelegate, rustClient, reporter, false)

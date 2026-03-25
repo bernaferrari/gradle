@@ -6,15 +6,18 @@ import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
-import java.util.Set;
 
 /**
  * Hooks into {@link TaskExecutionGraph#whenReady()} to shadow-compare
  * the Java task execution ordering with the Rust task graph service.
  *
  * <p>Registers all tasks with the Rust service, resolves its execution plan,
- * and compares the topological ordering with Gradle's Java resolver.</p>
+ * and compares the topological ordering with Gradle's Java resolver.
+ * In authoritative mode, a valid Rust plan becomes the effective order
+ * returned by {@link #resolveExecutionGraphOrFallback(List, java.util.Map, String)};
+ * otherwise Java order is used as fallback.</p>
  */
 public class TaskGraphShadowReporter {
 
@@ -22,13 +25,52 @@ public class TaskGraphShadowReporter {
 
     private final RustTaskGraphClient rustClient;
     private final HashMismatchReporter mismatchReporter;
+    private final boolean authoritative;
 
     public TaskGraphShadowReporter(
         RustTaskGraphClient rustClient,
         HashMismatchReporter mismatchReporter
     ) {
+        this(rustClient, mismatchReporter, false);
+    }
+
+    public TaskGraphShadowReporter(
+        RustTaskGraphClient rustClient,
+        HashMismatchReporter mismatchReporter,
+        boolean authoritative
+    ) {
         this.rustClient = rustClient;
         this.mismatchReporter = mismatchReporter;
+        this.authoritative = authoritative;
+    }
+
+    public boolean isAuthoritative() {
+        return authoritative;
+    }
+
+    /**
+     * Effective task graph decision in authoritative-or-fallback mode.
+     */
+    public static class EffectiveExecutionGraphResult {
+        private final List<String> executionOrder;
+        private final String source;
+
+        private EffectiveExecutionGraphResult(List<String> executionOrder, String source) {
+            this.executionOrder = executionOrder;
+            this.source = source;
+        }
+
+        public List<String> getExecutionOrder() {
+            return executionOrder;
+        }
+
+        public String getSource() {
+            return source;
+        }
+
+        public boolean isRustSource() {
+            return "rust".equals(source);
+        }
     }
 
     /**
@@ -43,8 +85,20 @@ public class TaskGraphShadowReporter {
         java.util.Map<String, List<String>> taskDependencies,
         String buildId
     ) {
+        resolveExecutionGraphOrFallback(taskPaths, taskDependencies, buildId);
+    }
+
+    /**
+     * Resolve Rust task graph and return effective execution order.
+     * In authoritative mode, returns Rust order when valid; otherwise Java order fallback.
+     */
+    public EffectiveExecutionGraphResult resolveExecutionGraphOrFallback(
+        List<String> taskPaths,
+        java.util.Map<String, List<String>> taskDependencies,
+        String buildId
+    ) {
         if (rustClient == null || taskPaths.isEmpty()) {
-            return;
+            return new EffectiveExecutionGraphResult(taskPaths, "java-shadow");
         }
 
         try {
@@ -59,21 +113,35 @@ public class TaskGraphShadowReporter {
                 rustClient.resolveExecutionPlan(buildId);
 
             if (!rustResult.isSuccess()) {
+                mismatchReporter.reportRustError(
+                    "task-graph:" + buildId,
+                    new RuntimeException(rustResult.getErrorMessage())
+                );
                 LOGGER.debug("[substrate:taskgraph] Rust resolve failed: {}",
                     rustResult.getErrorMessage());
-                return;
+                return new EffectiveExecutionGraphResult(taskPaths, "java-fallback");
             }
 
             if (rustResult.hasCycles()) {
                 LOGGER.warn("[substrate:taskgraph] Rust detected cycles that Java did not");
-                return;
+                mismatchReporter.reportMismatch(
+                    "task-graph:" + buildId,
+                    "java:no-cycles",
+                    "rust:cycles"
+                );
+                return new EffectiveExecutionGraphResult(taskPaths, "java-fallback");
             }
 
             // Compare task counts
             if (rustResult.getTotalTasks() != taskPaths.size()) {
                 LOGGER.warn("[substrate:taskgraph] Task count mismatch: java={}, rust={}",
                     taskPaths.size(), rustResult.getTotalTasks());
-                return;
+                mismatchReporter.reportMismatch(
+                    "task-graph-count:" + buildId,
+                    Integer.toString(taskPaths.size()),
+                    Integer.toString(rustResult.getTotalTasks())
+                );
+                return new EffectiveExecutionGraphResult(taskPaths, "java-fallback");
             }
 
             // Compare execution order
@@ -86,6 +154,13 @@ public class TaskGraphShadowReporter {
                 mismatchReporter.reportMatch();
                 LOGGER.debug("[substrate:taskgraph] shadow OK: {} tasks, order matches",
                     taskPaths.size());
+                if (authoritative) {
+                    return new EffectiveExecutionGraphResult(
+                        Collections.unmodifiableList(new ArrayList<>(rustOrder)),
+                        "rust"
+                    );
+                }
+                return new EffectiveExecutionGraphResult(taskPaths, "java-shadow");
             } else {
                 // Order may differ if Java uses a different tie-breaking strategy.
                 // Check that the ordering is still topologically valid relative to Java.
@@ -94,12 +169,27 @@ public class TaskGraphShadowReporter {
                     mismatchReporter.reportMatch();
                     LOGGER.debug("[substrate:taskgraph] shadow OK: {} tasks, different valid order",
                         taskPaths.size());
+                    if (authoritative) {
+                        return new EffectiveExecutionGraphResult(
+                            Collections.unmodifiableList(new ArrayList<>(rustOrder)),
+                            "rust"
+                        );
+                    }
+                    return new EffectiveExecutionGraphResult(taskPaths, "java-shadow");
                 } else {
+                    mismatchReporter.reportMismatch(
+                        "task-graph-order:" + buildId,
+                        taskPaths.toString(),
+                        rustOrder.toString()
+                    );
                     LOGGER.warn("[substrate:taskgraph] Rust execution order violates Java dependencies");
+                    return new EffectiveExecutionGraphResult(taskPaths, "java-fallback");
                 }
             }
         } catch (Exception e) {
+            mismatchReporter.reportRustError("task-graph:" + buildId, e);
             LOGGER.debug("[substrate:taskgraph] shadow comparison failed", e);
+            return new EffectiveExecutionGraphResult(taskPaths, "java-fallback");
         }
     }
 

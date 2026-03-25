@@ -11,8 +11,9 @@ import org.slf4j.Logger;
  * affecting build correctness. Fire-and-forget: errors are logged at debug level
  * and never propagated to the build.</p>
  *
- * <p>Style A (compare shadow): runs both Java and Rust, reports matches/mismatches
- * via {@link HashMismatchReporter}, always uses Java as authoritative.</p>
+ * <p>In shadow mode: runs both Java and Rust, reports matches/mismatches,
+ * and keeps Java as effective result. In authoritative mode: Rust result
+ * is used when available, with Java fallback on errors.</p>
  */
 public class ShadowingExecutionPlanAdvisor {
 
@@ -20,13 +21,52 @@ public class ShadowingExecutionPlanAdvisor {
 
     private final ExecutionPlanClient rustClient;
     private final HashMismatchReporter mismatchReporter;
+    private final boolean authoritative;
 
     public ShadowingExecutionPlanAdvisor(
         ExecutionPlanClient rustClient,
         HashMismatchReporter mismatchReporter
     ) {
+        this(rustClient, mismatchReporter, false);
+    }
+
+    public ShadowingExecutionPlanAdvisor(
+        ExecutionPlanClient rustClient,
+        HashMismatchReporter mismatchReporter,
+        boolean authoritative
+    ) {
         this.rustClient = rustClient;
         this.mismatchReporter = mismatchReporter;
+        this.authoritative = authoritative;
+    }
+
+    public boolean isAuthoritative() {
+        return authoritative;
+    }
+
+    /**
+     * Effective prediction result for authoritative-or-fallback mode.
+     */
+    public static class EffectivePredictionResult {
+        private final String prediction;
+        private final String source;
+
+        private EffectivePredictionResult(String prediction, String source) {
+            this.prediction = prediction;
+            this.source = source;
+        }
+
+        public String getPrediction() {
+            return prediction;
+        }
+
+        public String getSource() {
+            return source;
+        }
+
+        public boolean isRustSource() {
+            return "rust".equals(source);
+        }
     }
 
     /**
@@ -42,16 +82,24 @@ public class ShadowingExecutionPlanAdvisor {
      * @param durationMs     time taken by Java to produce the prediction, in milliseconds
      */
     public void shadowPredictOutcome(String workIdentity, String javaPrediction, long durationMs) {
+        advisePredictionOrFallback(workIdentity, javaPrediction, durationMs);
+    }
+
+    /**
+     * Ask Rust for prediction and return effective prediction.
+     * In authoritative mode, Rust prediction is used when available; Java fallback is used on error.
+     */
+    public EffectivePredictionResult advisePredictionOrFallback(
+        String workIdentity,
+        String javaPrediction,
+        long durationMs
+    ) {
         if (rustClient == null) {
-            return;
+            return new EffectivePredictionResult(javaPrediction, "java-shadow");
         }
 
         try {
-            gradle.substrate.v1.WorkMetadata minimalMetadata =
-                gradle.substrate.v1.WorkMetadata.newBuilder()
-                    .setWorkIdentity(workIdentity)
-                    .build();
-
+            gradle.substrate.v1.WorkMetadata minimalMetadata = minimalMetadata(workIdentity);
             long startTime = System.currentTimeMillis();
             ExecutionPlanClient.Prediction rustPrediction = rustClient.predictOutcome(minimalMetadata);
             long rustDurationMs = System.currentTimeMillis() - startTime;
@@ -77,11 +125,16 @@ public class ShadowingExecutionPlanAdvisor {
                     workIdentity, javaPrediction, rustPredictionStr, durationMs, rustDurationMs
                 );
             }
+            if (authoritative) {
+                return new EffectivePredictionResult(rustPredictionStr, "rust");
+            }
+            return new EffectivePredictionResult(javaPrediction, "java-shadow");
         } catch (Exception e) {
             mismatchReporter.reportRustError(
                 "execution-plan:" + workIdentity, e
             );
             LOGGER.debug("[substrate:execution-plan] shadow predict failed for {}", workIdentity, e);
+            return new EffectivePredictionResult(javaPrediction, "java-fallback");
         }
     }
 
@@ -129,5 +182,11 @@ public class ShadowingExecutionPlanAdvisor {
         } catch (Exception e) {
             LOGGER.debug("[substrate:execution-plan] shadow recordOutcome failed for {}", workIdentity, e);
         }
+    }
+
+    private gradle.substrate.v1.WorkMetadata minimalMetadata(String workIdentity) {
+        return gradle.substrate.v1.WorkMetadata.newBuilder()
+            .setWorkIdentity(workIdentity)
+            .build();
     }
 }

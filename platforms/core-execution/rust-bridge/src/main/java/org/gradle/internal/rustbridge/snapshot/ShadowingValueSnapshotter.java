@@ -37,6 +37,10 @@ public class ShadowingValueSnapshotter {
         this.authoritative = authoritative;
     }
 
+    public boolean isAuthoritative() {
+        return authoritative;
+    }
+
     /**
      * Snapshot all input properties using the Java delegate, and compare with Rust in shadow mode.
      *

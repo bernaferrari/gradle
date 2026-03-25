@@ -32,7 +32,8 @@ import java.util.Map;
  * <p>In shadow mode, this validates the Rust implementation against the known-good Java one
  * by walking the Java snapshot and comparing individual file hashes.</p>
  *
- * <p>In authoritative mode, Rust fingerprinting is used as the primary source with Java fallback.</p>
+ * <p>In authoritative mode, Rust fingerprinting is treated as primary for validation and
+ * telemetry, while Java snapshot objects remain the compatibility return type.</p>
  */
 public class ShadowingFileCollectionSnapshotter implements FileCollectionSnapshotter {
 
@@ -61,6 +62,10 @@ public class ShadowingFileCollectionSnapshotter implements FileCollectionSnapsho
         this.rustClient = rustClient;
         this.mismatchReporter = mismatchReporter;
         this.authoritative = authoritative;
+    }
+
+    public boolean isAuthoritative() {
+        return authoritative;
     }
 
     @Override
