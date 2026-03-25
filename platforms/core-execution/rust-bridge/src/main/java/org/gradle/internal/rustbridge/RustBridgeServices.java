@@ -375,7 +375,10 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_FINGERPRINTING)) {
                 return null;
             }
-            boolean authoritative = RustSubstrateOptions.isAuthoritative(options);
+            boolean authoritative = RustSubstrateOptions.isSubsystemAuthoritative(
+                options,
+                RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_FINGERPRINTING
+            );
             return new ShadowingFileCollectionSnapshotter(
                 javaSnapshotter,
                 rustFingerprintClient,
@@ -443,10 +446,14 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             HashMismatchReporter mismatchReporter,
             InternalOptions options
         ) {
-            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+            if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_ADVISORY_EXECUTION)) {
                 return null;
             }
-            return new ShadowingExecutionPlanAdvisor(executionPlanClient, mismatchReporter);
+            boolean authoritative = RustSubstrateOptions.isSubsystemAuthoritative(
+                options,
+                RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_EXECUTION_PLAN
+            );
+            return new ShadowingExecutionPlanAdvisor(executionPlanClient, mismatchReporter, authoritative);
         }
 
         // --- Plugin shadow wiring ---
@@ -756,8 +763,12 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_TASK_GRAPH)) {
                 return null;
             }
+            boolean authoritative = RustSubstrateOptions.isSubsystemAuthoritative(
+                options,
+                RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_TASK_GRAPH
+            );
             TaskGraphShadowListener listener = new TaskGraphShadowListener(
-                new TaskGraphShadowReporter(rustTaskGraphClient, mismatchReporter));
+                new TaskGraphShadowReporter(rustTaskGraphClient, mismatchReporter, authoritative));
             listenerManager.addListener(listener);
             return listener;
         }
@@ -958,7 +969,10 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_SNAPSHOTTING)) {
                 return null;
             }
-            boolean authoritative = RustSubstrateOptions.isAuthoritative(options);
+            boolean authoritative = RustSubstrateOptions.isSubsystemAuthoritative(
+                options,
+                RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_SNAPSHOTTING
+            );
             return new ShadowingValueSnapshotter(
                 new SnapshotHashDelegate(valueSnapshotter),
                 rustValueSnapshotClient,

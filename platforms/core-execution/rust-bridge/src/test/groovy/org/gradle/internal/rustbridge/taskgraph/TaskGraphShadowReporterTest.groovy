@@ -15,7 +15,20 @@ class TaskGraphShadowReporterTest extends Specification {
 
         then:
         reporter != null
+        !reporter.isAuthoritative()
         noExceptionThrown()
+    }
+
+    def "three-arg constructor sets authoritative mode"() {
+        given:
+        def rustClient = Mock(RustTaskGraphClient)
+        def mismatchReporter = Mock(HashMismatchReporter)
+
+        when:
+        def reporter = new TaskGraphShadowReporter(rustClient, mismatchReporter, true)
+
+        then:
+        reporter.isAuthoritative()
     }
 
     def "compareExecutionGraph with empty taskPaths returns immediately"() {
@@ -158,5 +171,50 @@ class TaskGraphShadowReporterTest extends Specification {
 
         then:
         1 * mismatchReporter.reportMatch()
+    }
+
+    def "authoritative resolve returns rust order when rust plan is valid"() {
+        given:
+        def rustClient = Mock(RustTaskGraphClient)
+        def mismatchReporter = Mock(HashMismatchReporter)
+        def reporter = new TaskGraphShadowReporter(rustClient, mismatchReporter, true)
+        def taskPaths = [":a", ":b"]
+        def taskDeps = [":a": [], ":b": [":a"]]
+
+        def node1 = gradle.substrate.v1.ExecutionNode.newBuilder().setTaskPath(":a").build()
+        def node2 = gradle.substrate.v1.ExecutionNode.newBuilder().setTaskPath(":b").build()
+        rustClient.registerTask(_, _, _, _) >> true
+        rustClient.resolveExecutionPlan("build-123") >> RustTaskGraphClient.ExecutionPlanResult.success(
+            [node1, node2], 2, 1, 0, false
+        )
+
+        when:
+        def result = reporter.resolveExecutionGraphOrFallback(taskPaths, taskDeps, "build-123")
+
+        then:
+        result.rustSource
+        result.source == "rust"
+        result.executionOrder == [":a", ":b"]
+    }
+
+    def "authoritative resolve falls back to java order when rust resolve fails"() {
+        given:
+        def rustClient = Mock(RustTaskGraphClient)
+        def mismatchReporter = Mock(HashMismatchReporter)
+        def reporter = new TaskGraphShadowReporter(rustClient, mismatchReporter, true)
+        def taskPaths = [":a", ":b"]
+        def taskDeps = [":a": [], ":b": [":a"]]
+
+        rustClient.registerTask(_, _, _, _) >> true
+        rustClient.resolveExecutionPlan("build-123") >> RustTaskGraphClient.ExecutionPlanResult.error("rpc unavailable")
+
+        when:
+        def result = reporter.resolveExecutionGraphOrFallback(taskPaths, taskDeps, "build-123")
+
+        then:
+        !result.rustSource
+        result.source == "java-fallback"
+        result.executionOrder == taskPaths
+        1 * mismatchReporter.reportRustError("task-graph:build-123", _ as RuntimeException)
     }
 }
