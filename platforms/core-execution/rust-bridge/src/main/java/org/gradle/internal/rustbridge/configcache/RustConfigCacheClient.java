@@ -72,23 +72,8 @@ public class RustConfigCacheClient {
      */
     public boolean storeConfigCache(String cacheKey, byte[] serializedConfig,
                                      long entryCount, List<String> inputHashes) {
-        if (client.isNoop()) {
-            return false;
-        }
-
         try {
-            StoreConfigCacheResponse response = client.getConfigCacheStub()
-                .storeConfigCache(StoreConfigCacheRequest.newBuilder()
-                    .setCacheKey(cacheKey)
-                    .setSerializedConfig(com.google.protobuf.ByteString.copyFrom(serializedConfig))
-                    .setEntryCount(entryCount)
-                    .addAllInputHashes(inputHashes)
-                    .setTimestampMs(System.currentTimeMillis())
-                    .build());
-
-            LOGGER.debug("[substrate:config-cache] stored entry {} in {}ms",
-                cacheKey, response.getStorageTimeMs());
-            return response.getStored();
+            return storeConfigCacheStrict(cacheKey, serializedConfig, entryCount, inputHashes);
         } catch (Exception e) {
             LOGGER.debug("[substrate:config-cache] store failed for {}", cacheKey, e);
             return false;
@@ -96,27 +81,40 @@ public class RustConfigCacheClient {
     }
 
     /**
+     * Store a configuration cache entry.
+     *
+     * @throws RuntimeException when the Rust substrate is unavailable or the RPC fails.
+     */
+    public boolean storeConfigCacheStrict(
+        String cacheKey,
+        byte[] serializedConfig,
+        long entryCount,
+        List<String> inputHashes
+    ) {
+        if (client.isNoop()) {
+            throw new IllegalStateException("Substrate not available");
+        }
+
+        StoreConfigCacheResponse response = client.getConfigCacheStub()
+            .storeConfigCache(StoreConfigCacheRequest.newBuilder()
+                .setCacheKey(cacheKey)
+                .setSerializedConfig(com.google.protobuf.ByteString.copyFrom(serializedConfig))
+                .setEntryCount(entryCount)
+                .addAllInputHashes(inputHashes)
+                .setTimestampMs(System.currentTimeMillis())
+                .build());
+
+        LOGGER.debug("[substrate:config-cache] stored entry {} in {}ms",
+            cacheKey, response.getStorageTimeMs());
+        return response.getStored();
+    }
+
+    /**
      * Load a configuration cache entry.
      */
     public CacheLoadResult loadConfigCache(String cacheKey) {
-        if (client.isNoop()) {
-            return new CacheLoadResult(false, new byte[0], 0, 0);
-        }
-
         try {
-            LoadConfigCacheResponse response = client.getConfigCacheStub()
-                .loadConfigCache(LoadConfigCacheRequest.newBuilder()
-                    .setCacheKey(cacheKey)
-                    .build());
-
-            LOGGER.debug("[substrate:config-cache] load {} = found:{}",
-                cacheKey, response.getFound());
-            return new CacheLoadResult(
-                response.getFound(),
-                response.getSerializedConfig().toByteArray(),
-                response.getEntryCount(),
-                response.getTimestampMs()
-            );
+            return loadConfigCacheStrict(cacheKey);
         } catch (Exception e) {
             LOGGER.debug("[substrate:config-cache] load failed for {}", cacheKey, e);
             return new CacheLoadResult(false, new byte[0], 0, 0);
@@ -124,25 +122,59 @@ public class RustConfigCacheClient {
     }
 
     /**
+     * Load a configuration cache entry.
+     *
+     * @throws RuntimeException when the Rust substrate is unavailable or the RPC fails.
+     */
+    public CacheLoadResult loadConfigCacheStrict(String cacheKey) {
+        if (client.isNoop()) {
+            throw new IllegalStateException("Substrate not available");
+        }
+
+        LoadConfigCacheResponse response = client.getConfigCacheStub()
+            .loadConfigCache(LoadConfigCacheRequest.newBuilder()
+                .setCacheKey(cacheKey)
+                .build());
+
+        LOGGER.debug("[substrate:config-cache] load {} = found:{}",
+            cacheKey, response.getFound());
+        return new CacheLoadResult(
+            response.getFound(),
+            response.getSerializedConfig().toByteArray(),
+            response.getEntryCount(),
+            response.getTimestampMs()
+        );
+    }
+
+    /**
      * Validate a configuration cache entry against current input hashes.
      */
     public ValidationResult validateConfig(String cacheKey, List<String> inputHashes) {
-        if (client.isNoop()) {
-            return new ValidationResult(false, "Substrate not available");
-        }
-
         try {
-            ValidateConfigResponse response = client.getConfigCacheStub()
-                .validateConfig(ValidateConfigRequest.newBuilder()
-                    .setCacheKey(cacheKey)
-                    .addAllInputHashes(inputHashes)
-                    .build());
-
-            return new ValidationResult(response.getValid(), response.getReason());
+            return validateConfigStrict(cacheKey, inputHashes);
         } catch (Exception e) {
             LOGGER.debug("[substrate:config-cache] validate failed for {}", cacheKey, e);
             return new ValidationResult(false, e.getMessage());
         }
+    }
+
+    /**
+     * Validate a configuration cache entry against current input hashes.
+     *
+     * @throws RuntimeException when the Rust substrate is unavailable or the RPC fails.
+     */
+    public ValidationResult validateConfigStrict(String cacheKey, List<String> inputHashes) {
+        if (client.isNoop()) {
+            throw new IllegalStateException("Substrate not available");
+        }
+
+        ValidateConfigResponse response = client.getConfigCacheStub()
+            .validateConfig(ValidateConfigRequest.newBuilder()
+                .setCacheKey(cacheKey)
+                .addAllInputHashes(inputHashes)
+                .build());
+
+        return new ValidationResult(response.getValid(), response.getReason());
     }
 
     /**

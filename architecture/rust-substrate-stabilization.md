@@ -59,6 +59,8 @@ Required checks:
 4. Cross-language hash compatibility tests must pass.
 5. Build-plan shadow differential checks must confirm order-insensitive JVM-model capture
    and per-build artifact partitioning.
+6. Configuration-cache authoritative-or-fallback bridge behavior must pass targeted
+   regression tests.
 
 Exit criteria:
 

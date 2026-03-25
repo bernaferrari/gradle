@@ -29,6 +29,8 @@ run_step "Type-check Rust daemon" cargo check -p gradle-substrate-daemon
 
 echo
 echo "== [${step}] Run critical Rust regression tests"
+echo "  -> org.gradle.internal.rustbridge.configcache.ConfigurationCacheShadowListenerTest"
+./gradlew -q :rust-bridge:test --tests org.gradle.internal.rustbridge.configcache.ConfigurationCacheShadowListenerTest
 critical_tests=(
   "server::work::tests::test_evaluate_input_hash_changes_when_only_keys_change"
   "server::config_cache::tests::test_validate_config_ignores_hash_order"

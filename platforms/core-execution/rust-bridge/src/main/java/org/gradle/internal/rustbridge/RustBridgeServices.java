@@ -816,10 +816,14 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
             HashMismatchReporter mismatchReporter,
             InternalOptions options
         ) {
-            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+            if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_CONFIG_CACHE)) {
                 return null;
             }
-            return new ConfigurationCacheShadowListener(rustConfigCacheClient, mismatchReporter);
+            boolean authoritative = RustSubstrateOptions.isSubsystemAuthoritative(
+                options,
+                RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_CONFIG_CACHE
+            );
+            return new ConfigurationCacheShadowListener(rustConfigCacheClient, mismatchReporter, authoritative);
         }
 
         @Provides
