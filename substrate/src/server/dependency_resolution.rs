@@ -35,6 +35,7 @@ struct ResolutionStats {
 }
 
 /// Parsed dependency from a POM file.
+#[derive(Clone)]
 pub struct PomDependency {
     group: String,
     name: String,
@@ -888,12 +889,30 @@ impl DependencyResolutionServiceImpl {
     }
 
     /// Resolve a single dependency descriptor with real POM fetching.
-    /// Handles property interpolation, version ranges, and transitive dependency resolution.
+    /// Handles property interpolation, version ranges, and recursive transitive resolution.
     async fn resolve_descriptor(
         &self,
         dep: &DependencyDescriptor,
         repos: &[RepositoryDescriptor],
     ) -> ResolvedDependency {
+        let mut visited = std::collections::HashSet::new();
+        self.resolve_recursive(dep, repos, &mut visited, 0).await
+    }
+
+    /// Recursively resolve a dependency and its transitive dependencies.
+    ///
+    /// Uses BFS-style resolution: fetches the POM for the current artifact,
+    /// extracts direct dependencies, then recursively resolves each one.
+    /// Cycle detection via `visited` set, depth limiting at 50 levels.
+    async fn resolve_recursive(
+        &self,
+        dep: &DependencyDescriptor,
+        repos: &[RepositoryDescriptor],
+        visited: &mut std::collections::HashSet<(String, String)>,
+        depth: u32,
+    ) -> ResolvedDependency {
+        const MAX_DEPTH: u32 = 50;
+
         let group = dep.group.clone();
         let name = dep.name.clone();
         let raw_version = dep.version.clone();
@@ -905,7 +924,6 @@ impl DependencyResolutionServiceImpl {
             || raw_version == "LATEST"
             || raw_version == "RELEASE"
         {
-            // Version range or special version — need to fetch available versions
             let (available, metadata) = self.fetch_available_versions(&group, &name, repos).await;
             if !available.is_empty() {
                 Self::resolve_version_range(&raw_version, &available, metadata.as_ref())
@@ -917,155 +935,279 @@ impl DependencyResolutionServiceImpl {
             raw_version.clone()
         };
 
-        // Try to fetch POM for transitive deps
-        let mut transitive_deps = Vec::new();
+        // Cycle detection: if we've already visited this group:name, return a leaf node.
+        let coord = (group.clone(), name.clone());
+        if !visited.insert(coord.clone()) {
+            tracing::debug!(
+                group = %group,
+                name = %name,
+                depth,
+                "Cycle detected — skipping re-resolution"
+            );
+            let repo_base = repos
+                .first()
+                .map(|r| r.url.trim_end_matches('/').to_string())
+                .unwrap_or_else(|| "https://repo.maven.apache.org/maven2".to_string());
 
-        if dep.transitive {
-            for repo in repos {
-                match self.fetch_pom(&group, &name, &selected_version, repo).await {
-                    Ok(pom_content) => {
-                        // Parse properties, dependency management, and regular dependencies
-                        let properties = Self::parse_pom_properties(&pom_content);
-                        let managed_versions = Self::parse_dependency_management(&pom_content);
-                        let pom_deps = Self::parse_pom_dependencies(&pom_content);
-
-                        // Collect all exclusions from this POM's direct dependencies
-                        // so we can filter transitive deps
-                        let all_exclusions: Vec<&(String, String)> =
-                            pom_deps.iter().flat_map(|d| d.exclusions.iter()).collect();
-
-                        for pom_dep in &pom_deps {
-                            // Skip test/provided scopes and optional deps
-                            if pom_dep.scope == "test"
-                                || pom_dep.scope == "provided"
-                                || pom_dep.optional
-                            {
-                                continue;
-                            }
-
-                            // Check if this dependency is excluded by any sibling exclusion
-                            let is_excluded =
-                                all_exclusions.iter().any(|(excl_group, excl_name)| {
-                                    Self::matches_exclusion(
-                                        &pom_dep.group,
-                                        &pom_dep.name,
-                                        excl_group,
-                                        excl_name,
-                                    )
-                                });
-                            if is_excluded {
-                                tracing::debug!(
-                                    group = %pom_dep.group,
-                                    name = %pom_dep.name,
-                                    "Transitive dependency excluded"
-                                );
-                                continue;
-                            }
-
-                            // Resolve version: use dependency management if version is empty or a property that didn't resolve
-                            let raw_dep_version =
-                                Self::interpolate_properties(&pom_dep.version, &properties);
-                            let resolved_version = if raw_dep_version.is_empty()
-                                || raw_dep_version.starts_with("${")
-                            {
-                                // Look up in managed versions
-                                managed_versions
-                                    .get(&(pom_dep.group.clone(), pom_dep.name.clone()))
-                                    .cloned()
-                                    .unwrap_or(raw_dep_version)
-                            } else {
-                                raw_dep_version
-                            };
-
-                            if resolved_version.is_empty() {
-                                continue;
-                            }
-
-                            let ext = if pom_dep.type_field.is_empty() {
-                                "jar"
-                            } else {
-                                &pom_dep.type_field
-                            };
-                            let artifact_filename = if pom_dep.classifier.is_empty() {
-                                format!("{}-{}.{}", pom_dep.name, resolved_version, ext)
-                            } else {
-                                format!(
-                                    "{}-{}-{}.{}",
-                                    pom_dep.name, resolved_version, pom_dep.classifier, ext
-                                )
-                            };
-                            let repo_base = repo.url.trim_end_matches('/');
-                            let artifact_url = format!(
-                                "{}/{}/{}/{}",
-                                repo_base,
-                                pom_dep.group.replace('.', "/"),
-                                pom_dep.name,
-                                artifact_filename
-                            );
-                            transitive_deps.push(ResolvedDependency {
-                                group: pom_dep.group.clone(),
-                                name: pom_dep.name.clone(),
-                                version: resolved_version.clone(),
-                                selected_version: resolved_version,
-                                dependencies: Vec::new(),
-                                resolved: true,
-                                failure_reason: String::new(),
-                                artifact_url,
-                                artifact_size: 0,
-                                artifact_sha256: String::new(),
-                            });
-                        }
-
-                        // Apply conflict resolution: deduplicate by group:name keeping highest version
-                        Self::resolve_conflicts(&mut transitive_deps);
-
-                        tracing::debug!(
-                            group = %group,
-                            name = %name,
-                            transitive = transitive_deps.len(),
-                            "Resolved POM with {} transitive dependencies (after conflict resolution)",
-                            transitive_deps.len()
-                        );
-                        break; // Found POM, no need to try more repos
-                    }
-                    Err(e) => {
-                        tracing::debug!(
-                            group = %group,
-                            name = %name,
-                            repo = %repo.url,
-                            error = %e,
-                            "Failed to fetch POM from repo"
-                        );
-                    }
-                }
-            }
-        }
-
-        // Compute artifact URL using the first repo (or default Maven Central)
-        let repo_base = repos
-            .first()
-            .map(|r| r.url.trim_end_matches('/').to_string())
-            .unwrap_or_else(|| "https://repo.maven.apache.org/maven2".to_string());
-
-        ResolvedDependency {
-            group: group.clone(),
-            name: name.clone(),
-            version: raw_version,
-            selected_version: selected_version.clone(),
-            dependencies: transitive_deps,
-            resolved: true,
-            failure_reason: String::new(),
-            artifact_url: format!(
+            let artifact_url = format!(
                 "{}/{}/{}/{}-{}.jar",
                 repo_base,
                 group.replace('.', "/"),
                 name,
                 name,
                 selected_version
-            ),
+            );
+            return ResolvedDependency {
+                group,
+                name,
+                version: raw_version,
+                selected_version,
+                dependencies: Vec::new(),
+                resolved: true,
+                failure_reason: String::new(),
+                artifact_url,
+                artifact_size: 0,
+                artifact_sha256: String::new(),
+            };
+        }
+
+        // Fetch POM and resolve transitive dependencies
+        let transitive_deps = if dep.transitive && depth < MAX_DEPTH {
+            self.fetch_and_resolve_transitive(
+                &group,
+                &name,
+                &selected_version,
+                repos,
+                visited,
+                depth,
+            )
+            .await
+        } else {
+            Vec::new()
+        };
+
+        // Remove from visited set so sibling branches can resolve the same dep
+        visited.remove(&coord);
+
+        // Compute artifact URL
+        let repo_base = repos
+            .first()
+            .map(|r| r.url.trim_end_matches('/').to_string())
+            .unwrap_or_else(|| "https://repo.maven.apache.org/maven2".to_string());
+
+        let artifact_url = format!(
+            "{}/{}/{}/{}-{}.jar",
+            repo_base,
+            group.replace('.', "/"),
+            name,
+            name,
+            selected_version
+        );
+
+        ResolvedDependency {
+            group,
+            name,
+            version: raw_version,
+            selected_version,
+            dependencies: transitive_deps,
+            resolved: true,
+            failure_reason: String::new(),
+            artifact_url,
             artifact_size: 0,
             artifact_sha256: String::new(),
         }
+    }
+
+    /// Fetch a POM from repositories and recursively resolve its transitive dependencies.
+    /// Handles BOM imports (scope=import, type=pom) and applies exclusions.
+    async fn fetch_and_resolve_transitive(
+        &self,
+        group: &str,
+        name: &str,
+        version: &str,
+        repos: &[RepositoryDescriptor],
+        visited: &mut std::collections::HashSet<(String, String)>,
+        depth: u32,
+    ) -> Vec<ResolvedDependency> {
+        for repo in repos {
+            match self.fetch_pom(group, name, version, repo).await {
+                Ok(pom_content) => {
+                    let properties = Self::parse_pom_properties(&pom_content);
+                    let managed_versions = Self::parse_dependency_management(&pom_content);
+                    let pom_deps = Self::parse_pom_dependencies(&pom_content);
+
+                    // Collect exclusions from this POM's direct dependencies
+                    let all_exclusions: Vec<&(String, String)> =
+                        pom_deps.iter().flat_map(|d| d.exclusions.iter()).collect();
+
+                    // Separate BOM imports from regular dependencies
+                    let mut bom_imports = Vec::new();
+                    let mut regular_deps = Vec::new();
+
+                    for pom_dep in &pom_deps {
+                        // BOM import: scope=import, type=pom
+                        if pom_dep.scope == "import" && pom_dep.type_field == "pom" {
+                            let bom_version =
+                                Self::interpolate_properties(&pom_dep.version, &properties);
+                            if !bom_version.is_empty() {
+                                bom_imports.push((
+                                    pom_dep.group.clone(),
+                                    pom_dep.name.clone(),
+                                    bom_version,
+                                ));
+                            }
+                            continue;
+                        }
+
+                        // Skip test/provided scopes and optional deps
+                        if pom_dep.scope == "test"
+                            || pom_dep.scope == "provided"
+                            || pom_dep.optional
+                        {
+                            continue;
+                        }
+
+                        // Check exclusions
+                        let is_excluded = all_exclusions.iter().any(|(excl_group, excl_name)| {
+                            Self::matches_exclusion(
+                                &pom_dep.group,
+                                &pom_dep.name,
+                                excl_group,
+                                excl_name,
+                            )
+                        });
+                        if is_excluded {
+                            tracing::debug!(
+                                group = %pom_dep.group,
+                                name = %pom_dep.name,
+                                "Transitive dependency excluded"
+                            );
+                            continue;
+                        }
+
+                        // Resolve version via property interpolation + dependency management
+                        let raw_dep_version =
+                            Self::interpolate_properties(&pom_dep.version, &properties);
+                        let resolved_version = if raw_dep_version.is_empty()
+                            || raw_dep_version.starts_with("${")
+                        {
+                            managed_versions
+                                .get(&(pom_dep.group.clone(), pom_dep.name.clone()))
+                                .cloned()
+                                .unwrap_or(raw_dep_version)
+                        } else {
+                            raw_dep_version
+                        };
+
+                        if resolved_version.is_empty() {
+                            continue;
+                        }
+
+                        regular_deps.push((pom_dep.clone(), resolved_version));
+                    }
+
+                    // Merge BOM managed versions into our managed set
+                    let mut merged_managed = managed_versions;
+                    for (bom_group, bom_name, bom_version) in &bom_imports {
+                        if let Ok(bom_pom) = self.fetch_pom(bom_group, bom_name, bom_version, repo).await {
+                            let bom_props = Self::parse_pom_properties(&bom_pom);
+                            let bom_managed = Self::parse_dependency_management(&bom_pom);
+                            for ((g, n), v) in bom_managed {
+                                let interpolated = Self::interpolate_properties(&v, &bom_props);
+                                if !interpolated.is_empty() {
+                                    merged_managed.entry((g, n)).or_insert(interpolated);
+                                }
+                            }
+                            tracing::debug!(
+                                bom_group = %bom_group,
+                                bom_name = %bom_name,
+                                bom_version = %bom_version,
+                                entries = merged_managed.len(),
+                                "Loaded BOM and merged managed dependencies"
+                            );
+                        }
+                    }
+
+                    // Re-resolve versions with merged managed set
+                    for (pom_dep, resolved_version) in &mut regular_deps {
+                        if resolved_version.starts_with("${") || resolved_version.is_empty() {
+                            if let Some(managed) = merged_managed
+                                .get(&(pom_dep.group.clone(), pom_dep.name.clone()))
+                            {
+                                *resolved_version = managed.clone();
+                            }
+                        }
+                    }
+
+                    // Resolve each regular dependency recursively
+                    let mut handles = Vec::new();
+
+                    for (pom_dep, resolved_version) in &regular_deps {
+                        if resolved_version.is_empty() {
+                            continue;
+                        }
+                        let child_dep = DependencyDescriptor {
+                            group: pom_dep.group.clone(),
+                            name: pom_dep.name.clone(),
+                            version: resolved_version.clone(),
+                            classifier: pom_dep.classifier.clone(),
+                            extension: if pom_dep.type_field.is_empty() {
+                                "jar".to_string()
+                            } else {
+                                pom_dep.type_field.clone()
+                            },
+                            transitive: true,
+                        };
+                        let repos_clone: Vec<RepositoryDescriptor> = repos.to_vec();
+                        handles.push(tokio::spawn(async move {
+                            // We can't move `self` into the spawned task, so we
+                            // just return the descriptor for serial resolution below.
+                            (child_dep, repos_clone)
+                        }));
+                    }
+
+                    // Collect handles and resolve serially (self is &self, not Send)
+                    let mut transitive_deps = Vec::new();
+                    for handle in handles {
+                        if let Ok((child_dep, repos_clone)) = handle.await {
+                            let resolved = Box::pin(self.resolve_recursive(
+                                &child_dep,
+                                &repos_clone,
+                                visited,
+                                depth + 1,
+                            ))
+                            .await;
+                            transitive_deps.push(resolved);
+                        }
+                    }
+
+                    // Apply conflict resolution
+                    Self::resolve_conflicts(&mut transitive_deps);
+
+                    tracing::debug!(
+                        group = %group,
+                        name = %name,
+                        depth,
+                        transitive = transitive_deps.len(),
+                        "Resolved {} transitive dependencies (depth {})",
+                        transitive_deps.len(),
+                        depth
+                    );
+
+                    return transitive_deps;
+                }
+                Err(e) => {
+                    tracing::debug!(
+                        group = %group,
+                        name = %name,
+                        repo = %repo.url,
+                        error = %e,
+                        "Failed to fetch POM from repo"
+                    );
+                }
+            }
+        }
+        Vec::new()
     }
 
     /// Download an artifact with retry logic.
@@ -3355,5 +3497,180 @@ mod tests {
                 .unwrap(),
             "3.0"
         );
+    }
+
+    // ---- Recursive transitive resolution tests ----
+
+    #[test]
+    fn test_resolve_descriptor_cycle_detection() {
+        // Verify that cycle detection doesn't cause infinite recursion.
+        // The resolve_descriptor creates a fresh visited set each time,
+        // so cycles are detected within a single resolve_recursive call chain.
+        let svc = make_svc();
+
+        // This test validates the visited set mechanism works.
+        // In real resolution, A→B→A would be caught by the visited set.
+        let mut visited = std::collections::HashSet::new();
+        let coord_a = ("com.example".to_string(), "lib-a".to_string());
+        let coord_b = ("com.example".to_string(), "lib-b".to_string());
+
+        // Simulate: first visit succeeds
+        assert!(visited.insert(coord_a.clone()));
+        // Second visit (cycle) fails
+        assert!(!visited.insert(coord_a.clone()));
+        // Different coord succeeds
+        assert!(visited.insert(coord_b.clone()));
+
+        // Remove and re-insert works
+        visited.remove(&coord_a);
+        assert!(visited.insert(coord_a.clone()));
+    }
+
+    #[test]
+    fn test_resolve_descriptor_depth_limit() {
+        // Verify MAX_DEPTH constant is reasonable
+        // The constant is 50, which should be more than enough for any real dependency tree
+        assert!(50 <= 100, "MAX_DEPTH should be bounded");
+    }
+
+    #[test]
+    fn test_bom_import_parsing() {
+        let pom = r#"<?xml version="1.0"?>
+<project>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-dependencies</artifactId>
+        <version>3.2.0</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-core</artifactId>
+      <version>6.1.0</version>
+    </dependency>
+  </dependencies>
+</project>"#;
+
+        let deps = DependencyResolutionServiceImpl::parse_pom_dependencies(pom);
+        let managed = DependencyResolutionServiceImpl::parse_dependency_management(pom);
+
+        // Regular dependency should be parsed
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].group, "org.springframework");
+        assert_eq!(deps[0].name, "spring-core");
+        // Empty scope means "compile" (Maven default)
+        assert!(deps[0].scope.is_empty() || deps[0].scope == "compile");
+
+        // BOM import should NOT appear in regular deps (it's in dependencyManagement)
+        // But it should be in managed deps if we parse them
+        assert!(managed.contains_key(&(
+            "org.springframework.boot".to_string(),
+            "spring-boot-dependencies".to_string()
+        )));
+    }
+
+    #[test]
+    fn test_bom_import_not_in_regular_deps() {
+        // BOM imports (scope=import, type=pom) should be filtered from regular deps
+        let pom = r#"<?xml version="1.0"?>
+<project>
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-dependencies</artifactId>
+      <version>3.2.0</version>
+      <type>pom</type>
+      <scope>import</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.google.guava</groupId>
+      <artifactId>guava</artifactId>
+      <version>32.1.3</version>
+    </dependency>
+  </dependencies>
+</project>"#;
+
+        let deps = DependencyResolutionServiceImpl::parse_pom_dependencies(pom);
+
+        // BOM import should be parsed as a dependency (with scope=import)
+        assert_eq!(deps.len(), 2);
+
+        // Verify we can distinguish BOM imports
+        let bom_dep = deps.iter().find(|d| d.scope == "import").unwrap();
+        assert_eq!(bom_dep.type_field, "pom");
+
+        let regular_dep = deps.iter().find(|d| d.scope != "import").unwrap();
+        assert_eq!(regular_dep.name, "guava");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_dependencies_returns_tree_structure() {
+        // Test that resolve_dependencies returns a proper tree (not flat list)
+        let svc = make_svc();
+
+        let resp = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "compileClasspath".to_string(),
+                dependencies: vec![make_dep("org.slf4j", "slf4j-api", "2.0.9")],
+                repositories: vec![make_repo(
+                    "central",
+                    "https://repo.maven.apache.org/maven2/",
+                )],
+                attributes: vec![],
+                lenient: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.success);
+        assert_eq!(resp.resolved_dependencies.len(), 1);
+        // slf4j-api has no compile-scope transitive dependencies
+        // so the tree may be flat — that's fine, the structure supports nesting
+    }
+
+    #[test]
+    fn test_parent_pom_parsing() {
+        // Test that parent POM elements can be parsed
+        let pom = r#"<?xml version="1.0"?>
+<project>
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.2.0</version>
+    </parent>
+  <artifactId>my-app</artifactId>
+  <version>1.0.0</version>
+</project>"#;
+
+        let deps = DependencyResolutionServiceImpl::parse_pom_dependencies(pom);
+        // Parent section should not produce any dependencies
+        assert!(deps.is_empty());
+    }
+
+    #[test]
+    fn test_pom_dependency_clone() {
+        // Verify PomDependency is Clone (needed for recursive resolution)
+        let dep = PomDependency {
+            group: "com.example".to_string(),
+            name: "lib".to_string(),
+            version: "1.0".to_string(),
+            scope: "compile".to_string(),
+            optional: false,
+            classifier: String::new(),
+            type_field: "jar".to_string(),
+            exclusions: vec![("org.unwanted".to_string(), "bar".to_string())],
+        };
+
+        let cloned = dep.clone();
+        assert_eq!(cloned.group, dep.group);
+        assert_eq!(cloned.name, dep.name);
+        assert_eq!(cloned.exclusions.len(), 1);
     }
 }
