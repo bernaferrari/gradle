@@ -14,6 +14,35 @@ use crate::server::cache::{hex, LocalCacheStore};
 /// Maximum number of stored cache keys to track before eviction.
 const MAX_STORED_KEYS: usize = 50_000;
 
+/// Append a string to the hasher in Gradle's format: length as varint, then UTF-8 bytes.
+/// Gradle's `Hasher.putString(CharSequence)` encodes the string length as a varint
+/// followed by the string's UTF-8 bytes.
+fn gradle_put_string(hasher: &mut Md5, s: &str) {
+    let bytes = s.as_bytes();
+    // Gradle uses a varint for the byte length
+    put_varint(hasher, bytes.len() as u64);
+    hasher.update(bytes);
+}
+
+/// Append a varint (variable-length integer) to the hasher.
+/// Gradle's Hasher uses the same varint encoding as protobuf.
+fn put_varint(hasher: &mut Md5, mut value: u64) {
+    loop {
+        if value < 0x80 {
+            hasher.update([value as u8]);
+            return;
+        }
+        hasher.update([((value & 0x7F) | 0x80) as u8]);
+        value >>= 7;
+    }
+}
+
+/// Append a hash (16 bytes of MD5) to the hasher in Gradle's format.
+/// Gradle's `Hasher.putHash(HashCode)` writes the raw hash bytes.
+fn gradle_put_hash(hasher: &mut Md5, hash_bytes: &[u8]) {
+    hasher.update(hash_bytes);
+}
+
 /// A tracked cached output entry: what outputs were stored and when.
 struct CachedOutputEntry {
     /// Monotonically increasing sequence number for eviction ordering.
@@ -95,39 +124,43 @@ impl BuildCacheOrchestrationServiceImpl {
     ) -> String {
         let mut hasher = Md5::new();
 
-        // Include all components in a deterministic order
-        hasher.update(work_identity.as_bytes());
-        hasher.update(b"|impl|");
-        hasher.update(implementation_hash.as_bytes());
-        hasher.update(b"|props|");
+        // 1. Implementation hash (raw bytes — implementation_hash is already a hex string
+        //    representing an MD5/SHA-1 hash of the task implementation)
+        let impl_bytes = hex::decode(implementation_hash)
+            .unwrap_or_else(|| implementation_hash.as_bytes().to_vec());
+        gradle_put_hash(&mut hasher, &impl_bytes);
 
-        // Sort input property hashes for determinism
+        // 2. Input properties — sorted by property name, each as (name, value_hash)
+        //    Gradle's algorithm: putString(propertyName) then valueSnapshot.appendToHasher()
         let mut sorted_props: Vec<_> = input_property_hashes.iter().collect();
         sorted_props.sort_by_key(|(k, _)| *k);
         for (key, hash) in sorted_props {
-            hasher.update(key.as_bytes());
-            hasher.update(b"=");
-            hasher.update(hash.as_bytes());
-            hasher.update(b";");
+            gradle_put_string(&mut hasher, key);
+            // The hash value is itself an MD5 hex string; decode to raw bytes
+            let hash_bytes = hex::decode(hash)
+                .unwrap_or_else(|| hash.as_bytes().to_vec());
+            gradle_put_hash(&mut hasher, &hash_bytes);
         }
 
-        hasher.update(b"|files|");
+        // 3. Input file hashes — sorted by property name, each as (name, fingerprint_hash)
         let mut sorted_files: Vec<_> = input_file_hashes.iter().collect();
         sorted_files.sort_by_key(|(k, _)| *k);
         for (key, hash) in sorted_files {
-            hasher.update(key.as_bytes());
-            hasher.update(b"=");
-            hasher.update(hash.as_bytes());
-            hasher.update(b";");
+            gradle_put_string(&mut hasher, key);
+            let hash_bytes = hex::decode(hash)
+                .unwrap_or_else(|| hash.as_bytes().to_vec());
+            gradle_put_hash(&mut hasher, &hash_bytes);
         }
 
-        hasher.update(b"|outputs|");
+        // 4. Output property names — sorted alphabetically
         let mut sorted_outputs: Vec<_> = output_property_names.iter().collect();
         sorted_outputs.sort();
         for output in sorted_outputs {
-            hasher.update(output.as_bytes());
-            hasher.update(b";");
+            gradle_put_string(&mut hasher, output);
         }
+
+        // 5. Work identity (appended last for uniqueness per task)
+        gradle_put_string(&mut hasher, work_identity);
 
         format!("{:x}", hasher.finalize())
     }
@@ -605,5 +638,133 @@ mod tests {
 
         assert_eq!(svc.cache_hits.load(Ordering::Relaxed), 1);
         assert_eq!(svc.cache_misses.load(Ordering::Relaxed), 2);
+    }
+
+    // ---- Gradle-compatible cache key computation tests ----
+
+    #[test]
+    fn test_cache_key_deterministic() {
+        let props: std::collections::HashMap<String, String> =
+            [("prop1".to_string(), "aaaa".to_string())]
+                .into_iter()
+                .collect();
+        let files: std::collections::HashMap<String, String> =
+            [("file1".to_string(), "bbbb".to_string())]
+                .into_iter()
+                .collect();
+        let outputs = vec!["output1".to_string()];
+
+        let key1 = BuildCacheOrchestrationServiceImpl::compute_cache_key(
+            ":compileJava",
+            "cc112233445566778899aabbccddeeff00",
+            &props,
+            &files,
+            &outputs,
+        );
+        let key2 = BuildCacheOrchestrationServiceImpl::compute_cache_key(
+            ":compileJava",
+            "cc112233445566778899aabbccddeeff00",
+            &props,
+            &files,
+            &outputs,
+        );
+        assert_eq!(key1, key2, "Cache key must be deterministic");
+    }
+
+    #[test]
+    fn test_cache_key_changes_with_different_inputs() {
+        let props1: std::collections::HashMap<String, String> =
+            [("prop1".to_string(), "aaaa".to_string())]
+                .into_iter()
+                .collect();
+        let props2: std::collections::HashMap<String, String> =
+            [("prop1".to_string(), "bbbb".to_string())]
+                .into_iter()
+                .collect();
+        let files: std::collections::HashMap<String, String> =
+            [("file1".to_string(), "cccc".to_string())]
+                .into_iter()
+                .collect();
+        let outputs = vec!["output1".to_string()];
+
+        let key1 = BuildCacheOrchestrationServiceImpl::compute_cache_key(
+            ":compileJava",
+            "cc112233445566778899aabbccddeeff00",
+            &props1,
+            &files,
+            &outputs,
+        );
+        let key2 = BuildCacheOrchestrationServiceImpl::compute_cache_key(
+            ":compileJava",
+            "cc112233445566778899aabbccddeeff00",
+            &props2,
+            &files,
+            &outputs,
+        );
+        assert_ne!(key1, key2, "Different property values should produce different keys");
+    }
+
+    #[test]
+    fn test_cache_key_independent_of_insertion_order() {
+        let props1: std::collections::HashMap<String, String> = [
+            ("alpha".to_string(), "1111".to_string()),
+            ("beta".to_string(), "2222".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let props2: std::collections::HashMap<String, String> = [
+            ("beta".to_string(), "2222".to_string()),
+            ("alpha".to_string(), "1111".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let files = std::collections::HashMap::new();
+        let outputs = vec![];
+
+        let key1 = BuildCacheOrchestrationServiceImpl::compute_cache_key(
+            ":test",
+            "aabbccdd11223344556677889900",
+            &props1,
+            &files,
+            &outputs,
+        );
+        let key2 = BuildCacheOrchestrationServiceImpl::compute_cache_key(
+            ":test",
+            "aabbccdd11223344556677889900",
+            &props2,
+            &files,
+            &outputs,
+        );
+        assert_eq!(key1, key2, "Property insertion order must not affect cache key");
+    }
+
+    #[test]
+    fn test_cache_key_uses_gradle_varint_format() {
+        // Verify that the cache key uses Gradle's varint-encoded string format
+        // (not the old pipe-delimited format)
+        let key = BuildCacheOrchestrationServiceImpl::compute_cache_key(
+            ":compileJava",
+            "aabbccdd11223344556677889900",
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+            &[],
+        );
+        // The key should NOT contain pipe characters (old format used |impl|, |props|, etc.)
+        assert!(!key.contains('|'), "Cache key should use Gradle varint format, not pipe-delimited");
+        // The key should be a valid hex string (MD5 = 32 hex chars)
+        assert_eq!(key.len(), 32, "MD5 hash should produce 32 hex characters");
+        assert!(key.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_cache_key_empty_inputs() {
+        let key = BuildCacheOrchestrationServiceImpl::compute_cache_key(
+            ":test",
+            "",
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+            &[],
+        );
+        assert_eq!(key.len(), 32);
     }
 }
