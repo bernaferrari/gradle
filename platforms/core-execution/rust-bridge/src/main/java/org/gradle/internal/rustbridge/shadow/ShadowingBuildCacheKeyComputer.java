@@ -10,7 +10,8 @@ import java.util.Map;
 
 /**
  * Shadow adapter that compares Java-computed cache keys with Rust-computed cache keys.
- * Always returns the Java result (authoritative). Reports mismatches for validation.
+ * In shadow mode, Java remains authoritative. In authoritative mode, Rust key is used
+ * when available and Java is the fallback.
  */
 public class ShadowingBuildCacheKeyComputer {
 
@@ -55,8 +56,10 @@ public class ShadowingBuildCacheKeyComputer {
         }
 
         try {
-            BuildCacheOrchestrationClient.CacheKeyResult rustResult =
-                cacheOrchestration.computeCacheKey(
+            BuildCacheOrchestrationClient.CacheKeyResult rustResult = authoritative
+                ? cacheOrchestration.computeCacheKeyStrict(
+                    workIdentity, implHash, inputPropertyHashes, inputFileHashes, outputNames)
+                : cacheOrchestration.computeCacheKey(
                     workIdentity, implHash, inputPropertyHashes, inputFileHashes, outputNames);
 
             if (rustResult.isSuccess()) {
@@ -81,6 +84,7 @@ public class ShadowingBuildCacheKeyComputer {
                 );
             }
         } catch (Exception e) {
+            mismatchReporter.reportRustError("cache-key:" + workIdentity, e);
             LOGGER.debug("[substrate:cache-key] shadow comparison failed", e);
         }
 

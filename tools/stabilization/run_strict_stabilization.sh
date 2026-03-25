@@ -39,6 +39,14 @@ echo "  -> org.gradle.internal.rustbridge.taskgraph.TaskGraphShadowReporterTest"
 ./gradlew -q :rust-bridge:test --tests org.gradle.internal.rustbridge.taskgraph.TaskGraphShadowReporterTest
 echo "  -> org.gradle.internal.rustbridge.execution.ShadowingExecutionPlanAdvisorTest"
 ./gradlew -q :rust-bridge:test --tests org.gradle.internal.rustbridge.execution.ShadowingExecutionPlanAdvisorTest
+echo "  -> org.gradle.internal.rustbridge.shadow.ShadowingBuildCacheKeyComputerTest"
+./gradlew -q :rust-bridge:test --tests org.gradle.internal.rustbridge.shadow.ShadowingBuildCacheKeyComputerTest
+echo "  -> org.gradle.internal.rustbridge.watch.ShadowingFileWatcherRegistryFactoryTest"
+./gradlew -q :rust-bridge:test --tests org.gradle.internal.rustbridge.watch.ShadowingFileWatcherRegistryFactoryTest
+echo "  -> org.gradle.internal.rustbridge.watch.ShadowingFileWatcherRegistryTest"
+./gradlew -q :rust-bridge:test --tests org.gradle.internal.rustbridge.watch.ShadowingFileWatcherRegistryTest
+echo "  -> org.gradle.internal.rustbridge.dependency.DependencyResolutionShadowListenerTest"
+./gradlew -q :rust-bridge:test --tests org.gradle.internal.rustbridge.dependency.DependencyResolutionShadowListenerTest
 critical_tests=(
   "server::work::tests::test_evaluate_input_hash_changes_when_only_keys_change"
   "server::config_cache::tests::test_validate_config_ignores_hash_order"

@@ -265,12 +265,17 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
                 fileWatchingFilter.getImmutableLocations()::contains);
 
             // Conditionally wrap with Rust shadow watcher
-            if (options.getOption(RustSubstrateOptions.ENABLE_RUST_FILE_WATCH).get()
+            if (RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_FILE_WATCH)
                 && maybeFactory.isPresent() && substrateClient != null && !substrateClient.isNoop()) {
+                boolean authoritative = RustSubstrateOptions.isSubsystemAuthoritative(
+                    options,
+                    RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_FILE_WATCH
+                );
                 FileWatcherRegistryFactory shadowFactory = new ShadowingFileWatcherRegistryFactory(
                     maybeFactory.get(),
                     new RustFileWatchClient(substrateClient),
-                    new HashMismatchReporter(true)
+                    new HashMismatchReporter(true),
+                    authoritative
                 );
                 maybeFactory = Optional.of(shadowFactory);
             }

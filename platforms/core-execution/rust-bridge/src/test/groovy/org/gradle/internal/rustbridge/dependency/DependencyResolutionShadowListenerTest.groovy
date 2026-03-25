@@ -1,9 +1,8 @@
 package org.gradle.internal.rustbridge.dependency
 
 import org.gradle.api.artifacts.ResolvableDependencies
-import org.gradle.api.artifacts.result.ResolvedArtifactResult
+import org.gradle.api.artifacts.result.ResolvedComponentResult
 import org.gradle.api.artifacts.result.ResolutionResult
-import org.gradle.api.artifacts.result.AttemptResult
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter
 import spock.lang.Specification
 
@@ -58,13 +57,11 @@ class DependencyResolutionShadowListenerTest extends Specification {
         def reporter = Mock(HashMismatchReporter)
         def listener = new DependencyResolutionShadowListener(client, reporter)
 
-        def artifactResult = Mock(ResolvedArtifactResult)
-        def attemptResult = Mock(AttemptResult) {
-            getFailure() >> null
-        }
+        def componentA = Mock(ResolvedComponentResult)
+        def componentB = Mock(ResolvedComponentResult)
         def resolutionResult = Mock(ResolutionResult) {
-            getAllResolvedArtifacts() >> [artifactResult, artifactResult]
-            getAllAttempts() >> [attemptResult]
+            getAllComponents() >> ([componentA, componentB] as Set)
+            getAllDependencies() >> ([] as Set)
         }
         def dependencies = Mock(ResolvableDependencies) {
             getName() >> "runtimeClasspath"
@@ -93,8 +90,8 @@ class DependencyResolutionShadowListenerTest extends Specification {
         def listener = new DependencyResolutionShadowListener(client, reporter)
 
         def resolutionResult = Mock(ResolutionResult) {
-            getAllResolvedArtifacts() >> []
-            getAllAttempts() >> []
+            getAllComponents() >> ([] as Set)
+            getAllDependencies() >> ([] as Set)
         }
         def dependencies = Mock(ResolvableDependencies) {
             getName() >> "testRuntimeClasspath"
@@ -152,8 +149,8 @@ class DependencyResolutionShadowListenerTest extends Specification {
         def listener = new DependencyResolutionShadowListener(client, reporter)
 
         def resolutionResult = Mock(ResolutionResult) {
-            getAllResolvedArtifacts() >> []
-            getAllAttempts() >> []
+            getAllComponents() >> ([] as Set)
+            getAllDependencies() >> ([] as Set)
         }
 
         def depsCompile = Mock(ResolvableDependencies) {
@@ -176,5 +173,57 @@ class DependencyResolutionShadowListenerTest extends Specification {
         listener.resolutionCount == 2
         listener.totalResolutionTimeMs >= 0
         2 * reporter.reportMatch()
+    }
+
+    def "authoritative mode records via strict call"() {
+        given:
+        def client = Mock(RustDependencyResolutionClient)
+        def reporter = Mock(HashMismatchReporter)
+        def listener = new DependencyResolutionShadowListener(client, reporter, true)
+
+        def resolutionResult = Mock(ResolutionResult) {
+            getAllComponents() >> ([] as Set)
+            getAllDependencies() >> ([] as Set)
+        }
+        def dependencies = Mock(ResolvableDependencies) {
+            getName() >> "runtimeClasspath"
+            getResolutionResult() >> resolutionResult
+        }
+        listener.beforeResolve(dependencies)
+
+        when:
+        listener.afterResolve(dependencies)
+
+        then:
+        listener.isAuthoritative()
+        1 * client.recordResolutionStrict("runtimeClasspath", _, 0, true, 0)
+        1 * reporter.reportMatch()
+    }
+
+    def "authoritative mode falls back when strict recording fails"() {
+        given:
+        def client = Mock(RustDependencyResolutionClient)
+        def reporter = Mock(HashMismatchReporter)
+        def listener = new DependencyResolutionShadowListener(client, reporter, true)
+
+        def resolutionResult = Mock(ResolutionResult) {
+            getAllComponents() >> ([] as Set)
+            getAllDependencies() >> ([] as Set)
+        }
+        def dependencies = Mock(ResolvableDependencies) {
+            getName() >> "compileClasspath"
+            getResolutionResult() >> resolutionResult
+        }
+        listener.beforeResolve(dependencies)
+
+        when:
+        listener.afterResolve(dependencies)
+
+        then:
+        1 * client.recordResolutionStrict("compileClasspath", _, 0, true, 0) >> {
+            throw new RuntimeException("rpc down")
+        }
+        1 * reporter.reportRustError("dep-resolve:compileClasspath", _ as RuntimeException)
+        1 * client.recordResolution("compileClasspath", _, 0, true, 0)
     }
 }

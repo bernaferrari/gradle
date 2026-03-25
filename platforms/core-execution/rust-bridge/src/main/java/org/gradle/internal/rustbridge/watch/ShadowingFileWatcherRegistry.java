@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -30,19 +31,31 @@ public class ShadowingFileWatcherRegistry implements FileWatcherRegistry {
     private final FileWatcherRegistry delegate;
     private final RustFileWatchClient rustClient;
     private final HashMismatchReporter mismatchReporter;
+    private final boolean authoritative;
 
     private final List<String> activeWatchIds = new ArrayList<>();
     private final Object lock = new Object();
     private final AtomicLong javaChangeCount = new AtomicLong(0);
+    private final AtomicBoolean rustWatchHealthy = new AtomicBoolean(true);
 
     public ShadowingFileWatcherRegistry(
         FileWatcherRegistry delegate,
         RustFileWatchClient rustClient,
         HashMismatchReporter mismatchReporter
     ) {
+        this(delegate, rustClient, mismatchReporter, false);
+    }
+
+    public ShadowingFileWatcherRegistry(
+        FileWatcherRegistry delegate,
+        RustFileWatchClient rustClient,
+        HashMismatchReporter mismatchReporter,
+        boolean authoritative
+    ) {
         this.delegate = delegate;
         this.rustClient = rustClient;
         this.mismatchReporter = mismatchReporter;
+        this.authoritative = authoritative;
     }
 
     @Override
@@ -64,16 +77,14 @@ public class ShadowingFileWatcherRegistry implements FileWatcherRegistry {
                     synchronized (lock) {
                         activeWatchIds.add(result.getWatchId());
                     }
+                    rustWatchHealthy.set(true);
                     LOGGER.debug("[substrate:watch] shadow watch started for {} (id={})",
                         path, result.getWatchId());
                 } else {
-                    mismatchReporter.reportRustError(
-                        "watch:" + path,
-                        new RuntimeException(result.getErrorMessage())
-                    );
+                    onRustWatchFailure(path, new RuntimeException(result.getErrorMessage()));
                 }
             } catch (Exception e) {
-                mismatchReporter.reportRustError("watch:" + path, e);
+                onRustWatchFailure(path, e);
                 LOGGER.debug("[substrate:watch] shadow watch start failed for {}", path, e);
             }
         }
@@ -109,8 +120,12 @@ public class ShadowingFileWatcherRegistry implements FileWatcherRegistry {
         // Shadow: report match for the build's change processing
         long javaCount = javaChangeCount.getAndSet(0);
         if (javaCount > 0 && rustClient != null) {
-            mismatchReporter.reportMatch();
-            LOGGER.debug("[substrate:watch] shadow OK: {} changes processed in build", javaCount);
+            if (!authoritative || rustWatchHealthy.get()) {
+                mismatchReporter.reportMatch();
+                LOGGER.debug("[substrate:watch] shadow OK: {} changes processed in build", javaCount);
+            } else {
+                LOGGER.debug("[substrate:watch] authoritative fallback active: using Java watcher for {} changes", javaCount);
+            }
         }
 
         return result;
@@ -143,5 +158,20 @@ public class ShadowingFileWatcherRegistry implements FileWatcherRegistry {
      */
     void recordJavaChange() {
         javaChangeCount.incrementAndGet();
+    }
+
+    public boolean isAuthoritative() {
+        return authoritative;
+    }
+
+    public boolean isRustWatchHealthy() {
+        return rustWatchHealthy.get();
+    }
+
+    private void onRustWatchFailure(String path, Exception e) {
+        mismatchReporter.reportRustError("watch:" + path, e);
+        if (authoritative && rustWatchHealthy.compareAndSet(true, false)) {
+            LOGGER.info("[substrate:watch] authoritative fallback to Java watcher for {}", path);
+        }
     }
 }
