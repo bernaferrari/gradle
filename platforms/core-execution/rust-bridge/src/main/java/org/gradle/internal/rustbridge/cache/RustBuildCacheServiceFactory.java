@@ -1,6 +1,5 @@
 package org.gradle.internal.rustbridge.cache;
 
-import org.gradle.api.Describer;
 import org.gradle.caching.BuildCacheService;
 import org.gradle.caching.BuildCacheServiceFactory;
 import org.gradle.internal.rustbridge.SubstrateClient;
@@ -18,9 +17,12 @@ public class RustBuildCacheServiceFactory implements BuildCacheServiceFactory<Ru
     }
 
     @Override
-    public BuildCacheService createBuildCacheService(RustBuildCache configuration, Describer describer) {
+    public BuildCacheService createBuildCacheService(
+        RustBuildCache configuration,
+        BuildCacheServiceFactory.Describer describer
+    ) {
         describer.type("Rust Local");
         describer.config("backend", "rust-local-filesystem");
-        return new RustBuildCacheService(client, "Rust local filesystem cache");
+        return new RustBuildCacheService(client);
     }
 }

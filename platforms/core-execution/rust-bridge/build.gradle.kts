@@ -112,13 +112,8 @@ tasks.named<JavaCompile>("compileJava") {
         "src/main/java/org/gradle/internal/rustbridge/exec/RustExecAction.java",
         "src/main/java/org/gradle/internal/rustbridge/exec/RustProcessHandle.java",
         "src/main/java/org/gradle/internal/rustbridge/worker/ShadowingWorkerPool.java",
-        // Cache files depend on internal org.gradle.caching.configuration.internal classes
-        "src/main/java/org/gradle/internal/rustbridge/cache/RustBridgeCacheServices.java",
-        "src/main/java/org/gradle/internal/rustbridge/cache/RustBuildCache.java",
-        "src/main/java/org/gradle/internal/rustbridge/cache/RustBuildCacheService.java",
-        "src/main/java/org/gradle/internal/rustbridge/cache/RustBuildCacheServiceFactory.java",
-        "src/main/java/org/gradle/internal/rustbridge/cache/RustRemoteBuildCache.java",
-        "src/main/java/org/gradle/internal/rustbridge/cache/RustRemoteBuildCacheServiceFactory.java"
+        // Cache service registration still depends on internal configuration APIs.
+        "src/main/java/org/gradle/internal/rustbridge/cache/RustBridgeCacheServices.java"
     )
     setSource(source.filter { file ->
         excludedDirs.none { file.absolutePath.contains(it) }
