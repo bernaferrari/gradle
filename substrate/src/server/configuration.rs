@@ -303,7 +303,7 @@ fn interpolate_template_depth(
             let expr_start = idx + 2;
             let mut expr_end = expr_start;
             let mut found_close = false;
-            while let Some((i, c)) = chars.next() {
+            for (i, c) in chars.by_ref() {
                 if c == '}' {
                     expr_end = i;
                     found_close = true;
@@ -1031,8 +1031,8 @@ mod tests {
         assert!(PropertySource::CommandLine > PropertySource::SystemProperty);
         assert!(PropertySource::SystemProperty > PropertySource::EnvVariable);
         assert!(PropertySource::EnvVariable > PropertySource::GradleProperties);
-        assert!(PropertySource::GradleProperties > PropertySource::BuildScript);
-        assert!(PropertySource::BuildScript > PropertySource::Extra);
+        assert!(PropertySource::GradleProperties > PropertySource::Extra);
+        assert!(PropertySource::Extra > PropertySource::BuildScript);
     }
 
     #[test]

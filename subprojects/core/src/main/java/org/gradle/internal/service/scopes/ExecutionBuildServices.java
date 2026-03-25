@@ -128,9 +128,9 @@ public class ExecutionBuildServices implements ServiceRegistrationProvider {
             classLoaderHasher
         );
 
-        if (options.getOption(RustSubstrateOptions.ENABLE_RUST_HISTORY).get()
+        if (options.getBoolean(RustSubstrateOptions.ENABLE_RUST_HISTORY)
             && rustHistoryClient != null) {
-            boolean authoritative = options.getOption(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION).get();
+            boolean authoritative = options.getBoolean(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION);
             return new ShadowingExecutionHistoryStore(
                 javaStore,
                 rustHistoryClient,
@@ -194,8 +194,8 @@ public class ExecutionBuildServices implements ServiceRegistrationProvider {
         Supplier<OutputsCleaner> skipEmptyWorkOutputsCleanerSupplier = () -> new OutputsCleaner(deleter, buildOutputCleanupRegistry::isOutputOwnedByBuild, buildOutputCleanupRegistry::isOutputOwnedByBuild);
         boolean emitBuildCacheDebugLogging = startParameter.isBuildCacheDebugLogging();
 
-        boolean advisoryEnabled = options.getOption(RustSubstrateOptions.ENABLE_ADVISORY_EXECUTION).get();
-        boolean authoritativeEnabled = options.getOption(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION).get();
+        boolean advisoryEnabled = options.getBoolean(RustSubstrateOptions.ENABLE_ADVISORY_EXECUTION);
+        boolean authoritativeEnabled = options.getBoolean(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION);
         ExecutionPlanClient planClient = null;
         if ((advisoryEnabled || authoritativeEnabled) && substrateClient != null && !substrateClient.isNoop()) {
             planClient = new ExecutionPlanClient(substrateClient);

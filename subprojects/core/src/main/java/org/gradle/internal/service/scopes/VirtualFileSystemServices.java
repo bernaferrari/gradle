@@ -189,7 +189,7 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
         }
 
         private static FileHasher createDelegate(StreamHasher streamHasher, InternalOptions options, @Nullable SubstrateClient substrateClient) {
-            if (!options.getOption(RustSubstrateOptions.ENABLE_RUST_HASHING).get()) {
+            if (!options.getBoolean(RustSubstrateOptions.ENABLE_RUST_HASHING)) {
                 return new DefaultFileHasher(streamHasher);
             }
             if (substrateClient == null || substrateClient.isNoop()) {
@@ -197,12 +197,12 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
             }
             FileHasher javaHasher = new DefaultFileHasher(streamHasher);
             RustGrpcFileHasher rustHasher = new RustGrpcFileHasher(substrateClient);
-            boolean authoritative = options.getOption(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION).get();
-            if (options.getOption(RustSubstrateOptions.SHADOW_HASHING).get()) {
+            boolean authoritative = options.getBoolean(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION);
+            if (options.getBoolean(RustSubstrateOptions.SHADOW_HASHING)) {
                 return new ShadowingFileHasher(
                     javaHasher,
                     rustHasher,
-                    new HashMismatchReporter(options.getOption(RustSubstrateOptions.REPORT_MISMATCHES).get()),
+                    new HashMismatchReporter(options.getBoolean(RustSubstrateOptions.REPORT_MISMATCHES)),
                     authoritative
                 );
             }
@@ -210,7 +210,7 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
                 return new ShadowingFileHasher(
                     javaHasher,
                     rustHasher,
-                    new HashMismatchReporter(options.getOption(RustSubstrateOptions.REPORT_MISMATCHES).get()),
+                    new HashMismatchReporter(options.getBoolean(RustSubstrateOptions.REPORT_MISMATCHES)),
                     true
                 );
             }
@@ -387,25 +387,25 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
             @Nullable SubstrateClient substrateClient
         ) {
             FileHasher localDelegate;
-            if (!options.getOption(RustSubstrateOptions.ENABLE_RUST_HASHING).get()
+            if (!options.getBoolean(RustSubstrateOptions.ENABLE_RUST_HASHING)
                 || substrateClient == null || substrateClient.isNoop()) {
                 localDelegate = new DefaultFileHasher(streamHasher);
             } else {
                 FileHasher javaHasher = new DefaultFileHasher(streamHasher);
                 RustGrpcFileHasher rustHasher = new RustGrpcFileHasher(substrateClient);
-                boolean authoritative = options.getOption(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION).get();
-                if (options.getOption(RustSubstrateOptions.SHADOW_HASHING).get()) {
+                boolean authoritative = options.getBoolean(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION);
+                if (options.getBoolean(RustSubstrateOptions.SHADOW_HASHING)) {
                     localDelegate = new ShadowingFileHasher(
                         javaHasher,
                         rustHasher,
-                        new HashMismatchReporter(options.getOption(RustSubstrateOptions.REPORT_MISMATCHES).get()),
+                        new HashMismatchReporter(options.getBoolean(RustSubstrateOptions.REPORT_MISMATCHES)),
                         authoritative
                     );
                 } else if (authoritative) {
                     localDelegate = new ShadowingFileHasher(
                         javaHasher,
                         rustHasher,
-                        new HashMismatchReporter(options.getOption(RustSubstrateOptions.REPORT_MISMATCHES).get()),
+                        new HashMismatchReporter(options.getBoolean(RustSubstrateOptions.REPORT_MISMATCHES)),
                         true
                     );
                 } else {
@@ -452,9 +452,9 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
         ) {
             FileCollectionSnapshotter javaSnapshotter = new DefaultFileCollectionSnapshotter(fileSystemAccess, stat);
 
-            if (options.getOption(RustSubstrateOptions.ENABLE_RUST_FINGERPRINTING).get()
+            if (options.getBoolean(RustSubstrateOptions.ENABLE_RUST_FINGERPRINTING)
                 && rustFileFingerprintClient != null && mismatchReporter != null) {
-                boolean authoritative = options.getOption(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION).get();
+                boolean authoritative = options.getBoolean(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION);
                 return new ShadowingFileCollectionSnapshotter(javaSnapshotter, rustFileFingerprintClient, mismatchReporter, authoritative);
             }
 
