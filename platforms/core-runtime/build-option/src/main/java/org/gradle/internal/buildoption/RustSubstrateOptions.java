@@ -334,6 +334,14 @@ public class RustSubstrateOptions {
         new InternalFlag("org.gradle.rust.substrate.cache.authoritative", false);
 
     /**
+     * Enable authoritative mode for Rust-backed configuration cache subsystem.
+     * Property: org.gradle.rust.substrate.configcache.authoritative
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_AUTHORITATIVE_CONFIG_CACHE =
+        new InternalFlag("org.gradle.rust.substrate.configcache.authoritative", false);
+
+    /**
      * Enable authoritative mode for Rust-backed process execution subsystem.
      * Property: org.gradle.rust.substrate.exec.authoritative
      * Default: false

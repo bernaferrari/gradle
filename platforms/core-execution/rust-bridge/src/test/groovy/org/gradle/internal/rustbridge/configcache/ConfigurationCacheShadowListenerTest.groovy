@@ -170,4 +170,67 @@ class ConfigurationCacheShadowListenerTest extends Specification {
         and: "stats reflect the validate"
         listener.getValidateCount() == 1
     }
+
+    def "authoritative store falls back to java result when rust store throws"() {
+        given:
+        def client = Mock(RustConfigCacheClient)
+        def reporter = Mock(HashMismatchReporter)
+        def listener = new ConfigurationCacheShadowListener(client, reporter, true)
+        def configBytes = "config-data".getBytes()
+
+        when:
+        def effectiveStored = listener.storeAuthoritativeOrFallback("key-1", configBytes, 2, ["hash-a"], true)
+
+        then:
+        listener.isAuthoritative()
+        effectiveStored
+        1 * client.storeConfigCacheStrict("key-1", configBytes, 2, ["hash-a"]) >> {
+            throw new RuntimeException("rpc down")
+        }
+        1 * reporter.reportRustError("config-cache:store:key-1", _ as RuntimeException)
+    }
+
+    def "authoritative load prefers rust hit when java misses"() {
+        given:
+        def client = Mock(RustConfigCacheClient)
+        def reporter = Mock(HashMismatchReporter)
+        def listener = new ConfigurationCacheShadowListener(client, reporter, true)
+        def rustBytes = "rust-config".getBytes()
+
+        when:
+        def result = listener.loadAuthoritativeOrFallback("key-1", new byte[0], false)
+
+        then:
+        1 * client.loadConfigCacheStrict("key-1") >> Mock(RustConfigCacheClient.CacheLoadResult) {
+            isFound() >> true
+            getSerializedConfig() >> rustBytes
+            getEntryCount() >> 7L
+            getTimestampMs() >> 1000L
+        }
+        result.isFound()
+        result.getSerializedConfig() == rustBytes
+        result.getEntryCount() == 7L
+        result.getTimestampMs() == 1000L
+        result.getSource() == "rust"
+        listener.getLoadCount() == 1
+    }
+
+    def "authoritative validate falls back to java decision when rust validate throws"() {
+        given:
+        def client = Mock(RustConfigCacheClient)
+        def reporter = Mock(HashMismatchReporter)
+        def listener = new ConfigurationCacheShadowListener(client, reporter, true)
+
+        when:
+        def result = listener.validateAuthoritativeOrFallback("key-1", ["hash-a"], true, "java valid")
+
+        then:
+        1 * client.validateConfigStrict("key-1", ["hash-a"]) >> {
+            throw new RuntimeException("socket closed")
+        }
+        1 * reporter.reportRustError("config-cache:validate:key-1", _ as RuntimeException)
+        result.isValid()
+        result.getReason() == "java valid"
+        result.getSource() == "java-fallback"
+    }
 }

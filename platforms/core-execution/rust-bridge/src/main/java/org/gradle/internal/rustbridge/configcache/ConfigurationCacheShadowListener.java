@@ -23,6 +23,7 @@ public class ConfigurationCacheShadowListener {
 
     private final RustConfigCacheClient client;
     private final HashMismatchReporter mismatchReporter;
+    private final boolean authoritative;
 
     private final AtomicLong storeCount = new AtomicLong(0);
     private final AtomicLong loadCount = new AtomicLong(0);
@@ -34,8 +35,89 @@ public class ConfigurationCacheShadowListener {
         RustConfigCacheClient client,
         HashMismatchReporter mismatchReporter
     ) {
+        this(client, mismatchReporter, false);
+    }
+
+    public ConfigurationCacheShadowListener(
+        RustConfigCacheClient client,
+        HashMismatchReporter mismatchReporter,
+        boolean authoritative
+    ) {
         this.client = client;
         this.mismatchReporter = mismatchReporter;
+        this.authoritative = authoritative;
+    }
+
+    /**
+     * Effective load decision returned by authoritative-or-fallback mode.
+     */
+    public static class EffectiveLoadResult {
+        private final boolean found;
+        private final byte[] serializedConfig;
+        private final long entryCount;
+        private final long timestampMs;
+        private final String source;
+
+        private EffectiveLoadResult(
+            boolean found,
+            byte[] serializedConfig,
+            long entryCount,
+            long timestampMs,
+            String source
+        ) {
+            this.found = found;
+            this.serializedConfig = serializedConfig;
+            this.entryCount = entryCount;
+            this.timestampMs = timestampMs;
+            this.source = source;
+        }
+
+        public boolean isFound() {
+            return found;
+        }
+
+        public byte[] getSerializedConfig() {
+            return serializedConfig;
+        }
+
+        public long getEntryCount() {
+            return entryCount;
+        }
+
+        public long getTimestampMs() {
+            return timestampMs;
+        }
+
+        public String getSource() {
+            return source;
+        }
+    }
+
+    /**
+     * Effective validation decision returned by authoritative-or-fallback mode.
+     */
+    public static class EffectiveValidationResult {
+        private final boolean valid;
+        private final String reason;
+        private final String source;
+
+        private EffectiveValidationResult(boolean valid, String reason, String source) {
+            this.valid = valid;
+            this.reason = reason;
+            this.source = source;
+        }
+
+        public boolean isValid() {
+            return valid;
+        }
+
+        public String getReason() {
+            return reason;
+        }
+
+        public String getSource() {
+            return source;
+        }
     }
 
     /**
@@ -54,29 +136,40 @@ public class ConfigurationCacheShadowListener {
         List<String> inputHashes
     ) {
         storeCount.incrementAndGet();
+        shadowStoreInternal(cacheKey, serializedConfig, entryCount, inputHashes);
+    }
 
+    /**
+     * Attempt Rust store as authoritative path and fall back to Java result on failure.
+     *
+     * @param javaStored the Java-side fallback outcome for this store operation
+     * @return the effective persisted outcome after Rust-first with Java fallback
+     */
+    public boolean storeAuthoritativeOrFallback(
+        String cacheKey,
+        byte[] serializedConfig,
+        long entryCount,
+        List<String> inputHashes,
+        boolean javaStored
+    ) {
+        storeCount.incrementAndGet();
+        if (!authoritative) {
+            shadowStoreInternal(cacheKey, serializedConfig, entryCount, inputHashes);
+            return javaStored;
+        }
         try {
-            boolean stored = client.storeConfigCache(cacheKey, serializedConfig, entryCount, inputHashes);
-
-            if (stored) {
-                mismatchReporter.reportMatch();
-                LOGGER.debug("[substrate:config-cache] shadow store OK: key={}, {} entries, {} bytes",
-                    cacheKey, entryCount, serializedConfig.length);
-            } else {
-                mismatchReporter.reportMismatch(
-                    "config-cache:store:" + cacheKey,
-                    HashCode.fromBytes(serializedConfig),
-                    new byte[0]
-                );
-                LOGGER.debug("[substrate:config-cache] shadow store FAILED for key={}", cacheKey);
+            boolean rustStored = client.storeConfigCacheStrict(cacheKey, serializedConfig, entryCount, inputHashes);
+            reportStoreComparison(cacheKey, serializedConfig, entryCount, rustStored);
+            if (rustStored) {
+                return true;
             }
+            LOGGER.debug("[substrate:config-cache] authoritative store fallback to Java for key={}", cacheKey);
+            return javaStored;
         } catch (Exception e) {
-            mismatchReporter.reportRustError(
-                "config-cache:store:" + cacheKey,
-                new RuntimeException("Rust store failed: " + e.getMessage(), e)
-            );
-            LOGGER.debug("[substrate:config-cache] shadow store error for key={}: {}",
+            reportRustError("store", cacheKey, e);
+            LOGGER.debug("[substrate:config-cache] authoritative store error for key={}, using Java fallback: {}",
                 cacheKey, e.getMessage());
+            return javaStored;
         }
     }
 
@@ -94,55 +187,42 @@ public class ConfigurationCacheShadowListener {
         boolean javaFound
     ) {
         loadCount.incrementAndGet();
+        shadowLoadInternal(cacheKey, javaConfigBytes, javaFound);
+    }
 
+    /**
+     * Attempt Rust load as authoritative path and fall back to Java result on failure.
+     */
+    public EffectiveLoadResult loadAuthoritativeOrFallback(
+        String cacheKey,
+        byte[] javaConfigBytes,
+        boolean javaFound
+    ) {
+        loadCount.incrementAndGet();
+        if (!authoritative) {
+            shadowLoadInternal(cacheKey, javaConfigBytes, javaFound);
+            return new EffectiveLoadResult(javaFound, javaConfigBytes, 0, 0, "java-shadow");
+        }
         try {
-            RustConfigCacheClient.CacheLoadResult rustResult = client.loadConfigCache(cacheKey);
+            RustConfigCacheClient.CacheLoadResult rustResult = client.loadConfigCacheStrict(cacheKey);
+            reportLoadComparison(cacheKey, javaConfigBytes, javaFound, rustResult);
 
-            if (javaFound && rustResult.isFound()) {
-                // Both found -- compare bytes
-                if (Arrays.equals(javaConfigBytes, rustResult.getSerializedConfig())) {
-                    hitCount.incrementAndGet();
-                    mismatchReporter.reportMatch();
-                    LOGGER.debug("[substrate:config-cache] shadow load MATCH: key={}, {} bytes",
-                        cacheKey, javaConfigBytes.length);
-                } else {
-                    hitCount.incrementAndGet();
-                    mismatchReporter.reportMismatch(
-                        "config-cache:load:" + cacheKey,
-                        HashCode.fromBytes(javaConfigBytes),
-                        rustResult.getSerializedConfig()
-                    );
-                    LOGGER.debug("[substrate:config-cache] shadow load MISMATCH: key={}, java={} bytes, rust={} bytes",
-                        cacheKey, javaConfigBytes.length, rustResult.getSerializedConfig().length);
-                }
-            } else if (javaFound && !rustResult.isFound()) {
-                // Java found but Rust did not
-                missCount.incrementAndGet();
-                mismatchReporter.reportMismatch(
-                    "config-cache:load:" + cacheKey,
-                    HashCode.fromBytes(javaConfigBytes),
-                    new byte[0]
+            if (rustResult.isFound()) {
+                return new EffectiveLoadResult(
+                    true,
+                    rustResult.getSerializedConfig(),
+                    rustResult.getEntryCount(),
+                    rustResult.getTimestampMs(),
+                    "rust"
                 );
-                LOGGER.debug("[substrate:config-cache] shadow load MISS (Rust): key={}, Java has {} bytes",
-                    cacheKey, javaConfigBytes.length);
-            } else if (!javaFound && rustResult.isFound()) {
-                // Rust found but Java did not -- unexpected but not a functional issue
-                missCount.incrementAndGet();
-                LOGGER.debug("[substrate:config-cache] shadow load MISS (Java): key={}, Rust has {} bytes",
-                    cacheKey, rustResult.getSerializedConfig().length);
-            } else {
-                // Neither found -- consistent miss
-                missCount.incrementAndGet();
-                LOGGER.debug("[substrate:config-cache] shadow load MISS (both): key={}", cacheKey);
             }
+            LOGGER.debug("[substrate:config-cache] authoritative load fallback to Java for key={}", cacheKey);
         } catch (Exception e) {
-            mismatchReporter.reportRustError(
-                "config-cache:load:" + cacheKey,
-                new RuntimeException("Rust load failed: " + e.getMessage(), e)
-            );
-            LOGGER.debug("[substrate:config-cache] shadow load error for key={}: {}",
+            reportRustError("load", cacheKey, e);
+            LOGGER.debug("[substrate:config-cache] authoritative load error for key={}, using Java fallback: {}",
                 cacheKey, e.getMessage());
         }
+        return new EffectiveLoadResult(javaFound, javaConfigBytes, 0, 0, "java-fallback");
     }
 
     /**
@@ -159,34 +239,190 @@ public class ConfigurationCacheShadowListener {
         boolean javaValid
     ) {
         validateCount.incrementAndGet();
+        shadowValidateInternal(cacheKey, inputHashes, javaValid);
+    }
+
+    /**
+     * Attempt Rust validation as authoritative path and fall back to Java decision on failure.
+     */
+    public EffectiveValidationResult validateAuthoritativeOrFallback(
+        String cacheKey,
+        List<String> inputHashes,
+        boolean javaValid,
+        String javaReason
+    ) {
+        validateCount.incrementAndGet();
+        if (!authoritative) {
+            shadowValidateInternal(cacheKey, inputHashes, javaValid);
+            return new EffectiveValidationResult(javaValid, javaReason, "java-shadow");
+        }
 
         try {
-            RustConfigCacheClient.ValidationResult rustResult = client.validateConfig(cacheKey, inputHashes);
-
-            if (javaValid == rustResult.isValid()) {
-                mismatchReporter.reportMatch();
-                LOGGER.debug("[substrate:config-cache] shadow validate OK: key={}, valid={}",
-                    cacheKey, javaValid);
-            } else {
-                mismatchReporter.reportMismatch(
-                    "config-cache:validate:" + cacheKey,
-                    HashCode.fromString(javaValid ? "VALID" : "INVALID"),
-                    HashCode.fromString(rustResult.isValid() ? "VALID" : "INVALID")
-                );
-                LOGGER.debug("[substrate:config-cache] shadow validate MISMATCH: key={}, java={}, rust={}, reason={}",
-                    cacheKey, javaValid, rustResult.isValid(), rustResult.getReason());
-            }
+            RustConfigCacheClient.ValidationResult rustResult = client.validateConfigStrict(cacheKey, inputHashes);
+            reportValidateComparison(cacheKey, javaValid, rustResult);
+            return new EffectiveValidationResult(rustResult.isValid(), rustResult.getReason(), "rust");
         } catch (Exception e) {
-            mismatchReporter.reportRustError(
-                "config-cache:validate:" + cacheKey,
-                new RuntimeException("Rust validate failed: " + e.getMessage(), e)
-            );
+            reportRustError("validate", cacheKey, e);
+            LOGGER.debug("[substrate:config-cache] authoritative validate error for key={}, using Java fallback: {}",
+                cacheKey, e.getMessage());
+            return new EffectiveValidationResult(javaValid, javaReason, "java-fallback");
+        }
+    }
+
+    /**
+     * Attempt Rust validation as authoritative path and fall back to Java decision on failure.
+     */
+    public EffectiveValidationResult validateAuthoritativeOrFallback(
+        String cacheKey,
+        List<String> inputHashes,
+        boolean javaValid
+    ) {
+        return validateAuthoritativeOrFallback(cacheKey, inputHashes, javaValid, "");
+    }
+
+    private void shadowStoreInternal(
+        String cacheKey,
+        byte[] serializedConfig,
+        long entryCount,
+        List<String> inputHashes
+    ) {
+        try {
+            boolean stored = client.storeConfigCache(cacheKey, serializedConfig, entryCount, inputHashes);
+            reportStoreComparison(cacheKey, serializedConfig, entryCount, stored);
+        } catch (Exception e) {
+            reportRustError("store", cacheKey, e);
+            LOGGER.debug("[substrate:config-cache] shadow store error for key={}: {}",
+                cacheKey, e.getMessage());
+        }
+    }
+
+    private void shadowLoadInternal(
+        String cacheKey,
+        byte[] javaConfigBytes,
+        boolean javaFound
+    ) {
+        try {
+            RustConfigCacheClient.CacheLoadResult rustResult = client.loadConfigCache(cacheKey);
+            reportLoadComparison(cacheKey, javaConfigBytes, javaFound, rustResult);
+        } catch (Exception e) {
+            reportRustError("load", cacheKey, e);
+            LOGGER.debug("[substrate:config-cache] shadow load error for key={}: {}",
+                cacheKey, e.getMessage());
+        }
+    }
+
+    private void shadowValidateInternal(
+        String cacheKey,
+        List<String> inputHashes,
+        boolean javaValid
+    ) {
+        try {
+            RustConfigCacheClient.ValidationResult rustResult = client.validateConfig(cacheKey, inputHashes);
+            reportValidateComparison(cacheKey, javaValid, rustResult);
+        } catch (Exception e) {
+            reportRustError("validate", cacheKey, e);
             LOGGER.debug("[substrate:config-cache] shadow validate error for key={}: {}",
                 cacheKey, e.getMessage());
         }
     }
 
+    private void reportStoreComparison(
+        String cacheKey,
+        byte[] serializedConfig,
+        long entryCount,
+        boolean rustStored
+    ) {
+        if (rustStored) {
+            mismatchReporter.reportMatch();
+            LOGGER.debug("[substrate:config-cache] shadow store OK: key={}, {} entries, {} bytes",
+                cacheKey, entryCount, serializedConfig.length);
+        } else {
+            mismatchReporter.reportMismatch(
+                "config-cache:store:" + cacheKey,
+                HashCode.fromBytes(serializedConfig),
+                new byte[0]
+            );
+            LOGGER.debug("[substrate:config-cache] shadow store FAILED for key={}", cacheKey);
+        }
+    }
+
+    private void reportLoadComparison(
+        String cacheKey,
+        byte[] javaConfigBytes,
+        boolean javaFound,
+        RustConfigCacheClient.CacheLoadResult rustResult
+    ) {
+        if (javaFound && rustResult.isFound()) {
+            // Both found -- compare bytes
+            if (Arrays.equals(javaConfigBytes, rustResult.getSerializedConfig())) {
+                hitCount.incrementAndGet();
+                mismatchReporter.reportMatch();
+                LOGGER.debug("[substrate:config-cache] shadow load MATCH: key={}, {} bytes",
+                    cacheKey, javaConfigBytes.length);
+            } else {
+                hitCount.incrementAndGet();
+                mismatchReporter.reportMismatch(
+                    "config-cache:load:" + cacheKey,
+                    HashCode.fromBytes(javaConfigBytes),
+                    rustResult.getSerializedConfig()
+                );
+                LOGGER.debug("[substrate:config-cache] shadow load MISMATCH: key={}, java={} bytes, rust={} bytes",
+                    cacheKey, javaConfigBytes.length, rustResult.getSerializedConfig().length);
+            }
+        } else if (javaFound && !rustResult.isFound()) {
+            // Java found but Rust did not
+            missCount.incrementAndGet();
+            mismatchReporter.reportMismatch(
+                "config-cache:load:" + cacheKey,
+                HashCode.fromBytes(javaConfigBytes),
+                new byte[0]
+            );
+            LOGGER.debug("[substrate:config-cache] shadow load MISS (Rust): key={}, Java has {} bytes",
+                cacheKey, javaConfigBytes.length);
+        } else if (!javaFound && rustResult.isFound()) {
+            // Rust found but Java did not -- unexpected but not a functional issue
+            missCount.incrementAndGet();
+            LOGGER.debug("[substrate:config-cache] shadow load MISS (Java): key={}, Rust has {} bytes",
+                cacheKey, rustResult.getSerializedConfig().length);
+        } else {
+            // Neither found -- consistent miss
+            missCount.incrementAndGet();
+            LOGGER.debug("[substrate:config-cache] shadow load MISS (both): key={}", cacheKey);
+        }
+    }
+
+    private void reportValidateComparison(
+        String cacheKey,
+        boolean javaValid,
+        RustConfigCacheClient.ValidationResult rustResult
+    ) {
+        if (javaValid == rustResult.isValid()) {
+            mismatchReporter.reportMatch();
+            LOGGER.debug("[substrate:config-cache] shadow validate OK: key={}, valid={}",
+                cacheKey, javaValid);
+        } else {
+            mismatchReporter.reportMismatch(
+                "config-cache:validate:" + cacheKey,
+                HashCode.fromBytes((javaValid ? "VALID" : "INVALID").getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                HashCode.fromBytes((rustResult.isValid() ? "VALID" : "INVALID").getBytes(java.nio.charset.StandardCharsets.UTF_8))
+            );
+            LOGGER.debug("[substrate:config-cache] shadow validate MISMATCH: key={}, java={}, rust={}, reason={}",
+                cacheKey, javaValid, rustResult.isValid(), rustResult.getReason());
+        }
+    }
+
+    private void reportRustError(String operation, String cacheKey, Exception e) {
+        mismatchReporter.reportRustError(
+            "config-cache:" + operation + ":" + cacheKey,
+            new RuntimeException("Rust " + operation + " failed: " + e.getMessage(), e)
+        );
+    }
+
     // --- Stats ---
+
+    public boolean isAuthoritative() {
+        return authoritative;
+    }
 
     /**
      * Get the total number of store operations shadowed.
@@ -237,7 +473,8 @@ public class ConfigurationCacheShadowListener {
     @Override
     public String toString() {
         return String.format(
-            "config-cache shadow: stores=%d, loads=%d, hits=%d, misses=%d, hitRate=%.1f%%, validates=%d",
+            "config-cache %s: stores=%d, loads=%d, hits=%d, misses=%d, hitRate=%.1f%%, validates=%d",
+            authoritative ? "authoritative" : "shadow",
             storeCount.get(), loadCount.get(), hitCount.get(), missCount.get(),
             getHitRate() * 100, validateCount.get()
         );
