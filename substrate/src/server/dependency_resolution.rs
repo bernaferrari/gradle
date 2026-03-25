@@ -80,6 +80,18 @@ struct MavenSnapshot {
     local_copy: bool,
 }
 
+/// Parsed <parent> section from a POM file.
+#[allow(dead_code)]
+struct ParentPom {
+    group_id: String,
+    artifact_id: String,
+    version: String,
+    relative_path: String,
+}
+
+/// Maximum depth for parent POM inheritance chain.
+const MAX_PARENT_DEPTH: u32 = 10;
+
 /// Checksum verification result.
 #[allow(dead_code)]
 struct ChecksumResult {
@@ -675,6 +687,30 @@ impl DependencyResolutionServiceImpl {
         group_matches && name_matches
     }
 
+    /// Parse the <parent> section from a POM file.
+    /// Returns None if no parent section exists.
+    fn parse_parent_pom(pom_content: &str) -> Option<ParentPom> {
+        let bytes = pom_content.as_bytes();
+        let pos = find_open_tag_exact(bytes, 0, b"parent")?;
+        let _end_pos = find_end_tag(bytes, pos, b"parent")?;
+
+        let group_id = extract_tag_text(bytes, pos, b"groupId").unwrap_or_default();
+        let artifact_id = extract_tag_text(bytes, pos, b"artifactId").unwrap_or_default();
+        let version = extract_tag_text(bytes, pos, b"version").unwrap_or_default();
+        let relative_path = extract_tag_text(bytes, pos, b"relativePath").unwrap_or_default();
+
+        if group_id.is_empty() || artifact_id.is_empty() || version.is_empty() {
+            return None;
+        }
+
+        Some(ParentPom {
+            group_id,
+            artifact_id,
+            version,
+            relative_path,
+        })
+    }
+
     /// Parse properties from <properties> section of a POM.
     pub fn parse_pom_properties(pom_content: &str) -> std::collections::HashMap<String, String> {
         let mut props = std::collections::HashMap::new();
@@ -1018,6 +1054,86 @@ impl DependencyResolutionServiceImpl {
         }
     }
 
+    /// Resolve parent POM chain and merge inherited properties and dependency management.
+    /// Walks up the parent chain (grandparent, great-grandparent, etc.) up to MAX_PARENT_DEPTH.
+    /// Child properties override parent properties. Parent managed deps fill gaps in child.
+    async fn resolve_parent_inheritance(
+        &self,
+        pom_content: &str,
+        repos: &[RepositoryDescriptor],
+    ) -> (
+        std::collections::HashMap<String, String>,
+        std::collections::HashMap<(String, String), String>,
+    ) {
+        let mut properties = Self::parse_pom_properties(pom_content);
+        let mut managed = Self::parse_dependency_management(pom_content);
+
+        let mut current_pom = pom_content.to_string();
+        let mut visited_parents = std::collections::HashSet::new();
+
+        for _ in 0..MAX_PARENT_DEPTH {
+            let parent = match Self::parse_parent_pom(&current_pom) {
+                Some(p) => p,
+                None => break,
+            };
+
+            let parent_key = (parent.group_id.clone(), parent.artifact_id.clone(), parent.version.clone());
+            if !visited_parents.insert(parent_key) {
+                tracing::debug!("Parent cycle detected, stopping inheritance chain");
+                break;
+            }
+
+            // Fetch parent POM from repos
+            let mut parent_content = None;
+            for repo in repos {
+                match self.fetch_pom(&parent.group_id, &parent.artifact_id, &parent.version, repo).await {
+                    Ok(content) => {
+                        parent_content = Some(content);
+                        break;
+                    }
+                    Err(e) => {
+                        tracing::debug!(
+                            parent_group = %parent.group_id,
+                            parent_name = %parent.artifact_id,
+                            parent_version = %parent.version,
+                            repo = %repo.url,
+                            error = %e,
+                            "Failed to fetch parent POM"
+                        );
+                    }
+                }
+            }
+
+            let parent_pom = match parent_content {
+                Some(content) => content,
+                None => break,
+            };
+
+            // Merge: child properties override parent, parent fills gaps
+            let parent_props = Self::parse_pom_properties(&parent_pom);
+            for (k, v) in parent_props {
+                properties.entry(k).or_insert(v);
+            }
+
+            // Merge: child managed deps override parent, parent fills gaps
+            let parent_managed = Self::parse_dependency_management(&parent_pom);
+            for (k, v) in parent_managed {
+                managed.entry(k).or_insert(v);
+            }
+
+            tracing::debug!(
+                parent_group = %parent.group_id,
+                parent_name = %parent.artifact_id,
+                parent_version = %parent.version,
+                "Inherited properties and managed deps from parent POM"
+            );
+
+            current_pom = parent_pom;
+        }
+
+        (properties, managed)
+    }
+
     /// Fetch a POM from repositories and recursively resolve its transitive dependencies.
     /// Handles BOM imports (scope=import, type=pom) and applies exclusions.
     async fn fetch_and_resolve_transitive(
@@ -1032,8 +1148,10 @@ impl DependencyResolutionServiceImpl {
         for repo in repos {
             match self.fetch_pom(group, name, version, repo).await {
                 Ok(pom_content) => {
-                    let properties = Self::parse_pom_properties(&pom_content);
-                    let managed_versions = Self::parse_dependency_management(&pom_content);
+                    // Resolve parent POM chain for inherited properties and managed deps
+                    let (properties, managed_versions) = self
+                        .resolve_parent_inheritance(&pom_content, repos)
+                        .await;
                     let pom_deps = Self::parse_pom_dependencies(&pom_content);
 
                     // Collect exclusions from this POM's direct dependencies
@@ -3672,5 +3790,185 @@ mod tests {
         assert_eq!(cloned.group, dep.group);
         assert_eq!(cloned.name, dep.name);
         assert_eq!(cloned.exclusions.len(), 1);
+    }
+
+    // ---- Parent POM inheritance tests ----
+
+    #[test]
+    fn test_parse_parent_pom_basic() {
+        let pom = r#"<?xml version="1.0"?>
+<project>
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.2.0</version>
+  </parent>
+  <groupId>com.example</groupId>
+  <artifactId>my-app</artifactId>
+  <version>1.0.0</version>
+</project>"#;
+
+        let parent = DependencyResolutionServiceImpl::parse_parent_pom(pom);
+        assert!(parent.is_some());
+        let p = parent.unwrap();
+        assert_eq!(p.group_id, "org.springframework.boot");
+        assert_eq!(p.artifact_id, "spring-boot-starter-parent");
+        assert_eq!(p.version, "3.2.0");
+        assert!(p.relative_path.is_empty());
+    }
+
+    #[test]
+    fn test_parse_parent_pom_with_relative_path() {
+        let pom = r#"<?xml version="1.0"?>
+<project>
+  <parent>
+    <groupId>com.example</groupId>
+    <artifactId>parent-pom</artifactId>
+    <version>1.0.0</version>
+    <relativePath>../parent/pom.xml</relativePath>
+  </parent>
+  <artifactId>child</artifactId>
+</project>"#;
+
+        let parent = DependencyResolutionServiceImpl::parse_parent_pom(pom).unwrap();
+        assert_eq!(parent.relative_path, "../parent/pom.xml");
+    }
+
+    #[test]
+    fn test_parse_parent_pom_none_when_missing() {
+        let pom = r#"<?xml version="1.0"?>
+<project>
+  <groupId>com.example</groupId>
+  <artifactId>standalone</artifactId>
+  <version>1.0.0</version>
+</project>"#;
+
+        assert!(DependencyResolutionServiceImpl::parse_parent_pom(pom).is_none());
+    }
+
+    #[test]
+    fn test_parse_parent_pom_none_when_incomplete() {
+        // Missing version — should return None
+        let pom = r#"<?xml version="1.0"?>
+<project>
+  <parent>
+    <groupId>com.example</groupId>
+    <artifactId>parent</artifactId>
+  </parent>
+</project>"#;
+
+        assert!(DependencyResolutionServiceImpl::parse_parent_pom(pom).is_none());
+    }
+
+    #[test]
+    fn test_parent_inheritance_property_merging() {
+        // Verify that child properties override parent properties
+        let child_pom = r#"<?xml version="1.0"?>
+<project>
+  <parent>
+    <groupId>com.example</groupId>
+    <artifactId>parent</artifactId>
+    <version>1.0</version>
+  </parent>
+  <properties>
+    <child.prop>child-value</child.prop>
+    <shared.prop>child-override</shared.prop>
+  </properties>
+</project>"#;
+
+        let parent_pom = r#"<?xml version="1.0"?>
+<project>
+  <groupId>com.example</groupId>
+  <artifactId>parent</artifactId>
+  <version>1.0</version>
+  <properties>
+    <parent.only.prop>parent-value</parent.only.prop>
+    <shared.prop>parent-value</shared.prop>
+  </properties>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-api</artifactId>
+        <version>2.0.9</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+</project>"#;
+
+        // Simulate what resolve_parent_inheritance does:
+        // Child props first, then parent fills gaps
+        let mut properties = DependencyResolutionServiceImpl::parse_pom_properties(child_pom);
+        let mut managed = DependencyResolutionServiceImpl::parse_dependency_management(child_pom);
+
+        // Parent doesn't contribute managed deps that child already has (child has none)
+        // but does fill in missing properties
+        let parent_props = DependencyResolutionServiceImpl::parse_pom_properties(parent_pom);
+        let parent_managed = DependencyResolutionServiceImpl::parse_dependency_management(parent_pom);
+
+        for (k, v) in parent_props {
+            properties.entry(k).or_insert(v);
+        }
+        for (k, v) in parent_managed {
+            managed.entry(k).or_insert(v);
+        }
+
+        // Child property should override parent
+        assert_eq!(properties.get("shared.prop").unwrap(), "child-override");
+        // Child-only property should exist
+        assert_eq!(properties.get("child.prop").unwrap(), "child-value");
+        // Parent-only property should be inherited
+        assert_eq!(properties.get("parent.only.prop").unwrap(), "parent-value");
+        // Parent managed dep should be inherited
+        assert_eq!(
+            managed.get(&("org.slf4j".to_string(), "slf4j-api".to_string())).unwrap(),
+            "2.0.9"
+        );
+    }
+
+    #[test]
+    fn test_parent_inheritance_dependency_management() {
+        // Parent provides managed version, child dependency uses it
+        let child_pom = r#"<?xml version="1.0"?>
+<project>
+  <parent>
+    <groupId>com.example</groupId>
+    <artifactId>parent</artifactId>
+    <version>1.0</version>
+  </parent>
+  <dependencies>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+    </dependency>
+  </dependencies>
+</project>"#;
+
+        let parent_pom = r#"<?xml version="1.0"?>
+<project>
+  <groupId>com.example</groupId>
+  <artifactId>parent</artifactId>
+  <version>1.0</version>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-api</artifactId>
+        <version>2.0.9</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+</project>"#;
+
+        // Simulate: child has no version for slf4j-api, parent provides it via dep management
+        let child_deps = DependencyResolutionServiceImpl::parse_pom_dependencies(child_pom);
+        assert_eq!(child_deps.len(), 1);
+        assert!(child_deps[0].version.is_empty()); // No version specified in child
+
+        let parent_managed = DependencyResolutionServiceImpl::parse_dependency_management(parent_pom);
+        let managed_version = parent_managed
+            .get(&("org.slf4j".to_string(), "slf4j-api".to_string()));
+        assert!(managed_version.is_some());
+        assert_eq!(managed_version.unwrap(), "2.0.9");
     }
 }
