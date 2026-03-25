@@ -5,13 +5,15 @@ use std::time::Instant;
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
+use crate::client::jvm_host_bridge::JvmHostBridge;
+use super::scopes::{BuildId, ScopeRegistry, SessionId};
+use super::build_plan_shadow::{capture_and_persist_shadow_from_jvm, BuildPlanShadowStore};
 use crate::proto::{
     bootstrap_service_server::BootstrapService, CompleteBuildRequest, CompleteBuildResponse,
-    GetSubstrateInfoRequest, GetSubstrateInfoResponse, HealthCheckRequest,
-    HealthCheckResponse, InitBuildRequest, InitBuildResponse, SubstrateServiceInfo,
+    GetSubstrateInfoRequest, GetSubstrateInfoResponse, HealthCheckRequest, HealthCheckResponse,
+    InitBuildRequest, InitBuildResponse, SubstrateServiceInfo,
 };
 use crate::SERVER_VERSION;
-use super::scopes::{BuildId, ScopeRegistry, SessionId};
 
 /// Active build session.
 struct BuildSession {
@@ -31,6 +33,8 @@ pub struct BootstrapServiceImpl {
     start_time: Instant,
     health_status: std::sync::atomic::AtomicBool,
     scope_registry: Option<Arc<ScopeRegistry>>,
+    jvm_bridge: Option<Arc<JvmHostBridge>>,
+    build_plan_shadow_store: Option<Arc<BuildPlanShadowStore>>,
 }
 
 impl Default for BootstrapServiceImpl {
@@ -47,6 +51,8 @@ impl BootstrapServiceImpl {
             start_time: Instant::now(),
             health_status: std::sync::atomic::AtomicBool::new(true),
             scope_registry: None,
+            jvm_bridge: None,
+            build_plan_shadow_store: None,
         }
     }
 
@@ -57,6 +63,24 @@ impl BootstrapServiceImpl {
             start_time: Instant::now(),
             health_status: std::sync::atomic::AtomicBool::new(true),
             scope_registry: Some(scope_registry),
+            jvm_bridge: None,
+            build_plan_shadow_store: None,
+        }
+    }
+
+    pub fn with_scope_registry_and_shadow(
+        scope_registry: Arc<ScopeRegistry>,
+        jvm_bridge: Arc<JvmHostBridge>,
+        build_plan_shadow_store: Arc<BuildPlanShadowStore>,
+    ) -> Self {
+        Self {
+            sessions: DashMap::new(),
+            request_counts: DashMap::new(),
+            start_time: Instant::now(),
+            health_status: std::sync::atomic::AtomicBool::new(true),
+            scope_registry: Some(scope_registry),
+            jvm_bridge: Some(jvm_bridge),
+            build_plan_shadow_store: Some(build_plan_shadow_store),
         }
     }
 
@@ -113,16 +137,60 @@ impl BootstrapService for BootstrapServiceImpl {
         // Register build in scope registry if session_id is provided
         if let Some(ref registry) = self.scope_registry {
             if !req.session_id.is_empty() {
-                registry.register_build(
-                    SessionId::from(req.session_id.clone()),
-                    build_id.clone(),
-                );
+                registry.register_build(SessionId::from(req.session_id.clone()), build_id.clone());
                 tracing::debug!(
                     build_id = %build_id_str,
                     session_id = %req.session_id,
                     "Registered build in scope registry"
                 );
             }
+        }
+
+        // Shadow capture path: once a build is initialized and the JVM host is connected,
+        // materialize and persist a canonical Build Plan IR artifact keyed by build_id.
+        if let (Some(jvm_bridge), Some(shadow_store)) =
+            (&self.jvm_bridge, &self.build_plan_shadow_store)
+        {
+            let jvm_bridge = Arc::clone(jvm_bridge);
+            let shadow_store = Arc::clone(shadow_store);
+            let build_id_for_shadow = req.build_id.clone();
+            tokio::spawn(async move {
+                for attempt in 1..=20 {
+                    match capture_and_persist_shadow_from_jvm(
+                        &jvm_bridge,
+                        &shadow_store,
+                        &build_id_for_shadow,
+                    )
+                    .await
+                    {
+                        Ok(Some(path)) => {
+                            tracing::info!(
+                                build_id = %build_id_for_shadow,
+                                attempt,
+                                artifact = %path.display(),
+                                "Persisted per-build JVM->Rust build plan shadow artifact"
+                            );
+                            return;
+                        }
+                        Ok(None) => {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                build_id = %build_id_for_shadow,
+                                attempt,
+                                error = %error,
+                                "Failed capturing per-build plan shadow from JVM host"
+                            );
+                            tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+                        }
+                    }
+                }
+                tracing::info!(
+                    build_id = %build_id_for_shadow,
+                    "No per-build JVM shadow plan captured within retry window"
+                );
+            });
         }
 
         tracing::info!(
@@ -207,16 +275,39 @@ impl BootstrapService for BootstrapServiceImpl {
         _request: Request<GetSubstrateInfoRequest>,
     ) -> Result<Response<GetSubstrateInfoResponse>, Status> {
         let all_services = [
-            "control", "hash", "cache", "exec", "work",
-            "execution-plan", "execution-history", "cache-orchestration",
-            "file-fingerprint", "value-snapshot", "task-graph",
-            "configuration", "plugin", "build-operations", "bootstrap",
-            "dependency-resolution", "file-watch", "configuration-cache",
-            "toolchain", "build-event-stream", "worker-process",
-            "build-layout", "build-result", "problem-reporting",
-            "resource-management", "build-comparison", "console",
-            "test-execution", "artifact-publishing", "build-init",
-            "incremental-compilation", "build-metrics", "garbage-collection",
+            "control",
+            "hash",
+            "cache",
+            "exec",
+            "work",
+            "execution-plan",
+            "execution-history",
+            "cache-orchestration",
+            "file-fingerprint",
+            "value-snapshot",
+            "task-graph",
+            "configuration",
+            "plugin",
+            "build-operations",
+            "bootstrap",
+            "dependency-resolution",
+            "file-watch",
+            "configuration-cache",
+            "toolchain",
+            "build-event-stream",
+            "worker-process",
+            "build-layout",
+            "build-result",
+            "problem-reporting",
+            "resource-management",
+            "build-comparison",
+            "console",
+            "test-execution",
+            "artifact-publishing",
+            "build-init",
+            "incremental-compilation",
+            "build-metrics",
+            "garbage-collection",
         ];
 
         let services: Vec<SubstrateServiceInfo> = all_services
@@ -263,7 +354,9 @@ mod tests {
         assert_eq!(resp.build_id, "build-123");
         assert_eq!(resp.max_parallelism, 4);
 
-        assert!(svc.sessions.contains_key(&BuildId::from("build-123".to_string())));
+        assert!(svc
+            .sessions
+            .contains_key(&BuildId::from("build-123".to_string())));
 
         let resp2 = svc
             .complete_build(Request::new(CompleteBuildRequest {
@@ -276,7 +369,9 @@ mod tests {
             .into_inner();
 
         assert!(resp2.acknowledged);
-        assert!(!svc.sessions.contains_key(&BuildId::from("build-123".to_string())));
+        assert!(!svc
+            .sessions
+            .contains_key(&BuildId::from("build-123".to_string())));
     }
 
     #[tokio::test]
@@ -590,10 +685,15 @@ mod tests {
 
         assert_eq!(resp.build_id, "zero-para");
         assert_eq!(resp.max_parallelism, 0);
-        assert!(svc.sessions.contains_key(&BuildId::from("zero-para".to_string())));
+        assert!(svc
+            .sessions
+            .contains_key(&BuildId::from("zero-para".to_string())));
 
         // Verify the session stored the zero parallelism
-        let session = svc.sessions.get(&BuildId::from("zero-para".to_string())).unwrap();
+        let session = svc
+            .sessions
+            .get(&BuildId::from("zero-para".to_string()))
+            .unwrap();
         assert_eq!(session.requested_parallelism, 0);
     }
 
@@ -608,10 +708,21 @@ mod tests {
             .into_inner();
 
         let expected_core_services = [
-            "hash", "cache", "exec", "work", "bootstrap", "control",
-            "configuration", "file-watch", "dependency-resolution",
-            "artifact-publishing", "worker-process", "build-event-stream",
-            "console", "plugin", "test-execution",
+            "hash",
+            "cache",
+            "exec",
+            "work",
+            "bootstrap",
+            "control",
+            "configuration",
+            "file-watch",
+            "dependency-resolution",
+            "artifact-publishing",
+            "worker-process",
+            "build-event-stream",
+            "console",
+            "plugin",
+            "test-execution",
         ];
 
         // Collect the service names returned
@@ -636,8 +747,7 @@ mod tests {
             assert_eq!(
                 svc_info.status, "active",
                 "Service '{}' should be active, got '{}'",
-                svc_info.service_name,
-                svc_info.status
+                svc_info.service_name, svc_info.status
             );
         }
 
@@ -646,8 +756,7 @@ mod tests {
             assert_eq!(
                 svc_info.requests_served, 1,
                 "Service '{}' should have 1 request on first call, got {}",
-                svc_info.service_name,
-                svc_info.requests_served
+                svc_info.service_name, svc_info.requests_served
             );
         }
     }

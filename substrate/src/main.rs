@@ -23,49 +23,49 @@ use gradle_substrate_daemon::{
         cache_service_server::CacheServiceServer,
         configuration_cache_service_server::ConfigurationCacheServiceServer,
         configuration_service_server::ConfigurationServiceServer,
-        console_service_server::ConsoleServiceServer,
-        control_service_server::ControlServiceServer,
+        console_service_server::ConsoleServiceServer, control_service_server::ControlServiceServer,
         dag_executor_service_server::DagExecutorServiceServer,
         dependency_resolution_service_server::DependencyResolutionServiceServer,
+        exec_service_server::ExecServiceServer,
         execution_history_service_server::ExecutionHistoryServiceServer,
         execution_plan_service_server::ExecutionPlanServiceServer,
-        exec_service_server::ExecServiceServer,
         file_fingerprint_service_server::FileFingerprintServiceServer,
         file_watch_service_server::FileWatchServiceServer,
         garbage_collection_service_server::GarbageCollectionServiceServer,
         hash_service_server::HashServiceServer,
         incremental_compilation_service_server::IncrementalCompilationServiceServer,
-        plugin_service_server::PluginServiceServer,
+        parser_service_server::ParserServiceServer, plugin_service_server::PluginServiceServer,
         problem_reporting_service_server::ProblemReportingServiceServer,
         resource_management_service_server::ResourceManagementServiceServer,
         task_graph_service_server::TaskGraphServiceServer,
         test_execution_service_server::TestExecutionServiceServer,
         toolchain_service_server::ToolchainServiceServer,
         value_snapshot_service_server::ValueSnapshotServiceServer,
-        worker_process_service_server::WorkerProcessServiceServer,
         work_service_server::WorkServiceServer,
+        worker_process_service_server::WorkerProcessServiceServer,
     },
     server::{
-        authoritative::AuthoritativeConfig,
-        dag_executor::DagExecutorServiceImpl,
-        artifact_publishing::ArtifactPublishingServiceImpl,
+        artifact_publishing::ArtifactPublishingServiceImpl, authoritative::AuthoritativeConfig,
         bootstrap::BootstrapServiceImpl, build_comparison::BuildComparisonServiceImpl,
         build_event_stream::BuildEventStreamServiceImpl, build_init::BuildInitServiceImpl,
         build_layout::BuildLayoutServiceImpl, build_metrics::BuildMetricsServiceImpl,
         build_operations::BuildOperationsServiceImpl, build_result::BuildResultServiceImpl,
+        build_plan_shadow::BuildPlanShadowStore,
         cache::CacheServiceImpl, cache_orchestration::BuildCacheOrchestrationServiceImpl,
         config_cache::ConfigurationCacheServiceImpl, configuration::ConfigurationServiceImpl,
         console::ConsoleServiceImpl, control::ControlServiceImpl,
-        dependency_resolution::DependencyResolutionServiceImpl,
+        dag_executor::DagExecutorServiceImpl,
+        dependency_resolution::DependencyResolutionServiceImpl, exec::ExecServiceImpl,
         execution_history::ExecutionHistoryServiceImpl, execution_plan::ExecutionPlanServiceImpl,
-        exec::ExecServiceImpl, file_fingerprint::FileFingerprintServiceImpl,
-        file_watch::FileWatchServiceImpl, garbage_collection::GarbageCollectionServiceImpl,
-        hash::HashServiceImpl, incremental_compilation::IncrementalCompilationServiceImpl,
-        plugin::PluginServiceImpl, problem_reporting::ProblemReportingServiceImpl,
+        file_fingerprint::FileFingerprintServiceImpl, file_watch::FileWatchServiceImpl,
+        garbage_collection::GarbageCollectionServiceImpl, hash::HashServiceImpl,
+        incremental_compilation::IncrementalCompilationServiceImpl,
+        parser_service::ParserServiceImpl, plugin::PluginServiceImpl,
+        problem_reporting::ProblemReportingServiceImpl,
         resource_management::ResourceManagementServiceImpl, scopes::ScopeRegistry,
         task_graph::TaskGraphServiceImpl, test_execution::TestExecutionServiceImpl,
         toolchain::ToolchainServiceImpl, value_snapshot::ValueSnapshotServiceImpl,
-        worker_process::WorkerProcessServiceImpl, work::WorkServiceImpl,
+        work::WorkServiceImpl, worker_process::WorkerProcessServiceImpl,
     },
     PROTOCOL_VERSION,
 };
@@ -182,6 +182,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 0: Control
     let control = ControlServiceImpl::with_config(shutdown_tx.clone(), authoritative_config);
     let control_for_jvm = control.clone();
+    let jvm_bridge = Arc::new(JvmHostBridge::new());
 
     // Phase 1: Hashing
     let hash = HashServiceImpl;
@@ -207,7 +208,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let exec = ExecServiceImpl::new();
 
     // Phase 4: Work scheduling
-    let work_scheduler = Arc::new(gradle_substrate_daemon::server::work::WorkerScheduler::new(num_cpus::get()));
+    let work_scheduler = Arc::new(gradle_substrate_daemon::server::work::WorkerScheduler::new(
+        num_cpus::get(),
+    ));
     let work = WorkServiceImpl::new(work_scheduler.clone());
 
     // Phase 7: Execution history (created early so execution plan + task graph can reference it)
@@ -218,11 +221,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("Loaded {} execution history entries", history_count);
 
     // Phase 5-6: Execution planning (wired to persistent history for rebuild loop detection)
-    let execution_plan = ExecutionPlanServiceImpl::with_persistent_history(work_scheduler.clone(), execution_history.clone());
+    let execution_plan = ExecutionPlanServiceImpl::with_persistent_history(
+        work_scheduler.clone(),
+        execution_history.clone(),
+    );
     execution_plan.load_persistent_history();
 
     // Phase 8: Build cache orchestration (wired to local cache for real probe operations)
-    let cache_orchestration = BuildCacheOrchestrationServiceImpl::with_local_cache(cache.local_store());
+    let cache_orchestration =
+        BuildCacheOrchestrationServiceImpl::with_local_cache(cache.local_store());
 
     // Phase 9: File fingerprinting
     let file_fingerprint = FileFingerprintServiceImpl::new();
@@ -231,7 +238,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let value_snapshot = ValueSnapshotServiceImpl::new();
 
     // Phase 11: Task graph (wired to execution history for duration estimates)
-    let task_graph = Arc::new(TaskGraphServiceImpl::with_history(execution_history.clone()));
+    let task_graph = Arc::new(TaskGraphServiceImpl::with_history(
+        execution_history.clone(),
+    ));
 
     // Phase 12: Configuration
     let configuration = ConfigurationServiceImpl::new();
@@ -239,14 +248,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 13: Plugin management
     let plugin = PluginServiceImpl::new();
 
+    // Phase 13.5: Parser service (wraps groovy_parser + build_script_parser)
+    let parser = ParserServiceImpl::default();
+
     // Phase 14: Build operations
     let build_operations = BuildOperationsServiceImpl::new();
 
     // Scope registry — tracks session→build membership for proper scope isolation
     let scope_registry = Arc::new(ScopeRegistry::new());
 
+    // Build-plan shadow store location (kept under configuration cache root).
+    let config_cache_dir = PathBuf::from(&args.config_cache_dir);
+    let gc_config_cache_dir = config_cache_dir.clone();
+    let build_plan_shadow_store = Arc::new(BuildPlanShadowStore::new(config_cache_dir.clone()));
+
     // Phase 15: Bootstrap (wired to scope registry for session tracking)
-    let bootstrap = BootstrapServiceImpl::with_scope_registry(scope_registry.clone());
+    let bootstrap = BootstrapServiceImpl::with_scope_registry_and_shadow(
+        scope_registry.clone(),
+        Arc::clone(&jvm_bridge),
+        Arc::clone(&build_plan_shadow_store),
+    );
 
     // Phase 18: Dependency resolution
     let artifact_store_dir = PathBuf::from(&args.artifact_store_dir);
@@ -256,8 +277,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let file_watch = FileWatchServiceImpl::with_task_graph(Arc::clone(&task_graph));
 
     // Phase 20: Configuration cache
-    let config_cache_dir = PathBuf::from(&args.config_cache_dir);
-    let gc_config_cache_dir = config_cache_dir.clone();
     let config_cache = ConfigurationCacheServiceImpl::new(config_cache_dir);
 
     // Phase 23: Toolchain management
@@ -267,14 +286,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 24: Build event streaming (wired to console + metrics for auto fan-out)
     let console = Arc::new(ConsoleServiceImpl::new());
     let build_metrics = Arc::new(BuildMetricsServiceImpl::new());
-    let event_dispatchers: Vec<Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>> = vec![
-        Arc::clone(&console) as Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
-        Arc::clone(&build_metrics) as Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
+    let event_dispatchers: Vec<
+        Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
+    > = vec![
+        Arc::clone(&console)
+            as Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
+        Arc::clone(&build_metrics)
+            as Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
     ];
-    let build_event_stream = BuildEventStreamServiceImpl::with_dispatchers(event_dispatchers.clone());
+    let build_event_stream =
+        BuildEventStreamServiceImpl::with_dispatchers(event_dispatchers.clone());
 
     // DAG Executor (orchestrates build execution using task graph + worker scheduler)
-    let dag_executor = DagExecutorServiceImpl::new(work_scheduler.clone(), Arc::clone(&task_graph), event_dispatchers);
+    let dag_executor = DagExecutorServiceImpl::new(
+        work_scheduler.clone(),
+        Arc::clone(&task_graph),
+        event_dispatchers,
+    );
 
     // Phase 25: Worker process management
     let worker_process = WorkerProcessServiceImpl::new();
@@ -307,11 +335,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let incremental_compilation = IncrementalCompilationServiceImpl::new();
 
     // Phase 38: Garbage collection
-    let garbage_collection = GarbageCollectionServiceImpl::new(
-        gc_cache_dir,
-        gc_history_dir,
-        gc_config_cache_dir,
-    );
+    let garbage_collection =
+        GarbageCollectionServiceImpl::new(gc_cache_dir, gc_history_dir, gc_config_cache_dir);
 
     let listener = UnixListener::bind(&socket_path)?;
 
@@ -323,25 +348,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 6: JVM Compatibility Host
     // The JVM host socket path arrives via handshake, so we spawn a background task
     // to attempt connection after the first handshake registers the path.
-    let jvm_bridge = Arc::new(JvmHostBridge::new());
     let jvm_bridge_for_connect = Arc::clone(&jvm_bridge);
     tokio::spawn(async move {
-        // Wait briefly for the JVM client to connect and send handshake
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
-        if let Some(jvm_socket) = control_for_jvm.get_jvm_host_socket_path().await {
-            match JvmHostClient::connect(&jvm_socket).await {
-                Ok(jvm_client) => {
-                    tracing::info!(path = %jvm_socket, "Connected to JVM host");
-                    jvm_bridge_for_connect.set_client(jvm_client).await;
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "Failed to connect to JVM host, continuing without");
+        // Retry for a bounded period: handshake may arrive after server startup.
+        for _ in 0..120 {
+            if let Some(jvm_socket) = control_for_jvm.get_jvm_host_socket_path().await {
+                match JvmHostClient::connect(&jvm_socket).await {
+                    Ok(jvm_client) => {
+                        tracing::info!(path = %jvm_socket, "Connected to JVM host");
+                        jvm_bridge_for_connect.set_client(jvm_client).await;
+                        return;
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to connect to JVM host, retrying");
+                    }
                 }
             }
-        } else {
-            tracing::info!("No JVM host socket path provided — running in standalone mode");
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         }
+        tracing::info!("No JVM host connection established — running in standalone mode");
     });
 
     Server::builder()
@@ -352,16 +377,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(ExecServiceServer::new(exec))
         .add_service(WorkServiceServer::new(work))
         .add_service(ExecutionPlanServiceServer::new(execution_plan))
-        .add_service(ExecutionHistoryServiceServer::new((*execution_history).clone()))
-        .add_service(BuildCacheOrchestrationServiceServer::new(cache_orchestration))
+        .add_service(ExecutionHistoryServiceServer::new(
+            (*execution_history).clone(),
+        ))
+        .add_service(BuildCacheOrchestrationServiceServer::new(
+            cache_orchestration,
+        ))
         .add_service(FileFingerprintServiceServer::new(file_fingerprint))
         .add_service(ValueSnapshotServiceServer::new(value_snapshot))
         .add_service(TaskGraphServiceServer::new((*task_graph).clone()))
         .add_service(ConfigurationServiceServer::new(configuration))
         .add_service(PluginServiceServer::new(plugin))
+        .add_service(ParserServiceServer::new(parser))
         .add_service(BuildOperationsServiceServer::new(build_operations))
         .add_service(BootstrapServiceServer::new(bootstrap))
-        .add_service(DependencyResolutionServiceServer::new(dependency_resolution))
+        .add_service(DependencyResolutionServiceServer::new(
+            dependency_resolution,
+        ))
         .add_service(FileWatchServiceServer::new(file_watch))
         .add_service(ConfigurationCacheServiceServer::new(config_cache))
         .add_service(ToolchainServiceServer::new(toolchain))
@@ -376,10 +408,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(TestExecutionServiceServer::new(test_execution))
         .add_service(ArtifactPublishingServiceServer::new(artifact_publishing))
         .add_service(BuildInitServiceServer::new(build_init))
-        .add_service(IncrementalCompilationServiceServer::new(incremental_compilation))
+        .add_service(IncrementalCompilationServiceServer::new(
+            incremental_compilation,
+        ))
         .add_service(BuildMetricsServiceServer::new((*build_metrics).clone()))
         .add_service(GarbageCollectionServiceServer::new(garbage_collection))
-        .serve_with_incoming_shutdown(tokio_stream::wrappers::UnixListenerStream::new(listener), shutdown_signal())
+        .serve_with_incoming_shutdown(
+            tokio_stream::wrappers::UnixListenerStream::new(listener),
+            shutdown_signal(),
+        )
         .await?;
 
     tracing::info!("Daemon shut down cleanly");

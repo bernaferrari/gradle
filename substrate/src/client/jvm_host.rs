@@ -4,9 +4,9 @@ use tonic::transport::{Channel, Endpoint};
 use tonic::{Request, Status};
 
 use crate::proto::{
-    jvm_host_service_client::JvmHostServiceClient, GetBuildEnvironmentRequest,
-    GetBuildEnvironmentResponse, GetBuildModelRequest, GetBuildModelResponse,
-    ResolveConfigRequest, ResolveConfigResponse, EvaluateScriptRequest, EvaluateScriptResponse,
+    jvm_host_service_client::JvmHostServiceClient, EvaluateScriptRequest, EvaluateScriptResponse,
+    GetBuildEnvironmentRequest, GetBuildEnvironmentResponse, GetBuildModelRequest,
+    GetBuildModelResponse, ResolveConfigRequest, ResolveConfigResponse,
 };
 
 /// Client for calling back into the JVM via the JvmHostService.
@@ -35,9 +35,7 @@ impl JvmHostClient {
     }
 
     /// Query the JVM for build environment information (Java version, OS, memory, etc.).
-    pub async fn get_build_environment(
-        &mut self,
-    ) -> Result<GetBuildEnvironmentResponse, Status> {
+    pub async fn get_build_environment(&mut self) -> Result<GetBuildEnvironmentResponse, Status> {
         let response = self
             .client
             .get_build_environment(Request::new(GetBuildEnvironmentRequest {}))
@@ -218,7 +216,10 @@ mod tests {
             _request: tonic::Request<crate::proto::GetBuildEnvironmentRequest>,
         ) -> Result<Response<crate::proto::GetBuildEnvironmentResponse>, tonic::Status> {
             let mut props = HashMap::new();
-            props.insert("java.vm.name".to_string(), "OpenJDK 64-Bit Server VM".to_string());
+            props.insert(
+                "java.vm.name".to_string(),
+                "OpenJDK 64-Bit Server VM".to_string(),
+            );
             props.insert("user.timezone".to_string(), "UTC".to_string());
             let response = crate::proto::GetBuildEnvironmentResponse {
                 java_version: "17.0.9".to_string(),
@@ -348,7 +349,10 @@ mod tests {
         assert_eq!(result.error_message, "");
         assert_eq!(result.applied_plugins.len(), 2);
         assert_eq!(result.applied_plugins[0].plugin_id, "java");
-        assert_eq!(result.applied_plugins[1].plugin_id, "org.springframework.boot");
+        assert_eq!(
+            result.applied_plugins[1].plugin_id,
+            "org.springframework.boot"
+        );
         assert_eq!(result.applied_plugins[0].apply_order, "1");
         assert_eq!(result.applied_plugins[1].apply_order, "2");
     }

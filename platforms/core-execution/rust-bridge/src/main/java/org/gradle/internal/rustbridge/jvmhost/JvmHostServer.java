@@ -40,7 +40,7 @@ public class JvmHostServer implements Closeable {
         this.serviceImpl = serviceImpl;
 
         // Clean up stale socket if present
-        Path socketFile = Path.of(socketPath);
+        Path socketFile = java.nio.file.Paths.get(socketPath);
         if (Files.exists(socketFile)) {
             Files.delete(socketFile);
         }
@@ -70,7 +70,7 @@ public class JvmHostServer implements Closeable {
                         // Read script from file if content is empty and path is provided
                         String content = scriptContent;
                         if (content.isEmpty() && !scriptPath.isEmpty()) {
-                            Path p = Path.of(scriptPath);
+                            Path p = java.nio.file.Paths.get(scriptPath);
                             if (Files.exists(p)) {
                                 content = Files.readString(p);
                             } else {
@@ -192,7 +192,7 @@ public class JvmHostServer implements Closeable {
      */
     public void start() throws IOException {
         server.start();
-        LOGGER.lifecycle("[substrate] JVM host server started on {}", socketPath);
+        LOGGER.info("[substrate] JVM host server started on {}", socketPath);
     }
 
     /**
@@ -224,10 +224,10 @@ public class JvmHostServer implements Closeable {
             }
             // Clean up socket file
             try {
-                Files.deleteIfExists(Path.of(socketPath));
+                Files.deleteIfExists(java.nio.file.Paths.get(socketPath));
             } catch (IOException ignored) {
             }
-            LOGGER.lifecycle("[substrate] JVM host server stopped");
+            LOGGER.info("[substrate] JVM host server stopped");
         }
     }
 

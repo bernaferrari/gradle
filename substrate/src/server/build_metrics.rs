@@ -8,14 +8,14 @@ use tonic::{Request, Response, Status};
 use super::event_dispatcher::EventDispatcher;
 use super::scopes::BuildId;
 
+#[cfg(test)]
+use crate::proto::MetricEvent;
 use crate::proto::{
     build_metrics_service_server::BuildMetricsService, GetMetricsRequest, GetMetricsResponse,
     GetPerformanceSummaryRequest, GetPerformanceSummaryResponse, MetricSnapshot,
     PerformanceSummary, RecordMetricRequest, RecordMetricResponse, ResetMetricsRequest,
     ResetMetricsResponse,
 };
-#[cfg(test)]
-use crate::proto::MetricEvent;
 
 /// Aggregated metric data for a single metric name.
 #[derive(Default)]
@@ -36,9 +36,7 @@ impl Clone for MetricData {
             min: AtomicI64::new(self.min.load(Ordering::Relaxed)),
             max: AtomicI64::new(self.max.load(Ordering::Relaxed)),
             last: AtomicI64::new(self.last.load(Ordering::Relaxed)),
-            tags: std::sync::Mutex::new(
-                self.tags.lock().map(|g| g.clone()).unwrap_or_default(),
-            ),
+            tags: std::sync::Mutex::new(self.tags.lock().map(|g| g.clone()).unwrap_or_default()),
         }
     }
 }
@@ -56,10 +54,12 @@ impl MetricData {
     fn record(&self, value: f64, tags: HashMap<String, String>) {
         self.count.fetch_add(1, Ordering::Relaxed);
         // Properly add f64 using atomic fetch_update to avoid bit corruption
-        self.sum.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-            let current_f64 = f64::from_bits(current);
-            Some((current_f64 + value).to_bits())
-        }).ok();
+        self.sum
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                let current_f64 = f64::from_bits(current);
+                Some((current_f64 + value).to_bits())
+            })
+            .ok();
         let ival = value as i64;
         if ival < self.min.load(Ordering::Relaxed) {
             self.min.store(ival, Ordering::Relaxed);
@@ -99,8 +99,7 @@ impl Default for BuildMetricsServiceImpl {
     }
 }
 
-impl BuildMetricsServiceImpl {
-}
+impl BuildMetricsServiceImpl {}
 
 #[derive(Default)]
 struct BuildSummaryData {
@@ -137,8 +136,12 @@ impl Clone for BuildSummaryData {
             total_bytes_loaded: AtomicI64::new(self.total_bytes_loaded.load(Ordering::Relaxed)),
             config_cache_hits: AtomicI64::new(self.config_cache_hits.load(Ordering::Relaxed)),
             config_cache_misses: AtomicI64::new(self.config_cache_misses.load(Ordering::Relaxed)),
-            history_entries_stored: AtomicI64::new(self.history_entries_stored.load(Ordering::Relaxed)),
-            history_entries_loaded: AtomicI64::new(self.history_entries_loaded.load(Ordering::Relaxed)),
+            history_entries_stored: AtomicI64::new(
+                self.history_entries_stored.load(Ordering::Relaxed),
+            ),
+            history_entries_loaded: AtomicI64::new(
+                self.history_entries_loaded.load(Ordering::Relaxed),
+            ),
             workers_used: AtomicI64::new(self.workers_used.load(Ordering::Relaxed)),
             start_time_ms: AtomicI64::new(self.start_time_ms.load(Ordering::Relaxed)),
             end_time_ms: AtomicI64::new(self.end_time_ms.load(Ordering::Relaxed)),
@@ -239,29 +242,61 @@ impl BuildMetricsService for BuildMetricsServiceImpl {
             self.ensure_build(&build_id);
             if let Some(build) = self.builds.get(&build_id) {
                 match event.name.as_str() {
-                    "tasks.total" => { build.total_tasks.fetch_add(1, Ordering::Relaxed); }
-                    "tasks.cached" => { build.cached_tasks.fetch_add(1, Ordering::Relaxed); }
-                    "tasks.up_to_date" => { build.up_to_date_tasks.fetch_add(1, Ordering::Relaxed); }
-                    "tasks.executed" => { build.executed_tasks.fetch_add(1, Ordering::Relaxed); }
-                    "tasks.failed" => { build.failed_tasks.fetch_add(1, Ordering::Relaxed); }
-                    "cache.hits" => { build.cache_hits.fetch_add(1, Ordering::Relaxed); }
-                    "cache.misses" => { build.cache_misses.fetch_add(1, Ordering::Relaxed); }
+                    "tasks.total" => {
+                        build.total_tasks.fetch_add(1, Ordering::Relaxed);
+                    }
+                    "tasks.cached" => {
+                        build.cached_tasks.fetch_add(1, Ordering::Relaxed);
+                    }
+                    "tasks.up_to_date" => {
+                        build.up_to_date_tasks.fetch_add(1, Ordering::Relaxed);
+                    }
+                    "tasks.executed" => {
+                        build.executed_tasks.fetch_add(1, Ordering::Relaxed);
+                    }
+                    "tasks.failed" => {
+                        build.failed_tasks.fetch_add(1, Ordering::Relaxed);
+                    }
+                    "cache.hits" => {
+                        build.cache_hits.fetch_add(1, Ordering::Relaxed);
+                    }
+                    "cache.misses" => {
+                        build.cache_misses.fetch_add(1, Ordering::Relaxed);
+                    }
                     "cache.bytes_stored" => {
-                        build.total_bytes_stored.fetch_add(value as i64, Ordering::Relaxed);
+                        build
+                            .total_bytes_stored
+                            .fetch_add(value as i64, Ordering::Relaxed);
                     }
                     "cache.bytes_loaded" => {
-                        build.total_bytes_loaded.fetch_add(value as i64, Ordering::Relaxed);
+                        build
+                            .total_bytes_loaded
+                            .fetch_add(value as i64, Ordering::Relaxed);
                     }
-                    "config_cache.hits" => { build.config_cache_hits.fetch_add(1, Ordering::Relaxed); }
-                    "config_cache.misses" => { build.config_cache_misses.fetch_add(1, Ordering::Relaxed); }
-                    "history.stored" => { build.history_entries_stored.fetch_add(1, Ordering::Relaxed); }
-                    "history.loaded" => { build.history_entries_loaded.fetch_add(1, Ordering::Relaxed); }
-                    "workers.used" => { build.workers_used.fetch_add(1, Ordering::Relaxed); }
+                    "config_cache.hits" => {
+                        build.config_cache_hits.fetch_add(1, Ordering::Relaxed);
+                    }
+                    "config_cache.misses" => {
+                        build.config_cache_misses.fetch_add(1, Ordering::Relaxed);
+                    }
+                    "history.stored" => {
+                        build.history_entries_stored.fetch_add(1, Ordering::Relaxed);
+                    }
+                    "history.loaded" => {
+                        build.history_entries_loaded.fetch_add(1, Ordering::Relaxed);
+                    }
+                    "workers.used" => {
+                        build.workers_used.fetch_add(1, Ordering::Relaxed);
+                    }
                     "build.start" => {
-                        build.start_time_ms.store(event.timestamp_ms, Ordering::Relaxed);
+                        build
+                            .start_time_ms
+                            .store(event.timestamp_ms, Ordering::Relaxed);
                     }
                     "build.end" => {
-                        build.end_time_ms.store(event.timestamp_ms, Ordering::Relaxed);
+                        build
+                            .end_time_ms
+                            .store(event.timestamp_ms, Ordering::Relaxed);
                         if !event.value.is_empty() {
                             if let Ok(mut guard) = build.outcome.lock() {
                                 *guard = event.value.clone();

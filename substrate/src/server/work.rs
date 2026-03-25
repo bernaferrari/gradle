@@ -1,5 +1,5 @@
 use dashmap::DashMap;
-use md5::{Digest, Md5};
+use sha2::{Digest, Sha256};
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
@@ -80,12 +80,23 @@ impl WorkService for WorkServiceImpl {
     ) -> Result<Response<WorkEvaluateResponse>, Status> {
         let req = request.into_inner();
 
-        // Compute an input hash from the input properties
-        let mut input_parts: Vec<&String> = req.input_properties.values().collect();
-        input_parts.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-        let input_str = input_parts.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("|");
-        let mut hasher = Md5::new();
-        hasher.update(input_str.as_bytes());
+        // Compute a deterministic input hash from sorted key-value pairs.
+        let mut input_parts: Vec<(&String, &String)> = req.input_properties.iter().collect();
+        input_parts.sort_by(|(ka, va), (kb, vb)| {
+            let key_cmp = ka.as_str().cmp(kb.as_str());
+            if key_cmp == std::cmp::Ordering::Equal {
+                va.as_str().cmp(vb.as_str())
+            } else {
+                key_cmp
+            }
+        });
+        let mut hasher = Sha256::new();
+        for (k, v) in input_parts {
+            hasher.update(k.as_bytes());
+            hasher.update([0x1f]); // Unit separator between key and value
+            hasher.update(v.as_bytes());
+            hasher.update([0x1e]); // Record separator between entries
+        }
         let input_hash = format!("{:x}", hasher.finalize());
 
         let should_execute;
@@ -101,7 +112,10 @@ impl WorkService for WorkServiceImpl {
                 );
             } else {
                 should_execute = true;
-                reason = format!("EXECUTE: inputs changed (hash {} -> {})", entry.input_hash, input_hash);
+                reason = format!(
+                    "EXECUTE: inputs changed (hash {} -> {})",
+                    entry.input_hash, input_hash
+                );
             }
         } else {
             should_execute = true;
@@ -141,15 +155,33 @@ impl WorkService for WorkServiceImpl {
             "Recorded execution"
         );
 
-        Ok(Response::new(WorkRecordResponse {
-            acknowledged: true,
-        }))
+        Ok(Response::new(WorkRecordResponse { acknowledged: true }))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn compute_hash(props: &std::collections::HashMap<String, String>) -> String {
+        let mut input_parts: Vec<(&String, &String)> = props.iter().collect();
+        input_parts.sort_by(|(ka, va), (kb, vb)| {
+            let key_cmp = ka.as_str().cmp(kb.as_str());
+            if key_cmp == std::cmp::Ordering::Equal {
+                va.as_str().cmp(vb.as_str())
+            } else {
+                key_cmp
+            }
+        });
+        let mut hasher = Sha256::new();
+        for (k, v) in input_parts {
+            hasher.update(k.as_bytes());
+            hasher.update([0x1f]);
+            hasher.update(v.as_bytes());
+            hasher.update([0x1e]);
+        }
+        format!("{:x}", hasher.finalize())
+    }
 
     #[tokio::test]
     async fn test_evaluate_no_history() {
@@ -174,10 +206,10 @@ mod tests {
         let scheduler = std::sync::Arc::new(WorkerScheduler::new(4));
         let svc = WorkServiceImpl::new(scheduler.clone());
 
-        // Compute the same hash that the evaluate function will compute
-        let mut hasher = Md5::new();
-        hasher.update(b"|"); // sorted single key "|" joined with "|"
-        let input_hash = format!("{:x}", hasher.finalize());
+        // Compute the same hash that the evaluate function will compute.
+        let mut seed_props = std::collections::HashMap::new();
+        seed_props.insert("key".to_string(), "|".to_string());
+        let input_hash = compute_hash(&seed_props);
 
         scheduler.history.entries.insert(
             ":compileJava".to_string(),
@@ -427,6 +459,44 @@ mod tests {
         assert_eq!(resp1.input_hash, resp2.input_hash);
     }
 
+    #[tokio::test]
+    async fn test_evaluate_input_hash_changes_when_only_keys_change() {
+        let scheduler = std::sync::Arc::new(WorkerScheduler::new(4));
+        let svc = WorkServiceImpl::new(scheduler);
+
+        // Same value multiset, different keys.
+        let mut props_a = std::collections::HashMap::new();
+        props_a.insert("a".to_string(), "1".to_string());
+        props_a.insert("b".to_string(), "2".to_string());
+
+        let mut props_b = std::collections::HashMap::new();
+        props_b.insert("x".to_string(), "1".to_string());
+        props_b.insert("y".to_string(), "2".to_string());
+
+        let resp_a = svc
+            .evaluate(Request::new(WorkEvaluateRequest {
+                task_path: ":hashA".to_string(),
+                input_properties: props_a,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let resp_b = svc
+            .evaluate(Request::new(WorkEvaluateRequest {
+                task_path: ":hashB".to_string(),
+                input_properties: props_b,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_ne!(
+            resp_a.input_hash, resp_b.input_hash,
+            "hash must include keys, not only values"
+        );
+    }
+
     #[test]
     fn test_scheduler_running_count() {
         let scheduler = WorkerScheduler::new(3);
@@ -521,7 +591,10 @@ mod tests {
             .unwrap()
             .into_inner();
 
-        assert!(!eval2.should_execute, "failed task should still be considered UP_TO_DATE on unchanged inputs");
+        assert!(
+            !eval2.should_execute,
+            "failed task should still be considered UP_TO_DATE on unchanged inputs"
+        );
         assert!(eval2.reason.contains("UP_TO_DATE"));
         assert!(
             eval2.reason.contains("failed"),
@@ -557,15 +630,9 @@ mod tests {
         assert!(rec.acknowledged);
 
         // Compute the hash for known input properties so we can record a matching entry.
-        // The service computes MD5(sorted property values joined by "|").
         let mut props_for_hash = std::collections::HashMap::new();
         props_for_hash.insert("only".to_string(), "val".to_string());
-        let mut sorted: Vec<&String> = props_for_hash.values().collect();
-        sorted.sort();
-        let input_str = sorted.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("|");
-        let mut hasher = Md5::new();
-        hasher.update(input_str.as_bytes());
-        let expected_hash = format!("{:x}", hasher.finalize());
+        let expected_hash = compute_hash(&props_for_hash);
 
         // Record with the correct hash
         svc.record_execution(Request::new(WorkRecordRequest {
@@ -613,7 +680,10 @@ mod tests {
             .unwrap()
             .into_inner();
 
-        assert!(eval1.should_execute, "cycle 1: no history should require execution");
+        assert!(
+            eval1.should_execute,
+            "cycle 1: no history should require execution"
+        );
 
         svc.record_execution(Request::new(WorkRecordRequest {
             task_path: task.clone(),
@@ -634,7 +704,10 @@ mod tests {
             .unwrap()
             .into_inner();
 
-        assert!(!eval2.should_execute, "cycle 2: unchanged inputs should be UP_TO_DATE");
+        assert!(
+            !eval2.should_execute,
+            "cycle 2: unchanged inputs should be UP_TO_DATE"
+        );
         assert!(eval2.reason.contains("1200ms"));
 
         // --- Cycle 3: inputs changed → execute ---
@@ -650,7 +723,10 @@ mod tests {
             .unwrap()
             .into_inner();
 
-        assert!(eval3.should_execute, "cycle 3: changed inputs should require execution");
+        assert!(
+            eval3.should_execute,
+            "cycle 3: changed inputs should require execution"
+        );
         assert!(eval3.reason.contains("inputs changed"));
 
         svc.record_execution(Request::new(WorkRecordRequest {
@@ -675,7 +751,10 @@ mod tests {
             .unwrap()
             .into_inner();
 
-        assert!(!eval4.should_execute, "cycle 4: unchanged inputs should be UP_TO_DATE");
+        assert!(
+            !eval4.should_execute,
+            "cycle 4: unchanged inputs should be UP_TO_DATE"
+        );
         assert!(
             eval4.reason.contains("800ms"),
             "cycle 4: should reflect the most recent recorded duration (800ms), got: {}",

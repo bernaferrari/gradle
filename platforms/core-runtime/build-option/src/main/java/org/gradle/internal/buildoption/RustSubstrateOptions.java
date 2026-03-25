@@ -318,6 +318,30 @@ public class RustSubstrateOptions {
         new InternalFlag("org.gradle.rust.substrate.gc.enabled", false);
 
     /**
+     * Enable authoritative mode for Rust-backed hashing subsystem.
+     * Property: org.gradle.rust.substrate.hashing.authoritative
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_AUTHORITATIVE_HASHING =
+        new InternalFlag("org.gradle.rust.substrate.hashing.authoritative", false);
+
+    /**
+     * Enable authoritative mode for Rust-backed build cache subsystem.
+     * Property: org.gradle.rust.substrate.cache.authoritative
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_AUTHORITATIVE_CACHE =
+        new InternalFlag("org.gradle.rust.substrate.cache.authoritative", false);
+
+    /**
+     * Enable authoritative mode for Rust-backed process execution subsystem.
+     * Property: org.gradle.rust.substrate.exec.authoritative
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_AUTHORITATIVE_EXEC =
+        new InternalFlag("org.gradle.rust.substrate.exec.authoritative", false);
+
+    /**
      * Enable Phase 6: JVM Compatibility Host.
      * Property: org.gradle.rust.substrate.jvm.host.enabled
      * Default: false
@@ -337,7 +361,7 @@ public class RustSubstrateOptions {
             return null; // not set — fall back to per-service flags
         }
         try {
-            return SubstrateMode.valueOf(modeString.toUpperCase());
+            return SubstrateMode.valueOf(modeString.toUpperCase(java.util.Locale.ROOT));
         } catch (IllegalArgumentException e) {
             return null; // invalid value — fall back to per-service flags
         }
@@ -379,6 +403,28 @@ public class RustSubstrateOptions {
         }
         // Fall back to per-service flag
         return options.getOption(ENABLE_AUTHORITATIVE_EXECUTION).get();
+    }
+
+    /**
+     * Check whether a specific subsystem is in authoritative mode, considering both
+     * umbrella mode and the per-subsystem authoritative flag.
+     *
+     * <ul>
+     *   <li>If SUBSTRATE_MODE is "authoritative" → true</li>
+     *   <li>If SUBSTRATE_MODE is "shadow" or not set → check the per-service authoritative flag</li>
+     *   <li>If SUBSTRATE_MODE is "off" → false</li>
+     * </ul>
+     */
+    public static boolean isSubsystemAuthoritative(InternalOptions options, InternalFlag perServiceAuthFlag) {
+        SubstrateMode mode = getMode(options);
+        if (mode == SubstrateMode.AUTHORITATIVE) {
+            return true;
+        }
+        if (mode == SubstrateMode.OFF) {
+            return false;
+        }
+        // shadow mode or not set — fall back to per-service authoritative flag
+        return options.getOption(perServiceAuthFlag).get();
     }
 
     /**

@@ -7,26 +7,27 @@ use tonic::Request;
 
 use gradle_substrate_daemon::proto::*;
 use gradle_substrate_daemon::server::{
-    dag_executor::DagExecutorServiceImpl,
     artifact_publishing::ArtifactPublishingServiceImpl,
     bootstrap::BootstrapServiceImpl,
-    build_metrics::BuildMetricsServiceImpl,
-    cache_orchestration::BuildCacheOrchestrationServiceImpl,
     build_comparison::BuildComparisonServiceImpl,
     build_event_stream::BuildEventStreamServiceImpl,
     build_init::BuildInitServiceImpl,
     build_layout::BuildLayoutServiceImpl,
+    build_metrics::BuildMetricsServiceImpl,
     build_operations::BuildOperationsServiceImpl,
     build_result::BuildResultServiceImpl,
     cache::CacheServiceImpl,
+    cache_orchestration::BuildCacheOrchestrationServiceImpl,
     config_cache::ConfigurationCacheServiceImpl,
     configuration::ConfigurationServiceImpl,
     console::ConsoleServiceImpl,
     control::ControlServiceImpl,
+    dag_executor::DagExecutorServiceImpl,
     dependency_resolution::DependencyResolutionServiceImpl,
+    event_dispatcher::EventDispatcher,
+    exec::ExecServiceImpl,
     execution_history::ExecutionHistoryServiceImpl,
     execution_plan::ExecutionPlanServiceImpl,
-    exec::ExecServiceImpl,
     file_fingerprint::FileFingerprintServiceImpl,
     file_watch::FileWatchServiceImpl,
     garbage_collection::GarbageCollectionServiceImpl,
@@ -39,9 +40,8 @@ use gradle_substrate_daemon::server::{
     test_execution::TestExecutionServiceImpl,
     toolchain::ToolchainServiceImpl,
     value_snapshot::ValueSnapshotServiceImpl,
+    work::{WorkServiceImpl, WorkerScheduler},
     worker_process::WorkerProcessServiceImpl,
-    work::{WorkerScheduler, WorkServiceImpl},
-    event_dispatcher::EventDispatcher,
 };
 
 /// Spawn a full gRPC server with dispatchers wired (same as main.rs).
@@ -74,10 +74,13 @@ async fn spawn_server_with_dispatchers() -> (String, tempfile::TempDir) {
         work_scheduler.clone(),
         Arc::clone(&shared_history),
     );
-    let cache_orchestration = BuildCacheOrchestrationServiceImpl::with_local_cache(cache_local_store);
+    let cache_orchestration =
+        BuildCacheOrchestrationServiceImpl::with_local_cache(cache_local_store);
     let file_fingerprint = FileFingerprintServiceImpl::new();
     let value_snapshot = ValueSnapshotServiceImpl::new();
-    let task_graph = Arc::new(TaskGraphServiceImpl::with_history(Arc::clone(&shared_history)));
+    let task_graph = Arc::new(TaskGraphServiceImpl::with_history(Arc::clone(
+        &shared_history,
+    )));
     let execution_history = ExecutionHistoryServiceImpl::new(history_dir.clone());
     let configuration = ConfigurationServiceImpl::new();
     let plugin = PluginServiceImpl::new();
@@ -93,8 +96,13 @@ async fn spawn_server_with_dispatchers() -> (String, tempfile::TempDir) {
         Arc::clone(&console) as Arc<dyn EventDispatcher>,
         Arc::clone(&build_metrics) as Arc<dyn EventDispatcher>,
     ];
-    let build_event_stream = BuildEventStreamServiceImpl::with_dispatchers(event_dispatchers.clone());
-    let dag_executor = DagExecutorServiceImpl::new(work_scheduler.clone(), Arc::clone(&task_graph), event_dispatchers);
+    let build_event_stream =
+        BuildEventStreamServiceImpl::with_dispatchers(event_dispatchers.clone());
+    let dag_executor = DagExecutorServiceImpl::new(
+        work_scheduler.clone(),
+        Arc::clone(&task_graph),
+        event_dispatchers,
+    );
     let worker_process = WorkerProcessServiceImpl::new();
     let build_layout = BuildLayoutServiceImpl::new();
     let build_result = BuildResultServiceImpl::new();
@@ -116,39 +124,123 @@ async fn spawn_server_with_dispatchers() -> (String, tempfile::TempDir) {
     tokio::spawn(async move {
         let _ = Server::builder()
             .add_service(control_service_server::ControlServiceServer::new(control))
-            .add_service(dag_executor_service_server::DagExecutorServiceServer::new(dag_executor))
+            .add_service(dag_executor_service_server::DagExecutorServiceServer::new(
+                dag_executor,
+            ))
             .add_service(hash_service_server::HashServiceServer::new(hash))
             .add_service(cache_service_server::CacheServiceServer::new(cache))
             .add_service(exec_service_server::ExecServiceServer::new(exec))
             .add_service(work_service_server::WorkServiceServer::new(work))
-            .add_service(execution_plan_service_server::ExecutionPlanServiceServer::new(execution_plan))
-            .add_service(execution_history_service_server::ExecutionHistoryServiceServer::new(execution_history))
-            .add_service(build_cache_orchestration_service_server::BuildCacheOrchestrationServiceServer::new(cache_orchestration))
-            .add_service(file_fingerprint_service_server::FileFingerprintServiceServer::new(file_fingerprint))
-            .add_service(value_snapshot_service_server::ValueSnapshotServiceServer::new(value_snapshot))
-            .add_service(task_graph_service_server::TaskGraphServiceServer::new((*task_graph).clone()))
-            .add_service(configuration_service_server::ConfigurationServiceServer::new(configuration))
+            .add_service(
+                execution_plan_service_server::ExecutionPlanServiceServer::new(execution_plan),
+            )
+            .add_service(
+                execution_history_service_server::ExecutionHistoryServiceServer::new(
+                    execution_history,
+                ),
+            )
+            .add_service(
+                build_cache_orchestration_service_server::BuildCacheOrchestrationServiceServer::new(
+                    cache_orchestration,
+                ),
+            )
+            .add_service(
+                file_fingerprint_service_server::FileFingerprintServiceServer::new(
+                    file_fingerprint,
+                ),
+            )
+            .add_service(
+                value_snapshot_service_server::ValueSnapshotServiceServer::new(value_snapshot),
+            )
+            .add_service(task_graph_service_server::TaskGraphServiceServer::new(
+                (*task_graph).clone(),
+            ))
+            .add_service(
+                configuration_service_server::ConfigurationServiceServer::new(configuration),
+            )
             .add_service(plugin_service_server::PluginServiceServer::new(plugin))
-            .add_service(build_operations_service_server::BuildOperationsServiceServer::new(build_operations))
-            .add_service(bootstrap_service_server::BootstrapServiceServer::new(bootstrap))
-            .add_service(dependency_resolution_service_server::DependencyResolutionServiceServer::new(dependency_resolution))
-            .add_service(file_watch_service_server::FileWatchServiceServer::new(file_watch))
-            .add_service(configuration_cache_service_server::ConfigurationCacheServiceServer::new(config_cache))
-            .add_service(toolchain_service_server::ToolchainServiceServer::new(toolchain))
-            .add_service(build_event_stream_service_server::BuildEventStreamServiceServer::new(build_event_stream))
-            .add_service(worker_process_service_server::WorkerProcessServiceServer::new(worker_process))
-            .add_service(build_layout_service_server::BuildLayoutServiceServer::new(build_layout))
-            .add_service(build_result_service_server::BuildResultServiceServer::new(build_result))
-            .add_service(problem_reporting_service_server::ProblemReportingServiceServer::new(problem_reporting))
-            .add_service(resource_management_service_server::ResourceManagementServiceServer::new(resource_management))
-            .add_service(build_comparison_service_server::BuildComparisonServiceServer::new(build_comparison))
-            .add_service(console_service_server::ConsoleServiceServer::new((*console).clone()))
-            .add_service(test_execution_service_server::TestExecutionServiceServer::new(test_execution))
-            .add_service(artifact_publishing_service_server::ArtifactPublishingServiceServer::new(artifact_publishing))
-            .add_service(build_init_service_server::BuildInitServiceServer::new(build_init))
-            .add_service(incremental_compilation_service_server::IncrementalCompilationServiceServer::new(incremental_compilation))
-            .add_service(build_metrics_service_server::BuildMetricsServiceServer::new((*build_metrics).clone()))
-            .add_service(garbage_collection_service_server::GarbageCollectionServiceServer::new(garbage_collection))
+            .add_service(
+                build_operations_service_server::BuildOperationsServiceServer::new(
+                    build_operations,
+                ),
+            )
+            .add_service(bootstrap_service_server::BootstrapServiceServer::new(
+                bootstrap,
+            ))
+            .add_service(
+                dependency_resolution_service_server::DependencyResolutionServiceServer::new(
+                    dependency_resolution,
+                ),
+            )
+            .add_service(file_watch_service_server::FileWatchServiceServer::new(
+                file_watch,
+            ))
+            .add_service(
+                configuration_cache_service_server::ConfigurationCacheServiceServer::new(
+                    config_cache,
+                ),
+            )
+            .add_service(toolchain_service_server::ToolchainServiceServer::new(
+                toolchain,
+            ))
+            .add_service(
+                build_event_stream_service_server::BuildEventStreamServiceServer::new(
+                    build_event_stream,
+                ),
+            )
+            .add_service(
+                worker_process_service_server::WorkerProcessServiceServer::new(worker_process),
+            )
+            .add_service(build_layout_service_server::BuildLayoutServiceServer::new(
+                build_layout,
+            ))
+            .add_service(build_result_service_server::BuildResultServiceServer::new(
+                build_result,
+            ))
+            .add_service(
+                problem_reporting_service_server::ProblemReportingServiceServer::new(
+                    problem_reporting,
+                ),
+            )
+            .add_service(
+                resource_management_service_server::ResourceManagementServiceServer::new(
+                    resource_management,
+                ),
+            )
+            .add_service(
+                build_comparison_service_server::BuildComparisonServiceServer::new(
+                    build_comparison,
+                ),
+            )
+            .add_service(console_service_server::ConsoleServiceServer::new(
+                (*console).clone(),
+            ))
+            .add_service(
+                test_execution_service_server::TestExecutionServiceServer::new(test_execution),
+            )
+            .add_service(
+                artifact_publishing_service_server::ArtifactPublishingServiceServer::new(
+                    artifact_publishing,
+                ),
+            )
+            .add_service(build_init_service_server::BuildInitServiceServer::new(
+                build_init,
+            ))
+            .add_service(
+                incremental_compilation_service_server::IncrementalCompilationServiceServer::new(
+                    incremental_compilation,
+                ),
+            )
+            .add_service(
+                build_metrics_service_server::BuildMetricsServiceServer::new(
+                    (*build_metrics).clone(),
+                ),
+            )
+            .add_service(
+                garbage_collection_service_server::GarbageCollectionServiceServer::new(
+                    garbage_collection,
+                ),
+            )
             .serve_with_incoming(UnixListenerStream::new(listener))
             .await;
     });
@@ -185,7 +277,8 @@ async fn test_full_lifecycle_with_event_fanout() {
     let build_id = "lifecycle-e2e";
 
     // 1. Bootstrap: init build
-    let mut bootstrap_client = bootstrap_service_client::BootstrapServiceClient::new(channel.clone());
+    let mut bootstrap_client =
+        bootstrap_service_client::BootstrapServiceClient::new(channel.clone());
     let init = bootstrap_client
         .init_build(Request::new(InitBuildRequest {
             build_id: build_id.to_string(),
@@ -220,8 +313,16 @@ async fn test_full_lifecycle_with_event_fanout() {
     let mut task_client = task_graph_service_client::TaskGraphServiceClient::new(channel.clone());
     let tasks = vec![
         (":processResources", "ProcessResources", vec![]),
-        (":compileJava", "JavaCompile", vec![":processResources".to_string()]),
-        (":classes", "Lifecycle", vec![":compileJava".to_string(), ":processResources".to_string()]),
+        (
+            ":compileJava",
+            "JavaCompile",
+            vec![":processResources".to_string()],
+        ),
+        (
+            ":classes",
+            "Lifecycle",
+            vec![":compileJava".to_string(), ":processResources".to_string()],
+        ),
         (":test", "Test", vec![":classes".to_string()]),
     ];
     for (path, task_type, deps) in &tasks {
@@ -348,10 +449,7 @@ async fn test_full_lifecycle_with_event_fanout() {
     assert_eq!(metric_map["tasks.up_to_date"].count, 1);
 
     // tasks.failed should be 0
-    let failed_count = metric_map
-        .get("tasks.failed")
-        .map(|m| m.count)
-        .unwrap_or(0);
+    let failed_count = metric_map.get("tasks.failed").map(|m| m.count).unwrap_or(0);
     assert_eq!(failed_count, 0, "No tasks should have failed");
 
     // build.start and build.end should be recorded
@@ -617,8 +715,7 @@ async fn test_event_fanout_handles_cached_tasks() {
         .await
         .unwrap();
 
-    let mut metrics_client =
-        build_metrics_service_client::BuildMetricsServiceClient::new(channel);
+    let mut metrics_client = build_metrics_service_client::BuildMetricsServiceClient::new(channel);
 
     let summary = metrics_client
         .get_performance_summary(Request::new(GetPerformanceSummaryRequest {

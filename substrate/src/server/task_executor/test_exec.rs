@@ -380,26 +380,11 @@ impl TestExecExecutor {
                 for part in line.split(',') {
                     let part = part.trim();
                     if part.contains("Tests run:") {
-                        tests = part
-                            .split(':')
-                            .nth(1)?
-                            .trim()
-                            .parse()
-                            .unwrap_or(0);
+                        tests = part.split(':').nth(1)?.trim().parse().unwrap_or(0);
                     } else if part.starts_with("Failures:") {
-                        failures = part
-                            .split(':')
-                            .nth(1)?
-                            .trim()
-                            .parse()
-                            .unwrap_or(0);
+                        failures = part.split(':').nth(1)?.trim().parse().unwrap_or(0);
                     } else if part.starts_with("Skipped:") {
-                        skipped = part
-                            .split(':')
-                            .nth(1)?
-                            .trim()
-                            .parse()
-                            .unwrap_or(0);
+                        skipped = part.split(':').nth(1)?.trim().parse().unwrap_or(0);
                     }
                 }
 
@@ -415,7 +400,10 @@ impl TestExecExecutor {
         let mut result = TestExecResult::default();
 
         // Determine if we have test classes to run
-        let has_test_classes = input.options.get("test_classes").is_some_and(|s| !s.is_empty());
+        let has_test_classes = input
+            .options
+            .get("test_classes")
+            .is_some_and(|s| !s.is_empty());
         let has_source_files = !input.source_files.is_empty();
 
         if !has_test_classes && !has_source_files {
@@ -441,9 +429,7 @@ impl TestExecExecutor {
             .options
             .get("xml_report_dir")
             .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                input.target_dir.clone().join("test-reports")
-            });
+            .unwrap_or_else(|| input.target_dir.clone().join("test-reports"));
         result.xml_report_dir = xml_report_dir.clone();
 
         // Ensure report directory exists
@@ -503,8 +489,15 @@ impl TestExecExecutor {
                     let failure_details: Vec<String> = result
                         .tests
                         .iter()
-                        .filter(|t| t.outcome == TestOutcome::Failed || t.outcome == TestOutcome::Error)
-                        .map(|t| format!("{} > {}: {}", t.class_name, t.method_name, t.failure_message))
+                        .filter(|t| {
+                            t.outcome == TestOutcome::Failed || t.outcome == TestOutcome::Error
+                        })
+                        .map(|t| {
+                            format!(
+                                "{} > {}: {}",
+                                t.class_name, t.method_name, t.failure_message
+                            )
+                        })
                         .collect();
 
                     if failure_details.is_empty() {
@@ -594,12 +587,14 @@ mod tests {
         input
             .options
             .insert("classpath".to_string(), "/tmp/test-classes".to_string());
-        input
-            .options
-            .insert("test_classes".to_string(), "com.example.FooTest".to_string());
-        input
-            .options
-            .insert("xml_report_dir".to_string(), "/tmp/test-reports".to_string());
+        input.options.insert(
+            "test_classes".to_string(),
+            "com.example.FooTest".to_string(),
+        );
+        input.options.insert(
+            "xml_report_dir".to_string(),
+            "/tmp/test-reports".to_string(),
+        );
         input.target_dir = PathBuf::from("/tmp/test-output");
         input
     }
@@ -821,7 +816,11 @@ mod tests {
         let cmd = executor.build_command(&java, &input);
 
         // Collect args as strings
-        let args: Vec<String> = cmd.as_std().get_args().map(|s| s.to_string_lossy().to_string()).collect();
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
 
         assert!(args.iter().any(|a| a == "-Xmx512m"));
         assert!(args.iter().any(|a| a.contains("FooTest")));
@@ -832,11 +831,17 @@ mod tests {
     fn test_build_command_custom_heap() {
         let executor = TestExecExecutor::new();
         let mut input = make_test_input();
-        input.options.insert("max_heap_mb".to_string(), "1024".to_string());
+        input
+            .options
+            .insert("max_heap_mb".to_string(), "1024".to_string());
         let java = PathBuf::from("/usr/lib/jvm/java-17/bin/java");
         let cmd = executor.build_command(&java, &input);
 
-        let args: Vec<String> = cmd.as_std().get_args().map(|s| s.to_string_lossy().to_string()).collect();
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
         assert!(args.iter().any(|a| a == "-Xmx1024m"));
     }
 
@@ -850,7 +855,11 @@ mod tests {
         let java = PathBuf::from("/usr/lib/jvm/java-17/bin/java");
         let cmd = executor.build_command(&java, &input);
 
-        let args: Vec<String> = cmd.as_std().get_args().map(|s| s.to_string_lossy().to_string()).collect();
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
         assert!(args.iter().any(|a| a == "-ea"));
         assert!(args.iter().any(|a| a == "-Dfoo=bar"));
     }
@@ -859,13 +868,18 @@ mod tests {
     fn test_build_command_system_properties() {
         let executor = TestExecExecutor::new();
         let mut input = make_test_input();
-        input
-            .options
-            .insert("system_properties".to_string(), "key1=val1,key2=val2".to_string());
+        input.options.insert(
+            "system_properties".to_string(),
+            "key1=val1,key2=val2".to_string(),
+        );
         let java = PathBuf::from("/usr/lib/jvm/java-17/bin/java");
         let cmd = executor.build_command(&java, &input);
 
-        let args: Vec<String> = cmd.as_std().get_args().map(|s| s.to_string_lossy().to_string()).collect();
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
         assert!(args.iter().any(|a| a == "-Dkey1=val1"));
         assert!(args.iter().any(|a| a == "-Dkey2=val2"));
     }
@@ -880,13 +894,14 @@ mod tests {
         let java = PathBuf::from("/usr/lib/jvm/java-17/bin/java");
         let cmd = executor.build_command(&java, &input);
 
-        let args: Vec<String> = cmd.as_std().get_args().map(|s| s.to_string_lossy().to_string()).collect();
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
         let filter_idx = args.iter().position(|a| a == "--filter");
         assert!(filter_idx.is_some());
-        assert_eq!(
-            args[filter_idx.unwrap() + 1],
-            "com.example.*Test"
-        );
+        assert_eq!(args[filter_idx.unwrap() + 1], "com.example.*Test");
     }
 
     #[test]
@@ -899,7 +914,11 @@ mod tests {
         let java = PathBuf::from("/usr/lib/jvm/java-17/bin/java");
         let cmd = executor.build_command(&java, &input);
 
-        let args: Vec<String> = cmd.as_std().get_args().map(|s| s.to_string_lossy().to_string()).collect();
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
         assert!(args.iter().any(|a| a == "--include-tag"));
         assert!(args.iter().any(|a| a == "slow"));
         assert!(args.iter().any(|a| a == "integration"));
@@ -915,7 +934,11 @@ mod tests {
         let java = PathBuf::from("/usr/lib/jvm/java-17/bin/java");
         let cmd = executor.build_command(&java, &input);
 
-        let args: Vec<String> = cmd.as_std().get_args().map(|s| s.to_string_lossy().to_string()).collect();
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
         assert!(args.iter().any(|a| a == "--exclude-tag"));
         assert!(args.iter().any(|a| a == "slow"));
     }
@@ -931,7 +954,11 @@ mod tests {
         let java = PathBuf::from("/usr/lib/jvm/java-17/bin/java");
         let cmd = executor.build_command(&java, &input);
 
-        let args: Vec<String> = cmd.as_std().get_args().map(|s| s.to_string_lossy().to_string()).collect();
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
         assert!(args.iter().any(|a| a.contains("FooTest")));
         assert!(args.iter().any(|a| a.contains("BarTest")));
     }
@@ -943,18 +970,22 @@ mod tests {
         input
             .options
             .insert("classpath".to_string(), "/tmp/classes".to_string());
-        input.source_files.push(PathBuf::from(
-            "src/test/java/com/example/FooTest.java",
-        ));
-        input.source_files.push(PathBuf::from(
-            "src/test/java/com/example/BarSpec.java",
-        ));
+        input
+            .source_files
+            .push(PathBuf::from("src/test/java/com/example/FooTest.java"));
+        input
+            .source_files
+            .push(PathBuf::from("src/test/java/com/example/BarSpec.java"));
         input.target_dir = PathBuf::from("/tmp/output");
 
         let java = PathBuf::from("/usr/lib/jvm/java-17/bin/java");
         let cmd = executor.build_command(&java, &input);
 
-        let args: Vec<String> = cmd.as_std().get_args().map(|s| s.to_string_lossy().to_string()).collect();
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
         assert!(args.iter().any(|a| a.contains("com.example.FooTest")));
         assert!(args.iter().any(|a| a.contains("com.example.BarSpec")));
     }
@@ -1033,13 +1064,13 @@ mod tests {
             .options
             .insert("java_home".to_string(), java_home.clone());
         // Use just --help to verify ConsoleLauncher works (no actual tests)
-        input.options.insert(
-            "classpath".to_string(),
-            "/nonexistent/cp".to_string(),
-        );
         input
             .options
-            .insert("xml_report_dir".to_string(), report_dir.to_str().unwrap().to_string());
+            .insert("classpath".to_string(), "/nonexistent/cp".to_string());
+        input.options.insert(
+            "xml_report_dir".to_string(),
+            report_dir.to_str().unwrap().to_string(),
+        );
         input.target_dir = output_dir.clone();
         // Don't pass test_classes so no actual tests run
         // We just verify the executor doesn't panic

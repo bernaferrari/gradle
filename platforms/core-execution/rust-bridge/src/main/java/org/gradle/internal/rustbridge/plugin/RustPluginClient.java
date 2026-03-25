@@ -6,6 +6,7 @@ import gradle.substrate.v1.GetAppliedPluginsRequest;
 import gradle.substrate.v1.GetAppliedPluginsResponse;
 import gradle.substrate.v1.HasPluginRequest;
 import gradle.substrate.v1.HasPluginResponse;
+import gradle.substrate.v1.PluginInfo;
 import gradle.substrate.v1.PluginServiceGrpc;
 import gradle.substrate.v1.RegisterPluginRequest;
 import gradle.substrate.v1.RegisterPluginResponse;
@@ -88,9 +89,9 @@ public class RustPluginClient {
         }
     }
 
-    public List<GetAppliedPluginsResponse.PluginInfo> getAppliedPlugins(String projectPath) {
+    public List<PluginInfo> getAppliedPlugins(String projectPath) {
         if (client.isNoop()) {
-            return List.of();
+            return java.util.Collections.emptyList();
         }
 
         try {
@@ -101,7 +102,7 @@ public class RustPluginClient {
             return response.getPluginsList();
         } catch (Exception e) {
             LOGGER.debug("[substrate:plugin] getAppliedPlugins failed", e);
-            return List.of();
+            return java.util.Collections.emptyList();
         }
     }
 }

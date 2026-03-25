@@ -16,8 +16,8 @@ use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 
 use crate::proto::{
-    exec_service_server::ExecService, ExecOutputChunk, ExecOutputRequest, ExecKillTreeRequest,
-    ExecKillTreeResponse, ExecSignalRequest, ExecSignalResponse, ExecSpawnRequest, ExecSpawnResponse,
+    exec_service_server::ExecService, ExecKillTreeRequest, ExecKillTreeResponse, ExecOutputChunk,
+    ExecOutputRequest, ExecSignalRequest, ExecSignalResponse, ExecSpawnRequest, ExecSpawnResponse,
     ExecWaitRequest, ExecWaitResponse,
 };
 
@@ -104,7 +104,9 @@ impl ExecServiceImpl {
                         }
                         // Spawn async wait to reap the child (we already own it from remove)
                         let mut child = entry.child;
-                        tokio::spawn(async move { let _ = child.wait().await; });
+                        tokio::spawn(async move {
+                            let _ = child.wait().await;
+                        });
                         tracing::debug!(pid, command = %command, "Killed stale process");
                     }
                     Err(_) => {}
@@ -119,8 +121,11 @@ impl ExecServiceImpl {
     }
 
     /// Stream output from a reader into a channel with optional binary mode.
-    fn stream_output<R>(mut reader: tokio::io::BufReader<R>, tx: mpsc::Sender<Vec<u8>>, binary: bool)
-    where
+    fn stream_output<R>(
+        mut reader: tokio::io::BufReader<R>,
+        tx: mpsc::Sender<Vec<u8>>,
+        binary: bool,
+    ) where
         R: tokio::io::AsyncRead + Unpin + Send + 'static,
     {
         tokio::spawn(async move {
@@ -129,7 +134,7 @@ impl ExecServiceImpl {
                 let mut buf = vec![0u8; 8192];
                 loop {
                     match reader.read(&mut buf).await {
-                        Ok(0) => break,     // EOF
+                        Ok(0) => break, // EOF
                         Ok(n) => {
                             if tx.send(buf[..n].to_vec()).await.is_err() {
                                 break;
@@ -211,9 +216,9 @@ impl ExecService for ExecServiceImpl {
             cmd.stderr(std::process::Stdio::null());
         }
 
-        let mut child = cmd.spawn().map_err(|e| {
-            Status::internal(format!("Failed to spawn '{}': {}", req.command, e))
-        })?;
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| Status::internal(format!("Failed to spawn '{}': {}", req.command, e)))?;
 
         let pid = child.id().unwrap_or(0);
 
@@ -230,19 +235,11 @@ impl ExecService for ExecServiceImpl {
         let (stderr_tx, stderr_rx) = mpsc::channel::<Vec<u8>>(64);
 
         if let Some(stdout) = child.stdout.take() {
-            Self::stream_output(
-                tokio::io::BufReader::new(stdout),
-                stdout_tx,
-                false,
-            );
+            Self::stream_output(tokio::io::BufReader::new(stdout), stdout_tx, false);
         }
 
         if let Some(stderr) = child.stderr.take() {
-            Self::stream_output(
-                tokio::io::BufReader::new(stderr),
-                stderr_tx,
-                false,
-            );
+            Self::stream_output(tokio::io::BufReader::new(stderr), stderr_tx, false);
         }
 
         self.processes.insert(
@@ -284,11 +281,10 @@ impl ExecService for ExecServiceImpl {
             .remove(&pid)
             .ok_or_else(|| Status::not_found(format!("Unknown process: {}", pid)))?;
 
-        let status = entry
-            .child
-            .wait()
-            .await
-            .map_err(|e| Status::internal(format!("Failed to wait for process {}: {}", pid, e)))?;
+        let status =
+            entry.child.wait().await.map_err(|e| {
+                Status::internal(format!("Failed to wait for process {}: {}", pid, e))
+            })?;
 
         let exit_code = status.code().unwrap_or(-1);
         let elapsed = entry.started_at.elapsed();
@@ -622,9 +618,7 @@ mod tests {
     async fn test_wait_nonexistent_process() {
         let svc = ExecServiceImpl::new();
 
-        let result = svc
-            .wait(Request::new(ExecWaitRequest { pid: 99999 }))
-            .await;
+        let result = svc.wait(Request::new(ExecWaitRequest { pid: 99999 })).await;
 
         assert!(result.is_err());
     }

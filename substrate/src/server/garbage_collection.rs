@@ -6,9 +6,8 @@ use tonic::{Request, Response, Status};
 
 use crate::proto::{
     garbage_collection_service_server::GarbageCollectionService, GcBuildCacheRequest,
-    GcBuildCacheResponse, GcConfigCacheRequest, GcConfigCacheResponse,
-    GcExecutionHistoryRequest, GcExecutionHistoryResponse, GetStorageStatsRequest,
-    GetStorageStatsResponse, StorageStats,
+    GcBuildCacheResponse, GcConfigCacheRequest, GcConfigCacheResponse, GcExecutionHistoryRequest,
+    GcExecutionHistoryResponse, GetStorageStatsRequest, GetStorageStatsResponse, StorageStats,
 };
 
 /// Provides garbage collection for substrate-managed stores.
@@ -30,11 +29,7 @@ impl Default for GarbageCollectionServiceImpl {
 }
 
 impl GarbageCollectionServiceImpl {
-    pub fn new(
-        cache_dir: PathBuf,
-        history_dir: PathBuf,
-        config_cache_dir: PathBuf,
-    ) -> Self {
+    pub fn new(cache_dir: PathBuf, history_dir: PathBuf, config_cache_dir: PathBuf) -> Self {
         Self {
             cache_dir,
             history_dir,
@@ -68,12 +63,18 @@ impl GarbageCollectionServiceImpl {
         let mut dirs_to_scan = vec![dir.to_path_buf()];
         while let Some(scan_dir) = dirs_to_scan.pop() {
             let mut dir_entries = fs::read_dir(&scan_dir).await.map_err(|e| {
-                Status::internal(format!("Failed to read directory {}: {}", scan_dir.display(), e))
+                Status::internal(format!(
+                    "Failed to read directory {}: {}",
+                    scan_dir.display(),
+                    e
+                ))
             })?;
 
-            while let Some(entry) = dir_entries.next_entry().await.map_err(|e| {
-                Status::internal(format!("Failed to read directory entry: {}", e))
-            })? {
+            while let Some(entry) = dir_entries
+                .next_entry()
+                .await
+                .map_err(|e| Status::internal(format!("Failed to read directory entry: {}", e)))?
+            {
                 let path = entry.path();
                 if path.is_dir() {
                     dirs_to_scan.push(path);
@@ -197,12 +198,18 @@ impl GarbageCollectionServiceImpl {
         let mut dirs_to_scan = vec![dir.to_path_buf()];
         while let Some(scan_dir) = dirs_to_scan.pop() {
             let mut dir_entries = fs::read_dir(&scan_dir).await.map_err(|e| {
-                Status::internal(format!("Failed to read directory {}: {}", scan_dir.display(), e))
+                Status::internal(format!(
+                    "Failed to read directory {}: {}",
+                    scan_dir.display(),
+                    e
+                ))
             })?;
 
-            while let Some(entry) = dir_entries.next_entry().await.map_err(|e| {
-                Status::internal(format!("Failed to read directory entry: {}", e))
-            })? {
+            while let Some(entry) = dir_entries
+                .next_entry()
+                .await
+                .map_err(|e| Status::internal(format!("Failed to read directory entry: {}", e)))?
+            {
                 let path = entry.path();
                 if path.is_dir() {
                     dirs_to_scan.push(path);
@@ -253,13 +260,7 @@ impl GarbageCollectionService for GarbageCollectionServiceImpl {
     ) -> Result<Response<GcBuildCacheResponse>, Status> {
         let req = request.into_inner();
         let (removed, bytes_recovered, remaining) = self
-            .gc_directory(
-                &self.cache_dir,
-                req.max_age_ms,
-                None,
-                req.dry_run,
-                "",
-            )
+            .gc_directory(&self.cache_dir, req.max_age_ms, None, req.dry_run, "")
             .await?;
 
         let bytes_remaining = self.dir_total_bytes(&self.cache_dir, "").await?;
@@ -381,9 +382,7 @@ mod tests {
         // Create some files
         for i in 0..5 {
             let path = dir.path().join(format!("entry{}.bin", i));
-            tokio::fs::write(&path, vec![0u8; 100])
-                .await
-                .unwrap();
+            tokio::fs::write(&path, vec![0u8; 100]).await.unwrap();
         }
 
         let svc = GarbageCollectionServiceImpl::new(
@@ -414,9 +413,7 @@ mod tests {
 
         for i in 0..3 {
             let path = dir.path().join(format!("entry{}.bin", i));
-            tokio::fs::write(&path, vec![0u8; 50])
-                .await
-                .unwrap();
+            tokio::fs::write(&path, vec![0u8; 50]).await.unwrap();
         }
 
         let svc = GarbageCollectionServiceImpl::new(
@@ -448,9 +445,7 @@ mod tests {
 
         for i in 0..5 {
             let path = dir.path().join(format!("entry{}.bin", i));
-            tokio::fs::write(&path, vec![0u8; 100])
-                .await
-                .unwrap();
+            tokio::fs::write(&path, vec![0u8; 100]).await.unwrap();
         }
 
         let svc = GarbageCollectionServiceImpl::new(
@@ -502,11 +497,14 @@ mod tests {
 
         // Build cache uses no extension filter (empty string)
         tokio::fs::write(dir.path().join("entry1.bin"), vec![0u8; 50])
-            .await.unwrap();
+            .await
+            .unwrap();
         tokio::fs::write(dir.path().join("entry2.dat"), vec![0u8; 75])
-            .await.unwrap();
+            .await
+            .unwrap();
         tokio::fs::write(dir.path().join("entry3.txt"), vec![0u8; 25])
-            .await.unwrap();
+            .await
+            .unwrap();
 
         let svc = GarbageCollectionServiceImpl::new(
             dir.path().to_path_buf(),
@@ -537,9 +535,11 @@ mod tests {
         let shard_dir = dir.path().join("ab");
         tokio::fs::create_dir_all(&shard_dir).await.unwrap();
         tokio::fs::write(shard_dir.join("entry1.bin"), vec![0u8; 100])
-            .await.unwrap();
+            .await
+            .unwrap();
         tokio::fs::write(dir.path().join("entry2.bin"), vec![0u8; 200])
-            .await.unwrap();
+            .await
+            .unwrap();
 
         let svc = GarbageCollectionServiceImpl::new(
             dir.path().to_path_buf(),
@@ -601,9 +601,7 @@ mod tests {
 
         for i in 0..4 {
             let path = dir.path().join(format!("config{}.bin", i));
-            tokio::fs::write(&path, vec![0u8; 80])
-                .await
-                .unwrap();
+            tokio::fs::write(&path, vec![0u8; 80]).await.unwrap();
         }
         // Also a non-.bin file that should be ignored
         tokio::fs::write(dir.path().join("readme.txt"), vec![0u8; 50])
@@ -639,9 +637,7 @@ mod tests {
         // Create files with known sizes: 3 files of 200 bytes each = 600 total
         for i in 0..3 {
             let path = dir.path().join(format!("entry{}", i));
-            tokio::fs::write(&path, vec![0u8; 200])
-                .await
-                .unwrap();
+            tokio::fs::write(&path, vec![0u8; 200]).await.unwrap();
         }
 
         let svc = GarbageCollectionServiceImpl::new(
@@ -685,9 +681,7 @@ mod tests {
         // then create one more. Use max_age_ms=0 to evict all.
         for i in 0..4 {
             let path = dir.path().join(format!("entry{}.bin", i));
-            tokio::fs::write(&path, vec![0u8; 50])
-                .await
-                .unwrap();
+            tokio::fs::write(&path, vec![0u8; 50]).await.unwrap();
         }
 
         let svc = GarbageCollectionServiceImpl::new(

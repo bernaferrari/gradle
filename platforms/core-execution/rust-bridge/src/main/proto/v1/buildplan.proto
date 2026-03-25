@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+option java_outer_classname = "BuildPlanProto";
+
+// Canonical build-plan IR emitted by JVM compatibility hosts and consumed by
+// the Rust daemon kernel.
+message BuildPlan {
+  uint32 schema_version = 1;
+  string build_id = 2;
+  repeated BuildPlanProject projects = 3;
+  repeated BuildPlanTask tasks = 4;
+  repeated BuildPlanDependency dependencies = 5;
+  repeated BuildPlanToolchainRequest toolchains = 6;
+  map<string, string> metadata = 7;
+}
+
+message BuildPlanProject {
+  string path = 1;
+  string name = 2;
+  string project_dir = 3;
+}
+
+message BuildPlanTask {
+  string path = 1;
+  string project_path = 2;
+  string implementation_id = 3;
+  repeated string depends_on = 4;
+  map<string, string> inputs = 5;
+  repeated string outputs = 6;
+  string worker_isolation = 7;
+}
+
+message BuildPlanDependency {
+  string project_path = 1;
+  string configuration = 2;
+  string notation = 3;
+}
+
+message BuildPlanToolchainRequest {
+  string language = 1;
+  string version = 2;
+  string vendor = 3;
+  string implementation = 4;
+}
+
+// Envelope for a build plan with deterministic fingerprint.
+message BuildPlanEnvelope {
+  BuildPlan plan = 1;
+  string plan_fingerprint_sha256 = 2;
+}

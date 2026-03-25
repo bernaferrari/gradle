@@ -1,0 +1,161 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service ParserService {
+  // Parse a Groovy DSL script into an AST
+  rpc ParseGroovy(ParseGroovyRequest) returns (ParseGroovyResponse);
+
+  // Parse a Gradle build script and extract all elements
+  rpc ParseBuildScript(ParseBuildScriptRequest) returns (ParseBuildScriptResponse);
+
+  // Extract dependency declarations from a build script
+  rpc ParseBuildScriptDependencies(ParseBuildScriptDependenciesRequest) returns (ParseBuildScriptDependenciesResponse);
+
+  // Extract plugin declarations from a build script
+  rpc ParseBuildScriptPlugins(ParseBuildScriptPluginsRequest) returns (ParseBuildScriptPluginsResponse);
+
+  // Extract repository declarations from a build script
+  rpc ParseBuildScriptRepositories(ParseBuildScriptRepositoriesRequest) returns (ParseBuildScriptRepositoriesResponse);
+
+  // Extract task definitions from a build script
+  rpc ParseBuildScriptTasks(ParseBuildScriptTasksRequest) returns (ParseBuildScriptTasksResponse);
+
+  // Extract source set declarations from a build script
+  rpc ParseBuildScriptSourceSets(ParseBuildScriptSourceSetsRequest) returns (ParseBuildScriptSourceSetsResponse);
+}
+
+// --- Groovy AST ---
+
+message ParseGroovyRequest {
+  string script_content = 1;
+  string file_path = 2;
+}
+
+message ParseGroovyResponse {
+  repeated GroovyNode nodes = 1;
+  int32 error_count = 2;
+  string error_message = 3;
+}
+
+message GroovyNode {
+  string node_type = 1;
+  string text = 2;
+  int32 line = 3;
+  int32 column = 4;
+  repeated GroovyNode children = 5;
+  map<string, string> properties = 6;
+}
+
+// --- Build Script Parsing ---
+
+message ParseBuildScriptRequest {
+  string script_content = 1;
+  string file_path = 2;
+}
+
+message ParseBuildScriptResponse {
+  repeated BuildScriptElement elements = 1;
+  int32 error_count = 2;
+}
+
+message BuildScriptElement {
+  string element_type = 1;
+  map<string, string> properties = 2;
+  string raw_text = 3;
+  int32 line = 4;
+}
+
+// --- Dependency Parsing ---
+
+message ParseBuildScriptDependenciesRequest {
+  string script_content = 1;
+  string configuration_name = 2;
+}
+
+message ParseBuildScriptDependenciesResponse {
+  repeated DependencyEntry dependencies = 1;
+}
+
+message DependencyEntry {
+  string group = 1;
+  string artifact = 2;
+  string version = 3;
+  string configuration = 4;
+  string raw_text = 5;
+  bool is_project = 6;
+}
+
+// --- Plugin Parsing ---
+
+message ParseBuildScriptPluginsRequest {
+  string script_content = 1;
+  string block_type = 2;
+}
+
+message ParseBuildScriptPluginsResponse {
+  repeated PluginEntry plugins = 1;
+}
+
+message PluginEntry {
+  string id = 1;
+  string version = 2;
+  bool apply = 3;
+  string raw_text = 4;
+  int32 line = 5;
+}
+
+// --- Repository Parsing ---
+
+message ParseBuildScriptRepositoriesRequest {
+  string script_content = 1;
+}
+
+message ParseBuildScriptRepositoriesResponse {
+  repeated RepositoryEntry repositories = 1;
+}
+
+message RepositoryEntry {
+  string name = 1;
+  string url = 2;
+  string type = 3;
+  string raw_text = 4;
+}
+
+// --- Task Parsing ---
+
+message ParseBuildScriptTasksRequest {
+  string script_content = 1;
+}
+
+message ParseBuildScriptTasksResponse {
+  repeated TaskEntry tasks = 1;
+}
+
+message TaskEntry {
+  string name = 1;
+  string type = 2;
+  repeated string depends_on = 3;
+  map<string, string> properties = 4;
+  string raw_text = 5;
+  int32 line = 6;
+}
+
+// --- Source Set Parsing ---
+
+message ParseBuildScriptSourceSetsRequest {
+  string script_content = 1;
+}
+
+message ParseBuildScriptSourceSetsResponse {
+  repeated SourceSetEntry source_sets = 1;
+}
+
+message SourceSetEntry {
+  string name = 1;
+  repeated string src_dirs = 2;
+  repeated string resource_dirs = 3;
+}

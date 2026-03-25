@@ -92,7 +92,10 @@ fn bench_send_1000_events_with_dispatchers(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 for req in &requests {
-                    let _ = svc.send_build_event(Request::new(req.clone())).await.unwrap();
+                    let _ = svc
+                        .send_build_event(Request::new(req.clone()))
+                        .await
+                        .unwrap();
                 }
             })
         })

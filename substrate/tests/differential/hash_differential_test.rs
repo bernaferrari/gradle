@@ -5,7 +5,6 @@
 /// - 100+ files hashed with MD5, SHA-1, SHA-256
 /// - Empty files, binary files, unicode filenames, large files (1MB+), symlinks
 /// - Byte-for-byte comparison against known-correct reference hashes
-
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -21,13 +20,6 @@ use tonic::Request;
 
 use gradle_substrate_daemon::proto::*;
 use gradle_substrate_daemon::server::{
-    cache::CacheServiceImpl,
-    control::ControlServiceImpl,
-    dag_executor::DagExecutorServiceImpl,
-    event_dispatcher::EventDispatcher,
-    execution_history::ExecutionHistoryServiceImpl,
-    hash::HashServiceImpl,
-    work::WorkerScheduler,
     // Import all services needed for the server
     artifact_publishing::ArtifactPublishingServiceImpl,
     bootstrap::BootstrapServiceImpl,
@@ -38,15 +30,21 @@ use gradle_substrate_daemon::server::{
     build_metrics::BuildMetricsServiceImpl,
     build_operations::BuildOperationsServiceImpl,
     build_result::BuildResultServiceImpl,
+    cache::CacheServiceImpl,
     cache_orchestration::BuildCacheOrchestrationServiceImpl,
     config_cache::ConfigurationCacheServiceImpl,
     configuration::ConfigurationServiceImpl,
     console::ConsoleServiceImpl,
+    control::ControlServiceImpl,
+    dag_executor::DagExecutorServiceImpl,
     dependency_resolution::DependencyResolutionServiceImpl,
+    event_dispatcher::EventDispatcher,
     exec::ExecServiceImpl,
+    execution_history::ExecutionHistoryServiceImpl,
     file_fingerprint::FileFingerprintServiceImpl,
     file_watch::FileWatchServiceImpl,
     garbage_collection::GarbageCollectionServiceImpl,
+    hash::HashServiceImpl,
     incremental_compilation::IncrementalCompilationServiceImpl,
     plugin::PluginServiceImpl,
     problem_reporting::ProblemReportingServiceImpl,
@@ -55,6 +53,7 @@ use gradle_substrate_daemon::server::{
     test_execution::TestExecutionServiceImpl,
     toolchain::ToolchainServiceImpl,
     value_snapshot::ValueSnapshotServiceImpl,
+    work::WorkerScheduler,
     worker_process::WorkerProcessServiceImpl,
 };
 
@@ -93,10 +92,13 @@ async fn spawn_server() -> (String, tempfile::TempDir) {
             work_scheduler.clone(),
             Arc::clone(&shared_history),
         );
-    let cache_orchestration = BuildCacheOrchestrationServiceImpl::with_local_cache(cache_local_store);
+    let cache_orchestration =
+        BuildCacheOrchestrationServiceImpl::with_local_cache(cache_local_store);
     let file_fingerprint = FileFingerprintServiceImpl::new();
     let value_snapshot = ValueSnapshotServiceImpl::new();
-    let task_graph = Arc::new(TaskGraphServiceImpl::with_history(Arc::clone(&shared_history)));
+    let task_graph = Arc::new(TaskGraphServiceImpl::with_history(Arc::clone(
+        &shared_history,
+    )));
     let execution_history = ExecutionHistoryServiceImpl::new(history_dir.clone());
     let configuration = ConfigurationServiceImpl::new();
     let plugin = PluginServiceImpl::new();
@@ -112,7 +114,8 @@ async fn spawn_server() -> (String, tempfile::TempDir) {
         Arc::clone(&console) as Arc<dyn EventDispatcher>,
         Arc::clone(&build_metrics) as Arc<dyn EventDispatcher>,
     ];
-    let build_event_stream = BuildEventStreamServiceImpl::with_dispatchers(event_dispatchers.clone());
+    let build_event_stream =
+        BuildEventStreamServiceImpl::with_dispatchers(event_dispatchers.clone());
     let dag_executor = DagExecutorServiceImpl::new(
         work_scheduler.clone(),
         Arc::clone(&task_graph),
@@ -139,7 +142,9 @@ async fn spawn_server() -> (String, tempfile::TempDir) {
     tokio::spawn(async move {
         let _ = Server::builder()
             .add_service(control_service_server::ControlServiceServer::new(control))
-            .add_service(dag_executor_service_server::DagExecutorServiceServer::new(dag_executor))
+            .add_service(dag_executor_service_server::DagExecutorServiceServer::new(
+                dag_executor,
+            ))
             .add_service(hash_service_server::HashServiceServer::new(hash))
             .add_service(cache_service_server::CacheServiceServer::new(cache))
             .add_service(exec_service_server::ExecServiceServer::new(exec))
@@ -152,11 +157,15 @@ async fn spawn_server() -> (String, tempfile::TempDir) {
                     execution_history,
                 ),
             )
-            .add_service(build_cache_orchestration_service_server::BuildCacheOrchestrationServiceServer::new(
-                cache_orchestration,
-            ))
             .add_service(
-                file_fingerprint_service_server::FileFingerprintServiceServer::new(file_fingerprint),
+                build_cache_orchestration_service_server::BuildCacheOrchestrationServiceServer::new(
+                    cache_orchestration,
+                ),
+            )
+            .add_service(
+                file_fingerprint_service_server::FileFingerprintServiceServer::new(
+                    file_fingerprint,
+                ),
             )
             .add_service(
                 value_snapshot_service_server::ValueSnapshotServiceServer::new(value_snapshot),
@@ -164,26 +173,34 @@ async fn spawn_server() -> (String, tempfile::TempDir) {
             .add_service(task_graph_service_server::TaskGraphServiceServer::new(
                 (*task_graph).clone(),
             ))
-            .add_service(configuration_service_server::ConfigurationServiceServer::new(
-                configuration,
-            ))
+            .add_service(
+                configuration_service_server::ConfigurationServiceServer::new(configuration),
+            )
             .add_service(plugin_service_server::PluginServiceServer::new(plugin))
             .add_service(
-                build_operations_service_server::BuildOperationsServiceServer::new(build_operations),
+                build_operations_service_server::BuildOperationsServiceServer::new(
+                    build_operations,
+                ),
             )
-            .add_service(bootstrap_service_server::BootstrapServiceServer::new(bootstrap))
+            .add_service(bootstrap_service_server::BootstrapServiceServer::new(
+                bootstrap,
+            ))
             .add_service(
                 dependency_resolution_service_server::DependencyResolutionServiceServer::new(
                     dependency_resolution,
                 ),
             )
-            .add_service(file_watch_service_server::FileWatchServiceServer::new(file_watch))
+            .add_service(file_watch_service_server::FileWatchServiceServer::new(
+                file_watch,
+            ))
             .add_service(
                 configuration_cache_service_server::ConfigurationCacheServiceServer::new(
                     config_cache,
                 ),
             )
-            .add_service(toolchain_service_server::ToolchainServiceServer::new(toolchain))
+            .add_service(toolchain_service_server::ToolchainServiceServer::new(
+                toolchain,
+            ))
             .add_service(
                 build_event_stream_service_server::BuildEventStreamServiceServer::new(
                     build_event_stream,
@@ -192,8 +209,12 @@ async fn spawn_server() -> (String, tempfile::TempDir) {
             .add_service(
                 worker_process_service_server::WorkerProcessServiceServer::new(worker_process),
             )
-            .add_service(build_layout_service_server::BuildLayoutServiceServer::new(build_layout))
-            .add_service(build_result_service_server::BuildResultServiceServer::new(build_result))
+            .add_service(build_layout_service_server::BuildLayoutServiceServer::new(
+                build_layout,
+            ))
+            .add_service(build_result_service_server::BuildResultServiceServer::new(
+                build_result,
+            ))
             .add_service(
                 problem_reporting_service_server::ProblemReportingServiceServer::new(
                     problem_reporting,
@@ -205,9 +226,13 @@ async fn spawn_server() -> (String, tempfile::TempDir) {
                 ),
             )
             .add_service(
-                build_comparison_service_server::BuildComparisonServiceServer::new(build_comparison),
+                build_comparison_service_server::BuildComparisonServiceServer::new(
+                    build_comparison,
+                ),
             )
-            .add_service(console_service_server::ConsoleServiceServer::new((*console).clone()))
+            .add_service(console_service_server::ConsoleServiceServer::new(
+                (*console).clone(),
+            ))
             .add_service(
                 test_execution_service_server::TestExecutionServiceServer::new(test_execution),
             )
@@ -216,14 +241,18 @@ async fn spawn_server() -> (String, tempfile::TempDir) {
                     artifact_publishing,
                 ),
             )
-            .add_service(build_init_service_server::BuildInitServiceServer::new(build_init))
+            .add_service(build_init_service_server::BuildInitServiceServer::new(
+                build_init,
+            ))
             .add_service(
                 incremental_compilation_service_server::IncrementalCompilationServiceServer::new(
                     incremental_compilation,
                 ),
             )
             .add_service(
-                build_metrics_service_server::BuildMetricsServiceServer::new((*build_metrics).clone()),
+                build_metrics_service_server::BuildMetricsServiceServer::new(
+                    (*build_metrics).clone(),
+                ),
             )
             .add_service(
                 garbage_collection_service_server::GarbageCollectionServiceServer::new(
@@ -327,8 +356,16 @@ async fn test_hash_100_files_against_reference_md5() {
     let mut mismatches: Vec<String> = Vec::new();
 
     for i in 0..105 {
-        let content = format!("file content number {} with some padding data to vary length: {}", i, "x".repeat(i % 256));
-        let file_path = write_test_file(file_dir.path(), &format!("file_{:04}.txt", i), content.as_bytes());
+        let content = format!(
+            "file content number {} with some padding data to vary length: {}",
+            i,
+            "x".repeat(i % 256)
+        );
+        let file_path = write_test_file(
+            file_dir.path(),
+            &format!("file_{:04}.txt", i),
+            content.as_bytes(),
+        );
         files_to_hash.push(FileToHash {
             absolute_path: file_path.clone(),
             length: 0,
@@ -392,7 +429,11 @@ async fn test_hash_100_files_against_reference_sha256() {
 
     for i in 0..105 {
         let content = format!("sha256 content {} padding {}", i, "y".repeat(i % 512));
-        let file_path = write_test_file(file_dir.path(), &format!("sha256_file_{:04}.dat", i), content.as_bytes());
+        let file_path = write_test_file(
+            file_dir.path(),
+            &format!("sha256_file_{:04}.dat", i),
+            content.as_bytes(),
+        );
         files_to_hash.push(FileToHash {
             absolute_path: file_path.clone(),
             length: 0,
@@ -420,7 +461,12 @@ async fn test_hash_100_files_against_reference_sha256() {
             continue;
         }
 
-        assert_eq!(result.hash_bytes.len(), 32, "SHA-256 must be 32 bytes for {}", result.absolute_path);
+        assert_eq!(
+            result.hash_bytes.len(),
+            32,
+            "SHA-256 must be 32 bytes for {}",
+            result.absolute_path
+        );
 
         let file_data = read_file(&result.absolute_path);
         let expected = reference_sha256(&file_data);
@@ -457,7 +503,11 @@ async fn test_hash_100_files_against_reference_sha1() {
 
     for i in 0..105 {
         let content = format!("sha1 test data #{} {}", i, "z".repeat(i % 384));
-        let file_path = write_test_file(file_dir.path(), &format!("sha1_file_{:04}.bin", i), content.as_bytes());
+        let file_path = write_test_file(
+            file_dir.path(),
+            &format!("sha1_file_{:04}.bin", i),
+            content.as_bytes(),
+        );
         files_to_hash.push(FileToHash {
             absolute_path: file_path.clone(),
             length: 0,
@@ -485,7 +535,12 @@ async fn test_hash_100_files_against_reference_sha1() {
             continue;
         }
 
-        assert_eq!(result.hash_bytes.len(), 20, "SHA-1 must be 20 bytes for {}", result.absolute_path);
+        assert_eq!(
+            result.hash_bytes.len(),
+            20,
+            "SHA-1 must be 20 bytes for {}",
+            result.absolute_path
+        );
 
         let file_data = read_file(&result.absolute_path);
         let expected = reference_sha1(&file_data);
@@ -524,9 +579,7 @@ async fn test_hash_empty_files_against_reference() {
 
     // Create multiple empty files
     let empty_paths: Vec<String> = (0..5)
-        .map(|i| {
-            write_test_file(file_dir.path(), &format!("empty_{}.txt", i), b"")
-        })
+        .map(|i| write_test_file(file_dir.path(), &format!("empty_{}.txt", i), b""))
         .collect();
 
     for algorithm in &["MD5", "SHA-1", "SHA-256"] {
@@ -551,7 +604,11 @@ async fn test_hash_empty_files_against_reference() {
         assert_eq!(response.results.len(), 5);
 
         for result in &response.results {
-            assert!(!result.error, "Empty file should not error: {}", result.error_message);
+            assert!(
+                !result.error,
+                "Empty file should not error: {}",
+                result.error_message
+            );
 
             let expected = match *algorithm {
                 "MD5" => reference_md5(b""),
@@ -598,12 +655,18 @@ async fn test_hash_binary_files_against_reference() {
     let binary_cases: Vec<(&str, Vec<u8>)> = vec![
         ("all_zeros.bin", vec![0u8; 1024]),
         ("all_ones.bin", vec![0xFFu8; 1024]),
-        ("alternating.bin", (0..512).flat_map(|i| vec![i as u8, 0xFF - i as u8]).collect()),
-        ("random_like.bin", (0..2048).map(|i| ((i * 31 + 17) % 256) as u8).collect()),
+        (
+            "alternating.bin",
+            (0..512)
+                .flat_map(|i| vec![i as u8, 0xFF - i as u8])
+                .collect(),
+        ),
+        (
+            "random_like.bin",
+            (0..2048).map(|i| ((i * 31 + 17) % 256) as u8).collect(),
+        ),
         ("single_byte.bin", vec![0x42u8]),
-        ("null_term.bin", {
-            b"hello world\0with null".to_vec()
-        }),
+        ("null_term.bin", { b"hello world\0with null".to_vec() }),
     ];
 
     for (name, content) in &binary_cases {
@@ -668,12 +731,27 @@ async fn test_hash_unicode_filenames_against_reference() {
     let mut mismatches: Vec<String> = Vec::new();
 
     let unicode_names = [
-        ("\u{00e9}ntrepr\u{00ee}se.txt", "enterprise content with accents"),
-        ("\u{4f60}\u{597d}\u{4e16}\u{754c}.txt", "chinese characters content"),
-        ("\u{043f}\u{0440}\u{0438}\u{0432}\u{0435}\u{0442}.txt", "russian privet"),
+        (
+            "\u{00e9}ntrepr\u{00ee}se.txt",
+            "enterprise content with accents",
+        ),
+        (
+            "\u{4f60}\u{597d}\u{4e16}\u{754c}.txt",
+            "chinese characters content",
+        ),
+        (
+            "\u{043f}\u{0440}\u{0438}\u{0432}\u{0435}\u{0442}.txt",
+            "russian privet",
+        ),
         ("caf\u{00e9}\u{0301}.txt", "cafe with combining accent"),
-        ("\u{3053}\u{3093}\u{306b}\u{3061}\u{306f}.txt", "japanese konnichiwa"),
-        ("\u{00dc}\u{00f6}\u{00e4}\u{00df}.txt", "german umlauts and eszett"),
+        (
+            "\u{3053}\u{3093}\u{306b}\u{3061}\u{306f}.txt",
+            "japanese konnichiwa",
+        ),
+        (
+            "\u{00dc}\u{00f6}\u{00e4}\u{00df}.txt",
+            "german umlauts and eszett",
+        ),
     ];
 
     for (name, content) in &unicode_names {
@@ -696,8 +774,7 @@ async fn test_hash_unicode_filenames_against_reference() {
         assert!(
             !result.error,
             "Unicode filename {} should not error: {}",
-            name,
-            result.error_message
+            name, result.error_message
         );
 
         let expected = reference_sha256(content.as_bytes());
@@ -735,10 +812,10 @@ async fn test_hash_large_files_against_reference() {
 
     // Generate large files that exceed the 8KB read threshold
     let large_cases: Vec<(&str, usize, u8)> = vec![
-        ("1mb_sequential.bin", 1_048_576, 0x42),  // 1 MB
-        ("1mb_zero.bin", 1_048_576, 0x00),         // 1 MB of zeros
-        ("2mb_pattern.bin", 2_097_152, 0xAB),      // 2 MB
-        ("512kb.bin", 524_288, 0xFF),              // 512 KB (just under 1MB)
+        ("1mb_sequential.bin", 1_048_576, 0x42), // 1 MB
+        ("1mb_zero.bin", 1_048_576, 0x00),       // 1 MB of zeros
+        ("2mb_pattern.bin", 2_097_152, 0xAB),    // 2 MB
+        ("512kb.bin", 524_288, 0xFF),            // 512 KB (just under 1MB)
     ];
 
     for (name, size, fill_byte) in &large_cases {
@@ -763,8 +840,7 @@ async fn test_hash_large_files_against_reference() {
             assert!(
                 !result.error,
                 "Large file {} should not error: {}",
-                name,
-                result.error_message
+                name, result.error_message
             );
 
             let expected = match *algorithm {
@@ -848,8 +924,7 @@ async fn test_hash_symlinks_against_reference() {
         assert!(
             !result.error,
             "Symlink {} should not error: {}",
-            symlink_str,
-            result.error_message
+            symlink_str, result.error_message
         );
 
         if result.hash_bytes != expected_sha256 {
@@ -882,7 +957,11 @@ async fn test_different_algorithms_produce_different_hashes() {
     let mut client = hash_service_client::HashServiceClient::new(channel);
 
     let file_dir = tempfile::tempdir().unwrap();
-    let file_path = write_test_file(file_dir.path(), "multi_algo.txt", b"test content for multi-algo comparison");
+    let file_path = write_test_file(
+        file_dir.path(),
+        "multi_algo.txt",
+        b"test content for multi-algo comparison",
+    );
 
     let mut all_hashes: Vec<(String, Vec<u8>)> = Vec::new();
 
@@ -900,7 +979,10 @@ async fn test_different_algorithms_produce_different_hashes() {
             .unwrap()
             .into_inner();
 
-        all_hashes.push((algorithm.to_string(), response.results[0].hash_bytes.clone()));
+        all_hashes.push((
+            algorithm.to_string(),
+            response.results[0].hash_bytes.clone(),
+        ));
     }
 
     // All three should have different lengths
@@ -910,9 +992,21 @@ async fn test_different_algorithms_produce_different_hashes() {
 
     // All three should differ in content (different lengths already prove this,
     // but also verify first 16 bytes differ between any pair)
-    assert_ne!(&all_hashes[0].1[..], &all_hashes[1].1[..16], "MD5 and SHA-1 first 16 bytes must differ");
-    assert_ne!(&all_hashes[0].1[..], &all_hashes[2].1[..16], "MD5 and SHA-256 first 16 bytes must differ");
-    assert_ne!(&all_hashes[1].1[..], &all_hashes[2].1[..16], "SHA-1 and SHA-256 first 16 bytes must differ");
+    assert_ne!(
+        &all_hashes[0].1[..],
+        &all_hashes[1].1[..16],
+        "MD5 and SHA-1 first 16 bytes must differ"
+    );
+    assert_ne!(
+        &all_hashes[0].1[..],
+        &all_hashes[2].1[..16],
+        "MD5 and SHA-256 first 16 bytes must differ"
+    );
+    assert_ne!(
+        &all_hashes[1].1[..],
+        &all_hashes[2].1[..16],
+        "SHA-1 and SHA-256 first 16 bytes must differ"
+    );
 }
 
 // ============================================================
@@ -951,7 +1045,11 @@ async fn test_nonexistent_files_report_errors_cleanly() {
 
     assert_eq!(response.results.len(), 3);
     for result in &response.results {
-        assert!(result.error, "Nonexistent file {} should report error", result.absolute_path);
+        assert!(
+            result.error,
+            "Nonexistent file {} should report error",
+            result.absolute_path
+        );
         assert!(
             !result.error_message.is_empty(),
             "Error message should not be empty for {}",
@@ -983,9 +1081,21 @@ async fn test_mixed_valid_invalid_batch() {
     let response = client
         .hash_batch(Request::new(HashBatchRequest {
             files: vec![
-                FileToHash { absolute_path: valid_path.clone(), length: 0, last_modified: 0 },
-                FileToHash { absolute_path: invalid_path, length: 0, last_modified: 0 },
-                FileToHash { absolute_path: valid_path2.clone(), length: 0, last_modified: 0 },
+                FileToHash {
+                    absolute_path: valid_path.clone(),
+                    length: 0,
+                    last_modified: 0,
+                },
+                FileToHash {
+                    absolute_path: invalid_path,
+                    length: 0,
+                    last_modified: 0,
+                },
+                FileToHash {
+                    absolute_path: valid_path2.clone(),
+                    length: 0,
+                    last_modified: 0,
+                },
             ],
             algorithm: "SHA-256".to_string(),
         }))
@@ -998,7 +1108,10 @@ async fn test_mixed_valid_invalid_batch() {
     // First: valid
     assert!(!response.results[0].error);
     let expected0 = reference_sha256(b"valid content");
-    assert_eq!(response.results[0].hash_bytes, expected0, "First valid file hash mismatch");
+    assert_eq!(
+        response.results[0].hash_bytes, expected0,
+        "First valid file hash mismatch"
+    );
 
     // Second: invalid
     assert!(response.results[1].error);
@@ -1006,7 +1119,10 @@ async fn test_mixed_valid_invalid_batch() {
     // Third: valid
     assert!(!response.results[2].error);
     let expected2 = reference_sha256(b"other valid content");
-    assert_eq!(response.results[2].hash_bytes, expected2, "Third valid file hash mismatch");
+    assert_eq!(
+        response.results[2].hash_bytes, expected2,
+        "Third valid file hash mismatch"
+    );
 }
 
 // ============================================================
@@ -1020,7 +1136,11 @@ async fn test_hash_determinism_across_10_calls() {
     let mut client = hash_service_client::HashServiceClient::new(channel);
 
     let file_dir = tempfile::tempdir().unwrap();
-    let file_path = write_test_file(file_dir.path(), "determinism.txt", b"check determinism across 10 calls");
+    let file_path = write_test_file(
+        file_dir.path(),
+        "determinism.txt",
+        b"check determinism across 10 calls",
+    );
 
     let file_entry = FileToHash {
         absolute_path: file_path.clone(),

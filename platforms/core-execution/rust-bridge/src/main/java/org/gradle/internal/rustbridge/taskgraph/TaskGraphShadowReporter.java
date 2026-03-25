@@ -1,7 +1,7 @@
 package org.gradle.internal.rustbridge.taskgraph;
 
 import org.gradle.api.logging.Logging;
-import org.gradle.api.tasks.TaskExecutionGraph;
+import org.gradle.api.execution.TaskExecutionGraph;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
 import org.slf4j.Logger;
 

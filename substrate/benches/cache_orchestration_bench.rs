@@ -9,11 +9,15 @@ use gradle_substrate_daemon::server::cache_orchestration::BuildCacheOrchestratio
 use tonic::Request;
 
 fn make_props(n: usize) -> HashMap<String, String> {
-    (0..n).map(|i| (format!("prop_{}", i), format!("hash_{}", i))).collect()
+    (0..n)
+        .map(|i| (format!("prop_{}", i), format!("hash_{}", i)))
+        .collect()
 }
 
 fn make_file_hashes(n: usize) -> HashMap<String, String> {
-    (0..n).map(|i| (format!("file_{}", i), format!("fhash_{}", i))).collect()
+    (0..n)
+        .map(|i| (format!("file_{}", i), format!("fhash_{}", i)))
+        .collect()
 }
 
 fn bench_compute_cache_key(c: &mut Criterion) {
@@ -29,7 +33,9 @@ fn bench_compute_cache_key(c: &mut Criterion) {
                     input_property_hashes: make_props(10),
                     input_file_hashes: make_file_hashes(5),
                     output_property_names: vec!["classes".to_string(), "resources".to_string()],
-                })).await.unwrap()
+                }))
+                .await
+                .unwrap()
             })
         })
     });
@@ -48,11 +54,17 @@ fn bench_compute_cache_key_large(c: &mut Criterion) {
                     input_property_hashes: make_props(100),
                     input_file_hashes: make_file_hashes(50),
                     output_property_names: (0..20).map(|i| format!("output_{}", i)).collect(),
-                })).await.unwrap()
+                }))
+                .await
+                .unwrap()
             })
         })
     });
 }
 
-criterion_group!(benches, bench_compute_cache_key, bench_compute_cache_key_large);
+criterion_group!(
+    benches,
+    bench_compute_cache_key,
+    bench_compute_cache_key_large
+);
 criterion_main!(benches);

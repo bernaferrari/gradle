@@ -60,7 +60,11 @@ impl ValueSnapshotServiceImpl {
         if s.is_empty() {
             return String::new();
         }
-        let mut values: Vec<&str> = s.split(',').map(|v| v.trim()).filter(|v| !v.is_empty()).collect();
+        let mut values: Vec<&str> = s
+            .split(',')
+            .map(|v| v.trim())
+            .filter(|v| !v.is_empty())
+            .collect();
         values.sort();
         values.dedup();
         values.join(",")
@@ -277,8 +281,16 @@ mod tests {
             implementation_fingerprint: "impl".to_string(),
         };
 
-        let resp1 = svc.snapshot_values(Request::new(make_request())).await.unwrap().into_inner();
-        let resp2 = svc.snapshot_values(Request::new(make_request())).await.unwrap().into_inner();
+        let resp1 = svc
+            .snapshot_values(Request::new(make_request()))
+            .await
+            .unwrap()
+            .into_inner();
+        let resp2 = svc
+            .snapshot_values(Request::new(make_request()))
+            .await
+            .unwrap()
+            .into_inner();
 
         assert_eq!(resp1.composite_hash, resp2.composite_hash);
         assert_eq!(resp1.results[0].fingerprint, resp2.results[0].fingerprint);
@@ -301,7 +313,10 @@ mod tests {
         let fp_str = ValueSnapshotServiceImpl::fingerprint_value(&prop_str);
         let fp_long = ValueSnapshotServiceImpl::fingerprint_value(&prop_long);
 
-        assert_ne!(fp_str, fp_long, "Different types should produce different fingerprints");
+        assert_ne!(
+            fp_str, fp_long,
+            "Different types should produce different fingerprints"
+        );
     }
 
     #[test]
@@ -320,7 +335,10 @@ mod tests {
 
         let fp_a = ValueSnapshotServiceImpl::fingerprint_value(&prop_a);
         let fp_b = ValueSnapshotServiceImpl::fingerprint_value(&prop_b);
-        assert_eq!(fp_a, fp_b, "FileCollection paths in different order should have same fingerprint");
+        assert_eq!(
+            fp_a, fp_b,
+            "FileCollection paths in different order should have same fingerprint"
+        );
     }
 
     #[test]
@@ -339,7 +357,10 @@ mod tests {
 
         let fp_unique = ValueSnapshotServiceImpl::fingerprint_value(&prop_unique);
         let fp_dup = ValueSnapshotServiceImpl::fingerprint_value(&prop_dup);
-        assert_eq!(fp_unique, fp_dup, "Duplicate FileCollection paths should be deduplicated");
+        assert_eq!(
+            fp_unique, fp_dup,
+            "Duplicate FileCollection paths should be deduplicated"
+        );
     }
 
     #[test]
@@ -436,8 +457,10 @@ mod tests {
         assert!(resp.success);
         assert_eq!(resp.results.len(), 1);
         assert_eq!(resp.results[0].name, "empty-prop");
-        assert!(!resp.results[0].fingerprint.is_empty(),
-            "Even a null value should produce a non-empty fingerprint");
+        assert!(
+            !resp.results[0].fingerprint.is_empty(),
+            "Even a null value should produce a non-empty fingerprint"
+        );
         assert!(resp.error_message.is_empty());
 
         // Also test empty string value — should differ from null
@@ -455,8 +478,7 @@ mod tests {
             .into_inner();
 
         assert_ne!(
-            resp.results[0].fingerprint,
-            resp_empty_str.results[0].fingerprint,
+            resp.results[0].fingerprint, resp_empty_str.results[0].fingerprint,
             "Null and empty-string values must produce different fingerprints"
         );
     }
@@ -498,15 +520,20 @@ mod tests {
             .into_inner();
 
         // Composite hash must be identical
-        assert_eq!(resp1.composite_hash, resp2.composite_hash,
-            "Composite hash must be deterministic across calls");
+        assert_eq!(
+            resp1.composite_hash, resp2.composite_hash,
+            "Composite hash must be deterministic across calls"
+        );
 
         // Each individual fingerprint must be identical
         assert_eq!(resp1.results.len(), resp2.results.len());
         for (r1, r2) in resp1.results.iter().zip(resp2.results.iter()) {
             assert_eq!(r1.name, r2.name);
-            assert_eq!(r1.fingerprint, r2.fingerprint,
-                "Fingerprint for '{}' must be deterministic", r1.name);
+            assert_eq!(
+                r1.fingerprint, r2.fingerprint,
+                "Fingerprint for '{}' must be deterministic",
+                r1.name
+            );
         }
 
         assert!(resp1.success);
@@ -535,10 +562,16 @@ mod tests {
         assert_eq!(resp.results.len(), 1);
         assert_eq!(resp.results[0].name, "large-input");
         // MD5 output is always 16 bytes regardless of input size
-        assert_eq!(resp.results[0].fingerprint.len(), 16,
-            "MD5 fingerprint must always be 16 bytes");
-        assert_eq!(resp.composite_hash.len(), 16,
-            "Composite MD5 hash must always be 16 bytes");
+        assert_eq!(
+            resp.results[0].fingerprint.len(),
+            16,
+            "MD5 fingerprint must always be 16 bytes"
+        );
+        assert_eq!(
+            resp.composite_hash.len(),
+            16,
+            "Composite MD5 hash must always be 16 bytes"
+        );
         assert!(resp.error_message.is_empty());
     }
 
@@ -594,18 +627,30 @@ mod tests {
             .into_inner();
 
         // All four composite hashes must differ
-        assert_ne!(string_resp.composite_hash, bool_resp.composite_hash,
-            "String and bool composite hashes must differ");
-        assert_ne!(string_resp.composite_hash, long_resp.composite_hash,
-            "String and long composite hashes must differ");
-        assert_ne!(string_resp.composite_hash, binary_resp.composite_hash,
-            "String and binary composite hashes must differ");
-        assert_ne!(bool_resp.composite_hash, long_resp.composite_hash,
-            "Bool and long composite hashes must differ");
-        assert_ne!(bool_resp.composite_hash, binary_resp.composite_hash,
-            "Bool and binary composite hashes must differ");
-        assert_ne!(long_resp.composite_hash, binary_resp.composite_hash,
-            "Long and binary composite hashes must differ");
+        assert_ne!(
+            string_resp.composite_hash, bool_resp.composite_hash,
+            "String and bool composite hashes must differ"
+        );
+        assert_ne!(
+            string_resp.composite_hash, long_resp.composite_hash,
+            "String and long composite hashes must differ"
+        );
+        assert_ne!(
+            string_resp.composite_hash, binary_resp.composite_hash,
+            "String and binary composite hashes must differ"
+        );
+        assert_ne!(
+            bool_resp.composite_hash, long_resp.composite_hash,
+            "Bool and long composite hashes must differ"
+        );
+        assert_ne!(
+            bool_resp.composite_hash, binary_resp.composite_hash,
+            "Bool and binary composite hashes must differ"
+        );
+        assert_ne!(
+            long_resp.composite_hash, binary_resp.composite_hash,
+            "Long and binary composite hashes must differ"
+        );
 
         // Verify all succeeded
         for resp in [&string_resp, &bool_resp, &long_resp, &binary_resp] {
@@ -630,7 +675,10 @@ mod tests {
 
         let fp_unix = ValueSnapshotServiceImpl::fingerprint_value(&prop_unix);
         let fp_mixed = ValueSnapshotServiceImpl::fingerprint_value(&prop_mixed);
-        assert_eq!(fp_unix, fp_mixed, "Backslash paths should normalize to forward slash");
+        assert_eq!(
+            fp_unix, fp_mixed,
+            "Backslash paths should normalize to forward slash"
+        );
     }
 
     #[tokio::test]
@@ -667,7 +715,9 @@ mod tests {
                     },
                     PropertyValue {
                         name: "env-vars".to_string(),
-                        value: Some(Value::MapValue("JAVA_HOME=/usr/lib/jvm;PATH=/usr/bin".to_string())),
+                        value: Some(Value::MapValue(
+                            "JAVA_HOME=/usr/lib/jvm;PATH=/usr/bin".to_string(),
+                        )),
                         type_name: "java.util.Map".to_string(),
                     },
                 ],
@@ -691,10 +741,17 @@ mod tests {
             "release",
         ];
         for (i, expected_name) in expected_order.iter().enumerate() {
-            assert_eq!(resp.results[i].name, *expected_name,
-                "Result at position {} should be '{}'", i, expected_name);
-            assert_eq!(resp.results[i].fingerprint.len(), 16,
-                "Fingerprint for '{}' must be 16 bytes", expected_name);
+            assert_eq!(
+                resp.results[i].name, *expected_name,
+                "Result at position {} should be '{}'",
+                i, expected_name
+            );
+            assert_eq!(
+                resp.results[i].fingerprint.len(),
+                16,
+                "Fingerprint for '{}' must be 16 bytes",
+                expected_name
+            );
         }
 
         // Composite hash must be 16 bytes (MD5)
@@ -740,11 +797,15 @@ mod tests {
         assert!(resp.error_message.is_empty());
 
         // Each property must have its own unique fingerprint
-        let fingerprints: Vec<Vec<u8>> = resp.results.iter().map(|r| r.fingerprint.clone()).collect();
+        let fingerprints: Vec<Vec<u8>> =
+            resp.results.iter().map(|r| r.fingerprint.clone()).collect();
         for i in 0..fingerprints.len() {
             for j in (i + 1)..fingerprints.len() {
-                assert_ne!(fingerprints[i], fingerprints[j],
-                    "Properties at indices {} and {} must have different fingerprints", i, j);
+                assert_ne!(
+                    fingerprints[i], fingerprints[j],
+                    "Properties at indices {} and {} must have different fingerprints",
+                    i, j
+                );
             }
         }
 
@@ -752,8 +813,11 @@ mod tests {
         let mut sorted_names: Vec<&str> = dotted_names.iter().map(|s| s.as_ref()).collect();
         sorted_names.sort();
         for (i, expected) in sorted_names.iter().enumerate() {
-            assert_eq!(resp.results[i].name, *expected,
-                "Result at position {} should be sorted as '{}'", i, expected);
+            assert_eq!(
+                resp.results[i].name, *expected,
+                "Result at position {} should be sorted as '{}'",
+                i, expected
+            );
         }
     }
 
@@ -851,12 +915,17 @@ mod tests {
         // Same fingerprint for each matching property across calls
         for (r1, r2) in resp.results.iter().zip(resp2.results.iter()) {
             assert_eq!(r1.name, r2.name);
-            assert_eq!(r1.fingerprint, r2.fingerprint,
-                "Fingerprint for '{}' must be stable across calls", r1.name);
+            assert_eq!(
+                r1.fingerprint, r2.fingerprint,
+                "Fingerprint for '{}' must be stable across calls",
+                r1.name
+            );
         }
 
-        assert_eq!(resp.composite_hash, resp2.composite_hash,
-            "Composite hash must be stable across calls with identical inputs");
+        assert_eq!(
+            resp.composite_hash, resp2.composite_hash,
+            "Composite hash must be stable across calls with identical inputs"
+        );
     }
 
     #[tokio::test]
@@ -871,14 +940,8 @@ mod tests {
                         Value::StringValue(format!("string-value-{}", i)),
                         "java.lang.String".to_string(),
                     ),
-                    1 => (
-                        Value::LongValue(i as i64),
-                        "java.lang.Long".to_string(),
-                    ),
-                    2 => (
-                        Value::BoolValue(i % 2 == 0),
-                        "boolean".to_string(),
-                    ),
+                    1 => (Value::LongValue(i as i64), "java.lang.Long".to_string()),
+                    2 => (Value::BoolValue(i % 2 == 0), "boolean".to_string()),
                     3 => (
                         Value::BinaryValue(vec![i as u8, (i >> 8) as u8, (i >> 16) as u8]),
                         "[B".to_string(),
@@ -912,13 +975,21 @@ mod tests {
             .into_inner();
 
         assert!(resp.success);
-        assert_eq!(resp.results.len(), 150, "Should return results for all 150 properties");
+        assert_eq!(
+            resp.results.len(),
+            150,
+            "Should return results for all 150 properties"
+        );
         assert!(resp.error_message.is_empty());
 
         // Every fingerprint must be 16 bytes (MD5)
         for result in &resp.results {
-            assert_eq!(result.fingerprint.len(), 16,
-                "Fingerprint for '{}' must be 16 bytes", result.name);
+            assert_eq!(
+                result.fingerprint.len(),
+                16,
+                "Fingerprint for '{}' must be 16 bytes",
+                result.name
+            );
         }
 
         // Composite hash must be 16 bytes
@@ -926,9 +997,12 @@ mod tests {
 
         // Results must be sorted by name
         for window in resp.results.windows(2) {
-            assert!(window[0].name < window[1].name,
+            assert!(
+                window[0].name < window[1].name,
                 "Results must be sorted: '{}' should come before '{}'",
-                window[0].name, window[1].name);
+                window[0].name,
+                window[1].name
+            );
         }
     }
 
@@ -937,9 +1011,7 @@ mod tests {
         let svc = ValueSnapshotServiceImpl::new();
 
         // Create a 512 KB binary value (simulates a serialized class file or compiled output)
-        let large_binary: Vec<u8> = (0..512 * 1024)
-            .map(|i| (i % 256) as u8)
-            .collect();
+        let large_binary: Vec<u8> = (0..512 * 1024).map(|i| (i % 256) as u8).collect();
 
         let resp = svc
             .snapshot_values(Request::new(SnapshotValuesRequest {
@@ -957,10 +1029,16 @@ mod tests {
         assert!(resp.success);
         assert_eq!(resp.results.len(), 1);
         assert_eq!(resp.results[0].name, "compiled-bytecode");
-        assert_eq!(resp.results[0].fingerprint.len(), 16,
-            "MD5 fingerprint must be 16 bytes regardless of input size");
-        assert_eq!(resp.composite_hash.len(), 16,
-            "Composite hash must be 16 bytes");
+        assert_eq!(
+            resp.results[0].fingerprint.len(),
+            16,
+            "MD5 fingerprint must be 16 bytes regardless of input size"
+        );
+        assert_eq!(
+            resp.composite_hash.len(),
+            16,
+            "Composite hash must be 16 bytes"
+        );
         assert!(resp.error_message.is_empty());
 
         // Verify determinism: same binary input produces same fingerprint
@@ -977,15 +1055,17 @@ mod tests {
             .unwrap()
             .into_inner();
 
-        assert_eq!(resp.results[0].fingerprint, resp2.results[0].fingerprint,
-            "Large binary fingerprint must be deterministic");
-        assert_eq!(resp.composite_hash, resp2.composite_hash,
-            "Composite hash must be deterministic for large binary values");
+        assert_eq!(
+            resp.results[0].fingerprint, resp2.results[0].fingerprint,
+            "Large binary fingerprint must be deterministic"
+        );
+        assert_eq!(
+            resp.composite_hash, resp2.composite_hash,
+            "Composite hash must be deterministic for large binary values"
+        );
 
         // Different binary content should produce a different fingerprint
-        let different_binary: Vec<u8> = (0..512 * 1024)
-            .map(|i| ((i + 1) % 256) as u8)
-            .collect();
+        let different_binary: Vec<u8> = (0..512 * 1024).map(|i| ((i + 1) % 256) as u8).collect();
         let resp3 = svc
             .snapshot_values(Request::new(SnapshotValuesRequest {
                 values: vec![PropertyValue {
@@ -999,7 +1079,9 @@ mod tests {
             .unwrap()
             .into_inner();
 
-        assert_ne!(resp.results[0].fingerprint, resp3.results[0].fingerprint,
-            "Different binary content must produce different fingerprints");
+        assert_ne!(
+            resp.results[0].fingerprint, resp3.results[0].fingerprint,
+            "Different binary content must produce different fingerprints"
+        );
     }
 }

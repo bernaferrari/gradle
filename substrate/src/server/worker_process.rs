@@ -9,7 +9,6 @@ use nix::sys::signal::{self, Signal};
 #[cfg(unix)]
 use nix::unistd::Pid;
 
-
 use crate::proto::{
     worker_process_service_server::WorkerProcessService, AcquireWorkerRequest,
     AcquireWorkerResponse, ConfigurePoolRequest, ConfigurePoolResponse, GetWorkerStatusRequest,
@@ -128,8 +127,7 @@ impl WorkerProcessServiceImpl {
             cmd.process_group(0);
         }
 
-        cmd
-            .stdin(std::process::Stdio::piped())
+        cmd.stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
@@ -137,13 +135,18 @@ impl WorkerProcessServiceImpl {
     }
 
     /// Spawn a real JVM worker process.
-    async fn spawn_worker(&self, spec: &WorkerSpec) -> Result<(u32, tokio::process::Child), String> {
+    async fn spawn_worker(
+        &self,
+        spec: &WorkerSpec,
+    ) -> Result<(u32, tokio::process::Child), String> {
         let mut cmd = Self::build_jvm_command(spec);
 
         cmd.spawn()
             .map_err(|e| format!("Failed to spawn worker: {}", e))
             .and_then(|child| {
-                let pid = child.id().ok_or_else(|| "Failed to get child PID".to_string())?;
+                let pid = child
+                    .id()
+                    .ok_or_else(|| "Failed to get child PID".to_string())?;
                 Ok((pid, child))
             })
     }
@@ -186,12 +189,7 @@ impl WorkerProcessServiceImpl {
         }
 
         // Wait up to 5 seconds for graceful shutdown
-        match tokio::time::timeout(
-            tokio::time::Duration::from_secs(5),
-            child.wait(),
-        )
-        .await
-        {
+        match tokio::time::timeout(tokio::time::Duration::from_secs(5), child.wait()).await {
             Ok(_) => {}
             Err(_) => {
                 // Force kill the process group
@@ -552,7 +550,8 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
             } else {
                 // Unhealthy or non-daemon -- remove
                 drop(worker);
-                self.stop_worker_internal(&req.worker_id, !req.healthy).await;
+                self.stop_worker_internal(&req.worker_id, !req.healthy)
+                    .await;
                 tracing::debug!(
                     worker_id = %req.worker_id,
                     "Worker removed (unhealthy={})",
@@ -687,9 +686,9 @@ fn get_process_memory(pid: u32) -> i64 {
         // Use proc_pidinfo to get RSS for a specific PID
         #[repr(C)]
         struct ProcVminfo {
-            pvi_size: u64,       // virtual memory size (bytes)
-            pvi_rssize: u64,     // resident set size (bytes)
-            pvi_footprint: u64,  // memory footprint (bytes)
+            pvi_size: u64,      // virtual memory size (bytes)
+            pvi_rssize: u64,    // resident set size (bytes)
+            pvi_footprint: u64, // memory footprint (bytes)
         }
 
         let mut info: ProcVminfo = unsafe { mem::zeroed() };
@@ -940,8 +939,7 @@ mod tests {
     async fn test_spawn_echo_process() {
         // Use echo command as a real process test
         let mut cmd = tokio::process::Command::new("echo");
-        cmd.arg("hello")
-            .stdin(std::process::Stdio::piped());
+        cmd.arg("hello").stdin(std::process::Stdio::piped());
         let child = cmd.spawn().unwrap();
         let pid = child.id().unwrap();
 
@@ -1236,21 +1234,43 @@ mod tests {
             java_home: "/usr/lib/jvm/java-17".to_string(),
             classpath: vec!["a.jar".to_string(), "b.jar".to_string()],
             working_dir: "/tmp".to_string(),
-            jvm_args: [("-ea".to_string(), "true".to_string()), ("-Xdebug".to_string(), "".to_string())]
-                .into_iter()
-                .collect(),
+            jvm_args: [
+                ("-ea".to_string(), "true".to_string()),
+                ("-Xdebug".to_string(), "".to_string()),
+            ]
+            .into_iter()
+            .collect(),
             max_memory_mb: 1024,
             daemon: true,
         };
 
         let cmd = WorkerProcessServiceImpl::build_jvm_command(&spec);
-        let args: Vec<String> = cmd.as_std().get_args().map(|s| s.to_string_lossy().to_string()).collect();
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
 
-        assert!(args.iter().any(|a| a == "-Xmx1024m"), "should have -Xmx1024m");
-        assert!(args.iter().any(|a| a.contains("a.jar")), "should have classpath");
-        assert!(args.iter().any(|a| a.contains("-ea=true")), "should have -ea=true JVM arg");
-        assert!(args.iter().any(|a| a.contains("-Xdebug=")), "should have -Xdebug= JVM arg");
-        assert!(args.iter().any(|a| a.contains("IsolatedClassloaderWorker")), "should have main class");
+        assert!(
+            args.iter().any(|a| a == "-Xmx1024m"),
+            "should have -Xmx1024m"
+        );
+        assert!(
+            args.iter().any(|a| a.contains("a.jar")),
+            "should have classpath"
+        );
+        assert!(
+            args.iter().any(|a| a.contains("-ea=true")),
+            "should have -ea=true JVM arg"
+        );
+        assert!(
+            args.iter().any(|a| a.contains("-Xdebug=")),
+            "should have -Xdebug= JVM arg"
+        );
+        assert!(
+            args.iter().any(|a| a.contains("IsolatedClassloaderWorker")),
+            "should have main class"
+        );
     }
 
     #[test]

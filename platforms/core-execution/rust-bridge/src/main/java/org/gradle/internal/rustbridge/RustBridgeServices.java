@@ -22,6 +22,8 @@ import org.gradle.internal.rustbridge.taskgraph.RustTaskGraphClient;
 import org.gradle.internal.rustbridge.taskgraph.TaskGraphShadowListener;
 import org.gradle.internal.rustbridge.taskgraph.TaskGraphShadowReporter;
 import org.gradle.internal.rustbridge.watch.RustFileWatchClient;
+import org.gradle.internal.rustbridge.parser.RustParserClient;
+import org.gradle.internal.rustbridge.parser.ShadowingScriptParser;
 import org.gradle.internal.rustbridge.work.WorkerSchedulerClient;
 import org.gradle.internal.rustbridge.bootstrap.RustBootstrapClient;
 import org.gradle.internal.rustbridge.bootstrap.BootstrapLifecycleListener;
@@ -62,11 +64,35 @@ import org.gradle.internal.rustbridge.jvmhost.JvmHostServiceImpl;
 import org.gradle.internal.rustbridge.jvmhost.ProjectModelProviderAdapter;
 import org.gradle.internal.rustbridge.evaluation.ProjectEvaluationShadowListener;
 import org.gradle.internal.rustbridge.graph.TaskExecutionGraphShadowListener;
+import org.gradle.internal.rustbridge.hash.RustGrpcFileHasher;
+import org.gradle.internal.rustbridge.hash.ShadowingFileHasher;
+import org.gradle.internal.rustbridge.history.ShadowingExecutionHistoryStore;
+import org.gradle.internal.rustbridge.history.BinaryEncoderExecutionHistorySerializer;
+import org.gradle.internal.rustbridge.snapshot.ShadowingInputFingerprinter;
+import org.gradle.internal.rustbridge.watch.ShadowingFileWatcherRegistryFactory;
+import org.gradle.internal.rustbridge.work.ShadowingWorkAvoidanceChecker;
+import org.gradle.internal.rustbridge.execution.ShadowingExecutionPlanAdvisor;
+import org.gradle.internal.rustbridge.plugin.ShadowingPluginRegistry;
+import org.gradle.internal.rustbridge.worker.ShadowingWorkerPool;
+import org.gradle.internal.rustbridge.eventstream.ShadowingBuildEventLogger;
+import org.gradle.internal.rustbridge.problems.ShadowingProblemCollector;
+import org.gradle.internal.rustbridge.resources.ShadowingResourceCoordinator;
+import org.gradle.internal.rustbridge.comparison.ShadowingBuildComparator;
+import org.gradle.internal.rustbridge.console.ShadowingConsoleOutput;
+import org.gradle.internal.rustbridge.metrics.ShadowingMetricsRecorder;
+import org.gradle.internal.rustbridge.publishing.ShadowingArtifactPublisher;
+import org.gradle.internal.rustbridge.exec.ShadowingExecActionFactory;
 import org.gradle.internal.service.Provides;
 import org.gradle.internal.service.ServiceRegistration;
 import org.gradle.internal.service.scopes.AbstractGradleModuleServices;
 import org.gradle.internal.snapshot.ValueSnapshotter;
 import org.gradle.api.internal.project.ProjectStateRegistry;
+import org.gradle.internal.hash.FileHasher;
+import org.gradle.internal.execution.history.ExecutionHistoryStore;
+import org.gradle.internal.execution.FileCollectionSnapshotter;
+import org.gradle.internal.execution.InputFingerprinter;
+import org.gradle.internal.watch.registry.FileWatcherRegistryFactory;
+import org.gradle.process.internal.ExecActionFactory;
 import org.jspecify.annotations.Nullable;
 
 import java.io.File;
@@ -311,6 +337,278 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
         @Provides
         RustGarbageCollectionClient createRustGarbageCollectionClient(SubstrateClient client) {
             return new RustGarbageCollectionClient(client);
+        }
+
+        // --- Execution history shadow wiring (ExecutionHistoryStore is Build scoped) ---
+
+        @Provides
+        @Nullable
+        ShadowingExecutionHistoryStore createShadowingExecutionHistoryStore(
+            ExecutionHistoryStore javaStore,
+            RustExecutionHistoryClient rustClient,
+            com.google.common.collect.Interner<String> stringInterner,
+            org.gradle.internal.hash.ClassLoaderHierarchyHasher classLoaderHasher,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_HISTORY)) {
+                return null;
+            }
+            boolean authoritative = RustSubstrateOptions.isAuthoritative(options);
+            return new ShadowingExecutionHistoryStore(
+                javaStore,
+                rustClient,
+                new BinaryEncoderExecutionHistorySerializer(stringInterner, classLoaderHasher),
+                authoritative
+            );
+        }
+
+        // --- File fingerprint shadow wiring ---
+
+        @Provides
+        @Nullable
+        ShadowingFileCollectionSnapshotter createShadowingFileCollectionSnapshotter(
+            FileCollectionSnapshotter javaSnapshotter,
+            RustFileFingerprintClient rustFingerprintClient,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_FINGERPRINTING)) {
+                return null;
+            }
+            boolean authoritative = RustSubstrateOptions.isAuthoritative(options);
+            return new ShadowingFileCollectionSnapshotter(
+                javaSnapshotter,
+                rustFingerprintClient,
+                mismatchReporter,
+                authoritative
+            );
+        }
+
+        // --- Input fingerprinter shadow wiring ---
+
+        @Provides
+        @Nullable
+        ShadowingInputFingerprinter createShadowingInputFingerprinter(
+            InputFingerprinter javaFingerprinter,
+            @Nullable ShadowingValueSnapshotter shadowingValueSnapshotter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_SNAPSHOTTING)) {
+                return null;
+            }
+            return new ShadowingInputFingerprinter(javaFingerprinter, shadowingValueSnapshotter);
+        }
+
+        // --- File watch shadow wiring ---
+
+        @Provides
+        @Nullable
+        ShadowingFileWatcherRegistryFactory createShadowingFileWatcherRegistryFactory(
+            FileWatcherRegistryFactory delegateFactory,
+            RustFileWatchClient rustFileWatchClient,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_FILE_WATCH)) {
+                return null;
+            }
+            return new ShadowingFileWatcherRegistryFactory(
+                delegateFactory,
+                rustFileWatchClient,
+                mismatchReporter
+            );
+        }
+
+        // --- Work / up-to-date shadow wiring ---
+
+        @Provides
+        @Nullable
+        ShadowingWorkAvoidanceChecker createShadowingWorkAvoidanceChecker(
+            WorkerSchedulerClient workerSchedulerClient,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+                return null;
+            }
+            return new ShadowingWorkAvoidanceChecker(workerSchedulerClient, mismatchReporter);
+        }
+
+        // --- Execution plan shadow wiring ---
+
+        @Provides
+        @Nullable
+        ShadowingExecutionPlanAdvisor createShadowingExecutionPlanAdvisor(
+            ExecutionPlanClient executionPlanClient,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+                return null;
+            }
+            return new ShadowingExecutionPlanAdvisor(executionPlanClient, mismatchReporter);
+        }
+
+        // --- Plugin shadow wiring ---
+
+        @Provides
+        @Nullable
+        ShadowingPluginRegistry createShadowingPluginRegistry(
+            RustPluginClient rustPluginClient,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+                return null;
+            }
+            return new ShadowingPluginRegistry(rustPluginClient, mismatchReporter);
+        }
+
+        // --- Worker pool shadow wiring ---
+
+        @Provides
+        @Nullable
+        ShadowingWorkerPool createShadowingWorkerPool(
+            RustWorkerProcessClient rustWorkerProcessClient,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+                return null;
+            }
+            return new ShadowingWorkerPool(rustWorkerProcessClient, mismatchReporter);
+        }
+
+        // --- Build event stream shadow wiring ---
+
+        @Provides
+        @Nullable
+        ShadowingBuildEventLogger createShadowingBuildEventLogger(
+            RustBuildEventStreamClient rustBuildEventStreamClient,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+                return null;
+            }
+            return new ShadowingBuildEventLogger(rustBuildEventStreamClient, mismatchReporter);
+        }
+
+        // --- Problem reporting shadow wiring ---
+
+        @Provides
+        @Nullable
+        ShadowingProblemCollector createShadowingProblemCollector(
+            RustProblemReportingClient rustProblemReportingClient,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+                return null;
+            }
+            return new ShadowingProblemCollector(rustProblemReportingClient, mismatchReporter);
+        }
+
+        // --- Resource management shadow wiring ---
+
+        @Provides
+        @Nullable
+        ShadowingResourceCoordinator createShadowingResourceCoordinator(
+            RustResourceManagementClient rustResourceManagementClient,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+                return null;
+            }
+            return new ShadowingResourceCoordinator(rustResourceManagementClient, mismatchReporter);
+        }
+
+        // --- Build comparison shadow wiring ---
+
+        @Provides
+        @Nullable
+        ShadowingBuildComparator createShadowingBuildComparator(
+            RustBuildComparisonClient rustBuildComparisonClient,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+                return null;
+            }
+            return new ShadowingBuildComparator(rustBuildComparisonClient, mismatchReporter);
+        }
+
+        // --- Console shadow wiring ---
+
+        @Provides
+        @Nullable
+        ShadowingConsoleOutput createShadowingConsoleOutput(
+            RustConsoleClient rustConsoleClient,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+                return null;
+            }
+            return new ShadowingConsoleOutput(rustConsoleClient, mismatchReporter);
+        }
+
+        // --- Metrics shadow wiring ---
+
+        @Provides
+        @Nullable
+        ShadowingMetricsRecorder createShadowingMetricsRecorder(
+            RustBuildMetricsClient rustBuildMetricsClient,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+                return null;
+            }
+            return new ShadowingMetricsRecorder(rustBuildMetricsClient, mismatchReporter);
+        }
+
+        // --- Artifact publishing shadow wiring ---
+
+        @Provides
+        @Nullable
+        ShadowingArtifactPublisher createShadowingArtifactPublisher(
+            RustArtifactPublishingClient rustArtifactPublishingClient,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+                return null;
+            }
+            return new ShadowingArtifactPublisher(rustArtifactPublishingClient, mismatchReporter);
+        }
+
+        // --- Parser service wiring ---
+
+        @Provides
+        @Nullable
+        RustParserClient createRustParserClient(
+            SubstrateClient client,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+                return new RustParserClient(SubstrateClient.noop());
+            }
+            return new RustParserClient(client);
+        }
+
+        @Provides
+        @Nullable
+        ShadowingScriptParser createShadowingScriptParser(
+            RustParserClient rustParserClient,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+                return null;
+            }
+            return new ShadowingScriptParser(rustParserClient, mismatchReporter);
         }
 
         @Provides
@@ -603,6 +901,46 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
         @Provides
         HashMismatchReporter createHashMismatchReporter() {
             return new HashMismatchReporter(true);
+        }
+
+        // --- Exec service wiring ---
+
+        @Provides
+        @org.gradle.internal.service.scopes.PrivateService
+        @Nullable
+        ShadowingExecActionFactory createShadowingExecActionFactory(
+            ExecActionFactory javaFactory,
+            SubstrateClient client,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_EXEC)) {
+                return null;
+            }
+            boolean authoritative = RustSubstrateOptions.isAuthoritative(options);
+            return new ShadowingExecActionFactory(javaFactory, client, mismatchReporter, authoritative);
+        }
+
+        // --- Hash service wiring (FileHasher is UserHome/BuildSession scoped) ---
+
+        @Provides
+        @Nullable
+        ShadowingFileHasher createShadowingFileHasher(
+            FileHasher javaFileHasher,
+            SubstrateClient client,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_HASHING)) {
+                return null;
+            }
+            boolean authoritative = RustSubstrateOptions.isAuthoritative(options);
+            return new ShadowingFileHasher(
+                javaFileHasher,
+                new RustGrpcFileHasher(client),
+                mismatchReporter,
+                authoritative
+            );
         }
 
         @Provides

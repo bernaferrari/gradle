@@ -93,7 +93,7 @@ public class RustBuildEventStreamClient {
                 .subscribeBuildEvents(request.build())
                 .forEachRemaining(events::add);
 
-            return events;
+            return Collections.unmodifiableList(events);
         } catch (Exception e) {
             LOGGER.debug("[substrate:eventstream] subscribe build events failed", e);
             return Collections.emptyList();

@@ -148,7 +148,7 @@ public class RustDependencyResolutionClient {
             return new CacheCheckResult(
                 response.getCached(),
                 response.getLocalPath(),
-                response.getCachedSize()
+                response.getCachedSize_()
             );
         } catch (Exception e) {
             LOGGER.debug("[substrate:dep-resolve] cache check failed", e);

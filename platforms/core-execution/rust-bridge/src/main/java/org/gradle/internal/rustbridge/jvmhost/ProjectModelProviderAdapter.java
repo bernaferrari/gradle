@@ -29,7 +29,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     @Override
     public List<JvmHostServiceImpl.ProjectModelEntry> getProjectModels() {
         if (projectStateRegistry == null) {
-            return List.of();
+            return java.util.Collections.emptyList();
         }
 
         List<JvmHostServiceImpl.ProjectModelEntry> entries = new ArrayList<>();
@@ -58,7 +58,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     public List<JvmHostServiceImpl.ResolvedArtifactEntry> resolveArtifacts(
             String projectPath, String configurationName) {
         if (projectStateRegistry == null) {
-            return List.of();
+            return java.util.Collections.emptyList();
         }
 
         try {
@@ -72,12 +72,12 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
 
             if (targetProject == null) {
                 LOGGER.debug("[substrate-jvmhost] Project not found: {}", projectPath);
-                return List.of();
+                return java.util.Collections.emptyList();
             }
 
             if (!targetProject.isCreated()) {
                 LOGGER.debug("[substrate-jvmhost] Project not yet configured: {}", projectPath);
-                return List.of();
+                return java.util.Collections.emptyList();
             }
 
             org.gradle.api.internal.project.ProjectInternal project =
@@ -88,13 +88,13 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             if (configuration == null) {
                 LOGGER.debug("[substrate-jvmhost] Configuration not found: {} in project {}",
                     configurationName, projectPath);
-                return List.of();
+                return java.util.Collections.emptyList();
             }
 
             if (!configuration.isCanBeResolved()) {
                 LOGGER.debug("[substrate-jvmhost] Configuration cannot be resolved: {} in project {}",
                     configurationName, projectPath);
-                return List.of();
+                return java.util.Collections.emptyList();
             }
 
             List<JvmHostServiceImpl.ResolvedArtifactEntry> artifacts = new ArrayList<>();
@@ -113,7 +113,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         } catch (Exception e) {
             LOGGER.debug("[substrate-jvmhost] Failed to resolve artifacts for {}:{}",
                 projectPath, configurationName, e);
-            return List.of();
+            return java.util.Collections.emptyList();
         }
     }
 

@@ -2,6 +2,13 @@ pub mod client;
 pub mod error;
 pub mod server;
 
+// Use jemalloc in test builds to prevent runaway RSS.
+// macOS system malloc retains freed pages, causing ~150GB RSS
+// when 832+ tests run sequentially in one process.
+#[cfg(test)]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 pub mod proto {
     tonic::include_proto!("gradle.substrate.v1");
 }

@@ -6,8 +6,7 @@ use tokio::process::Command;
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
 /// Result of a Java compilation.
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct JavaCompileResult {
     pub success: bool,
     pub exit_code: i32,
@@ -19,7 +18,6 @@ pub struct JavaCompileResult {
     pub source_files_compiled: u64,
     pub error_message: String,
 }
-
 
 /// Orchestrates javac compilation as a child process.
 pub struct JavaCompileExecutor;
@@ -54,11 +52,7 @@ impl JavaCompileExecutor {
     }
 
     /// Build the javac command line.
-    pub fn build_command(
-        &self,
-        javac_path: &Path,
-        input: &TaskInput,
-    ) -> Command {
+    pub fn build_command(&self, javac_path: &Path, input: &TaskInput) -> Command {
         let mut cmd = Command::new(javac_path);
 
         // Source files
@@ -117,12 +111,22 @@ impl JavaCompileExecutor {
         }
 
         // Warnings
-        if input.options.get("show_warnings").map(|v| v == "true").unwrap_or(false) {
+        if input
+            .options
+            .get("show_warnings")
+            .map(|v| v == "true")
+            .unwrap_or(false)
+        {
             cmd.arg("-Xlint:all");
         }
 
         // Verbose
-        if input.options.get("verbose").map(|v| v == "true").unwrap_or(false) {
+        if input
+            .options
+            .get("verbose")
+            .map(|v| v == "true")
+            .unwrap_or(false)
+        {
             cmd.arg("-verbose");
         }
 
@@ -134,12 +138,16 @@ impl JavaCompileExecutor {
         }
 
         // Proc only (generate but don't compile)
-        if input.options.get("proc_only").map(|v| v == "true").unwrap_or(false) {
+        if input
+            .options
+            .get("proc_only")
+            .map(|v| v == "true")
+            .unwrap_or(false)
+        {
             cmd.arg("-proc:only");
         }
 
-        cmd.stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
         cmd
     }
@@ -188,11 +196,7 @@ impl JavaCompileExecutor {
     }
 
     /// Compile sources using the given Java home.
-    pub async fn compile(
-        &self,
-        java_home: &str,
-        input: &TaskInput,
-    ) -> JavaCompileResult {
+    pub async fn compile(&self, java_home: &str, input: &TaskInput) -> JavaCompileResult {
         let start = std::time::Instant::now();
         let mut result = JavaCompileResult::default();
 
@@ -273,9 +277,7 @@ impl TaskExecutor for JavaCompileExecutor {
             .options
             .get("java_home")
             .cloned()
-            .unwrap_or_else(|| {
-                std::env::var("JAVA_HOME").unwrap_or_default()
-            });
+            .unwrap_or_else(|| std::env::var("JAVA_HOME").unwrap_or_default());
 
         let compile_result = self.compile(&java_home, input).await;
 
@@ -430,7 +432,11 @@ public class Hello {
         input.target_dir = output_dir.clone();
 
         let result = executor.compile(&java_home, &input).await;
-        assert!(result.success, "Compilation should succeed: {}", result.error_message);
+        assert!(
+            result.success,
+            "Compilation should succeed: {}",
+            result.error_message
+        );
         assert_eq!(result.source_files_compiled, 1);
         assert!(result.errors.is_empty());
 
@@ -505,7 +511,11 @@ public class Greet {
             .insert("classpath".to_string(), ".".to_string());
 
         let result = executor.compile(&java_home, &input).await;
-        assert!(result.success, "Compilation should succeed: {}", result.error_message);
+        assert!(
+            result.success,
+            "Compilation should succeed: {}",
+            result.error_message
+        );
         assert!(output_dir.join("Greet.class").exists());
     }
 
@@ -530,9 +540,7 @@ public class Greet {
         let mut input = TaskInput::new("JavaCompile");
         input.source_files.push(src_file);
         input.target_dir = output_dir.clone();
-        input
-            .options
-            .insert("java_home".to_string(), java_home);
+        input.options.insert("java_home".to_string(), java_home);
 
         let result = executor.execute(&input).await;
         assert!(result.success);

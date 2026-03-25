@@ -15,6 +15,7 @@ fn main() {
         "proto/v1/toolchain.proto",
         "proto/v1/worker.proto",
         "proto/v1/buildlayout.proto",
+        "proto/v1/buildplan.proto",
         "proto/v1/reporting.proto",
         "proto/v1/resources.proto",
         "proto/v1/testexec.proto",
@@ -22,6 +23,7 @@ fn main() {
         "proto/v1/incremental.proto",
         "proto/v1/metrics.proto",
         "proto/v1/jvmhost.proto",
+        "proto/v1/parser.proto",
     ];
 
     tonic_build::configure()

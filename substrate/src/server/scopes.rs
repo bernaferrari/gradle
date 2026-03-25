@@ -164,7 +164,8 @@ impl ScopeRegistry {
 
     /// Register a build as belonging to a session.
     pub fn register_build(&self, session_id: SessionId, build_id: BuildId) {
-        self.build_to_session.insert(build_id.clone(), session_id.clone());
+        self.build_to_session
+            .insert(build_id.clone(), session_id.clone());
         self.sessions
             .entry(session_id)
             .or_default()
@@ -173,15 +174,14 @@ impl ScopeRegistry {
 
     /// Associate a build with a tree.
     pub fn register_tree(&self, tree_id: TreeId, build_id: BuildId) {
-        self.trees
-            .entry(tree_id)
-            .or_default()
-            .insert(build_id);
+        self.trees.entry(tree_id).or_default().insert(build_id);
     }
 
     /// Look up the session that owns a build.
     pub fn session_for_build(&self, build_id: &BuildId) -> Option<SessionId> {
-        self.build_to_session.get(build_id).map(|r| r.value().clone())
+        self.build_to_session
+            .get(build_id)
+            .map(|r| r.value().clone())
     }
 
     /// Validate that a build belongs to a session.
@@ -262,15 +262,10 @@ mod tests {
 
         registry.register_build(session.clone(), build.clone());
 
-        assert_eq!(
-            registry.session_for_build(&build),
-            Some(session.clone())
-        );
+        assert_eq!(registry.session_for_build(&build), Some(session.clone()));
         assert!(registry.validate_build_in_session(&build, &session));
-        assert!(!registry.validate_build_in_session(
-            &build,
-            &SessionId::from("other-session".to_string())
-        ));
+        assert!(!registry
+            .validate_build_in_session(&build, &SessionId::from("other-session".to_string())));
     }
 
     #[test]

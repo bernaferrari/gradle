@@ -3,9 +3,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use dashmap::DashMap;
-use notify::{RecommendedWatcher, RecursiveMode, Watcher, Event, EventKind};
-use tonic::{Request, Response, Status};
+use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::mpsc;
+use tonic::{Request, Response, Status};
 
 use crate::proto::{
     file_watch_service_server::FileWatchService, FileChangeEvent, GetWatchStatsRequest,
@@ -22,7 +22,7 @@ struct WatchSession {
     exclude_patterns: Vec<String>,
     start_time: Instant,
     files_watched: i64,
-    changes_detected: AtomicI64,
+    changes_detected: Arc<AtomicI64>,
     last_poll_ms: AtomicI64,
     _event_tx: mpsc::Sender<Result<FileChangeEvent, Status>>,
     _watcher: RecommendedWatcher,
@@ -78,7 +78,10 @@ impl FileWatchServiceImpl {
                         count += 1;
                         if entry.path().is_dir() {
                             if let Some(name) = entry.file_name().to_str() {
-                                if name != "node_modules" && name != ".gradle" && !name.starts_with('.') {
+                                if name != "node_modules"
+                                    && name != ".gradle"
+                                    && !name.starts_with('.')
+                                {
                                     count += Self::count_files(&entry.path().to_string_lossy());
                                 }
                             }
@@ -143,7 +146,10 @@ impl FileWatchService for FileWatchServiceImpl {
         let req = request.into_inner();
         let root_path = req.root_path.clone();
 
-        let watch_id = format!("watch-{}", self.next_watch_id.fetch_add(1, Ordering::Relaxed));
+        let watch_id = format!(
+            "watch-{}",
+            self.next_watch_id.fetch_add(1, Ordering::Relaxed)
+        );
         let files_watched = Self::count_files(&req.root_path);
 
         // Create channel for forwarding file system events
@@ -159,7 +165,8 @@ impl FileWatchService for FileWatchServiceImpl {
         let mut watcher = RecommendedWatcher::new(
             move |res: Result<Event, notify::Error>| {
                 if let Ok(event) = res {
-                    let paths: Vec<String> = event.paths
+                    let paths: Vec<String> = event
+                        .paths
                         .iter()
                         .map(|p| p.to_string_lossy().to_string())
                         .collect();
@@ -178,10 +185,14 @@ impl FileWatchService for FileWatchServiceImpl {
                 }
             },
             notify::Config::default(),
-        ).map_err(|e| Status::internal(format!("Failed to create file watcher: {}", e)))?;
+        )
+        .map_err(|e| Status::internal(format!("Failed to create file watcher: {}", e)))?;
 
-        watcher.watch(root_path.as_ref(), RecursiveMode::Recursive)
-            .map_err(|e| Status::internal(format!("Failed to watch path '{}': {}", root_path, e)))?;
+        watcher
+            .watch(root_path.as_ref(), RecursiveMode::Recursive)
+            .map_err(|e| {
+                Status::internal(format!("Failed to watch path '{}': {}", root_path, e))
+            })?;
 
         self.watches.insert(
             watch_id.clone(),
@@ -191,7 +202,7 @@ impl FileWatchService for FileWatchServiceImpl {
                 exclude_patterns: req.exclude_patterns,
                 start_time: Instant::now(),
                 files_watched,
-                changes_detected: AtomicI64::new(0),
+                changes_detected,
                 last_poll_ms: AtomicI64::new(Self::now_ms()),
                 _event_tx: event_tx,
                 _watcher: watcher,
@@ -229,7 +240,11 @@ impl FileWatchService for FileWatchServiceImpl {
         Ok(Response::new(StopWatchingResponse { stopped }))
     }
 
-    type PollChangesStream = std::pin::Pin<Box<dyn tonic::codegen::tokio_stream::Stream<Item = Result<FileChangeEvent, Status>> + Send>>;
+    type PollChangesStream = std::pin::Pin<
+        Box<
+            dyn tonic::codegen::tokio_stream::Stream<Item = Result<FileChangeEvent, Status>> + Send,
+        >,
+    >;
 
     async fn poll_changes(
         &self,
@@ -238,22 +253,24 @@ impl FileWatchService for FileWatchServiceImpl {
         let req = request.into_inner();
 
         if let Some(session) = self.watches.get(&req.watch_id) {
-            session.last_poll_ms.store(Self::now_ms(), Ordering::Relaxed);
+            session
+                .last_poll_ms
+                .store(Self::now_ms(), Ordering::Relaxed);
 
             // Set up a new watcher for this poll session that sends events
             let (tx, rx) = mpsc::channel::<Result<FileChangeEvent, Status>>(256);
             let root_path = session.root_path.clone();
             let include = session.include_patterns.clone();
             let exclude = session.exclude_patterns.clone();
-            let changes = Arc::new(AtomicI64::new(0));
-            let changes_for_stream = changes.clone();
+            let changes_for_session = Arc::clone(&session.changes_detected);
             let task_graph_for_watcher = self.task_graph.clone();
 
             // Create a dedicated watcher for this polling stream
             let mut stream_watcher = RecommendedWatcher::new(
                 move |res: Result<Event, notify::Error>| {
                     if let Ok(event) = res {
-                        let paths: Vec<String> = event.paths
+                        let paths: Vec<String> = event
+                            .paths
                             .iter()
                             .map(|p| p.to_string_lossy().to_string())
                             .collect();
@@ -263,10 +280,11 @@ impl FileWatchService for FileWatchServiceImpl {
                                 continue;
                             }
 
-                            changes_for_stream.fetch_add(1, Ordering::Relaxed);
+                            changes_for_session.fetch_add(1, Ordering::Relaxed);
                             let _change_type = Self::event_kind_to_change_type(&event.kind);
 
-                            let change_type = Self::event_kind_to_change_type(&event.kind).to_string();
+                            let change_type =
+                                Self::event_kind_to_change_type(&event.kind).to_string();
                             let file_event = FileChangeEvent {
                                 path,
                                 change_type,
@@ -293,12 +311,14 @@ impl FileWatchService for FileWatchServiceImpl {
                     }
                 },
                 notify::Config::default(),
-            ).map_err(|e| Status::internal(format!("Failed to create poll watcher: {}", e)))?;
+            )
+            .map_err(|e| Status::internal(format!("Failed to create poll watcher: {}", e)))?;
 
-            stream_watcher.watch(
-                std::path::Path::new(&root_path),
-                RecursiveMode::Recursive,
-            ).map_err(|e| Status::internal(format!("Failed to watch path for polling: {}", e)))?;
+            stream_watcher
+                .watch(std::path::Path::new(&root_path), RecursiveMode::Recursive)
+                .map_err(|e| {
+                    Status::internal(format!("Failed to watch path for polling: {}", e))
+                })?;
 
             // Keep the watcher alive for the duration of the stream
             let stream = async_stream::stream! {
@@ -314,7 +334,10 @@ impl FileWatchService for FileWatchServiceImpl {
 
             Ok(Response::new(Box::pin(stream) as Self::PollChangesStream))
         } else {
-            Err(Status::not_found(format!("Watch session '{}' not found", req.watch_id)))
+            Err(Status::not_found(format!(
+                "Watch session '{}' not found",
+                req.watch_id
+            )))
         }
     }
 
@@ -420,7 +443,9 @@ mod tests {
     #[test]
     fn test_matches_patterns_no_filters() {
         assert!(FileWatchServiceImpl::matches_patterns(
-            "/tmp/test.java", &[], &[]
+            "/tmp/test.java",
+            &[],
+            &[]
         ));
     }
 
@@ -585,9 +610,18 @@ mod tests {
             .unwrap()
             .into_inner();
 
-        assert!(stats1.files_watched >= 1, "dir1 should have at least 1 file");
-        assert!(stats2.files_watched >= 1, "dir2 should have at least 1 file");
-        assert!(stats3.files_watched >= 1, "dir3 should have at least 1 file");
+        assert!(
+            stats1.files_watched >= 1,
+            "dir1 should have at least 1 file"
+        );
+        assert!(
+            stats2.files_watched >= 1,
+            "dir2 should have at least 1 file"
+        );
+        assert!(
+            stats3.files_watched >= 1,
+            "dir3 should have at least 1 file"
+        );
         assert!(stats1.watch_start_time_ms > 0);
         assert!(stats2.watch_start_time_ms > 0);
         assert!(stats3.watch_start_time_ms > 0);
@@ -666,7 +700,10 @@ mod tests {
             .into_inner();
 
         assert!(resp2.watching);
-        assert_ne!(resp2.watch_id, first_id, "restarted watcher should have a new ID");
+        assert_ne!(
+            resp2.watch_id, first_id,
+            "restarted watcher should have a new ID"
+        );
 
         // Stats should be active again
         let stats_restarted = svc
@@ -703,7 +740,10 @@ mod tests {
             }))
             .await;
 
-        assert!(result.is_err(), "watching a nonexistent directory should fail");
+        assert!(
+            result.is_err(),
+            "watching a nonexistent directory should fail"
+        );
         let status = result.unwrap_err();
         // The error should be an internal status from the notify watcher
         assert_eq!(status.code(), tonic::Code::Internal);
@@ -743,7 +783,10 @@ mod tests {
             .unwrap()
             .into_inner();
 
-        assert!(stats_before.watch_start_time_ms > 0, "watcher should be active before stop");
+        assert!(
+            stats_before.watch_start_time_ms > 0,
+            "watcher should be active before stop"
+        );
 
         // Stop the watcher
         let stop_resp = svc
@@ -765,9 +808,18 @@ mod tests {
             .unwrap()
             .into_inner();
 
-        assert_eq!(stats_after.files_watched, 0, "files_watched should be 0 after stop");
-        assert_eq!(stats_after.changes_detected, 0, "changes_detected should be 0 after stop");
-        assert_eq!(stats_after.watch_start_time_ms, 0, "watch_start_time_ms should be 0 after stop");
+        assert_eq!(
+            stats_after.files_watched, 0,
+            "files_watched should be 0 after stop"
+        );
+        assert_eq!(
+            stats_after.changes_detected, 0,
+            "changes_detected should be 0 after stop"
+        );
+        assert_eq!(
+            stats_after.watch_start_time_ms, 0,
+            "watch_start_time_ms should be 0 after stop"
+        );
 
         // Polling the stopped watcher should fail with NotFound
         let poll_result = svc
@@ -777,7 +829,10 @@ mod tests {
             }))
             .await;
 
-        assert!(poll_result.is_err(), "polling a stopped watcher should return an error");
+        assert!(
+            poll_result.is_err(),
+            "polling a stopped watcher should return an error"
+        );
         match poll_result {
             Err(status) => {
                 assert_eq!(status.code(), tonic::Code::NotFound);
@@ -820,7 +875,10 @@ mod tests {
             }))
             .await;
 
-        assert!(result2.is_err(), "polling with empty watch_id should also fail");
+        assert!(
+            result2.is_err(),
+            "polling with empty watch_id should also fail"
+        );
     }
 
     /// Test that multiple polls on the same watcher each return independent streams.
@@ -874,7 +932,10 @@ mod tests {
             }))
             .await;
 
-        assert!(stream2.is_ok(), "second poll_changes on same watch_id should succeed");
+        assert!(
+            stream2.is_ok(),
+            "second poll_changes on same watch_id should succeed"
+        );
 
         // Create another file while the second stream is active
         let file2 = dir.path().join("beta.txt");
@@ -892,7 +953,10 @@ mod tests {
             }))
             .await;
 
-        assert!(stream3.is_ok(), "third poll_changes on same watch_id should succeed");
+        assert!(
+            stream3.is_ok(),
+            "third poll_changes on same watch_id should succeed"
+        );
         drop(stream3);
 
         // Verify the watch session is still alive via stats
@@ -904,7 +968,10 @@ mod tests {
             .unwrap()
             .into_inner();
 
-        assert!(stats.watch_start_time_ms > 0, "watch session should still be active after multiple polls");
+        assert!(
+            stats.watch_start_time_ms > 0,
+            "watch session should still be active after multiple polls"
+        );
 
         // After stopping the watcher, polls should fail
         svc.stop_watching(Request::new(StopWatchingRequest {
@@ -952,7 +1019,10 @@ mod tests {
         assert!(resp.watching, "watching a single file should succeed");
         assert!(!resp.watch_id.is_empty());
         // count_files returns 1 for a file
-        assert_eq!(resp.files_watched, 1, "a single file should report files_watched == 1");
+        assert_eq!(
+            resp.files_watched, 1,
+            "a single file should report files_watched == 1"
+        );
 
         let watch_id = resp.watch_id.clone();
 
@@ -976,7 +1046,10 @@ mod tests {
             }))
             .await;
 
-        assert!(stream.is_ok(), "poll_changes on a file watcher should succeed");
+        assert!(
+            stream.is_ok(),
+            "poll_changes on a file watcher should succeed"
+        );
 
         // Verify last_poll_time_ms was updated by the poll
         let stats_after_poll = svc
@@ -993,10 +1066,8 @@ mod tests {
         );
 
         // Cleanup
-        svc.stop_watching(Request::new(StopWatchingRequest {
-            watch_id,
-        }))
-        .await
-        .unwrap();
+        svc.stop_watching(Request::new(StopWatchingRequest { watch_id }))
+            .await
+            .unwrap();
     }
 }

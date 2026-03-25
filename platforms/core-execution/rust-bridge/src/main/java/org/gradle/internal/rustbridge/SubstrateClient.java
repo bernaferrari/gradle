@@ -7,6 +7,7 @@ import gradle.substrate.v1.*;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -18,6 +19,8 @@ import java.util.concurrent.TimeUnit;
  * throw {@link SubstrateException}.</p>
  */
 public class SubstrateClient implements Closeable {
+
+    private static final String CLIENT_PROTOCOL_VERSION = "1.0.0";
 
     private final ManagedChannel channel;
     private final boolean noop;
@@ -89,6 +92,8 @@ public class SubstrateClient implements Closeable {
     private final BuildMetricsServiceGrpc.BuildMetricsServiceBlockingStub buildMetricsStub;
     // Phase 38: Garbage collection
     private final GarbageCollectionServiceGrpc.GarbageCollectionServiceBlockingStub garbageCollectionStub;
+    // Phase 39: Parser
+    private final ParserServiceGrpc.ParserServiceBlockingStub parserStub;
     // Phase 6: JVM Compatibility Host
     private final String jvmHostSocketPath;
 
@@ -131,6 +136,7 @@ public class SubstrateClient implements Closeable {
             this.incrementalCompilationStub = null;
             this.buildMetricsStub = null;
             this.garbageCollectionStub = null;
+            this.parserStub = null;
         } else {
             this.controlStub = ControlServiceGrpc.newBlockingStub(channel);
             this.hashStub = HashServiceGrpc.newBlockingStub(channel);
@@ -166,6 +172,7 @@ public class SubstrateClient implements Closeable {
             this.incrementalCompilationStub = IncrementalCompilationServiceGrpc.newBlockingStub(channel);
             this.buildMetricsStub = BuildMetricsServiceGrpc.newBlockingStub(channel);
             this.garbageCollectionStub = GarbageCollectionServiceGrpc.newBlockingStub(channel);
+            this.parserStub = ParserServiceGrpc.newBlockingStub(channel);
         }
     }
 
@@ -185,7 +192,14 @@ public class SubstrateClient implements Closeable {
             .forAddress(new DomainSocketAddress(socketPath))
             .usePlaintext()
             .build();
-        return new SubstrateClient(channel, false, jvmHostSocketPath);
+        SubstrateClient client = new SubstrateClient(channel, false, jvmHostSocketPath);
+        try {
+            client.performHandshake();
+        } catch (IOException e) {
+            client.close();
+            throw e;
+        }
+        return client;
     }
 
     /**
@@ -378,10 +392,61 @@ public class SubstrateClient implements Closeable {
         return garbageCollectionStub;
     }
 
+    public ParserServiceGrpc.ParserServiceBlockingStub getParserStub() {
+        throwIfNoop();
+        return parserStub;
+    }
+
     private void throwIfNoop() {
         if (noop) {
             throw new SubstrateException("Substrate client is in no-op mode");
         }
+    }
+
+    private void performHandshake() throws IOException {
+        throwIfNoop();
+        try {
+            HandshakeRequest.Builder request = HandshakeRequest.newBuilder()
+                .setClientVersion(resolveClientVersion())
+                .setProtocolVersion(CLIENT_PROTOCOL_VERSION)
+                .setClientPid(currentPid());
+            if (jvmHostSocketPath != null) {
+                request.setJvmHostSocketPath(jvmHostSocketPath);
+            }
+            HandshakeResponse response = controlStub.handshake(request.build());
+            if (!response.getAccepted()) {
+                throw new IOException(
+                    "Substrate handshake rejected: " + response.getErrorMessage()
+                        + " (clientProtocol=" + CLIENT_PROTOCOL_VERSION
+                        + ", serverProtocol=" + response.getProtocolVersion() + ")"
+                );
+            }
+        } catch (RuntimeException e) {
+            throw new IOException("Failed to handshake with substrate daemon", e);
+        }
+    }
+
+    private static String resolveClientVersion() {
+        Package pkg = SubstrateClient.class.getPackage();
+        if (pkg != null && pkg.getImplementationVersion() != null) {
+            return pkg.getImplementationVersion();
+        }
+        return "gradle-rust-bridge";
+    }
+
+    private static int currentPid() {
+        String runtimeName = ManagementFactory.getRuntimeMXBean().getName();
+        if (runtimeName != null) {
+            int at = runtimeName.indexOf('@');
+            if (at > 0) {
+                try {
+                    return Integer.parseInt(runtimeName.substring(0, at));
+                } catch (NumberFormatException ignored) {
+                    // Fall through.
+                }
+            }
+        }
+        return -1;
     }
 
     @Override

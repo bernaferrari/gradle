@@ -7,6 +7,7 @@ import org.gradle.internal.execution.InputFingerprinter;
 import org.gradle.internal.execution.InputVisitor;
 import org.gradle.internal.fingerprint.CurrentFileCollectionFingerprint;
 import org.gradle.internal.fingerprint.FileCollectionFingerprint;
+import org.gradle.internal.properties.InputBehavior;
 import org.gradle.internal.snapshot.ValueSnapshot;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;

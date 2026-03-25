@@ -5,6 +5,7 @@ import gradle.substrate.v1.GetJavaHomeRequest;
 import gradle.substrate.v1.GetJavaHomeResponse;
 import gradle.substrate.v1.ListToolchainsRequest;
 import gradle.substrate.v1.ListToolchainsResponse;
+import gradle.substrate.v1.ToolchainLocation;
 import gradle.substrate.v1.ToolchainProgress;
 import gradle.substrate.v1.ToolchainServiceGrpc;
 import gradle.substrate.v1.VerifyToolchainRequest;
@@ -31,9 +32,9 @@ public class RustToolchainServiceClient {
         this.client = client;
     }
 
-    public List<ListToolchainsResponse.ToolchainLocation> listToolchains(String os, String arch) {
+    public List<ToolchainLocation> listToolchains(String os, String arch) {
         if (client.isNoop()) {
-            return List.of();
+            return java.util.Collections.emptyList();
         }
 
         try {
@@ -45,7 +46,7 @@ public class RustToolchainServiceClient {
             return response.getToolchainsList();
         } catch (Exception e) {
             LOGGER.debug("[substrate:toolchain] list toolchains failed", e);
-            return List.of();
+            return java.util.Collections.emptyList();
         }
     }
 
@@ -113,7 +114,7 @@ public class RustToolchainServiceClient {
                 .ensureToolchain(request.build())
                 .forEachRemaining(progress::add);
 
-            return progress;
+            return Collections.unmodifiableList(progress);
         } catch (Exception e) {
             LOGGER.debug("[substrate:toolchain] ensure toolchain failed", e);
             return Collections.emptyList();

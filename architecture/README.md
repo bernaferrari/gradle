@@ -57,3 +57,10 @@ This affects the lifecycle of the code and the set of services available for dep
 When working on some source code it is important to be aware of the model it acts on.
 
 See [build state model](build-state-model.md) for more details.
+
+### Rust substrate stabilization
+
+The Rust substrate integration follows a strict stabilization order to prevent protocol drift and partial breakage between the JVM bridge and Rust daemon.
+
+See [Rust substrate stabilization](rust-substrate-stabilization.md) for the required phase order and enforcement command.
+The upstream sync inventory is tracked in `architecture/upstream-map/modules.toml` with per-module `UPSTREAM.md` and `PARITY.md` metadata.

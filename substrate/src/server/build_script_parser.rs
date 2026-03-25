@@ -102,7 +102,9 @@ pub fn parse_build_script(content: &str, file_name: &str) -> BuildScriptParseRes
         ScriptType::Groovy => parse_groovy(content),
         ScriptType::Unknown => {
             let mut result = BuildScriptParseResult::default();
-            result.warnings.push("Unknown build script type".to_string());
+            result
+                .warnings
+                .push("Unknown build script type".to_string());
             result
         }
     }
@@ -204,7 +206,7 @@ fn remove_block_comments(content: &str) -> String {
     while let Some(c) = chars.next() {
         if c == '/' && chars.peek() == Some(&'*') {
             chars.next(); // consume '*'
-            // Preserve line structure: only emit newlines for lines the comment spans
+                          // Preserve line structure: only emit newlines for lines the comment spans
             loop {
                 match chars.next() {
                     Some('*') if chars.peek() == Some(&'/') => {
@@ -454,7 +456,12 @@ fn parse_dependencies_block(content: &str, result: &mut BuildScriptParseResult) 
             while let Some(i) = block[search_from..].find(&pattern) {
                 let abs_i = search_from + i;
                 // Ensure the match is not part of a longer identifier
-                if abs_i > 0 && block.as_bytes().get(abs_i - 1).is_some_and(|c| c.is_ascii_alphabetic()) {
+                if abs_i > 0
+                    && block
+                        .as_bytes()
+                        .get(abs_i - 1)
+                        .is_some_and(|c| c.is_ascii_alphabetic())
+                {
                     search_from = abs_i + 1;
                     continue;
                 }
@@ -462,15 +469,21 @@ fn parse_dependencies_block(content: &str, result: &mut BuildScriptParseResult) 
                 if let Some(close) = find_matching_paren(&block[args_start..]) {
                     let args = &block[args_start..args_start + close];
                     if let Some(notation) = extract_string_literal(args) {
-                        found_deps.push((abs_i, ParsedDependency {
-                            configuration: kw.to_string(),
-                            notation,
-                        }));
+                        found_deps.push((
+                            abs_i,
+                            ParsedDependency {
+                                configuration: kw.to_string(),
+                                notation,
+                            },
+                        ));
                     } else if args.trim().starts_with("project(") {
-                        found_deps.push((abs_i, ParsedDependency {
-                            configuration: kw.to_string(),
-                            notation: args.trim().to_string(),
-                        }));
+                        found_deps.push((
+                            abs_i,
+                            ParsedDependency {
+                                configuration: kw.to_string(),
+                                notation: args.trim().to_string(),
+                            },
+                        ));
                     }
                 }
                 search_from = abs_i + 1;
@@ -479,7 +492,9 @@ fn parse_dependencies_block(content: &str, result: &mut BuildScriptParseResult) 
 
         // Sort by source position to maintain declaration order
         found_deps.sort_by_key(|(pos, _)| *pos);
-        result.dependencies.extend(found_deps.into_iter().map(|(_, dep)| dep));
+        result
+            .dependencies
+            .extend(found_deps.into_iter().map(|(_, dep)| dep));
     }
 
     // Parse standalone dependency declarations outside a block:
@@ -499,34 +514,32 @@ fn parse_dependencies_block(content: &str, result: &mut BuildScriptParseResult) 
 /// Parse Groovy-style plugins block.
 fn parse_groovy_plugins(content: &str, result: &mut BuildScriptParseResult) {
     if let Some((_pos, block)) = find_top_level_block(content, "plugins") {
-        // Groovy: id "foo"
+        // Groovy: id "foo" or id 'foo'
         for (i, _) in block.match_indices("id ") {
             let args_start = i + 3;
-            if let Some(end) = block[args_start..].find('\n') {
-                let args = block[args_start..args_start + end].trim();
-                if let Some(id) = extract_string_literal(args) {
-                    let apply = !block[i..].contains("apply false");
-                    result.plugins.push(ParsedPlugin { id, apply });
-                }
+            // Get the rest of the line (or rest of block if no newline)
+            let line_end = block[args_start..]
+                .find('\n')
+                .unwrap_or(block.len() - args_start);
+            let args = block[args_start..args_start + line_end].trim();
+            if let Some(id) = extract_string_literal(args) {
+                // Check if "apply false" appears on the SAME line as this id
+                let rest_of_line = &block[i..args_start + line_end];
+                let apply = !rest_of_line.contains("apply false");
+                result.plugins.push(ParsedPlugin { id, apply });
             }
         }
     }
 
-    // Groovy standalone: apply plugin: "foo"
+    // Groovy standalone: apply plugin: "foo" or apply plugin: 'foo'
+    // Single pass handles both quote styles via extract_string_literal
     for (i, _) in content.match_indices("apply plugin:") {
         let args_start = i + 14;
-        let end = content[args_start..].find('\n').unwrap_or(content.len() - args_start);
-        let args = content[args_start..args_start + end].trim();
+        let line_end = content[args_start..]
+            .find('\n')
+            .unwrap_or(content.len() - args_start);
+        let args = content[args_start..args_start + line_end].trim();
         if let Some(id) = extract_string_literal(args) {
-            result.plugins.push(ParsedPlugin { id, apply: true });
-        }
-    }
-
-    // Groovy: apply plugin: 'foo'
-    for (i, _) in content.match_indices("apply plugin: '") {
-        let args_start = i + 15;
-        if let Some(end) = content[args_start..].find('\'') {
-            let id = content[args_start..args_start + end].to_string();
             result.plugins.push(ParsedPlugin { id, apply: true });
         }
     }
@@ -535,6 +548,13 @@ fn parse_groovy_plugins(content: &str, result: &mut BuildScriptParseResult) {
 /// Parse Groovy-style dependencies block.
 fn parse_groovy_dependencies(content: &str, result: &mut BuildScriptParseResult) {
     if let Some((_pos, block)) = find_top_level_block(content, "dependencies") {
+        #[cfg(test)]
+        eprintln!(
+            "[DEBUG parse_groovy_deps] block len={}, first 80: {:?}",
+            block.len(),
+            &block[..std::cmp::min(block.len(), 80)]
+        );
+
         let config_keywords = [
             "implementation",
             "api",
@@ -546,40 +566,111 @@ fn parse_groovy_dependencies(content: &str, result: &mut BuildScriptParseResult)
             "annotationProcessor",
         ];
 
+        // Collect dependencies with their source positions for ordering
+        let mut found_deps: Vec<(usize, ParsedDependency)> = Vec::new();
+
         for kw in &config_keywords {
-            // Groovy: implementation 'com.example:lib:1.0' or implementation("...")
+            // Groovy: implementation 'com.example:lib:1.0'
             let single_quote = format!("{} '", kw);
-            let double_quote = format!("{}(", kw);
+            // Groovy: implementation "com.example:lib:1.0"
+            let double_quote = format!("{} \"", kw);
+            // Groovy: implementation("com.example:lib:1.0") or implementation('...')
+            let paren_form = format!("{}(", kw);
             let mut search_from = 0;
 
+            #[cfg(test)]
+            eprintln!(
+                "[DEBUG] kw={}, single_quote={:?}, paren_form={:?}",
+                kw, single_quote, paren_form
+            );
+
             while search_from < block.len() {
+                // Try single-quote form first: implementation 'group:artifact:ver'
                 let found = if let Some(i) = block[search_from..].find(&single_quote) {
-                    let abs_i = search_from + i + single_quote.len();
-                    if let Some(end) = block[abs_i..].find('\'') {
-                        let notation = block[abs_i..abs_i + end].to_string();
-                        result.dependencies.push(ParsedDependency {
-                            configuration: kw.to_string(),
-                            notation,
-                        });
-                        search_from = abs_i + end + 1;
+                    let abs_i = search_from + i;
+                    // Ensure not part of a longer identifier
+                    if abs_i > 0
+                        && block
+                            .as_bytes()
+                            .get(abs_i - 1)
+                            .is_some_and(|c| c.is_ascii_alphabetic())
+                    {
+                        search_from = abs_i + 1;
+                        continue;
+                    }
+                    let val_start = abs_i + single_quote.len();
+                    if let Some(end) = block[val_start..].find('\'') {
+                        let notation = block[val_start..val_start + end].to_string();
+                        found_deps.push((
+                            abs_i,
+                            ParsedDependency {
+                                configuration: kw.to_string(),
+                                notation,
+                            },
+                        ));
+                        search_from = val_start + end + 1;
                         continue;
                     }
                     abs_i
                 } else {
-                    block.len()
+                    // single_quote not found — try double-quote form from current position
+                    if let Some(i) = block[search_from..].find(&double_quote) {
+                        let abs_i = search_from + i;
+                        if abs_i > 0
+                            && block
+                                .as_bytes()
+                                .get(abs_i - 1)
+                                .is_some_and(|c| c.is_ascii_alphabetic())
+                        {
+                            search_from = abs_i + 1;
+                            continue;
+                        }
+                        let val_start = abs_i + double_quote.len();
+                        if let Some(end) = block[val_start..].find('"') {
+                            let notation = block[val_start..val_start + end].to_string();
+                            found_deps.push((
+                                abs_i,
+                                ParsedDependency {
+                                    configuration: kw.to_string(),
+                                    notation,
+                                },
+                            ));
+                            search_from = val_start + end + 1;
+                            continue;
+                        }
+                        abs_i
+                    } else {
+                        search_from
+                    }
                 };
 
-                if let Some(i) = block[found..].find(&double_quote) {
-                    let abs_i = found + i + double_quote.len();
-                    if let Some(end) = block[abs_i..].find(')') {
-                        let args = &block[abs_i..abs_i + end];
+                // Try paren form: implementation("...") or implementation('...')
+                if let Some(i) = block[found..].find(&paren_form) {
+                    let abs_i = found + i;
+                    // Ensure not part of a longer identifier
+                    if abs_i > 0
+                        && block
+                            .as_bytes()
+                            .get(abs_i - 1)
+                            .is_some_and(|c| c.is_ascii_alphabetic())
+                    {
+                        search_from = abs_i + 1;
+                        continue;
+                    }
+                    let args_start = abs_i + paren_form.len();
+                    // Use find_matching_paren to handle nested parens like exclude(group: 'x', module: 'y')
+                    if let Some(close) = find_matching_paren(&block[args_start..]) {
+                        let args = &block[args_start..args_start + close];
                         if let Some(notation) = extract_string_literal(args) {
-                            result.dependencies.push(ParsedDependency {
-                                configuration: kw.to_string(),
-                                notation,
-                            });
+                            found_deps.push((
+                                abs_i,
+                                ParsedDependency {
+                                    configuration: kw.to_string(),
+                                    notation,
+                                },
+                            ));
                         }
-                        search_from = abs_i + end + 1;
+                        search_from = abs_i + close + paren_form.len() + 1;
                         continue;
                     }
                 }
@@ -587,57 +678,124 @@ fn parse_groovy_dependencies(content: &str, result: &mut BuildScriptParseResult)
                 search_from = block.len();
             }
         }
+
+        // Sort by source position to maintain declaration order
+        found_deps.sort_by_key(|(pos, _)| *pos);
+        result
+            .dependencies
+            .extend(found_deps.into_iter().map(|(_, dep)| dep));
     }
 }
 
 /// Parse repositories block (works for both Kotlin DSL and Groovy).
 fn parse_repositories_block(content: &str, result: &mut BuildScriptParseResult) {
     if let Some((_pos, block)) = find_top_level_block(content, "repositories") {
-        if block.contains("mavenCentral()") {
-            result.repositories.push(ParsedRepository {
-                name: "mavenCentral".to_string(),
-                repo_type: "maven".to_string(),
-            });
-        }
-        if block.contains("google()") {
-            result.repositories.push(ParsedRepository {
-                name: "google".to_string(),
-                repo_type: "maven".to_string(),
-            });
-        }
-        if block.contains("gradlePluginPortal()") {
-            result.repositories.push(ParsedRepository {
-                name: "gradlePluginPortal".to_string(),
-                repo_type: "gradlePluginPortal".to_string(),
-            });
-        }
-        if block.contains("mavenLocal()") {
-            result.repositories.push(ParsedRepository {
-                name: "mavenLocal".to_string(),
-                repo_type: "maven-local".to_string(),
-            });
-        }
+        // Parse all repos in source order to maintain declaration order.
+        let mut found_repos: Vec<(usize, ParsedRepository)> = Vec::new();
 
-        // Custom maven repos: maven { url = "..." }
-        for (i, _) in block.match_indices("maven {") {
-            let sub = &block[i..];
-            if let Some(url_start) = sub.find("url ") {
-                let after_url = &sub[url_start + 4..];
-                // Skip past "url = " to get to the value
-                let value_start = if after_url.starts_with("= ") { 2 } else { 0 };
-                let url_end = after_url[value_start..]
-                    .find('\n')
-                    .unwrap_or(after_url.len() - value_start);
-                let url_line = after_url[value_start..value_start + url_end].trim();
-                if let Some(url) = extract_string_literal(url_line) {
-                    result.repositories.push(ParsedRepository {
-                        name: url.clone(),
-                        repo_type: "maven".to_string(),
-                    });
-                }
+        // Standard shorthand repos: match whole-line forms
+        let standard_repos = [
+            ("mavenCentral()", "mavenCentral", "maven"),
+            ("google()", "google", "maven"),
+            (
+                "gradlePluginPortal()",
+                "gradlePluginPortal",
+                "gradlePluginPortal",
+            ),
+            ("mavenLocal()", "mavenLocal", "maven-local"),
+        ];
+
+        for (pattern, name, repo_type) in &standard_repos {
+            if let Some(pos) = block.find(pattern) {
+                found_repos.push((
+                    pos,
+                    ParsedRepository {
+                        name: name.to_string(),
+                        repo_type: repo_type.to_string(),
+                    },
+                ));
             }
         }
+
+        // Custom maven repos: maven { url = "..." } or maven { url "..." } or maven { url '...' }
+        for (i, _) in block.match_indices("maven {") {
+            let sub = &block[i..];
+            let brace_pos = sub.find('{').unwrap_or(sub.len());
+            let inner = &sub[brace_pos + 1..];
+
+            // Find the closing brace of this maven block
+            let close_brace = match find_brace_block_end(inner) {
+                Some(c) => c,
+                None => continue,
+            };
+            let body = &inner[..close_brace];
+
+            // Try url = "..." or url("...") or url '...' or url "..."
+            let url = if let Some(url_pos) = body.find("url") {
+                let after_url = body[url_pos + 3..].trim();
+                if let Some(eq_pos) = after_url.find('=') {
+                    let value = after_url[eq_pos + 1..].trim();
+                    extract_string_literal(value)
+                } else if after_url.starts_with('(') {
+                    if let Some(close) = find_matching_paren(&after_url[1..]) {
+                        extract_string_literal(&after_url[1..close + 1])
+                    } else {
+                        None
+                    }
+                } else {
+                    // Groovy: url 'https://...' or url "https://..."
+                    extract_string_literal(after_url)
+                }
+            } else {
+                None
+            };
+
+            found_repos.push((
+                i,
+                ParsedRepository {
+                    name: url.unwrap_or_else(|| format!("maven-custom-{}", found_repos.len())),
+                    repo_type: "maven".to_string(),
+                },
+            ));
+        }
+
+        // Sort by source position to maintain declaration order
+        found_repos.sort_by_key(|(pos, _)| *pos);
+        result
+            .repositories
+            .extend(found_repos.into_iter().map(|(_, repo)| repo));
     }
+}
+
+/// Find the position of the closing brace (accounting for nesting and strings).
+/// Returns the index of `}` within `content`.
+fn find_brace_block_end(content: &str) -> Option<usize> {
+    let mut depth = 1;
+    let mut in_string = false;
+    let mut string_char = ' ';
+    let bytes = content.as_bytes();
+    let mut i = 0;
+
+    while i < bytes.len() && depth > 0 {
+        let c = bytes[i];
+        if in_string {
+            if c == string_char as u8 && !is_escaped(content, i) {
+                in_string = false;
+            }
+        } else if c == b'"' || c == b'\'' {
+            in_string = true;
+            string_char = c as char;
+        } else if c == b'{' {
+            depth += 1;
+        } else if c == b'}' {
+            depth -= 1;
+            if depth == 0 {
+                return Some(i);
+            }
+        }
+        i += 1;
+    }
+    None
 }
 
 /// Parse tasks block in Kotlin DSL.
@@ -721,30 +879,34 @@ fn parse_groovy_tasks(content: &str, result: &mut BuildScriptParseResult) {
         let rest = &content[search_from..];
         if let Some(brace_pos) = rest.find('{') {
             if let Some(block) = find_brace_block(content, search_from + brace_pos) {
-                // dependsOn 'bar'
+                // dependsOn 'bar' or dependsOn "bar" or dependsOn bar
                 for (di, _) in block.match_indices("dependsOn ") {
-                    let da = di + 11;
-                    let end = block[da..]
-                        .find(|c: char| c.is_whitespace())
-                        .unwrap_or(block.len() - da);
-                    let dep = block[da..da + end].trim();
-                    if let Some(dep) = extract_string_literal(dep) {
+                    let da = di + 10; // "dependsOn " = 10 chars
+                    let rest = block[da..].trim_start();
+                    // Try to extract a quoted string literal first
+                    if let Some(dep) = extract_string_literal(rest) {
                         task_config.depends_on.push(dep);
-                    } else if !dep.is_empty() {
-                        task_config.depends_on.push(dep.to_string());
+                    } else {
+                        // Unquoted form: take until whitespace or newline
+                        let end = rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len());
+                        let dep = rest[..end].trim().to_string();
+                        if !dep.is_empty() {
+                            task_config.depends_on.push(dep);
+                        }
                     }
                 }
-                // shouldRunAfter 'bar' or shouldRunAfter test
+                // shouldRunAfter 'bar' or shouldRunAfter "bar" or shouldRunAfter bar
                 for (di, _) in block.match_indices("shouldRunAfter ") {
-                    let da = di + 15;
-                    let end = block[da..]
-                        .find(|c: char| c.is_whitespace())
-                        .unwrap_or(block.len() - da);
-                    let dep = block[da..da + end].trim();
-                    if let Some(dep) = extract_string_literal(dep) {
+                    let da = di + 14; // "shouldRunAfter " = 14 chars
+                    let rest = block[da..].trim_start();
+                    if let Some(dep) = extract_string_literal(rest) {
                         task_config.should_run_after.push(dep);
-                    } else if !dep.is_empty() {
-                        task_config.should_run_after.push(dep.to_string());
+                    } else {
+                        let end = rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len());
+                        let dep = rest[..end].trim().to_string();
+                        if !dep.is_empty() {
+                            task_config.should_run_after.push(dep);
+                        }
                     }
                 }
                 if block.contains("enabled = false") || block.contains("enabled false") {
@@ -802,10 +964,23 @@ fn parse_top_level_assignments(content: &str, result: &mut BuildScriptParseResul
 
                 match key {
                     "sourceCompatibility" | "sourceCompatibilityVersion" => {
-                        result.source_compatibility = Some(value.trim_start_matches('"').trim_end_matches('"').to_string());
+                        // Strip both single and double quotes
+                        let cleaned = value
+                            .trim_start_matches('\'')
+                            .trim_end_matches('\'')
+                            .trim_start_matches('"')
+                            .trim_end_matches('"')
+                            .to_string();
+                        result.source_compatibility = Some(cleaned);
                     }
                     "targetCompatibility" | "targetCompatibilityVersion" => {
-                        result.target_compatibility = Some(value.trim_start_matches('"').trim_end_matches('"').to_string());
+                        let cleaned = value
+                            .trim_start_matches('\'')
+                            .trim_end_matches('\'')
+                            .trim_start_matches('"')
+                            .trim_end_matches('"')
+                            .to_string();
+                        result.target_compatibility = Some(cleaned);
                     }
                     _ => {}
                 }
@@ -831,10 +1006,11 @@ fn parse_subproject_includes(content: &str, result: &mut BuildScriptParseResult)
         }
     }
 
-    // settings.gradle: include ':app', ':lib'
+    // settings.gradle: include ':app', ':lib' or include ":app", ":lib"
+    // Single pass handles both quote styles via extract_string_literal
     for (i, _) in content.match_indices("include ") {
         let args_start = i + 8; // skip past "include "
-        // Find end of the include statement (newline or end of content)
+                                // Find end of the include statement (newline or end of content)
         let line_end = content[args_start..]
             .find('\n')
             .unwrap_or(content.len() - args_start);
@@ -843,25 +1019,14 @@ fn parse_subproject_includes(content: &str, result: &mut BuildScriptParseResult)
         if !line.starts_with('\'') && !line.starts_with('"') && !line.starts_with('(') {
             continue;
         }
-        // Parse comma-separated single-quoted strings
+        // Parse comma-separated quoted strings
         for part in line.split(',') {
             let part = part.trim();
             if let Some(path) = extract_string_literal(part) {
-                result.subprojects.push(ParsedSubproject { path });
-            }
-        }
-    }
-
-    for (i, _) in content.match_indices("include \"") {
-        let args_start = i + 9;
-        let line_end = content[args_start..]
-            .find('\n')
-            .unwrap_or(content.len() - args_start);
-        let line = &content[args_start..args_start + line_end];
-        for part in line.split(',') {
-            let part = part.trim();
-            if let Some(path) = extract_string_literal(part) {
-                result.subprojects.push(ParsedSubproject { path });
+                // Deduplicate: skip if already added by include() form
+                if !result.subprojects.iter().any(|s| s.path == path) {
+                    result.subprojects.push(ParsedSubproject { path });
+                }
             }
         }
     }
@@ -878,7 +1043,9 @@ pub fn parse_build_script_file(path: &Path) -> std::io::Result<BuildScriptParseR
 }
 
 /// Parse multiple build script files and merge results.
-pub fn parse_build_script_files(paths: &[&Path]) -> Vec<(std::path::PathBuf, BuildScriptParseResult)> {
+pub fn parse_build_script_files(
+    paths: &[&Path],
+) -> Vec<(std::path::PathBuf, BuildScriptParseResult)> {
     paths
         .iter()
         .filter_map(|p| {
@@ -894,7 +1061,10 @@ pub fn is_build_script(path: &Path) -> bool {
         Some(n) => n,
         None => return false,
     };
-    name == "build.gradle" || name == "build.gradle.kts" || name == "settings.gradle" || name == "settings.gradle.kts"
+    name == "build.gradle"
+        || name == "build.gradle.kts"
+        || name == "settings.gradle"
+        || name == "settings.gradle.kts"
 }
 
 #[cfg(test)]
@@ -903,7 +1073,10 @@ mod tests {
 
     #[test]
     fn test_detect_kotlin_dsl_by_extension() {
-        assert_eq!(detect_script_type("build.gradle.kts", ""), ScriptType::KotlinDsl);
+        assert_eq!(
+            detect_script_type("build.gradle.kts", ""),
+            ScriptType::KotlinDsl
+        );
         assert_eq!(detect_script_type("build.gradle", ""), ScriptType::Groovy);
         assert_eq!(detect_script_type("foo.txt", ""), ScriptType::Unknown);
     }
@@ -916,13 +1089,19 @@ mod tests {
     #[test]
     fn test_detect_kotlin_dsl_by_content() {
         let content = r#"plugins { id("java") }"#;
-        assert_eq!(detect_script_type("build.gradle", content), ScriptType::KotlinDsl);
+        assert_eq!(
+            detect_script_type("build.gradle", content),
+            ScriptType::KotlinDsl
+        );
     }
 
     #[test]
     fn test_detect_groovy_by_content() {
         let content = r#"plugins { id "java" }"#;
-        assert_eq!(detect_script_type("build.gradle", content), ScriptType::Groovy);
+        assert_eq!(
+            detect_script_type("build.gradle", content),
+            ScriptType::Groovy
+        );
     }
 
     #[test]
@@ -1058,8 +1237,14 @@ java {
 }
 "#;
         let result = parse_build_script(content, "build.gradle.kts");
-        assert_eq!(result.source_compatibility.as_deref(), Some("JavaVersion.VERSION_17"));
-        assert_eq!(result.target_compatibility.as_deref(), Some("JavaVersion.VERSION_17"));
+        assert_eq!(
+            result.source_compatibility.as_deref(),
+            Some("JavaVersion.VERSION_17")
+        );
+        assert_eq!(
+            result.target_compatibility.as_deref(),
+            Some("JavaVersion.VERSION_17")
+        );
     }
 
     #[test]
@@ -1125,7 +1310,10 @@ include(":app", ":lib", ":core")
 
     #[test]
     fn test_extract_string_literal_double_quotes() {
-        assert_eq!(extract_string_literal("\"hello\""), Some("hello".to_string()));
+        assert_eq!(
+            extract_string_literal("\"hello\""),
+            Some("hello".to_string())
+        );
     }
 
     #[test]
@@ -1141,13 +1329,19 @@ include(":app", ":lib", ":core")
     #[test]
     fn test_find_brace_block() {
         let content = "abc { def { ghi } jkl }";
-        assert_eq!(find_brace_block(content, 4), Some(" def { ghi } jkl ".to_string()));
+        assert_eq!(
+            find_brace_block(content, 4),
+            Some(" def { ghi } jkl ".to_string())
+        );
     }
 
     #[test]
     fn test_find_brace_block_nested_strings() {
         let content = "abc { val x = \"}\" }";
-        assert_eq!(find_brace_block(content, 4), Some(" val x = \"}\" ".to_string()));
+        assert_eq!(
+            find_brace_block(content, 4),
+            Some(" val x = \"}\" ".to_string())
+        );
     }
 
     #[test]
@@ -1266,5 +1460,71 @@ repositories {
         assert_eq!(result.repositories.len(), 1);
         assert_eq!(result.repositories[0].repo_type, "maven");
         assert!(result.repositories[0].name.contains("spring.io"));
+    }
+
+    #[test]
+    fn test_nested_braces_in_dep_closure() {
+        let content = r#"dependencies {
+    implementation('com.example:lib:1.0') {
+        exclude group: 'org.slf4j', module: 'slf4j-log4j12'
+    }
+}
+"#;
+        // Debug: check find_top_level_block
+        match super::find_top_level_block(content, "dependencies") {
+            Some((_pos, block)) => {
+                eprintln!(
+                    "Block found (len={}): {:?}",
+                    block.len(),
+                    &block[..std::cmp::min(block.len(), 80)]
+                );
+            }
+            None => {
+                eprintln!("find_top_level_block returned None!");
+            }
+        }
+        let mut result = BuildScriptParseResult::default();
+        parse_groovy_dependencies(content, &mut result);
+        eprintln!("deps found: {}", result.dependencies.len());
+        for d in &result.dependencies {
+            eprintln!("  {} -> {}", d.configuration, d.notation);
+        }
+        assert_eq!(result.dependencies.len(), 1);
+        assert_eq!(result.dependencies[0].configuration, "implementation");
+        assert_eq!(result.dependencies[0].notation, "com.example:lib:1.0");
+    }
+
+    #[test]
+    fn test_double_quote_dep_groovy() {
+        let content = r#"dependencies {
+    implementation "com.example:lib:1.0"
+}
+"#;
+        let mut result = BuildScriptParseResult::default();
+        parse_groovy_dependencies(content, &mut result);
+        eprintln!("deps found: {}", result.dependencies.len());
+        for d in &result.dependencies {
+            eprintln!("  {} -> {}", d.configuration, d.notation);
+        }
+        assert_eq!(result.dependencies.len(), 1);
+    }
+
+    #[test]
+    fn test_depends_on_quoted() {
+        let content = r#"task foo {
+    dependsOn 'test'
+}
+"#;
+        let mut result = BuildScriptParseResult::default();
+        parse_groovy_tasks(content, &mut result);
+        eprintln!("tasks found: {}", result.task_configs.len());
+        for t in &result.task_configs {
+            eprintln!(
+                "  {} -> depends_on={:?} enabled={}",
+                t.task_name, t.depends_on, t.enabled
+            );
+        }
+        assert_eq!(result.task_configs.len(), 1);
+        assert_eq!(result.task_configs[0].depends_on, vec!["test"]);
     }
 }

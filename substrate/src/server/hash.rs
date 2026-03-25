@@ -68,17 +68,12 @@ fn hash_file_with_algorithm(
     algorithm: HashAlgorithm,
     with_signature: bool,
 ) -> Result<Vec<u8>, SubstrateError> {
-    let file = File::open(path).map_err(|e| SubstrateError::Hash(format!(
-        "Cannot open {}: {}",
-        path.display(),
-        e
-    )))?;
+    let file = File::open(path)
+        .map_err(|e| SubstrateError::Hash(format!("Cannot open {}: {}", path.display(), e)))?;
 
-    let metadata = file.metadata().map_err(|e| SubstrateError::Hash(format!(
-        "Cannot stat {}: {}",
-        path.display(),
-        e
-    )))?;
+    let metadata = file
+        .metadata()
+        .map_err(|e| SubstrateError::Hash(format!("Cannot stat {}: {}", path.display(), e)))?;
 
     let file_len = metadata.len() as usize;
     let mut reader = BufReader::with_capacity(64 * 1024, file);
@@ -130,20 +125,16 @@ fn stream_hash<D: Digest, R: Read>(
 ) -> Result<(), SubstrateError> {
     if file_len < 64 * 1024 {
         let mut buf = Vec::with_capacity(file_len);
-        reader.read_to_end(&mut buf).map_err(|e| SubstrateError::Hash(format!(
-            "Cannot read {}: {}",
-            path.display(),
-            e
-        )))?;
+        reader
+            .read_to_end(&mut buf)
+            .map_err(|e| SubstrateError::Hash(format!("Cannot read {}: {}", path.display(), e)))?;
         hasher.update(&buf);
     } else {
         let mut buffer = [0u8; 64 * 1024];
         loop {
-            let n = reader.read(&mut buffer).map_err(|e| SubstrateError::Hash(format!(
-                "Cannot read {}: {}",
-                path.display(),
-                e
-            )))?;
+            let n = reader.read(&mut buffer).map_err(|e| {
+                SubstrateError::Hash(format!("Cannot read {}: {}", path.display(), e))
+            })?;
             if n == 0 {
                 break;
             }
@@ -163,20 +154,16 @@ fn stream_hash_blake3<R: Read>(
 ) -> Result<(), SubstrateError> {
     if file_len < 64 * 1024 {
         let mut buf = Vec::with_capacity(file_len);
-        reader.read_to_end(&mut buf).map_err(|e| SubstrateError::Hash(format!(
-            "Cannot read {}: {}",
-            path.display(),
-            e
-        )))?;
+        reader
+            .read_to_end(&mut buf)
+            .map_err(|e| SubstrateError::Hash(format!("Cannot read {}: {}", path.display(), e)))?;
         hasher.update(&buf);
     } else {
         let mut buffer = [0u8; 64 * 1024];
         loop {
-            let n = reader.read(&mut buffer).map_err(|e| SubstrateError::Hash(format!(
-                "Cannot read {}: {}",
-                path.display(),
-                e
-            )))?;
+            let n = reader.read(&mut buffer).map_err(|e| {
+                SubstrateError::Hash(format!("Cannot read {}: {}", path.display(), e))
+            })?;
             if n == 0 {
                 break;
             }
@@ -329,6 +316,7 @@ pub fn hash_batch_parallel(
 }
 
 #[cfg(test)]
+#[allow(non_snake_case)]
 mod tests {
     use super::*;
     use std::io::Write;
@@ -438,7 +426,10 @@ mod tests {
         let sha3_256 = hash_file_sha3_256(tmp.path()).unwrap();
         assert_eq!(sha256.len(), 32);
         assert_eq!(sha3_256.len(), 32);
-        assert_ne!(sha256, sha3_256, "SHA-256 and SHA3-256 must produce different hashes");
+        assert_ne!(
+            sha256, sha3_256,
+            "SHA-256 and SHA3-256 must produce different hashes"
+        );
     }
 
     #[test]
@@ -707,7 +698,12 @@ mod tests {
 
         for algo in &algos {
             let results = hash_batch_parallel(&paths, *algo);
-            assert_eq!(results.len(), 20, "all files should return a result for {:?}", algo);
+            assert_eq!(
+                results.len(),
+                20,
+                "all files should return a result for {:?}",
+                algo
+            );
             for (i, result) in results.iter().enumerate() {
                 assert!(result.is_ok(), "file {} should hash with {:?}", i, algo);
                 assert_eq!(result.as_ref().unwrap().len(), algo.output_len());
@@ -874,7 +870,10 @@ mod tests {
             .into_inner();
 
         assert_eq!(resp.results.len(), 1);
-        assert!(resp.results[0].error, "expected error flag for non-existent file");
+        assert!(
+            resp.results[0].error,
+            "expected error flag for non-existent file"
+        );
         assert!(
             !resp.results[0].error_message.is_empty(),
             "expected a non-empty error message"
@@ -915,18 +914,12 @@ mod tests {
         assert_eq!(resp.results.len(), 2);
 
         // First file: should succeed
-        assert!(
-            !resp.results[0].error,
-            "first file should succeed"
-        );
+        assert!(!resp.results[0].error, "first file should succeed");
         assert_eq!(resp.results[0].hash_bytes.len(), 16);
         assert!(resp.results[0].error_message.is_empty());
 
         // Second file: should fail gracefully
-        assert!(
-            resp.results[1].error,
-            "second file should have error flag"
-        );
+        assert!(resp.results[1].error, "second file should have error flag");
         assert!(resp.results[1].hash_bytes.is_empty());
         assert!(
             !resp.results[1].error_message.is_empty(),
@@ -1029,8 +1022,15 @@ mod tests {
             .into_inner();
 
         assert_eq!(resp.results.len(), 1);
-        assert!(!resp.results[0].error, "large file should hash without error");
-        assert_eq!(resp.results[0].hash_bytes.len(), 16, "MD5 hash must be 16 bytes");
+        assert!(
+            !resp.results[0].error,
+            "large file should hash without error"
+        );
+        assert_eq!(
+            resp.results[0].hash_bytes.len(),
+            16,
+            "MD5 hash must be 16 bytes"
+        );
         // Verify at least one byte is non-zero (the hash of 1MB of data should not be all zeros)
         assert!(
             resp.results[0].hash_bytes.iter().any(|&b| b != 0),
@@ -1127,7 +1127,10 @@ mod tests {
 
         assert_eq!(resp.results.len(), 3);
         for result in &resp.results {
-            assert!(!result.error, "each file should hash successfully with SHA-256");
+            assert!(
+                !result.error,
+                "each file should hash successfully with SHA-256"
+            );
             assert_eq!(
                 result.hash_bytes.len(),
                 32,
@@ -1181,8 +1184,7 @@ mod tests {
         assert_eq!(md5_resp.results[0].hash_bytes.len(), 16);
         assert_eq!(sha256_resp.results[0].hash_bytes.len(), 32);
         assert_ne!(
-            md5_resp.results[0].hash_bytes,
-            sha256_resp.results[0].hash_bytes,
+            md5_resp.results[0].hash_bytes, sha256_resp.results[0].hash_bytes,
             "MD5 and SHA-256 hashes must differ"
         );
 
@@ -1249,8 +1251,7 @@ mod tests {
             assert!(
                 !result.error,
                 "file at '{}' should hash without error: {}",
-                result.absolute_path,
-                result.error_message
+                result.absolute_path, result.error_message
             );
             assert_eq!(
                 result.hash_bytes.len(),

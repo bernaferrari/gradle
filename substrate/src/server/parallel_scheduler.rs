@@ -42,9 +42,13 @@ struct PrioritizedTask {
 impl Ord for PrioritizedTask {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // Higher priority = comes first (reverse enum ordering)
-        other.priority
+        other
+            .priority
             .cmp(&self.priority)
-            .then_with(|| self.critical_path_remaining_ms.cmp(&other.critical_path_remaining_ms))
+            .then_with(|| {
+                self.critical_path_remaining_ms
+                    .cmp(&other.critical_path_remaining_ms)
+            })
             .then_with(|| self.sequence.cmp(&other.sequence))
     }
 }
@@ -356,10 +360,7 @@ impl ParallelScheduler {
                             self.tasks
                                 .get(dep)
                                 .map(|d| {
-                                    matches!(
-                                        d.status,
-                                        TaskStatus::Succeeded | TaskStatus::Skipped
-                                    )
+                                    matches!(d.status, TaskStatus::Succeeded | TaskStatus::Skipped)
                                 })
                                 .unwrap_or(true)
                         });
@@ -449,10 +450,7 @@ impl ParallelScheduler {
                         self.tasks
                             .get(dep)
                             .map(|d| {
-                                matches!(
-                                    d.status,
-                                    TaskStatus::Succeeded | TaskStatus::Skipped
-                                )
+                                matches!(d.status, TaskStatus::Succeeded | TaskStatus::Skipped)
                             })
                             .unwrap_or(true)
                     })
@@ -560,7 +558,10 @@ impl ParallelScheduler {
     pub fn is_complete(&self) -> bool {
         let executing = self.executing.is_empty();
         let has_pending = self.tasks.iter().any(|t| {
-            matches!(t.status, TaskStatus::Pending | TaskStatus::Ready | TaskStatus::Executing)
+            matches!(
+                t.status,
+                TaskStatus::Pending | TaskStatus::Ready | TaskStatus::Executing
+            )
         });
         executing && !has_pending
     }
@@ -667,17 +668,37 @@ mod tests {
     async fn test_register_and_build_graph() {
         let scheduler = ParallelScheduler::with_config(make_config(4));
 
-        scheduler.register_task(":a", vec![], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":b", vec![":a".to_string()], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":c", vec![":a".to_string()], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":d", vec![":b".to_string(), ":c".to_string()], TaskPriority::Critical, ResourceEstimate::default());
+        scheduler.register_task(
+            ":a",
+            vec![],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":b",
+            vec![":a".to_string()],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":c",
+            vec![":a".to_string()],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":d",
+            vec![":b".to_string(), ":c".to_string()],
+            TaskPriority::Critical,
+            ResourceEstimate::default(),
+        );
 
         scheduler.build_graph();
 
         // :a should be ready immediately
         let (pending, ready, _, _, _, _) = scheduler.status_counts();
         assert_eq!(pending, 3); // :b, :c, :d
-        assert_eq!(ready, 1);  // :a
+        assert_eq!(ready, 1); // :a
         assert_eq!(scheduler.total_tasks(), 4);
     }
 
@@ -685,7 +706,12 @@ mod tests {
     async fn test_steal_ready_task() {
         let scheduler = ParallelScheduler::with_config(make_config(4));
 
-        scheduler.register_task(":a", vec![], TaskPriority::Normal, ResourceEstimate::default());
+        scheduler.register_task(
+            ":a",
+            vec![],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
         scheduler.build_graph();
 
         let stolen = scheduler.try_steal().await;
@@ -701,8 +727,18 @@ mod tests {
     async fn test_complete_unblocks_dependents() {
         let scheduler = ParallelScheduler::with_config(make_config(4));
 
-        scheduler.register_task(":a", vec![], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":b", vec![":a".to_string()], TaskPriority::Normal, ResourceEstimate::default());
+        scheduler.register_task(
+            ":a",
+            vec![],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":b",
+            vec![":a".to_string()],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
         scheduler.build_graph();
 
         // Steal :a
@@ -722,9 +758,24 @@ mod tests {
     async fn test_complete_unblocks_multiple_dependents() {
         let scheduler = ParallelScheduler::with_config(make_config(4));
 
-        scheduler.register_task(":a", vec![], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":b", vec![":a".to_string()], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":c", vec![":a".to_string()], TaskPriority::Normal, ResourceEstimate::default());
+        scheduler.register_task(
+            ":a",
+            vec![],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":b",
+            vec![":a".to_string()],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":c",
+            vec![":a".to_string()],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
         scheduler.build_graph();
 
         // Steal :a
@@ -736,7 +787,8 @@ mod tests {
         let stolen_b = scheduler.try_steal().await.unwrap();
         let stolen_c = scheduler.try_steal().await.unwrap();
 
-        assert!(vec![stolen_b.task_path.clone(), stolen_c.task_path.clone()].contains(&":b".to_string()));
+        assert!(vec![stolen_b.task_path.clone(), stolen_c.task_path.clone()]
+            .contains(&":b".to_string()));
         assert!(vec![stolen_b.task_path, stolen_c.task_path].contains(&":c".to_string()));
     }
 
@@ -744,9 +796,24 @@ mod tests {
     async fn test_failure_skips_dependents() {
         let scheduler = ParallelScheduler::with_config(make_config(4));
 
-        scheduler.register_task(":a", vec![], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":b", vec![":a".to_string()], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":c", vec![":b".to_string()], TaskPriority::Normal, ResourceEstimate::default());
+        scheduler.register_task(
+            ":a",
+            vec![],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":b",
+            vec![":a".to_string()],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":c",
+            vec![":b".to_string()],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
         scheduler.build_graph();
 
         scheduler.try_steal().await.unwrap();
@@ -766,9 +833,24 @@ mod tests {
         let scheduler = ParallelScheduler::with_config(make_config(2));
 
         // 3 independent tasks but only 2 slots
-        scheduler.register_task(":a", vec![], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":b", vec![], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":c", vec![], TaskPriority::Normal, ResourceEstimate::default());
+        scheduler.register_task(
+            ":a",
+            vec![],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":b",
+            vec![],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":c",
+            vec![],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
         scheduler.build_graph();
 
         let s1 = scheduler.try_steal().await.unwrap();
@@ -791,16 +873,26 @@ mod tests {
     async fn test_critical_path_priority() {
         let scheduler = ParallelScheduler::with_config(make_config(4));
 
-        scheduler.register_task(":fast", vec![], TaskPriority::Normal, ResourceEstimate {
-            cpu_weight: 0.5,
-            memory_bytes: 0,
-            estimated_ms: 10,
-        });
-        scheduler.register_task(":slow", vec![], TaskPriority::Critical, ResourceEstimate {
-            cpu_weight: 1.0,
-            memory_bytes: 0,
-            estimated_ms: 1000,
-        });
+        scheduler.register_task(
+            ":fast",
+            vec![],
+            TaskPriority::Normal,
+            ResourceEstimate {
+                cpu_weight: 0.5,
+                memory_bytes: 0,
+                estimated_ms: 10,
+            },
+        );
+        scheduler.register_task(
+            ":slow",
+            vec![],
+            TaskPriority::Critical,
+            ResourceEstimate {
+                cpu_weight: 1.0,
+                memory_bytes: 0,
+                estimated_ms: 1000,
+            },
+        );
         scheduler.build_graph();
 
         // Critical path task should be stolen first
@@ -816,9 +908,24 @@ mod tests {
     async fn test_cancel() {
         let scheduler = ParallelScheduler::with_config(make_config(4));
 
-        scheduler.register_task(":a", vec![], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":b", vec![":a".to_string()], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":c", vec![], TaskPriority::Normal, ResourceEstimate::default());
+        scheduler.register_task(
+            ":a",
+            vec![],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":b",
+            vec![":a".to_string()],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":c",
+            vec![],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
         scheduler.build_graph();
 
         scheduler.cancel();
@@ -839,10 +946,30 @@ mod tests {
         let scheduler = ParallelScheduler::with_config(make_config(4));
 
         // Diamond: a -> b, a -> c, b -> d, c -> d
-        scheduler.register_task(":a", vec![], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":b", vec![":a".to_string()], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":c", vec![":a".to_string()], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":d", vec![":b".to_string(), ":c".to_string()], TaskPriority::Critical, ResourceEstimate::default());
+        scheduler.register_task(
+            ":a",
+            vec![],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":b",
+            vec![":a".to_string()],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":c",
+            vec![":a".to_string()],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":d",
+            vec![":b".to_string(), ":c".to_string()],
+            TaskPriority::Critical,
+            ResourceEstimate::default(),
+        );
         scheduler.build_graph();
 
         // Step 1: Steal :a
@@ -880,7 +1007,12 @@ mod tests {
     async fn test_is_complete() {
         let scheduler = ParallelScheduler::with_config(make_config(4));
 
-        scheduler.register_task(":a", vec![], TaskPriority::Normal, ResourceEstimate::default());
+        scheduler.register_task(
+            ":a",
+            vec![],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
         scheduler.build_graph();
 
         assert!(!scheduler.is_complete());
@@ -896,8 +1028,18 @@ mod tests {
     async fn test_stats() {
         let scheduler = ParallelScheduler::with_config(make_config(4));
 
-        scheduler.register_task(":a", vec![], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":b", vec![":a".to_string()], TaskPriority::Normal, ResourceEstimate::default());
+        scheduler.register_task(
+            ":a",
+            vec![],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":b",
+            vec![":a".to_string()],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
         scheduler.build_graph();
 
         let s = scheduler.try_steal().await.unwrap();
@@ -930,7 +1072,9 @@ mod tests {
     fn test_scheduler_config_cpu_aware() {
         let config = SchedulerConfig::default();
         assert!(config.cpu_aware);
-        let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+        let cpus = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
         assert!(config.max_parallelism <= cpus);
     }
 
@@ -963,8 +1107,18 @@ mod tests {
     async fn test_ready_count() {
         let scheduler = ParallelScheduler::with_config(make_config(4));
 
-        scheduler.register_task(":a", vec![], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":b", vec![], TaskPriority::Normal, ResourceEstimate::default());
+        scheduler.register_task(
+            ":a",
+            vec![],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":b",
+            vec![],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
         scheduler.build_graph();
 
         assert_eq!(scheduler.ready_count(), 2);
@@ -985,9 +1139,24 @@ mod tests {
         let scheduler = ParallelScheduler::with_config(make_config(4));
 
         // All 3 tasks are independent roots
-        scheduler.register_task(":a", vec![], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":b", vec![], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":c", vec![], TaskPriority::Normal, ResourceEstimate::default());
+        scheduler.register_task(
+            ":a",
+            vec![],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":b",
+            vec![],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":c",
+            vec![],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
         scheduler.build_graph();
 
         let s1 = scheduler.try_steal().await.unwrap();
@@ -1005,10 +1174,30 @@ mod tests {
         let scheduler = ParallelScheduler::with_config(make_config(4));
 
         // a -> b -> d, a -> c -> d
-        scheduler.register_task(":a", vec![], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":b", vec![":a".to_string()], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":c", vec![":a".to_string()], TaskPriority::Normal, ResourceEstimate::default());
-        scheduler.register_task(":d", vec![":b".to_string(), ":c".to_string()], TaskPriority::Normal, ResourceEstimate::default());
+        scheduler.register_task(
+            ":a",
+            vec![],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":b",
+            vec![":a".to_string()],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":c",
+            vec![":a".to_string()],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
+        scheduler.register_task(
+            ":d",
+            vec![":b".to_string(), ":c".to_string()],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
         scheduler.build_graph();
 
         // Complete :a
@@ -1023,7 +1212,9 @@ mod tests {
             "expected :b or :c, got {}",
             first_stolen.task_path
         );
-        scheduler.complete_task(&first_stolen.task_path, 10, false).await;
+        scheduler
+            .complete_task(&first_stolen.task_path, 10, false)
+            .await;
 
         // :d should be skipped (depends on failed task)
         let (_, _, _, _, _, skipped) = scheduler.status_counts();
@@ -1037,7 +1228,9 @@ mod tests {
             second_stolen.task_path
         );
         assert_ne!(first_stolen.task_path, second_stolen.task_path);
-        scheduler.complete_task(&second_stolen.task_path, 10, true).await;
+        scheduler
+            .complete_task(&second_stolen.task_path, 10, true)
+            .await;
 
         assert!(scheduler.is_complete());
     }
@@ -1054,7 +1247,12 @@ mod tests {
             } else {
                 vec![]
             };
-            scheduler.register_task(&path, deps, TaskPriority::Normal, ResourceEstimate::default());
+            scheduler.register_task(
+                &path,
+                deps,
+                TaskPriority::Normal,
+                ResourceEstimate::default(),
+            );
         }
         scheduler.build_graph();
 
@@ -1076,7 +1274,12 @@ mod tests {
         let scheduler = ParallelScheduler::with_config(make_config(8));
 
         // 1 root -> 7 dependents
-        scheduler.register_task(":root", vec![], TaskPriority::Normal, ResourceEstimate::default());
+        scheduler.register_task(
+            ":root",
+            vec![],
+            TaskPriority::Normal,
+            ResourceEstimate::default(),
+        );
         for i in 0..7 {
             scheduler.register_task(
                 &format!(":dep{}", i),

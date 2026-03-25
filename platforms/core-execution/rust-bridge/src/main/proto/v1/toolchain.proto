@@ -13,6 +13,7 @@ service ToolchainService {
   rpc RegisterToolchain(RegisterToolchainRequest) returns (RegisterToolchainResponse);
   rpc RemoveToolchain(RemoveToolchainRequest) returns (RemoveToolchainResponse);
   rpc GetToolchainMetadata(GetToolchainMetadataRequest) returns (GetToolchainMetadataResponse);
+  rpc AutoDetectToolchains(AutoDetectToolchainsRequest) returns (AutoDetectToolchainsResponse);
 }
 
 message ToolchainDescriptor {
@@ -127,4 +128,32 @@ message GetToolchainMetadataResponse {
   string java_home = 6;
   int64 install_size_bytes = 7;
   bool verified = 8;
+}
+
+// --- Auto-detection ---
+
+message AutoDetectToolchainsRequest {
+  // Optional filter: only return toolchains matching this major version (e.g., "17")
+  string major_version = 1;
+  // Scan PATH for java binaries in addition to known paths
+  bool scan_path = 2;
+  // Check SDKMAN installations
+  bool scan_sdkman = 3;
+  // Check toolchain.properties in project tree
+  bool scan_project = 4;
+}
+
+message AutoDetectedToolchain {
+  string java_home = 1;
+  string major_version = 2;   // e.g., "17"
+  string full_version = 3;    // e.g., "17.0.12"
+  string vendor = 4;          // e.g., "Temurin", "Corretto", "OpenJDK"
+  string source = 5;          // e.g., "JAVA_HOME", "PATH", "SDKMAN", "filesystem", "toolchain.properties"
+  bool verified = 6;
+}
+
+message AutoDetectToolchainsResponse {
+  repeated AutoDetectedToolchain toolchains = 1;
+  int32 total_found = 2;
+  string scan_summary = 3;
 }

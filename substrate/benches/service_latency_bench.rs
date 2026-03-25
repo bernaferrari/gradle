@@ -8,7 +8,9 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 ///   - POM parsing: MavenXpp3Reader vs byte-level scanner
 ///   - Property interpolation: String.replaceAll() vs iterative interpolation
 ///   - Version comparison: ComparableVersion.compareTo() vs compare_versions()
-use gradle_substrate_daemon::server::dependency_resolution::{DependencyResolutionServiceImpl, compare_versions};
+use gradle_substrate_daemon::server::dependency_resolution::{
+    compare_versions, DependencyResolutionServiceImpl,
+};
 
 fn bench_pom_parsing(c: &mut Criterion) {
     let pom_kotlin = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -179,21 +181,24 @@ fn bench_pom_parsing(c: &mut Criterion) {
 
     c.bench_function("parse_pom_kotlin_10_deps", |b| {
         b.iter(|| {
-            let deps = DependencyResolutionServiceImpl::parse_pom_dependencies(black_box(pom_kotlin));
+            let deps =
+                DependencyResolutionServiceImpl::parse_pom_dependencies(black_box(pom_kotlin));
             black_box(deps);
         });
     });
 
     c.bench_function("parse_pom_groovy_3_deps", |b| {
         b.iter(|| {
-            let deps = DependencyResolutionServiceImpl::parse_pom_dependencies(black_box(pom_groovy));
+            let deps =
+                DependencyResolutionServiceImpl::parse_pom_dependencies(black_box(pom_groovy));
             black_box(deps);
         });
     });
 
     c.bench_function("parse_pom_large_16_deps", |b| {
         b.iter(|| {
-            let deps = DependencyResolutionServiceImpl::parse_pom_dependencies(black_box(pom_large));
+            let deps =
+                DependencyResolutionServiceImpl::parse_pom_dependencies(black_box(pom_large));
             black_box(deps);
         });
     });
@@ -254,14 +259,16 @@ fn bench_pom_support(c: &mut Criterion) {
 
     c.bench_function("parse_properties_2_entries", |b| {
         b.iter(|| {
-            let props = DependencyResolutionServiceImpl::parse_pom_properties(black_box(pom_kotlin));
+            let props =
+                DependencyResolutionServiceImpl::parse_pom_properties(black_box(pom_kotlin));
             black_box(props);
         });
     });
 
     c.bench_function("parse_dependency_management", |b| {
         b.iter(|| {
-            let managed = DependencyResolutionServiceImpl::parse_dependency_management(black_box(pom_kotlin));
+            let managed =
+                DependencyResolutionServiceImpl::parse_dependency_management(black_box(pom_kotlin));
             black_box(managed);
         });
     });
@@ -277,7 +284,8 @@ fn bench_interpolation(c: &mut Criterion) {
     c.bench_function("interpolate_single_property", |b| {
         let props = &props;
         b.iter(|| {
-            let result = DependencyResolutionServiceImpl::interpolate_properties("${spring.version}", props);
+            let result =
+                DependencyResolutionServiceImpl::interpolate_properties("${spring.version}", props);
             black_box(result);
         });
     });

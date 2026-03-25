@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use tonic::{Request, Response, Status};
 
-use crate::{PROTOCOL_VERSION, SERVER_VERSION};
-use crate::proto::{
-    control_service_server::ControlService, HandshakeRequest, HandshakeResponse,
-    ShutdownRequest, ShutdownResponse, SetAuthoritativeModeRequest, SetAuthoritativeModeResponse,
-    GetAuthoritativeModeRequest, GetAuthoritativeModeResponse, SubsystemAuthStatus,
-};
 use super::authoritative::AuthoritativeConfig;
+use crate::proto::{
+    control_service_server::ControlService, GetAuthoritativeModeRequest,
+    GetAuthoritativeModeResponse, HandshakeRequest, HandshakeResponse, SetAuthoritativeModeRequest,
+    SetAuthoritativeModeResponse, ShutdownRequest, ShutdownResponse, SubsystemAuthStatus,
+};
+use crate::{PROTOCOL_VERSION, SERVER_VERSION};
 
 #[derive(Clone)]
 pub struct ControlServiceImpl {
@@ -100,9 +100,7 @@ impl ControlService for ControlServiceImpl {
     ) -> Result<Response<ShutdownResponse>, Status> {
         tracing::info!("Shutdown requested");
         let _ = self.shutdown_tx.send(());
-        Ok(Response::new(ShutdownResponse {
-            acknowledged: true,
-        }))
+        Ok(Response::new(ShutdownResponse { acknowledged: true }))
     }
 
     async fn set_authoritative_mode(
@@ -122,7 +120,10 @@ impl ControlService for ControlServiceImpl {
             }));
         }
 
-        match self.authoritative_config.set_subsystem(subsystem, authoritative) {
+        match self
+            .authoritative_config
+            .set_subsystem(subsystem, authoritative)
+        {
             Some(previous) => {
                 tracing::info!(
                     subsystem = %subsystem,
@@ -186,7 +187,11 @@ mod tests {
             .into_inner();
         assert_eq!(resp.subsystems.len(), 7);
         for s in &resp.subsystems {
-            assert!(!s.authoritative, "{} should be shadow by default", s.subsystem);
+            assert!(
+                !s.authoritative,
+                "{} should be shadow by default",
+                s.subsystem
+            );
         }
     }
 
@@ -210,9 +215,17 @@ mod tests {
             .await
             .unwrap()
             .into_inner();
-        let hashing = get_resp.subsystems.iter().find(|s| s.subsystem == "hashing").unwrap();
+        let hashing = get_resp
+            .subsystems
+            .iter()
+            .find(|s| s.subsystem == "hashing")
+            .unwrap();
         assert!(hashing.authoritative);
-        let cache_keys = get_resp.subsystems.iter().find(|s| s.subsystem == "cache_keys").unwrap();
+        let cache_keys = get_resp
+            .subsystems
+            .iter()
+            .find(|s| s.subsystem == "cache_keys")
+            .unwrap();
         assert!(!cache_keys.authoritative);
     }
 
@@ -283,12 +296,16 @@ mod tests {
         assert!(svc.get_jvm_host_socket_path().await.is_none());
 
         // Handshake with JVM host socket path
-        let resp = svc.handshake(Request::new(HandshakeRequest {
-            client_version: "test".to_string(),
-            protocol_version: PROTOCOL_VERSION.to_string(),
-            client_pid: 1234,
-            jvm_host_socket_path: "/tmp/jvm-host.sock".to_string(),
-        })).await.unwrap().into_inner();
+        let resp = svc
+            .handshake(Request::new(HandshakeRequest {
+                client_version: "test".to_string(),
+                protocol_version: PROTOCOL_VERSION.to_string(),
+                client_pid: 1234,
+                jvm_host_socket_path: "/tmp/jvm-host.sock".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
         assert!(resp.accepted);
 
         let path = svc.get_jvm_host_socket_path().await;
@@ -304,7 +321,10 @@ mod tests {
             protocol_version: PROTOCOL_VERSION.to_string(),
             client_pid: 1234,
             jvm_host_socket_path: String::new(),
-        })).await.unwrap().into_inner();
+        }))
+        .await
+        .unwrap()
+        .into_inner();
 
         assert!(svc.get_jvm_host_socket_path().await.is_none());
     }
