@@ -60,9 +60,7 @@ protobuf {
 tasks.named("generateProto").configure { dependsOn("syncProtos") }
 tasks.named("processResources").configure { dependsOn("syncProtos") }
 tasks.named<ProcessResources>("processResources") {
-    // RustBridgeServices is currently excluded from compilation in this stabilization pass.
-    // Avoid publishing a service entry that would trigger ClassNotFoundException at runtime.
-    exclude("META-INF/services/org.gradle.internal.service.scopes.GradleModuleServices")
+    // Keep service descriptor packaged so the active lightweight services are discoverable.
 }
 
 // Two-phase compilation: compile proto-generated sources first, then handwritten sources.
