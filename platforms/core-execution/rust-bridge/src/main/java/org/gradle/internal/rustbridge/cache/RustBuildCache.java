@@ -1,8 +1,6 @@
 package org.gradle.internal.rustbridge.cache;
 
-import org.gradle.caching.BuildCache;
-import org.gradle.caching.BuildCacheService;
-import org.gradle.caching.configuration.BuildCacheServiceFactory;
+import org.gradle.caching.configuration.BuildCache;
 
 /**
  * Configuration for the Rust-backed build cache.

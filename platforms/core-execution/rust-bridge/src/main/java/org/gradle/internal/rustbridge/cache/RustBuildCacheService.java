@@ -31,11 +31,9 @@ import java.util.concurrent.atomic.AtomicReference;
 public class RustBuildCacheService implements BuildCacheService {
 
     private final SubstrateClient client;
-    private final String description;
 
-    public RustBuildCacheService(SubstrateClient client, String description) {
+    public RustBuildCacheService(SubstrateClient client) {
         this.client = client;
-        this.description = description;
     }
 
     @Override

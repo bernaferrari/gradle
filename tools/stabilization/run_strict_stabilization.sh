@@ -39,6 +39,10 @@ echo "  -> org.gradle.internal.rustbridge.taskgraph.TaskGraphShadowReporterTest"
 ./gradlew -q :rust-bridge:test --tests org.gradle.internal.rustbridge.taskgraph.TaskGraphShadowReporterTest
 echo "  -> org.gradle.internal.rustbridge.execution.ShadowingExecutionPlanAdvisorTest"
 ./gradlew -q :rust-bridge:test --tests org.gradle.internal.rustbridge.execution.ShadowingExecutionPlanAdvisorTest
+echo "  -> org.gradle.internal.rustbridge.cache.RustBuildCacheServiceFactoryTest"
+./gradlew -q :rust-bridge:test --tests org.gradle.internal.rustbridge.cache.RustBuildCacheServiceFactoryTest
+echo "  -> org.gradle.internal.rustbridge.cache.RustRemoteBuildCacheServiceFactoryTest"
+./gradlew -q :rust-bridge:test --tests org.gradle.internal.rustbridge.cache.RustRemoteBuildCacheServiceFactoryTest
 echo "  -> org.gradle.internal.rustbridge.shadow.ShadowingBuildCacheKeyComputerTest"
 ./gradlew -q :rust-bridge:test --tests org.gradle.internal.rustbridge.shadow.ShadowingBuildCacheKeyComputerTest
 echo "  -> org.gradle.internal.rustbridge.watch.ShadowingFileWatcherRegistryFactoryTest"

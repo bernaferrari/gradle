@@ -1,6 +1,7 @@
 package org.gradle.internal.rustbridge.cache
 
 import gradle.substrate.v1.CacheLoadChunk
+import gradle.substrate.v1.CacheServiceGrpc
 import gradle.substrate.v1.CacheStoreChunk
 import gradle.substrate.v1.CacheStoreResponse
 import io.grpc.stub.StreamObserver
@@ -25,7 +26,7 @@ class RustBuildCacheServiceTest extends Specification {
         given:
         def client = Mock(SubstrateClient)
         client.isNoop() >> true
-        def service = new RustBuildCacheService(client, "test")
+        def service = new RustBuildCacheService(client)
         def key = Mock(BuildCacheKey)
         def reader = Mock(BuildCacheEntryReader)
 
@@ -37,7 +38,7 @@ class RustBuildCacheServiceTest extends Specification {
         given:
         def client = Mock(SubstrateClient)
         client.isNoop() >> true
-        def service = new RustBuildCacheService(client, "test")
+        def service = new RustBuildCacheService(client)
         def key = Mock(BuildCacheKey)
         def writer = Mock(BuildCacheEntryWriter)
 
@@ -56,12 +57,15 @@ class RustBuildCacheServiceTest extends Specification {
         def client = Mock(SubstrateClient)
         client.isNoop() >> false
         client.getCacheStub() >> blockingStub
-        def service = new RustBuildCacheService(client, "test")
+        def service = new RustBuildCacheService(client)
         def key = Mock(BuildCacheKey)
         def reader = Mock(BuildCacheEntryReader)
 
-        expect:
-        service.load(key, reader) == false
+        when:
+        def result = service.load(key, reader)
+
+        then:
+        result == false
         0 * reader._
     }
 
@@ -76,7 +80,7 @@ class RustBuildCacheServiceTest extends Specification {
         def client = Mock(SubstrateClient)
         client.isNoop() >> false
         client.getCacheStub() >> blockingStub
-        def service = new RustBuildCacheService(client, "test")
+        def service = new RustBuildCacheService(client)
         def key = Mock(BuildCacheKey)
         def reader = Mock(BuildCacheEntryReader)
 
@@ -117,7 +121,7 @@ class RustBuildCacheServiceTest extends Specification {
         def client = Mock(SubstrateClient)
         client.isNoop() >> false
         client.getCacheAsyncStub() >> asyncStub
-        def service = new RustBuildCacheService(client, "test")
+        def service = new RustBuildCacheService(client)
 
         when:
         service.store(key, writer)
@@ -147,7 +151,7 @@ class RustBuildCacheServiceTest extends Specification {
         def client = Mock(SubstrateClient)
         client.isNoop() >> false
         client.getCacheAsyncStub() >> asyncStub
-        def service = new RustBuildCacheService(client, "test")
+        def service = new RustBuildCacheService(client)
 
         when:
         service.store(key, writer)
@@ -160,7 +164,7 @@ class RustBuildCacheServiceTest extends Specification {
     def "close does nothing"() {
         given:
         def client = Mock(SubstrateClient)
-        def service = new RustBuildCacheService(client, "test")
+        def service = new RustBuildCacheService(client)
 
         when:
         service.close()
