@@ -1258,7 +1258,7 @@ impl DependencyResolutionServiceImpl {
                     }
 
                     // Resolve each regular dependency recursively
-                    let mut handles = Vec::new();
+                    let mut transitive_deps = Vec::new();
 
                     for (pom_dep, resolved_version) in &regular_deps {
                         if resolved_version.is_empty() {
@@ -1276,27 +1276,14 @@ impl DependencyResolutionServiceImpl {
                             },
                             transitive: true,
                         };
-                        let repos_clone: Vec<RepositoryDescriptor> = repos.to_vec();
-                        handles.push(tokio::spawn(async move {
-                            // We can't move `self` into the spawned task, so we
-                            // just return the descriptor for serial resolution below.
-                            (child_dep, repos_clone)
-                        }));
-                    }
-
-                    // Collect handles and resolve serially (self is &self, not Send)
-                    let mut transitive_deps = Vec::new();
-                    for handle in handles {
-                        if let Ok((child_dep, repos_clone)) = handle.await {
-                            let resolved = Box::pin(self.resolve_recursive(
-                                &child_dep,
-                                &repos_clone,
-                                visited,
-                                depth + 1,
-                            ))
-                            .await;
-                            transitive_deps.push(resolved);
-                        }
+                        let resolved = Box::pin(self.resolve_recursive(
+                            &child_dep,
+                            repos,
+                            visited,
+                            depth + 1,
+                        ))
+                        .await;
+                        transitive_deps.push(resolved);
                     }
 
                     // Apply conflict resolution
