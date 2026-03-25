@@ -105,7 +105,7 @@ public class RustFileFingerprintClient {
         List<String> ignorePatterns
     ) {
         if (client.isNoop()) {
-            return new FingerprintResult(Collections.emptyList(), HashCode.fromInt(0), false, "Substrate not available");
+            return new FingerprintResult(Collections.emptyList(), HashCode.fromBytes(new byte[16]), false, "Substrate not available");
         }
 
         try {
@@ -128,7 +128,7 @@ public class RustFileFingerprintClient {
 
             if (!response.getSuccess()) {
                 LOGGER.warn("[substrate:fingerprint] fingerprinting failed: {}", response.getErrorMessage());
-                return new FingerprintResult(Collections.emptyList(), HashCode.fromInt(0),
+                return new FingerprintResult(Collections.emptyList(), HashCode.fromBytes(new byte[16]),
                     false, response.getErrorMessage());
             }
 
@@ -151,7 +151,7 @@ public class RustFileFingerprintClient {
             return new FingerprintResult(entries, collectionHash, true, "");
         } catch (Exception e) {
             LOGGER.debug("[substrate:fingerprint] gRPC call failed", e);
-            return new FingerprintResult(Collections.emptyList(), HashCode.fromInt(0),
+            return new FingerprintResult(Collections.emptyList(), HashCode.fromBytes(new byte[16]),
                 false, "gRPC error: " + e.getMessage());
         }
     }

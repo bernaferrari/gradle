@@ -3,7 +3,7 @@ package org.gradle.internal.rustbridge.history;
 import com.google.common.collect.ImmutableSortedMap;
 import com.google.common.collect.Interner;
 import org.gradle.internal.execution.history.AfterExecutionState;
-import org.gradle.internal.execution.history.CurrentFileCollectionFingerprint;
+import org.gradle.internal.fingerprint.CurrentFileCollectionFingerprint;
 import org.gradle.internal.execution.history.PreviousExecutionState;
 import org.gradle.internal.execution.history.impl.DefaultPreviousExecutionState;
 import org.gradle.internal.execution.history.impl.DefaultPreviousExecutionStateSerializer;

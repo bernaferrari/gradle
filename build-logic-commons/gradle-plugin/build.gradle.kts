@@ -23,4 +23,5 @@ dependencies {
     implementation(buildLibs.kgp)
     implementation(buildLibs.testRetryPlugin)
     implementation(buildLibs.detektPlugin)
+    implementation(buildLibs.protobufPlugin)
 }

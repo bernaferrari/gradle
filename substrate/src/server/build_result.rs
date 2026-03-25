@@ -6,9 +6,9 @@ use tonic::{Request, Response, Status};
 use super::scopes::BuildId;
 use crate::proto::{
     build_result_service_server::BuildResultService, BuildOutcome, GetBuildResultRequest,
-    GetBuildResultResponse, GetTaskSummaryRequest, GetTaskSummaryResponse, ReportBuildFailureRequest,
-    ReportBuildFailureResponse, ReportTaskResultRequest, ReportTaskResultResponse, TaskResult,
-    TaskSummaryEntry,
+    GetBuildResultResponse, GetTaskSummaryRequest, GetTaskSummaryResponse,
+    ReportBuildFailureRequest, ReportBuildFailureResponse, ReportTaskResultRequest,
+    ReportTaskResultResponse, TaskResult, TaskSummaryEntry,
 };
 
 /// A tracked build's aggregated state.
@@ -127,8 +127,7 @@ impl BuildResultService for BuildResultServiceImpl {
             .map(|r| r.iter().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
 
-        let (executed, from_cache, up_to_date, failed, skipped) =
-            Self::count_outcomes(&results);
+        let (executed, from_cache, up_to_date, failed, skipped) = Self::count_outcomes(&results);
 
         let build_state = self.build_states.get(&BuildId::from(req.build_id.clone()));
 
@@ -146,20 +145,19 @@ impl BuildResultService for BuildResultServiceImpl {
 
         let total_duration_ms: i64 = results.iter().map(|r| r.duration_ms).sum();
 
-        let (failure_type, failure_message, failed_task_paths) =
-            if let Some(state) = &build_state {
-                if state.failed {
-                    (
-                        Some(state.failure_type.clone()),
-                        Some(state.failure_message.clone()),
-                        state.failed_task_paths.clone(),
-                    )
-                } else {
-                    (None, None, Vec::new())
-                }
+        let (failure_type, failure_message, failed_task_paths) = if let Some(state) = &build_state {
+            if state.failed {
+                (
+                    Some(state.failure_type.clone()),
+                    Some(state.failure_message.clone()),
+                    state.failed_task_paths.clone(),
+                )
             } else {
                 (None, None, Vec::new())
-            };
+            }
+        } else {
+            (None, None, Vec::new())
+        };
 
         let outcome = BuildOutcome {
             build_id: req.build_id,
@@ -518,8 +516,12 @@ mod tests {
         assert_eq!(state.failure_type, "configuration_error");
         assert_eq!(state.failure_message, custom_msg);
         assert_eq!(state.failed_task_paths.len(), 2);
-        assert!(state.failed_task_paths.contains(&":app:compileDebugKotlin".to_string()));
-        assert!(state.failed_task_paths.contains(&":app:mergeDebugResources".to_string()));
+        assert!(state
+            .failed_task_paths
+            .contains(&":app:compileDebugKotlin".to_string()));
+        assert!(state
+            .failed_task_paths
+            .contains(&":app:mergeDebugResources".to_string()));
     }
 
     #[tokio::test]

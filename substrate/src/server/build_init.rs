@@ -9,8 +9,8 @@ use super::scopes::{BuildId, ScopeRegistry, SessionId};
 use crate::proto::{
     build_init_service_server::BuildInitService, BuildInitStatus, GetBuildInitStatusRequest,
     GetBuildInitStatusResponse, InitBuildSettingsRequest, InitBuildSettingsResponse,
-    InitScriptInfo, RecordInitScriptRequest, RecordInitScriptResponse,
-    RecordSettingsDetailRequest, RecordSettingsDetailResponse, SettingsDetailEntry,
+    InitScriptInfo, RecordInitScriptRequest, RecordInitScriptResponse, RecordSettingsDetailRequest,
+    RecordSettingsDetailResponse, SettingsDetailEntry,
 };
 
 /// Tracked build initialization state.
@@ -83,10 +83,7 @@ impl BuildInitServiceImpl {
 
         if let Some(path) = actual_settings {
             if let Ok(content) = std::fs::read_to_string(&path) {
-                let is_kts = path
-                    .extension()
-                    .map(|e| e == "kts")
-                    .unwrap_or(false);
+                let is_kts = path.extension().map(|e| e == "kts").unwrap_or(false);
                 result.is_kotlin_dsl = is_kts;
                 Self::extract_settings_info(&content, is_kts, &mut result);
             }
@@ -165,9 +162,7 @@ impl BuildInitServiceImpl {
         let expected = format!("{} =", prefix);
         if let Some(idx) = line.find(&expected) {
             let value = line[idx + expected.len()..].trim();
-            let value = value
-                .strip_prefix('"')
-                .and_then(|v| v.strip_suffix('"'));
+            let value = value.strip_prefix('"').and_then(|v| v.strip_suffix('"'));
             if let Some(name) = value {
                 let name = name.trim().to_string();
                 if !name.is_empty() {
@@ -216,9 +211,7 @@ impl BuildInitServiceImpl {
 
             for part in content.split(',') {
                 let part = part.trim();
-                let cleaned = part
-                    .strip_prefix('"')
-                    .and_then(|v| v.strip_suffix('"'));
+                let cleaned = part.strip_prefix('"').and_then(|v| v.strip_suffix('"'));
                 if let Some(name) = cleaned {
                     let name = name.trim();
                     if !name.is_empty() && name.starts_with(':') {
@@ -247,7 +240,11 @@ impl BuildInitServiceImpl {
                     .strip_prefix('"')
                     .and_then(|v| v.strip_suffix('"'))
             })
-            .or_else(|| rest.trim().strip_suffix(')').and_then(|v| v.strip_suffix('"')))
+            .or_else(|| {
+                rest.trim()
+                    .strip_suffix(')')
+                    .and_then(|v| v.strip_suffix('"'))
+            })
             .unwrap_or(rest.trim());
 
         let cleaned = cleaned.trim();
@@ -263,7 +260,7 @@ impl BuildInitServiceImpl {
         }
         if let Some(start) = line.find("includeBuild") {
             let rest = &line[start + 13..]; // skip "includeBuild"
-            // Skip whitespace and opening paren
+                                            // Skip whitespace and opening paren
             let rest = rest.trim_start();
             let rest = rest.strip_prefix('(').unwrap_or(rest);
             let rest = rest.trim_start();
@@ -354,10 +351,7 @@ impl BuildInitService for BuildInitServiceImpl {
         // Register build in scope registry if session_id is provided
         if let Some(ref registry) = self.scope_registry {
             if !req.session_id.is_empty() {
-                registry.register_build(
-                    SessionId::from(req.session_id.clone()),
-                    build_key.clone(),
-                );
+                registry.register_build(SessionId::from(req.session_id.clone()), build_key.clone());
                 tracing::debug!(
                     build_id = %build_id,
                     session_id = %req.session_id,
@@ -417,14 +411,20 @@ impl BuildInitService for BuildInitServiceImpl {
 
         if let Some(mut build) = self.builds.get_mut(&BuildId::from(req.build_id)) {
             // Update if key exists, else push
-            if let Some(existing) = build.settings_details.iter_mut().find(|d| d.key == detail.key) {
+            if let Some(existing) = build
+                .settings_details
+                .iter_mut()
+                .find(|d| d.key == detail.key)
+            {
                 existing.value = detail.value;
             } else {
                 build.settings_details.push(detail);
             }
         }
 
-        Ok(Response::new(RecordSettingsDetailResponse { accepted: true }))
+        Ok(Response::new(RecordSettingsDetailResponse {
+            accepted: true,
+        }))
     }
 
     async fn get_build_init_status(
@@ -713,10 +713,7 @@ includeBuild("platform")
     async fn test_settings_file_missing() {
         let dir = tempfile::tempdir().unwrap();
 
-        let parsed = BuildInitServiceImpl::parse_settings_file(
-            dir.path().to_str().unwrap(),
-            "",
-        );
+        let parsed = BuildInitServiceImpl::parse_settings_file(dir.path().to_str().unwrap(), "");
 
         assert!(!parsed.settings_file_exists);
         // Falls back to directory name
@@ -788,8 +785,8 @@ include ':core'
                 }),
             }))
             .await
-        .unwrap()
-        .into_inner();
+            .unwrap()
+            .into_inner();
 
         assert!(resp.accepted);
     }
@@ -808,8 +805,8 @@ include ':core'
                 duration_ms: 50,
             }))
             .await
-        .unwrap()
-        .into_inner();
+            .unwrap()
+            .into_inner();
 
         assert!(resp.accepted);
     }

@@ -12,9 +12,7 @@ fn bench_cache_store(c: &mut Criterion) {
 
     c.bench_function("cache_store_1mb", |b| {
         b.iter(|| {
-            rt.block_on(async {
-                store.store(black_box(key), black_box(&data)).await.unwrap()
-            })
+            rt.block_on(async { store.store(black_box(key), black_box(&data)).await.unwrap() })
         })
     });
 }
@@ -28,11 +26,7 @@ fn bench_cache_load(c: &mut Criterion) {
     rt.block_on(store.store(key, &data)).unwrap();
 
     c.bench_function("cache_load_1mb", |b| {
-        b.iter(|| {
-            rt.block_on(async {
-                store.load(black_box(key)).await.unwrap()
-            })
-        })
+        b.iter(|| rt.block_on(async { store.load(black_box(key)).await.unwrap() }))
     });
 }
 
@@ -55,5 +49,10 @@ fn bench_cache_store_and_load(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_cache_store, bench_cache_load, bench_cache_store_and_load);
+criterion_group!(
+    benches,
+    bench_cache_store,
+    bench_cache_load,
+    bench_cache_store_and_load
+);
 criterion_main!(benches);

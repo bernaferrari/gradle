@@ -1,8 +1,6 @@
 package org.gradle.internal.rustbridge.toolchain;
 
-import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
-import org.slf4j.Logger;
 import org.jspecify.annotations.Nullable;
 
 import java.util.List;
@@ -14,8 +12,6 @@ import java.util.List;
  * In authoritative mode, uses the Rust result as primary.</p>
  */
 public class ShadowingToolchainProvider {
-
-    private static final Logger LOGGER = Logging.getLogger(ShadowingToolchainProvider.class);
 
     private final RustToolchainServiceClient rustClient;
     private final HashMismatchReporter mismatchReporter;

@@ -134,7 +134,7 @@ public class RustBuildMetricsClient {
                                                                List<String> metricNames,
                                                                long sinceMs) {
         if (client.isNoop()) {
-            return List.of();
+            return java.util.Collections.emptyList();
         }
 
         try {
@@ -152,7 +152,7 @@ public class RustBuildMetricsClient {
                 .getMetricsList();
         } catch (Exception e) {
             LOGGER.debug("[substrate:metrics] failed to get metrics: {}", e.getMessage());
-            return List.of();
+            return java.util.Collections.emptyList();
         }
     }
 

@@ -86,7 +86,7 @@ public class RustProblemReportingClient {
 
         try {
             return client.getProblemReportingStub()
-                .getProblems(GetProblemsBySeverityRequest.newBuilder()
+                .getProblemsBySeverity(GetProblemsBySeverityRequest.newBuilder()
                     .setBuildId(buildId)
                     .setSeverity(severity)
                     .build());

@@ -9,8 +9,8 @@ use tonic::{Request, Response, Status, Streaming};
 
 use crate::error::SubstrateError;
 use crate::proto::{
-    cache_load_chunk, cache_service_server::CacheService, cache_store_chunk, CacheLoadChunk,
-    CacheLoadRequest, CacheStoreChunk, CacheStoreResponse, CacheEntryMetadata,
+    cache_load_chunk, cache_service_server::CacheService, cache_store_chunk, CacheEntryMetadata,
+    CacheLoadChunk, CacheLoadRequest, CacheStoreChunk, CacheStoreResponse,
 };
 
 const CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks for streaming
@@ -47,7 +47,9 @@ impl LocalCacheStore {
 
     /// Set the maximum cache size in bytes (0 = unlimited).
     pub fn set_max_size(&self, max_bytes: u64) {
-        self.counters.max_size_bytes.store(max_bytes, Ordering::Relaxed);
+        self.counters
+            .max_size_bytes
+            .store(max_bytes, Ordering::Relaxed);
     }
 
     fn key_to_path(&self, key: &str) -> PathBuf {
@@ -81,7 +83,10 @@ impl LocalCacheStore {
                 self.counters.misses.fetch_add(1, Ordering::Relaxed);
                 Ok(None)
             }
-            Err(e) => Err(SubstrateError::Cache(format!("Failed to load cache entry {}: {}", key, e))),
+            Err(e) => Err(SubstrateError::Cache(format!(
+                "Failed to load cache entry {}: {}",
+                key, e
+            ))),
         }
     }
 
@@ -105,7 +110,9 @@ impl LocalCacheStore {
         } else {
             self.counters.entry_count.fetch_add(1, Ordering::Relaxed);
         }
-        self.counters.total_bytes.fetch_add(data_len, Ordering::Relaxed);
+        self.counters
+            .total_bytes
+            .fetch_add(data_len, Ordering::Relaxed);
 
         Ok(())
     }
@@ -119,7 +126,10 @@ impl LocalCacheStore {
                 Ok(true)
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-            Err(e) => Err(SubstrateError::Cache(format!("Failed to remove cache entry {}: {}", key, e))),
+            Err(e) => Err(SubstrateError::Cache(format!(
+                "Failed to remove cache entry {}: {}",
+                key, e
+            ))),
         }
     }
 
@@ -153,7 +163,11 @@ impl LocalCacheStore {
         }
 
         if freed > 0 {
-            tracing::info!(freed_bytes = freed, target_bytes = target, "Cache eviction completed");
+            tracing::info!(
+                freed_bytes = freed,
+                target_bytes = target,
+                "Cache eviction completed"
+            );
         }
     }
 
@@ -193,7 +207,10 @@ impl LocalCacheStore {
         }
 
         entries.sort_by_key(|e| e.2);
-        entries.into_iter().map(|(path, size, _)| (path, size)).collect()
+        entries
+            .into_iter()
+            .map(|(path, size, _)| (path, size))
+            .collect()
     }
 
     /// Get cache statistics.
@@ -246,7 +263,10 @@ impl CacheServiceImpl {
         }
     }
 
-    pub fn with_remote(base_dir: PathBuf, remote: crate::server::remote_cache::RemoteCacheStore) -> Self {
+    pub fn with_remote(
+        base_dir: PathBuf,
+        remote: crate::server::remote_cache::RemoteCacheStore,
+    ) -> Self {
         Self {
             store: Arc::new(LocalCacheStore::new(base_dir)),
             remote: Some(std::sync::Arc::new(remote)),
@@ -318,12 +338,10 @@ impl CacheService for CacheServiceImpl {
             if let Some(data) = data {
                 let _ = tx
                     .send(Ok(CacheLoadChunk {
-                        payload: Some(cache_load_chunk::Payload::Metadata(
-                            CacheEntryMetadata {
-                                size: data.len() as i64,
-                                content_type: "application/octet-stream".to_string(),
-                            },
-                        )),
+                        payload: Some(cache_load_chunk::Payload::Metadata(CacheEntryMetadata {
+                            size: data.len() as i64,
+                            content_type: "application/octet-stream".to_string(),
+                        })),
                     }))
                     .await;
 
@@ -333,9 +351,7 @@ impl CacheService for CacheServiceImpl {
                     }
                     let _ = tx
                         .send(Ok(CacheLoadChunk {
-                            payload: Some(cache_load_chunk::Payload::Data(
-                                chunk.to_vec(),
-                            )),
+                            payload: Some(cache_load_chunk::Payload::Data(chunk.to_vec())),
                         }))
                         .await;
                 }
@@ -357,9 +373,11 @@ impl CacheService for CacheServiceImpl {
         let mut key: Option<String> = None;
         let mut data = Vec::new();
 
-        while let Some(chunk) = stream.message().await.map_err(|e| {
-            Status::internal(format!("Failed to read stream chunk: {}", e))
-        })? {
+        while let Some(chunk) = stream
+            .message()
+            .await
+            .map_err(|e| Status::internal(format!("Failed to read stream chunk: {}", e)))?
+        {
             match chunk.payload {
                 Some(cache_store_chunk::Payload::Init(init)) => {
                     key = Some(hex::encode(&init.key));
@@ -390,7 +408,9 @@ impl CacheService for CacheServiceImpl {
             tokio::spawn(async move {
                 match remote.store(&key_clone, &data_clone).await {
                     Ok(()) => tracing::debug!(key = %key_clone, "Cache entry stored to remote"),
-                    Err(e) => tracing::warn!(key = %key_clone, error = %e, "Failed to store cache entry to remote"),
+                    Err(e) => {
+                        tracing::warn!(key = %key_clone, error = %e, "Failed to store cache entry to remote")
+                    }
                 }
             });
         }
@@ -519,7 +539,10 @@ mod tests {
         let store = LocalCacheStore::new(tmp.path().to_path_buf());
 
         store.store("ff1111111111", b"old_data").await.unwrap();
-        store.store("ff1111111111", b"new_data_longer").await.unwrap();
+        store
+            .store("ff1111111111", b"new_data_longer")
+            .await
+            .unwrap();
 
         let loaded = store.load("ff1111111111").await.unwrap();
         assert_eq!(loaded, Some(b"new_data_longer".to_vec()));
@@ -557,7 +580,10 @@ mod tests {
         // Default max_size is 0 (unlimited)
 
         for i in 0..10 {
-            store.store(&format!("hh{:08x}", i), &vec![0u8; 1000]).await.unwrap();
+            store
+                .store(&format!("hh{:08x}", i), &vec![0u8; 1000])
+                .await
+                .unwrap();
         }
 
         let stats = store.get_stats();
@@ -613,7 +639,10 @@ mod tests {
 
         // total_bytes reflects the sum of both stores (the implementation
         // adds bytes on every store, even for overwrites)
-        assert_eq!(stats.total_bytes, "first_value".len() as u64 + "second_value_replaces".len() as u64);
+        assert_eq!(
+            stats.total_bytes,
+            "first_value".len() as u64 + "second_value_replaces".len() as u64
+        );
     }
 
     #[tokio::test]
@@ -628,7 +657,7 @@ mod tests {
         assert_eq!(stats.hits, 0);
         assert_eq!(stats.misses, 0);
         assert_eq!(stats.max_bytes, 0); // 0 means unlimited
-        // With zero total lookups, hit_rate is defined as 1.0
+                                        // With zero total lookups, hit_rate is defined as 1.0
         assert!((stats.hit_rate - 1.0).abs() < 0.01);
     }
 

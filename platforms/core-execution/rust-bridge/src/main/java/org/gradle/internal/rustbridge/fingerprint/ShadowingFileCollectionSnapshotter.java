@@ -143,12 +143,6 @@ public class ShadowingFileCollectionSnapshotter implements FileCollectionSnapsho
                         org.gradle.api.internal.file.collections.FileSystemMirroringFileTree sourceTree) {
                         filePaths.add(file);
                     }
-
-                    @Override
-                    public void visitGenericFileTree(File root,
-                        org.gradle.api.internal.file.FileTreeInternal fileTree) {
-                        filePaths.add(root);
-                    }
                 }
             );
         } catch (Exception e) {

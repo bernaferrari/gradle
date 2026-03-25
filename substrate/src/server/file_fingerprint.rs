@@ -1,4 +1,4 @@
-use std::io::{Read, Cursor};
+use std::io::{Cursor, Read};
 use std::path::Path;
 
 use md5::{Digest, Md5};
@@ -65,7 +65,10 @@ fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
 
     // Validate constant pool structural integrity
     if let Err(validation_err) = validate_constant_pool(&cp_entries) {
-        tracing::debug!("Class file constant pool validation failed: {}", validation_err);
+        tracing::debug!(
+            "Class file constant pool validation failed: {}",
+            validation_err
+        );
         return None;
     }
 
@@ -107,7 +110,10 @@ fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
             cursor.consume(attr_len)?;
         }
         if flags & (ACC_PUBLIC | ACC_PROTECTED) != 0 {
-            if let (Some(name), Some(desc)) = (get_utf8(&cp_entries, name_idx), get_utf8(&cp_entries, desc_idx)) {
+            if let (Some(name), Some(desc)) = (
+                get_utf8(&cp_entries, name_idx),
+                get_utf8(&cp_entries, desc_idx),
+            ) {
                 public_field_abi.push(format!("{}:{}", name, desc));
             }
         }
@@ -127,7 +133,10 @@ fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
             cursor.consume(attr_len)?;
         }
         if flags & (ACC_PUBLIC | ACC_PROTECTED) != 0 {
-            if let (Some(name), Some(desc)) = (get_utf8(&cp_entries, name_idx), get_utf8(&cp_entries, desc_idx)) {
+            if let (Some(name), Some(desc)) = (
+                get_utf8(&cp_entries, name_idx),
+                get_utf8(&cp_entries, desc_idx),
+            ) {
                 public_method_abi.push(format!("{}:{}", name, desc));
             }
         }
@@ -217,12 +226,12 @@ fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
 #[derive(Debug)]
 enum CpEntry {
     Utf8(String),
-    Class(u16),             // name_index
-    NameAndType(u16, u16),   // name_index, descriptor_index
-    MethodRef(u16, u16),     // class_index, name_and_type_index
+    Class(u16),            // name_index
+    NameAndType(u16, u16), // name_index, descriptor_index
+    MethodRef(u16, u16),   // class_index, name_and_type_index
     InterfaceMethodRef(u16, u16),
     FieldRef(u16, u16),
-    String(u16),            // utf8_index
+    String(u16), // utf8_index
     Integer(i32),
     Float(f32),
     Long(i64),
@@ -356,10 +365,20 @@ impl CpEntryStats {
     }
 
     fn total(&self) -> usize {
-        self.utf8 + self.class + self.string + self.field_ref + self.method_ref
-            + self.interface_method_ref + self.name_and_type + self.integer
-            + self.float_ + self.long + self.double_ + self.method_handle
-            + self.method_type + self.invoke_dynamic
+        self.utf8
+            + self.class
+            + self.string
+            + self.field_ref
+            + self.method_ref
+            + self.interface_method_ref
+            + self.name_and_type
+            + self.integer
+            + self.float_
+            + self.long
+            + self.double_
+            + self.method_handle
+            + self.method_type
+            + self.invoke_dynamic
     }
 
     fn describe(&self) -> String {
@@ -409,64 +428,100 @@ fn validate_constant_pool(cp: &[Option<CpEntry>]) -> Result<(), String> {
         match entry {
             CpEntry::Class(name_idx) => {
                 if *name_idx == 0 || *name_idx as usize >= cp.len() {
-                    return Err(format!("Class entry at {} references invalid utf8 index {}", i, name_idx));
+                    return Err(format!(
+                        "Class entry at {} references invalid utf8 index {}",
+                        i, name_idx
+                    ));
                 }
                 match &cp[*name_idx as usize] {
                     Some(CpEntry::Utf8(_)) => {}
-                    other => return Err(format!(
-                        "Class entry at {} references non-utf8 at index {} (found {:?})",
-                        i, name_idx, other.as_ref().map(std::mem::discriminant)
-                    )),
+                    other => {
+                        return Err(format!(
+                            "Class entry at {} references non-utf8 at index {} (found {:?})",
+                            i,
+                            name_idx,
+                            other.as_ref().map(std::mem::discriminant)
+                        ))
+                    }
                 }
             }
             CpEntry::NameAndType(name_idx, desc_idx) => {
                 for (label, idx) in [("name", name_idx), ("descriptor", desc_idx)] {
                     if *idx == 0 || *idx as usize >= cp.len() {
-                        return Err(format!("NameAndType at {} references invalid {} index {}", i, label, idx));
+                        return Err(format!(
+                            "NameAndType at {} references invalid {} index {}",
+                            i, label, idx
+                        ));
                     }
                     match &cp[*idx as usize] {
                         Some(CpEntry::Utf8(_)) => {}
-                        other => return Err(format!(
-                            "NameAndType at {} references non-utf8 {} at index {} (found {:?})",
-                            i, label, idx, other.as_ref().map(std::mem::discriminant)
-                        )),
+                        other => {
+                            return Err(format!(
+                                "NameAndType at {} references non-utf8 {} at index {} (found {:?})",
+                                i,
+                                label,
+                                idx,
+                                other.as_ref().map(std::mem::discriminant)
+                            ))
+                        }
                     }
                 }
             }
             CpEntry::String(utf8_idx) => {
                 if *utf8_idx == 0 || *utf8_idx as usize >= cp.len() {
-                    return Err(format!("String entry at {} references invalid utf8 index {}", i, utf8_idx));
+                    return Err(format!(
+                        "String entry at {} references invalid utf8 index {}",
+                        i, utf8_idx
+                    ));
                 }
                 match &cp[*utf8_idx as usize] {
                     Some(CpEntry::Utf8(_)) => {}
-                    other => return Err(format!(
-                        "String entry at {} references non-utf8 at index {} (found {:?})",
-                        i, utf8_idx, other.as_ref().map(std::mem::discriminant)
-                    )),
+                    other => {
+                        return Err(format!(
+                            "String entry at {} references non-utf8 at index {} (found {:?})",
+                            i,
+                            utf8_idx,
+                            other.as_ref().map(std::mem::discriminant)
+                        ))
+                    }
                 }
             }
             CpEntry::FieldRef(class_idx, nat_idx)
             | CpEntry::MethodRef(class_idx, nat_idx)
             | CpEntry::InterfaceMethodRef(class_idx, nat_idx) => {
                 if *class_idx == 0 || *class_idx as usize >= cp.len() {
-                    return Err(format!("Ref entry at {} references invalid class index {}", i, class_idx));
+                    return Err(format!(
+                        "Ref entry at {} references invalid class index {}",
+                        i, class_idx
+                    ));
                 }
                 match &cp[*class_idx as usize] {
                     Some(CpEntry::Class(_)) => {}
-                    other => return Err(format!(
-                        "Ref entry at {} references non-class at index {} (found {:?})",
-                        i, class_idx, other.as_ref().map(std::mem::discriminant)
-                    )),
+                    other => {
+                        return Err(format!(
+                            "Ref entry at {} references non-class at index {} (found {:?})",
+                            i,
+                            class_idx,
+                            other.as_ref().map(std::mem::discriminant)
+                        ))
+                    }
                 }
                 if *nat_idx == 0 || *nat_idx as usize >= cp.len() {
-                    return Err(format!("Ref entry at {} references invalid nat index {}", i, nat_idx));
+                    return Err(format!(
+                        "Ref entry at {} references invalid nat index {}",
+                        i, nat_idx
+                    ));
                 }
                 match &cp[*nat_idx as usize] {
                     Some(CpEntry::NameAndType(_, _)) => {}
-                    other => return Err(format!(
-                        "Ref entry at {} references non-NameAndType at index {} (found {:?})",
-                        i, nat_idx, other.as_ref().map(std::mem::discriminant)
-                    )),
+                    other => {
+                        return Err(format!(
+                            "Ref entry at {} references non-NameAndType at index {} (found {:?})",
+                            i,
+                            nat_idx,
+                            other.as_ref().map(std::mem::discriminant)
+                        ))
+                    }
                 }
             }
             CpEntry::MethodHandle(kind, reference_idx) => {
@@ -480,7 +535,10 @@ fn validate_constant_pool(cp: &[Option<CpEntry>]) -> Result<(), String> {
                     ));
                 }
                 if *reference_idx == 0 || *reference_idx as usize >= cp.len() {
-                    return Err(format!("MethodHandle at {} references invalid index {}", i, reference_idx));
+                    return Err(format!(
+                        "MethodHandle at {} references invalid index {}",
+                        i, reference_idx
+                    ));
                 }
                 let is_field_ref = *kind <= 4; // REF_getField=1 .. REF_putStatic=4
                 let valid = if is_field_ref {
@@ -488,8 +546,7 @@ fn validate_constant_pool(cp: &[Option<CpEntry>]) -> Result<(), String> {
                 } else {
                     matches!(
                         &cp[*reference_idx as usize],
-                        Some(CpEntry::MethodRef(_, _))
-                        | Some(CpEntry::InterfaceMethodRef(_, _))
+                        Some(CpEntry::MethodRef(_, _)) | Some(CpEntry::InterfaceMethodRef(_, _))
                     )
                 };
                 if !valid {
@@ -501,36 +558,53 @@ fn validate_constant_pool(cp: &[Option<CpEntry>]) -> Result<(), String> {
             }
             CpEntry::MethodType(desc_idx) => {
                 if *desc_idx == 0 || *desc_idx as usize >= cp.len() {
-                    return Err(format!("MethodType at {} references invalid utf8 index {}", i, desc_idx));
+                    return Err(format!(
+                        "MethodType at {} references invalid utf8 index {}",
+                        i, desc_idx
+                    ));
                 }
                 match &cp[*desc_idx as usize] {
                     Some(CpEntry::Utf8(_)) => {}
-                    other => return Err(format!(
-                        "MethodType at {} references non-utf8 at index {} (found {:?})",
-                        i, desc_idx, other.as_ref().map(std::mem::discriminant)
-                    )),
+                    other => {
+                        return Err(format!(
+                            "MethodType at {} references non-utf8 at index {} (found {:?})",
+                            i,
+                            desc_idx,
+                            other.as_ref().map(std::mem::discriminant)
+                        ))
+                    }
                 }
             }
             CpEntry::InvokeDynamic(bootstrap_idx, nat_idx) => {
                 if *bootstrap_idx == 0 || *bootstrap_idx as usize >= cp.len() {
-                    return Err(format!("InvokeDynamic at {} references invalid bootstrap index {}", i, bootstrap_idx));
+                    return Err(format!(
+                        "InvokeDynamic at {} references invalid bootstrap index {}",
+                        i, bootstrap_idx
+                    ));
                 }
                 match &cp[*bootstrap_idx as usize] {
                     Some(CpEntry::NameAndType(_, _)) | Some(CpEntry::MethodHandle(_, _)) => {}
-                    other => return Err(format!(
+                    other => {
+                        return Err(format!(
                         "InvokeDynamic at {} references unexpected entry at index {} (found {:?})",
                         i, bootstrap_idx, other.as_ref().map(std::mem::discriminant)
-                    )),
+                    ))
+                    }
                 }
                 if *nat_idx == 0 || *nat_idx as usize >= cp.len() {
-                    return Err(format!("InvokeDynamic at {} references invalid nat index {}", i, nat_idx));
+                    return Err(format!(
+                        "InvokeDynamic at {} references invalid nat index {}",
+                        i, nat_idx
+                    ));
                 }
                 match &cp[*nat_idx as usize] {
                     Some(CpEntry::NameAndType(_, _)) => {}
-                    other => return Err(format!(
+                    other => {
+                        return Err(format!(
                         "InvokeDynamic at {} references non-NameAndType at index {} (found {:?})",
                         i, nat_idx, other.as_ref().map(std::mem::discriminant)
-                    )),
+                    ))
+                    }
                 }
             }
             // Utf8 has no cross-references to validate
@@ -577,10 +651,13 @@ fn get_utf8(cp: &[Option<CpEntry>], index: u16) -> Option<&str> {
 }
 
 fn get_class_name(cp: &[Option<CpEntry>], class_index: u16) -> Option<String> {
-    let name_index = cp.get(class_index as usize)?.as_ref().and_then(|e| match e {
-        CpEntry::Class(idx) => Some(*idx),
-        _ => None,
-    })?;
+    let name_index = cp
+        .get(class_index as usize)?
+        .as_ref()
+        .and_then(|e| match e {
+            CpEntry::Class(idx) => Some(*idx),
+            _ => None,
+        })?;
     Some(get_utf8(cp, name_index)?.replace('/', "."))
 }
 
@@ -612,7 +689,6 @@ impl CursorConsume for Cursor<&[u8]> {
     }
 }
 
-
 /// Normalization strategy for file paths in fingerprint computation.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum NormalizationStrategy {
@@ -642,7 +718,12 @@ impl NormalizationStrategy {
     /// Normalize a path according to the strategy.
     /// `base` is the root directory (used for RELATIVE_PATH).
     /// `relative` is the path relative to base.
-    fn normalize<'a>(&self, _base: &Path, relative: &'a str, full_path: &Path) -> std::borrow::Cow<'a, str> {
+    fn normalize<'a>(
+        &self,
+        _base: &Path,
+        relative: &'a str,
+        full_path: &Path,
+    ) -> std::borrow::Cow<'a, str> {
         match self {
             Self::AbsolutePath => {
                 // Use the full absolute path
@@ -682,7 +763,10 @@ impl FileFingerprintServiceImpl {
         Self
     }
 
-    fn fingerprint_file_with_strategy(path: &Path, strategy: NormalizationStrategy) -> Result<(Vec<u8>, i64, i64), String> {
+    fn fingerprint_file_with_strategy(
+        path: &Path,
+        strategy: NormalizationStrategy,
+    ) -> Result<(Vec<u8>, i64, i64), String> {
         let metadata = std::fs::metadata(path).map_err(|e| format!("{}: {}", path.display(), e))?;
         let size = metadata.len() as i64;
         let modified = metadata
@@ -696,7 +780,8 @@ impl FileFingerprintServiceImpl {
         if strategy == NormalizationStrategy::ClassAbi {
             if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                 if ext == "class" {
-                    let data = std::fs::read(path).map_err(|e| format!("{}: {}", path.display(), e))?;
+                    let data =
+                        std::fs::read(path).map_err(|e| format!("{}: {}", path.display(), e))?;
                     if let Some(hash) = class_file_abi_hash(&data) {
                         return Ok((hash, size, modified));
                     }
@@ -731,16 +816,21 @@ impl FileFingerprintServiceImpl {
         let mut entries = Vec::new();
         let mut dir_hasher = Md5::new();
 
-        Self::walk_dir(dir, dir, &mut entries, &mut dir_hasher, ignore_patterns, strategy)?;
+        Self::walk_dir(
+            dir,
+            dir,
+            &mut entries,
+            &mut dir_hasher,
+            ignore_patterns,
+            strategy,
+        )?;
 
         let collection_hash = dir_hasher.finalize().to_vec();
         Ok((entries, collection_hash))
     }
 
     fn should_ignore(path: &Path, ignore_patterns: &[String]) -> bool {
-        let file_name = path.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
+        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let path_str = path.to_string_lossy();
 
         for pattern in ignore_patterns {
@@ -775,12 +865,10 @@ impl FileFingerprintServiceImpl {
         ignore_patterns: &[String],
         strategy: NormalizationStrategy,
     ) -> Result<(), String> {
-        let dir_entries = std::fs::read_dir(current)
-            .map_err(|e| format!("{}: {}", current.display(), e))?;
+        let dir_entries =
+            std::fs::read_dir(current).map_err(|e| format!("{}: {}", current.display(), e))?;
 
-        let mut dir_entries: Vec<_> = dir_entries
-            .filter_map(|e| e.ok())
-            .collect();
+        let mut dir_entries: Vec<_> = dir_entries.filter_map(|e| e.ok()).collect();
         dir_entries.sort_by_key(|e| e.file_name());
 
         for entry in dir_entries {
@@ -799,7 +887,9 @@ impl FileFingerprintServiceImpl {
             if path.is_dir() {
                 Self::walk_dir(base, &path, entries, hasher, ignore_patterns, strategy)?;
             } else {
-                if let Ok((hash, size, modified)) = Self::fingerprint_file_with_strategy(&path, strategy) {
+                if let Ok((hash, size, modified)) =
+                    Self::fingerprint_file_with_strategy(&path, strategy)
+                {
                     let normalized = strategy.normalize(base, &relative, &path);
 
                     match strategy {
@@ -807,7 +897,13 @@ impl FileFingerprintServiceImpl {
                             // Only hash content contributes; path is ignored
                             hasher.update(&hash);
                             hasher.update(b";");
-                            entries.push((NormalizationStrategy::hash_only_path(&hash), hash, size, modified, false));
+                            entries.push((
+                                NormalizationStrategy::hash_only_path(&hash),
+                                hash,
+                                size,
+                                modified,
+                                false,
+                            ));
                         }
                         _ => {
                             hasher.update(normalized.as_bytes());
@@ -843,8 +939,8 @@ impl FileFingerprintService for FileFingerprintServiceImpl {
                 continue;
             }
 
-            let file_type = FingerprintType::try_from(file.r#type)
-                .unwrap_or(FingerprintType::FingerprintFile);
+            let file_type =
+                FingerprintType::try_from(file.r#type).unwrap_or(FingerprintType::FingerprintFile);
 
             match file_type {
                 FingerprintType::FingerprintDirectory | FingerprintType::FingerprintRoot => {
@@ -889,13 +985,14 @@ impl FileFingerprintService for FileFingerprintServiceImpl {
                         Ok((hash, size, modified)) => {
                             let display_path = match strategy {
                                 NormalizationStrategy::RelativePath => file.absolute_path.clone(),
-                                NormalizationStrategy::NameOnly => {
-                                    path.file_name()
-                                        .and_then(|n| n.to_str())
-                                        .unwrap_or(&file.absolute_path)
-                                        .to_string()
+                                NormalizationStrategy::NameOnly => path
+                                    .file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or(&file.absolute_path)
+                                    .to_string(),
+                                NormalizationStrategy::HashOnly => {
+                                    format!("hash-{:x}", Md5::digest(&hash))
                                 }
-                                NormalizationStrategy::HashOnly => format!("hash-{:x}", Md5::digest(&hash)),
                                 _ => file.absolute_path.clone(),
                             };
                             all_entries.push(FileFingerprintEntry {
@@ -1028,7 +1125,11 @@ mod tests {
         let file_path = dir.path().join("known.txt");
         std::fs::write(&file_path, "test content").unwrap();
 
-        let (hash, size, _) = FileFingerprintServiceImpl::fingerprint_file_with_strategy(&file_path, NormalizationStrategy::AbsolutePath).unwrap();
+        let (hash, size, _) = FileFingerprintServiceImpl::fingerprint_file_with_strategy(
+            &file_path,
+            NormalizationStrategy::AbsolutePath,
+        )
+        .unwrap();
 
         // Standard MD5 of "test content" = 9473fdd0d880a43c21b7778d34872157
         let expected: [u8; 16] = Md5::digest(b"test content").into();
@@ -1104,7 +1205,11 @@ mod tests {
         assert_eq!(resp.entries.len(), 2);
         // Paths should be just filenames
         for entry in &resp.entries {
-            assert!(!entry.path.contains('/'), "Expected name-only, got: {}", entry.path);
+            assert!(
+                !entry.path.contains('/'),
+                "Expected name-only, got: {}",
+                entry.path
+            );
             assert!(
                 entry.path == "a.txt" || entry.path == "b.txt",
                 "Expected a.txt or b.txt, got: {}",
@@ -1135,7 +1240,11 @@ mod tests {
         assert!(resp.success);
         assert_eq!(resp.entries.len(), 1);
         // Path should start with "hash-"
-        assert!(resp.entries[0].path.starts_with("hash-"), "Expected hash- prefix, got: {}", resp.entries[0].path);
+        assert!(
+            resp.entries[0].path.starts_with("hash-"),
+            "Expected hash- prefix, got: {}",
+            resp.entries[0].path
+        );
     }
 
     #[tokio::test]
@@ -1199,19 +1308,42 @@ mod tests {
             .unwrap()
             .into_inner();
 
-        assert_eq!(resp1.collection_hash, resp2.collection_hash,
-            "HASH strategy should produce same collection hash for same content regardless of path");
+        assert_eq!(
+            resp1.collection_hash, resp2.collection_hash,
+            "HASH strategy should produce same collection hash for same content regardless of path"
+        );
     }
 
     #[test]
     fn test_normalization_strategy_from_str() {
-        assert_eq!(NormalizationStrategy::from_str("ABSOLUTE_PATH"), NormalizationStrategy::AbsolutePath);
-        assert_eq!(NormalizationStrategy::from_str("RELATIVE_PATH"), NormalizationStrategy::RelativePath);
-        assert_eq!(NormalizationStrategy::from_str("NAME_ONLY"), NormalizationStrategy::NameOnly);
-        assert_eq!(NormalizationStrategy::from_str("HASH"), NormalizationStrategy::HashOnly);
-        assert_eq!(NormalizationStrategy::from_str("CLASS_ABI"), NormalizationStrategy::ClassAbi);
-        assert_eq!(NormalizationStrategy::from_str("unknown"), NormalizationStrategy::AbsolutePath);
-        assert_eq!(NormalizationStrategy::from_str(""), NormalizationStrategy::AbsolutePath);
+        assert_eq!(
+            NormalizationStrategy::from_str("ABSOLUTE_PATH"),
+            NormalizationStrategy::AbsolutePath
+        );
+        assert_eq!(
+            NormalizationStrategy::from_str("RELATIVE_PATH"),
+            NormalizationStrategy::RelativePath
+        );
+        assert_eq!(
+            NormalizationStrategy::from_str("NAME_ONLY"),
+            NormalizationStrategy::NameOnly
+        );
+        assert_eq!(
+            NormalizationStrategy::from_str("HASH"),
+            NormalizationStrategy::HashOnly
+        );
+        assert_eq!(
+            NormalizationStrategy::from_str("CLASS_ABI"),
+            NormalizationStrategy::ClassAbi
+        );
+        assert_eq!(
+            NormalizationStrategy::from_str("unknown"),
+            NormalizationStrategy::AbsolutePath
+        );
+        assert_eq!(
+            NormalizationStrategy::from_str(""),
+            NormalizationStrategy::AbsolutePath
+        );
     }
 
     // --- Class file ABI fingerprinting tests ---
@@ -1392,7 +1524,10 @@ mod tests {
 
         let hash1 = class_file_abi_hash(&class1).unwrap();
         let hash2 = class_file_abi_hash(&class2).unwrap();
-        assert_eq!(hash1, hash2, "Classes with same public API but different private methods should have same ABI hash");
+        assert_eq!(
+            hash1, hash2,
+            "Classes with same public API but different private methods should have same ABI hash"
+        );
     }
 
     #[test]
@@ -1413,7 +1548,10 @@ mod tests {
 
         let hash1 = class_file_abi_hash(&class1).unwrap();
         let hash2 = class_file_abi_hash(&class2).unwrap();
-        assert_ne!(hash1, hash2, "Changing public method signature should change ABI hash");
+        assert_ne!(
+            hash1, hash2,
+            "Changing public method signature should change ABI hash"
+        );
     }
 
     #[test]

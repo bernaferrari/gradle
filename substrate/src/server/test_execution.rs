@@ -35,7 +35,7 @@ struct TestHistory {
 /// Tracks test discovery, execution, result aggregation, and flaky test detection.
 #[derive(Default)]
 pub struct TestExecutionServiceImpl {
-    suites: DashMap<String, TestSuite>,     // suite_id -> TestSuite
+    suites: DashMap<String, TestSuite>, // suite_id -> TestSuite
     build_suites: DashMap<BuildId, Vec<String>>, // build_id -> [suite_id]
     results_reported: AtomicI64,
     history: TestHistory,
@@ -104,7 +104,11 @@ impl TestExecutionServiceImpl {
         }
 
         // Sort by flake rate descending
-        flaky.sort_by(|a, b| b.flake_rate.partial_cmp(&a.flake_rate).unwrap_or(std::cmp::Ordering::Equal));
+        flaky.sort_by(|a, b| {
+            b.flake_rate
+                .partial_cmp(&a.flake_rate)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         flaky
     }
 }
@@ -289,7 +293,10 @@ impl TestExecutionService for TestExecutionServiceImpl {
 
         let count = results.len() as i32;
 
-        Ok(Response::new(GetTestResultsByOutcomeResponse { results, count }))
+        Ok(Response::new(GetTestResultsByOutcomeResponse {
+            results,
+            count,
+        }))
     }
 
     async fn get_test_summary(
@@ -322,10 +329,7 @@ impl TestExecutionService for TestExecutionServiceImpl {
                         "PASSED" => passed += 1,
                         "FAILED" => {
                             failed += 1;
-                            failed_test_names.push(format!(
-                                "{} > {}",
-                                r.test_class, r.test_name
-                            ));
+                            failed_test_names.push(format!("{} > {}", r.test_class, r.test_name));
                         }
                         "SKIPPED" => skipped += 1,
                         "ABORTED" => aborted += 1,
@@ -392,7 +396,13 @@ mod tests {
         }
     }
 
-    fn make_test_result(suite_id: &str, name: &str, class: &str, outcome: &str, ms: i64) -> TestResultEntry {
+    fn make_test_result(
+        suite_id: &str,
+        name: &str,
+        class: &str,
+        outcome: &str,
+        ms: i64,
+    ) -> TestResultEntry {
         TestResultEntry {
             test_id: format!("{}#{}", class, name),
             suite_id: suite_id.to_string(),
@@ -423,14 +433,26 @@ mod tests {
 
         svc.report_test_result(Request::new(ReportTestResultRequest {
             build_id: "build-1".to_string(),
-            result: Some(make_test_result("suite-1", "testA", "com.example.MyTest", "PASSED", 100)),
+            result: Some(make_test_result(
+                "suite-1",
+                "testA",
+                "com.example.MyTest",
+                "PASSED",
+                100,
+            )),
         }))
         .await
         .unwrap();
 
         svc.report_test_result(Request::new(ReportTestResultRequest {
             build_id: "build-1".to_string(),
-            result: Some(make_test_result("suite-1", "testB", "com.example.MyTest", "PASSED", 200)),
+            result: Some(make_test_result(
+                "suite-1",
+                "testB",
+                "com.example.MyTest",
+                "PASSED",
+                200,
+            )),
         }))
         .await
         .unwrap();
@@ -462,14 +484,26 @@ mod tests {
 
         svc.report_test_result(Request::new(ReportTestResultRequest {
             build_id: "build-2".to_string(),
-            result: Some(make_test_result("suite-2", "testPass", "com.FailingTest", "PASSED", 50)),
+            result: Some(make_test_result(
+                "suite-2",
+                "testPass",
+                "com.FailingTest",
+                "PASSED",
+                50,
+            )),
         }))
         .await
         .unwrap();
 
         svc.report_test_result(Request::new(ReportTestResultRequest {
             build_id: "build-2".to_string(),
-            result: Some(make_test_result("suite-2", "testFail", "com.FailingTest", "FAILED", 100)),
+            result: Some(make_test_result(
+                "suite-2",
+                "testFail",
+                "com.FailingTest",
+                "FAILED",
+                100,
+            )),
         }))
         .await
         .unwrap();
@@ -790,14 +824,26 @@ mod tests {
 
         svc.report_test_result(Request::new(ReportTestResultRequest {
             build_id: "build-grpc-flaky".to_string(),
-            result: Some(make_test_result("suite-g", "testFlaky", "com.GTest", "PASSED", 10)),
+            result: Some(make_test_result(
+                "suite-g",
+                "testFlaky",
+                "com.GTest",
+                "PASSED",
+                10,
+            )),
         }))
         .await
         .unwrap();
 
         svc.report_test_result(Request::new(ReportTestResultRequest {
             build_id: "build-grpc-flaky".to_string(),
-            result: Some(make_test_result("suite-g", "testFlaky", "com.GTest", "FAILED", 20)),
+            result: Some(make_test_result(
+                "suite-g",
+                "testFlaky",
+                "com.GTest",
+                "FAILED",
+                20,
+            )),
         }))
         .await
         .unwrap();

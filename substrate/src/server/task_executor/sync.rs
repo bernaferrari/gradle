@@ -19,7 +19,9 @@ impl SyncTaskExecutor {
     }
 
     /// Recursively list all files in a directory.
-    fn list_files(dir: &std::path::Path) -> Pin<Box<dyn std::future::Future<Output = Vec<PathBuf>> + Send + '_>> {
+    fn list_files(
+        dir: &std::path::Path,
+    ) -> Pin<Box<dyn std::future::Future<Output = Vec<PathBuf>> + Send + '_>> {
         Box::pin(async move {
             let mut files = Vec::new();
             if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
@@ -80,17 +82,14 @@ impl TaskExecutor for SyncTaskExecutor {
 
             // Copy/update files
             for src_file in &source_files {
-                let relative = src_file
-                    .strip_prefix(source_dir)
-                    .unwrap_or(src_file);
+                let relative = src_file.strip_prefix(source_dir).unwrap_or(src_file);
                 let dest_file = input.target_dir.join(relative);
 
                 // Create parent directories
                 if let Some(parent) = dest_file.parent() {
                     if let Err(e) = tokio::fs::create_dir_all(parent).await {
                         result.success = false;
-                        result.error_message =
-                            format!("Failed to create directory: {}", e);
+                        result.error_message = format!("Failed to create directory: {}", e);
                         return result;
                     }
                 }
@@ -176,8 +175,12 @@ mod tests {
         let src_dir = tmp.path().join("src");
         let dest_dir = tmp.path().join("dest");
 
-        tokio::fs::create_dir_all(src_dir.join("sub")).await.unwrap();
-        tokio::fs::write(src_dir.join("a.txt"), b"aaa").await.unwrap();
+        tokio::fs::create_dir_all(src_dir.join("sub"))
+            .await
+            .unwrap();
+        tokio::fs::write(src_dir.join("a.txt"), b"aaa")
+            .await
+            .unwrap();
         tokio::fs::write(src_dir.join("sub/b.txt"), b"bbb")
             .await
             .unwrap();
@@ -235,7 +238,9 @@ mod tests {
         tokio::fs::create_dir_all(&src_dir).await.unwrap();
         tokio::fs::create_dir_all(&dest_dir).await.unwrap();
 
-        tokio::fs::write(src_dir.join("new.txt"), b"new").await.unwrap();
+        tokio::fs::write(src_dir.join("new.txt"), b"new")
+            .await
+            .unwrap();
         tokio::fs::write(dest_dir.join("orphan.txt"), b"keep me")
             .await
             .unwrap();

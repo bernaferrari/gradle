@@ -1,8 +1,6 @@
 package org.gradle.internal.rustbridge.buildinit;
 
-import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
-import org.slf4j.Logger;
 
 /**
  * Shadow adapter that compares JVM build init data with Rust.
@@ -11,8 +9,6 @@ import org.slf4j.Logger;
  * and compares against the Rust BuildInitService.</p>
  */
 public class ShadowingBuildInitTracker {
-
-    private static final Logger LOGGER = Logging.getLogger(ShadowingBuildInitTracker.class);
 
     private final RustBuildInitClient rustClient;
     private final HashMismatchReporter mismatchReporter;
@@ -33,8 +29,8 @@ public class ShadowingBuildInitTracker {
         try {
             gradle.substrate.v1.GetBuildInitStatusResponse rustResponse =
                 rustClient.getBuildInitStatus(buildId);
-            boolean rustInitialized = rustResponse.getInitialized();
-            int rustSettingsCount = rustResponse.getSettingsDetailsCount();
+            boolean rustInitialized = rustResponse.getStatus().getInitialized();
+            int rustSettingsCount = rustResponse.getStatus().getSettingsDetailsCount();
 
             if (javaInitialized != rustInitialized) {
                 mismatchReporter.reportMismatch(

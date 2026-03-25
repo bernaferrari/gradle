@@ -55,7 +55,11 @@ impl ProgressEntry {
             self.description,
             self.status,
             pct as u64,
-            if elapsed > 0 { format!(" ({}ms)", elapsed) } else { String::new() },
+            if elapsed > 0 {
+                format!(" ({}ms)", elapsed)
+            } else {
+                String::new()
+            },
         )
     }
 
@@ -171,9 +175,9 @@ mod ansi {
 /// Rust-native console/rich output service.
 /// Manages console output, progress rendering, status lines, and log buffering.
 pub struct ConsoleServiceImpl {
-    progress_ops: Arc<DashMap<String, ProgressEntry>>,    // operation_id -> entry
-    build_descriptions: Arc<DashMap<BuildId, String>>,     // build_id -> description
-    log_buffer: Arc<DashMap<BuildId, Vec<BufferedLog>>>,   // build_id -> [logs]
+    progress_ops: Arc<DashMap<String, ProgressEntry>>, // operation_id -> entry
+    build_descriptions: Arc<DashMap<BuildId, String>>, // build_id -> description
+    log_buffer: Arc<DashMap<BuildId, Vec<BufferedLog>>>, // build_id -> [logs]
     log_counts: Arc<AtomicI64>,
     progress_updates: Arc<AtomicI64>,
     logs_evicted: Arc<AtomicI64>,
@@ -496,7 +500,9 @@ impl ConsoleService for ConsoleServiceImpl {
             "Build description set"
         );
 
-        Ok(Response::new(SetBuildDescriptionResponse { accepted: true }))
+        Ok(Response::new(SetBuildDescriptionResponse {
+            accepted: true,
+        }))
     }
 }
 
@@ -654,7 +660,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_format_log_message() {
-        let formatted = ConsoleServiceImpl::format_log_message("error", "org.gradle", "Build failed");
+        let formatted =
+            ConsoleServiceImpl::format_log_message("error", "org.gradle", "Build failed");
         assert!(formatted.contains("[ERROR]"));
         assert!(formatted.contains("[org.gradle]"));
 
@@ -800,7 +807,10 @@ mod tests {
         .await
         .unwrap();
 
-        let desc = svc.build_descriptions.get(&BuildId("build-4".to_string())).unwrap();
+        let desc = svc
+            .build_descriptions
+            .get(&BuildId("build-4".to_string()))
+            .unwrap();
         assert_eq!(*desc, "Building my-app (42 tasks)");
     }
 

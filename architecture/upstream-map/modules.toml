@@ -1,0 +1,191 @@
+schema_version = 1
+
+# Tracks ownership and parity for Rust migration modules.
+# Keep paths aligned with upstream module names whenever possible.
+
+[[module]]
+id = "platform-core-configuration"
+path = "platforms/core-configuration"
+owner = "core-configuration"
+status = "planned"
+upstream_paths = ["platforms/core-configuration"]
+last_synced_commit = ""
+parity_test_targets = [
+  "./gradlew compileAll",
+  "./gradlew sanityCheck",
+]
+
+[[module]]
+id = "platform-core-execution"
+path = "platforms/core-execution"
+owner = "core-execution"
+status = "mixed"
+upstream_paths = ["platforms/core-execution"]
+last_synced_commit = ""
+parity_test_targets = [
+  "./tools/stabilization/run_strict_stabilization.sh quick",
+  "./gradlew -q :rust-bridge:compileJava :rust-bridge:testClasses",
+]
+
+[[module]]
+id = "core-execution-rust-bridge"
+path = "platforms/core-execution/rust-bridge"
+owner = "rust-bridge"
+status = "jvm-compat"
+upstream_paths = ["platforms/core-execution/rust-bridge"]
+last_synced_commit = ""
+parity_test_targets = [
+  "./gradlew -q :rust-bridge:compileJava",
+  "./gradlew -q :rust-bridge:testClasses",
+]
+
+[[module]]
+id = "platform-core-runtime"
+path = "platforms/core-runtime"
+owner = "core-runtime"
+status = "planned"
+upstream_paths = ["platforms/core-runtime"]
+last_synced_commit = ""
+parity_test_targets = [
+  "./gradlew compileAll",
+  "./gradlew sanityCheck",
+]
+
+[[module]]
+id = "platform-documentation"
+path = "platforms/documentation"
+owner = "documentation"
+status = "planned"
+upstream_paths = ["platforms/documentation"]
+last_synced_commit = ""
+parity_test_targets = [
+  "./gradlew compileAll",
+  "./gradlew sanityCheck",
+]
+
+[[module]]
+id = "platform-enterprise"
+path = "platforms/enterprise"
+owner = "enterprise"
+status = "planned"
+upstream_paths = ["platforms/enterprise"]
+last_synced_commit = ""
+parity_test_targets = [
+  "./gradlew compileAll",
+  "./gradlew sanityCheck",
+]
+
+[[module]]
+id = "platform-extensibility"
+path = "platforms/extensibility"
+owner = "extensibility"
+status = "planned"
+upstream_paths = ["platforms/extensibility"]
+last_synced_commit = ""
+parity_test_targets = [
+  "./gradlew compileAll",
+  "./gradlew sanityCheck",
+]
+
+[[module]]
+id = "platform-ide"
+path = "platforms/ide"
+owner = "ide"
+status = "planned"
+upstream_paths = ["platforms/ide"]
+last_synced_commit = ""
+parity_test_targets = [
+  "./gradlew compileAll",
+  "./gradlew sanityCheck",
+]
+
+[[module]]
+id = "platform-jvm"
+path = "platforms/jvm"
+owner = "jvm"
+status = "planned"
+upstream_paths = ["platforms/jvm"]
+last_synced_commit = ""
+parity_test_targets = [
+  "./gradlew compileAll",
+  "./gradlew sanityCheck",
+]
+
+[[module]]
+id = "platform-native"
+path = "platforms/native"
+owner = "native"
+status = "planned"
+upstream_paths = ["platforms/native"]
+last_synced_commit = ""
+parity_test_targets = [
+  "./gradlew compileAll",
+  "./gradlew sanityCheck",
+]
+
+[[module]]
+id = "platform-software"
+path = "platforms/software"
+owner = "software"
+status = "planned"
+upstream_paths = ["platforms/software"]
+last_synced_commit = ""
+parity_test_targets = [
+  "./gradlew compileAll",
+  "./gradlew sanityCheck",
+]
+
+[[module]]
+id = "subproject-composite-builds"
+path = "subprojects/composite-builds"
+owner = "subprojects"
+status = "planned"
+upstream_paths = ["subprojects/composite-builds"]
+last_synced_commit = ""
+parity_test_targets = [
+  "./gradlew compileAll",
+  "./gradlew sanityCheck",
+]
+
+[[module]]
+id = "subproject-core"
+path = "subprojects/core"
+owner = "subprojects"
+status = "planned"
+upstream_paths = ["subprojects/core"]
+last_synced_commit = ""
+parity_test_targets = [
+  "./gradlew compileAll",
+  "./gradlew sanityCheck",
+]
+
+[[module]]
+id = "subproject-core-api"
+path = "subprojects/core-api"
+owner = "subprojects"
+status = "planned"
+upstream_paths = ["subprojects/core-api"]
+last_synced_commit = ""
+parity_test_targets = [
+  "./gradlew compileAll",
+  "./gradlew sanityCheck",
+]
+
+[[module]]
+id = "substrate-daemon"
+path = "substrate"
+owner = "substrate"
+status = "native-kernel"
+upstream_paths = [
+  "platforms/core-configuration/configuration-cache",
+  "platforms/core-execution/execution",
+  "platforms/core-execution/file-watching",
+  "platforms/core-execution/hashing",
+  "platforms/core-execution/persistent-cache",
+  "platforms/core-execution/scoped-persistent-cache",
+]
+last_synced_commit = ""
+parity_test_targets = [
+  "cargo check -p gradle-substrate-daemon",
+  "cargo test -p gradle-substrate-daemon --test hash_compatibility_test",
+]

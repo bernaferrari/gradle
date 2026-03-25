@@ -7,6 +7,10 @@ option java_package = "gradle.substrate.v1";
 
 service ConfigurationService {
   rpc RegisterProject(RegisterProjectRequest) returns (RegisterProjectResponse);
+  rpc GetProperty(GetPropertyRequest) returns (GetPropertyResponse);
+  rpc SetProperty(SetPropertyRequest) returns (SetPropertyResponse);
+  rpc ListProperties(ListPropertiesRequest) returns (ListPropertiesResponse);
+  rpc ResolveProperties(ResolvePropertiesRequest) returns (ResolvePropertiesResponse);
   rpc ResolveProperty(ResolvePropertyRequest) returns (ResolvePropertyResponse);
   rpc CacheConfiguration(CacheConfigurationRequest) returns (CacheConfigurationResponse);
   rpc ValidateConfigCache(ValidateConfigCacheRequest) returns (ValidateConfigCacheResponse);
@@ -109,6 +113,82 @@ message PluginInfo {
   string version = 3;
   int64 applied_at_ms = 4;
   int32 apply_order = 5;
+}
+
+// --- GetProperty RPC ---
+
+message GetPropertyRequest {
+  string project_path = 1;
+  string property_name = 2;
+  // Access pattern used, e.g. "project.property('foo')", "project.ext.foo"
+  string access_pattern = 3;
+}
+
+message GetPropertyResponse {
+  string value = 1;
+  // Canonical source identifier: "command_line", "system_property", "env_variable",
+  // "gradle_properties", "build_script", "extra", "convention"
+  string source = 2;
+  bool found = 3;
+}
+
+// --- SetProperty RPC ---
+
+message SetPropertyRequest {
+  string project_path = 1;
+  string property_name = 2;
+  string value = 3;
+  // Target layer: "command_line", "extra", "build_script". Defaults to "extra".
+  string target_layer = 4;
+}
+
+message SetPropertyResponse {
+  bool success = 1;
+  string previous_value = 2;
+  bool had_previous = 3;
+}
+
+// --- ListProperties RPC ---
+
+message ListPropertiesRequest {
+  string project_path = 1;
+  // If non-empty, only return properties from this source layer.
+  string filter_source = 2;
+  // If true, include inherited/environment/system properties in the listing.
+  bool include_inherited = 3;
+}
+
+message ListPropertiesResponse {
+  repeated PropertyEntry entries = 1;
+}
+
+message PropertyEntry {
+  string key = 1;
+  string value = 2;
+  string source = 3;
+}
+
+// --- ResolveProperties RPC (interpolation) ---
+
+message ResolvePropertiesRequest {
+  string project_path = 1;
+  // Template strings containing ${...} references to resolve.
+  repeated string templates = 2;
+}
+
+message ResolvePropertiesResponse {
+  repeated ResolvedProperty resolved = 1;
+}
+
+message ResolvedProperty {
+  // Original template string.
+  string template = 1;
+  // Fully interpolated result.
+  string resolved_value = 2;
+  // Whether interpolation succeeded (false if a referenced property is missing).
+  bool success = 3;
+  // Human-readable error if success == false.
+  string error = 4;
 }
 
 service ConfigurationCacheService {

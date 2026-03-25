@@ -32,7 +32,7 @@ public class WorkerSchedulerClient {
      */
     public WorkDecision evaluate(String taskPath, Map<String, String> inputProperties) {
         if (client.isNoop()) {
-            return WorkDecision.EXECUTE;
+            return new WorkDecision(WorkDecision.Type.EXECUTE, "");
         }
 
         WorkEvaluateResponse response = client.getWorkStub().evaluate(
@@ -46,7 +46,7 @@ public class WorkerSchedulerClient {
             LOGGER.debug("[substrate:work] {}: {}", taskPath, response.getReason());
             return new WorkDecision(WorkDecision.Type.EXECUTE, response.getInputHash());
         } else {
-            LOGGER.lifecycle("[substrate:work] {}: {}", taskPath, response.getReason());
+            LOGGER.info("[substrate:work] {}: {}", taskPath, response.getReason());
             return new WorkDecision(WorkDecision.Type.SKIP, response.getInputHash());
         }
     }
@@ -91,8 +91,4 @@ public class WorkerSchedulerClient {
         }
     }
 
-    public enum WorkDecision {
-        EXECUTE,
-        SKIP
-    }
 }

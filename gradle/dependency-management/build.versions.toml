@@ -66,6 +66,7 @@ nullaway = { module = "com.uber.nullaway:nullaway", version = "0.12.10" }
 nullawayPlugin = { module = "net.ltgt.gradle:gradle-nullaway-plugin", version = "2.2.0" }
 objenesis = { group = "org.objenesis", name = "objenesis", version.ref = "objenesis" }
 pdfbox = { module = "org.apache.pdfbox:pdfbox", version = "2.0.24" } # Flexmark 0.34.60 brings in a vulnerable version of pdfbox
+protobufPlugin = { module = "com.google.protobuf:protobuf-gradle-plugin", version = "0.9.4" }
 publishPlugin = { module = "com.gradle.publish:plugin-publish-plugin", version = "2.1.1" }
 qdox = { module = "com.thoughtworks.qdox:qdox", version = "2.0.3" }
 spock = { group = "org.spockframework", name = "spock-core", version.ref = "spock" }

@@ -1,6 +1,5 @@
 package org.gradle.internal.rustbridge.graph;
 
-import org.gradle.api.Task;
 import org.gradle.api.execution.TaskExecutionGraph;
 import org.gradle.api.execution.TaskExecutionGraphListener;
 import org.gradle.api.logging.Logging;
@@ -28,11 +27,7 @@ public class TaskExecutionGraphShadowListener implements TaskExecutionGraphListe
         populateTimestampMs = System.currentTimeMillis();
 
         // Count tasks in the execution graph
-        int count = 0;
-        for (Task task : graph.getAllTasks()) {
-            count++;
-        }
-        taskCount = count;
+        taskCount = graph.getAllTasks().size();
 
         // Report as a build event
         try {

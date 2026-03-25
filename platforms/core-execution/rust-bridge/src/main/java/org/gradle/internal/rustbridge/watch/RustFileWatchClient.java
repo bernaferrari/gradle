@@ -140,7 +140,7 @@ public class RustFileWatchClient {
                     changes.size(), watchId);
             }
 
-            return changes;
+            return Collections.unmodifiableList(changes);
         } catch (Exception e) {
             LOGGER.debug("[substrate:watch] pollChanges failed", e);
             return Collections.emptyList();

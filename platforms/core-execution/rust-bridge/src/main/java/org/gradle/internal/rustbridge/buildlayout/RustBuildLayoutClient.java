@@ -108,7 +108,7 @@ public class RustBuildLayoutClient {
 
     public List<String> listProjects(String buildId) {
         if (client.isNoop()) {
-            return List.of();
+            return java.util.Collections.emptyList();
         }
 
         try {
@@ -119,7 +119,7 @@ public class RustBuildLayoutClient {
             return response.getProjectPathsList();
         } catch (Exception e) {
             LOGGER.debug("[substrate:layout] list projects failed", e);
-            return List.of();
+            return java.util.Collections.emptyList();
         }
     }
 }

@@ -11,7 +11,8 @@
 /// - execution_plan_differential_test: DAG topological ordering vs reference sort
 
 mod differential {
-    pub mod hash_differential_test;
+    pub mod build_plan_shadow_differential_test;
     pub mod cache_differential_test;
     pub mod execution_plan_differential_test;
+    pub mod hash_differential_test;
 }

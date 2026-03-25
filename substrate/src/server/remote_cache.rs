@@ -61,7 +61,9 @@ impl RemoteCacheStore {
             match request.send().await {
                 Ok(resp) => match resp.status().as_u16() {
                     200..=299 => {
-                        let bytes = resp.bytes().await
+                        let bytes = resp
+                            .bytes()
+                            .await
                             .map_err(|e| format!("Failed to read response body: {}", e))?;
                         return Ok(Some(bytes.to_vec()));
                     }
@@ -108,7 +110,9 @@ impl RemoteCacheStore {
 
         loop {
             attempt += 1;
-            let mut request = self.client.put(&url)
+            let mut request = self
+                .client
+                .put(&url)
                 .header(CONTENT_TYPE, "application/octet-stream")
                 .body(data.to_vec());
             if let Some(auth) = self.auth_header() {
@@ -212,11 +216,7 @@ mod tests {
 
     #[test]
     fn test_no_auth() {
-        let store = RemoteCacheStore::new(
-            "https://example.com".to_string(),
-            None,
-            None,
-        );
+        let store = RemoteCacheStore::new("https://example.com".to_string(), None, None);
         assert!(store.auth_header().is_none());
     }
 
@@ -247,11 +247,7 @@ mod tests {
 
     #[test]
     fn test_trailing_slash_trimmed() {
-        let store = RemoteCacheStore::new(
-            "https://example.com/cache/".to_string(),
-            None,
-            None,
-        );
+        let store = RemoteCacheStore::new("https://example.com/cache/".to_string(), None, None);
         assert_eq!(store.base_url, "https://example.com/cache");
     }
 
@@ -278,8 +274,8 @@ mod tests {
     // Async tests: exercise load/store against a real HTTP server
     // ---------------------------------------------------------------------------
 
-    use std::sync::Arc;
     use std::collections::HashMap;
+    use std::sync::Arc;
     use tokio::net::TcpListener;
     use tokio::sync::RwLock;
 
@@ -320,10 +316,7 @@ mod tests {
                         }
                     }
 
-                    let header_end = buf
-                        .windows(4)
-                        .position(|w| w == b"\r\n\r\n")
-                        .unwrap() + 4;
+                    let header_end = buf.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
                     let header_str = String::from_utf8_lossy(&buf[..header_end]);
 
                     let (method, path) = parse_request_line(&header_str);
@@ -420,12 +413,18 @@ mod tests {
         // `base_url/` and the server will return 200 because the path "/"
         // is valid for our mock.  Verify the store doesn't panic and
         // succeeds (the real value is that it doesn't crash).
-        assert!(result.is_ok(), "store should succeed for empty key (no crash)");
+        assert!(
+            result.is_ok(),
+            "store should succeed for empty key (no crash)"
+        );
 
         // Loading with empty key should hit the "/" path in the mock server,
         // which will return whatever was stored there.
         let loaded = store.load("").await;
-        assert!(loaded.is_ok(), "load should succeed for empty key (no crash)");
+        assert!(
+            loaded.is_ok(),
+            "load should succeed for empty key (no crash)"
+        );
         assert_eq!(loaded.unwrap(), Some(b"some data".to_vec()));
     }
 
@@ -508,11 +507,7 @@ mod tests {
 
         // RemoteCacheStore.load returns Ok(None) for 404s, which is the
         // equivalent of "does not have".  Test several nonexistent keys.
-        let missing_keys = [
-            "/cache/aaa111",
-            "/cache/bbb222",
-            "/cache/ccc333",
-        ];
+        let missing_keys = ["/cache/aaa111", "/cache/bbb222", "/cache/ccc333"];
         for key in &missing_keys {
             let result = store.load(key).await.unwrap();
             assert_eq!(result, None, "key {} should not exist", key);
@@ -520,7 +515,10 @@ mod tests {
 
         // Store one of them and verify the others remain missing
         store.store("/cache/aaa111", b"present").await.unwrap();
-        assert_eq!(store.load("/cache/aaa111").await.unwrap(), Some(b"present".to_vec()));
+        assert_eq!(
+            store.load("/cache/aaa111").await.unwrap(),
+            Some(b"present".to_vec())
+        );
         assert_eq!(store.load("/cache/bbb222").await.unwrap(), None);
         assert_eq!(store.load("/cache/ccc333").await.unwrap(), None);
     }
@@ -533,9 +531,7 @@ mod tests {
         let store = RemoteCacheStore::new(base_url, None, None);
 
         let payload_size = 1024 * 1024 + 512; // 1 MB + 512 bytes
-        let payload: Vec<u8> = (0..payload_size)
-            .map(|i| (i % 256) as u8)
-            .collect();
+        let payload: Vec<u8> = (0..payload_size).map(|i| (i % 256) as u8).collect();
 
         let key = "/cache/large-artifact";
         store.store(key, &payload).await.unwrap();
@@ -586,12 +582,21 @@ mod tests {
         // Verify every key loads back the correct value.
         for (key, expected_data) in &expected {
             let loaded = store.load(key).await.unwrap();
-            assert_eq!(loaded, Some(expected_data.clone()), "mismatch for key {}", key);
+            assert_eq!(
+                loaded,
+                Some(expected_data.clone()),
+                "mismatch for key {}",
+                key
+            );
         }
 
         // Also verify the total number of entries in the backing store.
         let store_map = backing.read().await;
-        assert_eq!(store_map.len(), num_keys, "all concurrent stores should be present");
+        assert_eq!(
+            store_map.len(),
+            num_keys,
+            "all concurrent stores should be present"
+        );
     }
 
     #[tokio::test]
@@ -617,14 +622,14 @@ mod tests {
         let store2 = RemoteCacheStore::new(base_url2, None, None);
 
         let loaded = store2.load(key).await.unwrap();
-        assert_eq!(loaded, None, "data should NOT be present on the restarted server");
+        assert_eq!(
+            loaded, None,
+            "data should NOT be present on the restarted server"
+        );
 
         // Store new data on the second server and verify it works.
         store2.store(key, b"new-data").await.unwrap();
-        assert_eq!(
-            store2.load(key).await.unwrap(),
-            Some(b"new-data".to_vec()),
-        );
+        assert_eq!(store2.load(key).await.unwrap(), Some(b"new-data".to_vec()),);
     }
 
     #[tokio::test]
@@ -647,7 +652,10 @@ mod tests {
                 );
                 let key_clone = key.clone();
                 tokio::spawn(async move {
-                    store_cloned.store(&key_clone, data.as_bytes()).await.unwrap();
+                    store_cloned
+                        .store(&key_clone, data.as_bytes())
+                        .await
+                        .unwrap();
                 });
                 key
             })
@@ -661,9 +669,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         // Build a mixed query set: some existing, some not
-        let all_keys: Vec<String> = (0..10)
-            .map(|i| format!("/cache/exists/{}", i))
-            .collect();
+        let all_keys: Vec<String> = (0..10).map(|i| format!("/cache/exists/{}", i)).collect();
 
         let mut present_count = 0;
         let mut missing_count = 0;
@@ -707,10 +713,17 @@ mod tests {
         let loaded = store.load(key_truncated).await;
         assert!(loaded.is_ok(), "load should not error on corrupted data");
         let loaded = loaded.unwrap();
-        assert!(loaded.is_some(), "corrupted entry should still be retrievable");
+        assert!(
+            loaded.is_some(),
+            "corrupted entry should still be retrievable"
+        );
         let loaded = loaded.unwrap();
         assert_eq!(loaded.len(), 5, "truncated entry should be 5 bytes");
-        assert_eq!(&loaded[..], b"SIZE:", "bytes should match the corrupted content");
+        assert_eq!(
+            &loaded[..],
+            b"SIZE:",
+            "bytes should match the corrupted content"
+        );
 
         // Insert a completely garbage payload.
         let key_garbage = "/cache/corrupt-garbage";

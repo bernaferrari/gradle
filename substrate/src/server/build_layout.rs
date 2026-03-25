@@ -95,10 +95,8 @@ impl BuildLayoutService for BuildLayoutServiceImpl {
             children: Vec::new(),
         };
 
-        self.projects.insert(
-            Self::project_key(&build_id, ":"),
-            root_project,
-        );
+        self.projects
+            .insert(Self::project_key(&build_id, ":"), root_project);
 
         tracing::info!(
             build_id = %build_id,
@@ -140,7 +138,9 @@ impl BuildLayoutService for BuildLayoutServiceImpl {
 
         // Validate that the subproject directory is under the build root
         let layout = self.builds.get(&build_key).unwrap();
-        if !req.project_dir.starts_with(&layout.root_dir) {
+        let project_dir = std::path::Path::new(&req.project_dir);
+        let build_root = std::path::Path::new(&layout.root_dir);
+        if !project_dir.starts_with(build_root) {
             return Ok(Response::new(AddSubprojectResponse {
                 added: false,
                 error_message: format!(
@@ -572,6 +572,38 @@ mod tests {
 
         assert!(!resp.added);
         assert!(!resp.error_message.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_add_subproject_rejects_string_prefix_outside_root() {
+        let svc = BuildLayoutServiceImpl::new();
+
+        let build = svc
+            .init_build_layout(Request::new(InitBuildLayoutRequest {
+                root_dir: "/tmp/root".to_string(),
+                settings_file: String::new(),
+                build_file: String::new(),
+                build_name: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // "/tmp/root2" shares a string prefix with "/tmp/root", but is not a child path.
+        let resp = svc
+            .add_subproject(Request::new(AddSubprojectRequest {
+                build_id: build.build_id,
+                project_path: ":leak".to_string(),
+                project_dir: "/tmp/root2/leak".to_string(),
+                build_file: String::new(),
+                display_name: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.added);
+        assert!(resp.error_message.contains("not under build root"));
     }
 
     #[tokio::test]

@@ -39,7 +39,8 @@ fn bench_record_10k_metrics(c: &mut Criterion) {
 
 fn bench_record_metric_direct(c: &mut Criterion) {
     let svc = BuildMetricsServiceImpl::new();
-    let build_id = gradle_substrate_daemon::server::scopes::BuildId::from("bench-build".to_string());
+    let build_id =
+        gradle_substrate_daemon::server::scopes::BuildId::from("bench-build".to_string());
 
     c.bench_function("record_metric_direct_10k", |b| {
         b.iter(|| {

@@ -8,14 +8,14 @@ use tonic::{Request, Response, Status};
 use super::scopes::BuildId;
 
 use crate::proto::{
-    incremental_compilation_service_server::IncrementalCompilationService, AnalyzeClassDependenciesRequest,
-    AnalyzeClassDependenciesResponse, AnnotationProcessorChange, ClassDependencyInfo,
-    CompilationUnit, DetectAnnotationProcessorChangesRequest, DetectAnnotationProcessorChangesResponse,
-    DiscoveredSource, DiscoverSourcesRequest, DiscoverSourcesResponse,
-    GetIncrementalStateRequest, GetIncrementalStateResponse, GetRebuildSetRequest,
-    GetRebuildSetResponse, IncrementalState, RebuildDecision, RecordCompilationRequest,
-    RecordCompilationResponse, RegisterSourceSetRequest, RegisterSourceSetResponse,
-    SourceSetDescriptor,
+    incremental_compilation_service_server::IncrementalCompilationService,
+    AnalyzeClassDependenciesRequest, AnalyzeClassDependenciesResponse, AnnotationProcessorChange,
+    ClassDependencyInfo, CompilationUnit, DetectAnnotationProcessorChangesRequest,
+    DetectAnnotationProcessorChangesResponse, DiscoverSourcesRequest, DiscoverSourcesResponse,
+    DiscoveredSource, GetIncrementalStateRequest, GetIncrementalStateResponse,
+    GetRebuildSetRequest, GetRebuildSetResponse, IncrementalState, RebuildDecision,
+    RecordCompilationRequest, RecordCompilationResponse, RegisterSourceSetRequest,
+    RegisterSourceSetResponse, SourceSetDescriptor,
 };
 
 /// Tracked source set for incremental compilation.
@@ -34,7 +34,7 @@ struct SourceSet {
 /// Tracks source changes and computes rebuild decisions with transitive dependency closure.
 #[derive(Default)]
 pub struct IncrementalCompilationServiceImpl {
-    source_sets: DashMap<String, SourceSet>,     // source_set_id -> SourceSet
+    source_sets: DashMap<String, SourceSet>, // source_set_id -> SourceSet
     build_source_sets: DashMap<BuildId, Vec<String>>, // build_id -> [source_set_id]
 }
 
@@ -56,7 +56,10 @@ impl IncrementalCompilationServiceImpl {
         let mut reverse_deps: HashMap<&str, Vec<&str>> = HashMap::new();
         for unit in units {
             for dep in &unit.dependencies {
-                reverse_deps.entry(dep.as_str()).or_default().push(&unit.source_file);
+                reverse_deps
+                    .entry(dep.as_str())
+                    .or_default()
+                    .push(&unit.source_file);
             }
         }
 
@@ -184,10 +187,7 @@ impl IncrementalCompilationServiceImpl {
 
                 // Skip if specific targets were requested and this isn't one
                 if !targets.is_empty() {
-                    let rel = entry
-                        .strip_prefix(dir)
-                        .unwrap_or(&entry)
-                        .to_string_lossy();
+                    let rel = entry.strip_prefix(dir).unwrap_or(&entry).to_string_lossy();
                     if !targets.iter().any(|t| rel.contains(t) || rel.ends_with(t)) {
                         continue;
                     }
@@ -264,8 +264,16 @@ impl IncrementalCompilationService for IncrementalCompilationServiceImpl {
                     } else {
                         existing.units.clone()
                     },
-                    if changed { 0 } else { existing.total_compile_time_ms },
-                    if changed { 0 } else { existing.incremental_compiles },
+                    if changed {
+                        0
+                    } else {
+                        existing.total_compile_time_ms
+                    },
+                    if changed {
+                        0
+                    } else {
+                        existing.incremental_compiles
+                    },
                     if changed { 0 } else { existing.full_compiles },
                 )
             } else {
@@ -313,7 +321,11 @@ impl IncrementalCompilationService for IncrementalCompilationServiceImpl {
             changed = existing.is_some();
 
             let compile_duration_ms = unit.compile_duration_ms;
-            if let Some(existing) = ss.units.iter_mut().find(|u| u.source_file == unit.source_file) {
+            if let Some(existing) = ss
+                .units
+                .iter_mut()
+                .find(|u| u.source_file == unit.source_file)
+            {
                 *existing = unit.clone();
                 ss.incremental_compiles += 1;
             } else {
@@ -359,8 +371,7 @@ impl IncrementalCompilationService for IncrementalCompilationServiceImpl {
                 }
             } else {
                 // Compute transitive closure of affected files
-                let affected =
-                    Self::compute_transitive_rebuild_set(&ss.units, &req.changed_files);
+                let affected = Self::compute_transitive_rebuild_set(&ss.units, &req.changed_files);
 
                 for unit in &ss.units {
                     if affected.contains(&unit.source_file) {
@@ -446,10 +457,8 @@ impl IncrementalCompilationService for IncrementalCompilationServiceImpl {
         request: Request<AnalyzeClassDependenciesRequest>,
     ) -> Result<Response<AnalyzeClassDependenciesResponse>, Status> {
         let req = request.into_inner();
-        let dependencies = Self::analyze_class_dependencies_impl(
-            &req.output_dirs,
-            &req.class_files,
-        );
+        let dependencies =
+            Self::analyze_class_dependencies_impl(&req.output_dirs, &req.class_files);
         let total = dependencies.len() as i32;
         tracing::debug!(
             output_dirs = ?req.output_dirs,
@@ -728,7 +737,11 @@ mod tests {
         }
     }
 
-    fn make_compilation_unit(source_set_id: &str, source: &str, deps: Vec<&str>) -> CompilationUnit {
+    fn make_compilation_unit(
+        source_set_id: &str,
+        source: &str,
+        deps: Vec<&str>,
+    ) -> CompilationUnit {
         CompilationUnit {
             source_set_id: source_set_id.to_string(),
             source_file: source.to_string(),
@@ -984,8 +997,11 @@ mod tests {
         assert_eq!(rebuild.must_recompile_count, 4);
         assert_eq!(rebuild.up_to_date_count, 1);
 
-        let rebuild_files: std::collections::HashSet<String> =
-            rebuild.decisions.iter().map(|d| d.source_file.clone()).collect();
+        let rebuild_files: std::collections::HashSet<String> = rebuild
+            .decisions
+            .iter()
+            .map(|d| d.source_file.clone())
+            .collect();
         assert!(rebuild_files.contains("D.java"));
         assert!(rebuild_files.contains("C.java"));
         assert!(rebuild_files.contains("B.java"));
@@ -993,9 +1009,17 @@ mod tests {
         assert!(!rebuild_files.contains("E.java"));
 
         // D is directly changed, others are transitive
-        let d_decision = rebuild.decisions.iter().find(|d| d.source_file == "D.java").unwrap();
+        let d_decision = rebuild
+            .decisions
+            .iter()
+            .find(|d| d.source_file == "D.java")
+            .unwrap();
         assert_eq!(d_decision.reason, "source_changed");
-        let a_decision = rebuild.decisions.iter().find(|d| d.source_file == "A.java").unwrap();
+        let a_decision = rebuild
+            .decisions
+            .iter()
+            .find(|d| d.source_file == "A.java")
+            .unwrap();
         assert_eq!(a_decision.reason, "transitive_dependency_changed");
     }
 
@@ -1039,7 +1063,11 @@ mod tests {
 
         svc.record_compilation(Request::new(RecordCompilationRequest {
             build_id: "build-7".to_string(),
-            unit: Some(make_compilation_unit("ss7", "A.java", vec!["B.java", "C.java"])),
+            unit: Some(make_compilation_unit(
+                "ss7",
+                "A.java",
+                vec!["B.java", "C.java"],
+            )),
         }))
         .await
         .unwrap();
@@ -1247,13 +1275,14 @@ mod tests {
         .unwrap();
 
         // Re-compile after classpath change
-        let resp = svc.record_compilation(Request::new(RecordCompilationRequest {
-            build_id: "build-cp3".to_string(),
-            unit: Some(make_compilation_unit("ss-cp3", "Z.java", vec![])),
-        }))
-        .await
-        .unwrap()
-        .into_inner();
+        let resp = svc
+            .record_compilation(Request::new(RecordCompilationRequest {
+                build_id: "build-cp3".to_string(),
+                unit: Some(make_compilation_unit("ss-cp3", "Z.java", vec![])),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
 
         assert!(!resp.changed); // units were cleared, so this is a fresh compile, not recompilation
 
@@ -1281,11 +1310,25 @@ mod tests {
 
         // Create temp source directories
         let tmp = tempfile::tempdir().unwrap();
-        let src_dir = tmp.path().join("src").join("main").join("java").join("com").join("example");
+        let src_dir = tmp
+            .path()
+            .join("src")
+            .join("main")
+            .join("java")
+            .join("com")
+            .join("example");
         std::fs::create_dir_all(&src_dir).unwrap();
 
-        std::fs::write(src_dir.join("Foo.java"), "package com.example; class Foo {}").unwrap();
-        std::fs::write(src_dir.join("Bar.java"), "package com.example; class Bar {}").unwrap();
+        std::fs::write(
+            src_dir.join("Foo.java"),
+            "package com.example; class Foo {}",
+        )
+        .unwrap();
+        std::fs::write(
+            src_dir.join("Bar.java"),
+            "package com.example; class Bar {}",
+        )
+        .unwrap();
         // Create a generated sources dir with exclusions
         let gen_dir = tmp.path().join("build").join("generated");
         std::fs::create_dir_all(&gen_dir).unwrap();
@@ -1298,10 +1341,7 @@ mod tests {
                     gen_dir.to_string_lossy().to_string(),
                 ],
                 include_patterns: vec!["**/*.java".to_string()],
-                exclude_patterns: vec![format!(
-                    "{}/**/*.java",
-                    gen_dir.to_string_lossy()
-                )],
+                exclude_patterns: vec![format!("{}/**/*.java", gen_dir.to_string_lossy())],
             }))
             .await
             .unwrap()
@@ -1353,7 +1393,7 @@ mod tests {
                     java_dir.to_string_lossy().to_string(),
                     kt_dir.to_string_lossy().to_string(),
                 ],
-                include_patterns: vec![],  // Use defaults
+                include_patterns: vec![], // Use defaults
                 exclude_patterns: vec![],
             }))
             .await

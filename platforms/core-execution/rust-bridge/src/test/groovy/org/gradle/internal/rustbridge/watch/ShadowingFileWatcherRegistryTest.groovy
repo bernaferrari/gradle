@@ -223,6 +223,7 @@ class ShadowingFileWatcherRegistryTest extends Specification {
         then:
         // After recording 3 changes, updateVfsAfterBuildFinished should report a match
         // (verified by interaction on reporter)
+        noExceptionThrown()
     }
 
     def "updateVfsAfterBuildFinished reports match when Java changes were recorded"() {

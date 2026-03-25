@@ -1,7 +1,7 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use gradle_substrate_daemon::proto::{
-    file_fingerprint_service_server::FileFingerprintService,
-    FileToFingerprint, FingerprintFilesRequest, FingerprintType,
+    file_fingerprint_service_server::FileFingerprintService, FileToFingerprint,
+    FingerprintFilesRequest, FingerprintType,
 };
 use gradle_substrate_daemon::server::file_fingerprint::FileFingerprintServiceImpl;
 use tonic::Request;
@@ -25,7 +25,9 @@ fn bench_fingerprint_single_file(c: &mut Criterion) {
                     }],
                     normalization_strategy: "ABSOLUTE_PATH".to_string(),
                     ignore_patterns: vec![],
-                })).await.unwrap()
+                }))
+                .await
+                .unwrap()
             })
         })
     });
@@ -52,11 +54,17 @@ fn bench_fingerprint_directory(c: &mut Criterion) {
                     }],
                     normalization_strategy: "ABSOLUTE_PATH".to_string(),
                     ignore_patterns: vec![],
-                })).await.unwrap()
+                }))
+                .await
+                .unwrap()
             })
         })
     });
 }
 
-criterion_group!(benches, bench_fingerprint_single_file, bench_fingerprint_directory);
+criterion_group!(
+    benches,
+    bench_fingerprint_single_file,
+    bench_fingerprint_directory
+);
 criterion_main!(benches);

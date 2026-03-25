@@ -82,6 +82,7 @@ public class SubstrateAdvisoryStep<C extends MutableChangesContext> implements S
         return executeAdvisory(work, context, prediction);
     }
 
+    @SuppressWarnings("unused")
     private UpToDateResult wrapResult(UnitOfWork work, C context, AfterExecutionResult result) {
         // If the delegate already returned UpToDateResult, pass through
         if (result instanceof UpToDateResult) {
@@ -105,7 +106,7 @@ public class SubstrateAdvisoryStep<C extends MutableChangesContext> implements S
         String actualOutcome = javaResult.getExecution()
             .map(Execution::getOutcome)
             .map(Object::toString)
-            .orElse("NO_EXECUTION");
+            .getOrMapFailure(t -> "NO_EXECUTION");
 
         boolean predictionCorrect = isPredictionCorrect(prediction, actualOutcome);
 
@@ -136,10 +137,10 @@ public class SubstrateAdvisoryStep<C extends MutableChangesContext> implements S
             String cacheKeyHint = plan.getCacheKeyHint();
             if (!cacheKeyHint.isEmpty()) {
                 BuildCacheOrchestrationClient.ProbeResult probe =
-                    cacheOrchestration.probeCache(cacheKeyHint.getBytes());
+                    cacheOrchestration.probeCache(cacheKeyHint.getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
                 if (probe.isAvailable()) {
-                    LOGGER.lifecycle("[substrate:authoritative] {} FROM_CACHE (key={}, location={})",
+                    LOGGER.info("[substrate:authoritative] {} FROM_CACHE (key={}, location={})",
                         work.getDisplayName(), cacheKeyHint, probe.getLocation());
                     return skipExecution(work, context, "Loaded from Rust cache: " + cacheKeyHint);
                 }
@@ -154,7 +155,7 @@ public class SubstrateAdvisoryStep<C extends MutableChangesContext> implements S
         String actualOutcome = result.getExecution()
             .map(Execution::getOutcome)
             .map(Object::toString)
-            .orElse("NO_EXECUTION");
+            .getOrMapFailure(t -> "NO_EXECUTION");
 
         LOGGER.info("[substrate:authoritative] {} plan_action={} actual={}",
             work.getDisplayName(), plan.getAction(), actualOutcome);
@@ -171,7 +172,7 @@ public class SubstrateAdvisoryStep<C extends MutableChangesContext> implements S
     }
 
     private UpToDateResult skipExecution(UnitOfWork work, C context, String reason) {
-        LOGGER.lifecycle("[substrate:authoritative] Skipping {} - {}", work.getDisplayName(), reason);
+        LOGGER.info("[substrate:authoritative] Skipping {} - {}", work.getDisplayName(), reason);
 
         Optional<PreviousExecutionState> prevState = context.getPreviousExecutionState();
         if (!prevState.isPresent()) {

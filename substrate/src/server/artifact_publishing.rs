@@ -5,13 +5,13 @@ use dashmap::DashMap;
 use md5::Digest as _;
 use tonic::{Request, Response, Status};
 
+use super::scopes::BuildId;
 use crate::proto::{
     artifact_publishing_service_server::ArtifactPublishingService, ArtifactDescriptor,
     ArtifactPublishStatus, GetArtifactChecksumsRequest, GetArtifactChecksumsResponse,
     GetPublishingStatusRequest, GetPublishingStatusResponse, RecordUploadResultRequest,
     RecordUploadResultResponse, RegisterArtifactRequest, RegisterArtifactResponse,
 };
-use super::scopes::BuildId;
 
 /// Tracked artifact being published.
 struct TrackedArtifact {
@@ -62,7 +62,8 @@ impl ArtifactPublishingServiceImpl {
 
     /// Register repository credentials for authenticated uploads.
     pub fn register_repo(&self, repo_id: String, username: String, password: String) {
-        self.repos.insert(repo_id, RepoCredentials { username, password });
+        self.repos
+            .insert(repo_id, RepoCredentials { username, password });
     }
 
     /// Build the Maven repository URL for an artifact.
@@ -87,23 +88,21 @@ impl ArtifactPublishingServiceImpl {
     }
 
     /// Perform an actual HTTP PUT upload of an artifact to a Maven repository.
-    async fn perform_upload(
-        &self,
-        descriptor: &ArtifactDescriptor,
-    ) -> Result<i64, String> {
+    async fn perform_upload(&self, descriptor: &ArtifactDescriptor) -> Result<i64, String> {
         let file_path = &descriptor.file_path;
         if file_path.is_empty() || !std::path::Path::new(file_path).exists() {
             return Err("Artifact file does not exist".to_string());
         }
 
-        let data = std::fs::read(file_path)
-            .map_err(|e| format!("Failed to read artifact file: {}", e))?;
+        let data =
+            std::fs::read(file_path).map_err(|e| format!("Failed to read artifact file: {}", e))?;
 
         let base_url = self.artifact_url(descriptor);
         let start = std::time::Instant::now();
 
         // Build the request with optional auth
-        let mut request = self.http_client
+        let mut request = self
+            .http_client
             .put(&base_url)
             .header("Content-Type", "application/octet-stream")
             .body(data.clone());
@@ -116,7 +115,9 @@ impl ArtifactPublishingServiceImpl {
             request = request.header("Authorization", format!("Basic {}", auth));
         }
 
-        let response = request.send().await
+        let response = request
+            .send()
+            .await
             .map_err(|e| format!("Upload request failed: {}", e))?;
 
         let status = response.status().as_u16();
@@ -126,15 +127,22 @@ impl ArtifactPublishingServiceImpl {
 
         // Upload checksum files
         let checksum_uploads = [
-            (format!("{}.md5", base_url), format!("{:x}", md5::Md5::digest(&data))),
-            (format!("{}.sha1", base_url), format!("{:x}", sha1::Sha1::digest(&data))),
-            (format!("{}.sha256", base_url), format!("{:x}", sha2::Sha256::digest(&data))),
+            (
+                format!("{}.md5", base_url),
+                format!("{:x}", md5::Md5::digest(&data)),
+            ),
+            (
+                format!("{}.sha1", base_url),
+                format!("{:x}", sha1::Sha1::digest(&data)),
+            ),
+            (
+                format!("{}.sha256", base_url),
+                format!("{:x}", sha2::Sha256::digest(&data)),
+            ),
         ];
 
         for (url, checksum) in &checksum_uploads {
-            let mut req = self.http_client
-                .put(url)
-                .body(checksum.clone());
+            let mut req = self.http_client.put(url).body(checksum.clone());
             if let Some(creds) = self.repos.get(&descriptor.repository_id) {
                 use std::io::Write;
                 let mut buf = Vec::new();
@@ -385,15 +393,16 @@ impl ArtifactPublishingService for ArtifactPublishingServiceImpl {
             let file_path = &artifact.descriptor.file_path;
 
             // Compute checksums from the file
-            let (md5, sha1, sha256) = if !file_path.is_empty() && std::path::Path::new(file_path).exists() {
-                let content = std::fs::read(file_path).unwrap_or_default();
-                let md5_hash = format!("{:x}", md5::Md5::digest(&content));
-                let sha1_hash = format!("{:x}", sha1::Sha1::digest(&content));
-                let sha256_hash = format!("{:x}", sha2::Sha256::digest(&content));
-                (md5_hash, sha1_hash, sha256_hash)
-            } else {
-                (String::new(), String::new(), String::new())
-            };
+            let (md5, sha1, sha256) =
+                if !file_path.is_empty() && std::path::Path::new(file_path).exists() {
+                    let content = std::fs::read(file_path).unwrap_or_default();
+                    let md5_hash = format!("{:x}", md5::Md5::digest(&content));
+                    let sha1_hash = format!("{:x}", sha1::Sha1::digest(&content));
+                    let sha256_hash = format!("{:x}", sha2::Sha256::digest(&content));
+                    (md5_hash, sha1_hash, sha256_hash)
+                } else {
+                    (String::new(), String::new(), String::new())
+                };
 
             Ok(Response::new(GetArtifactChecksumsResponse {
                 md5,
@@ -604,7 +613,10 @@ mod tests {
             repository_id: "https://repo.example.com/maven2".to_string(),
         };
         let url = svc.artifact_url(&desc);
-        assert_eq!(url, "https://repo.example.com/maven2/com/example/my-lib/1.0.0/my-lib-1.0.0.jar");
+        assert_eq!(
+            url,
+            "https://repo.example.com/maven2/com/example/my-lib/1.0.0/my-lib-1.0.0.jar"
+        );
     }
 
     #[test]
@@ -622,13 +634,20 @@ mod tests {
             repository_id: "https://repo.example.com/maven2".to_string(),
         };
         let url = svc.artifact_url(&desc);
-        assert_eq!(url, "https://repo.example.com/maven2/com/example/my-lib/1.0.0/my-lib-1.0.0-sources.jar");
+        assert_eq!(
+            url,
+            "https://repo.example.com/maven2/com/example/my-lib/1.0.0/my-lib-1.0.0-sources.jar"
+        );
     }
 
     #[test]
     fn test_repo_credentials() {
         let svc = ArtifactPublishingServiceImpl::new();
-        svc.register_repo("my-repo".to_string(), "user".to_string(), "pass".to_string());
+        svc.register_repo(
+            "my-repo".to_string(),
+            "user".to_string(),
+            "pass".to_string(),
+        );
         assert!(svc.repos.contains_key("my-repo"));
     }
 
@@ -682,8 +701,8 @@ mod tests {
                 bytes_transferred: 0,
             }))
             .await
-        .unwrap()
-        .into_inner();
+            .unwrap()
+            .into_inner();
 
         assert!(resp.accepted);
     }
@@ -819,11 +838,17 @@ mod tests {
         );
         assert_eq!(
             checksums.sha1,
-            format!("{:x}", sha1::Sha1::digest(b"artifact content for publishing"))
+            format!(
+                "{:x}",
+                sha1::Sha1::digest(b"artifact content for publishing")
+            )
         );
         assert_eq!(
             checksums.sha256,
-            format!("{:x}", sha2::Sha256::digest(b"artifact content for publishing"))
+            format!(
+                "{:x}",
+                sha2::Sha256::digest(b"artifact content for publishing")
+            )
         );
 
         // Also confirm the status reflects the completed upload
@@ -922,7 +947,7 @@ mod tests {
 
         assert_eq!(status_y.total, 2);
         assert_eq!(status_y.uploaded, 1); // shared-1 is uploaded
-        assert_eq!(status_y.pending, 1);  // y-only is still pending
+        assert_eq!(status_y.pending, 1); // y-only is still pending
     }
 
     #[tokio::test]
@@ -1003,7 +1028,10 @@ mod tests {
 
         assert_eq!(artifacts_by_name["util-lib"].status, "failed");
         assert_eq!(artifacts_by_name["util-lib"].upload_duration_ms, 2500);
-        assert_eq!(artifacts_by_name["util-lib"].error_message, "HTTP 403 Forbidden");
+        assert_eq!(
+            artifacts_by_name["util-lib"].error_message,
+            "HTTP 403 Forbidden"
+        );
 
         assert_eq!(artifacts_by_name["test-lib"].status, "pending");
         assert_eq!(artifacts_by_name["test-lib"].upload_duration_ms, 0);
