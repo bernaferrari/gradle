@@ -31,6 +31,14 @@ echo
 echo "== [${step}] Run critical Rust regression tests"
 echo "  -> org.gradle.internal.rustbridge.configcache.ConfigurationCacheShadowListenerTest"
 ./gradlew -q :rust-bridge:test --tests org.gradle.internal.rustbridge.configcache.ConfigurationCacheShadowListenerTest
+echo "  -> org.gradle.internal.rustbridge.fingerprint.ShadowingFileCollectionSnapshotterTest"
+./gradlew -q :rust-bridge:test --tests org.gradle.internal.rustbridge.fingerprint.ShadowingFileCollectionSnapshotterTest
+echo "  -> org.gradle.internal.rustbridge.snapshot.ShadowingValueSnapshotterTest"
+./gradlew -q :rust-bridge:test --tests org.gradle.internal.rustbridge.snapshot.ShadowingValueSnapshotterTest
+echo "  -> org.gradle.internal.rustbridge.taskgraph.TaskGraphShadowReporterTest"
+./gradlew -q :rust-bridge:test --tests org.gradle.internal.rustbridge.taskgraph.TaskGraphShadowReporterTest
+echo "  -> org.gradle.internal.rustbridge.execution.ShadowingExecutionPlanAdvisorTest"
+./gradlew -q :rust-bridge:test --tests org.gradle.internal.rustbridge.execution.ShadowingExecutionPlanAdvisorTest
 critical_tests=(
   "server::work::tests::test_evaluate_input_hash_changes_when_only_keys_change"
   "server::config_cache::tests::test_validate_config_ignores_hash_order"

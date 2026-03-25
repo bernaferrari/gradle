@@ -342,6 +342,38 @@ public class RustSubstrateOptions {
         new InternalFlag("org.gradle.rust.substrate.configcache.authoritative", false);
 
     /**
+     * Enable authoritative mode for Rust-backed file fingerprinting subsystem.
+     * Property: org.gradle.rust.substrate.fingerprint.authoritative
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_AUTHORITATIVE_FINGERPRINTING =
+        new InternalFlag("org.gradle.rust.substrate.fingerprint.authoritative", false);
+
+    /**
+     * Enable authoritative mode for Rust-backed value snapshotting subsystem.
+     * Property: org.gradle.rust.substrate.snapshot.authoritative
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_AUTHORITATIVE_SNAPSHOTTING =
+        new InternalFlag("org.gradle.rust.substrate.snapshot.authoritative", false);
+
+    /**
+     * Enable authoritative mode for Rust-backed task graph subsystem.
+     * Property: org.gradle.rust.substrate.taskgraph.authoritative
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_AUTHORITATIVE_TASK_GRAPH =
+        new InternalFlag("org.gradle.rust.substrate.taskgraph.authoritative", false);
+
+    /**
+     * Enable authoritative mode for Rust-backed execution plan advisory subsystem.
+     * Property: org.gradle.rust.substrate.executionplan.authoritative
+     * Default: false
+     */
+    public static final InternalFlag ENABLE_RUST_AUTHORITATIVE_EXECUTION_PLAN =
+        new InternalFlag("org.gradle.rust.substrate.executionplan.authoritative", false);
+
+    /**
      * Enable authoritative mode for Rust-backed process execution subsystem.
      * Property: org.gradle.rust.substrate.exec.authoritative
      * Default: false
