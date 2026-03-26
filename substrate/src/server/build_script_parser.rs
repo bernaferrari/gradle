@@ -56,6 +56,47 @@ pub struct ParsedSubproject {
     pub path: String,
 }
 
+/// A parsed version catalog alias reference (e.g. `libs.commons.lang3`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedVersionCatalogRef {
+    /// The configuration (e.g. "implementation", "api").
+    pub configuration: String,
+    /// The catalog alias (e.g. "libs.commons.lang3", "libs.versions.java").
+    pub alias: String,
+}
+
+/// A parsed buildscript classpath dependency.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedBuildScriptDep {
+    /// The dependency notation.
+    pub notation: String,
+}
+
+/// A parsed plugin management repository.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedPluginRepository {
+    /// Repository name or URL.
+    pub name: String,
+    /// Repository type (gradlePluginPortal, maven, mavenLocal, etc.).
+    pub repo_type: String,
+}
+
+/// Parsed pluginManagement block.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ParsedPluginManagement {
+    /// Plugin repositories.
+    pub repositories: Vec<ParsedPluginRepository>,
+}
+
+/// Parsed dependencyResolutionManagement block.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ParsedDependencyResolutionManagement {
+    /// Repositories mode (e.g. "PREFER_SETTINGS", "FAIL_ON_PROJECT_REPOS").
+    pub repositories_mode: Option<String>,
+    /// Repositories declared in settings.
+    pub repositories: Vec<ParsedRepository>,
+}
+
 /// The result of parsing a build script.
 #[derive(Debug, Clone, Default)]
 pub struct BuildScriptParseResult {
@@ -63,12 +104,20 @@ pub struct BuildScriptParseResult {
     pub plugins: Vec<ParsedPlugin>,
     /// Dependencies (project and external).
     pub dependencies: Vec<ParsedDependency>,
+    /// Version catalog alias references.
+    pub catalog_refs: Vec<ParsedVersionCatalogRef>,
+    /// Buildscript classpath dependencies.
+    pub buildscript_deps: Vec<ParsedBuildScriptDep>,
     /// Task configurations.
     pub task_configs: Vec<ParsedTaskConfig>,
     /// Repositories.
     pub repositories: Vec<ParsedRepository>,
     /// Subprojects (from settings.gradle or include statements).
     pub subprojects: Vec<ParsedSubproject>,
+    /// Plugin management block (settings.gradle(.kts)).
+    pub plugin_management: Option<ParsedPluginManagement>,
+    /// Dependency resolution management block (settings.gradle(.kts)).
+    pub dependency_resolution_management: Option<ParsedDependencyResolutionManagement>,
     /// Source compatibility (java, kotlin).
     pub source_compatibility: Option<String>,
     /// Target compatibility.
@@ -152,6 +201,12 @@ fn parse_kotlin_dsl(content: &str) -> BuildScriptParseResult {
     // Parse dependencies block: dependencies { implementation("...") }
     parse_dependencies_block(&content_clean, &mut result);
 
+    // Parse version catalog references: implementation(libs.commons.lang3)
+    parse_version_catalog_refs(&content_clean, &mut result);
+
+    // Parse buildscript block: buildscript { classpath("...") }
+    parse_buildscript_block(&content_clean, &mut result);
+
     // Parse repositories block: repositories { mavenCentral() }
     parse_repositories_block(&content_clean, &mut result);
 
@@ -163,6 +218,12 @@ fn parse_kotlin_dsl(content: &str) -> BuildScriptParseResult {
 
     // Parse subproject includes
     parse_subproject_includes(&content_clean, &mut result);
+
+    // Parse pluginManagement block (settings.gradle.kts)
+    parse_plugin_management(&content_clean, &mut result);
+
+    // Parse dependencyResolutionManagement block (settings.gradle.kts)
+    parse_dependency_resolution_management(&content_clean, &mut result);
 
     result
 }
@@ -183,6 +244,12 @@ fn parse_groovy(content: &str) -> BuildScriptParseResult {
     // Parse dependencies { implementation '...' }
     parse_groovy_dependencies(&content_clean, &mut result);
 
+    // Parse version catalog references
+    parse_version_catalog_refs(&content_clean, &mut result);
+
+    // Parse buildscript block
+    parse_buildscript_block(&content_clean, &mut result);
+
     // Parse repositories { mavenCentral() }
     parse_repositories_block(&content_clean, &mut result);
 
@@ -194,6 +261,12 @@ fn parse_groovy(content: &str) -> BuildScriptParseResult {
 
     // Parse subproject includes
     parse_subproject_includes(&content_clean, &mut result);
+
+    // Parse pluginManagement block (settings.gradle.kts)
+    parse_plugin_management(&content_clean, &mut result);
+
+    // Parse dependencyResolutionManagement block (settings.gradle.kts)
+    parse_dependency_resolution_management(&content_clean, &mut result);
 
     result
 }
@@ -502,12 +575,375 @@ fn parse_dependencies_block(content: &str, result: &mut BuildScriptParseResult) 
     for kw in &["implementation", "api", "compileOnly", "runtimeOnly"] {
         let pattern = format!("val {} by ", kw);
         if let Some(_i) = content.find(&pattern) {
-            // This is a version catalog reference, skip detailed parsing
             result.warnings.push(format!(
                 "Version catalog dependency '{}' not fully parsed",
                 kw
             ));
         }
+    }
+}
+
+/// Parse version catalog references inside a dependencies block.
+///
+/// Handles:
+/// - `implementation(libs.commons.lang3)` — Kotlin DSL
+/// - `implementation(libs.versions.java.get())` — version reference
+/// - `testImplementation(platform(libs.androidx.test)))` — wrapped accessors
+/// - `implementation libs.commons.lang3` — Groovy DSL (no parens)
+fn parse_version_catalog_refs(content: &str, result: &mut BuildScriptParseResult) {
+    if let Some((_pos, block)) = find_top_level_block(content, "dependencies") {
+        let config_keywords = [
+            "implementation",
+            "api",
+            "compileOnly",
+            "runtimeOnly",
+            "testImplementation",
+            "testRuntimeOnly",
+            "testCompileOnly",
+            "androidTestImplementation",
+            "kapt",
+            "kaptTest",
+        ];
+
+        for kw in &config_keywords {
+            // Kotlin DSL pattern: config(libs.something)
+            let pattern = format!("{}(", kw);
+            let mut search_from = 0;
+            while let Some(i) = block[search_from..].find(&pattern) {
+                let abs_i = search_from + i;
+
+                // Ensure not part of a longer identifier
+                if abs_i > 0
+                    && block
+                        .as_bytes()
+                        .get(abs_i - 1)
+                        .is_some_and(|c| c.is_ascii_alphabetic())
+                {
+                    search_from = abs_i + 1;
+                    continue;
+                }
+
+                let args_start = abs_i + pattern.len();
+                if let Some(close) = find_matching_paren(&block[args_start..]) {
+                    let args = block[args_start..args_start + close].trim();
+
+                    // Check if this is a catalog reference (contains "libs.")
+                    if args.contains("libs.") {
+                        // Extract the alias — strip platform(...) wrapper if present
+                        let alias = if args.starts_with("platform(")
+                            && args.ends_with(')')
+                        {
+                            &args[9..args.len() - 1]
+                        } else {
+                            args
+                        };
+
+                        // Strip trailing .get(), .asProvider(), etc.
+                        let clean_alias = alias
+                            .trim_end_matches(".get()")
+                            .trim_end_matches(".asProvider()")
+                            .trim_end_matches(")")
+                            .trim()
+                            .trim_matches('"')
+                            .trim_matches('\'');
+
+                        if !clean_alias.is_empty() && clean_alias.contains('.') {
+                            result.catalog_refs.push(ParsedVersionCatalogRef {
+                                configuration: kw.to_string(),
+                                alias: clean_alias.to_string(),
+                            });
+                        }
+                    }
+                }
+                search_from = abs_i + 1;
+            }
+
+            // Groovy DSL pattern: config libs.something (no parens)
+            let space_pattern = format!("{} ", kw);
+            let mut search_from = 0;
+            while let Some(i) = block[search_from..].find(&space_pattern) {
+                let abs_i = search_from + i;
+
+                // Ensure not part of a longer identifier
+                if abs_i > 0
+                    && block
+                        .as_bytes()
+                        .get(abs_i - 1)
+                        .is_some_and(|c| c.is_ascii_alphabetic())
+                {
+                    search_from = abs_i + 1;
+                    continue;
+                }
+
+                let rest = block[abs_i + space_pattern.len()..].trim();
+                // Check if this starts with libs. and extract the alias
+                if let Some(alias) = rest.split_whitespace().next() {
+                    if alias.starts_with("libs.") {
+                        let clean_alias = alias
+                            .trim_end_matches(".get()")
+                            .trim_end_matches(".asProvider()")
+                            .trim_end_matches(')')
+                            .trim_end_matches('(')
+                            .trim();
+
+                        if !clean_alias.is_empty() && clean_alias.contains('.') {
+                            result.catalog_refs.push(ParsedVersionCatalogRef {
+                                configuration: kw.to_string(),
+                                alias: clean_alias.to_string(),
+                            });
+                        }
+                    }
+                }
+                search_from = abs_i + 1;
+            }
+        }
+    }
+}
+
+/// Parse the `buildscript` block to extract classpath dependencies.
+///
+/// Handles:
+/// ```kotlin
+/// buildscript {
+///     dependencies {
+///         classpath("com.example:plugin:1.0")
+///     }
+/// }
+/// ```
+fn parse_buildscript_block(content: &str, result: &mut BuildScriptParseResult) {
+    if let Some((_pos, block)) = find_top_level_block(content, "buildscript") {
+        // Search for classpath directly in the buildscript block
+        // (avoids find_top_level_block which would match nested "dependencies")
+        // Kotlin: classpath("group:artifact:ver")   Groovy: classpath 'group:artifact:ver'
+        let patterns = ["classpath(", "classpath '", "classpath \""];
+
+        for pat in &patterns {
+            let mut search_from = 0;
+            while let Some(i) = block[search_from..].find(pat) {
+                let abs_i = search_from + i;
+
+                // Ensure not part of a longer identifier
+                if abs_i > 0
+                    && block
+                        .as_bytes()
+                        .get(abs_i - 1)
+                        .is_some_and(|c| c.is_ascii_alphabetic())
+                {
+                    search_from = abs_i + 1;
+                    continue;
+                }
+
+                let args_start = abs_i + pat.len();
+
+                if pat.ends_with('(') {
+                    // Kotlin paren form: classpath("...")
+                    if let Some(close) = find_matching_paren(&block[args_start..]) {
+                        let args = block[args_start..args_start + close].trim();
+                        if let Some(notation) = extract_string_literal(args) {
+                            result.buildscript_deps.push(ParsedBuildScriptDep {
+                                notation,
+                            });
+                        }
+                    }
+                } else {
+                    // Groovy no-paren form: classpath '...'
+                    // Pattern consumed the opening quote, so args starts with the notation
+                    let rest = &block[args_start..];
+                    let line_end = rest
+                        .find('\n')
+                        .unwrap_or(rest.len());
+                    let args = rest[..line_end].trim();
+                    // The opening quote was consumed by the pattern; strip trailing quote
+                    let notation = args
+                        .strip_suffix('\'')
+                        .or_else(|| args.strip_suffix('"'))
+                        .unwrap_or(args);
+                    if !notation.is_empty() {
+                        result.buildscript_deps.push(ParsedBuildScriptDep {
+                            notation: notation.to_string(),
+                        });
+                    }
+                }
+
+                search_from = abs_i + 1;
+            }
+        }
+    }
+}
+
+/// Parse `pluginManagement` block from settings.gradle(.kts).
+///
+/// Handles:
+/// ```kotlin
+/// pluginManagement {
+///     repositories {
+///         gradlePluginPortal()
+///         maven { url = uri("https://...") }
+///         mavenCentral()
+///     }
+/// }
+/// ```
+fn parse_plugin_management(content: &str, result: &mut BuildScriptParseResult) {
+    if let Some((_pos, block)) = find_top_level_block(content, "pluginManagement") {
+        let mut pm = ParsedPluginManagement::default();
+
+        // Find the nested repositories block within pluginManagement
+        if let Some((_repo_pos, repo_block)) = find_top_level_block(&block, "repositories") {
+            // Collect all repos with source positions for ordering
+            let mut found_repos: Vec<(usize, ParsedPluginRepository)> = Vec::new();
+
+            // Standard shorthand repos
+            let standard_repos = [
+                ("gradlePluginPortal()", "gradlePluginPortal", "gradlePluginPortal"),
+                ("mavenCentral()", "mavenCentral", "maven"),
+                ("google()", "google", "maven"),
+                ("mavenLocal()", "mavenLocal", "maven-local"),
+            ];
+
+            for (pattern, name, repo_type) in &standard_repos {
+                if let Some(pos) = repo_block.find(pattern) {
+                    found_repos.push((
+                        pos,
+                        ParsedPluginRepository {
+                            name: name.to_string(),
+                            repo_type: repo_type.to_string(),
+                        },
+                    ));
+                }
+            }
+
+            // Custom maven repos: maven { url = uri("...") } or maven { url = "..." }
+            for (i, _) in repo_block.match_indices("maven {") {
+                let sub = &repo_block[i..];
+                let brace_pos = sub.find('{').unwrap_or(sub.len());
+                let inner = &sub[brace_pos + 1..];
+
+                let close_brace = match find_brace_block_end(inner) {
+                    Some(c) => c,
+                    None => continue,
+                };
+                let body = &inner[..close_brace];
+
+                // Try url = uri("...") or url = "..." or url("...")
+                if let Some(url_pos) = body.find("url") {
+                    let after_url = body[url_pos + 3..].trim();
+                    let url = if let Some(eq_pos) = after_url.find('=') {
+                        let value = after_url[eq_pos + 1..].trim();
+                        // Handle uri("...") wrapper
+                        if let Some(rest) = value.strip_prefix("uri(") {
+                            if let Some(close) = find_matching_paren(rest) {
+                                extract_string_literal(&rest[..close])
+                            } else {
+                                None
+                            }
+                        } else {
+                            extract_string_literal(value)
+                        }
+                    } else if let Some(rest) = after_url.strip_prefix('(') {
+                        if let Some(_close) = find_matching_paren(rest) {
+                            extract_string_literal(rest)
+                        } else {
+                            None
+                        }
+                    } else {
+                        // Groovy: url "..." or url '...'
+                        extract_string_literal(after_url)
+                    };
+
+                    if let Some(url) = url {
+                        found_repos.push((
+                            i,
+                            ParsedPluginRepository {
+                                name: url.clone(),
+                                repo_type: "maven".to_string(),
+                            },
+                        ));
+                    }
+                }
+            }
+
+            // Sort by source position to maintain declaration order
+            found_repos.sort_by_key(|(pos, _)| *pos);
+            for (_, repo) in found_repos {
+                pm.repositories.push(repo);
+            }
+        }
+
+        result.plugin_management = Some(pm);
+    }
+}
+
+/// Parse `dependencyResolutionManagement` block from settings.gradle(.kts).
+///
+/// Handles:
+/// ```kotlin
+/// dependencyResolutionManagement {
+///     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+///     repositories {
+///         mavenCentral()
+///     }
+/// }
+/// ```
+fn parse_dependency_resolution_management(content: &str, result: &mut BuildScriptParseResult) {
+    if let Some((_pos, block)) = find_top_level_block(content, "dependencyResolutionManagement") {
+        let mut drm = ParsedDependencyResolutionManagement::default();
+
+        // Extract repositoriesMode
+        if let Some((i, _)) = block.match_indices("repositoriesMode").next() {
+            let rest = &block[i + "repositoriesMode".len()..].trim_start();
+            // Kotlin: repositoriesMode.set(RepositoriesMode.XXX) or repositoriesMode.set(XXX)
+            if let Some(set_pos) = rest.find(".set(") {
+                let args_start = set_pos + 5;
+                if let Some(close) = find_matching_paren(&rest[args_start..]) {
+                    let args = rest[args_start..args_start + close].trim();
+                    // Handle RepositoriesMode.PREFER_SETTINGS or just PREFER_SETTINGS
+                    let mode = if let Some(dot) = args.rfind('.') {
+                        &args[dot + 1..]
+                    } else {
+                        args
+                    };
+                    drm.repositories_mode = Some(mode.trim_end_matches(')').to_string());
+                }
+            }
+            // Groovy: repositoriesMode = RepositoriesMode.XXX
+            else if let Some(eq_pos) = rest.find('=') {
+                let value = rest[eq_pos + 1..].trim();
+                // Trim to end of line
+                let value = if let Some(nl) = value.find('\n') {
+                    &value[..nl]
+                } else {
+                    value
+                }
+                .trim();
+                let mode = if let Some(dot) = value.rfind('.') {
+                    &value[dot + 1..]
+                } else {
+                    value
+                };
+                drm.repositories_mode = Some(mode.trim_end_matches(')').to_string());
+            }
+        }
+
+        // Extract repositories from the nested repositories block
+        if let Some((_repo_pos, repo_block)) = find_top_level_block(&block, "repositories") {
+            let standard_repos = [
+                ("mavenCentral()", "mavenCentral", "maven"),
+                ("google()", "google", "maven"),
+                ("mavenLocal()", "mavenLocal", "maven-local"),
+                ("gradlePluginPortal()", "gradlePluginPortal", "gradlePluginPortal"),
+            ];
+
+            for (pattern, name, repo_type) in &standard_repos {
+                if repo_block.contains(pattern) {
+                    drm.repositories.push(ParsedRepository {
+                        name: name.to_string(),
+                        repo_type: repo_type.to_string(),
+                    });
+                }
+            }
+        }
+
+        result.dependency_resolution_management = Some(drm);
     }
 }
 
@@ -1526,5 +1962,215 @@ repositories {
         }
         assert_eq!(result.task_configs.len(), 1);
         assert_eq!(result.task_configs[0].depends_on, vec!["test"]);
+    }
+
+    #[test]
+    fn test_version_catalog_ref_kotlin() {
+        let content = r#"
+dependencies {
+    implementation(libs.commons.lang3)
+    api(libs.versions.java.get())
+    testImplementation(platform(libs.androidx.test)))
+}
+"#;
+        let result = parse_build_script(content, "build.gradle.kts");
+        assert_eq!(result.catalog_refs.len(), 3);
+        assert_eq!(result.catalog_refs[0].configuration, "implementation");
+        assert_eq!(result.catalog_refs[0].alias, "libs.commons.lang3");
+        assert_eq!(result.catalog_refs[1].alias, "libs.versions.java");
+        assert_eq!(result.catalog_refs[2].alias, "libs.androidx.test");
+    }
+
+    #[test]
+    fn test_version_catalog_ref_groovy() {
+        let content = r#"
+dependencies {
+    implementation libs.commons.lang3
+}
+"#;
+        let result = parse_build_script(content, "build.gradle");
+        assert_eq!(result.catalog_refs.len(), 1);
+        assert_eq!(result.catalog_refs[0].configuration, "implementation");
+        assert_eq!(result.catalog_refs[0].alias, "libs.commons.lang3");
+    }
+
+    #[test]
+    fn test_buildscript_classpath() {
+        let content = r#"
+buildscript {
+    dependencies {
+        classpath("com.example:plugin:1.0")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22")
+    }
+}
+"#;
+        let result = parse_build_script(content, "build.gradle.kts");
+        assert_eq!(result.buildscript_deps.len(), 2);
+        assert_eq!(
+            result.buildscript_deps[0].notation,
+            "com.example:plugin:1.0"
+        );
+        assert_eq!(
+            result.buildscript_deps[1].notation,
+            "org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22"
+        );
+    }
+
+    #[test]
+    fn test_buildscript_classpath_groovy() {
+        let content = r#"
+buildscript {
+    dependencies {
+        classpath 'com.example:plugin:1.0'
+    }
+}
+"#;
+        let result = parse_build_script(content, "build.gradle");
+        assert_eq!(result.buildscript_deps.len(), 1);
+    }
+
+    #[test]
+    fn test_no_catalog_refs_without_libs() {
+        let content = r#"
+dependencies {
+    implementation("com.example:lib:1.0")
+}
+"#;
+        let result = parse_build_script(content, "build.gradle.kts");
+        assert!(result.catalog_refs.is_empty());
+    }
+
+    #[test]
+    fn test_no_buildscript_without_block() {
+        let content = r#"
+plugins { id("java") }
+dependencies { implementation("com.example:lib:1.0") }
+"#;
+        let result = parse_build_script(content, "build.gradle.kts");
+        assert!(result.buildscript_deps.is_empty());
+    }
+
+    #[test]
+    fn test_plugin_management_kotlin() {
+        let content = r#"
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven { url = uri("https://repo.example.com/plugins") }
+        mavenCentral()
+    }
+}
+"#;
+        let result = parse_build_script(content, "settings.gradle.kts");
+        let pm = result.plugin_management.as_ref().unwrap();
+        assert_eq!(pm.repositories.len(), 3);
+        assert_eq!(pm.repositories[0].name, "gradlePluginPortal");
+        assert_eq!(pm.repositories[1].name, "https://repo.example.com/plugins");
+        assert_eq!(pm.repositories[1].repo_type, "maven");
+        assert_eq!(pm.repositories[2].name, "mavenCentral");
+    }
+
+    #[test]
+    fn test_plugin_management_groovy() {
+        let content = r#"
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven {
+            url 'https://repo.example.com/plugins'
+        }
+    }
+}
+"#;
+        let result = parse_build_script(content, "settings.gradle");
+        let pm = result.plugin_management.as_ref().unwrap();
+        assert_eq!(pm.repositories.len(), 2);
+        assert_eq!(pm.repositories[0].name, "gradlePluginPortal");
+        assert_eq!(pm.repositories[1].name, "https://repo.example.com/plugins");
+    }
+
+    #[test]
+    fn test_dependency_resolution_management_kotlin() {
+        let content = r#"
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        mavenCentral()
+        google()
+    }
+}
+"#;
+        let result = parse_build_script(content, "settings.gradle.kts");
+        let drm = result.dependency_resolution_management.as_ref().unwrap();
+        assert_eq!(
+            drm.repositories_mode.as_deref(),
+            Some("FAIL_ON_PROJECT_REPOS")
+        );
+        assert_eq!(drm.repositories.len(), 2);
+        assert_eq!(drm.repositories[0].name, "mavenCentral");
+        assert_eq!(drm.repositories[1].name, "google");
+    }
+
+    #[test]
+    fn test_dependency_resolution_management_groovy() {
+        let content = r#"
+dependencyResolutionManagement {
+    repositoriesMode = RepositoriesMode.PREFER_SETTINGS
+    repositories {
+        mavenCentral()
+    }
+}
+"#;
+        let result = parse_build_script(content, "settings.gradle");
+        let drm = result.dependency_resolution_management.as_ref().unwrap();
+        assert_eq!(
+            drm.repositories_mode.as_deref(),
+            Some("PREFER_SETTINGS")
+        );
+        assert_eq!(drm.repositories.len(), 1);
+    }
+
+    #[test]
+    fn test_no_plugin_management_without_block() {
+        let content = r#"
+plugins { id("java") }
+"#;
+        let result = parse_build_script(content, "settings.gradle.kts");
+        assert!(result.plugin_management.is_none());
+        assert!(result.dependency_resolution_management.is_none());
+    }
+
+    #[test]
+    fn test_full_settings_kotlin() {
+        let content = r#"
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        mavenCentral()
+    }
+}
+
+rootProject.name = "my-app"
+include(":app")
+include(":lib")
+"#;
+        let result = parse_build_script(content, "settings.gradle.kts");
+        let pm = result.plugin_management.as_ref().unwrap();
+        assert_eq!(pm.repositories.len(), 2);
+
+        let drm = result.dependency_resolution_management.as_ref().unwrap();
+        assert_eq!(drm.repositories_mode.as_deref(), Some("FAIL_ON_PROJECT_REPOS"));
+        assert_eq!(drm.repositories.len(), 1);
+
+        assert_eq!(result.subprojects.len(), 2);
+        assert_eq!(result.subprojects[0].path, ":app");
+        assert_eq!(result.subprojects[1].path, ":lib");
     }
 }
