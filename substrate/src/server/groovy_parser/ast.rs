@@ -159,6 +159,8 @@ pub struct VarDecl {
     pub kind: VarKind,
     /// The declared name.
     pub name: String,
+    /// Kotlin explicit type annotation (e.g. `val name: String`).
+    pub type_annotation: Option<String>,
     /// Kotlin `by` delegation target (e.g. `val implementation by deps`).
     pub delegate: Option<Box<Expr>>,
     /// The initializer expression, if present.
@@ -266,6 +268,9 @@ pub enum Expr {
     // -- Calls -------------------------------------------------------------
     /// A method or function call: `foo()`, `bar(arg1, arg2)`.
     MethodCall(MethodCall),
+
+    /// Gradle Kotlin DSL type-safe accessor: `the<JavaCompile> { ... }`.
+    TypeSafeAccessor(TypeSafeAccessor),
 
     // -- Assignment --------------------------------------------------------
     /// An assignment: `target = value`.
@@ -574,6 +579,16 @@ pub struct CastExpr {
     pub target_type: String,
     /// Whether this is a safe cast (`as?` in Kotlin).
     pub is_safe: bool,
+}
+
+/// Gradle Kotlin DSL type-safe accessor: `the<JavaCompile> { ... }`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TypeSafeAccessor {
+    pub span: Span,
+    /// The type name inside the angle brackets (e.g., "JavaCompile").
+    pub type_name: String,
+    /// The configuration block (a closure expression).
+    pub configuration: Box<Expr>,
 }
 
 // ---------------------------------------------------------------------------
