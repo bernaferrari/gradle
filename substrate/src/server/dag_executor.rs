@@ -15,9 +15,10 @@ use crate::proto::{
     CancelBuildRequest, CancelBuildResponse, GetBuildStatusRequest, GetBuildStatusResponse,
     GetNextTaskRequest, GetNextTaskResponse, NotifyTaskFinishedRequest, NotifyTaskFinishedResponse,
     NotifyTaskStartedRequest, NotifyTaskStartedResponse, ResolveExecutionPlanRequest,
-    StartBuildRequest, StartBuildResponse, TaskFinishedRequest, TaskStartedRequest,
-    TaskStatusEntry,
+    RunBuildRequest, RunBuildResponse, StartBuildRequest, StartBuildResponse,
+    TaskExecutionDetail, TaskFinishedRequest, TaskStartedRequest, TaskStatusEntry,
 };
+use crate::server::task_executor::{TaskExecutorRegistry, TaskInput};
 
 /// Sentinel value returned by GetNextTask when the build is complete.
 const BUILD_COMPLETE_SENTINEL: &str = "__BUILD_COMPLETE__";
@@ -98,6 +99,56 @@ impl BuildExecution {
     }
 }
 
+/// Current time in milliseconds since UNIX epoch.
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Build a `TaskInput` from optional JSON context.
+fn build_task_input(task_type: &str, context_json: Option<&String>) -> TaskInput {
+    let mut input = TaskInput::new(task_type);
+    if let Some(json) = context_json {
+        if let Ok(map) = serde_json::from_str::<HashMap<String, serde_json::Value>>(json) {
+            if let Some(v) = map.get("source_files") {
+                if let Some(arr) = v.as_array() {
+                    input.source_files = arr
+                        .iter()
+                        .filter_map(|v| v.as_str().map(std::path::PathBuf::from))
+                        .collect();
+                }
+            }
+            if let Some(v) = map.get("target_dir") {
+                if let Some(s) = v.as_str() {
+                    input.target_dir = std::path::PathBuf::from(s);
+                }
+            }
+            if let Some(v) = map.get("options") {
+                if let Some(obj) = v.as_object() {
+                    input.options = obj
+                        .iter()
+                        .filter_map(|(k, v)| v.as_str().map(|sv| (k.clone(), sv.to_string())))
+                        .collect();
+                }
+            }
+        }
+    }
+    input
+}
+
+/// Result from a spawned task execution, sent back via channel.
+struct TaskExecResult {
+    task_path: String,
+    task_type: String,
+    success: bool,
+    outcome: String,
+    duration_ms: i64,
+    execution_mode: String,
+    error_message: String,
+}
+
 /// DAG Executor service.
 /// Orchestrates build execution by managing task scheduling, parallelism,
 /// cancellation, and event dispatch.
@@ -110,6 +161,8 @@ pub struct DagExecutorServiceImpl {
     task_graph: Arc<super::task_graph::TaskGraphServiceImpl>,
     /// Event dispatchers for automatic fan-out (console + metrics).
     dispatchers: Vec<Arc<dyn EventDispatcher>>,
+    /// Native task executor registry for RunBuild authoritative execution.
+    executor_registry: Arc<TaskExecutorRegistry>,
     request_counter: AtomicI64,
     builds_started: AtomicI64,
 }
@@ -121,6 +174,7 @@ impl Clone for DagExecutorServiceImpl {
             scheduler: Arc::clone(&self.scheduler),
             task_graph: Arc::clone(&self.task_graph),
             dispatchers: self.dispatchers.clone(),
+            executor_registry: Arc::clone(&self.executor_registry),
             request_counter: AtomicI64::new(self.request_counter.load(Ordering::Relaxed)),
             builds_started: AtomicI64::new(self.builds_started.load(Ordering::Relaxed)),
         }
@@ -148,6 +202,7 @@ impl DagExecutorServiceImpl {
             scheduler,
             task_graph,
             dispatchers,
+            executor_registry: Arc::new(TaskExecutorRegistry::new()),
             request_counter: AtomicI64::new(0),
             builds_started: AtomicI64::new(0),
         }
@@ -339,7 +394,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 node.task_path.clone(),
                 TaskSlot {
                     task_path: node.task_path.clone(),
-                    task_type: String::new(), // populated from task_graph if needed
+                    task_type: node.task_type.clone(),
                     status: "PENDING".to_string(),
                     start_time_ms: 0,
                     duration_ms: 0,
@@ -415,6 +470,213 @@ impl DagExecutorService for DagExecutorServiceImpl {
             error_message: String::new(),
             total_tasks,
             critical_path_ms: plan_response.critical_path_ms,
+        }))
+    }
+
+    async fn run_build(
+        &self,
+        request: Request<RunBuildRequest>,
+    ) -> Result<Response<RunBuildResponse>, Status> {
+        let req = request.into_inner();
+        let build_id_str = req.build_id.clone();
+        let start_time = now_ms();
+
+        // Phase 1: Start the build (sets up the execution plan and ready queue).
+        let start_resp = self
+            .start_build(Request::new(StartBuildRequest {
+                build_id: build_id_str.clone(),
+                max_parallelism: req.max_parallelism,
+                task_filter: req.task_filter.clone(),
+            }))
+            .await?;
+
+        if !start_resp.get_ref().accepted {
+            return Ok(Response::new(RunBuildResponse {
+                build_id: build_id_str.clone(),
+                final_status: "FAILED".to_string(),
+                total_tasks: 0,
+                tasks_succeeded: 0,
+                tasks_failed: 0,
+                tasks_skipped: 0,
+                tasks_forwarded_to_jvm: 0,
+                total_duration_ms: now_ms() - start_time,
+                failure_message: start_resp.get_ref().error_message.clone(),
+                task_details: vec![],
+            }));
+        }
+
+        let total_tasks = start_resp.get_ref().total_tasks;
+        let max_parallelism = req.max_parallelism.max(1) as usize;
+        let task_contexts = req.task_contexts;
+
+        // Channel for task results (spawned tasks send back, main loop processes).
+        let (result_tx, mut result_rx) =
+            tokio::sync::mpsc::channel::<TaskExecResult>(total_tasks as usize);
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(max_parallelism));
+        let mut in_flight: usize = 0;
+        let mut tasks_dispatched: usize = 0;
+        let mut tasks_completed: usize = 0;
+        let mut task_details: Vec<TaskExecutionDetail> = Vec::new();
+        let mut jvm_forward_count: i32 = 0;
+        let mut failure_message = String::new();
+        let mut build_failed = false;
+
+        loop {
+            // Dispatch tasks while we have capacity and tasks are available.
+            while in_flight < max_parallelism && !build_failed {
+                let next = self
+                    .get_next_task(Request::new(GetNextTaskRequest {
+                        build_id: build_id_str.clone(),
+                    }))
+                    .await?
+                    .into_inner();
+
+                if next.task_path == BUILD_COMPLETE_SENTINEL {
+                    build_failed = true;
+                    break;
+                }
+
+                if next.task_path.is_empty() {
+                    // Throttled — no ready tasks but in-flight work exists.
+                    break;
+                }
+
+                let task_path = next.task_path.clone();
+                let task_type = next.task_type.clone();
+                let registry = Arc::clone(&self.executor_registry);
+                let contexts = task_contexts.clone();
+                let tx = result_tx.clone();
+                let permit = semaphore.clone().acquire_owned().await.map_err(|_| {
+                    Status::internal("Semaphore closed during build execution")
+                })?;
+
+                tasks_dispatched += 1;
+                in_flight += 1;
+
+                // Notify started on the DAG executor (before spawning).
+                self.notify_task_started(Request::new(NotifyTaskStartedRequest {
+                    build_id: build_id_str.clone(),
+                    task_path: task_path.clone(),
+                    start_time_ms: now_ms(),
+                }))
+                .await?;
+
+                tokio::spawn(async move {
+                    let exec_start = now_ms();
+
+                    let (success, outcome, exec_mode, error_msg) =
+                        if let Some(executor) = registry.get(&task_type) {
+                            let input = build_task_input(&task_type, contexts.get(&task_path));
+                            let result = executor.execute(&input).await;
+                            (
+                                result.success,
+                                if result.success {
+                                    "EXECUTED".to_string()
+                                } else {
+                                    "FAILED".to_string()
+                                },
+                                "native".to_string(),
+                                result.error_message,
+                            )
+                        } else {
+                            // No native executor — mark as JVM-forwarded.
+                            (
+                                true,
+                                "JVM_FORWARD".to_string(),
+                                "jvm_forward".to_string(),
+                                String::new(),
+                            )
+                        };
+
+                    drop(permit);
+
+                    let _ = tx
+                        .send(TaskExecResult {
+                            task_path,
+                            task_type,
+                            success,
+                            outcome,
+                            duration_ms: now_ms() - exec_start,
+                            execution_mode: exec_mode,
+                            error_message: error_msg,
+                        })
+                        .await;
+                });
+            }
+
+            // All dispatched and no in-flight — we're done.
+            if in_flight == 0 {
+                break;
+            }
+
+            // Wait for at least one task to complete.
+            if let Some(result) = result_rx.recv().await {
+                in_flight -= 1;
+                tasks_completed += 1;
+
+                // Notify finished on the DAG executor (updates state, unblocks dependents).
+                self.notify_task_finished(Request::new(NotifyTaskFinishedRequest {
+                    build_id: build_id_str.clone(),
+                    task_path: result.task_path.clone(),
+                    success: result.success,
+                    outcome: result.outcome.clone(),
+                    duration_ms: result.duration_ms,
+                    failure_message: result.error_message.clone(),
+                }))
+                .await?;
+
+                if result.execution_mode == "jvm_forward" {
+                    jvm_forward_count += 1;
+                }
+                if !result.success && failure_message.is_empty() {
+                    failure_message = format!("Task {} failed: {}", result.task_path, result.error_message);
+                    build_failed = true;
+                }
+
+                task_details.push(TaskExecutionDetail {
+                    task_path: result.task_path,
+                    task_type: result.task_type,
+                    outcome: result.outcome,
+                    duration_ms: result.duration_ms,
+                    execution_mode: result.execution_mode,
+                    error_message: result.error_message,
+                });
+            }
+        }
+
+        // Phase 3: Read final build status.
+        let final_status = self
+            .get_build_status(Request::new(GetBuildStatusRequest {
+                build_id: build_id_str.clone(),
+            }))
+            .await
+            .map(|r| r.into_inner().status)
+            .unwrap_or_else(|_| "FAILED".to_string());
+
+        let total_duration = now_ms() - start_time;
+
+        tracing::info!(
+            build_id = %build_id_str,
+            final_status = %final_status,
+            total_tasks = total_tasks,
+            dispatched = tasks_dispatched,
+            completed = tasks_completed,
+            jvm_forwarded = jvm_forward_count,
+            duration_ms = total_duration,
+            "RunBuild completed"
+        );
+
+        Ok(Response::new(RunBuildResponse {
+            build_id: build_id_str,
+            final_status,
+            total_tasks,
+            tasks_succeeded: task_details.iter().filter(|d| d.outcome == "EXECUTED").count() as i32,
+            tasks_failed: task_details.iter().filter(|d| d.outcome == "FAILED").count() as i32,
+            tasks_skipped: task_details.iter().filter(|d| d.outcome == "JVM_FORWARD").count() as i32,
+            tasks_forwarded_to_jvm: jvm_forward_count,
+            total_duration_ms: total_duration,
+            failure_message,
+            task_details,
         }))
     }
 
@@ -1748,5 +2010,366 @@ mod tests {
 
         assert_eq!(status.status, "COMPLETED");
         assert_eq!(status.total_tasks, 4);
+    }
+
+    // -----------------------------------------------------------------------
+    // RunBuild tests (authoritative execution)
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_run_build_simple_chain_jvm_forward() {
+        let svc = make_svc();
+        register_chain(
+            &svc,
+            "rb-chain",
+            &[
+                (":a", "UnknownTask", &[]),
+                (":b", "UnknownTask", &[":a"]),
+                (":c", "UnknownTask", &[":b"]),
+            ],
+        )
+        .await;
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "rb-chain".to_string(),
+                max_parallelism: 2,
+                task_filter: vec![],
+                task_contexts: Default::default(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.final_status, "COMPLETED");
+        assert_eq!(resp.total_tasks, 3);
+        assert_eq!(resp.tasks_forwarded_to_jvm, 3);
+        assert_eq!(resp.tasks_succeeded, 0);
+        assert_eq!(resp.tasks_failed, 0);
+        assert_eq!(resp.task_details.len(), 3);
+        // All tasks should have JVM_FORWARD outcome
+        for d in &resp.task_details {
+            assert_eq!(d.execution_mode, "jvm_forward");
+            assert_eq!(d.outcome, "JVM_FORWARD");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_run_build_native_mkdir() {
+        let svc = make_svc();
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("output");
+
+        register_chain(
+            &svc,
+            "rb-mkdir",
+            &[(":createDir", "Mkdir", &[])],
+        )
+        .await;
+
+        let ctx = serde_json::json!({
+            "source_files": [target.to_string_lossy()],
+            "target_dir": "",
+            "options": {}
+        })
+        .to_string();
+
+        let mut contexts = HashMap::new();
+        contexts.insert(":createDir".to_string(), ctx);
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "rb-mkdir".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.final_status, "COMPLETED");
+        assert_eq!(resp.total_tasks, 1);
+        assert_eq!(resp.tasks_succeeded, 1);
+        assert!(target.exists(), "Mkdir should create the directory");
+    }
+
+    #[tokio::test]
+    async fn test_run_build_native_copy() {
+        let svc = make_svc();
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src_file.txt");
+        let target_dir = dir.path().join("dest");
+        std::fs::write(&src, "hello world").unwrap();
+
+        register_chain(
+            &svc,
+            "rb-copy",
+            &[(":copyFiles", "Copy", &[])],
+        )
+        .await;
+
+        let ctx = serde_json::json!({
+            "source_files": [src.to_string_lossy()],
+            "target_dir": target_dir.to_string_lossy(),
+            "options": {}
+        })
+        .to_string();
+
+        let mut contexts = HashMap::new();
+        contexts.insert(":copyFiles".to_string(), ctx);
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "rb-copy".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.final_status, "COMPLETED");
+        assert_eq!(resp.tasks_succeeded, 1);
+        assert!(target_dir.exists(), "Copy should create target dir");
+    }
+
+    #[tokio::test]
+    async fn test_run_build_diamond_jvm_forward() {
+        let svc = make_svc();
+        //    :root
+        //   /     \
+        //  :left  :right
+        //   \     /
+        //    :join
+        register_chain(
+            &svc,
+            "rb-diamond",
+            &[
+                (":root", "UnknownTask", &[]),
+                (":left", "UnknownTask", &[":root"]),
+                (":right", "UnknownTask", &[":root"]),
+                (":join", "UnknownTask", &[":left", ":right"]),
+            ],
+        )
+        .await;
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "rb-diamond".to_string(),
+                max_parallelism: 4,
+                task_filter: vec![],
+                task_contexts: Default::default(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.final_status, "COMPLETED");
+        assert_eq!(resp.total_tasks, 4);
+        assert_eq!(resp.tasks_forwarded_to_jvm, 4);
+    }
+
+    #[tokio::test]
+    async fn test_run_build_mixed_native_and_jvm() {
+        let svc = make_svc();
+        let dir = tempfile::tempdir().unwrap();
+        let mkdir_target = dir.path().join("classes");
+
+        register_chain(
+            &svc,
+            "rb-mixed",
+            &[
+                (":mkdir", "Mkdir", &[]),
+                (":compileJava", "JavaCompile", &[":mkdir"]),
+                (":processResources", "Copy", &[":mkdir"]),
+                (":classes", "UnknownTask", &[":compileJava", ":processResources"]),
+            ],
+        )
+        .await;
+
+        let mkdir_ctx = serde_json::json!({
+            "source_files": [mkdir_target.to_string_lossy()],
+            "target_dir": ""
+        })
+        .to_string();
+
+        let copy_ctx = serde_json::json!({
+            "source_files": [],
+            "target_dir": dir.path().join("resources").to_string_lossy()
+        })
+        .to_string();
+
+        let mut contexts = HashMap::new();
+        contexts.insert(":mkdir".to_string(), mkdir_ctx);
+        contexts.insert(":processResources".to_string(), copy_ctx);
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "rb-mixed".to_string(),
+                max_parallelism: 4,
+                task_filter: vec![],
+                task_contexts: contexts,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.final_status, "COMPLETED");
+        assert_eq!(resp.total_tasks, 4);
+        // :mkdir, :processResources, and :compileJava all have native executors.
+        // :classes has no native executor → JVM-forwarded.
+        assert_eq!(resp.tasks_forwarded_to_jvm, 1);
+        let native_count = resp
+            .task_details
+            .iter()
+            .filter(|d| d.execution_mode == "native")
+            .count();
+        assert_eq!(native_count, 3);
+        assert!(mkdir_target.exists(), "Mkdir should have run");
+    }
+
+    #[tokio::test]
+    async fn test_run_build_failure_propagation() {
+        let svc = make_svc();
+        let dir = tempfile::tempdir().unwrap();
+        // :copy will fail (nonexistent source), :downstream should be skipped
+        let bad_target = dir.path().join("nowhere");
+
+        register_chain(
+            &svc,
+            "rb-fail",
+            &[
+                (":copy", "Copy", &[]),
+                (":downstream", "Mkdir", &[":copy"]),
+            ],
+        )
+        .await;
+
+        let ctx = serde_json::json!({
+            "source_files": ["/nonexistent/file.txt"],
+            "target_dir": bad_target.to_string_lossy()
+        })
+        .to_string();
+
+        let mut contexts = HashMap::new();
+        contexts.insert(":copy".to_string(), ctx);
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "rb-fail".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.final_status, "FAILED");
+        assert_eq!(resp.total_tasks, 2);
+        assert_eq!(resp.tasks_failed, 1);
+        assert!(!resp.failure_message.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_run_build_empty_graph() {
+        let svc = make_svc();
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "rb-empty".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: Default::default(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.final_status, "FAILED");
+        assert_eq!(resp.total_tasks, 0);
+    }
+
+    #[tokio::test]
+    async fn test_run_build_parallel_native_tasks() {
+        let svc = make_svc();
+        let dir = tempfile::tempdir().unwrap();
+
+        // Three independent Mkdir tasks should run in parallel
+        register_chain(
+            &svc,
+            "rb-par",
+            &[
+                (":dir1", "Mkdir", &[]),
+                (":dir2", "Mkdir", &[]),
+                (":dir3", "Mkdir", &[]),
+            ],
+        )
+        .await;
+
+        let mut contexts = HashMap::new();
+        for (i, name) in ["dir1", "dir2", "dir3"].iter().enumerate() {
+            let dir_path = dir.path().join(format!("out{}", i));
+            let ctx = serde_json::json!({
+                "source_files": [dir_path.to_string_lossy()],
+                "target_dir": ""
+            })
+            .to_string();
+            contexts.insert(format!(":{}", name), ctx);
+        }
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "rb-par".to_string(),
+                max_parallelism: 3,
+                task_filter: vec![],
+                task_contexts: contexts,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.final_status, "COMPLETED");
+        assert_eq!(resp.total_tasks, 3);
+        assert_eq!(resp.tasks_succeeded, 3);
+        assert!(dir.path().join("out0").exists());
+        assert!(dir.path().join("out1").exists());
+        assert!(dir.path().join("out2").exists());
+    }
+
+    #[tokio::test]
+    async fn test_run_build_returns_task_details() {
+        let svc = make_svc();
+
+        register_chain(
+            &svc,
+            "rb-details",
+            &[(":a", "UnknownTask", &[]), (":b", "Mkdir", &[":a"])],
+        )
+        .await;
+
+        let ctx = serde_json::json!({"source_files": ["/tmp/rb-details-test"], "target_dir": ""}).to_string();
+        let mut contexts = HashMap::new();
+        contexts.insert(":b".to_string(), ctx);
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "rb-details".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.task_details.len(), 2);
+        assert_eq!(resp.task_details[0].task_path, ":a");
+        assert_eq!(resp.task_details[0].execution_mode, "jvm_forward");
+        assert_eq!(resp.task_details[1].task_path, ":b");
+        assert_eq!(resp.task_details[1].execution_mode, "native");
+        assert!(resp.task_details[1].duration_ms >= 0);
     }
 }
