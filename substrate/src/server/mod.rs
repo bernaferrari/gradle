@@ -1,4 +1,5 @@
 pub mod artifact_publishing;
+pub mod ast_extractor;
 pub mod authoritative;
 pub mod bootstrap;
 pub mod build_comparison;
@@ -11,6 +12,7 @@ pub mod build_plan_ir;
 pub mod build_plan_shadow;
 pub mod build_result;
 pub mod build_script_parser;
+pub mod build_script_types;
 pub mod cache;
 pub mod cache_orchestration;
 pub mod config_cache;

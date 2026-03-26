@@ -1,151 +1,53 @@
 use std::path::Path;
 
-/// A parsed dependency declaration from a build script.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ParsedDependency {
-    /// The dependency configuration (e.g. "implementation", "api", "testImplementation").
-    pub configuration: String,
-    /// The dependency notation (e.g. "com.example:lib:1.0", "project(:other)").
-    pub notation: String,
-}
-
-/// A parsed plugin application from a build script.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ParsedPlugin {
-    /// The plugin ID or fully-qualified class name.
-    pub id: String,
-    /// Whether `apply false` was used (deferred application).
-    pub apply: bool,
-}
-
-/// A parsed task dependency declaration.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ParsedTaskDependency {
-    /// The task path.
-    pub path: String,
-    /// Whether the dependency is "shouldRunAfter" (soft) vs dependsOn (hard).
-    pub soft: bool,
-}
-
-/// A parsed task configuration block.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ParsedTaskConfig {
-    /// The task name.
-    pub task_name: String,
-    /// Dependencies declared on this task.
-    pub depends_on: Vec<String>,
-    /// shouldRunAfter dependencies.
-    pub should_run_after: Vec<String>,
-    /// Whether the task is enabled (default: true).
-    pub enabled: bool,
-}
-
-/// A parsed repositories declaration.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ParsedRepository {
-    /// Repository name or URL.
-    pub name: String,
-    /// Repository type (maven, mavenCentral, gradlePluginPortal, etc.).
-    pub repo_type: String,
-}
-
-/// A parsed subprojects declaration.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ParsedSubproject {
-    /// The subproject path (e.g. ":app", ":lib").
-    pub path: String,
-}
-
-/// A parsed version catalog alias reference (e.g. `libs.commons.lang3`).
-#[derive(Debug, Clone, PartialEq)]
-pub struct ParsedVersionCatalogRef {
-    /// The configuration (e.g. "implementation", "api").
-    pub configuration: String,
-    /// The catalog alias (e.g. "libs.commons.lang3", "libs.versions.java").
-    pub alias: String,
-}
-
-/// A parsed buildscript classpath dependency.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ParsedBuildScriptDep {
-    /// The dependency notation.
-    pub notation: String,
-}
-
-/// A parsed plugin management repository.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ParsedPluginRepository {
-    /// Repository name or URL.
-    pub name: String,
-    /// Repository type (gradlePluginPortal, maven, mavenLocal, etc.).
-    pub repo_type: String,
-}
-
-/// Parsed pluginManagement block.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct ParsedPluginManagement {
-    /// Plugin repositories.
-    pub repositories: Vec<ParsedPluginRepository>,
-}
-
-/// Parsed dependencyResolutionManagement block.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct ParsedDependencyResolutionManagement {
-    /// Repositories mode (e.g. "PREFER_SETTINGS", "FAIL_ON_PROJECT_REPOS").
-    pub repositories_mode: Option<String>,
-    /// Repositories declared in settings.
-    pub repositories: Vec<ParsedRepository>,
-}
-
-/// The result of parsing a build script.
-#[derive(Debug, Clone, Default)]
-pub struct BuildScriptParseResult {
-    /// Applied plugins.
-    pub plugins: Vec<ParsedPlugin>,
-    /// Dependencies (project and external).
-    pub dependencies: Vec<ParsedDependency>,
-    /// Version catalog alias references.
-    pub catalog_refs: Vec<ParsedVersionCatalogRef>,
-    /// Buildscript classpath dependencies.
-    pub buildscript_deps: Vec<ParsedBuildScriptDep>,
-    /// Task configurations.
-    pub task_configs: Vec<ParsedTaskConfig>,
-    /// Repositories.
-    pub repositories: Vec<ParsedRepository>,
-    /// Subprojects (from settings.gradle or include statements).
-    pub subprojects: Vec<ParsedSubproject>,
-    /// Plugin management block (settings.gradle(.kts)).
-    pub plugin_management: Option<ParsedPluginManagement>,
-    /// Dependency resolution management block (settings.gradle(.kts)).
-    pub dependency_resolution_management: Option<ParsedDependencyResolutionManagement>,
-    /// Source compatibility (java, kotlin).
-    pub source_compatibility: Option<String>,
-    /// Target compatibility.
-    pub target_compatibility: Option<String>,
-    /// Group ID.
-    pub group: Option<String>,
-    /// Version.
-    pub version: Option<String>,
-    /// The build script type detected.
-    pub script_type: ScriptType,
-    /// Parse errors or warnings.
-    pub warnings: Vec<String>,
-}
-
-/// Detected build script type.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum ScriptType {
-    #[default]
-    Unknown,
-    KotlinDsl,
-    Groovy,
-}
+// Re-export all IR types from the shared types module.
+pub use super::build_script_types::*;
 
 /// Parse a Gradle build script (Kotlin DSL or Groovy) and extract
 /// plugins, dependencies, task configs, repositories, and subprojects.
+///
+/// Tries AST-based extraction first (structured, with line numbers).
+/// Falls back to string-based extraction when the parser reports errors.
 pub fn parse_build_script(content: &str, file_name: &str) -> BuildScriptParseResult {
     let script_type = detect_script_type(file_name, content);
 
+    // Try AST-based extraction first — it provides line numbers and
+    // structurally robust results.
+    let ast_result = crate::server::groovy_parser::parse(content);
+    if ast_result.errors.is_empty() {
+        let mut result = super::ast_extractor::extract_from_ast(&ast_result.script, script_type);
+        result.script_type = script_type;
+
+        // If the AST extractor found nothing but the content clearly has
+        // blocks, the parser likely consumed multi-line constructs as
+        // single expressions. Fall back to string-based extraction.
+        // Only consider "substantial" elements — settings scripts with just
+        // subprojects/include should fall through to string-based extraction
+        // which handles pluginManagement/dependencyResolutionManagement.
+        let has_elements = !result.plugins.is_empty()
+            || !result.dependencies.is_empty()
+            || !result.repositories.is_empty()
+            || !result.task_configs.is_empty();
+
+        // If the parser consumed the entire script as a single statement,
+        // the AST extraction is likely incomplete (parser's no-paren
+        // greediness merged multiple top-level blocks). Fall back.
+        let single_statement = ast_result.script.statements.len() <= 1;
+        let multi_block = content.matches('{').count() > 1;
+
+        if has_elements && !(single_statement && multi_block) || !content.contains('{') {
+            if script_type == ScriptType::Unknown {
+                result
+                    .warnings
+                    .push("Unknown build script type".to_string());
+            }
+            return result;
+        }
+        // Fall through to string-based extraction
+    }
+
+    // Fallback: string-based extraction for scripts that the parser
+    // cannot fully handle (partial parse / error recovery).
     match script_type {
         ScriptType::KotlinDsl => parse_kotlin_dsl(content),
         ScriptType::Groovy => parse_groovy(content),
@@ -479,7 +381,7 @@ fn parse_plugins_block(content: &str, result: &mut BuildScriptParseResult) {
                         .unwrap_or(block.len());
                     let statement = &block[i..statement_end];
                     let apply = !statement.contains("apply false");
-                    result.plugins.push(ParsedPlugin { id, apply });
+                    result.plugins.push(ParsedPlugin { id, apply, ..Default::default() });
                 }
             }
         }
@@ -494,7 +396,7 @@ fn parse_plugins_block(content: &str, result: &mut BuildScriptParseResult) {
             if let Some(eq_pos) = args.find('=') {
                 let value = args[eq_pos + 1..].trim();
                 if let Some(id) = extract_string_literal(value) {
-                    result.plugins.push(ParsedPlugin { id, apply: true });
+                    result.plugins.push(ParsedPlugin { id, apply: true, ..Default::default() });
                 }
             }
         }
@@ -547,6 +449,7 @@ fn parse_dependencies_block(content: &str, result: &mut BuildScriptParseResult) 
                             ParsedDependency {
                                 configuration: kw.to_string(),
                                 notation,
+                                ..Default::default()
                             },
                         ));
                     } else if args.trim().starts_with("project(") {
@@ -555,6 +458,7 @@ fn parse_dependencies_block(content: &str, result: &mut BuildScriptParseResult) 
                             ParsedDependency {
                                 configuration: kw.to_string(),
                                 notation: args.trim().to_string(),
+                                ..Default::default()
                             },
                         ));
                     }
@@ -962,7 +866,7 @@ fn parse_groovy_plugins(content: &str, result: &mut BuildScriptParseResult) {
                 // Check if "apply false" appears on the SAME line as this id
                 let rest_of_line = &block[i..args_start + line_end];
                 let apply = !rest_of_line.contains("apply false");
-                result.plugins.push(ParsedPlugin { id, apply });
+                result.plugins.push(ParsedPlugin { id, apply, ..Default::default() });
             }
         }
     }
@@ -976,7 +880,7 @@ fn parse_groovy_plugins(content: &str, result: &mut BuildScriptParseResult) {
             .unwrap_or(content.len() - args_start);
         let args = content[args_start..args_start + line_end].trim();
         if let Some(id) = extract_string_literal(args) {
-            result.plugins.push(ParsedPlugin { id, apply: true });
+            result.plugins.push(ParsedPlugin { id, apply: true, ..Default::default() });
         }
     }
 }
@@ -1042,6 +946,7 @@ fn parse_groovy_dependencies(content: &str, result: &mut BuildScriptParseResult)
                             ParsedDependency {
                                 configuration: kw.to_string(),
                                 notation,
+                                ..Default::default()
                             },
                         ));
                         search_from = val_start + end + 1;
@@ -1069,6 +974,7 @@ fn parse_groovy_dependencies(content: &str, result: &mut BuildScriptParseResult)
                                 ParsedDependency {
                                     configuration: kw.to_string(),
                                     notation,
+                                    ..Default::default()
                                 },
                             ));
                             search_from = val_start + end + 1;
@@ -1103,6 +1009,7 @@ fn parse_groovy_dependencies(content: &str, result: &mut BuildScriptParseResult)
                                 ParsedDependency {
                                     configuration: kw.to_string(),
                                     notation,
+                                    ..Default::default()
                                 },
                             ));
                         }
@@ -1247,6 +1154,7 @@ fn parse_tasks_block(content: &str, result: &mut BuildScriptParseResult) {
                     depends_on: Vec::new(),
                     should_run_after: Vec::new(),
                     enabled: true,
+                    ..Default::default()
                 };
 
                 // Find the block after the register call
@@ -1308,6 +1216,7 @@ fn parse_groovy_tasks(content: &str, result: &mut BuildScriptParseResult) {
             depends_on: Vec::new(),
             should_run_after: Vec::new(),
             enabled: true,
+            ..Default::default()
         };
 
         // Find the task block
@@ -1970,7 +1879,7 @@ repositories {
 dependencies {
     implementation(libs.commons.lang3)
     api(libs.versions.java.get())
-    testImplementation(platform(libs.androidx.test)))
+    testImplementation(platform(libs.androidx.test))
 }
 "#;
         let result = parse_build_script(content, "build.gradle.kts");

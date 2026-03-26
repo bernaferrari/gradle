@@ -186,7 +186,7 @@ impl ParserService for ParserServiceImpl {
                 element_type: "plugin".to_string(),
                 properties: props,
                 raw_text: format!("plugin id: {} apply: {}", plugin.id, plugin.apply),
-                line: 0,
+                line: plugin.line.unwrap_or(0) as i32,
             });
         }
 
@@ -347,10 +347,10 @@ impl ParserService for ParserServiceImpl {
             .into_iter()
             .map(|p| PluginEntry {
                 id: p.id,
-                version: String::new(), // build_script_parser does not extract version yet
+                version: p.version.unwrap_or_default(),
                 apply: p.apply,
                 raw_text: String::new(),
-                line: 0,
+                line: p.line.unwrap_or(0) as i32,
             })
             .collect();
 
@@ -411,7 +411,7 @@ impl ParserService for ParserServiceImpl {
                     depends_on: t.depends_on,
                     properties: props,
                     raw_text: String::new(),
-                    line: 0,
+                    line: t.line.unwrap_or(0) as i32,
                 }
             })
             .collect();
