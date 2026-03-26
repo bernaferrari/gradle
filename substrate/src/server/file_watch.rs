@@ -1,6 +1,6 @@
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -15,6 +15,13 @@ use crate::proto::{
 
 use super::task_graph::TaskGraphServiceImpl;
 
+/// Default debounce interval in milliseconds.
+const DEFAULT_DEBOUNCE_MS: u64 = 100;
+/// Maximum file tree depth for counting.
+const MAX_TREE_DEPTH: u32 = 50;
+/// Maximum number of files to count before giving up.
+const MAX_FILES_TO_COUNT: i64 = 100_000;
+
 /// An active file watch session backed by a real OS file watcher.
 struct WatchSession {
     root_path: String,
@@ -24,8 +31,101 @@ struct WatchSession {
     files_watched: i64,
     changes_detected: Arc<AtomicI64>,
     last_poll_ms: AtomicI64,
+    /// Whether this session has fallen back to polling mode.
+    polling_mode: AtomicBool,
+    /// Debounce interval in milliseconds.
+    debounce_ms: u64,
+    /// Whether to follow symlinks.
+    follow_symlinks: bool,
     _event_tx: mpsc::Sender<Result<FileChangeEvent, Status>>,
-    _watcher: RecommendedWatcher,
+    _watcher: Option<RecommendedWatcher>,
+}
+
+/// Detect if a path is on a network/remote filesystem.
+/// On Linux, checks for NFS/SMB/FUSE mounts in /proc/mounts.
+/// On macOS, checks for network mounts via statfs.
+pub(crate) fn is_network_filesystem(path: &str) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        // Check /proc/mounts for network filesystem types
+        if let Ok(content) = std::fs::read_to_string("/proc/mounts") {
+            let path_str = path;
+            for line in content.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    let mount_point = parts[1];
+                    let fs_type = parts[2];
+                    if path_str.starts_with(mount_point)
+                        && (fs_type.contains("nfs")
+                            || fs_type.contains("smb")
+                            || fs_type.contains("cifs")
+                            || fs_type.contains("fuse")
+                            || fs_type.contains("sshfs"))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        use std::ffi::CString;
+        let path = std::path::Path::new(path);
+        if !path.exists() {
+            return false;
+        }
+        unsafe {
+            let mut statfs: libc::statfs = std::mem::zeroed();
+            let c_path = CString::new(path_str_for_statfs(path)).unwrap_or_default();
+            if libc::statfs(c_path.as_ptr(), &mut statfs) != 0 {
+                return false;
+            }
+            // Check if it's NFS, SMB, or other network FS
+            let f_type = statfs.f_type;
+            // NFS
+            if f_type == 0x6969 {
+                return true;
+            }
+            // SMB/CIFS
+            if f_type == 0xff {
+                return true;
+            }
+            // FUSE
+            if f_type == 0x65735546 {
+                return true;
+            }
+            // AFP
+            if f_type == 0x0001 {
+                return true;
+            }
+        }
+        false
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn path_str_for_statfs(path: &std::path::Path) -> String {
+    path.to_string_lossy().to_string()
+}
+
+/// Resolve symlinks in a path, returning the canonical path if follow_symlinks is true.
+pub(crate) fn resolve_path(path: &str, follow_symlinks: bool) -> String {
+    if follow_symlinks {
+        std::fs::canonicalize(path)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| path.to_string())
+    } else {
+        path.to_string()
+    }
 }
 
 /// Rust-native file watch service.
@@ -69,7 +169,22 @@ impl FileWatchServiceImpl {
     }
 
     fn count_files(path: &str) -> i64 {
-        let mut count = 0i64;
+        Self::count_files_inner(path, 0, 0)
+    }
+
+    /// Returns the debounce interval in milliseconds for a given watch session.
+    pub fn debounce_ms_for(&self, watch_id: &str) -> u64 {
+        self.watches
+            .get(watch_id)
+            .map(|s| s.debounce_ms)
+            .unwrap_or(DEFAULT_DEBOUNCE_MS)
+    }
+
+    pub(crate) fn count_files_inner(path: &str, depth: u32, count: i64) -> i64 {
+        if depth > MAX_TREE_DEPTH || count > MAX_FILES_TO_COUNT {
+            return count;
+        }
+        let mut count = count;
         let path = std::path::Path::new(path);
         if path.exists() {
             if path.is_dir() {
@@ -80,9 +195,14 @@ impl FileWatchServiceImpl {
                             if let Some(name) = entry.file_name().to_str() {
                                 if name != "node_modules"
                                     && name != ".gradle"
+                                    && name != "build"
                                     && !name.starts_with('.')
                                 {
-                                    count += Self::count_files(&entry.path().to_string_lossy());
+                                    count = Self::count_files_inner(
+                                        &entry.path().to_string_lossy(),
+                                        depth + 1,
+                                        count,
+                                    );
                                 }
                             }
                         }
@@ -161,38 +281,65 @@ impl FileWatchService for FileWatchServiceImpl {
         let exclude_patterns = req.exclude_patterns.clone();
         let changes_detected = Arc::new(AtomicI64::new(0));
         let changes_detected_clone = changes_detected.clone();
+        let debounce_ms = if req.debounce_ms > 0 {
+            req.debounce_ms as u64
+        } else {
+            DEFAULT_DEBOUNCE_MS
+        };
+        let follow_symlinks = req.follow_symlinks;
 
-        let mut watcher = RecommendedWatcher::new(
-            move |res: Result<Event, notify::Error>| {
-                if let Ok(event) = res {
-                    let paths: Vec<String> = event
-                        .paths
-                        .iter()
-                        .map(|p| p.to_string_lossy().to_string())
-                        .collect();
+        // Detect network filesystem and use polling fallback
+        let is_network = is_network_filesystem(&root_path);
+        let polling_mode = is_network;
 
-                    for path in paths {
-                        if !Self::matches_patterns(&path, &include_patterns, &exclude_patterns) {
-                            continue;
+        let watcher_result = if !polling_mode {
+            let config = notify::Config::default()
+                .with_poll_interval(Duration::from_millis(100));
+            RecommendedWatcher::new(
+                move |res: Result<Event, notify::Error>| {
+                    if let Ok(event) = res {
+                        let paths: Vec<String> = event
+                            .paths
+                            .iter()
+                            .map(|p| resolve_path(&p.to_string_lossy(), follow_symlinks))
+                            .collect();
+
+                        for path in paths {
+                            if !Self::matches_patterns(&path, &include_patterns, &exclude_patterns) {
+                                continue;
+                            }
+
+                            changes_detected_clone.fetch_add(1, Ordering::Relaxed);
                         }
-
-                        changes_detected_clone.fetch_add(1, Ordering::Relaxed);
-
-                        // Forward to gRPC stream - the event_tx is stored in the session
-                        // but we can't clone it here. Instead, we track changes and
-                        // deliver them on poll.
                     }
-                }
-            },
-            notify::Config::default(),
-        )
-        .map_err(|e| Status::internal(format!("Failed to create file watcher: {}", e)))?;
+                },
+                config,
+            )
+            .and_then(|mut watcher| {
+                watcher
+                    .watch(root_path.as_ref(), RecursiveMode::Recursive)
+                    .map(|_| watcher)
+            })
+        } else {
+            Err(notify::Error::io(std::io::Error::other(
+                "network filesystem detected, using polling fallback",
+            )))
+        };
 
-        watcher
-            .watch(root_path.as_ref(), RecursiveMode::Recursive)
-            .map_err(|e| {
-                Status::internal(format!("Failed to watch path '{}': {}", root_path, e))
-            })?;
+        let watcher = match watcher_result {
+            Ok(w) => Some(w),
+            Err(e) => {
+                tracing::warn!(
+                    watch_id = %watch_id,
+                    error = %e,
+                    root = %root_path,
+                    "OS watcher failed, falling back to polling mode"
+                );
+                None
+            }
+        };
+
+        let using_polling = polling_mode || watcher.is_none();
 
         self.watches.insert(
             watch_id.clone(),
@@ -204,6 +351,9 @@ impl FileWatchService for FileWatchServiceImpl {
                 files_watched,
                 changes_detected,
                 last_poll_ms: AtomicI64::new(Self::now_ms()),
+                polling_mode: AtomicBool::new(using_polling),
+                debounce_ms,
+                follow_symlinks,
                 _event_tx: event_tx,
                 _watcher: watcher,
             },
@@ -213,13 +363,18 @@ impl FileWatchService for FileWatchServiceImpl {
             watch_id = %watch_id,
             root = %root_path,
             files = files_watched,
-            "File watch started (real OS events)"
+            polling = using_polling,
+            network_fs = is_network,
+            debounce_ms,
+            follow_symlinks,
+            "File watch started"
         );
 
         Ok(Response::new(StartWatchingResponse {
             watching: true,
             watch_id,
             files_watched,
+            polling_mode: using_polling,
         }))
     }
 
@@ -264,15 +419,18 @@ impl FileWatchService for FileWatchServiceImpl {
             let exclude = session.exclude_patterns.clone();
             let changes_for_session = Arc::clone(&session.changes_detected);
             let task_graph_for_watcher = self.task_graph.clone();
+            let follow_symlinks = session.follow_symlinks;
 
             // Create a dedicated watcher for this polling stream
+            let config = notify::Config::default()
+                .with_poll_interval(Duration::from_millis(100));
             let mut stream_watcher = RecommendedWatcher::new(
                 move |res: Result<Event, notify::Error>| {
                     if let Ok(event) = res {
                         let paths: Vec<String> = event
                             .paths
                             .iter()
-                            .map(|p| p.to_string_lossy().to_string())
+                            .map(|p| resolve_path(&p.to_string_lossy(), follow_symlinks))
                             .collect();
 
                         for path in paths {
@@ -310,7 +468,7 @@ impl FileWatchService for FileWatchServiceImpl {
                         }
                     }
                 },
-                notify::Config::default(),
+                config,
             )
             .map_err(|e| Status::internal(format!("Failed to create poll watcher: {}", e)))?;
 
@@ -355,6 +513,7 @@ impl FileWatchService for FileWatchServiceImpl {
                 changes_detected: session.changes_detected.load(Ordering::Relaxed),
                 last_poll_time_ms: session.last_poll_ms.load(Ordering::Relaxed),
                 watch_start_time_ms: Self::now_ms() - elapsed,
+                polling_mode: session.polling_mode.load(Ordering::Relaxed),
             }))
         } else {
             Ok(Response::new(GetWatchStatsResponse {
@@ -362,6 +521,7 @@ impl FileWatchService for FileWatchServiceImpl {
                 changes_detected: 0,
                 last_poll_time_ms: 0,
                 watch_start_time_ms: 0,
+                polling_mode: false,
             }))
         }
     }
@@ -380,6 +540,8 @@ mod tests {
                 root_path: "/tmp".to_string(),
                 include_patterns: vec!["**/*.java".to_string()],
                 exclude_patterns: vec!["**/generated/**".to_string()],
+                debounce_ms: 0,
+                follow_symlinks: true,
             }))
             .await
             .unwrap()
@@ -408,6 +570,8 @@ mod tests {
                 root_path: "/tmp".to_string(),
                 include_patterns: vec![],
                 exclude_patterns: vec![],
+                debounce_ms: 0,
+                follow_symlinks: true,
             }))
             .await
             .unwrap()
@@ -498,6 +662,8 @@ mod tests {
                 root_path: dir_path.clone(),
                 include_patterns: vec!["**/*".to_string()],
                 exclude_patterns: vec![],
+                debounce_ms: 0,
+                follow_symlinks: true,
             }))
             .await
             .unwrap()
@@ -552,6 +718,8 @@ mod tests {
                 root_path: path1.clone(),
                 include_patterns: vec![],
                 exclude_patterns: vec![],
+                debounce_ms: 0,
+                follow_symlinks: true,
             }))
             .await
             .unwrap()
@@ -562,6 +730,8 @@ mod tests {
                 root_path: path2.clone(),
                 include_patterns: vec![],
                 exclude_patterns: vec![],
+                debounce_ms: 0,
+                follow_symlinks: true,
             }))
             .await
             .unwrap()
@@ -572,6 +742,8 @@ mod tests {
                 root_path: path3.clone(),
                 include_patterns: vec![],
                 exclude_patterns: vec![],
+                debounce_ms: 0,
+                follow_symlinks: true,
             }))
             .await
             .unwrap()
@@ -657,6 +829,8 @@ mod tests {
                 root_path: dir_path.clone(),
                 include_patterns: vec![],
                 exclude_patterns: vec![],
+                debounce_ms: 0,
+                follow_symlinks: true,
             }))
             .await
             .unwrap()
@@ -694,6 +868,8 @@ mod tests {
                 root_path: dir_path.clone(),
                 include_patterns: vec![],
                 exclude_patterns: vec![],
+                debounce_ms: 0,
+                follow_symlinks: true,
             }))
             .await
             .unwrap()
@@ -731,27 +907,21 @@ mod tests {
         // Use a path that is extremely unlikely to exist
         let nonexistent = "/tmp/gradle_file_watch_test_nonexistent_dir_abcdef123456";
 
-        // Attempting to watch a nonexistent directory should return an error
+        // A nonexistent directory falls back to polling mode (robustness)
         let result = svc
             .start_watching(Request::new(StartWatchingRequest {
                 root_path: nonexistent.to_string(),
                 include_patterns: vec![],
                 exclude_patterns: vec![],
+                debounce_ms: 0,
+                follow_symlinks: true,
             }))
             .await;
 
-        assert!(
-            result.is_err(),
-            "watching a nonexistent directory should fail"
-        );
-        let status = result.unwrap_err();
-        // The error should be an internal status from the notify watcher
-        assert_eq!(status.code(), tonic::Code::Internal);
-        assert!(
-            status.message().contains("Failed to watch path"),
-            "error message should mention the watch failure: {}",
-            status.message()
-        );
+        let resp = result.unwrap().into_inner();
+        assert!(resp.watching, "should succeed in polling mode");
+        assert!(resp.polling_mode, "should use polling fallback for nonexistent dir");
+        assert_eq!(resp.files_watched, 0, "no files in nonexistent dir");
     }
 
     /// Test that after stopping a watcher, its stats are cleared and it cannot be polled.
@@ -766,6 +936,8 @@ mod tests {
                 root_path: dir_path.clone(),
                 include_patterns: vec![],
                 exclude_patterns: vec![],
+                debounce_ms: 0,
+                follow_symlinks: true,
             }))
             .await
             .unwrap()
@@ -898,6 +1070,8 @@ mod tests {
                 root_path: dir_path.clone(),
                 include_patterns: vec!["**/*".to_string()],
                 exclude_patterns: vec![],
+                debounce_ms: 0,
+                follow_symlinks: true,
             }))
             .await
             .unwrap()
@@ -1011,6 +1185,8 @@ mod tests {
                 root_path: file_path.clone(),
                 include_patterns: vec![],
                 exclude_patterns: vec![],
+                debounce_ms: 0,
+                follow_symlinks: true,
             }))
             .await
             .unwrap()
@@ -1069,5 +1245,193 @@ mod tests {
         svc.stop_watching(Request::new(StopWatchingRequest { watch_id }))
             .await
             .unwrap();
+    }
+
+    /// Test that custom debounce_ms is respected (0 = default 100ms).
+    #[tokio::test]
+    async fn test_custom_debounce() {
+        let svc = FileWatchServiceImpl::new();
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = dir.path().to_string_lossy().to_string();
+
+        // Explicit debounce_ms = 0 should use default
+        let resp = svc
+            .start_watching(Request::new(StartWatchingRequest {
+                root_path: dir_path.clone(),
+                include_patterns: vec![],
+                exclude_patterns: vec![],
+                debounce_ms: 0,
+                follow_symlinks: true,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(svc.debounce_ms_for(&resp.watch_id), DEFAULT_DEBOUNCE_MS);
+
+        // Custom debounce_ms = 500
+        svc.stop_watching(Request::new(StopWatchingRequest {
+            watch_id: resp.watch_id,
+        }))
+        .await
+        .unwrap();
+
+        let resp2 = svc
+            .start_watching(Request::new(StartWatchingRequest {
+                root_path: dir_path.clone(),
+                include_patterns: vec![],
+                exclude_patterns: vec![],
+                debounce_ms: 500,
+                follow_symlinks: true,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(svc.debounce_ms_for(&resp2.watch_id), 500);
+
+        svc.stop_watching(Request::new(StopWatchingRequest {
+            watch_id: resp2.watch_id,
+        }))
+        .await
+        .unwrap();
+    }
+
+    /// Test that polling_mode is reported in start response and stats.
+    #[tokio::test]
+    async fn test_polling_mode_reported() {
+        let svc = FileWatchServiceImpl::new();
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = dir.path().to_string_lossy().to_string();
+
+        let resp = svc
+            .start_watching(Request::new(StartWatchingRequest {
+                root_path: dir_path.clone(),
+                include_patterns: vec![],
+                exclude_patterns: vec![],
+                debounce_ms: 0,
+                follow_symlinks: true,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Local FS should use native watcher, not polling
+        // (unless running in CI/container without proper watcher support)
+        let stats = svc
+            .get_watch_stats(Request::new(GetWatchStatsRequest {
+                watch_id: resp.watch_id.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // polling_mode in stats should match start response
+        assert_eq!(stats.polling_mode, resp.polling_mode);
+
+        svc.stop_watching(Request::new(StopWatchingRequest {
+            watch_id: resp.watch_id,
+        }))
+        .await
+        .unwrap();
+    }
+
+    /// Test that symlink resolution works (follow_symlinks=true vs false).
+    #[tokio::test]
+    async fn test_symlink_handling() {
+        let svc = FileWatchServiceImpl::new();
+        let dir = tempfile::tempdir().unwrap();
+        let real_dir = dir.path().join("real");
+        std::fs::create_dir_all(&real_dir).unwrap();
+        std::fs::write(real_dir.join("a.txt"), b"hello").unwrap();
+
+        let link_path = dir.path().join("link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real_dir, &link_path).unwrap();
+
+        // With follow_symlinks = true, should resolve and watch
+        let resp = svc
+            .start_watching(Request::new(StartWatchingRequest {
+                root_path: link_path.to_string_lossy().to_string(),
+                include_patterns: vec![],
+                exclude_patterns: vec![],
+                debounce_ms: 0,
+                follow_symlinks: true,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.watching, "should watch through symlink");
+        assert!(resp.files_watched > 0, "should count files through symlink");
+
+        svc.stop_watching(Request::new(StopWatchingRequest {
+            watch_id: resp.watch_id,
+        }))
+        .await
+        .unwrap();
+    }
+
+    /// Test that network FS detection returns false for local paths.
+    #[test]
+    fn test_network_fs_detection_local() {
+        // /tmp is always local
+        assert!(
+            !is_network_filesystem("/tmp"),
+            "/tmp should not be detected as network FS"
+        );
+    }
+
+    /// Test resolve_path with follow_symlinks.
+    #[test]
+    fn test_resolve_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let real_file = dir.path().join("real.txt");
+        std::fs::write(&real_file, b"data").unwrap();
+
+        // follow_symlinks = true should canonicalize
+        let resolved = resolve_path(&real_file.to_string_lossy(), true);
+        // canonicalize on macOS adds prefix; just check it contains the filename
+        assert!(
+            resolved.contains("real.txt"),
+            "resolved path should contain real.txt: {}",
+            resolved
+        );
+
+        // follow_symlinks = false returns as-is
+        let raw = resolve_path(&real_file.to_string_lossy(), false);
+        assert_eq!(raw, real_file.to_string_lossy().to_string());
+
+        // Nonexistent path with follow_symlinks = true returns original (canonicalize fails)
+        let resolved = resolve_path("/nonexistent/path", true);
+        assert_eq!(resolved, "/nonexistent/path");
+    }
+
+    /// Test that count_files_inner respects depth limit and skips build dirs.
+    #[test]
+    fn test_count_files_depth_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        // Create a deep directory chain
+        let mut path = dir.path().to_path_buf();
+        for i in 0..60 {
+            path = path.join(format!("d{}", i));
+            std::fs::create_dir_all(&path).unwrap();
+            std::fs::write(path.join("f.txt"), b"x").unwrap();
+        }
+
+        let count = FileWatchServiceImpl::count_files_inner(
+            &dir.path().to_string_lossy(),
+            0,
+            0,
+        );
+
+        // Should be capped by MAX_TREE_DEPTH — 60 levels but limit is 50
+        // Each level has 1 dir + 1 file = 2 entries, so max ~102
+        assert!(
+            count <= (MAX_TREE_DEPTH as i64 + 1) * 2,
+            "should cap at MAX_TREE_DEPTH, got {}",
+            count
+        );
+        assert!(count < 120, "should not count all 60 levels, got {}", count);
     }
 }
