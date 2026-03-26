@@ -61,6 +61,7 @@ message RecordOutcomeRequest {
   string actual_outcome = 3;
   bool prediction_correct = 4;
   int64 duration_ms = 5;
+  string input_fingerprint = 6;
 }
 message RecordOutcomeResponse { bool acknowledged = 1; }
 
@@ -198,6 +199,8 @@ message RunBuildResponse {
   int64 total_duration_ms = 8;
   string failure_message = 9;
   repeated TaskExecutionDetail task_details = 10;
+  int32 tasks_up_to_date = 11;
+  int32 tasks_from_cache = 12;
 }
 
 message TaskExecutionDetail {

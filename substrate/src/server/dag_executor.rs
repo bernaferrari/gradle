@@ -10,13 +10,16 @@ use super::scopes::BuildId;
 use super::work::WorkerScheduler;
 
 use crate::proto::{
-    dag_executor_service_server::DagExecutorService, task_graph_service_server::TaskGraphService,
-    AwaitBuildCompletionRequest, AwaitBuildCompletionResponse, BuildEventMessage,
-    CancelBuildRequest, CancelBuildResponse, GetBuildStatusRequest, GetBuildStatusResponse,
-    GetNextTaskRequest, GetNextTaskResponse, NotifyTaskFinishedRequest, NotifyTaskFinishedResponse,
-    NotifyTaskStartedRequest, NotifyTaskStartedResponse, ResolveExecutionPlanRequest,
-    RunBuildRequest, RunBuildResponse, StartBuildRequest, StartBuildResponse,
-    TaskExecutionDetail, TaskFinishedRequest, TaskStartedRequest, TaskStatusEntry,
+    dag_executor_service_server::DagExecutorService,
+    execution_plan_service_server::ExecutionPlanService,
+    task_graph_service_server::TaskGraphService, AwaitBuildCompletionRequest,
+    AwaitBuildCompletionResponse, BuildEventMessage, CancelBuildRequest, CancelBuildResponse,
+    GetBuildStatusRequest, GetBuildStatusResponse, GetNextTaskRequest, GetNextTaskResponse,
+    NotifyTaskFinishedRequest, NotifyTaskFinishedResponse, NotifyTaskStartedRequest,
+    NotifyTaskStartedResponse, PredictedOutcome, RecordOutcomeRequest,
+    ResolveExecutionPlanRequest, ResolvePlanRequest, RunBuildRequest, RunBuildResponse,
+    StartBuildRequest, StartBuildResponse, TaskExecutionDetail, TaskFinishedRequest,
+    TaskStartedRequest, TaskStatusEntry, WorkMetadata,
 };
 use crate::server::task_executor::{TaskExecutorRegistry, TaskInput};
 
@@ -32,6 +35,9 @@ struct TaskSlot {
     start_time_ms: i64,
     duration_ms: i64,
     dependencies: Vec<String>,
+    work_metadata: Option<WorkMetadata>,
+    predicted_outcome: i32,
+    input_fingerprint: String,
 }
 
 /// Runtime state for an active build execution.
@@ -159,6 +165,8 @@ pub struct DagExecutorServiceImpl {
     scheduler: Arc<WorkerScheduler>,
     /// Task graph service for plan resolution and progress tracking.
     task_graph: Arc<super::task_graph::TaskGraphServiceImpl>,
+    /// Execution plan service for UP-TO-DATE detection.
+    execution_plan: Arc<super::execution_plan::ExecutionPlanServiceImpl>,
     /// Event dispatchers for automatic fan-out (console + metrics).
     dispatchers: Vec<Arc<dyn EventDispatcher>>,
     /// Native task executor registry for RunBuild authoritative execution.
@@ -173,6 +181,7 @@ impl Clone for DagExecutorServiceImpl {
             builds: Arc::clone(&self.builds),
             scheduler: Arc::clone(&self.scheduler),
             task_graph: Arc::clone(&self.task_graph),
+            execution_plan: Arc::clone(&self.execution_plan),
             dispatchers: self.dispatchers.clone(),
             executor_registry: Arc::clone(&self.executor_registry),
             request_counter: AtomicI64::new(self.request_counter.load(Ordering::Relaxed)),
@@ -186,6 +195,7 @@ impl Default for DagExecutorServiceImpl {
         Self::new(
             Arc::new(WorkerScheduler::new(16)),
             Arc::new(super::task_graph::TaskGraphServiceImpl::new()),
+            Arc::new(super::execution_plan::ExecutionPlanServiceImpl::default()),
             Vec::new(),
         )
     }
@@ -195,12 +205,14 @@ impl DagExecutorServiceImpl {
     pub fn new(
         scheduler: Arc<WorkerScheduler>,
         task_graph: Arc<super::task_graph::TaskGraphServiceImpl>,
+        execution_plan: Arc<super::execution_plan::ExecutionPlanServiceImpl>,
         dispatchers: Vec<Arc<dyn EventDispatcher>>,
     ) -> Self {
         Self {
             builds: Arc::new(DashMap::new()),
             scheduler,
             task_graph,
+            execution_plan,
             dispatchers,
             executor_registry: Arc::new(TaskExecutorRegistry::new()),
             request_counter: AtomicI64::new(0),
@@ -399,6 +411,9 @@ impl DagExecutorService for DagExecutorServiceImpl {
                     start_time_ms: 0,
                     duration_ms: 0,
                     dependencies: deps,
+                    work_metadata: None,
+                    predicted_outcome: PredictedOutcome::PredictedUnknown as i32,
+                    input_fingerprint: String::new(),
                 },
             );
 
@@ -502,6 +517,8 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 total_duration_ms: now_ms() - start_time,
                 failure_message: start_resp.get_ref().error_message.clone(),
                 task_details: vec![],
+                tasks_up_to_date: 0,
+                tasks_from_cache: 0,
             }));
         }
 
@@ -518,6 +535,8 @@ impl DagExecutorService for DagExecutorServiceImpl {
         let mut tasks_completed: usize = 0;
         let mut task_details: Vec<TaskExecutionDetail> = Vec::new();
         let mut jvm_forward_count: i32 = 0;
+        let mut up_to_date_count: i32 = 0;
+        let mut from_cache_count: i32 = 0;
         let mut failure_message = String::new();
         let mut build_failed = false;
 
@@ -543,6 +562,178 @@ impl DagExecutorService for DagExecutorServiceImpl {
 
                 let task_path = next.task_path.clone();
                 let task_type = next.task_type.clone();
+
+                // Phase 2a: Check execution plan for UP-TO-DATE / FROM_CACHE.
+                let context_json = task_contexts.get(&task_path).cloned();
+                let work_meta = context_json.as_ref().and_then(|json| {
+                    serde_json::from_str::<serde_json::Value>(json).ok().and_then(|v| {
+                        Some(WorkMetadata {
+                            work_identity: v.get("work_identity")?.as_str()?.to_string(),
+                            display_name: v
+                                .get("display_name")
+                                .and_then(|d| d.as_str())
+                                .unwrap_or(&task_path)
+                                .to_string(),
+                            implementation_class: v
+                                .get("implementation_class")
+                                .and_then(|c| c.as_str())
+                                .unwrap_or(&task_type)
+                                .to_string(),
+                            input_properties: v
+                                .get("input_properties")
+                                .and_then(|p| p.as_object())
+                                .map(|obj| {
+                                    obj.iter()
+                                        .filter_map(|(k, val)| val.as_str().map(|s| (k.clone(), s.to_string())))
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
+                            input_file_fingerprints: v
+                                .get("input_file_fingerprints")
+                                .and_then(|f| f.as_object())
+                                .map(|obj| {
+                                    obj.iter()
+                                        .filter_map(|(k, val)| val.as_str().map(|s| (k.clone(), s.to_string())))
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
+                            caching_enabled: v
+                                .get("caching_enabled")
+                                .and_then(|c| c.as_bool())
+                                .unwrap_or(false),
+                            can_load_from_cache: v
+                                .get("can_load_from_cache")
+                                .and_then(|c| c.as_bool())
+                                .unwrap_or(false),
+                            has_previous_execution_state: v
+                                .get("has_previous_execution_state")
+                                .and_then(|c| c.as_bool())
+                                .unwrap_or(false),
+                            rebuild_reasons: v
+                                .get("rebuild_reasons")
+                                .and_then(|r| r.as_array())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|val| val.as_str().map(|s| s.to_string()))
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
+                        })
+                    })
+                });
+
+                if let Some(ref meta) = work_meta {
+                    // Store work_metadata on the task slot for later outcome recording.
+                    let build_id_clone = build_id_str.clone();
+                    if let Some(mut execution) = self.builds.get_mut(&BuildId::from(build_id_clone)) {
+                        if let Some(slot) = execution.tasks.get_mut(&task_path) {
+                            slot.work_metadata = Some(meta.clone());
+                            slot.input_fingerprint =
+                                super::execution_plan::ExecutionPlanServiceImpl::compute_fingerprint(
+                                    meta,
+                                );
+                        }
+                    }
+
+                    let plan_resp = self
+                        .execution_plan
+                        .resolve_plan(Request::new(ResolvePlanRequest {
+                            work: Some(meta.clone()),
+                            authoritative: false,
+                        }))
+                        .await?
+                        .into_inner();
+
+                    let action = crate::proto::PlanAction::try_from(plan_resp.action)
+                        .unwrap_or(crate::proto::PlanAction::Unknown);
+
+                    match action {
+                        crate::proto::PlanAction::SkipUpToDate => {
+                            // Mark task as UP-TO-DATE without executing.
+                            self.notify_task_finished(Request::new(NotifyTaskFinishedRequest {
+                                build_id: build_id_str.clone(),
+                                task_path: task_path.clone(),
+                                success: true,
+                                outcome: "UP_TO_DATE".to_string(),
+                                duration_ms: 0,
+                                failure_message: String::new(),
+                            }))
+                            .await?;
+
+                            // Record outcome to execution plan.
+                            let fp =
+                                super::execution_plan::ExecutionPlanServiceImpl::compute_fingerprint(
+                                    meta,
+                                );
+                            let _ = self
+                                .execution_plan
+                                .record_outcome(Request::new(RecordOutcomeRequest {
+                                    work_identity: meta.work_identity.clone(),
+                                    predicted_outcome: PredictedOutcome::PredictedUpToDate as i32,
+                                    actual_outcome: "UP_TO_DATE".to_string(),
+                                    prediction_correct: true,
+                                    duration_ms: 0,
+                                    input_fingerprint: fp,
+                                }))
+                                .await;
+
+                            up_to_date_count += 1;
+                            tasks_completed += 1;
+                            task_details.push(TaskExecutionDetail {
+                                task_path,
+                                task_type,
+                                outcome: "UP_TO_DATE".to_string(),
+                                duration_ms: 0,
+                                execution_mode: "skipped".to_string(),
+                                error_message: plan_resp.reasoning,
+                            });
+                            continue;
+                        }
+                        crate::proto::PlanAction::LoadFromCache => {
+                            self.notify_task_finished(Request::new(NotifyTaskFinishedRequest {
+                                build_id: build_id_str.clone(),
+                                task_path: task_path.clone(),
+                                success: true,
+                                outcome: "FROM_CACHE".to_string(),
+                                duration_ms: 0,
+                                failure_message: String::new(),
+                            }))
+                            .await?;
+
+                            let fp =
+                                super::execution_plan::ExecutionPlanServiceImpl::compute_fingerprint(
+                                    meta,
+                                );
+                            let _ = self
+                                .execution_plan
+                                .record_outcome(Request::new(RecordOutcomeRequest {
+                                    work_identity: meta.work_identity.clone(),
+                                    predicted_outcome: PredictedOutcome::PredictedFromCache as i32,
+                                    actual_outcome: "FROM_CACHE".to_string(),
+                                    prediction_correct: true,
+                                    duration_ms: 0,
+                                    input_fingerprint: fp,
+                                }))
+                                .await;
+
+                            from_cache_count += 1;
+                            tasks_completed += 1;
+                            task_details.push(TaskExecutionDetail {
+                                task_path,
+                                task_type,
+                                outcome: "FROM_CACHE".to_string(),
+                                duration_ms: 0,
+                                execution_mode: "cached".to_string(),
+                                error_message: plan_resp.reasoning,
+                            });
+                            continue;
+                        }
+                        _ => {
+                            // EXECUTE or UNKNOWN — proceed with execution.
+                        }
+                    }
+                }
+
                 let registry = Arc::clone(&self.executor_registry);
                 let contexts = task_contexts.clone();
                 let tx = result_tx.clone();
@@ -625,11 +816,44 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 }))
                 .await?;
 
+                // Record outcome to execution plan for executed tasks.
+                {
+                    let build_id_for_meta = build_id_str.clone();
+                    let task_path_for_meta = result.task_path.clone();
+                    let actual_outcome = result.outcome.clone();
+                    let duration_for_record = result.duration_ms;
+
+                    if let Some(execution) = self.builds.get(&BuildId::from(build_id_for_meta)) {
+                        if let Some(slot) = execution.tasks.get(&task_path_for_meta) {
+                            if let Some(ref meta) = slot.work_metadata {
+                                let predicted = slot.predicted_outcome;
+                                let prediction_correct =
+                                    (predicted == PredictedOutcome::PredictedExecute as i32
+                                        && actual_outcome == "EXECUTED")
+                                        || (predicted == PredictedOutcome::PredictedUnknown as i32);
+
+                                let _ = self
+                                    .execution_plan
+                                    .record_outcome(Request::new(RecordOutcomeRequest {
+                                        work_identity: meta.work_identity.clone(),
+                                        predicted_outcome: predicted,
+                                        actual_outcome,
+                                        prediction_correct,
+                                        duration_ms: duration_for_record,
+                                        input_fingerprint: slot.input_fingerprint.clone(),
+                                    }))
+                                    .await;
+                            }
+                        }
+                    }
+                }
+
                 if result.execution_mode == "jvm_forward" {
                     jvm_forward_count += 1;
                 }
                 if !result.success && failure_message.is_empty() {
-                    failure_message = format!("Task {} failed: {}", result.task_path, result.error_message);
+                    failure_message =
+                        format!("Task {} failed: {}", result.task_path, result.error_message);
                     build_failed = true;
                 }
 
@@ -662,6 +886,8 @@ impl DagExecutorService for DagExecutorServiceImpl {
             dispatched = tasks_dispatched,
             completed = tasks_completed,
             jvm_forwarded = jvm_forward_count,
+            up_to_date = up_to_date_count,
+            from_cache = from_cache_count,
             duration_ms = total_duration,
             "RunBuild completed"
         );
@@ -670,13 +896,21 @@ impl DagExecutorService for DagExecutorServiceImpl {
             build_id: build_id_str,
             final_status,
             total_tasks,
-            tasks_succeeded: task_details.iter().filter(|d| d.outcome == "EXECUTED").count() as i32,
+            tasks_succeeded: task_details
+                .iter()
+                .filter(|d| d.outcome == "EXECUTED" || d.outcome == "UP_TO_DATE" || d.outcome == "FROM_CACHE")
+                .count() as i32,
             tasks_failed: task_details.iter().filter(|d| d.outcome == "FAILED").count() as i32,
-            tasks_skipped: task_details.iter().filter(|d| d.outcome == "JVM_FORWARD").count() as i32,
+            tasks_skipped: task_details
+                .iter()
+                .filter(|d| d.outcome == "JVM_FORWARD")
+                .count() as i32,
             tasks_forwarded_to_jvm: jvm_forward_count,
             total_duration_ms: total_duration,
             failure_message,
             task_details,
+            tasks_up_to_date: up_to_date_count,
+            tasks_from_cache: from_cache_count,
         }))
     }
 
@@ -1123,7 +1357,12 @@ mod tests {
     fn make_svc() -> DagExecutorServiceImpl {
         let task_graph = Arc::new(super::super::task_graph::TaskGraphServiceImpl::new());
         let scheduler = Arc::new(WorkerScheduler::new(4));
-        DagExecutorServiceImpl::new(scheduler, task_graph, Vec::new())
+        DagExecutorServiceImpl::new(
+            scheduler,
+            task_graph,
+            Arc::new(super::super::execution_plan::ExecutionPlanServiceImpl::default()),
+            Vec::new(),
+        )
     }
 
     /// Helper to register tasks in the task graph before starting a build.
@@ -2371,5 +2610,373 @@ mod tests {
         assert_eq!(resp.task_details[1].task_path, ":b");
         assert_eq!(resp.task_details[1].execution_mode, "native");
         assert!(resp.task_details[1].duration_ms >= 0);
+    }
+
+    /// Test that tasks with matching execution history are skipped as UP-TO-DATE.
+    #[tokio::test]
+    async fn test_run_build_skips_up_to_date_tasks() {
+        let svc = make_svc();
+
+        register_chain(
+            &svc,
+            "build-utd",
+            &[(":compileJava", "JavaCompile", &[])],
+        )
+        .await;
+
+        let dir = tempfile::tempdir().unwrap();
+
+        // First run: execute the task (no history → always executes)
+        let ctx1 = serde_json::json!({
+            "work_identity": ":project:compileJava",
+            "display_name": ":project:compileJava",
+            "implementation_class": "org.gradle.api.tasks.compile.JavaCompile",
+            "input_properties": {"classpath": "libs/a.jar"},
+            "input_file_fingerprints": {"src/Main.java": "abc123"},
+            "caching_enabled": false,
+            "can_load_from_cache": false,
+            "has_previous_execution_state": false,
+            "rebuild_reasons": [],
+            "source_files": [dir.path().join("src").to_string_lossy()],
+            "target_dir": dir.path().join("classes").to_string_lossy()
+        })
+        .to_string();
+
+        let mut contexts1 = HashMap::new();
+        contexts1.insert(":compileJava".to_string(), ctx1);
+
+        let resp1 = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "build-utd".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts1,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp1.total_tasks, 1);
+        // First run: no history, so it executes (JavaCompile has no real javac, so it may fail
+        // or succeed depending on the environment — either way, history is recorded)
+
+        // Second run: same inputs → should be UP-TO-DATE
+        register_chain(
+            &svc,
+            "build-utd-2",
+            &[(":compileJava", "JavaCompile", &[])],
+        )
+        .await;
+
+        let ctx2 = serde_json::json!({
+            "work_identity": ":project:compileJava",
+            "display_name": ":project:compileJava",
+            "implementation_class": "org.gradle.api.tasks.compile.JavaCompile",
+            "input_properties": {"classpath": "libs/a.jar"},
+            "input_file_fingerprints": {"src/Main.java": "abc123"},
+            "caching_enabled": false,
+            "can_load_from_cache": false,
+            "has_previous_execution_state": true,
+            "rebuild_reasons": [],
+            "source_files": [dir.path().join("src").to_string_lossy()],
+            "target_dir": dir.path().join("classes").to_string_lossy()
+        })
+        .to_string();
+
+        let mut contexts2 = HashMap::new();
+        contexts2.insert(":compileJava".to_string(), ctx2);
+
+        let resp2 = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "build-utd-2".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts2,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp2.total_tasks, 1);
+        // Second run with same fingerprint should be UP-TO-DATE
+        assert_eq!(resp2.tasks_up_to_date, 1, "task should be UP-TO-DATE on second run");
+        assert_eq!(resp2.tasks_succeeded, 1);
+    }
+
+    /// Test that UP-TO-DATE count is reflected in RunBuildResponse.
+    #[tokio::test]
+    async fn test_run_build_up_to_date_counted_in_response() {
+        let svc = make_svc();
+
+        register_chain(
+            &svc,
+            "build-utd-count",
+            &[(":task1", "Mkdir", &[]), (":task2", "Mkdir", &[])],
+        )
+        .await;
+
+        let dir = tempfile::tempdir().unwrap();
+
+        // Run once to establish history
+        let ctx1 = serde_json::json!({
+            "work_identity": ":project:task1",
+            "input_properties": {"key": "value"},
+            "input_file_fingerprints": {"f": "hash1"},
+            "rebuild_reasons": [],
+            "source_files": [dir.path().join("t1").to_string_lossy()],
+            "target_dir": ""
+        })
+        .to_string();
+
+        let ctx2 = serde_json::json!({
+            "work_identity": ":project:task2",
+            "input_properties": {"key": "value"},
+            "input_file_fingerprints": {"f": "hash2"},
+            "rebuild_reasons": [],
+            "source_files": [dir.path().join("t2").to_string_lossy()],
+            "target_dir": ""
+        })
+        .to_string();
+
+        let mut contexts1 = HashMap::new();
+        contexts1.insert(":task1".to_string(), ctx1);
+        contexts1.insert(":task2".to_string(), ctx2);
+
+        let _ = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "build-utd-count".to_string(),
+                max_parallelism: 2,
+                task_filter: vec![],
+                task_contexts: contexts1,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Second run — both should be UP-TO-DATE
+        register_chain(
+            &svc,
+            "build-utd-count-2",
+            &[(":task1", "Mkdir", &[]), (":task2", "Mkdir", &[])],
+        )
+        .await;
+
+        let ctx1b = serde_json::json!({
+            "work_identity": ":project:task1",
+            "input_properties": {"key": "value"},
+            "input_file_fingerprints": {"f": "hash1"},
+            "rebuild_reasons": [],
+            "source_files": [dir.path().join("t1").to_string_lossy()],
+            "target_dir": ""
+        })
+        .to_string();
+
+        let ctx2b = serde_json::json!({
+            "work_identity": ":project:task2",
+            "input_properties": {"key": "value"},
+            "input_file_fingerprints": {"f": "hash2"},
+            "rebuild_reasons": [],
+            "source_files": [dir.path().join("t2").to_string_lossy()],
+            "target_dir": ""
+        })
+        .to_string();
+
+        let mut contexts2 = HashMap::new();
+        contexts2.insert(":task1".to_string(), ctx1b);
+        contexts2.insert(":task2".to_string(), ctx2b);
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "build-utd-count-2".to_string(),
+                max_parallelism: 2,
+                task_filter: vec![],
+                task_contexts: contexts2,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.tasks_up_to_date, 2);
+        assert_eq!(resp.tasks_from_cache, 0);
+        assert_eq!(resp.tasks_succeeded, 2);
+    }
+
+    /// Test that tasks without work_metadata in context always execute.
+    #[tokio::test]
+    async fn test_run_build_no_metadata_always_executes() {
+        let svc = make_svc();
+
+        register_chain(
+            &svc,
+            "build-no-meta",
+            &[(":a", "UnknownTask", &[])],
+        )
+        .await;
+
+        // No task_contexts at all → no work_metadata → always execute
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "build-no-meta".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: Default::default(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.total_tasks, 1);
+        assert_eq!(resp.tasks_up_to_date, 0);
+        assert_eq!(resp.tasks_forwarded_to_jvm, 1);
+    }
+
+    /// Test that rebuild_reasons in metadata forces execution even with matching history.
+    #[tokio::test]
+    async fn test_run_build_rebuild_reason_forces_execution() {
+        let svc = make_svc();
+
+        register_chain(
+            &svc,
+            "build-rebuild",
+            &[(":compileJava", "JavaCompile", &[])],
+        )
+        .await;
+
+        let dir = tempfile::tempdir().unwrap();
+
+        // First run: establish history
+        let ctx1 = serde_json::json!({
+            "work_identity": ":project:compileJava",
+            "input_properties": {"cp": "old.jar"},
+            "input_file_fingerprints": {"src/A.java": "aaa"},
+            "rebuild_reasons": [],
+            "source_files": [dir.path().join("src").to_string_lossy()],
+            "target_dir": dir.path().join("classes").to_string_lossy()
+        })
+        .to_string();
+
+        let mut contexts1 = HashMap::new();
+        contexts1.insert(":compileJava".to_string(), ctx1);
+
+        let _ = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "build-rebuild".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts1,
+            }))
+            .await;
+
+        // Second run: same inputs but with rebuild_reasons → must execute
+        register_chain(
+            &svc,
+            "build-rebuild-2",
+            &[(":compileJava", "JavaCompile", &[])],
+        )
+        .await;
+
+        let ctx2 = serde_json::json!({
+            "work_identity": ":project:compileJava",
+            "input_properties": {"cp": "old.jar"},
+            "input_file_fingerprints": {"src/A.java": "aaa"},
+            "rebuild_reasons": ["output file deleted"],
+            "source_files": [dir.path().join("src").to_string_lossy()],
+            "target_dir": dir.path().join("classes").to_string_lossy()
+        })
+        .to_string();
+
+        let mut contexts2 = HashMap::new();
+        contexts2.insert(":compileJava".to_string(), ctx2);
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "build-rebuild-2".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts2,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Should NOT be UP-TO-DATE despite matching fingerprint
+        assert_eq!(resp.tasks_up_to_date, 0, "rebuild_reasons should force execution");
+        assert_eq!(resp.total_tasks, 1);
+    }
+
+    /// Test that execution plan receives record_outcome calls after task execution.
+    #[tokio::test]
+    async fn test_run_build_records_outcome_to_history() {
+        let svc = make_svc();
+
+        register_chain(
+            &svc,
+            "build-record",
+            &[(":task", "Mkdir", &[])],
+        )
+        .await;
+
+        let dir = tempfile::tempdir().unwrap();
+
+        let ctx = serde_json::json!({
+            "work_identity": ":project:task",
+            "input_properties": {"key": "val"},
+            "input_file_fingerprints": {"f": "h1"},
+            "rebuild_reasons": [],
+            "source_files": [dir.path().join("t").to_string_lossy()],
+            "target_dir": ""
+        })
+        .to_string();
+
+        let mut contexts = HashMap::new();
+        contexts.insert(":task".to_string(), ctx.clone());
+
+        // Run once — this should record outcome to execution plan history
+        let _ = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "build-record".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Verify history was recorded by checking internal state
+        let has_entry = svc
+            .execution_plan
+            .history
+            .entries
+            .contains_key(":project:task");
+
+        assert!(
+            has_entry,
+            "execution plan should have recorded history for :project:task"
+        );
+
+        // Run again with same inputs → should be UP-TO-DATE (proves history is being used)
+        register_chain(
+            &svc,
+            "build-record-2",
+            &[(":task", "Mkdir", &[])],
+        )
+        .await;
+
+        let mut contexts2 = HashMap::new();
+        contexts2.insert(":task".to_string(), ctx);
+
+        let resp2 = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "build-record-2".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts2,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp2.tasks_up_to_date, 1, "second run should be UP-TO-DATE");
     }
 }

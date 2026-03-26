@@ -41,12 +41,12 @@ impl PredictionStats {
 
 /// Tracks execution history keyed by work identity + input fingerprint.
 #[derive(Default)]
-struct ExecutionPlanHistory {
-    entries: DashMap<String, ExecutionRecord>,
+pub(crate) struct ExecutionPlanHistory {
+    pub(crate) entries: DashMap<String, ExecutionRecord>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-struct ExecutionRecord {
+pub(crate) struct ExecutionRecord {
     input_fingerprint: String,
     outcome: String,
     duration_ms: i64,
@@ -69,10 +69,21 @@ impl ExecutionRecord {
 
 pub struct ExecutionPlanServiceImpl {
     _scheduler: Arc<WorkerScheduler>,
-    history: ExecutionPlanHistory,
-    stats: PredictionStats,
+    pub(crate) history: Arc<ExecutionPlanHistory>,
+    stats: Arc<PredictionStats>,
     /// Optional persistent history for cross-daemon-restart durability.
     persistent_history: Option<Arc<ExecutionHistoryServiceImpl>>,
+}
+
+impl Clone for ExecutionPlanServiceImpl {
+    fn clone(&self) -> Self {
+        Self {
+            _scheduler: Arc::clone(&self._scheduler),
+            history: Arc::clone(&self.history),
+            stats: Arc::clone(&self.stats),
+            persistent_history: self.persistent_history.clone(),
+        }
+    }
 }
 
 impl Default for ExecutionPlanServiceImpl {
@@ -85,8 +96,8 @@ impl ExecutionPlanServiceImpl {
     pub fn new(scheduler: Arc<WorkerScheduler>) -> Self {
         Self {
             _scheduler: scheduler,
-            history: ExecutionPlanHistory::default(),
-            stats: PredictionStats::default(),
+            history: Arc::new(ExecutionPlanHistory::default()),
+            stats: Arc::new(PredictionStats::default()),
             persistent_history: None,
         }
     }
@@ -97,8 +108,8 @@ impl ExecutionPlanServiceImpl {
     ) -> Self {
         Self {
             _scheduler: scheduler,
-            history: ExecutionPlanHistory::default(),
-            stats: PredictionStats::default(),
+            history: Arc::new(ExecutionPlanHistory::default()),
+            stats: Arc::new(PredictionStats::default()),
             persistent_history: Some(persistent_history),
         }
     }
@@ -159,6 +170,7 @@ impl ExecutionPlanServiceImpl {
         actual_outcome: &str,
         prediction_correct: bool,
         duration_ms: i64,
+        input_fingerprint: &str,
     ) {
         self.stats.record("overall", prediction_correct);
 
@@ -178,6 +190,10 @@ impl ExecutionPlanServiceImpl {
 
         let updated_record = if let Some((_, entry)) = self.history.entries.remove(work_identity) {
             let mut entry = entry;
+            // Update fingerprint if provided
+            if !input_fingerprint.is_empty() {
+                entry.input_fingerprint = input_fingerprint.to_string();
+            }
             if is_execute {
                 entry.consecutive_executions += 1;
                 entry.total_consecutive_ms += duration_ms;
@@ -191,7 +207,7 @@ impl ExecutionPlanServiceImpl {
         } else {
             // No existing record — create a new one
             Some(ExecutionRecord {
-                input_fingerprint: String::new(), // fingerprint unknown at this point
+                input_fingerprint: input_fingerprint.to_string(),
                 outcome: actual_outcome.to_string(),
                 duration_ms,
                 consecutive_executions: if is_execute { 1 } else { 0 },
@@ -219,7 +235,7 @@ impl ExecutionPlanServiceImpl {
     }
 
     /// Compute a composite fingerprint from work metadata.
-    fn compute_fingerprint(work: &WorkMetadata) -> String {
+    pub(crate) fn compute_fingerprint(work: &WorkMetadata) -> String {
         let mut hasher = Md5::new();
 
         // Include scalar input properties in sorted order
@@ -448,6 +464,7 @@ impl ExecutionPlanService for ExecutionPlanServiceImpl {
             &req.actual_outcome,
             req.prediction_correct,
             req.duration_ms,
+            &req.input_fingerprint,
         );
 
         Ok(Response::new(RecordOutcomeResponse { acknowledged: true }))
@@ -760,6 +777,7 @@ mod tests {
             "EXECUTED",
             true,
             200,
+            "",
         );
 
         // Verify via get clone to avoid holding lock
@@ -779,6 +797,7 @@ mod tests {
             "UP_TO_DATE",
             true,
             0,
+            "",
         );
 
         let entry = svc.history.entries.get(":compileJava").map(|r| {
@@ -834,6 +853,7 @@ mod tests {
             "EXECUTED",
             true,
             500,
+            "",
         );
 
         // Should be in memory
@@ -880,6 +900,7 @@ mod tests {
             "EXECUTED",
             true,
             600,
+            "",
         );
 
         let record = svc2.history.entries.get(":compileJava").map(|r| {
