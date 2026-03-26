@@ -298,10 +298,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let toolchain_dir = PathBuf::from(&args.toolchain_dir);
     let toolchain = ToolchainServiceImpl::new(toolchain_dir);
 
-    // DAG Executor (orchestrates build execution using task graph + worker scheduler)
+    // DAG Executor (orchestrates build execution using task graph + worker scheduler + execution plan)
     let dag_executor = DagExecutorServiceImpl::new(
         work_scheduler.clone(),
         Arc::clone(&task_graph),
+        Arc::new(execution_plan.clone()),
         event_dispatchers,
     );
 
