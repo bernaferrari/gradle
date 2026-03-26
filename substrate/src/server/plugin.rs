@@ -4,9 +4,12 @@ use tonic::{Request, Response, Status};
 
 use crate::proto::{
     plugin_service_server::PluginService, ApplyPluginRequest, ApplyPluginResponse,
-    CheckPluginCompatibilityRequest, CheckPluginCompatibilityResponse, GetAppliedPluginsRequest,
-    GetAppliedPluginsResponse, HasPluginRequest, HasPluginResponse, PluginInfo,
-    RegisterPluginRequest, RegisterPluginResponse,
+    CheckPluginCompatibilityRequest, CheckPluginCompatibilityResponse, ExtensionInfo,
+    GetAppliedPluginsRequest, GetAppliedPluginsResponse, GetExtensionRequest,
+    GetExtensionResponse, GetExtensionsRequest, GetExtensionsResponse, HasPluginRequest,
+    HasPluginResponse, PluginInfo, RegisterConventionRequest, RegisterConventionResponse,
+    RegisterPluginRequest, RegisterPluginResponse, ResolveConventionRequest,
+    ResolveConventionResponse,
 };
 
 /// Registered plugin metadata.
@@ -31,6 +34,28 @@ struct AppliedPlugin {
     apply_order: i32,
 }
 
+/// Extension registered by a plugin.
+struct ExtensionEntry {
+    name: String,
+    extension_type: String,
+    source_plugin: String,
+    properties: std::collections::HashMap<String, String>,
+}
+
+/// Convention mapping rule.
+struct ConventionEntry {
+    project_path: String,
+    plugin_id: String,
+    conventions: std::collections::HashMap<String, String>,
+    convention_source: String,
+}
+
+impl ConventionEntry {
+    fn project_and_plugin(&self) -> (&str, &str) {
+        (&self.project_path, &self.plugin_id)
+    }
+}
+
 /// Plugin compatibility check result.
 pub struct CompatibilityResult {
     compatible: bool,
@@ -46,6 +71,10 @@ pub struct PluginServiceImpl {
     registry: DashMap<String, PluginEntry>,
     applied: DashMap<String, Vec<AppliedPlugin>>,
     apply_counters: DashMap<String, i32>,
+    /// Extensions keyed by (project_path, extension_name).
+    extensions: DashMap<(String, String), ExtensionEntry>,
+    /// Convention mappings keyed by (project_path, property_name).
+    conventions: DashMap<(String, String), ConventionEntry>,
 }
 
 impl PluginServiceImpl {
@@ -54,6 +83,8 @@ impl PluginServiceImpl {
             registry: DashMap::new(),
             applied: DashMap::new(),
             apply_counters: DashMap::new(),
+            extensions: DashMap::new(),
+            conventions: DashMap::new(),
         }
     }
 
@@ -378,6 +409,143 @@ impl PluginService for PluginServiceImpl {
             errors: result.errors,
             warnings: result.warnings,
         }))
+    }
+
+    async fn get_extension(
+        &self,
+        request: Request<GetExtensionRequest>,
+    ) -> Result<Response<GetExtensionResponse>, Status> {
+        let req = request.into_inner();
+        let key = (req.project_path.clone(), req.extension_name.clone());
+
+        if let Some(ext) = self.extensions.get(&key) {
+            // If a specific property_path is requested, try to find it
+            let value = if !req.property_path.is_empty() {
+                ext.properties
+                    .get(&req.property_path)
+                    .cloned()
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+
+            Ok(Response::new(GetExtensionResponse {
+                found: true,
+                value,
+                extension_type: ext.extension_type.clone(),
+                properties: ext.properties.clone(),
+                error_message: String::new(),
+            }))
+        } else {
+            Ok(Response::new(GetExtensionResponse {
+                found: false,
+                value: String::new(),
+                extension_type: String::new(),
+                properties: std::collections::HashMap::new(),
+                error_message: format!(
+                    "Extension '{}' not found in project '{}'",
+                    req.extension_name, req.project_path
+                ),
+            }))
+        }
+    }
+
+    async fn get_extensions(
+        &self,
+        request: Request<GetExtensionsRequest>,
+    ) -> Result<Response<GetExtensionsResponse>, Status> {
+        let req = request.into_inner();
+        let mut extensions = Vec::new();
+
+        for entry in self.extensions.iter() {
+            if entry.key().0 == req.project_path {
+                extensions.push(ExtensionInfo {
+                    name: entry.name.clone(),
+                    r#type: entry.extension_type.clone(),
+                    source_plugin: entry.source_plugin.clone(),
+                    properties: entry.properties.clone(),
+                });
+            }
+        }
+
+        // Sort by name for deterministic output
+        extensions.sort_by(|a, b| a.name.cmp(&b.name));
+
+        Ok(Response::new(GetExtensionsResponse { extensions }))
+    }
+
+    async fn register_convention(
+        &self,
+        request: Request<RegisterConventionRequest>,
+    ) -> Result<Response<RegisterConventionResponse>, Status> {
+        let req = request.into_inner();
+
+        for (property_name, default_value) in &req.conventions {
+            let key = (req.project_path.clone(), property_name.clone());
+            let entry = ConventionEntry {
+                project_path: req.project_path.clone(),
+                plugin_id: req.plugin_id.clone(),
+                conventions: req.conventions.clone(),
+                convention_source: req.convention_source.clone(),
+            };
+            let _ = entry.project_and_plugin(); // verify fields are accessible
+            self.conventions.insert(key, entry);
+            tracing::debug!(
+                project_path = %req.project_path,
+                property = %property_name,
+                source = %req.convention_source,
+                value = %default_value,
+                "Convention registered"
+            );
+        }
+
+        Ok(Response::new(RegisterConventionResponse { registered: true }))
+    }
+
+    async fn resolve_convention(
+        &self,
+        request: Request<ResolveConventionRequest>,
+    ) -> Result<Response<ResolveConventionResponse>, Status> {
+        let req = request.into_inner();
+        let key = (req.project_path.clone(), req.property_name.clone());
+
+        if let Some(conv) = self.conventions.get(&key) {
+            let value = conv
+                .conventions
+                .get(&req.property_name)
+                .cloned()
+                .unwrap_or_default();
+
+            // Check if source matches preferred sources
+            let source_matches = req.preferred_sources.is_empty()
+                || req
+                    .preferred_sources
+                    .iter()
+                    .any(|s| s == &conv.convention_source);
+
+            if source_matches {
+                Ok(Response::new(ResolveConventionResponse {
+                    found: true,
+                    value,
+                    source: conv.convention_source.clone(),
+                    resolved_by: "convention".to_string(),
+                }))
+            } else {
+                Ok(Response::new(ResolveConventionResponse {
+                    found: false,
+                    value: String::new(),
+                    source: String::new(),
+                    resolved_by: String::new(),
+                }))
+            }
+        } else {
+            Ok(Response::new(ResolveConventionResponse {
+                found: false,
+                value: String::new(),
+                source: String::new(),
+                resolved_by: String::new(),
+            }))
+        }
     }
 }
 
@@ -822,5 +990,213 @@ mod tests {
         assert_eq!(ids.len(), 2);
         assert!(ids.contains(&"java".to_string()));
         assert!(ids.contains(&"kotlin".to_string()));
+    }
+
+    // --- Extension tests ---
+
+    #[tokio::test]
+    async fn test_get_extension_not_found() {
+        let svc = PluginServiceImpl::new();
+
+        let resp = svc
+            .get_extension(Request::new(GetExtensionRequest {
+                project_path: ":app".to_string(),
+                extension_name: "android".to_string(),
+                property_path: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.found);
+        assert!(!resp.error_message.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_register_and_get_extension() {
+        let svc = PluginServiceImpl::new();
+
+        let mut props = std::collections::HashMap::new();
+        props.insert(
+            "compileSdkVersion".to_string(),
+            "34".to_string(),
+        );
+        props.insert(
+            "minSdkVersion".to_string(),
+            "24".to_string(),
+        );
+
+        svc.extensions.insert(
+            (":app".to_string(), "android".to_string()),
+            ExtensionEntry {
+                name: "android".to_string(),
+                extension_type: "com.android.build.gradle.LibraryExtension".to_string(),
+                source_plugin: "com.android.library".to_string(),
+                properties: props.clone(),
+            },
+        );
+
+        let resp = svc
+            .get_extension(Request::new(GetExtensionRequest {
+                project_path: ":app".to_string(),
+                extension_name: "android".to_string(),
+                property_path: "compileSdkVersion".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.found);
+        assert_eq!(resp.value, "34");
+        assert_eq!(
+            resp.extension_type,
+            "com.android.build.gradle.LibraryExtension"
+        );
+        assert_eq!(resp.properties.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_get_extensions_lists_all() {
+        let svc = PluginServiceImpl::new();
+
+        svc.extensions.insert(
+            (":app".to_string(), "android".to_string()),
+            ExtensionEntry {
+                name: "android".to_string(),
+                extension_type: "AndroidExt".to_string(),
+                source_plugin: "android".to_string(),
+                properties: std::collections::HashMap::new(),
+            },
+        );
+        svc.extensions.insert(
+            (":app".to_string(), "kotlin".to_string()),
+            ExtensionEntry {
+                name: "kotlin".to_string(),
+                extension_type: "KotlinExt".to_string(),
+                source_plugin: "kotlin-android".to_string(),
+                properties: std::collections::HashMap::new(),
+            },
+        );
+        // Extension in different project — should not appear
+        svc.extensions.insert(
+            (":lib".to_string(), "java".to_string()),
+            ExtensionEntry {
+                name: "java".to_string(),
+                extension_type: "JavaExt".to_string(),
+                source_plugin: "java".to_string(),
+                properties: std::collections::HashMap::new(),
+            },
+        );
+
+        let resp = svc
+            .get_extensions(Request::new(GetExtensionsRequest {
+                project_path: ":app".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.extensions.len(), 2);
+        // Should be sorted by name
+        assert_eq!(resp.extensions[0].name, "android");
+        assert_eq!(resp.extensions[1].name, "kotlin");
+    }
+
+    // --- Convention tests ---
+
+    #[tokio::test]
+    async fn test_register_and_resolve_convention() {
+        let svc = PluginServiceImpl::new();
+
+        let mut conventions = std::collections::HashMap::new();
+        conventions.insert("sourceCompatibility".to_string(), "17".to_string());
+        conventions.insert("targetCompatibility".to_string(), "17".to_string());
+
+        svc.register_convention(Request::new(RegisterConventionRequest {
+            project_path: ":app".to_string(),
+            plugin_id: "java".to_string(),
+            conventions: conventions.clone(),
+            convention_source: "java".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        let resp = svc
+            .resolve_convention(Request::new(ResolveConventionRequest {
+                project_path: ":app".to_string(),
+                property_name: "sourceCompatibility".to_string(),
+                preferred_sources: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.found);
+        assert_eq!(resp.value, "17");
+        assert_eq!(resp.source, "java");
+        assert_eq!(resp.resolved_by, "convention");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_convention_not_found() {
+        let svc = PluginServiceImpl::new();
+
+        let resp = svc
+            .resolve_convention(Request::new(ResolveConventionRequest {
+                project_path: ":app".to_string(),
+                property_name: "nonexistent".to_string(),
+                preferred_sources: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.found);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_convention_with_preferred_source() {
+        let svc = PluginServiceImpl::new();
+
+        // Register java convention
+        let mut java_convs = std::collections::HashMap::new();
+        java_convs.insert("jvmTarget".to_string(), "17".to_string());
+        svc.register_convention(Request::new(RegisterConventionRequest {
+            project_path: ":app".to_string(),
+            plugin_id: "java".to_string(),
+            conventions: java_convs,
+            convention_source: "java".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        // Register kotlin convention
+        let mut kt_convs = std::collections::HashMap::new();
+        kt_convs.insert("jvmTarget".to_string(), "21".to_string());
+        svc.register_convention(Request::new(RegisterConventionRequest {
+            project_path: ":app".to_string(),
+            plugin_id: "kotlin".to_string(),
+            conventions: kt_convs,
+            convention_source: "kotlin".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        // Prefer kotlin source — but java was registered first so it wins
+        // (convention is per-key, last-write-wins)
+        let resp = svc
+            .resolve_convention(Request::new(ResolveConventionRequest {
+                project_path: ":app".to_string(),
+                property_name: "jvmTarget".to_string(),
+                preferred_sources: vec!["kotlin".to_string()],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Kotlin convention was registered last, so it wins (last-write-wins in DashMap)
+        // But if the source doesn't match preferred, it returns not found
+        // In our case kotlin IS the preferred source, so it should be found
+        assert!(resp.found, "kotlin convention should be found with preferred source kotlin");
     }
 }
