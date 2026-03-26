@@ -33,6 +33,12 @@ service ParserService {
 message ParseGroovyRequest {
   string script_content = 1;
   string file_path = 2;
+  Dialect dialect = 3;
+}
+
+enum Dialect {
+  GROOVY = 0;
+  KOTLIN_DSL = 1;
 }
 
 message ParseGroovyResponse {
