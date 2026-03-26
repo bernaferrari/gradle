@@ -254,6 +254,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 14: Build operations
     let build_operations = BuildOperationsServiceImpl::new();
 
+    // Build event streaming (wired to console + metrics for auto fan-out)
+    // Created before bootstrap so bootstrap can emit lifecycle events.
+    let console = Arc::new(ConsoleServiceImpl::new());
+    let build_metrics = Arc::new(BuildMetricsServiceImpl::new());
+    let event_dispatchers: Vec<
+        Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
+    > = vec![
+        Arc::clone(&console)
+            as Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
+        Arc::clone(&build_metrics)
+            as Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
+    ];
+    let build_event_stream = BuildEventStreamServiceImpl::with_dispatchers(event_dispatchers.clone());
+
     // Scope registry — tracks session→build membership for proper scope isolation
     let scope_registry = Arc::new(ScopeRegistry::new());
 
@@ -262,12 +276,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let gc_config_cache_dir = config_cache_dir.clone();
     let build_plan_shadow_store = Arc::new(BuildPlanShadowStore::new(config_cache_dir.clone()));
 
-    // Phase 15: Bootstrap (wired to scope registry for session tracking)
+    // Phase 15: Bootstrap (wired to scope registry + event stream for lifecycle events)
     let bootstrap = BootstrapServiceImpl::with_scope_registry_and_shadow(
         scope_registry.clone(),
         Arc::clone(&jvm_bridge),
         Arc::clone(&build_plan_shadow_store),
-    );
+    )
+    .with_event_stream(Arc::new(build_event_stream.clone()));
 
     // Phase 18: Dependency resolution
     let artifact_store_dir = PathBuf::from(&args.artifact_store_dir);
@@ -282,20 +297,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 23: Toolchain management
     let toolchain_dir = PathBuf::from(&args.toolchain_dir);
     let toolchain = ToolchainServiceImpl::new(toolchain_dir);
-
-    // Phase 24: Build event streaming (wired to console + metrics for auto fan-out)
-    let console = Arc::new(ConsoleServiceImpl::new());
-    let build_metrics = Arc::new(BuildMetricsServiceImpl::new());
-    let event_dispatchers: Vec<
-        Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
-    > = vec![
-        Arc::clone(&console)
-            as Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
-        Arc::clone(&build_metrics)
-            as Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
-    ];
-    let build_event_stream =
-        BuildEventStreamServiceImpl::with_dispatchers(event_dispatchers.clone());
 
     // DAG Executor (orchestrates build execution using task graph + worker scheduler)
     let dag_executor = DagExecutorServiceImpl::new(

@@ -21,13 +21,11 @@ const MAX_EVENTS_PER_BUILD: usize = 10_000;
 /// Channel capacity for broadcast subscribers.
 const BROADCAST_CAPACITY: usize = 256;
 
-/// Rust-native build event streaming service.
-/// Buffers build events and streams them to subscribers (IDEs, CI systems).
+/// Shared inner state for `BuildEventStreamServiceImpl`.
 ///
-/// Uses tokio broadcast channels for real-time fan-out to multiple subscribers.
-/// Events are also buffered in memory for historical queries.
-#[derive(Default)]
-pub struct BuildEventStreamServiceImpl {
+/// Wrapped in `Arc` so that `Clone` on the service gives a shallow copy
+/// that shares the same buffers, channels, and counters.
+struct EventStreamInner {
     event_buffers: DashMap<BuildId, Vec<BuildEventMessage>>,
     /// Broadcast channels per build_id for real-time streaming.
     build_channels: DashMap<BuildId, broadcast::Sender<BuildEventMessage>>,
@@ -39,16 +37,36 @@ pub struct BuildEventStreamServiceImpl {
     dispatchers: Vec<Arc<dyn EventDispatcher>>,
 }
 
+/// Rust-native build event streaming service.
+/// Buffers build events and streams them to subscribers (IDEs, CI systems).
+///
+/// Uses tokio broadcast channels for real-time fan-out to multiple subscribers.
+/// Events are also buffered in memory for historical queries.
+///
+/// `Clone` produces a shallow handle that shares the same underlying state.
+#[derive(Clone)]
+pub struct BuildEventStreamServiceImpl {
+    inner: Arc<EventStreamInner>,
+}
+
+impl Default for BuildEventStreamServiceImpl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BuildEventStreamServiceImpl {
     pub fn new() -> Self {
         Self {
-            event_buffers: DashMap::new(),
-            build_channels: DashMap::new(),
-            subscribers: AtomicI64::new(0),
-            events_sent: AtomicI64::new(0),
-            events_received: AtomicI64::new(0),
-            events_evicted: AtomicI64::new(0),
-            dispatchers: Vec::new(),
+            inner: Arc::new(EventStreamInner {
+                event_buffers: DashMap::new(),
+                build_channels: DashMap::new(),
+                subscribers: AtomicI64::new(0),
+                events_sent: AtomicI64::new(0),
+                events_received: AtomicI64::new(0),
+                events_evicted: AtomicI64::new(0),
+                dispatchers: Vec::new(),
+            }),
         }
     }
 
@@ -56,8 +74,18 @@ impl BuildEventStreamServiceImpl {
     /// automatic cross-service fan-out (e.g., events → console, events → metrics).
     pub fn with_dispatchers(dispatchers: Vec<Arc<dyn EventDispatcher>>) -> Self {
         Self {
-            dispatchers,
-            ..Self::new()
+            inner: Arc::new(EventStreamInner {
+                dispatchers,
+                ..EventStreamInner {
+                    event_buffers: DashMap::new(),
+                    build_channels: DashMap::new(),
+                    subscribers: AtomicI64::new(0),
+                    events_sent: AtomicI64::new(0),
+                    events_received: AtomicI64::new(0),
+                    events_evicted: AtomicI64::new(0),
+                    dispatchers: Vec::new(),
+                }
+            }),
         }
     }
 
@@ -74,7 +102,7 @@ impl BuildEventStreamServiceImpl {
 
     /// Get or create a broadcast sender for a build.
     fn get_or_create_channel(&self, build_id: BuildId) -> broadcast::Sender<BuildEventMessage> {
-        self.build_channels
+        self.inner.build_channels
             .entry(build_id)
             .or_insert_with(|| {
                 let (tx, _) = broadcast::channel(BROADCAST_CAPACITY);
@@ -85,13 +113,74 @@ impl BuildEventStreamServiceImpl {
 
     /// Get the total number of active subscriber channels.
     pub fn active_build_count(&self) -> usize {
-        self.build_channels.len()
+        self.inner.build_channels.len()
     }
 
     /// Remove a build's channel and buffer (cleanup after build completes).
     pub fn cleanup_build(&self, build_id: &BuildId) {
-        self.build_channels.remove(build_id);
-        self.event_buffers.remove(build_id);
+        self.inner.build_channels.remove(build_id);
+        self.inner.event_buffers.remove(build_id);
+    }
+
+    /// Number of buffered builds (for testing).
+    #[cfg(test)]
+    fn buffered_build_count(&self) -> usize {
+        self.inner.event_buffers.len()
+    }
+
+    /// Total events received (for testing).
+    #[cfg(test)]
+    fn total_received(&self) -> i64 {
+        self.inner.events_received.load(Ordering::Relaxed)
+    }
+
+    /// Total events sent (for testing).
+    #[cfg(test)]
+    fn total_sent(&self) -> i64 {
+        self.inner.events_sent.load(Ordering::Relaxed)
+    }
+
+    /// Total events evicted (for testing).
+    #[cfg(test)]
+    fn total_evicted(&self) -> i64 {
+        self.inner.events_evicted.load(Ordering::Relaxed)
+    }
+
+    /// Emit an event directly (for internal use by other services).
+    /// Buffers, dispatches to registered dispatchers, and broadcasts — same as
+    /// `send_build_event` but callable without going through the gRPC layer.
+    pub fn emit_event(&self, event: BuildEventMessage) {
+        self.inner.events_received.fetch_add(1, Ordering::Relaxed);
+
+        let build_id = BuildId::from(event.build_id.clone());
+
+        // Buffer the event
+        if let Some(mut buf) = self.inner.event_buffers.get_mut(&build_id) {
+            if buf.len() >= MAX_EVENTS_PER_BUILD {
+                let evict_count = buf.len() / 2;
+                buf.drain(..evict_count);
+                self.inner.events_evicted
+                    .fetch_add(evict_count as i64, Ordering::Relaxed);
+            }
+            buf.push(event.clone());
+        } else {
+            self.inner.event_buffers
+                .entry(build_id.clone())
+                .or_default()
+                .push(event.clone());
+        }
+
+        // Fan out to registered dispatchers (e.g., console, build_metrics)
+        for dispatcher in &self.inner.dispatchers {
+            dispatcher.dispatch_event(&event);
+        }
+
+        // Broadcast to live subscribers
+        if let Some(tx) = self.inner.build_channels.get(&build_id) {
+            let _ = tx.send(event);
+        }
+
+        self.inner.events_sent.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -109,7 +198,7 @@ impl BuildEventStreamService for BuildEventStreamServiceImpl {
         request: Request<SubscribeBuildEventsRequest>,
     ) -> Result<Response<Self::SubscribeBuildEventsStream>, Status> {
         let req = request.into_inner();
-        self.subscribers.fetch_add(1, Ordering::Relaxed);
+        self.inner.subscribers.fetch_add(1, Ordering::Relaxed);
 
         let build_id = BuildId::from(req.build_id.clone());
         let filter = req.event_types;
@@ -119,7 +208,7 @@ impl BuildEventStreamService for BuildEventStreamServiceImpl {
 
         // Also replay buffered events
         let buffered_events: Vec<BuildEventMessage> =
-            if let Some(buf) = self.event_buffers.get(&build_id) {
+            if let Some(buf) = self.inner.event_buffers.get(&build_id) {
                 buf.iter()
                     .filter(|e| Self::matches_filter(e, &filter))
                     .cloned()
@@ -173,9 +262,6 @@ impl BuildEventStreamService for BuildEventStreamServiceImpl {
         request: Request<SendBuildEventRequest>,
     ) -> Result<Response<SendBuildEventResponse>, Status> {
         let req = request.into_inner();
-        self.events_received.fetch_add(1, Ordering::Relaxed);
-
-        let build_id = BuildId::from(req.build_id.clone());
 
         let event = BuildEventMessage {
             build_id: req.build_id.clone(),
@@ -187,35 +273,7 @@ impl BuildEventStreamService for BuildEventStreamServiceImpl {
             parent_id: req.parent_id,
         };
 
-        // Buffer the event
-        if let Some(mut buf) = self.event_buffers.get_mut(&build_id) {
-            if buf.len() >= MAX_EVENTS_PER_BUILD {
-                // Evict oldest events (keep the most recent half)
-                let evict_count = buf.len() / 2;
-                buf.drain(..evict_count);
-                self.events_evicted
-                    .fetch_add(evict_count as i64, Ordering::Relaxed);
-            }
-            buf.push(event.clone());
-        } else {
-            self.event_buffers
-                .entry(build_id.clone())
-                .or_default()
-                .push(event.clone());
-        }
-
-        // Fan out to registered dispatchers (e.g., console, build_metrics)
-        for dispatcher in &self.dispatchers {
-            dispatcher.dispatch_event(&event);
-        }
-
-        // Broadcast to live subscribers
-        if let Some(tx) = self.build_channels.get(&build_id) {
-            // Ignore send errors — no subscribers or channel full
-            let _ = tx.send(event);
-        }
-
-        self.events_sent.fetch_add(1, Ordering::Relaxed);
+        self.emit_event(event);
 
         Ok(Response::new(SendBuildEventResponse { accepted: true }))
     }
@@ -227,7 +285,7 @@ impl BuildEventStreamService for BuildEventStreamServiceImpl {
         let req = request.into_inner();
         let build_id = BuildId::from(req.build_id);
 
-        let events = if let Some(buf) = self.event_buffers.get(&build_id) {
+        let events = if let Some(buf) = self.inner.event_buffers.get(&build_id) {
             let mut events: Vec<BuildEventMessage> = buf.iter().cloned().collect();
 
             // Filter by timestamp if requested
@@ -471,7 +529,7 @@ mod tests {
         .unwrap();
 
         // Should have evicted old events
-        assert!(svc.events_evicted.load(Ordering::Relaxed) > 0);
+        assert!(svc.total_evicted() > 0);
 
         let log2 = svc
             .get_event_log(Request::new(GetEventLogRequest {
@@ -638,8 +696,8 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(svc.events_received.load(Ordering::Relaxed), 2);
-        assert_eq!(svc.events_sent.load(Ordering::Relaxed), 2);
+        assert_eq!(svc.total_received(), 2);
+        assert_eq!(svc.total_sent(), 2);
     }
 
     #[tokio::test]
@@ -657,7 +715,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(svc.event_buffers.len(), 1);
+        assert_eq!(svc.buffered_build_count(), 1);
 
         // Subscribe to create the broadcast channel
         let _ = svc
@@ -671,7 +729,7 @@ mod tests {
 
         svc.cleanup_build(&BuildId::from("build-cleanup".to_string()));
 
-        assert_eq!(svc.event_buffers.len(), 0);
+        assert_eq!(svc.buffered_build_count(), 0);
         assert_eq!(svc.active_build_count(), 0);
     }
 
@@ -727,5 +785,100 @@ mod tests {
         assert_eq!(log_a.events[0].event_type, "a_event");
         assert_eq!(log_b.total_events, 1);
         assert_eq!(log_b.events[0].event_type, "b_event");
+    }
+
+    use std::sync::atomic::AtomicUsize;
+
+    struct MockDispatcher {
+        event_count: AtomicUsize,
+    }
+
+    impl MockDispatcher {
+        fn new() -> Self {
+            Self {
+                event_count: AtomicUsize::new(0),
+            }
+        }
+
+        fn count(&self) -> usize {
+            self.event_count.load(Ordering::Relaxed)
+        }
+    }
+
+    impl EventDispatcher for MockDispatcher {
+        fn dispatch_event(&self, _event: &BuildEventMessage) {
+            self.event_count.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_emit_event_buffers_and_dispatches() {
+        let dispatcher = Arc::new(MockDispatcher::new());
+        let svc = BuildEventStreamServiceImpl::with_dispatchers(vec![dispatcher.clone()]);
+
+        let event = BuildEventMessage {
+            build_id: "build-emit".to_string(),
+            timestamp_ms: 1000,
+            event_type: "test_event".to_string(),
+            event_id: "emit-1".to_string(),
+            properties: Default::default(),
+            display_name: "Test".to_string(),
+            parent_id: String::new(),
+        };
+
+        svc.emit_event(event);
+
+        assert_eq!(dispatcher.count(), 1);
+        assert_eq!(svc.total_received(), 1);
+        assert_eq!(svc.total_sent(), 1);
+
+        // Event should be in the buffer
+        let log = svc
+            .get_event_log(Request::new(GetEventLogRequest {
+                build_id: "build-emit".to_string(),
+                since_timestamp_ms: 0,
+                max_events: 0,
+                event_types: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(log.total_events, 1);
+        assert_eq!(log.events[0].event_type, "test_event");
+    }
+
+    #[tokio::test]
+    async fn test_emit_event_broadcasts_to_subscribers() {
+        let svc = BuildEventStreamServiceImpl::new();
+
+        // Subscribe first
+        let resp = svc
+            .subscribe_build_events(Request::new(SubscribeBuildEventsRequest {
+                build_id: "build-emit-live".to_string(),
+                event_types: vec![],
+            }))
+            .await
+            .unwrap();
+
+        let mut stream = resp.into_inner();
+
+        // Emit event directly (not via gRPC)
+        let event = BuildEventMessage {
+            build_id: "build-emit-live".to_string(),
+            timestamp_ms: 1000,
+            event_type: "emitted_event".to_string(),
+            event_id: "emit-live-1".to_string(),
+            properties: Default::default(),
+            display_name: "Emitted".to_string(),
+            parent_id: String::new(),
+        };
+
+        svc.emit_event(event);
+
+        use futures_util::StreamExt;
+        if let Some(Ok(event)) = stream.next().await {
+            assert_eq!(event.event_type, "emitted_event");
+        }
     }
 }
