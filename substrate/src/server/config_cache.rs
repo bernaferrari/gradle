@@ -10,9 +10,12 @@ use crate::proto::{
     StoreConfigCacheRequest, StoreConfigCacheResponse, ValidateConfigRequest,
     ValidateConfigResponse,
 };
+use crate::server::config_cache_ir::{
+    InvalidationTriggers, PhaseGraphEnvelope, PHASE_GRAPH_SCHEMA_VERSION,
+};
 
 /// A cached configuration entry.
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 struct ConfigCacheEntry {
     serialized_config: Vec<u8>,
     entry_count: i64,
@@ -21,6 +24,12 @@ struct ConfigCacheEntry {
     storage_time_ms: i64,
     #[serde(default)]
     last_access_ms: i64,
+    /// Build ID that owns this entry, for scope isolation.
+    #[serde(default)]
+    build_id: String,
+    /// Phase graph envelope with invalidation metadata.
+    #[serde(default)]
+    phase_graph: Option<PhaseGraphEnvelope>,
 }
 
 /// Default maximum cache entries before LRU eviction kicks in.
@@ -34,6 +43,8 @@ const MAX_CACHE_ENTRIES: usize = 1000;
 /// Java serialization for complex object graphs).
 pub struct ConfigurationCacheServiceImpl {
     cache: DashMap<String, ConfigCacheEntry>,
+    /// build_id → cache_keys index for scope isolation.
+    build_id_index: DashMap<String, Vec<String>>,
     cache_dir: PathBuf,
     total_stores: AtomicI64,
     total_hits: AtomicI64,
@@ -52,6 +63,7 @@ impl ConfigurationCacheServiceImpl {
         std::fs::create_dir_all(&cache_dir).ok();
         Self {
             cache: DashMap::new(),
+            build_id_index: DashMap::new(),
             cache_dir,
             total_stores: AtomicI64::new(0),
             total_hits: AtomicI64::new(0),
@@ -98,6 +110,96 @@ impl ConfigurationCacheServiceImpl {
         let path = self.disk_path(cache_key);
         std::fs::remove_file(&path).ok();
     }
+
+    /// Build `InvalidationTriggers` from a store request.
+    fn triggers_from_store_request(req: &StoreConfigCacheRequest) -> InvalidationTriggers {
+        InvalidationTriggers {
+            build_script_hash: req.build_script_hash.clone(),
+            settings_script_hash: req.settings_script_hash.clone(),
+            init_script_hashes: req
+                .init_script_hashes
+                .iter()
+                .map(|e| (e.path.clone(), e.hash.clone()))
+                .collect(),
+            gradle_version: req.gradle_version.clone(),
+            relevant_system_properties: req
+                .system_properties
+                .iter()
+                .map(|e| (e.key.clone(), e.value.clone()))
+                .collect(),
+        }
+    }
+
+    /// Build `InvalidationTriggers` from a validate request.
+    fn triggers_from_validate_request(req: &ValidateConfigRequest) -> InvalidationTriggers {
+        InvalidationTriggers {
+            build_script_hash: req.build_script_hash.clone(),
+            settings_script_hash: req.settings_script_hash.clone(),
+            init_script_hashes: req
+                .init_script_hashes
+                .iter()
+                .map(|e| (e.path.clone(), e.hash.clone()))
+                .collect(),
+            gradle_version: req.gradle_version.clone(),
+            relevant_system_properties: req
+                .system_properties
+                .iter()
+                .map(|e| (e.key.clone(), e.value.clone()))
+                .collect(),
+        }
+    }
+
+    /// Index a cache key under its build_id for scope isolation.
+    fn index_by_build_id(&self, build_id: &str, cache_key: &str) {
+        if build_id.is_empty() {
+            return;
+        }
+        if let Some(mut keys) = self.build_id_index.get_mut(build_id) {
+            if !keys.contains(&cache_key.to_string()) {
+                keys.push(cache_key.to_string());
+            }
+        } else {
+            self.build_id_index
+                .insert(build_id.to_string(), vec![cache_key.to_string()]);
+        }
+    }
+
+    /// Remove a cache key from the build_id index.
+    fn deindex_by_build_id(&self, build_id: &str, cache_key: &str) {
+        if build_id.is_empty() {
+            return;
+        }
+        if let Some(mut keys) = self.build_id_index.get_mut(build_id) {
+            keys.retain(|k| k != cache_key);
+            if keys.is_empty() {
+                drop(keys);
+                self.build_id_index.remove(build_id);
+            }
+        }
+    }
+
+    /// Invalidate all cache entries belonging to a build_id.
+    pub fn invalidate_by_build_id(&self, build_id: &str) -> u32 {
+        if build_id.is_empty() {
+            return 0;
+        }
+        let keys: Vec<String> = self
+            .build_id_index
+            .get(build_id)
+            .map(|keys| keys.clone())
+            .unwrap_or_default();
+
+        for key in &keys {
+            if self.cache.remove(key).is_some() {
+                self.remove_from_disk(key);
+                self.deindex_by_build_id(build_id, key);
+                self.entries_evicted.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        self.build_id_index.remove(build_id);
+        keys.len() as u32
+    }
 }
 
 #[tonic::async_trait]
@@ -109,6 +211,28 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
         let req = request.into_inner();
         let start = std::time::Instant::now();
 
+        let build_id = req.build_id.clone();
+        let triggers = Self::triggers_from_store_request(&req);
+        let has_triggers = !triggers.build_script_hash.is_empty()
+            || !triggers.settings_script_hash.is_empty()
+            || !triggers.gradle_version.is_empty()
+            || !triggers.init_script_hashes.is_empty()
+            || !triggers.relevant_system_properties.is_empty();
+
+        let phase_graph = if has_triggers {
+            Some(PhaseGraphEnvelope {
+                schema_version: PHASE_GRAPH_SCHEMA_VERSION,
+                build_id: build_id.clone(),
+                triggers,
+                project_count: req.entry_count as u32,
+                task_count: 0,
+                phase_graph_bytes: req.serialized_config.to_vec(),
+                creation_time_ms: Self::now_ms(),
+            })
+        } else {
+            None
+        };
+
         let entry = ConfigCacheEntry {
             serialized_config: req.serialized_config.to_vec(),
             entry_count: req.entry_count,
@@ -116,6 +240,8 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
             timestamp_ms: req.timestamp_ms,
             storage_time_ms: 0,
             last_access_ms: Self::now_ms(),
+            build_id: build_id.clone(),
+            phase_graph,
         };
 
         let storage_time_ms = start.elapsed().as_millis() as i64;
@@ -126,29 +252,37 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
         };
 
         let key = req.cache_key.clone();
+        self.index_by_build_id(&build_id, &key);
         self.cache.insert(key.clone(), entry);
 
         // LRU eviction: if cache is over capacity, remove the least-recently-accessed entries.
         if self.cache.len() > MAX_CACHE_ENTRIES {
             let to_remove = self.cache.len() - MAX_CACHE_ENTRIES / 2;
-            let mut candidates: Vec<(i64, String)> = self
+            let mut candidates: Vec<(i64, String, String)> = self
                 .cache
                 .iter()
-                .map(|entry| (entry.value().last_access_ms, entry.key().clone()))
+                .map(|entry| {
+                    (
+                        entry.value().last_access_ms,
+                        entry.key().clone(),
+                        entry.value().build_id.clone(),
+                    )
+                })
                 .collect();
-            candidates.sort_by_key(|(last_access_ms, _)| *last_access_ms);
-            let keys_to_remove: Vec<String> = candidates
+            candidates.sort_by_key(|(last_access_ms, _, _)| *last_access_ms);
+            let to_evict: Vec<(String, String)> = candidates
                 .into_iter()
                 .take(to_remove)
-                .map(|(_, key)| key)
+                .map(|(_, key, bid)| (key, bid))
                 .collect();
-            for k in &keys_to_remove {
+            for (k, bid) in &to_evict {
                 if self.cache.remove(k).is_some() {
                     self.remove_from_disk(k);
+                    self.deindex_by_build_id(bid, k);
                 }
             }
             self.entries_evicted
-                .fetch_add(keys_to_remove.len() as i64, Ordering::Relaxed);
+                .fetch_add(to_evict.len() as i64, Ordering::Relaxed);
         }
 
         // Persist to disk
@@ -196,6 +330,8 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
             let timestamp = entry.timestamp_ms;
             let count = entry.entry_count;
             let config = entry.serialized_config.clone();
+            let bid = entry.build_id.clone();
+            self.index_by_build_id(&bid, &req.cache_key);
             self.cache.insert(req.cache_key, entry);
             return Ok(Response::new(LoadConfigCacheResponse {
                 found: true,
@@ -221,7 +357,41 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
     ) -> Result<Response<ValidateConfigResponse>, Status> {
         let req = request.into_inner();
 
-        if let Some(entry) = self.cache.get(&req.cache_key) {
+        // Check memory cache first, then disk
+        let entry: Option<ConfigCacheEntry> = if let Some(entry) = self.cache.get(&req.cache_key) {
+            Some(entry.value().clone())
+        } else {
+            self.load_from_disk(&req.cache_key)
+        };
+        let entry = entry.inspect(|e| {
+            self.index_by_build_id(&e.build_id, &req.cache_key);
+        });
+
+        if let Some(entry) = entry {
+            // If the entry has phase graph triggers, use granular validation.
+            if let Some(ref pg) = entry.phase_graph {
+                let current = Self::triggers_from_validate_request(&req);
+                let changed = pg.triggers.changed_triggers(&current);
+
+                if changed.is_empty() {
+                    return Ok(Response::new(ValidateConfigResponse {
+                        valid: true,
+                        reason: "All invalidation triggers match".to_string(),
+                        invalidated_triggers: vec![],
+                    }));
+                }
+
+                return Ok(Response::new(ValidateConfigResponse {
+                    valid: false,
+                    reason: format!(
+                        "Invalidation triggers changed: {}",
+                        changed.join(", ")
+                    ),
+                    invalidated_triggers: changed,
+                }));
+            }
+
+            // Fallback: legacy input_hashes comparison.
             let mut cached = entry.input_hashes.clone();
             let mut requested = req.input_hashes.clone();
             cached.sort();
@@ -230,18 +400,21 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
                 return Ok(Response::new(ValidateConfigResponse {
                     valid: true,
                     reason: "All input hashes match".to_string(),
+                    invalidated_triggers: vec![],
                 }));
             }
 
             return Ok(Response::new(ValidateConfigResponse {
                 valid: false,
                 reason: "Input hashes do not match cached configuration".to_string(),
+                invalidated_triggers: vec!["input_hashes".to_string()],
             }));
         }
 
         Ok(Response::new(ValidateConfigResponse {
             valid: false,
             reason: "No cached configuration found".to_string(),
+            invalidated_triggers: vec![],
         }))
     }
 
@@ -254,22 +427,48 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
         let mut removed = 0i32;
         let mut space_recovered = 0i64;
 
-        let keys_to_remove: Vec<String> = self
-            .cache
-            .iter()
-            .filter(|entry| {
-                let too_old = req.max_age_ms > 0 && now - entry.timestamp_ms > req.max_age_ms;
-                let too_many = req.max_entries > 0 && self.cache.len() as i32 > req.max_entries;
-                too_old || too_many
-            })
-            .map(|entry| entry.key().clone())
-            .collect();
+        // Snapshot current cache length for max_entries check.
+        let current_len = self.cache.len() as i32;
 
-        for key in &keys_to_remove {
-            if let Some((_, entry)) = self.cache.remove(key) {
-                removed += 1;
-                space_recovered += entry.serialized_config.len() as i64;
-                self.remove_from_disk(key);
+        // If a build_id is specified, clean all entries for that build
+        // (build-scoped clean doesn't require age/count filters).
+        let build_scoped = !req.build_id.is_empty();
+
+        // If a build_id is specified, only clean entries belonging to that build.
+        let target_keys: Vec<String> = if build_scoped {
+            self.build_id_index
+                .get(&req.build_id)
+                .map(|keys| keys.clone())
+                .unwrap_or_default()
+        } else {
+            // All keys
+            self.cache
+                .iter()
+                .map(|entry| entry.key().clone())
+                .collect()
+        };
+
+        for key in &target_keys {
+            let should_remove = if build_scoped {
+                // Build-scoped: remove all entries for this build
+                true
+            } else if let Some(entry) = self.cache.get(key) {
+                let too_old =
+                    req.max_age_ms > 0 && now - entry.timestamp_ms > req.max_age_ms;
+                let too_many =
+                    req.max_entries > 0 && current_len > req.max_entries;
+                too_old || too_many
+            } else {
+                false
+            };
+
+            if should_remove {
+                if let Some((_, entry)) = self.cache.remove(key) {
+                    removed += 1;
+                    space_recovered += entry.serialized_config.len() as i64;
+                    self.remove_from_disk(key);
+                    self.deindex_by_build_id(&entry.build_id, key);
+                }
             }
         }
 
@@ -306,6 +505,7 @@ mod tests {
             entry_count: 10,
             input_hashes: vec!["hash1".to_string(), "hash2".to_string()],
             timestamp_ms: 1000,
+            ..Default::default()
         }))
         .await
         .unwrap();
@@ -348,6 +548,7 @@ mod tests {
             entry_count: 1,
             input_hashes: vec!["h1".to_string(), "h2".to_string()],
             timestamp_ms: 100,
+            ..Default::default()
         }))
         .await
         .unwrap();
@@ -357,6 +558,7 @@ mod tests {
             .validate_config(Request::new(ValidateConfigRequest {
                 cache_key: ":app".to_string(),
                 input_hashes: vec!["h1".to_string(), "h2".to_string()],
+                ..Default::default()
             }))
             .await
             .unwrap()
@@ -368,6 +570,7 @@ mod tests {
             .validate_config(Request::new(ValidateConfigRequest {
                 cache_key: ":app".to_string(),
                 input_hashes: vec!["h1".to_string(), "h3".to_string()],
+                ..Default::default()
             }))
             .await
             .unwrap()
@@ -379,6 +582,7 @@ mod tests {
             .validate_config(Request::new(ValidateConfigRequest {
                 cache_key: ":app".to_string(),
                 input_hashes: vec!["h1".to_string()],
+                ..Default::default()
             }))
             .await
             .unwrap()
@@ -396,6 +600,7 @@ mod tests {
             entry_count: 1,
             input_hashes: vec!["h1".to_string(), "h2".to_string(), "h3".to_string()],
             timestamp_ms: 100,
+            ..Default::default()
         }))
         .await
         .unwrap();
@@ -404,6 +609,7 @@ mod tests {
             .validate_config(Request::new(ValidateConfigRequest {
                 cache_key: ":ordered".to_string(),
                 input_hashes: vec!["h3".to_string(), "h1".to_string(), "h2".to_string()],
+                ..Default::default()
             }))
             .await
             .unwrap()
@@ -423,6 +629,7 @@ mod tests {
                 entry_count: 1,
                 input_hashes: vec![],
                 timestamp_ms: 100,
+                ..Default::default()
             }))
             .await
             .unwrap();
@@ -432,6 +639,7 @@ mod tests {
             .clean_config_cache(Request::new(CleanConfigCacheRequest {
                 max_age_ms: 0,
                 max_entries: 2,
+                ..Default::default()
             }))
             .await
             .unwrap()
@@ -449,6 +657,7 @@ mod tests {
             .validate_config(Request::new(ValidateConfigRequest {
                 cache_key: ":nonexistent".to_string(),
                 input_hashes: vec!["h1".to_string()],
+                ..Default::default()
             }))
             .await
             .unwrap()
@@ -466,6 +675,7 @@ mod tests {
             .clean_config_cache(Request::new(CleanConfigCacheRequest {
                 max_age_ms: 0,
                 max_entries: 0,
+                ..Default::default()
             }))
             .await
             .unwrap()
@@ -485,6 +695,7 @@ mod tests {
             entry_count: 5,
             input_hashes: vec!["old-hash".to_string()],
             timestamp_ms: 100,
+            ..Default::default()
         }))
         .await
         .unwrap();
@@ -496,6 +707,7 @@ mod tests {
             entry_count: 8,
             input_hashes: vec!["new-hash".to_string()],
             timestamp_ms: 200,
+            ..Default::default()
         }))
         .await
         .unwrap();
@@ -523,6 +735,7 @@ mod tests {
             entry_count: 1,
             input_hashes: vec!["h1".to_string(), "h2".to_string()],
             timestamp_ms: 100,
+            ..Default::default()
         }))
         .await
         .unwrap();
@@ -532,6 +745,7 @@ mod tests {
             .validate_config(Request::new(ValidateConfigRequest {
                 cache_key: ":len".to_string(),
                 input_hashes: vec!["h1".to_string()],
+                ..Default::default()
             }))
             .await
             .unwrap()
@@ -554,6 +768,7 @@ mod tests {
                 entry_count: 5,
                 input_hashes: vec!["hash1".to_string()],
                 timestamp_ms: 100,
+                ..Default::default()
             }))
             .await
             .unwrap();
@@ -587,6 +802,8 @@ mod tests {
                 entry_count: (i + 1) as i64 * 10,
                 input_hashes: vec![format!("hash-{}", i)],
                 timestamp_ms: 1000 + i as i64 * 100,
+                build_id: build_id.to_string(),
+                ..Default::default()
             }))
             .await
             .unwrap();
@@ -650,42 +867,22 @@ mod tests {
                 entry_count: (i + 1) as i64,
                 input_hashes: vec![format!("hash{}", i)],
                 timestamp_ms: 500,
+                ..Default::default()
             }))
             .await
             .unwrap();
         }
 
-        // Invalidate the middle entry via clean with a targeted approach:
-        // First store a fresh entry with a very recent timestamp, then clean by max_age_ms
-        // to only remove the older entries. We use the clean API to remove entries whose
-        // timestamp is older than a threshold.
-        //
-        // Store :task1 again with a very old timestamp so it becomes the only removable entry.
-        svc.store_config_cache(Request::new(StoreConfigCacheRequest {
-            cache_key: ":task1".to_string(),
-            serialized_config: vec![99; 16].into(),
-            entry_count: 999,
-            input_hashes: vec!["replaced-hash".to_string()],
-            timestamp_ms: 0, // far in the past
-        }))
-        .await
-        .unwrap();
-
-        // Now clean entries older than 100ms -- only :task1 (timestamp 0) should be removed.
-        // Note: :task0 and :task2 also have timestamp 500, which is older than 100ms too,
-        // so they would also be removed. Instead, use max_entries=2 to thin the cache.
-        // A more direct approach: just verify that after cleaning all with max_entries=0,
-        // everything is gone, and then re-add two entries to confirm selective behavior.
         let clean_resp = svc
             .clean_config_cache(Request::new(CleanConfigCacheRequest {
                 max_age_ms: 200,
                 max_entries: 0,
+                ..Default::default()
             }))
             .await
             .unwrap()
             .into_inner();
 
-        // All entries had timestamp <= 500, and 200ms threshold removes them all
         assert_eq!(clean_resp.entries_removed, 3);
 
         // Verify all are gone
@@ -707,6 +904,7 @@ mod tests {
             entry_count: 1,
             input_hashes: vec![],
             timestamp_ms: 5000,
+            ..Default::default()
         }))
         .await
         .unwrap();
@@ -716,15 +914,16 @@ mod tests {
             entry_count: 2,
             input_hashes: vec![],
             timestamp_ms: 5000,
+            ..Default::default()
         }))
         .await
         .unwrap();
 
-        // Clean with max_entries=1 -- both exceed the limit, so both get removed
         let selective_resp = svc
             .clean_config_cache(Request::new(CleanConfigCacheRequest {
                 max_age_ms: 0,
                 max_entries: 1,
+                ..Default::default()
             }))
             .await
             .unwrap()
@@ -756,7 +955,6 @@ mod tests {
         let svc = make_svc();
         let num_entries: usize = 200;
 
-        // Store many entries
         for i in 0..num_entries {
             let resp = svc
                 .store_config_cache(Request::new(StoreConfigCacheRequest {
@@ -765,6 +963,7 @@ mod tests {
                     entry_count: i as i64,
                     input_hashes: vec![format!("input-hash-{}", i)],
                     timestamp_ms: i as i64 * 10,
+                    ..Default::default()
                 }))
                 .await
                 .unwrap()
@@ -773,10 +972,8 @@ mod tests {
             assert!(resp.stored, "Failed to store entry {}", i);
         }
 
-        // Verify total stores counter
         assert_eq!(svc.total_stores.load(Ordering::Relaxed), num_entries as i64);
 
-        // Load a sample from the beginning, middle, and end
         for i in [0, num_entries / 2, num_entries - 1] {
             let resp = svc
                 .load_config_cache(Request::new(LoadConfigCacheRequest {
@@ -792,10 +989,8 @@ mod tests {
             assert_eq!(resp.timestamp_ms, i as i64 * 10);
         }
 
-        // Verify hits counter reflects the 3 successful loads
         assert_eq!(svc.total_hits.load(Ordering::Relaxed), 3);
 
-        // Verify a miss still increments misses counter
         svc.load_config_cache(Request::new(LoadConfigCacheRequest {
             cache_key: ":large:task99999".to_string(),
         }))
@@ -803,16 +998,393 @@ mod tests {
         .unwrap();
         assert_eq!(svc.total_misses.load(Ordering::Relaxed), 1);
 
-        // Validate a specific entry's input hashes
         let validate_resp = svc
             .validate_config(Request::new(ValidateConfigRequest {
                 cache_key: format!(":large:task{}", num_entries / 2),
                 input_hashes: vec![format!("input-hash-{}", num_entries / 2)],
+                ..Default::default()
             }))
             .await
             .unwrap()
             .into_inner();
 
         assert!(validate_resp.valid);
+    }
+
+    // --- Phase graph invalidation tests ---
+
+    #[tokio::test]
+    async fn test_store_with_triggers_and_validate_match() {
+        let svc = make_svc();
+
+        svc.store_config_cache(Request::new(StoreConfigCacheRequest {
+            cache_key: ":triggered".to_string(),
+            serialized_config: vec![42].into(),
+            entry_count: 5,
+            input_hashes: vec![],
+            timestamp_ms: 100,
+            build_script_hash: "abc123".to_string(),
+            settings_script_hash: "def456".to_string(),
+            gradle_version: "8.5".to_string(),
+            build_id: "build-1".to_string(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+
+        let resp = svc
+            .validate_config(Request::new(ValidateConfigRequest {
+                cache_key: ":triggered".to_string(),
+                input_hashes: vec![],
+                build_script_hash: "abc123".to_string(),
+                settings_script_hash: "def456".to_string(),
+                gradle_version: "8.5".to_string(),
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.valid);
+        assert!(resp.invalidated_triggers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_validate_build_script_hash_change() {
+        let svc = make_svc();
+
+        svc.store_config_cache(Request::new(StoreConfigCacheRequest {
+            cache_key: ":bs-change".to_string(),
+            serialized_config: vec![].into(),
+            entry_count: 1,
+            input_hashes: vec![],
+            timestamp_ms: 100,
+            build_script_hash: "old-hash".to_string(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+
+        let resp = svc
+            .validate_config(Request::new(ValidateConfigRequest {
+                cache_key: ":bs-change".to_string(),
+                input_hashes: vec![],
+                build_script_hash: "new-hash".to_string(),
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.valid);
+        assert!(resp
+            .invalidated_triggers
+            .iter()
+            .any(|t| t == "build_script_hash"));
+    }
+
+    #[tokio::test]
+    async fn test_validate_gradle_version_change() {
+        let svc = make_svc();
+
+        svc.store_config_cache(Request::new(StoreConfigCacheRequest {
+            cache_key: ":gv-change".to_string(),
+            serialized_config: vec![].into(),
+            entry_count: 1,
+            input_hashes: vec![],
+            timestamp_ms: 100,
+            gradle_version: "8.5".to_string(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+
+        let resp = svc
+            .validate_config(Request::new(ValidateConfigRequest {
+                cache_key: ":gv-change".to_string(),
+                input_hashes: vec![],
+                gradle_version: "8.6".to_string(),
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.valid);
+        assert!(resp
+            .invalidated_triggers
+            .iter()
+            .any(|t| t == "gradle_version"));
+    }
+
+    #[tokio::test]
+    async fn test_validate_init_script_added() {
+        let svc = make_svc();
+
+        // Store with a build_script_hash so phase graph is created
+        svc.store_config_cache(Request::new(StoreConfigCacheRequest {
+            cache_key: ":init-added".to_string(),
+            serialized_config: vec![].into(),
+            entry_count: 1,
+            input_hashes: vec![],
+            timestamp_ms: 100,
+            build_script_hash: "sha-build".to_string(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+
+        let resp = svc
+            .validate_config(Request::new(ValidateConfigRequest {
+                cache_key: ":init-added".to_string(),
+                input_hashes: vec![],
+                build_script_hash: "sha-build".to_string(),
+                init_script_hashes: vec![crate::proto::ScriptHashEntry {
+                    path: "init.gradle".to_string(),
+                    hash: "h1".to_string(),
+                }],
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.valid);
+        assert!(resp
+            .invalidated_triggers
+            .iter()
+            .any(|t| t.contains("init_script_added")));
+    }
+
+    #[tokio::test]
+    async fn test_validate_system_property_changed() {
+        let svc = make_svc();
+
+        svc.store_config_cache(Request::new(StoreConfigCacheRequest {
+            cache_key: ":prop-change".to_string(),
+            serialized_config: vec![].into(),
+            entry_count: 1,
+            input_hashes: vec![],
+            timestamp_ms: 100,
+            system_properties: vec![crate::proto::StringEntry {
+                key: "profile".to_string(),
+                value: "dev".to_string(),
+            }],
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+
+        let resp = svc
+            .validate_config(Request::new(ValidateConfigRequest {
+                cache_key: ":prop-change".to_string(),
+                input_hashes: vec![],
+                system_properties: vec![crate::proto::StringEntry {
+                    key: "profile".to_string(),
+                    value: "prod".to_string(),
+                }],
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.valid);
+        assert!(resp
+            .invalidated_triggers
+            .iter()
+            .any(|t| t.contains("property_changed")));
+    }
+
+    #[tokio::test]
+    async fn test_backward_compat_old_entry_without_triggers() {
+        let svc = make_svc();
+
+        // Store without any trigger fields (simulates old client)
+        svc.store_config_cache(Request::new(StoreConfigCacheRequest {
+            cache_key: ":old-entry".to_string(),
+            serialized_config: vec![1, 2, 3].into(),
+            entry_count: 3,
+            input_hashes: vec!["legacy-hash".to_string()],
+            timestamp_ms: 100,
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+
+        // Validate with legacy input_hashes only
+        let resp = svc
+            .validate_config(Request::new(ValidateConfigRequest {
+                cache_key: ":old-entry".to_string(),
+                input_hashes: vec!["legacy-hash".to_string()],
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.valid, "old entries without triggers should still validate via input_hashes");
+    }
+
+    #[tokio::test]
+    async fn test_invalidate_by_build_id() {
+        let svc = make_svc();
+
+        // Store entries for two builds
+        svc.store_config_cache(Request::new(StoreConfigCacheRequest {
+            cache_key: "build-A:task1".to_string(),
+            serialized_config: vec![1].into(),
+            entry_count: 1,
+            input_hashes: vec![],
+            timestamp_ms: 100,
+            build_id: "build-A".to_string(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+        svc.store_config_cache(Request::new(StoreConfigCacheRequest {
+            cache_key: "build-A:task2".to_string(),
+            serialized_config: vec![2].into(),
+            entry_count: 1,
+            input_hashes: vec![],
+            timestamp_ms: 100,
+            build_id: "build-A".to_string(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+        svc.store_config_cache(Request::new(StoreConfigCacheRequest {
+            cache_key: "build-B:task1".to_string(),
+            serialized_config: vec![3].into(),
+            entry_count: 1,
+            input_hashes: vec![],
+            timestamp_ms: 100,
+            build_id: "build-B".to_string(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+
+        // Invalidate build-A
+        let removed = svc.invalidate_by_build_id("build-A");
+        assert_eq!(removed, 2);
+
+        // build-A entries gone
+        let resp_a1 = svc
+            .load_config_cache(Request::new(LoadConfigCacheRequest {
+                cache_key: "build-A:task1".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!resp_a1.found);
+
+        // build-B still present
+        let resp_b1 = svc
+            .load_config_cache(Request::new(LoadConfigCacheRequest {
+                cache_key: "build-B:task1".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp_b1.found);
+    }
+
+    #[tokio::test]
+    async fn test_clean_by_build_id() {
+        let svc = make_svc();
+
+        svc.store_config_cache(Request::new(StoreConfigCacheRequest {
+            cache_key: "build-X:k1".to_string(),
+            serialized_config: vec![1].into(),
+            entry_count: 1,
+            input_hashes: vec![],
+            timestamp_ms: 100,
+            build_id: "build-X".to_string(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+        svc.store_config_cache(Request::new(StoreConfigCacheRequest {
+            cache_key: "build-Y:k1".to_string(),
+            serialized_config: vec![2].into(),
+            entry_count: 1,
+            input_hashes: vec![],
+            timestamp_ms: 100,
+            build_id: "build-Y".to_string(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+
+        // Clean only build-X
+        let resp = svc
+            .clean_config_cache(Request::new(CleanConfigCacheRequest {
+                max_age_ms: 0,
+                max_entries: 0,
+                build_id: "build-X".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.entries_removed, 1);
+
+        // build-Y still present
+        let resp_y = svc
+            .load_config_cache(Request::new(LoadConfigCacheRequest {
+                cache_key: "build-Y:k1".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp_y.found);
+    }
+
+    #[tokio::test]
+    async fn test_phase_graph_disk_persistence() {
+        let dir = tempdir().unwrap();
+        let cache_key = ":phase-persist";
+
+        {
+            let svc = ConfigurationCacheServiceImpl::new(dir.path().to_path_buf());
+            svc.store_config_cache(Request::new(StoreConfigCacheRequest {
+                cache_key: cache_key.to_string(),
+                serialized_config: b"phase-data".to_vec().into(),
+                entry_count: 7,
+                input_hashes: vec![],
+                timestamp_ms: 100,
+                build_script_hash: "sha-abc".to_string(),
+                gradle_version: "8.7".to_string(),
+                build_id: "persist-build".to_string(),
+                system_properties: vec![crate::proto::StringEntry {
+                    key: "mode".to_string(),
+                    value: "release".to_string(),
+                }],
+                ..Default::default()
+            }))
+            .await
+            .unwrap();
+        }
+
+        // New instance loads from disk, validates with triggers
+        let svc2 = ConfigurationCacheServiceImpl::new(dir.path().to_path_buf());
+        let resp = svc2
+            .validate_config(Request::new(ValidateConfigRequest {
+                cache_key: cache_key.to_string(),
+                input_hashes: vec![],
+                build_script_hash: "sha-abc".to_string(),
+                gradle_version: "8.7".to_string(),
+                system_properties: vec![crate::proto::StringEntry {
+                    key: "mode".to_string(),
+                    value: "release".to_string(),
+                }],
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.valid, "phase graph triggers should survive disk persistence");
     }
 }

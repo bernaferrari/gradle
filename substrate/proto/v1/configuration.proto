@@ -267,6 +267,13 @@ message StoreConfigCacheRequest {
   int64 entry_count = 3;
   repeated string input_hashes = 4;
   int64 timestamp_ms = 5;
+  // Phase graph invalidation triggers
+  string build_script_hash = 6;
+  string settings_script_hash = 7;
+  repeated ScriptHashEntry init_script_hashes = 8;
+  string gradle_version = 9;
+  repeated StringEntry system_properties = 10;
+  string build_id = 11;
 }
 message StoreConfigCacheResponse {
   bool stored = 1;
@@ -282,16 +289,38 @@ message LoadConfigCacheResponse {
 message ValidateConfigRequest {
   string cache_key = 1;
   repeated string input_hashes = 2;
+  // Phase graph invalidation triggers for granular validation
+  string build_script_hash = 3;
+  string settings_script_hash = 4;
+  repeated ScriptHashEntry init_script_hashes = 5;
+  string gradle_version = 6;
+  repeated StringEntry system_properties = 7;
 }
 message ValidateConfigResponse {
   bool valid = 1;
   string reason = 2;
+  // Names of triggers that caused invalidation
+  repeated string invalidated_triggers = 3;
 }
 message CleanConfigCacheRequest {
   int64 max_age_ms = 1;
   int32 max_entries = 2;
+  // If non-empty, only clean entries belonging to this build ID
+  string build_id = 3;
 }
 message CleanConfigCacheResponse {
   int32 entries_removed = 1;
   int64 space_recovered_bytes = 2;
+}
+
+// Key-value pair for script hashes (path → hash).
+message ScriptHashEntry {
+  string path = 1;
+  string hash = 2;
+}
+
+// Key-value pair for system properties (key → value).
+message StringEntry {
+  string key = 1;
+  string value = 2;
 }
