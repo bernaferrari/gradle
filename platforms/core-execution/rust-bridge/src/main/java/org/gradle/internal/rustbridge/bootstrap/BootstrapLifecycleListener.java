@@ -2,6 +2,7 @@ package org.gradle.internal.rustbridge.bootstrap;
 
 import org.gradle.api.logging.Logging;
 import org.gradle.initialization.RootBuildLifecycleListener;
+import org.gradle.internal.rustbridge.eventstream.BuildIdHolder;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
@@ -50,6 +51,7 @@ public class BootstrapLifecycleListener implements RootBuildLifecycleListener {
                 props, Collections.emptyList()
             );
             buildInitialized = true;
+            BuildIdHolder.setBuildId(buildId);
             LOGGER.debug("[substrate:bootstrap] initialized build {}", result.getBuildId());
         } catch (Exception e) {
             LOGGER.debug("[substrate:bootstrap] failed to initialize build", e);
@@ -66,6 +68,7 @@ public class BootstrapLifecycleListener implements RootBuildLifecycleListener {
             String outcome = failure != null ? "FAILED" : "SUCCESS";
             long durationMs = System.currentTimeMillis() - startTimeMs;
             bootstrapClient.completeBuild(buildId, outcome, durationMs);
+            BuildIdHolder.clear();
         } catch (Exception e) {
             LOGGER.debug("[substrate:bootstrap] failed to complete build", e);
         }

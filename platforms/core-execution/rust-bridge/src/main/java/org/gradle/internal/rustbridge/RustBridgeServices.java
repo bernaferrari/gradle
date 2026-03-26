@@ -75,6 +75,8 @@ import org.gradle.internal.rustbridge.execution.ShadowingExecutionPlanAdvisor;
 import org.gradle.internal.rustbridge.plugin.ShadowingPluginRegistry;
 import org.gradle.internal.rustbridge.worker.ShadowingWorkerPool;
 import org.gradle.internal.rustbridge.eventstream.ShadowingBuildEventLogger;
+import org.gradle.internal.rustbridge.eventstream.BuildLifecycleEventForwarder;
+import org.gradle.internal.rustbridge.eventstream.TaskExecutionEventForwarder;
 import org.gradle.internal.rustbridge.problems.ShadowingProblemCollector;
 import org.gradle.internal.rustbridge.resources.ShadowingResourceCoordinator;
 import org.gradle.internal.rustbridge.comparison.ShadowingBuildComparator;
@@ -911,6 +913,38 @@ public class RustBridgeServices extends AbstractGradleModuleServices {
                 return null;
             }
             return new ShadowingGarbageCollector(rustGarbageCollectionClient, mismatchReporter);
+        }
+
+        // --- Build lifecycle event forwarding ---
+
+        @Provides
+        @Nullable
+        BuildLifecycleEventForwarder createBuildLifecycleEventForwarder(
+            RustBuildEventStreamClient rustBuildEventStreamClient,
+            ListenerManager listenerManager,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+                return null;
+            }
+            BuildLifecycleEventForwarder listener = new BuildLifecycleEventForwarder(rustBuildEventStreamClient);
+            listenerManager.addListener(listener);
+            return listener;
+        }
+
+        @Provides
+        @Nullable
+        TaskExecutionEventForwarder createTaskExecutionEventForwarder(
+            RustBuildEventStreamClient rustBuildEventStreamClient,
+            ListenerManager listenerManager,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+                return null;
+            }
+            TaskExecutionEventForwarder listener = new TaskExecutionEventForwarder(rustBuildEventStreamClient);
+            listenerManager.addListener(listener);
+            return listener;
         }
     }
 
