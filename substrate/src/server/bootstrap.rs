@@ -8,10 +8,11 @@ use tonic::{Request, Response, Status};
 use crate::client::jvm_host_bridge::JvmHostBridge;
 use super::scopes::{BuildId, ScopeRegistry, SessionId};
 use super::build_plan_shadow::{capture_and_persist_shadow_from_jvm, BuildPlanShadowStore};
+use super::build_event_stream::BuildEventStreamServiceImpl;
 use crate::proto::{
     bootstrap_service_server::BootstrapService, CompleteBuildRequest, CompleteBuildResponse,
     GetSubstrateInfoRequest, GetSubstrateInfoResponse, HealthCheckRequest, HealthCheckResponse,
-    InitBuildRequest, InitBuildResponse, SubstrateServiceInfo,
+    InitBuildRequest, InitBuildResponse, SubstrateServiceInfo, BuildEventMessage,
 };
 use crate::SERVER_VERSION;
 
@@ -35,6 +36,7 @@ pub struct BootstrapServiceImpl {
     scope_registry: Option<Arc<ScopeRegistry>>,
     jvm_bridge: Option<Arc<JvmHostBridge>>,
     build_plan_shadow_store: Option<Arc<BuildPlanShadowStore>>,
+    event_stream: Option<Arc<BuildEventStreamServiceImpl>>,
 }
 
 impl Default for BootstrapServiceImpl {
@@ -53,6 +55,7 @@ impl BootstrapServiceImpl {
             scope_registry: None,
             jvm_bridge: None,
             build_plan_shadow_store: None,
+            event_stream: None,
         }
     }
 
@@ -65,6 +68,7 @@ impl BootstrapServiceImpl {
             scope_registry: Some(scope_registry),
             jvm_bridge: None,
             build_plan_shadow_store: None,
+            event_stream: None,
         }
     }
 
@@ -81,7 +85,14 @@ impl BootstrapServiceImpl {
             scope_registry: Some(scope_registry),
             jvm_bridge: Some(jvm_bridge),
             build_plan_shadow_store: Some(build_plan_shadow_store),
+            event_stream: None,
         }
+    }
+
+    /// Set the event stream for build lifecycle event emission.
+    pub fn with_event_stream(mut self, event_stream: Arc<BuildEventStreamServiceImpl>) -> Self {
+        self.event_stream = Some(event_stream);
+        self
     }
 
     fn increment_requests(service: &str, counts: &DashMap<String, AtomicI64>) -> i64 {
@@ -91,6 +102,13 @@ impl BootstrapServiceImpl {
             .fetch_add(1, Ordering::Relaxed)
             + 1
     }
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 #[tonic::async_trait]
@@ -203,6 +221,22 @@ impl BootstrapService for BootstrapServiceImpl {
             "Build session initialized"
         );
 
+        // Emit build_start event to the event stream for cross-service fan-out
+        if let Some(ref event_stream) = self.event_stream {
+            let mut props = std::collections::HashMap::new();
+            props.insert("project_dir".to_string(), project_dir);
+            props.insert("parallelism".to_string(), parallelism.to_string());
+            event_stream.emit_event(BuildEventMessage {
+                build_id: build_id_str.clone(),
+                timestamp_ms: now_ms(),
+                event_type: "build_start".to_string(),
+                event_id: format!("bootstrap-{}", build_id_str),
+                properties: props,
+                display_name: "Build".to_string(),
+                parent_id: String::new(),
+            });
+        }
+
         Ok(Response::new(InitBuildResponse {
             build_id: req.build_id,
             substrate_version: SERVER_VERSION.to_string(),
@@ -246,6 +280,24 @@ impl BootstrapService for BootstrapServiceImpl {
                 client_reported_duration_ms = req.duration_ms,
                 "CompleteBuild called for unknown session"
             );
+        }
+
+        // Emit build_finish event to the event stream
+        if let Some(ref event_stream) = self.event_stream {
+            let mut props = std::collections::HashMap::new();
+            props.insert("outcome".to_string(), req.outcome.clone());
+            props.insert("duration_ms".to_string(), req.duration_ms.to_string());
+            let event_id = format!("bootstrap-finish-{}", req.build_id);
+            event_stream.emit_event(BuildEventMessage {
+                build_id: req.build_id.clone(),
+                timestamp_ms: now_ms(),
+                event_type: "build_finish".to_string(),
+                event_id,
+                properties: props,
+                display_name: "Build".to_string(),
+                parent_id: String::new(),
+            });
+            event_stream.cleanup_build(&build_id);
         }
 
         // Clean up scope registry
