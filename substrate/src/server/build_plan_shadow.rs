@@ -273,35 +273,191 @@ fn diff_expected_vs_artifact(
         ));
     }
     if expected.projects != actual.projects {
-        mismatches.push(format!(
-            "projects mismatch: expected {} entries got {}",
-            expected.projects.len(),
-            actual.projects.len()
-        ));
+        // Field-level diff: identify specific project differences
+        let expected_paths: std::collections::HashSet<&str> =
+            expected.projects.iter().map(|p| p.path.as_str()).collect();
+        let actual_paths: std::collections::HashSet<&str> =
+            actual.projects.iter().map(|p| p.path.as_str()).collect();
+
+        let only_expected: Vec<&str> = expected_paths.difference(&actual_paths).copied().collect();
+        let only_actual: Vec<&str> = actual_paths.difference(&expected_paths).copied().collect();
+
+        if !only_expected.is_empty() {
+            mismatches.push(format!(
+                "projects only in expected: [{}]",
+                only_expected.join(", ")
+            ));
+        }
+        if !only_actual.is_empty() {
+            mismatches.push(format!(
+                "projects only in actual: [{}]",
+                only_actual.join(", ")
+            ));
+        }
+
+        // Check for field-level differences in common projects
+        for p in &expected.projects {
+            if let Some(a) = actual.projects.iter().find(|a| a.path == p.path) {
+                if p.name != a.name {
+                    mismatches.push(format!(
+                        "project '{}' name mismatch: expected '{}' got '{}'",
+                        p.path, p.name, a.name
+                    ));
+                }
+                if p.project_dir != a.project_dir {
+                    mismatches.push(format!(
+                        "project '{}' project_dir mismatch: expected '{}' got '{}'",
+                        p.path, p.project_dir, a.project_dir
+                    ));
+                }
+            }
+        }
+
+        if only_expected.is_empty() && only_actual.is_empty() && mismatches.iter().all(|m| !m.starts_with("project")) {
+            mismatches.push(format!(
+                "projects mismatch: expected {} entries got {}",
+                expected.projects.len(),
+                actual.projects.len()
+            ));
+        }
     }
     if expected.tasks != actual.tasks {
-        mismatches.push(format!(
-            "tasks mismatch: expected {} entries got {}",
-            expected.tasks.len(),
-            actual.tasks.len()
-        ));
+        let expected_tasks: std::collections::HashSet<&str> =
+            expected.tasks.iter().map(|t| t.path.as_str()).collect();
+        let actual_tasks: std::collections::HashSet<&str> =
+            actual.tasks.iter().map(|t| t.path.as_str()).collect();
+
+        let only_expected: Vec<&str> = expected_tasks.difference(&actual_tasks).copied().collect();
+        let only_actual: Vec<&str> = actual_tasks.difference(&expected_tasks).copied().collect();
+
+        if !only_expected.is_empty() {
+            mismatches.push(format!(
+                "tasks only in expected: [{}]",
+                only_expected.join(", ")
+            ));
+        }
+        if !only_actual.is_empty() {
+            mismatches.push(format!(
+                "tasks only in actual: [{}]",
+                only_actual.join(", ")
+            ));
+        }
+        if only_expected.is_empty() && only_actual.is_empty() {
+            mismatches.push(format!(
+                "tasks field-level mismatch: expected {} entries got {}",
+                expected.tasks.len(),
+                actual.tasks.len()
+            ));
+        }
     }
     if expected.dependencies != actual.dependencies {
-        mismatches.push(format!(
-            "dependencies mismatch: expected {} entries got {}",
-            expected.dependencies.len(),
-            actual.dependencies.len()
-        ));
+        let expected_deps: std::collections::HashSet<String> = expected
+            .dependencies
+            .iter()
+            .map(|d| format!("{}|{}|{}", d.project_path, d.configuration, d.notation))
+            .collect();
+        let actual_deps: std::collections::HashSet<String> = actual
+            .dependencies
+            .iter()
+            .map(|d| format!("{}|{}|{}", d.project_path, d.configuration, d.notation))
+            .collect();
+
+        let only_expected: Vec<String> = expected_deps.iter()
+            .filter(|s| !actual_deps.contains(*s))
+            .cloned()
+            .collect();
+        let only_actual: Vec<String> = actual_deps.iter()
+            .filter(|s| !expected_deps.contains(*s))
+            .cloned()
+            .collect();
+
+        if !only_expected.is_empty() {
+            mismatches.push(format!(
+                "dependencies only in expected: [{}]",
+                only_expected.join(", ")
+            ));
+        }
+        if !only_actual.is_empty() {
+            mismatches.push(format!(
+                "dependencies only in actual: [{}]",
+                only_actual.join(", ")
+            ));
+        }
+        if only_expected.is_empty() && only_actual.is_empty() {
+            mismatches.push(format!(
+                "dependencies mismatch: expected {} entries got {}",
+                expected.dependencies.len(),
+                actual.dependencies.len()
+            ));
+        }
     }
     if expected.toolchains != actual.toolchains {
-        mismatches.push(format!(
-            "toolchains mismatch: expected {} entries got {}",
-            expected.toolchains.len(),
-            actual.toolchains.len()
-        ));
+        let expected_tc: std::collections::HashSet<&str> = expected
+            .toolchains
+            .iter()
+            .map(|t| t.language.as_str())
+            .collect();
+        let actual_tc: std::collections::HashSet<&str> = actual
+            .toolchains
+            .iter()
+            .map(|t| t.language.as_str())
+            .collect();
+
+        let only_expected: Vec<&str> = expected_tc.difference(&actual_tc).copied().collect();
+        let only_actual: Vec<&str> = actual_tc.difference(&expected_tc).copied().collect();
+
+        if !only_expected.is_empty() {
+            mismatches.push(format!(
+                "toolchains only in expected: [{}]",
+                only_expected.join(", ")
+            ));
+        }
+        if !only_actual.is_empty() {
+            mismatches.push(format!(
+                "toolchains only in actual: [{}]",
+                only_actual.join(", ")
+            ));
+        }
+        if only_expected.is_empty() && only_actual.is_empty() {
+            mismatches.push(format!(
+                "toolchains field-level mismatch: expected {} entries got {}",
+                expected.toolchains.len(),
+                actual.toolchains.len()
+            ));
+        }
     }
     if expected.metadata != actual.metadata {
-        mismatches.push("metadata mismatch".to_string());
+        let only_expected: Vec<String> = expected
+            .metadata
+            .keys()
+            .filter(|k| !actual.metadata.contains_key(*k))
+            .map(|k| k.to_string())
+            .collect();
+        let only_actual: Vec<String> = actual
+            .metadata
+            .keys()
+            .filter(|k| !expected.metadata.contains_key(*k))
+            .map(|k| k.to_string())
+            .collect();
+        let value_diffs: Vec<String> = expected
+            .metadata
+            .iter()
+            .filter(|(k, v)| actual.metadata.get(*k) != Some(v))
+            .map(|(k, v)| format!("{}: expected='{}' got='{}'", k, v, actual.metadata.get(k).unwrap_or(&String::new())))
+            .collect();
+
+        if !only_expected.is_empty() {
+            mismatches.push(format!("metadata keys only in expected: [{}]", only_expected.join(", ")));
+        }
+        if !only_actual.is_empty() {
+            mismatches.push(format!("metadata keys only in actual: [{}]", only_actual.join(", ")));
+        }
+        for d in &value_diffs {
+            mismatches.push(format!("metadata {}", d));
+        }
+        if only_expected.is_empty() && only_actual.is_empty() && value_diffs.is_empty() {
+            mismatches.push("metadata mismatch".to_string());
+        }
     }
 
     match fingerprint_sha256_hex(&actual) {
