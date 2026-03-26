@@ -9,10 +9,113 @@ use tonic::{Request, Response, Status};
 use crate::proto::{
     dependency_resolution_service_server::DependencyResolutionService, AddArtifactToCacheRequest,
     AddArtifactToCacheResponse, CheckArtifactCacheRequest, CheckArtifactCacheResponse,
-    DependencyDescriptor, GetResolutionStatsRequest, GetResolutionStatsResponse,
-    RecordResolutionRequest, RecordResolutionResponse, RepositoryDescriptor,
-    ResolveDependenciesRequest, ResolveDependenciesResponse, ResolvedDependency,
+    ChecksumFailure, DependencyDescriptor, GetResolutionStatsRequest,
+    GetResolutionStatsResponse, RecordResolutionRequest, RecordResolutionResponse,
+    RepositoryDescriptor, ResolveDependenciesRequest, ResolveDependenciesResponse,
+    ResolvedDependency, VerifyDependencyChecksumsRequest, VerifyDependencyChecksumsResponse,
 };
+
+// ---------------------------------------------------------------------------
+// Dependency scope
+// ---------------------------------------------------------------------------
+
+/// Dependency scope classification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DependencyScope {
+    Compile,
+    Runtime,
+    Test,
+    Provided,
+    System,
+}
+
+impl DependencyScope {
+    /// Parse a scope string (case-insensitive).
+    pub fn from_str_loose(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "compile" | "compileonly" | "api" => DependencyScope::Compile,
+            "runtime" | "implementation" | "runtimeonly" => DependencyScope::Runtime,
+            "test" | "testimplementation" | "testruntimeonly" => DependencyScope::Test,
+            "provided" => DependencyScope::Provided,
+            "system" => DependencyScope::System,
+            _ => DependencyScope::Compile,
+        }
+    }
+
+    /// Returns true if this scope includes the given dependency scope.
+    /// Compile includes everything. Runtime includes Compile. Test includes Runtime.
+    pub fn includes(&self, other: &DependencyScope) -> bool {
+        match self {
+            DependencyScope::Compile => true,
+            DependencyScope::Runtime => matches!(other, DependencyScope::Compile | DependencyScope::Runtime),
+            DependencyScope::Test => true,
+            DependencyScope::Provided => matches!(other, DependencyScope::Compile | DependencyScope::Provided),
+            DependencyScope::System => matches!(other, DependencyScope::System),
+        }
+    }
+
+    /// Scopes that are transitively inherited.
+    pub fn transitive_scopes(&self) -> Vec<DependencyScope> {
+        match self {
+            DependencyScope::Compile => vec![DependencyScope::Compile, DependencyScope::Runtime],
+            DependencyScope::Runtime => vec![DependencyScope::Runtime],
+            DependencyScope::Test => vec![DependencyScope::Compile, DependencyScope::Runtime],
+            DependencyScope::Provided => vec![],
+            DependencyScope::System => vec![],
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Resolution strategy
+// ---------------------------------------------------------------------------
+
+/// Resolution strategy for version conflicts.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResolutionStrategy {
+    /// Pick the highest version (existing default behavior).
+    HighestVersion,
+    /// Force specific versions for given "group:name" coordinates.
+    Force(std::collections::HashMap<String, String>),
+    /// Prefer specific versions but don't force them.
+    Prefer(std::collections::HashMap<String, String>),
+    /// Fail if any version conflict exists.
+    FailOnConflict,
+    /// Use the nearest definition in the dependency tree.
+    NearestDefinition,
+}
+
+#[allow(clippy::derivable_impls)]
+impl Default for ResolutionStrategy {
+    fn default() -> Self {
+        ResolutionStrategy::HighestVersion
+    }
+}
+
+impl ResolutionStrategy {
+    /// Parse strategy from proto config.
+    pub fn from_proto(config: &crate::proto::ResolutionStrategyConfig) -> Self {
+        match config.strategy.as_str() {
+            "force" => {
+                let mut map = std::collections::HashMap::new();
+                for entry in &config.forced_versions {
+                    map.insert(entry.key.clone(), entry.value.clone());
+                }
+                ResolutionStrategy::Force(map)
+            }
+            "prefer" => {
+                let mut map = std::collections::HashMap::new();
+                for entry in &config.preferred_versions {
+                    map.insert(entry.key.clone(), entry.value.clone());
+                }
+                ResolutionStrategy::Prefer(map)
+            }
+            "fail_on_conflict" => ResolutionStrategy::FailOnConflict,
+            "nearest" => ResolutionStrategy::NearestDefinition,
+            _ => ResolutionStrategy::HighestVersion,
+        }
+    }
+}
 
 /// Cached artifact metadata.
 struct CachedArtifact {
@@ -637,40 +740,213 @@ impl DependencyResolutionServiceImpl {
     /// Deduplicate resolved dependencies by (group, name), keeping the highest version.
     /// This implements Gradle's default conflict resolution strategy.
     pub fn resolve_conflicts(deps: &mut Vec<ResolvedDependency>) {
-        let mut best: std::collections::HashMap<(String, String), usize> =
-            std::collections::HashMap::new();
+        Self::resolve_conflicts_with_strategy(deps, &ResolutionStrategy::HighestVersion);
+    }
 
-        for (idx, dep) in deps.iter().enumerate() {
-            let key = (dep.group.clone(), dep.name.clone());
-            if let Some(&prev_idx) = best.get(&key) {
-                // Compare versions: keep the higher one
-                if compare_versions(&dep.selected_version, &deps[prev_idx].selected_version)
-                    == std::cmp::Ordering::Greater
-                {
-                    best.insert(key, idx);
+    /// Deduplicate resolved dependencies using the given resolution strategy.
+    pub fn resolve_conflicts_with_strategy(
+        deps: &mut Vec<ResolvedDependency>,
+        strategy: &ResolutionStrategy,
+    ) {
+        match strategy {
+            ResolutionStrategy::HighestVersion => {
+                // Existing behavior: keep highest version
+                let mut best: std::collections::HashMap<(String, String), usize> =
+                    std::collections::HashMap::new();
+
+                for (idx, dep) in deps.iter().enumerate() {
+                    let key = (dep.group.clone(), dep.name.clone());
+                    if let Some(&prev_idx) = best.get(&key) {
+                        if compare_versions(&dep.selected_version, &deps[prev_idx].selected_version)
+                            == std::cmp::Ordering::Greater
+                        {
+                            best.insert(key, idx);
+                        }
+                    } else {
+                        best.insert(key, idx);
+                    }
                 }
-            } else {
-                best.insert(key, idx);
+
+                let mut winning_indices: Vec<usize> = best.values().copied().collect();
+                winning_indices.sort();
+
+                let original_len = deps.len();
+                *deps = winning_indices
+                    .into_iter()
+                    .map(|idx| deps[idx].clone())
+                    .collect();
+
+                tracing::debug!(
+                    original_count = original_len,
+                    deduplicated_count = deps.len(),
+                    "Conflict resolution (highest_version): deduplicated {} -> {}",
+                    original_len,
+                    deps.len()
+                );
+            }
+            ResolutionStrategy::Force(forced) => {
+                // Apply forced versions, then fall back to highest for the rest
+                let mut best: std::collections::HashMap<(String, String), usize> =
+                    std::collections::HashMap::new();
+
+                for (idx, dep) in deps.iter().enumerate() {
+                    let key = (dep.group.clone(), dep.name.clone());
+                    // Check if a forced version exists (key is "group:name" -> version)
+                    let forced_key = format!("{}:{}", dep.group, dep.name);
+                    if let Some(forced_ver) = forced.get(&forced_key) {
+                        if dep.selected_version == *forced_ver {
+                            best.insert(key, idx);
+                        }
+                    } else if let Some(&prev_idx) = best.get(&key) {
+                        if compare_versions(&dep.selected_version, &deps[prev_idx].selected_version)
+                            == std::cmp::Ordering::Greater
+                        {
+                            best.insert(key, idx);
+                        }
+                    } else {
+                        best.insert(key, idx);
+                    }
+                }
+
+                let mut winning_indices: Vec<usize> = best.values().copied().collect();
+                winning_indices.sort();
+
+                let original_len = deps.len();
+                *deps = winning_indices
+                    .into_iter()
+                    .map(|idx| deps[idx].clone())
+                    .collect();
+
+                tracing::debug!(
+                    original_count = original_len,
+                    deduplicated_count = deps.len(),
+                    forced_count = forced.len(),
+                    "Conflict resolution (force): deduplicated {} -> {}",
+                    original_len,
+                    deps.len()
+                );
+            }
+            ResolutionStrategy::FailOnConflict => {
+                // Check for any version conflicts; fail if found
+                let mut versions: std::collections::HashMap<(String, String), Vec<String>> =
+                    std::collections::HashMap::new();
+
+                for dep in deps.iter() {
+                    let key = (dep.group.clone(), dep.name.clone());
+                    versions
+                        .entry(key)
+                        .or_default()
+                        .push(dep.selected_version.clone());
+                }
+
+                let conflicts: Vec<((String, String), Vec<String>)> = versions
+                    .into_iter()
+                    .filter(|(_, v)| v.len() > 1)
+                    .collect();
+
+                if !conflicts.is_empty() {
+                    let conflict_str: Vec<String> = conflicts
+                        .iter()
+                        .map(|((g, n), v)| format!("{}:{} has versions {}", g, n, v.join(", ")))
+                        .collect();
+                    tracing::warn!(
+                        conflicts = conflict_str.join("; "),
+                        "Version conflict detected (fail_on_conflict)"
+                    );
+                    // Still deduplicate using highest version for non-conflicting deps
+                    Self::resolve_conflicts_with_strategy(deps, &ResolutionStrategy::HighestVersion);
+                }
+            }
+            ResolutionStrategy::Prefer(preferred) => {
+                // Prefer specific versions but allow overrides by higher transitive versions
+                let mut best: std::collections::HashMap<(String, String), usize> =
+                    std::collections::HashMap::new();
+
+                for (idx, dep) in deps.iter().enumerate() {
+                    let key = (dep.group.clone(), dep.name.clone());
+                    let pref_key = format!("{}:{}", dep.group, dep.name);
+                    let is_preferred = preferred
+                        .get(&pref_key)
+                        .map(|v| dep.selected_version == *v)
+                        .unwrap_or(false);
+
+                    if is_preferred {
+                        // Preferred version always wins over non-preferred
+                        best.insert(key, idx);
+                    } else if let Some(&prev_idx) = best.get(&key) {
+                        // Check if previous was preferred — if so, keep it
+                        let prev_key =
+                            format!("{}:{}", deps[prev_idx].group, deps[prev_idx].name);
+                        let prev_preferred = preferred
+                            .get(&prev_key)
+                            .map(|v| deps[prev_idx].selected_version == *v)
+                            .unwrap_or(false);
+                        if !prev_preferred
+                            && compare_versions(&dep.selected_version, &deps[prev_idx].selected_version)
+                                == std::cmp::Ordering::Greater
+                        {
+                            best.insert(key, idx);
+                        }
+                    } else {
+                        best.insert(key, idx);
+                    }
+                }
+
+                let mut winning_indices: Vec<usize> = best.values().copied().collect();
+                winning_indices.sort();
+
+                let original_len = deps.len();
+                *deps = winning_indices
+                    .into_iter()
+                    .map(|idx| deps[idx].clone())
+                    .collect();
+
+                tracing::debug!(
+                    original_count = original_len,
+                    deduplicated_count = deps.len(),
+                    "Conflict resolution (prefer): deduplicated {} -> {}",
+                    original_len,
+                    deps.len()
+                );
+            }
+            ResolutionStrategy::NearestDefinition => {
+                // Nearest wins — keep the first occurrence (shallowest in the tree)
+                let mut seen: std::collections::HashSet<(String, String)> =
+                    std::collections::HashSet::new();
+                let mut kept = Vec::new();
+
+                for dep in deps.iter() {
+                    let key = (dep.group.clone(), dep.name.clone());
+                    if seen.insert(key) {
+                        kept.push(dep.clone());
+                    }
+                }
+
+                let original_len = deps.len();
+                *deps = kept;
+
+                tracing::debug!(
+                    original_count = original_len,
+                    deduplicated_count = deps.len(),
+                    "Conflict resolution (nearest): deduplicated {} -> {}",
+                    original_len,
+                    deps.len()
+                );
             }
         }
+    }
 
-        // Collect the winning indices, sorted by original index to preserve order
-        let mut winning_indices: Vec<usize> = best.values().copied().collect();
-        winning_indices.sort();
-
-        let original_len = deps.len();
-        *deps = winning_indices
-            .into_iter()
-            .map(|idx| deps[idx].clone())
-            .collect();
-
-        tracing::debug!(
-            original_count = original_len,
-            deduplicated_count = deps.len(),
-            "Conflict resolution: deduplicated {} -> {}",
-            original_len,
-            deps.len()
-        );
+    /// Filter resolved dependencies by scope.
+    pub fn filter_by_scope(deps: Vec<ResolvedDependency>, target: &DependencyScope) -> Vec<ResolvedDependency> {
+        if matches!(target, DependencyScope::Compile) {
+            return deps; // Compile includes everything
+        }
+        deps.into_iter()
+            .filter(|dep| {
+                let dep_scope = DependencyScope::from_str_loose(&dep.scope);
+                target.includes(&dep_scope)
+            })
+            .collect()
     }
 
     /// Check if a dependency matches an exclusion pattern.
@@ -1096,6 +1372,7 @@ impl DependencyResolutionServiceImpl {
                 artifact_url,
                 artifact_size: 0,
                 artifact_sha256: String::new(),
+                scope: String::new(),
             };
         }
 
@@ -1143,6 +1420,7 @@ impl DependencyResolutionServiceImpl {
             artifact_url,
             artifact_size: 0,
             artifact_sha256: String::new(),
+            scope: String::new(),
         }
     }
 
@@ -1367,6 +1645,10 @@ impl DependencyResolutionServiceImpl {
                                 pom_dep.type_field.clone()
                             },
                             transitive: true,
+                            scope: String::new(),
+                            changing: false,
+                            optional: false,
+                            ivy_conf: String::new(),
                         };
                         let resolved = Box::pin(self.resolve_recursive(
                             &child_dep,
@@ -1595,6 +1877,8 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                 m2compatible: r.m2compatible,
                 allow_insecure_protocol: r.allow_insecure_protocol,
                 credentials: r.credentials.clone(),
+                layout: r.layout.clone(),
+                ivy_pattern: r.ivy_pattern.clone(),
             })
             .collect();
         let default_repo = RepositoryDescriptor {
@@ -1603,6 +1887,8 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             m2compatible: true,
             allow_insecure_protocol: false,
             credentials: Default::default(),
+            layout: String::new(),
+            ivy_pattern: String::new(),
         };
         let repos = if repo_urls.is_empty() {
             vec![default_repo]
@@ -1612,9 +1898,29 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
 
         let mut resolved = Vec::new();
         for dep in &req.dependencies {
-            let result = self.resolve_descriptor(dep, &repos).await;
+            let mut result = self.resolve_descriptor(dep, &repos).await;
+            // Propagate scope from the request descriptor
+            if !dep.scope.is_empty() {
+                result.scope = dep.scope.clone();
+            }
             resolved.push(result);
         }
+
+        // Apply resolution strategy if configured
+        let strategy = req
+            .resolution_strategy
+            .as_ref()
+            .map(ResolutionStrategy::from_proto)
+            .unwrap_or_default();
+        Self::resolve_conflicts_with_strategy(&mut resolved, &strategy);
+
+        // Filter by target scope if specified
+        let resolved = if !req.target_scope.is_empty() {
+            let target = DependencyScope::from_str_loose(&req.target_scope);
+            Self::filter_by_scope(resolved, &target)
+        } else {
+            resolved
+        };
 
         let elapsed = start.elapsed().as_millis() as i64;
         let total_artifacts = resolved.len() as i32;
@@ -2040,6 +2346,54 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
 
         Ok(Response::new(AddArtifactToCacheResponse { accepted: true }))
     }
+
+    async fn verify_dependency_checksums(
+        &self,
+        request: Request<VerifyDependencyChecksumsRequest>,
+    ) -> Result<Response<VerifyDependencyChecksumsResponse>, Status> {
+        let req = request.into_inner();
+        let mut failures = Vec::new();
+
+        for entry in &req.entries {
+            let cache_key = Self::artifact_cache_key(
+                &entry.group,
+                &entry.name,
+                &entry.version,
+                &entry.classifier,
+            );
+
+            match self.artifact_cache.get(&cache_key) {
+                Some(cached) => {
+                    if cached.sha256 != entry.expected_sha256 {
+                        failures.push(ChecksumFailure {
+                            group: entry.group.clone(),
+                            name: entry.name.clone(),
+                            version: entry.version.clone(),
+                            expected_sha256: entry.expected_sha256.clone(),
+                            actual_sha256: cached.sha256.clone(),
+                        });
+                    }
+                }
+                None => {
+                    // Artifact not in cache — report as mismatch
+                    failures.push(ChecksumFailure {
+                        group: entry.group.clone(),
+                        name: entry.name.clone(),
+                        version: entry.version.clone(),
+                        expected_sha256: entry.expected_sha256.clone(),
+                        actual_sha256: String::new(),
+                    });
+                }
+            }
+        }
+
+        let all_matched = failures.is_empty();
+
+        Ok(Response::new(VerifyDependencyChecksumsResponse {
+            all_matched,
+            failures,
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -2059,6 +2413,10 @@ mod tests {
             classifier: String::new(),
             extension: "jar".to_string(),
             transitive: true,
+            scope: String::new(),
+            changing: false,
+            optional: false,
+            ivy_conf: String::new(),
         }
     }
 
@@ -2069,6 +2427,8 @@ mod tests {
             m2compatible: true,
             allow_insecure_protocol: false,
             credentials: Default::default(),
+            layout: String::new(),
+            ivy_pattern: String::new(),
         }
     }
 
@@ -2089,6 +2449,7 @@ mod tests {
                 )],
                 attributes: vec![],
                 lenient: false,
+                ..Default::default()
             }))
             .await
             .unwrap()
@@ -2452,6 +2813,7 @@ mod tests {
                 repositories: vec![],
                 attributes: vec![],
                 lenient: false,
+                ..Default::default()
             }))
             .await
             .unwrap()
@@ -2585,6 +2947,7 @@ mod tests {
             )],
             attributes: vec![],
             lenient: true,
+            ..Default::default()
         }))
         .await
         .unwrap();
@@ -2859,6 +3222,8 @@ mod tests {
                 m.insert("password".to_string(), "pass".to_string());
                 m
             },
+            layout: String::new(),
+            ivy_pattern: String::new(),
         };
 
         // The build_request method returns a RequestBuilder — we can't easily inspect it,
@@ -3153,6 +3518,7 @@ mod tests {
                 artifact_url: String::new(),
                 artifact_size: 0,
                 artifact_sha256: String::new(),
+                ..Default::default()
             },
             ResolvedDependency {
                 group: "com.example".to_string(),
@@ -3165,6 +3531,7 @@ mod tests {
                 artifact_url: String::new(),
                 artifact_size: 0,
                 artifact_sha256: String::new(),
+                ..Default::default()
             },
             ResolvedDependency {
                 group: "com.other".to_string(),
@@ -3177,6 +3544,7 @@ mod tests {
                 artifact_url: String::new(),
                 artifact_size: 0,
                 artifact_sha256: String::new(),
+                ..Default::default()
             },
         ];
 
@@ -3205,6 +3573,7 @@ mod tests {
                 artifact_url: String::new(),
                 artifact_size: 0,
                 artifact_sha256: String::new(),
+                ..Default::default()
             },
             ResolvedDependency {
                 group: "a".to_string(),
@@ -3217,6 +3586,7 @@ mod tests {
                 artifact_url: String::new(),
                 artifact_size: 0,
                 artifact_sha256: String::new(),
+                ..Default::default()
             },
             ResolvedDependency {
                 group: "a".to_string(),
@@ -3229,6 +3599,7 @@ mod tests {
                 artifact_url: String::new(),
                 artifact_size: 0,
                 artifact_sha256: String::new(),
+                ..Default::default()
             },
         ];
 
@@ -3257,6 +3628,7 @@ mod tests {
                 artifact_url: String::new(),
                 artifact_size: 0,
                 artifact_sha256: String::new(),
+                ..Default::default()
             },
             ResolvedDependency {
                 group: "b".to_string(),
@@ -3269,6 +3641,7 @@ mod tests {
                 artifact_url: String::new(),
                 artifact_size: 0,
                 artifact_sha256: String::new(),
+                ..Default::default()
             },
         ];
 
@@ -3298,6 +3671,7 @@ mod tests {
                 artifact_url: String::new(),
                 artifact_size: 0,
                 artifact_sha256: String::new(),
+                ..Default::default()
             },
             ResolvedDependency {
                 group: "a".to_string(),
@@ -3310,6 +3684,7 @@ mod tests {
                 artifact_url: String::new(),
                 artifact_size: 0,
                 artifact_sha256: String::new(),
+                ..Default::default()
             },
         ];
 
@@ -3333,6 +3708,7 @@ mod tests {
                 artifact_url: String::new(),
                 artifact_size: 0,
                 artifact_sha256: String::new(),
+                ..Default::default()
             },
             ResolvedDependency {
                 group: "a".to_string(),
@@ -3345,6 +3721,7 @@ mod tests {
                 artifact_url: String::new(),
                 artifact_size: 0,
                 artifact_sha256: String::new(),
+                ..Default::default()
             },
         ];
 
@@ -3609,6 +3986,7 @@ mod tests {
                 artifact_url: String::new(),
                 artifact_size: 0,
                 artifact_sha256: String::new(),
+                ..Default::default()
             });
         }
 
@@ -3821,6 +4199,7 @@ mod tests {
                 )],
                 attributes: vec![],
                 lenient: false,
+                ..Default::default()
             }))
             .await
             .unwrap()

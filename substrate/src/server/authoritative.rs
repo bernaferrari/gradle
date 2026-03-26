@@ -10,6 +10,7 @@ pub struct SubsystemModes {
     pub task_graph: bool,
     pub file_fingerprinting: bool,
     pub execution_plan: bool,
+    pub config_cache: bool,
 }
 
 impl SubsystemModes {
@@ -23,6 +24,7 @@ impl SubsystemModes {
             "task_graph",
             "file_fingerprinting",
             "execution_plan",
+            "config_cache",
         ]
     }
 
@@ -44,6 +46,7 @@ impl SubsystemModes {
             "task_graph" => self.task_graph,
             "file_fingerprinting" => self.file_fingerprinting,
             "execution_plan" => self.execution_plan,
+            "config_cache" => self.config_cache,
             _ => false,
         }
     }
@@ -64,6 +67,7 @@ impl SubsystemModes {
                 authoritative,
             )),
             "execution_plan" => Some(std::mem::replace(&mut self.execution_plan, authoritative)),
+            "config_cache" => Some(std::mem::replace(&mut self.config_cache, authoritative)),
             _ => None,
         }
     }
@@ -98,6 +102,7 @@ impl AuthoritativeConfig {
         modes.task_graph = authoritative;
         modes.file_fingerprinting = authoritative;
         modes.execution_plan = authoritative;
+        modes.config_cache = authoritative;
     }
 
     /// Check whether a specific subsystem is in authoritative mode.
@@ -152,6 +157,7 @@ mod tests {
         assert!(modes.task_graph);
         assert!(modes.file_fingerprinting);
         assert!(modes.execution_plan);
+        assert!(modes.config_cache);
     }
 
     #[test]
@@ -170,7 +176,7 @@ mod tests {
         config.set_subsystem("hashing", true);
         let modes = config.get_modes();
         let pairs = modes.as_pairs();
-        assert_eq!(pairs.len(), 7);
+        assert_eq!(pairs.len(), 8);
         assert!(pairs.iter().any(|(name, auth)| *name == "hashing" && *auth));
         assert!(pairs
             .iter()

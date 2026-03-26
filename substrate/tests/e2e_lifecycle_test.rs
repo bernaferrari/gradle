@@ -74,6 +74,11 @@ async fn spawn_server_with_dispatchers() -> (String, tempfile::TempDir) {
         work_scheduler.clone(),
         Arc::clone(&shared_history),
     );
+    let execution_plan_arc = Arc::new(execution_plan);
+    let execution_plan_server = ExecutionPlanServiceImpl::with_persistent_history(
+        work_scheduler.clone(),
+        Arc::clone(&shared_history),
+    );
     let cache_orchestration =
         BuildCacheOrchestrationServiceImpl::with_local_cache(cache_local_store);
     let file_fingerprint = FileFingerprintServiceImpl::new();
@@ -101,6 +106,7 @@ async fn spawn_server_with_dispatchers() -> (String, tempfile::TempDir) {
     let dag_executor = DagExecutorServiceImpl::new(
         work_scheduler.clone(),
         Arc::clone(&task_graph),
+        execution_plan_arc,
         event_dispatchers,
     );
     let worker_process = WorkerProcessServiceImpl::new();
@@ -132,7 +138,9 @@ async fn spawn_server_with_dispatchers() -> (String, tempfile::TempDir) {
             .add_service(exec_service_server::ExecServiceServer::new(exec))
             .add_service(work_service_server::WorkServiceServer::new(work))
             .add_service(
-                execution_plan_service_server::ExecutionPlanServiceServer::new(execution_plan),
+                execution_plan_service_server::ExecutionPlanServiceServer::new(
+                    execution_plan_server,
+                ),
             )
             .add_service(
                 execution_history_service_server::ExecutionHistoryServiceServer::new(

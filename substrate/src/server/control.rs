@@ -185,7 +185,7 @@ mod tests {
             .await
             .unwrap()
             .into_inner();
-        assert_eq!(resp.subsystems.len(), 7);
+        assert_eq!(resp.subsystems.len(), 8);
         for s in &resp.subsystems {
             assert!(
                 !s.authoritative,
