@@ -12,8 +12,9 @@ use nix::unistd::Pid;
 use crate::proto::{
     worker_process_service_server::WorkerProcessService, AcquireWorkerRequest,
     AcquireWorkerResponse, ConfigurePoolRequest, ConfigurePoolResponse, GetWorkerStatusRequest,
-    GetWorkerStatusResponse, ReleaseWorkerRequest, ReleaseWorkerResponse, StopWorkerRequest,
-    StopWorkerResponse, WorkerHandle, WorkerSpec, WorkerStatus,
+    GetWorkerStatusResponse, ReleaseWorkerRequest, ReleaseWorkerResponse, RenewLeaseRequest,
+    RenewLeaseResponse, SendWorkRequest, SendWorkResponse, StopWorkerRequest, StopWorkerResponse,
+    WorkerHandle, WorkerSpec, WorkerStatus,
 };
 
 /// State of a tracked worker process.
@@ -29,6 +30,12 @@ struct TrackedWorker {
     last_used_ms: i64,
     tasks_completed: i32,
     spec: WorkerSpec,
+    /// When the current lease expires (0 = no lease).
+    lease_expires_at_ms: i64,
+    /// Who holds the lease.
+    lease_holder: String,
+    /// Display name of current work item.
+    current_work: String,
 }
 
 /// Rust-native worker process management service.
@@ -43,6 +50,7 @@ pub struct WorkerProcessServiceImpl {
     next_worker_id: AtomicI64,
     max_pool_size: std::sync::RwLock<i32>,
     idle_timeout_ms: std::sync::RwLock<i64>,
+    max_per_key: std::sync::RwLock<i32>,
     workers_spawned: AtomicI64,
     workers_reused: AtomicI64,
     workers_stopped: AtomicI64,
@@ -64,6 +72,7 @@ impl WorkerProcessServiceImpl {
             next_worker_id: AtomicI64::new(1),
             max_pool_size: std::sync::RwLock::new(16),
             idle_timeout_ms: std::sync::RwLock::new(120_000),
+            max_per_key: std::sync::RwLock::new(i32::MAX),
             workers_spawned: AtomicI64::new(0),
             workers_reused: AtomicI64::new(0),
             workers_stopped: AtomicI64::new(0),
@@ -250,6 +259,9 @@ impl WorkerProcessServiceImpl {
                 last_used_ms: now,
                 tasks_completed: 0,
                 spec,
+                lease_expires_at_ms: 0,
+                lease_holder: String::new(),
+                current_work: String::new(),
             },
         );
         self.workers_spawned.fetch_add(1, Ordering::Relaxed);
@@ -262,6 +274,9 @@ impl WorkerProcessServiceImpl {
                 connect_address: format!("unix:/tmp/gradle-worker-{}.sock", pid),
                 started_at_ms: now,
                 healthy: true,
+                lease_expires_at_ms: 0,
+                lease_holder: String::new(),
+                current_work: String::new(),
             }),
             reused: false,
             error_message: String::new(),
@@ -313,10 +328,57 @@ impl WorkerProcessServiceImpl {
             loop {
                 tokio::time::sleep(interval).await;
                 svc.reap_idle_workers().await;
+                svc.reap_expired_leases();
                 // Wait for state changes too
                 svc.state_changed.notified().await;
             }
         })
+    }
+
+    /// Expire leases on workers whose lease has elapsed.
+    /// Marks them idle so they can be re-acquired.
+    pub fn reap_expired_leases(&self) {
+        let now = Self::now_ms();
+
+        let expired: Vec<String> = self
+            .workers
+            .iter()
+            .filter(|e| {
+                e.state == "busy"
+                    && e.lease_expires_at_ms > 0
+                    && now > e.lease_expires_at_ms
+            })
+            .map(|e| e.worker_id.clone())
+            .collect();
+
+        for worker_id in &expired {
+            if let Some(mut worker) = self.workers.get_mut(worker_id) {
+                tracing::warn!(
+                    worker_id = %worker_id,
+                    current_work = %worker.current_work,
+                    "Worker lease expired, returning to idle pool"
+                );
+                worker.state = "idle".to_string();
+                worker.lease_expires_at_ms = 0;
+                worker.lease_holder = String::new();
+                worker.current_work = String::new();
+                worker.last_used_ms = now;
+
+                let key = worker.worker_key.clone();
+                drop(worker);
+
+                self.idle_workers
+                    .entry(key)
+                    .or_default()
+                    .push(worker_id.clone());
+
+                self.state_changed.notify_waiters();
+            }
+        }
+
+        if !expired.is_empty() {
+            tracing::info!(count = expired.len(), "Reaped expired worker leases");
+        }
     }
 
     /// Spawn a background task that captures stdout/stderr from a worker process
@@ -383,7 +445,36 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
             .ok_or_else(|| Status::invalid_argument("WorkerSpec is required"))?;
 
         let worker_key = spec.worker_key.clone();
+        let isolation_mode = spec.isolation_mode.clone();
         let now = Self::now_ms();
+
+        // Check per-key parallelism limit
+        let max_per_key = *self.max_per_key.read().unwrap();
+        if max_per_key != i32::MAX {
+            let busy_count: i32 = self
+                .workers
+                .iter()
+                .filter(|e| e.worker_key == worker_key && e.state == "busy")
+                .count() as i32;
+            if busy_count >= max_per_key {
+                return Ok(Response::new(AcquireWorkerResponse {
+                    worker: None,
+                    reused: false,
+                    error_message: format!(
+                        "Per-key parallelism limit reached ({}/{} for key {})",
+                        busy_count, max_per_key, worker_key
+                    ),
+                }));
+            }
+        }
+
+        // Isolation mode handling:
+        // "process" = spawn JVM daemon (default behavior)
+        // "classloader" / "app_classloader" / "none" = return stub (delegated to JVM)
+        if isolation_mode != "process" && !isolation_mode.is_empty() {
+            let worker_id = self.generate_worker_id();
+            return Ok(self.insert_stub_worker(worker_id, worker_key, spec, now));
+        }
 
         // Check for idle worker of the same type
         if let Some(mut idle_list) = self.idle_workers.get_mut(&worker_key) {
@@ -414,6 +505,15 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
                         worker.state = "busy".to_string();
                         worker.last_used_ms = now;
                         worker.tasks_completed += 1;
+                        // Set default lease (5 minutes from now)
+                        let lease_expires = if req.timeout_ms > 0 {
+                            now + req.timeout_ms
+                        } else {
+                            now + 300_000
+                        };
+                        worker.lease_expires_at_ms = lease_expires;
+                        worker.lease_holder = String::new();
+                        let lease_ms = worker.lease_expires_at_ms;
                         let pid = worker.pid;
                         let started_at = worker.started_at_ms;
                         drop(worker);
@@ -434,6 +534,9 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
                                 connect_address: format!("unix:/tmp/gradle-worker-{}.sock", pid),
                                 started_at_ms: started_at,
                                 healthy: true,
+                                lease_expires_at_ms: lease_ms,
+                                lease_holder: String::new(),
+                                current_work: String::new(),
                             }),
                             reused: true,
                             error_message: String::new(),
@@ -470,6 +573,12 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
 
         let (pid, child) = spawn_result.unwrap();
 
+        let lease_expires = if req.timeout_ms > 0 {
+            now + req.timeout_ms
+        } else {
+            now + 300_000
+        };
+
         self.workers.insert(
             worker_id.clone(),
             TrackedWorker {
@@ -483,6 +592,9 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
                 last_used_ms: now,
                 tasks_completed: 0,
                 spec,
+                lease_expires_at_ms: lease_expires,
+                lease_holder: String::new(),
+                current_work: String::new(),
             },
         );
 
@@ -506,6 +618,9 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
                 connect_address: format!("unix:/tmp/gradle-worker-{}.sock", pid),
                 started_at_ms: now,
                 healthy: true,
+                lease_expires_at_ms: lease_expires,
+                lease_holder: String::new(),
+                current_work: String::new(),
             }),
             reused: false,
             error_message: String::new(),
@@ -532,6 +647,9 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
             if req.healthy && worker.spec.daemon && alive {
                 worker.state = "idle".to_string();
                 worker.last_used_ms = now;
+                worker.lease_expires_at_ms = 0;
+                worker.lease_holder = String::new();
+                worker.current_work = String::new();
                 let key = worker.worker_key.clone();
                 drop(worker);
 
@@ -620,6 +738,8 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
                     last_used_ms: entry.last_used_ms,
                     memory_used_bytes: memory_used,
                     tasks_completed: entry.tasks_completed,
+                    current_work: entry.current_work.clone(),
+                    lease_expires_at_ms: entry.lease_expires_at_ms,
                 });
             }
         }
@@ -644,6 +764,9 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
         if req.idle_timeout_ms > 0 {
             *self.idle_timeout_ms.write().unwrap() = req.idle_timeout_ms;
         }
+        if req.max_per_key > 0 {
+            *self.max_per_key.write().unwrap() = req.max_per_key;
+        }
 
         tracing::info!(
             max_pool_size = req.max_pool_size,
@@ -653,6 +776,83 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
         );
 
         Ok(Response::new(ConfigurePoolResponse { applied: true }))
+    }
+
+    async fn renew_lease(
+        &self,
+        request: Request<RenewLeaseRequest>,
+    ) -> Result<Response<RenewLeaseResponse>, Status> {
+        let req = request.into_inner();
+
+        if let Some(mut worker) = self.workers.get_mut(&req.worker_id) {
+            if worker.state != "busy" {
+                return Ok(Response::new(RenewLeaseResponse { renewed: false }));
+            }
+
+            let now = Self::now_ms();
+            if req.duration_ms <= 0 {
+                return Err(Status::invalid_argument("duration_ms must be positive"));
+            }
+
+            worker.lease_expires_at_ms = now + req.duration_ms;
+            tracing::debug!(
+                worker_id = %req.worker_id,
+                duration_ms = req.duration_ms,
+                "Lease renewed"
+            );
+
+            Ok(Response::new(RenewLeaseResponse { renewed: true }))
+        } else {
+            Ok(Response::new(RenewLeaseResponse { renewed: false }))
+        }
+    }
+
+    async fn send_work(
+        &self,
+        request: Request<SendWorkRequest>,
+    ) -> Result<Response<SendWorkResponse>, Status> {
+        let req = request.into_inner();
+
+        if let Some(mut worker) = self.workers.get_mut(&req.worker_id) {
+            if worker.state == "busy" && !worker.current_work.is_empty() {
+                return Ok(Response::new(SendWorkResponse {
+                    accepted: false,
+                    error_message: format!(
+                        "Worker {} already has work in progress: {}",
+                        req.worker_id, worker.current_work
+                    ),
+                }));
+            }
+
+            if worker.state == "idle" {
+                worker.state = "busy".to_string();
+            }
+
+            worker.current_work = req.display_name.clone();
+            worker.last_used_ms = Self::now_ms();
+
+            // Update lease if timeout provided
+            if req.timeout_ms > 0 {
+                worker.lease_expires_at_ms = Self::now_ms() + req.timeout_ms;
+            }
+
+            tracing::info!(
+                worker_id = %req.worker_id,
+                action_class = %req.action_class,
+                display_name = %req.display_name,
+                "Work dispatched to worker"
+            );
+
+            Ok(Response::new(SendWorkResponse {
+                accepted: true,
+                error_message: String::new(),
+            }))
+        } else {
+            Ok(Response::new(SendWorkResponse {
+                accepted: false,
+                error_message: format!("Worker {} not found", req.worker_id),
+            }))
+        }
     }
 }
 
@@ -729,6 +929,7 @@ mod tests {
             jvm_args: Default::default(),
             max_memory_mb: 512,
             daemon: true,
+            isolation_mode: "process".to_string(),
         }
     }
 
@@ -956,6 +1157,7 @@ mod tests {
             jvm_args: Default::default(),
             max_memory_mb: 1024,
             daemon: true,
+            isolation_mode: "process".to_string(),
         };
 
         let _cmd = WorkerProcessServiceImpl::build_jvm_command(&spec);
@@ -1242,6 +1444,7 @@ mod tests {
             .collect(),
             max_memory_mb: 1024,
             daemon: true,
+            isolation_mode: "process".to_string(),
         };
 
         let cmd = WorkerProcessServiceImpl::build_jvm_command(&spec);
@@ -1283,6 +1486,7 @@ mod tests {
             jvm_args: Default::default(),
             max_memory_mb: 0,
             daemon: false,
+            isolation_mode: String::new(),
         };
 
         let cmd = WorkerProcessServiceImpl::build_jvm_command(&spec);
@@ -1303,6 +1507,7 @@ mod tests {
             jvm_args: Default::default(),
             max_memory_mb: 0, // no limit
             daemon: false,
+            isolation_mode: String::new(),
         };
 
         let resp = svc
@@ -1330,6 +1535,7 @@ mod tests {
             jvm_args: Default::default(),
             max_memory_mb: 512,
             daemon: false, // non-daemon
+            isolation_mode: String::new(),
         };
 
         let resp = svc
@@ -1360,5 +1566,440 @@ mod tests {
             .into_inner();
 
         assert_eq!(status.pool_size, 0, "non-daemon worker should be removed");
+    }
+
+    // --- Isolation mode tests ---
+
+    #[tokio::test]
+    async fn test_isolation_mode_process_worker() {
+        let svc = WorkerProcessServiceImpl::new();
+
+        let mut spec = make_spec("compiler");
+        spec.isolation_mode = "process".to_string();
+
+        let resp = svc
+            .acquire_worker(Request::new(AcquireWorkerRequest {
+                spec: Some(spec),
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // process mode should return a worker (may be stub if spawn fails)
+        assert!(resp.worker.is_some());
+        assert!(!resp.worker.as_ref().unwrap().connect_address.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_isolation_mode_classloader_returns_stub() {
+        let svc = WorkerProcessServiceImpl::new();
+
+        let mut spec = make_spec("compiler");
+        spec.isolation_mode = "classloader".to_string();
+
+        let resp = svc
+            .acquire_worker(Request::new(AcquireWorkerRequest {
+                spec: Some(spec),
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // classloader mode should return a stub worker
+        assert!(resp.worker.is_some());
+        let worker = resp.worker.unwrap();
+        assert_eq!(worker.worker_key, "compiler");
+    }
+
+    #[tokio::test]
+    async fn test_isolation_mode_none_returns_stub() {
+        let svc = WorkerProcessServiceImpl::new();
+
+        let mut spec = make_spec("compiler");
+        spec.isolation_mode = "none".to_string();
+
+        let resp = svc
+            .acquire_worker(Request::new(AcquireWorkerRequest {
+                spec: Some(spec),
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // none mode should return a stub worker
+        assert!(resp.worker.is_some());
+        assert_eq!(resp.worker.unwrap().worker_key, "compiler");
+    }
+
+    // --- Lease tests ---
+
+    #[tokio::test]
+    async fn test_lease_expiration() {
+        let svc = WorkerProcessServiceImpl::new();
+
+        let spec = make_spec("lease-test");
+
+        let resp = svc
+            .acquire_worker(Request::new(AcquireWorkerRequest {
+                spec: Some(spec),
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let worker_id = resp.worker.unwrap().worker_id;
+
+        // Manually set lease to expired
+        {
+            let mut worker = svc.workers.get_mut(&worker_id).unwrap();
+            worker.lease_expires_at_ms = WorkerProcessServiceImpl::now_ms() - 1000;
+        }
+
+        // Reap expired leases
+        svc.reap_expired_leases();
+
+        // Worker should now be idle
+        let status = svc
+            .get_worker_status(Request::new(GetWorkerStatusRequest {
+                worker_key: "lease-test".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(status.idle_count, 1, "expired lease worker should be idle");
+        assert_eq!(status.busy_count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_renew_lease_extends_timeout() {
+        let svc = WorkerProcessServiceImpl::new();
+
+        let spec = make_spec("renew-test");
+
+        let resp = svc
+            .acquire_worker(Request::new(AcquireWorkerRequest {
+                spec: Some(spec),
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let worker_id = resp.worker.unwrap().worker_id.clone();
+
+        // Set lease about to expire
+        {
+            let mut worker = svc.workers.get_mut(&worker_id).unwrap();
+            worker.lease_expires_at_ms = WorkerProcessServiceImpl::now_ms() + 1000;
+        }
+
+        // Renew lease for 60 seconds
+        let renew_resp = svc
+            .renew_lease(Request::new(RenewLeaseRequest {
+                worker_id: worker_id.clone(),
+                duration_ms: 60_000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(renew_resp.renewed);
+
+        // Verify lease was extended
+        {
+            let worker = svc.workers.get(&worker_id).unwrap();
+            assert!(worker.lease_expires_at_ms > WorkerProcessServiceImpl::now_ms() + 50_000);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_renew_lease_idle_worker_fails() {
+        let svc = WorkerProcessServiceImpl::new();
+
+        let spec = make_spec("idle-lease-test");
+
+        let resp = svc
+            .acquire_worker(Request::new(AcquireWorkerRequest {
+                spec: Some(spec),
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let worker_id = resp.worker.unwrap().worker_id.clone();
+
+        // Release worker to idle
+        svc.release_worker(Request::new(ReleaseWorkerRequest {
+            worker_id: worker_id.clone(),
+            healthy: true,
+        }))
+        .await
+        .unwrap();
+
+        // Renewing lease on idle worker should fail
+        let renew_resp = svc
+            .renew_lease(Request::new(RenewLeaseRequest {
+                worker_id,
+                duration_ms: 60_000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!renew_resp.renewed);
+    }
+
+    // --- Per-key parallelism tests ---
+
+    #[tokio::test]
+    async fn test_per_key_parallelism_limit() {
+        let svc = WorkerProcessServiceImpl::new();
+        *svc.max_per_key.write().unwrap() = 2;
+
+        // Acquire 2 workers with same key — should succeed
+        for _ in 0..2 {
+            let resp = svc
+                .acquire_worker(Request::new(AcquireWorkerRequest {
+                    spec: Some(make_spec("limited-key")),
+                    timeout_ms: 5000,
+                }))
+                .await
+                .unwrap()
+                .into_inner();
+            assert!(resp.worker.is_some(), "should allow up to max_per_key workers");
+        }
+
+        // 3rd should be rejected due to per-key limit
+        let resp = svc
+            .acquire_worker(Request::new(AcquireWorkerRequest {
+                spec: Some(make_spec("limited-key")),
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.worker.is_none());
+        assert!(resp.error_message.contains("Per-key parallelism limit"));
+    }
+
+    #[tokio::test]
+    async fn test_per_key_limit_different_keys_ok() {
+        let svc = WorkerProcessServiceImpl::new();
+        *svc.max_per_key.write().unwrap() = 1;
+
+        // One worker per key should be fine
+        let resp_a = svc
+            .acquire_worker(Request::new(AcquireWorkerRequest {
+                spec: Some(make_spec("key-a")),
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp_a.worker.is_some());
+
+        let resp_b = svc
+            .acquire_worker(Request::new(AcquireWorkerRequest {
+                spec: Some(make_spec("key-b")),
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp_b.worker.is_some());
+    }
+
+    // --- SendWork tests ---
+
+    #[tokio::test]
+    async fn test_send_work_accepted() {
+        let svc = WorkerProcessServiceImpl::new();
+
+        let spec = make_spec("work-test");
+        let resp = svc
+            .acquire_worker(Request::new(AcquireWorkerRequest {
+                spec: Some(spec),
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let worker_id = resp.worker.unwrap().worker_id.clone();
+
+        // Send work to the worker
+        let work_resp = svc
+            .send_work(Request::new(SendWorkRequest {
+                worker_id: worker_id.clone(),
+                action_class: "org.gradle.compiler.JavaCompile".to_string(),
+                parameters_json: "{}".to_string(),
+                timeout_ms: 30_000,
+                display_name: "compileJava".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(work_resp.accepted);
+        assert!(work_resp.error_message.is_empty());
+
+        // Verify worker status shows current work
+        let worker = svc.workers.get(&worker_id).unwrap();
+        assert_eq!(worker.current_work, "compileJava");
+    }
+
+    #[tokio::test]
+    async fn test_send_work_rejected_when_busy() {
+        let svc = WorkerProcessServiceImpl::new();
+
+        let spec = make_spec("busy-work-test");
+        let resp = svc
+            .acquire_worker(Request::new(AcquireWorkerRequest {
+                spec: Some(spec),
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let worker_id = resp.worker.unwrap().worker_id.clone();
+
+        // Send first work item
+        let work_resp1 = svc
+            .send_work(Request::new(SendWorkRequest {
+                worker_id: worker_id.clone(),
+                action_class: "org.gradle.compiler.JavaCompile".to_string(),
+                parameters_json: "{}".to_string(),
+                timeout_ms: 30_000,
+                display_name: "compileJava".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(work_resp1.accepted);
+
+        // Send second work item — should be rejected
+        let work_resp2 = svc
+            .send_work(Request::new(SendWorkRequest {
+                worker_id: worker_id.clone(),
+                action_class: "org.gradle.test.TestExec".to_string(),
+                parameters_json: "{}".to_string(),
+                timeout_ms: 30_000,
+                display_name: "test".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!work_resp2.accepted);
+        assert!(work_resp2.error_message.contains("already has work"));
+    }
+
+    #[tokio::test]
+    async fn test_send_work_to_idle_worker_transitions_to_busy() {
+        let svc = WorkerProcessServiceImpl::new();
+
+        let spec = make_spec("idle-work-test");
+        let resp = svc
+            .acquire_worker(Request::new(AcquireWorkerRequest {
+                spec: Some(spec),
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let worker_id = resp.worker.unwrap().worker_id.clone();
+
+        // Release to idle (clears current_work)
+        svc.release_worker(Request::new(ReleaseWorkerRequest {
+            worker_id: worker_id.clone(),
+            healthy: true,
+        }))
+        .await
+        .unwrap();
+
+        // SendWork should transition idle → busy
+        let work_resp = svc
+            .send_work(Request::new(SendWorkRequest {
+                worker_id: worker_id.clone(),
+                action_class: "org.gradle.compiler.JavaCompile".to_string(),
+                parameters_json: "{}".to_string(),
+                timeout_ms: 30_000,
+                display_name: "compileKotlin".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(work_resp.accepted);
+
+        let worker = svc.workers.get(&worker_id).unwrap();
+        assert_eq!(worker.state, "busy");
+        assert_eq!(worker.current_work, "compileKotlin");
+    }
+
+    // --- Lease reaper tests ---
+
+    #[tokio::test]
+    async fn test_lease_reaper_expires_dead_workers() {
+        let svc = WorkerProcessServiceImpl::new();
+
+        let spec = make_spec("reaper-test");
+
+        let resp = svc
+            .acquire_worker(Request::new(AcquireWorkerRequest {
+                spec: Some(spec),
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let worker_id = resp.worker.unwrap().worker_id.clone();
+
+        // Manually set lease to expired
+        {
+            let mut worker = svc.workers.get_mut(&worker_id).unwrap();
+            worker.lease_expires_at_ms = WorkerProcessServiceImpl::now_ms() - 1000;
+            worker.current_work = "stale-work".to_string();
+        }
+
+        // Verify busy before reaper
+        let status_before = svc
+            .get_worker_status(Request::new(GetWorkerStatusRequest {
+                worker_key: "reaper-test".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(status_before.busy_count, 1);
+
+        // Run reaper
+        svc.reap_expired_leases();
+
+        // Should be idle after reaper
+        let status_after = svc
+            .get_worker_status(Request::new(GetWorkerStatusRequest {
+                worker_key: "reaper-test".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(status_after.idle_count, 1);
+        assert_eq!(status_after.busy_count, 0);
+
+        // Verify work was cleared
+        let worker = svc.workers.get(&worker_id).unwrap();
+        assert!(worker.current_work.is_empty());
+        assert_eq!(worker.lease_expires_at_ms, 0);
     }
 }
