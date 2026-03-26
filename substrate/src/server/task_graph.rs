@@ -201,6 +201,7 @@ impl TaskGraphServiceImpl {
                         dependencies: entry.depends_on.clone(),
                         execution_order: order,
                         estimated_duration_ms: estimated,
+                        task_type: entry.task_type.clone(),
                     });
                 }
             }

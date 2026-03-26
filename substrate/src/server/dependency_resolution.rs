@@ -3703,7 +3703,7 @@ mod tests {
         // Verify that cycle detection doesn't cause infinite recursion.
         // The resolve_descriptor creates a fresh visited set each time,
         // so cycles are detected within a single resolve_recursive call chain.
-        let svc = make_svc();
+        let _svc = make_svc();
 
         // This test validates the visited set mechanism works.
         // In real resolution, A→B→A would be caught by the visited set.
