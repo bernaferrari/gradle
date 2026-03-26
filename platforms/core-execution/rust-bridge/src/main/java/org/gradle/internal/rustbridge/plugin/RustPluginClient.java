@@ -2,19 +2,30 @@ package org.gradle.internal.rustbridge.plugin;
 
 import gradle.substrate.v1.ApplyPluginRequest;
 import gradle.substrate.v1.ApplyPluginResponse;
+import gradle.substrate.v1.ExtensionInfo;
 import gradle.substrate.v1.GetAppliedPluginsRequest;
 import gradle.substrate.v1.GetAppliedPluginsResponse;
+import gradle.substrate.v1.GetExtensionRequest;
+import gradle.substrate.v1.GetExtensionResponse;
+import gradle.substrate.v1.GetExtensionsRequest;
+import gradle.substrate.v1.GetExtensionsResponse;
 import gradle.substrate.v1.HasPluginRequest;
 import gradle.substrate.v1.HasPluginResponse;
 import gradle.substrate.v1.PluginInfo;
 import gradle.substrate.v1.PluginServiceGrpc;
+import gradle.substrate.v1.RegisterConventionRequest;
+import gradle.substrate.v1.RegisterConventionResponse;
 import gradle.substrate.v1.RegisterPluginRequest;
 import gradle.substrate.v1.RegisterPluginResponse;
+import gradle.substrate.v1.ResolveConventionRequest;
+import gradle.substrate.v1.ResolveConventionResponse;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
 import org.slf4j.Logger;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Client for the Rust plugin service.
@@ -102,7 +113,99 @@ public class RustPluginClient {
             return response.getPluginsList();
         } catch (Exception e) {
             LOGGER.debug("[substrate:plugin] getAppliedPlugins failed", e);
-            return java.util.Collections.emptyList();
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Read an extension value from the Rust plugin service.
+     *
+     * @return the extension response (found, value, properties)
+     */
+    public GetExtensionResponse getExtension(String projectPath, String extensionName,
+                                              String propertyPath) {
+        if (client.isNoop()) {
+            return GetExtensionResponse.getDefaultInstance();
+        }
+
+        try {
+            GetExtensionRequest.Builder builder = GetExtensionRequest.newBuilder()
+                .setProjectPath(projectPath)
+                .setExtensionName(extensionName);
+            if (propertyPath != null && !propertyPath.isEmpty()) {
+                builder.setPropertyPath(propertyPath);
+            }
+            return client.getPluginStub().getExtension(builder.build());
+        } catch (Exception e) {
+            LOGGER.debug("[substrate:plugin] getExtension failed for {}", extensionName, e);
+            return GetExtensionResponse.getDefaultInstance();
+        }
+    }
+
+    /**
+     * List all extensions registered for a project.
+     */
+    public List<ExtensionInfo> getExtensions(String projectPath) {
+        if (client.isNoop()) {
+            return Collections.emptyList();
+        }
+
+        try {
+            GetExtensionsResponse response = client.getPluginStub()
+                .getExtensions(GetExtensionsRequest.newBuilder()
+                    .setProjectPath(projectPath)
+                    .build());
+            return response.getExtensionsList();
+        } catch (Exception e) {
+            LOGGER.debug("[substrate:plugin] getExtensions failed", e);
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Register convention mappings from a plugin.
+     */
+    public boolean registerConvention(String projectPath, String pluginId,
+                                       Map<String, String> conventions, String conventionSource) {
+        if (client.isNoop()) {
+            return false;
+        }
+
+        try {
+            RegisterConventionResponse response = client.getPluginStub()
+                .registerConvention(RegisterConventionRequest.newBuilder()
+                    .setProjectPath(projectPath)
+                    .setPluginId(pluginId)
+                    .putAllConventions(conventions)
+                    .setConventionSource(conventionSource)
+                    .build());
+            return response.getRegistered();
+        } catch (Exception e) {
+            LOGGER.debug("[substrate:plugin] registerConvention failed for {}", pluginId, e);
+            return false;
+        }
+    }
+
+    /**
+     * Resolve a property value via convention mapping.
+     */
+    public ResolveConventionResponse resolveConvention(String projectPath, String propertyName,
+                                                        List<String> preferredSources) {
+        if (client.isNoop()) {
+            return ResolveConventionResponse.getDefaultInstance();
+        }
+
+        try {
+            ResolveConventionRequest.Builder builder = ResolveConventionRequest.newBuilder()
+                .setProjectPath(projectPath)
+                .setPropertyName(propertyName);
+            if (preferredSources != null) {
+                builder.addAllPreferredSources(preferredSources);
+            }
+            return client.getPluginStub().resolveConvention(builder.build());
+        } catch (Exception e) {
+            LOGGER.debug("[substrate:plugin] resolveConvention failed", e);
+            return ResolveConventionResponse.getDefaultInstance();
         }
     }
 }
