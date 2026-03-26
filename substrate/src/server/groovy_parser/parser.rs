@@ -379,6 +379,12 @@ impl Parser {
 
         let name = self.expect(TokenKind::Identifier)?.text.clone();
 
+        // Kotlin type annotation: val name: String = ...
+        let mut type_annotation = None;
+        if self.eat(TokenKind::Colon) {
+            type_annotation = Some(self.parse_type_reference()?);
+        }
+
         // Check for 'by' delegation (Kotlin: val foo by delegate)
         let mut delegate = None;
         if self.at(TokenKind::By) {
@@ -402,9 +408,44 @@ impl Parser {
             span: merge_spans(start_span, end_span),
             kind,
             name,
+            type_annotation,
             delegate,
             initializer,
         }))
+    }
+
+    /// Parse a Kotlin type reference: `String`, `List<String>`, `Map<String, Int>`, `String?`.
+    fn parse_type_reference(&mut self) -> Result<String, ParseError> {
+        let mut type_name = self.expect(TokenKind::Identifier)?.text.clone();
+
+        // Nullable: String?
+        if self.eat(TokenKind::Question) {
+            type_name.push('?');
+        }
+
+        // Generic types: List<String>, Map<String, Int>
+        if self.eat(TokenKind::Lt) {
+            type_name.push('<');
+            loop {
+                type_name.push_str(&self.expect(TokenKind::Identifier)?.text);
+                // Nested nullable: String?
+                if self.eat(TokenKind::Question) {
+                    type_name.push('?');
+                }
+                if !self.eat(TokenKind::Comma) {
+                    break;
+                }
+                type_name.push_str(", ");
+            }
+            self.expect(TokenKind::Gt)?;
+            type_name.push('>');
+            // Nullable on the whole type: List<String>?
+            if self.eat(TokenKind::Question) {
+                type_name.push('?');
+            }
+        }
+
+        Ok(type_name)
     }
 
     fn parse_expr_or_assignment(&mut self) -> Result<Stmt, ParseError> {
@@ -453,6 +494,7 @@ impl Parser {
             TokenKind::StarEq => BinaryOp::MulAssign,
             TokenKind::SlashEq => BinaryOp::DivAssign,
             TokenKind::PercentEq => BinaryOp::ModAssign,
+            TokenKind::ElvisAssign => BinaryOp::ElvisAssign,
             _ => return None,
         };
         self.advance();
@@ -466,9 +508,8 @@ impl Parser {
     }
 
     fn parse_ternary(&mut self) -> Result<Expr, ParseError> {
-        // The lexer doesn't have a standalone '?' token (it only has QuestionDot and Elvis).
-        // For now, we skip ternary parsing and go directly to elvis.
-        // Ternary support would require the lexer to emit a standalone '?' token.
+        // The lexer has a standalone '?' token now, but ternary parsing still goes
+        // through the elvis path. Full ternary support can be added here later.
         self.parse_elvis()
     }
 
@@ -868,6 +909,20 @@ impl Parser {
                 let tok = self.advance();
                 let name = tok.text.clone();
                 let id_span = to_ast_span(&tok.span);
+
+                // Kotlin DSL type-safe accessor: the<JavaCompile> { ... }
+                if name == "the" && self.at(TokenKind::Lt) {
+                    self.advance(); // consume <
+                    let type_name = self.parse_type_reference()?;
+                    self.expect(TokenKind::Gt)?; // consume >
+                    let configuration = self.parse_closure()?;
+                    let end_span = configuration.span;
+                    return Ok(Expr::TypeSafeAccessor(TypeSafeAccessor {
+                        span: merge_spans(id_span, end_span),
+                        type_name,
+                        configuration: Box::new(Expr::Closure(configuration)),
+                    }));
+                }
 
                 // Method call with parens: foo(args)
                 if self.at(TokenKind::LParen) {
@@ -1450,6 +1505,7 @@ fn expr_span(expr: &Expr) -> Span {
         Expr::Identifier(i) => i.span,
         Expr::This(t) => t.span,
         Expr::Paren(p) => p.span,
+        Expr::TypeSafeAccessor(t) => t.span,
     }
 }
 
@@ -2081,6 +2137,115 @@ dependencies {
                 _ => panic!("expected method call"),
             },
             _ => panic!("expected expression"),
+        }
+    }
+
+    // ─── Kotlin DSL tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_kotlin_type_annotation() {
+        let result = parse("val name: String = \"test\"");
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+        assert_eq!(result.script.statements.len(), 1);
+        match &result.script.statements[0] {
+            Stmt::VarDecl(v) => {
+                assert_eq!(v.name, "name");
+                assert_eq!(v.type_annotation.as_deref(), Some("String"));
+            }
+            _ => panic!("expected VarDecl"),
+        }
+    }
+
+    #[test]
+    fn test_parse_kotlin_generic_type() {
+        let result = parse("val list: List<String> = emptyList()");
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+        match &result.script.statements[0] {
+            Stmt::VarDecl(v) => {
+                assert_eq!(v.name, "list");
+                assert_eq!(v.type_annotation.as_deref(), Some("List<String>"));
+            }
+            _ => panic!("expected VarDecl"),
+        }
+    }
+
+    #[test]
+    fn test_parse_kotlin_nullable_type() {
+        let result = parse("val name: String? = null");
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+        match &result.script.statements[0] {
+            Stmt::VarDecl(v) => {
+                assert_eq!(v.name, "name");
+                assert_eq!(v.type_annotation.as_deref(), Some("String?"));
+            }
+            _ => panic!("expected VarDecl"),
+        }
+    }
+
+    #[test]
+    fn test_parse_kotlin_map_type() {
+        let result = parse("val map: Map<String, Int> = emptyMap()");
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+        match &result.script.statements[0] {
+            Stmt::VarDecl(v) => {
+                assert_eq!(v.type_annotation.as_deref(), Some("Map<String, Int>"));
+            }
+            _ => panic!("expected VarDecl"),
+        }
+    }
+
+    #[test]
+    fn test_parse_type_safe_accessor() {
+        let result = parse("the<JavaCompile> { sourceCompatibility = \"17\" }");
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+        match &result.script.statements[0] {
+            Stmt::Expr(expr_stmt) => match &*expr_stmt.expr {
+                Expr::TypeSafeAccessor(tsa) => {
+                    assert_eq!(tsa.type_name, "JavaCompile");
+                }
+                _ => panic!("expected TypeSafeAccessor"),
+            },
+            _ => panic!("expected Expr"),
+        }
+    }
+
+    #[test]
+    fn test_parse_elvis_assignment() {
+        let result = parse("value ?= defaultValue");
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+        match &result.script.statements[0] {
+            Stmt::Expr(expr_stmt) => match &*expr_stmt.expr {
+                Expr::Binary(b) => {
+                    assert_eq!(b.operator, BinaryOp::ElvisAssign);
+                }
+                other => panic!("expected Binary with ElvisAssign, got: {:?}", other),
+            },
+            other => panic!("expected Expr, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_val_without_type_annotation() {
+        let result = parse("val x = 42");
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+        match &result.script.statements[0] {
+            Stmt::VarDecl(v) => {
+                assert_eq!(v.name, "x");
+                assert!(v.type_annotation.is_none());
+            }
+            _ => panic!("expected VarDecl"),
+        }
+    }
+
+    #[test]
+    fn test_parse_var_with_mutation() {
+        let result = parse("var count = 0");
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+        match &result.script.statements[0] {
+            Stmt::VarDecl(v) => {
+                assert_eq!(v.name, "count");
+            }
+            _ => panic!("expected VarDecl"),
         }
     }
 }

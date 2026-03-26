@@ -133,9 +133,24 @@ impl ParserService for ParserServiceImpl {
         req: Request<ParseGroovyRequest>,
     ) -> Result<Response<ParseGroovyResponse>, Status> {
         let content = req.get_ref().script_content.clone();
+        let file_path = req.get_ref().file_path.clone();
+
+        let _dialect = req.get_ref().dialect();
+        let _is_kotlin = _dialect == crate::proto::Dialect::KotlinDsl
+            || file_path.ends_with(".gradle.kts")
+            || file_path.ends_with(".kts");
 
         let result = groovy_parser::parse(&content);
-        let nodes = to_groovy_nodes(&result.script);
+        let mut nodes = to_groovy_nodes(&result.script);
+
+        // Annotate nodes with dialect information for downstream consumers
+        if _is_kotlin {
+            for node in &mut nodes {
+                node.properties
+                    .insert("dialect".to_string(), "kotlin_dsl".to_string());
+            }
+        }
+
         let error_count = result.errors.len() as i32;
         let error_message = result
             .errors
@@ -488,6 +503,7 @@ mod tests {
         let req = Request::new(ParseGroovyRequest {
             script_content: "println 'hello'".to_string(),
             file_path: String::new(),
+            ..Default::default()
         });
         let resp = svc.parse_groovy(req).await.unwrap();
         assert_eq!(resp.get_ref().error_count, 0);
@@ -544,5 +560,59 @@ mod tests {
         });
         let resp = svc.parse_build_script_source_sets(req).await.unwrap();
         assert!(resp.get_ref().source_sets.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_detect_kotlin_dialect_from_extension() {
+        let svc = ParserServiceImpl::default();
+        let req = Request::new(ParseGroovyRequest {
+            script_content: "val x = 42".to_string(),
+            file_path: "build.gradle.kts".to_string(),
+            ..Default::default()
+        });
+        let resp = svc.parse_groovy(req).await.unwrap();
+        assert_eq!(resp.get_ref().error_count, 0);
+        // All nodes should be annotated with kotlin_dsl dialect
+        for node in &resp.get_ref().nodes {
+            assert_eq!(
+                node.properties.get("dialect").unwrap_or(&String::new()),
+                "kotlin_dsl"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_detect_kotlin_dialect_from_proto_field() {
+        use crate::proto::Dialect;
+        let svc = ParserServiceImpl::default();
+        let req = Request::new(ParseGroovyRequest {
+            script_content: "val x = 42".to_string(),
+            file_path: "build.gradle".to_string(),
+            dialect: Dialect::KotlinDsl as i32,
+        });
+        let resp = svc.parse_groovy(req).await.unwrap();
+        assert_eq!(resp.get_ref().error_count, 0);
+        for node in &resp.get_ref().nodes {
+            assert_eq!(
+                node.properties.get("dialect").unwrap_or(&String::new()),
+                "kotlin_dsl"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_groovy_file_no_kotlin_dialect() {
+        let svc = ParserServiceImpl::default();
+        let req = Request::new(ParseGroovyRequest {
+            script_content: "def x = 42".to_string(),
+            file_path: "build.gradle".to_string(),
+            ..Default::default()
+        });
+        let resp = svc.parse_groovy(req).await.unwrap();
+        assert_eq!(resp.get_ref().error_count, 0);
+        // Groovy files should NOT have kotlin_dsl annotation
+        for node in &resp.get_ref().nodes {
+            assert!(node.properties.get("dialect").is_none());
+        }
     }
 }

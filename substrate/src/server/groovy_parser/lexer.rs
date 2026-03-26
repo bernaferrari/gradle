@@ -153,13 +153,15 @@ pub enum TokenKind {
     StarEq,      // *=
     SlashEq,     // /=
     PercentEq,   // %=
+    ElvisAssign,  // ?= (Kotlin 1.9+)
     Arrow,       // ->
     FatArrow,    // =>
     DotDot,      // ..
     DotDotLt,    // ..<
     Elvis,       // ?:
-    QuestionDot, // ?.
-    SafeNav,     // ?.
+    Question,     // ?
+    QuestionDot,  // ?.
+    SafeNav,      // ?.
 
     // -- Brackets ---------------------------------------------------------
     LBrace,
@@ -1033,6 +1035,7 @@ impl<'src> Lexer<'src> {
             ('*', Some('=')) => return self.simple_token(TokenKind::StarEq, "*="),
             ('/', Some('=')) => return self.simple_token(TokenKind::SlashEq, "/="),
             ('%', Some('=')) => return self.simple_token(TokenKind::PercentEq, "%="),
+            ('?', Some('=')) => return self.simple_token(TokenKind::ElvisAssign, "?="),
             ('-', Some('>')) => return self.simple_token(TokenKind::Arrow, "->"),
             ('=', Some('>')) => return self.simple_token(TokenKind::FatArrow, "=>"),
             ('.', Some('.')) => return self.simple_token(TokenKind::DotDot, ".."),
@@ -1068,6 +1071,7 @@ impl<'src> Lexer<'src> {
             ';' => self.simple_token(TokenKind::Semicolon, ";"),
             ':' => self.simple_token(TokenKind::Colon, ":"),
             '@' => self.simple_token(TokenKind::At, "@"),
+            '?' => self.simple_token(TokenKind::Question, "?"),
             '#' => {
                 // Groovy shebang-like or preprocessor — just error
                 self.simple_token(TokenKind::Error, "#")
