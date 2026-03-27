@@ -180,7 +180,7 @@ impl ProjectState {
         let mut entries: Vec<(String, String, PropertySource)> = Vec::new();
         // Iterate layers from highest precedence to lowest.
         let mut sources: Vec<PropertySource> = self.layers.keys().copied().collect();
-        sources.sort_by(|a, b| b.cmp(a));
+        sources.sort_unstable_by(|a, b| b.cmp(a));
         let mut seen = HashSet::new();
         for source in sources {
             if let Some(layer) = self.layers.get(&source) {
