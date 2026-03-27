@@ -258,7 +258,7 @@ impl ExecutionPlanServiceImpl {
             hasher.update(b";");
         }
 
-        format!("{:x}", hasher.finalize())
+        crate::server::cache::hex::encode(hasher.finalize().as_ref())
     }
 
     /// Predict whether the work should execute based on history.

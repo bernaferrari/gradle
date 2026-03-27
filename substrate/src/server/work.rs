@@ -97,7 +97,7 @@ impl WorkService for WorkServiceImpl {
             hasher.update(v.as_bytes());
             hasher.update([0x1e]); // Record separator between entries
         }
-        let input_hash = format!("{:x}", hasher.finalize());
+        let input_hash = crate::server::cache::hex::encode(hasher.finalize().as_ref());
 
         let should_execute;
         let reason;
