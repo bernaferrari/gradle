@@ -34,15 +34,39 @@ pub enum HashAlgorithm {
 
 impl HashAlgorithm {
     pub fn from_name(name: &str) -> Option<Self> {
-        match name.to_uppercase().as_str() {
-            "" | "MD5" => Some(HashAlgorithm::Md5),
-            "SHA-1" | "SHA1" => Some(HashAlgorithm::Sha1),
-            "SHA-256" | "SHA256" => Some(HashAlgorithm::Sha256),
-            "SHA3-256" | "SHA3_256" => Some(HashAlgorithm::Sha3_256),
-            "SHA3-512" | "SHA3_512" => Some(HashAlgorithm::Sha3_512),
-            "BLAKE3" => Some(HashAlgorithm::Blake3),
-            _ => None,
+        // Case-insensitive matching without heap allocation
+        match name.as_bytes() {
+            b"" | b"MD5" | b"md5" => Some(HashAlgorithm::Md5),
+            b"SHA-1" | b"sha-1" | b"SHA1" | b"sha1" => Some(HashAlgorithm::Sha1),
+            b"SHA-256" | b"sha-256" | b"SHA256" | b"sha256" => Some(HashAlgorithm::Sha256),
+            b"SHA3-256" | b"sha3-256" | b"SHA3_256" | b"sha3_256" => Some(HashAlgorithm::Sha3_256),
+            b"SHA3-512" | b"sha3-512" | b"SHA3_512" | b"sha3_512" => Some(HashAlgorithm::Sha3_512),
+            b"BLAKE3" | b"blake3" => Some(HashAlgorithm::Blake3),
+            other => {
+                // Fallback for mixed-case: byte-by-byte comparison
+                if Self::eq_ignore_case(other, b"MD5") {
+                    Some(HashAlgorithm::Md5)
+                } else if Self::eq_ignore_case(other, b"SHA-1") || Self::eq_ignore_case(other, b"SHA1") {
+                    Some(HashAlgorithm::Sha1)
+                } else if Self::eq_ignore_case(other, b"SHA-256") || Self::eq_ignore_case(other, b"SHA256") {
+                    Some(HashAlgorithm::Sha256)
+                } else if Self::eq_ignore_case(other, b"SHA3-256") || Self::eq_ignore_case(other, b"SHA3_256") {
+                    Some(HashAlgorithm::Sha3_256)
+                } else if Self::eq_ignore_case(other, b"SHA3-512") || Self::eq_ignore_case(other, b"SHA3_512") {
+                    Some(HashAlgorithm::Sha3_512)
+                } else if Self::eq_ignore_case(other, b"BLAKE3") {
+                    Some(HashAlgorithm::Blake3)
+                } else {
+                    None
+                }
+            }
         }
+    }
+
+    /// Case-insensitive byte slice comparison without allocation.
+    fn eq_ignore_case(a: &[u8], b: &[u8]) -> bool {
+        a.len() == b.len()
+            && a.iter().zip(b).all(|(&ca, &cb)| ca.to_ascii_uppercase() == cb.to_ascii_uppercase())
     }
 
     /// Expected output length in bytes for this algorithm.
