@@ -258,7 +258,7 @@ impl PluginServiceImpl {
             .get(project_path)
             .map(|plugins| {
                 let mut ordered: Vec<_> = plugins.iter().collect();
-                ordered.sort_by_key(|p| p.apply_order);
+                ordered.sort_unstable_by_key(|p| p.apply_order);
                 ordered.iter().map(|p| p.plugin_id.clone()).collect()
             })
             .unwrap_or_default()
@@ -388,7 +388,7 @@ impl PluginService for PluginServiceImpl {
             .get(&req.project_path)
             .map(|project_plugins| {
                 let mut ordered: Vec<_> = project_plugins.iter().collect();
-                ordered.sort_by_key(|p| p.apply_order);
+                ordered.sort_unstable_by_key(|p| p.apply_order);
                 ordered
                     .iter()
                     .map(|p| PluginInfo {
