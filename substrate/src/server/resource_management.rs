@@ -91,14 +91,25 @@ impl ResourceManagementServiceImpl {
     fn system_memory_mb() -> i64 {
         #[cfg(target_os = "macos")]
         {
-            std::process::Command::new("sysctl")
-                .args(["-n", "hw.memsize"])
-                .output()
-                .ok()
-                .and_then(|out| String::from_utf8(out.stdout).ok())
-                .and_then(|s| s.trim().parse::<u64>().ok())
-                .map(|bytes| (bytes / 1024 / 1024) as i64)
-                .unwrap_or(8192)
+            // Use native sysctl for hw.memsize (total physical memory)
+            let mib: [libc::c_int; 2] = [libc::CTL_HW, libc::HW_MEMSIZE];
+            let mut mem_size: u64 = 0;
+            let mut size = std::mem::size_of::<u64>() as libc::size_t;
+            let result = unsafe {
+                libc::sysctl(
+                    mib.as_ptr() as *mut _,
+                    2,
+                    &mut mem_size as *mut _ as *mut libc::c_void,
+                    &mut size,
+                    std::ptr::null_mut(),
+                    0,
+                )
+            };
+            if result == 0 {
+                (mem_size / 1024 / 1024) as i64
+            } else {
+                8192
+            }
         }
         #[cfg(target_os = "linux")]
         {
@@ -185,30 +196,32 @@ impl ResourceManagementServiceImpl {
 
     #[cfg(target_os = "macos")]
     fn read_cpu_usage_macos() -> f64 {
-        // Use sysctl vm.loadavg for load average (proxy for CPU pressure)
-        // A load average > CPU count indicates saturation
-        std::process::Command::new("sysctl")
-            .args(["-n", "vm.loadavg"])
-            .output()
-            .ok()
-            .and_then(|out| String::from_utf8(out.stdout).ok())
-            .and_then(|s| {
-                // Output format: { 1.23 0.98 0.76 }
-                let trimmed = s.trim().trim_start_matches('{').trim_end_matches('}');
-                let parts: Vec<&str> = trimmed.split_whitespace().collect();
-                parts.first().and_then(|p| p.parse::<f64>().ok())
-            })
-            .map(|load_avg| {
-                let cpu_count = num_cpus::get() as f64;
-                // Convert load average to percentage (capped at 100%)
-                let usage = load_avg / cpu_count;
-                if usage > 1.0 {
-                    100.0
-                } else {
-                    usage * 100.0
-                }
-            })
-            .unwrap_or(0.0)
+        // Use native sysctl for vm.loadavg instead of shelling out
+        // sysctl name: vm.loadavg (OID 2.12)
+        let mib: [libc::c_int; 2] = [libc::CTL_VM, 2]; // vm.loadavg
+        let mut load_avg: libc::c_double = 0.0;
+        let mut len = std::mem::size_of::<libc::c_double>();
+        let result = unsafe {
+            libc::sysctl(
+                mib.as_ptr() as *mut _,
+                2,
+                &mut load_avg as *mut _ as *mut libc::c_void,
+                &mut len,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if result == 0 {
+            let cpu_count = num_cpus::get() as f64;
+            let usage = load_avg / cpu_count;
+            if usage > 1.0 {
+                100.0
+            } else {
+                usage * 100.0
+            }
+        } else {
+            0.0
+        }
     }
 
     /// Read current process RSS memory usage in MB.
@@ -268,29 +281,46 @@ impl ResourceManagementServiceImpl {
         }
         #[cfg(target_os = "macos")]
         {
-            // On macOS, approximate available memory using vm_stat
-            std::process::Command::new("vm_stat")
-                .output()
-                .ok()
-                .and_then(|out| String::from_utf8(out.stdout).ok())
-                .map(|s| {
-                    let mut free_pages: u64 = 0;
-                    let mut inactive_pages: u64 = 0;
-                    for line in s.lines() {
-                        if let Some(val) = line
-                            .strip_prefix("Pages free:")
-                            .or_else(|| line.strip_prefix("Pages free:"))
-                        {
-                            free_pages = val.trim().trim_end_matches('.').parse().unwrap_or(0);
-                        }
-                        if let Some(val) = line.strip_prefix("Pages inactive:") {
-                            inactive_pages = val.trim().trim_end_matches('.').parse().unwrap_or(0);
-                        }
-                    }
-                    // page_size is 4096 on all modern macOS
-                    ((free_pages + inactive_pages) * 4096 / 1024 / 1024) as i64
-                })
-                .unwrap_or(0)
+            // Use host_statistics64 via sysctl for available memory (no shell-out)
+            // Read vm_page_free_count + vm_page_inactive_count from sysctl
+            // OID: vm.stats.free (CTL_VM + VM_STAT)
+            let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) as u64 };
+
+            // Read free page count: vm.stats.free_count
+            let mut free_count: u32 = 0;
+            let mut len = std::mem::size_of::<u32>();
+            let mib_free: [libc::c_int; 3] = [libc::CTL_VM, 5, 1]; // vm.stats.free_count (approximate OID)
+            let free_ok = unsafe {
+                libc::sysctl(
+                    mib_free.as_ptr() as *mut _,
+                    3,
+                    &mut free_count as *mut _ as *mut libc::c_void,
+                    &mut len,
+                    std::ptr::null_mut(),
+                    0,
+                )
+            };
+
+            // Read inactive page count: vm.stats.inactive_count
+            let mut inactive_count: u32 = 0;
+            let mib_inactive: [libc::c_int; 3] = [libc::CTL_VM, 5, 2]; // vm.stats.inactive_count
+            let mut len2 = std::mem::size_of::<u32>();
+            let inactive_ok = unsafe {
+                libc::sysctl(
+                    mib_inactive.as_ptr() as *mut _,
+                    3,
+                    &mut inactive_count as *mut _ as *mut libc::c_void,
+                    &mut len2,
+                    std::ptr::null_mut(),
+                    0,
+                )
+            };
+
+            if free_ok == 0 && inactive_ok == 0 && page_size > 0 {
+                ((free_count as u64 + inactive_count as u64) * page_size / 1024 / 1024) as i64
+            } else {
+                0
+            }
         }
         #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         {
