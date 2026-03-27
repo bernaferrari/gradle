@@ -204,7 +204,7 @@ fn infer_project_dir(build_file: &str) -> String {
     }
     let path = Path::new(build_file);
     path.parent()
-        .map(|p| p.to_string_lossy().to_string())
+        .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default()
 }
 
