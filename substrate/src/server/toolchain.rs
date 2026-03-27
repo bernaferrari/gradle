@@ -1546,7 +1546,7 @@ impl ToolchainService for ToolchainServiceImpl {
                         };
                         if java_bin.is_file() {
                             if let Some(java_home) = java_bin.parent().and_then(|p| p.parent()) {
-                                let home_str = java_home.to_string_lossy().to_string();
+                                let home_str = java_home.to_string_lossy().into_owned();
                                 // Skip if already found via JAVA_HOME
                                 if results.iter().any(|r| r.java_home == home_str) {
                                     continue;
@@ -1580,7 +1580,7 @@ impl ToolchainService for ToolchainServiceImpl {
                             for entry in entries.flatten() {
                                 let path = entry.path();
                                 if path.is_dir() {
-                                    let home_str = path.to_string_lossy().to_string();
+                                    let home_str = path.to_string_lossy().into_owned();
                                     if results.iter().any(|r| r.java_home == home_str) {
                                         continue;
                                     }
@@ -1647,7 +1647,7 @@ impl ToolchainService for ToolchainServiceImpl {
                         } else {
                             path.clone()
                         };
-                        let home_str = home.to_string_lossy().to_string();
+                        let home_str = home.to_string_lossy().into_owned();
                         if results.iter().any(|r| r.java_home == home_str) {
                             continue;
                         }
