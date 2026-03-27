@@ -106,7 +106,7 @@ impl IncrementalCompilationServiceImpl {
         for source_dir in source_dirs {
             let dir_path = Path::new(source_dir);
             for pattern in &include_globs {
-                let full_pattern = dir_path.join(pattern).to_string_lossy().to_string();
+                let full_pattern = dir_path.join(pattern).to_string_lossy().into_owned();
                 if let Ok(entries) = glob(&full_pattern) {
                     for entry in entries.flatten() {
                         let relative = entry
@@ -207,7 +207,7 @@ impl IncrementalCompilationServiceImpl {
     fn parse_class_file(data: &[u8], path: &Path) -> ClassDependencyInfo {
         let class_name = extract_class_name(data).unwrap_or_else(|| {
             path.file_stem()
-                .map(|s| s.to_string_lossy().to_string())
+                .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_default()
         });
 
@@ -224,7 +224,8 @@ impl IncrementalCompilationServiceImpl {
             .any(|a| a == "SupportedAnnotationTypes" || a == "SupportedSourceVersion");
 
         ClassDependencyInfo {
-            class_file: path.to_string_lossy().to_string(),
+            class_file: path.to_string_lossy().into_owned(),
+
             class_name,
             references,
             annotations,

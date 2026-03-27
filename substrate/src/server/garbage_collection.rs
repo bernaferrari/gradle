@@ -93,7 +93,7 @@ impl GarbageCollectionServiceImpl {
                             .map(|d| d.as_millis() as i64)
                             .unwrap_or(0);
                         let size = metadata.len() as i64;
-                        entries.push((path.to_string_lossy().to_string(), mtime_ms, size));
+                        entries.push((path.to_string_lossy().into_owned(), mtime_ms, size));
                     }
                 }
             }
