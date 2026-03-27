@@ -82,7 +82,7 @@ impl WorkService for WorkServiceImpl {
 
         // Compute a deterministic input hash from sorted key-value pairs.
         let mut input_parts: Vec<(&String, &String)> = req.input_properties.iter().collect();
-        input_parts.sort_by(|(ka, va), (kb, vb)| {
+        input_parts.sort_unstable_by(|(ka, va), (kb, vb)| {
             let key_cmp = ka.as_str().cmp(kb.as_str());
             if key_cmp == std::cmp::Ordering::Equal {
                 va.as_str().cmp(vb.as_str())

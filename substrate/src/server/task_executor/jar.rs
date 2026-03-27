@@ -429,7 +429,7 @@ impl JarTaskExecutor {
             entries.push(("META-INF/MANIFEST.MF".to_string(), manifest));
         }
 
-        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
         let mut out = std::fs::File::create(jar_path)
             .map_err(|e| format!("Cannot create {}: {}", jar_path.display(), e))?;
@@ -484,7 +484,7 @@ impl JarTaskExecutor {
             entries.push(("META-INF/MANIFEST.MF".to_string(), manifest));
         }
 
-        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
         let mut out = std::fs::File::create(jar_path)
             .map_err(|e| format!("Cannot create {}: {}", jar_path.display(), e))?;
