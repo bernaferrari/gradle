@@ -21,6 +21,7 @@ use gradle_substrate_daemon::{
         build_operations_service_server::BuildOperationsServiceServer,
         build_result_service_server::BuildResultServiceServer,
         cache_service_server::CacheServiceServer,
+        classpath_service_server::ClasspathServiceServer,
         configuration_cache_service_server::ConfigurationCacheServiceServer,
         configuration_service_server::ConfigurationServiceServer,
         console_service_server::ConsoleServiceServer, control_service_server::ControlServiceServer,
@@ -30,6 +31,7 @@ use gradle_substrate_daemon::{
         execution_history_service_server::ExecutionHistoryServiceServer,
         execution_plan_service_server::ExecutionPlanServiceServer,
         file_fingerprint_service_server::FileFingerprintServiceServer,
+        file_tree_service_server::FileTreeServiceServer,
         file_watch_service_server::FileWatchServiceServer,
         garbage_collection_service_server::GarbageCollectionServiceServer,
         hash_service_server::HashServiceServer,
@@ -52,12 +54,14 @@ use gradle_substrate_daemon::{
         build_operations::BuildOperationsServiceImpl, build_result::BuildResultServiceImpl,
         build_plan_shadow::BuildPlanShadowStore,
         cache::CacheServiceImpl, cache_orchestration::BuildCacheOrchestrationServiceImpl,
+        classpath::ClasspathServiceImpl,
         config_cache::ConfigurationCacheServiceImpl, configuration::ConfigurationServiceImpl,
         console::ConsoleServiceImpl, control::ControlServiceImpl,
         dag_executor::DagExecutorServiceImpl,
         dependency_resolution::DependencyResolutionServiceImpl, exec::ExecServiceImpl,
         execution_history::ExecutionHistoryServiceImpl, execution_plan::ExecutionPlanServiceImpl,
-        file_fingerprint::FileFingerprintServiceImpl, file_watch::FileWatchServiceImpl,
+        file_fingerprint::FileFingerprintServiceImpl, file_tree::FileTreeServiceImpl,
+        file_watch::FileWatchServiceImpl,
         garbage_collection::GarbageCollectionServiceImpl, hash::HashServiceImpl,
         incremental_compilation::IncrementalCompilationServiceImpl,
         parser_service::ParserServiceImpl, plugin::PluginServiceImpl,
@@ -376,6 +380,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(DagExecutorServiceServer::new(dag_executor))
         .add_service(HashServiceServer::new(hash))
         .add_service(CacheServiceServer::new(cache))
+        .add_service(ClasspathServiceServer::new(ClasspathServiceImpl::default()))
         .add_service(ExecServiceServer::new(exec))
         .add_service(WorkServiceServer::new(work))
         .add_service(ExecutionPlanServiceServer::new(execution_plan))
@@ -386,6 +391,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             cache_orchestration,
         ))
         .add_service(FileFingerprintServiceServer::new(file_fingerprint))
+        .add_service(FileTreeServiceServer::new(FileTreeServiceImpl::default()))
         .add_service(ValueSnapshotServiceServer::new(value_snapshot))
         .add_service(TaskGraphServiceServer::new((*task_graph).clone()))
         .add_service(ConfigurationServiceServer::new(configuration))
