@@ -154,7 +154,7 @@ impl BuildCacheOrchestrationServiceImpl {
 
         // 4. Output property names — sorted alphabetically
         let mut sorted_outputs: Vec<_> = output_property_names.iter().collect();
-        sorted_outputs.sort();
+        sorted_outputs.sort_unstable();
         for output in sorted_outputs {
             gradle_put_string(&mut hasher, output);
         }
