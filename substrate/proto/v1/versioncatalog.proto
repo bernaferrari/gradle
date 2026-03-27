@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "org.gradle.substrate.v1";
+
+// Parses Gradle version catalogs (libs.versions.toml).
+service VersionCatalogService {
+  rpc ParseVersionCatalog(ParseVersionCatalogRequest) returns (ParseVersionCatalogResponse);
+}
+
+message ParseVersionCatalogRequest {
+  string content = 1; // TOML content of the version catalog file
+}
+
+message ParseVersionCatalogResponse {
+  repeated ProtoVersion versions = 1;
+  repeated ProtoLibrary libraries = 2;
+  repeated ProtoBundle bundles = 3;
+  repeated ProtoPlugin plugins = 4;
+}
+
+message ProtoVersion {
+  string alias = 1;
+  string version = 2;
+}
+
+message ProtoLibrary {
+  string alias = 1;
+  string group = 2;
+  string artifact = 3;
+  string version_ref = 4;
+  string version_literal = 5;
+}
+
+message ProtoBundle {
+  string alias = 1;
+  repeated string library_aliases = 2;
+}
+
+message ProtoPlugin {
+  string alias = 1;
+  string id = 2;
+  string version_ref = 3;
+  string version_literal = 4;
+}
