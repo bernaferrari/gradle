@@ -223,8 +223,9 @@ impl ParallelScheduler {
     /// Must be called after all tasks are registered.
     pub fn build_graph(&self) {
         // Phase 1: Collect all dependency -> dependent relationships (iter then drop)
-        let mut dep_map: HashMap<String, Vec<String>> = HashMap::new();
-        let mut ready: Vec<String> = Vec::new();
+        let task_count = self.tasks.len();
+        let mut dep_map: HashMap<String, Vec<String>> = HashMap::with_capacity(task_count);
+        let mut ready: Vec<String> = Vec::with_capacity(task_count);
 
         {
             // Collect deps and find ready tasks in one pass
