@@ -154,17 +154,22 @@ impl JavaCompileExecutor {
 
     /// Parse javac output for errors, warnings, and notes.
     pub fn parse_javac_output(output: &str) -> (Vec<String>, Vec<String>, Vec<String>) {
-        let mut errors = Vec::new();
-        let mut warnings = Vec::new();
+        let line_count = output.lines().count();
+        let mut errors = Vec::with_capacity(line_count / 8);
+        let mut warnings = Vec::with_capacity(line_count / 4);
         let mut notes = Vec::new();
 
         for line in output.lines() {
-            let lower = line.to_lowercase();
-            if lower.contains("error:") {
+            // Case-insensitive search without allocating a lowercase copy
+            let has_error = line.contains("error:") || line.contains("Error:") || line.contains("ERROR:");
+            let has_warning = line.contains("warning:") || line.contains("Warning:") || line.contains("WARNING:");
+            let has_note = line.contains("note:") || line.contains("Note:") || line.contains("NOTE:");
+
+            if has_error {
                 errors.push(line.to_string());
-            } else if lower.contains("warning:") {
+            } else if has_warning {
                 warnings.push(line.to_string());
-            } else if lower.contains("note:") {
+            } else if has_note {
                 notes.push(line.to_string());
             }
         }
