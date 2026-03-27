@@ -1580,7 +1580,7 @@ mod tests {
             .into_inner();
 
         let mut roots = vec![t1.task_path, t2.task_path];
-        roots.sort();
+        roots.sort_unstable();
         assert_eq!(roots, vec![":a".to_string(), ":b".to_string()]);
 
         // :c should NOT be available yet

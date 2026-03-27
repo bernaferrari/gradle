@@ -768,7 +768,7 @@ impl DependencyResolutionServiceImpl {
                 }
 
                 let mut winning_indices: Vec<usize> = best.values().copied().collect();
-                winning_indices.sort();
+                winning_indices.sort_unstable();
 
                 let original_len = deps.len();
                 *deps = winning_indices
@@ -809,7 +809,7 @@ impl DependencyResolutionServiceImpl {
                 }
 
                 let mut winning_indices: Vec<usize> = best.values().copied().collect();
-                winning_indices.sort();
+                winning_indices.sort_unstable();
 
                 let original_len = deps.len();
                 *deps = winning_indices
@@ -893,7 +893,7 @@ impl DependencyResolutionServiceImpl {
                 }
 
                 let mut winning_indices: Vec<usize> = best.values().copied().collect();
-                winning_indices.sort();
+                winning_indices.sort_unstable();
 
                 let original_len = deps.len();
                 *deps = winning_indices
