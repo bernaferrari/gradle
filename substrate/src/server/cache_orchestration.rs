@@ -106,7 +106,7 @@ impl BuildCacheOrchestrationServiceImpl {
             .iter()
             .map(|entry| (entry.value().sequence, entry.key().clone()))
             .collect();
-        sequenced.sort_by_key(|(seq, _)| *seq);
+        sequenced.sort_unstable_by_key(|(seq, _)| *seq);
 
         for (_seq, key) in sequenced.into_iter().take(to_remove_count) {
             if self.stored_keys.remove(&key).is_some() {
@@ -133,7 +133,7 @@ impl BuildCacheOrchestrationServiceImpl {
         // 2. Input properties — sorted by property name, each as (name, value_hash)
         //    Gradle's algorithm: putString(propertyName) then valueSnapshot.appendToHasher()
         let mut sorted_props: Vec<_> = input_property_hashes.iter().collect();
-        sorted_props.sort_by_key(|(k, _)| *k);
+        sorted_props.sort_unstable_by_key(|(k, _)| *k);
         for (key, hash) in sorted_props {
             gradle_put_string(&mut hasher, key);
             // The hash value is itself an MD5 hex string; decode to raw bytes
@@ -144,7 +144,7 @@ impl BuildCacheOrchestrationServiceImpl {
 
         // 3. Input file hashes — sorted by property name, each as (name, fingerprint_hash)
         let mut sorted_files: Vec<_> = input_file_hashes.iter().collect();
-        sorted_files.sort_by_key(|(k, _)| *k);
+        sorted_files.sort_unstable_by_key(|(k, _)| *k);
         for (key, hash) in sorted_files {
             gradle_put_string(&mut hasher, key);
             let hash_bytes = hex::decode(hash)

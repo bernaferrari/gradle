@@ -215,7 +215,7 @@ impl LocalCacheStore {
             }
         }
 
-        entries.sort_by_key(|e| e.2);
+        entries.sort_unstable_by_key(|e| e.2);
         entries
             .into_iter()
             .map(|(path, size, _)| (path, size))

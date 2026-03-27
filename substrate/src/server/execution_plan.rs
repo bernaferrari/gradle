@@ -240,7 +240,7 @@ impl ExecutionPlanServiceImpl {
 
         // Include scalar input properties in sorted order
         let mut sorted_props: Vec<_> = work.input_properties.iter().collect();
-        sorted_props.sort_by_key(|(k, _)| *k);
+        sorted_props.sort_unstable_by_key(|(k, _)| *k);
         for (key, value) in &sorted_props {
             hasher.update(key.as_bytes());
             hasher.update(b"=");
@@ -250,7 +250,7 @@ impl ExecutionPlanServiceImpl {
 
         // Include file fingerprints in sorted order
         let mut sorted_files: Vec<_> = work.input_file_fingerprints.iter().collect();
-        sorted_files.sort_by_key(|(k, _)| *k);
+        sorted_files.sort_unstable_by_key(|(k, _)| *k);
         for (key, hash) in &sorted_files {
             hasher.update(key.as_bytes());
             hasher.update(b"=");
