@@ -145,7 +145,7 @@ impl ClasspathServiceImpl {
         }
 
         let mut sorted: Vec<_> = entries.iter().collect();
-        sorted.sort_by_key(|e| &e.absolute_path);
+        sorted.sort_unstable_by_key(|e| &e.absolute_path);
 
         let entry_hashes: Vec<(String, Vec<u8>)> = if sorted.len() >= PARALLEL_THRESHOLD {
             sorted

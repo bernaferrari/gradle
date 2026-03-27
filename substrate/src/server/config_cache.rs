@@ -269,7 +269,7 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
                     )
                 })
                 .collect();
-            candidates.sort_by_key(|(last_access_ms, _, _)| *last_access_ms);
+            candidates.sort_unstable_by_key(|(last_access_ms, _, _)| *last_access_ms);
             let to_evict: Vec<(String, String)> = candidates
                 .into_iter()
                 .take(to_remove)
@@ -394,8 +394,8 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
             // Fallback: legacy input_hashes comparison.
             let mut cached = entry.input_hashes.clone();
             let mut requested = req.input_hashes.clone();
-            cached.sort();
-            requested.sort();
+            cached.sort_unstable();
+            requested.sort_unstable();
             if cached == requested {
                 return Ok(Response::new(ValidateConfigResponse {
                     valid: true,
