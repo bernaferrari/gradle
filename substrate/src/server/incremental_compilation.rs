@@ -158,7 +158,7 @@ impl IncrementalCompilationServiceImpl {
             }
         }
 
-        sources.sort_by(|a, b| a.path.cmp(&b.path));
+        sources.sort_unstable_by(|a, b| a.path.cmp(&b.path));
         sources.dedup_by(|a, b| a.path == b.path);
         sources
     }
