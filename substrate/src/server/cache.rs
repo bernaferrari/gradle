@@ -429,8 +429,17 @@ impl CacheService for CacheServiceImpl {
 }
 
 pub(crate) mod hex {
+    const HEX_TABLE: &[u8; 16] = b"0123456789abcdef";
+
+    /// Encode bytes to lowercase hex string using a lookup table.
+    /// Zero per-byte allocations — pre-allocates exactly 2× input length.
     pub fn encode(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{:02x}", b)).collect()
+        let mut s = String::with_capacity(bytes.len() * 2);
+        for &b in bytes {
+            s.push(HEX_TABLE[(b >> 4) as usize] as char);
+            s.push(HEX_TABLE[(b & 0x0F) as usize] as char);
+        }
+        s
     }
 
     /// Decode a hex string into raw bytes. Returns None if the input is not valid hex.
