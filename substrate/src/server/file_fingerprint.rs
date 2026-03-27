@@ -873,7 +873,7 @@ impl FileFingerprintServiceImpl {
             .map_err(|e| SubstrateError::Fingerprint { path: current.to_path_buf(), reason: e.to_string() })?;
 
         let mut dir_entries: Vec<_> = dir_entries.filter_map(|e| e.ok()).collect();
-        dir_entries.sort_by_key(|e| e.file_name());
+        dir_entries.sort_unstable_by_key(|e| e.file_name());
 
         for entry in dir_entries {
             let path = entry.path();
