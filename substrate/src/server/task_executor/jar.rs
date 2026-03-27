@@ -408,7 +408,7 @@ impl JarTaskExecutor {
         jar_path: &Path,
         options: &std::collections::HashMap<String, String>,
     ) -> Result<(), String> {
-        let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
+        let mut entries: Vec<(String, Vec<u8>)> = Vec::with_capacity(source_files.len());
 
         for source in source_files {
             if !source.is_dir() {
