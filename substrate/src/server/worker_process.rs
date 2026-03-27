@@ -286,7 +286,10 @@ impl WorkerProcessServiceImpl {
     /// Reap idle workers that have exceeded the idle timeout.
     /// Returns the number of workers reaped.
     pub async fn reap_idle_workers(&self) -> usize {
-        let idle_timeout_ms = *self.idle_timeout_ms.read().unwrap();
+        let idle_timeout_ms = *self
+            .idle_timeout_ms
+            .read()
+            .expect("idle_timeout_ms lock should not be poisoned");
         let now = Self::now_ms();
         let mut reaped = 0;
 
@@ -449,7 +452,10 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
         let now = Self::now_ms();
 
         // Check per-key parallelism limit
-        let max_per_key = *self.max_per_key.read().unwrap();
+        let max_per_key = *self
+            .max_per_key
+            .read()
+            .expect("max_per_key lock should not be poisoned");
         if max_per_key != i32::MAX {
             let busy_count: i32 = self
                 .workers
@@ -547,7 +553,10 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
         }
 
         // No idle worker available -- spawn a new one
-        let max_pool = *self.max_pool_size.read().unwrap();
+        let max_pool = *self
+            .max_pool_size
+            .read()
+            .expect("max_pool_size lock should not be poisoned");
         if self.pool_size() >= max_pool {
             return Ok(Response::new(AcquireWorkerResponse {
                 worker: None,
@@ -571,7 +580,8 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
             return Ok(self.insert_stub_worker(worker_id, worker_key, spec, now));
         }
 
-        let (pid, child) = spawn_result.unwrap();
+        let (pid, child) = spawn_result
+            .expect("spawn result should be Ok after error branch was handled");
 
         let lease_expires = if req.timeout_ms > 0 {
             now + req.timeout_ms
@@ -759,13 +769,22 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
         let req = request.into_inner();
 
         if req.max_pool_size > 0 {
-            *self.max_pool_size.write().unwrap() = req.max_pool_size;
+            *self
+                .max_pool_size
+                .write()
+                .expect("max_pool_size lock should not be poisoned") = req.max_pool_size;
         }
         if req.idle_timeout_ms > 0 {
-            *self.idle_timeout_ms.write().unwrap() = req.idle_timeout_ms;
+            *self
+                .idle_timeout_ms
+                .write()
+                .expect("idle_timeout_ms lock should not be poisoned") = req.idle_timeout_ms;
         }
         if req.max_per_key > 0 {
-            *self.max_per_key.write().unwrap() = req.max_per_key;
+            *self
+                .max_per_key
+                .write()
+                .expect("max_per_key lock should not be poisoned") = req.max_per_key;
         }
 
         tracing::info!(

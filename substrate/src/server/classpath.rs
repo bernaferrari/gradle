@@ -19,6 +19,12 @@ use crate::proto::{
 #[derive(Default)]
 pub struct ClasspathServiceImpl;
 
+impl ClasspathServiceImpl {
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
 /// Minimum entry count to trigger parallel hashing via rayon.
 const PARALLEL_THRESHOLD: usize = 8;
 
@@ -133,21 +139,23 @@ fn composite_hash(entry_hashes: &[(String, Vec<u8>)], algorithm_name: &str) -> V
     }
 }
 
+const SEP: &[u8] = &[0];
+
 fn feed_entries<H: md5::Digest>(hasher: &mut H, entries: &[(String, Vec<u8>)]) {
     for (path, hash) in entries {
         hasher.update(path.as_bytes());
-        hasher.update(&[0u8]);
+        hasher.update(SEP);
         hasher.update(hash);
-        hasher.update(&[0u8]);
+        hasher.update(SEP);
     }
 }
 
 fn feed_blake3(hasher: &mut Blake3Hasher, entries: &[(String, Vec<u8>)]) {
     for (path, hash) in entries {
         hasher.update(path.as_bytes());
-        hasher.update(&[0u8]);
+        hasher.update(SEP);
         hasher.update(hash);
-        hasher.update(&[0u8]);
+        hasher.update(SEP);
     }
 }
 

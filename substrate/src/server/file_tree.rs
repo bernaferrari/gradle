@@ -11,6 +11,12 @@ use crate::proto::{
 #[derive(Default)]
 pub struct FileTreeServiceImpl;
 
+impl FileTreeServiceImpl {
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
 /// Gradle/Ant default excludes (from Apache Ant DirectoryScanner).
 const DEFAULT_EXCLUDES: &[&str] = &[
     "**/*~",
@@ -350,14 +356,9 @@ impl FileTreeServiceImpl {
             .iter()
             .map(|path| {
                 let normalized = path.replace('\\', "/");
-                let included = if !include_patterns.is_empty()
+                let included = !(!include_patterns.is_empty()
                     && !matches_any_pattern(&normalized, include_patterns)
-                    || matches_any_pattern(&normalized, exclude_patterns)
-                {
-                    false
-                } else {
-                    true
-                };
+                    || matches_any_pattern(&normalized, exclude_patterns));
                 PatternMatchResult {
                     path: path.clone(),
                     included,
