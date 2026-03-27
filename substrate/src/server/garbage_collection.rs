@@ -180,7 +180,7 @@ impl GarbageCollectionServiceImpl {
             return Ok(StorageStats {
                 store_name: dir
                     .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
+                    .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default(),
                 entries: 0,
                 total_bytes: 0,
@@ -242,7 +242,7 @@ impl GarbageCollectionServiceImpl {
         Ok(StorageStats {
             store_name: dir
                 .file_name()
-                .map(|n| n.to_string_lossy().to_string())
+                .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default(),
             entries,
             total_bytes,

@@ -205,7 +205,7 @@ impl BuildCacheOrchestrationService for BuildCacheOrchestrationServiceImpl {
         request: Request<ProbeCacheRequest>,
     ) -> Result<Response<ProbeCacheResponse>, Status> {
         let req = request.into_inner();
-        let key = String::from_utf8_lossy(&req.cache_key).to_string();
+        let key = String::from_utf8_lossy(&req.cache_key).into_owned();
 
         // First check the metadata index (tracks what was stored this session)
         if let Some(entry) = self.stored_keys.get(&key) {
@@ -278,7 +278,7 @@ impl BuildCacheOrchestrationService for BuildCacheOrchestrationServiceImpl {
         request: Request<StoreOutputsRequest>,
     ) -> Result<Response<StoreOutputsResponse>, Status> {
         let req = request.into_inner();
-        let key = String::from_utf8_lossy(&req.cache_key).to_string();
+        let key = String::from_utf8_lossy(&req.cache_key).into_owned();
 
         // Use monotonically increasing sequence for eviction ordering
         let seq = self.sequence.fetch_add(1, Ordering::Relaxed);

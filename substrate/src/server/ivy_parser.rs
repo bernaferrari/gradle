@@ -123,7 +123,7 @@ fn extract_tag(bytes: &[u8], from: usize, to: usize, tag: &[u8]) -> String {
             v
         };
         if let Some(end) = bytes[content_start..to].windows(close_needle.len()).position(|w| w == &close_needle[..]) {
-            return String::from_utf8_lossy(&bytes[content_start..content_start + end]).trim().to_string();
+            return String::from_utf8_lossy(&bytes[content_start..content_start + end]).trim().to_owned();
         }
     }
     String::new()
@@ -140,7 +140,7 @@ fn extract_attr(bytes: &[u8], from: usize, to: usize, attr: &[u8]) -> Option<Str
     if let Some(start) = bytes[from..to].windows(needle.len()).position(|w| w == &needle[..]) {
         let val_start = from + start + needle.len();
         if let Some(end) = bytes[val_start..to].iter().position(|&b| b == b'"') {
-            let val = String::from_utf8_lossy(&bytes[val_start..val_start + end]).to_string();
+            let val = String::from_utf8_lossy(&bytes[val_start..val_start + end]).into_owned();
             return Some(val);
         }
     }

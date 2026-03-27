@@ -737,7 +737,7 @@ impl NormalizationStrategy {
         match self {
             Self::AbsolutePath => {
                 // Use the full absolute path
-                std::borrow::Cow::Owned(full_path.to_string_lossy().to_string())
+                std::borrow::Cow::Owned(full_path.to_string_lossy().into_owned())
             }
             Self::RelativePath => {
                 // Already relative to base

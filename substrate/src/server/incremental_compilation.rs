@@ -53,7 +53,7 @@ impl IncrementalCompilationServiceImpl {
         changed_files: &[String],
     ) -> HashSet<String> {
         // Build reverse dependency map: file -> set of files that depend on it
-        let mut reverse_deps: HashMap<&str, Vec<&str>> = HashMap::new();
+        let mut reverse_deps: HashMap<&str, Vec<&str>> = HashMap::with_capacity(units.len());
         for unit in units {
             for dep in &unit.dependencies {
                 reverse_deps
@@ -563,7 +563,7 @@ fn extract_class_name(data: &[u8]) -> Option<String> {
                 if offset + len > data.len() {
                     break;
                 }
-                let s = String::from_utf8_lossy(&data[offset..offset + len]).to_string();
+                let s = String::from_utf8_lossy(&data[offset..offset + len]).into_owned();
                 utf8_strings.push(Some(s));
                 offset += len;
             }
@@ -631,7 +631,7 @@ fn extract_class_references(data: &[u8]) -> Vec<String> {
 
     let cp_count = u16::from_be_bytes([data[8], data[9]]) as usize;
     let mut offset = 10;
-    let mut utf8_strings: HashMap<usize, String> = HashMap::new();
+    let mut utf8_strings: HashMap<usize, String> = HashMap::with_capacity(cp_count);
 
     for idx in 1..cp_count {
         if offset >= data.len() {
@@ -650,7 +650,7 @@ fn extract_class_references(data: &[u8]) -> Vec<String> {
                 if offset + len > data.len() {
                     break;
                 }
-                let s = String::from_utf8_lossy(&data[offset..offset + len]).to_string();
+                let s = String::from_utf8_lossy(&data[offset..offset + len]).into_owned();
                 utf8_strings.insert(idx, s);
                 offset += len;
             }

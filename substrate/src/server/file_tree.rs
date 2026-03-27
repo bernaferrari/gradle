@@ -305,7 +305,7 @@ impl FileTreeServiceImpl {
                 {
                     entries.push(FileTreeEntry {
                         relative_path: relative_normalized,
-                        absolute_path: path.to_string_lossy().to_string(),
+                        absolute_path: path.to_string_lossy().into_owned(),
                         is_directory: true,
                         size: if include_metadata {
                             metadata.len() as i64
@@ -348,7 +348,7 @@ impl FileTreeServiceImpl {
                     }
                     entries.push(FileTreeEntry {
                         relative_path: relative_normalized,
-                        absolute_path: path.to_string_lossy().to_string(),
+                        absolute_path: path.to_string_lossy().into_owned(),
                         is_directory: false,
                         size: if include_metadata {
                             metadata.len() as i64
