@@ -100,7 +100,7 @@ impl GarbageCollectionServiceImpl {
         }
 
         // Sort by modification time (oldest first) for LRU-style eviction
-        entries.sort_by_key(|e| e.1);
+        entries.sort_unstable_by_key(|e| e.1);
 
         let mut to_remove = Vec::new();
 
