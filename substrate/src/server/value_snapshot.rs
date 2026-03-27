@@ -49,7 +49,7 @@ impl ValueSnapshotServiceImpl {
             .filter(|p| !p.is_empty())
             .map(Self::normalize_path)
             .collect();
-        paths.sort();
+        paths.sort_unstable();
         paths.dedup();
         paths.join(";")
     }
@@ -65,7 +65,7 @@ impl ValueSnapshotServiceImpl {
             .map(|v| v.trim())
             .filter(|v| !v.is_empty())
             .collect();
-        values.sort();
+        values.sort_unstable();
         values.dedup();
         values.join(",")
     }
@@ -85,7 +85,7 @@ impl ValueSnapshotServiceImpl {
                 Some((key, value))
             })
             .collect();
-        entries.sort_by_key(|(k, _)| *k);
+        entries.sort_unstable_by_key(|(k, _)| *k);
         entries
             .iter()
             .map(|(k, v)| format!("{}={}", k, v))
@@ -165,7 +165,7 @@ impl ValueSnapshotService for ValueSnapshotServiceImpl {
 
         // Sort by property name for deterministic ordering
         let mut sorted_values: Vec<_> = req.values.iter().collect();
-        sorted_values.sort_by_key(|v| v.name.as_str());
+        sorted_values.sort_unstable_by_key(|v| v.name.as_str());
 
         for prop in sorted_values {
             let fingerprint = Self::fingerprint_value(prop);
