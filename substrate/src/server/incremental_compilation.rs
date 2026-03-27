@@ -115,12 +115,12 @@ impl IncrementalCompilationServiceImpl {
                             .to_string_lossy()
                             .to_string();
 
-                        // Check exclude patterns
+                        // Check exclude patterns using Ant-style matching (no filesystem access)
                         let excluded = exclude_patterns.iter().any(|exc| {
-                            let full_exc = dir_path.join(exc).to_string_lossy().to_string();
-                            glob(&full_exc)
-                                .map(|e| e.flatten().any(|e| e == entry))
-                                .unwrap_or(false)
+                            let abs_entry = entry.to_string_lossy();
+                            let full_exc_binding = dir_path.join(exc);
+                            let full_exc = full_exc_binding.to_string_lossy();
+                            crate::server::file_tree::ant_match(&abs_entry, &full_exc)
                         });
 
                         if excluded {
