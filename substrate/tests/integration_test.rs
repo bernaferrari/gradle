@@ -18,6 +18,7 @@ use gradle_substrate_daemon::server::{
     build_result::BuildResultServiceImpl,
     cache::CacheServiceImpl,
     cache_orchestration::BuildCacheOrchestrationServiceImpl,
+    classpath::ClasspathServiceImpl,
     config_cache::ConfigurationCacheServiceImpl,
     configuration::ConfigurationServiceImpl,
     console::ConsoleServiceImpl,
@@ -28,6 +29,7 @@ use gradle_substrate_daemon::server::{
     execution_history::ExecutionHistoryServiceImpl,
     execution_plan::ExecutionPlanServiceImpl,
     file_fingerprint::FileFingerprintServiceImpl,
+    file_tree::FileTreeServiceImpl,
     file_watch::FileWatchServiceImpl,
     garbage_collection::GarbageCollectionServiceImpl,
     hash::HashServiceImpl,
@@ -39,6 +41,7 @@ use gradle_substrate_daemon::server::{
     test_execution::TestExecutionServiceImpl,
     toolchain::ToolchainServiceImpl,
     value_snapshot::ValueSnapshotServiceImpl,
+    version_catalog::VersionCatalogServiceImpl,
     work::{WorkServiceImpl, WorkerScheduler},
     worker_process::WorkerProcessServiceImpl,
 };
@@ -264,6 +267,15 @@ async fn spawn_test_server() -> (String, tempfile::TempDir) {
                     garbage_collection,
                 ),
             )
+            .add_service(classpath_service_server::ClasspathServiceServer::new(
+                ClasspathServiceImpl::new(),
+            ))
+            .add_service(file_tree_service_server::FileTreeServiceServer::new(
+                FileTreeServiceImpl::new(),
+            ))
+            .add_service(version_catalog_service_server::VersionCatalogServiceServer::new(
+                VersionCatalogServiceImpl::new(),
+            ))
             .serve_with_incoming(UnixListenerStream::new(listener))
             .await;
     });
@@ -4275,4 +4287,200 @@ async fn test_task_graph_with_execution_history_integration() {
             .any(|n| n.task_path == task_path),
         "Registered task should be in the execution plan"
     );
+}
+
+/// Integration test for ClasspathService: hash a classpath and compare.
+#[tokio::test]
+async fn test_classpath_service_hash_and_compare() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client = classpath_service_client::ClasspathServiceClient::new(channel);
+
+    // Hash a classpath with two entries
+    let hash_resp = client
+        .hash_classpath(Request::new(HashClasspathRequest {
+            entries: vec![
+                ClasspathEntry {
+                    absolute_path: "/tmp/a.jar".to_string(),
+                    entry_type: 0,
+                    length: 1024,
+                    last_modified: 1000,
+                },
+                ClasspathEntry {
+                    absolute_path: "/tmp/b.jar".to_string(),
+                    entry_type: 0,
+                    length: 2048,
+                    last_modified: 2000,
+                },
+            ],
+            algorithm: "SHA-256".to_string(),
+            ignore_timestamps: false,
+            include_entry_hashes: true,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(hash_resp.algorithm_used, "SHA-256");
+    assert_eq!(hash_resp.classpath_hash.len(), 32); // SHA-256 = 32 bytes
+    assert_eq!(hash_resp.entries.len(), 2);
+
+    // Compare with same entries → should not be changed
+    let compare_resp = client
+        .compare_classpaths(Request::new(CompareClasspathsRequest {
+            previous_hash: hash_resp.classpath_hash.clone(),
+            current_entries: vec![
+                ClasspathEntry {
+                    absolute_path: "/tmp/a.jar".to_string(),
+                    entry_type: 0,
+                    length: 1024,
+                    last_modified: 1000,
+                },
+                ClasspathEntry {
+                    absolute_path: "/tmp/b.jar".to_string(),
+                    entry_type: 0,
+                    length: 2048,
+                    last_modified: 2000,
+                },
+            ],
+            algorithm: "SHA-256".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(!compare_resp.changed);
+    assert!(compare_resp.differences.is_empty());
+
+    // Compare with different entries → should be changed
+    let compare_resp2 = client
+        .compare_classpaths(Request::new(CompareClasspathsRequest {
+            previous_hash: hash_resp.classpath_hash.clone(),
+            current_entries: vec![
+                ClasspathEntry {
+                    absolute_path: "/tmp/a.jar".to_string(),
+                    entry_type: 0,
+                    length: 1024,
+                    last_modified: 9999, // changed mtime
+                },
+            ],
+            algorithm: "SHA-256".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(compare_resp2.changed);
+}
+
+/// Integration test for FileTreeService: traverse a temp directory and match patterns.
+#[tokio::test]
+async fn test_file_tree_service_traverse_and_match() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client = file_tree_service_client::FileTreeServiceClient::new(channel);
+
+    // Create a temp directory structure
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join("src/main/java/com")).unwrap();
+    std::fs::write(tmp.path().join("src/main/java/com/App.java"), "class App {}").unwrap();
+    std::fs::write(tmp.path().join("src/main/java/com/Util.kt"), "fun util()").unwrap();
+    std::fs::write(tmp.path().join("build.gradle"), "plugins { id 'java' }").unwrap();
+
+    // Traverse with include pattern **/*.java
+    let traverse_resp = client
+        .traverse_file_tree(Request::new(TraverseFileTreeRequest {
+            root_dir: tmp.path().to_string_lossy().to_string(),
+            include_patterns: vec!["**/*.java".to_string()],
+            exclude_patterns: vec![],
+            include_files: true,
+            include_dirs: false,
+            follow_symlinks: false,
+            max_depth: 0,
+            include_metadata: true,
+            apply_default_excludes: false,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(traverse_resp.entries.len(), 1);
+    assert!(traverse_resp.entries[0].relative_path.contains("App.java"));
+    assert!(traverse_resp.entries[0].size > 0);
+
+    // Match patterns without filesystem
+    let match_resp = client
+        .match_patterns(Request::new(MatchPatternsRequest {
+            paths: vec![
+                "src/main/java/App.java".to_string(),
+                "src/main/java/Util.kt".to_string(),
+                "build.gradle".to_string(),
+            ],
+            include_patterns: vec!["**/*.java".to_string(), "**/*.gradle".to_string()],
+            exclude_patterns: vec!["**/test/**".to_string()],
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(match_resp.results[0].included); // .java
+    assert!(!match_resp.results[1].included); // .kt
+    assert!(match_resp.results[2].included); // .gradle
+}
+
+/// Integration test for VersionCatalogService: parse a TOML version catalog.
+#[tokio::test]
+async fn test_version_catalog_service_parse() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client =
+        version_catalog_service_client::VersionCatalogServiceClient::new(channel);
+
+    let toml_content = r#"
+[versions]
+kotlin = "1.9.22"
+junit = "4.13"
+
+[libraries]
+kotlin-stdlib = { group = "org.jetbrains.kotlin", name = "kotlin-stdlib", version.ref = "kotlin" }
+junit-junit = { group = "junit", name = "junit", version.ref = "junit" }
+
+[bundles]
+testing = ["junit-junit"]
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+"#;
+
+    let resp = client
+        .parse_version_catalog(Request::new(ParseVersionCatalogRequest {
+            content: toml_content.to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(resp.versions.len(), 2);
+    assert_eq!(resp.libraries.len(), 2);
+    assert_eq!(resp.bundles.len(), 1);
+    assert_eq!(resp.plugins.len(), 1);
+
+    // Check version ref resolution
+    let kotlin_stdlib = resp
+        .libraries
+        .iter()
+        .find(|l| l.alias == "kotlin-stdlib")
+        .unwrap();
+    assert_eq!(kotlin_stdlib.version_ref, "kotlin");
+    assert!(kotlin_stdlib.version_literal.is_empty());
+
+    // Check bundle
+    let testing = &resp.bundles[0];
+    assert_eq!(testing.alias, "testing");
+    assert_eq!(testing.library_aliases, vec!["junit-junit"]);
+
+    // Check plugin
+    let kotlin_plugin = &resp.plugins[0];
+    assert_eq!(kotlin_plugin.id, "org.jetbrains.kotlin.jvm");
+    assert_eq!(kotlin_plugin.version_ref, "kotlin");
 }
