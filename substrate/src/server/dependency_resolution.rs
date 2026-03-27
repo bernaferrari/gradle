@@ -97,14 +97,14 @@ impl ResolutionStrategy {
     pub fn from_proto(config: &crate::proto::ResolutionStrategyConfig) -> Self {
         match config.strategy.as_str() {
             "force" => {
-                let mut map = std::collections::HashMap::new();
+                let mut map = std::collections::HashMap::with_capacity(config.forced_versions.len());
                 for entry in &config.forced_versions {
                     map.insert(entry.key.clone(), entry.value.clone());
                 }
                 ResolutionStrategy::Force(map)
             }
             "prefer" => {
-                let mut map = std::collections::HashMap::new();
+                let mut map = std::collections::HashMap::with_capacity(config.preferred_versions.len());
                 for entry in &config.preferred_versions {
                     map.insert(entry.key.clone(), entry.value.clone());
                 }
@@ -752,7 +752,7 @@ impl DependencyResolutionServiceImpl {
             ResolutionStrategy::HighestVersion => {
                 // Existing behavior: keep highest version
                 let mut best: std::collections::HashMap<(String, String), usize> =
-                    std::collections::HashMap::new();
+                    std::collections::HashMap::with_capacity(deps.len());
 
                 for (idx, dep) in deps.iter().enumerate() {
                     let key = (dep.group.clone(), dep.name.clone());
@@ -787,7 +787,7 @@ impl DependencyResolutionServiceImpl {
             ResolutionStrategy::Force(forced) => {
                 // Apply forced versions, then fall back to highest for the rest
                 let mut best: std::collections::HashMap<(String, String), usize> =
-                    std::collections::HashMap::new();
+                    std::collections::HashMap::with_capacity(deps.len());
 
                 for (idx, dep) in deps.iter().enumerate() {
                     let key = (dep.group.clone(), dep.name.clone());
@@ -829,7 +829,7 @@ impl DependencyResolutionServiceImpl {
             ResolutionStrategy::FailOnConflict => {
                 // Check for any version conflicts; fail if found
                 let mut versions: std::collections::HashMap<(String, String), Vec<String>> =
-                    std::collections::HashMap::new();
+                    std::collections::HashMap::with_capacity(deps.len());
 
                 for dep in deps.iter() {
                     let key = (dep.group.clone(), dep.name.clone());
@@ -860,7 +860,7 @@ impl DependencyResolutionServiceImpl {
             ResolutionStrategy::Prefer(preferred) => {
                 // Prefer specific versions but allow overrides by higher transitive versions
                 let mut best: std::collections::HashMap<(String, String), usize> =
-                    std::collections::HashMap::new();
+                    std::collections::HashMap::with_capacity(deps.len());
 
                 for (idx, dep) in deps.iter().enumerate() {
                     let key = (dep.group.clone(), dep.name.clone());
@@ -2026,7 +2026,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                 classifier: req.classifier.clone(),
                 extension: req.extension.clone(),
                 sha256: req.sha256.clone(),
-                local_path: path.to_string_lossy().to_string(),
+                local_path: path.to_string_lossy().into_owned(),
                 size,
                 cached_at_ms: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -2046,7 +2046,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
 
             return Ok(Response::new(CheckArtifactCacheResponse {
                 cached: true,
-                local_path: path.to_string_lossy().to_string(),
+                local_path: path.to_string_lossy().into_owned(),
                 cached_size: size,
             }));
         }
@@ -2311,7 +2311,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                     .await;
                 }
 
-                store_path.to_string_lossy().to_string()
+                store_path.to_string_lossy().into_owned()
             } else {
                 req.local_path.clone()
             }
@@ -3126,7 +3126,7 @@ mod tests {
             name: "test-lib".to_string(),
             version: "1.0".to_string(),
             classifier: String::new(),
-            local_path: src.to_string_lossy().to_string(),
+            local_path: src.to_string_lossy().into_owned(),
             size: 20,
             sha256: "abc123".to_string(),
         }))

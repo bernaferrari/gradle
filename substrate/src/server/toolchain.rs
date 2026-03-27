@@ -95,7 +95,7 @@ impl ToolchainServiceImpl {
                 if java_bin.is_file() {
                     // Walk up from bin/java to find JAVA_HOME
                     if let Some(java_home) = java_bin.parent().and_then(|p| p.parent()) {
-                        let home_str = java_home.to_string_lossy().to_string();
+                        let home_str = java_home.to_string_lossy().into_owned();
                         if let Some((version, _)) = Self::probe_java_home(&home_str) {
                             found.push((home_str, version));
                         }
@@ -176,7 +176,7 @@ impl ToolchainServiceImpl {
                             if let Some((version, _)) =
                                 Self::probe_java_home(&home.to_string_lossy())
                             {
-                                found.push((home.to_string_lossy().to_string(), version));
+                                found.push((home.to_string_lossy().into_owned(), version));
                             }
                         }
                     }
@@ -200,7 +200,7 @@ impl ToolchainServiceImpl {
                                 if let Some((version, _)) =
                                     Self::probe_java_home(&path.to_string_lossy())
                                 {
-                                    found.push((path.to_string_lossy().to_string(), version));
+                                    found.push((path.to_string_lossy().into_owned(), version));
                                 }
                             }
                         }
@@ -1091,7 +1091,7 @@ impl ToolchainService for ToolchainServiceImpl {
             });
 
             let java_home = match Self::find_java_home_in_dir(&extract_dir) {
-                Some(home) => home.to_string_lossy().to_string(),
+                Some(home) => home.to_string_lossy().into_owned(),
                 None => {
                     yield Ok(ToolchainProgress {
                         phase: "error".to_string(),
