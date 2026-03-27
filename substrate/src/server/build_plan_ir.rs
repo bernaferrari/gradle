@@ -56,15 +56,15 @@ pub struct CanonicalBuildPlanToolchainRequest {
 
 impl CanonicalBuildPlan {
     pub fn normalized(mut self) -> Self {
-        self.projects.sort_by(|a, b| {
+        self.projects.sort_unstable_by(|a, b| {
             (&a.path, &a.name, &a.project_dir).cmp(&(&b.path, &b.name, &b.project_dir))
         });
 
         for task in &mut self.tasks {
-            task.depends_on.sort();
-            task.outputs.sort();
+            task.depends_on.sort_unstable();
+            task.outputs.sort_unstable();
         }
-        self.tasks.sort_by(|a, b| {
+        self.tasks.sort_unstable_by(|a, b| {
             (&a.path, &a.project_path, &a.implementation_id).cmp(&(
                 &b.path,
                 &b.project_path,
@@ -72,7 +72,7 @@ impl CanonicalBuildPlan {
             ))
         });
 
-        self.dependencies.sort_by(|a, b| {
+        self.dependencies.sort_unstable_by(|a, b| {
             (&a.project_path, &a.configuration, &a.notation).cmp(&(
                 &b.project_path,
                 &b.configuration,
@@ -80,7 +80,7 @@ impl CanonicalBuildPlan {
             ))
         });
 
-        self.toolchains.sort_by(|a, b| {
+        self.toolchains.sort_unstable_by(|a, b| {
             (&a.language, &a.version, &a.vendor, &a.implementation).cmp(&(
                 &b.language,
                 &b.version,
