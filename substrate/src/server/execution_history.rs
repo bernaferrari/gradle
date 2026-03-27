@@ -78,9 +78,9 @@ impl ExecutionHistoryServiceImpl {
                 if name.ends_with(".bin") {
                     match fs::read(entry.path()).await {
                         Ok(data) => {
-                            if let Ok(hentry) = bincode::deserialize::<HistoryEntry>(&data) {
-                                let original_key = hentry.key.clone();
-                                self.entries.insert(original_key, hentry);
+                            if let Ok(mut hentry) = bincode::deserialize::<HistoryEntry>(&data) {
+                                let key = std::mem::take(&mut hentry.key);
+                                self.entries.insert(key, hentry);
                                 count += 1;
                             }
                         }
@@ -135,7 +135,7 @@ impl ExecutionHistoryServiceImpl {
             .iter()
             .map(|entry| (entry.value().timestamp_ms, entry.key().clone()))
             .collect();
-        timestamped.sort_by_key(|(ts, _)| *ts);
+        timestamped.sort_unstable_by_key(|(ts, _)| *ts);
 
         for (_, key) in timestamped.into_iter().take(to_remove_count) {
             if self.entries.remove(&key).is_some() {
