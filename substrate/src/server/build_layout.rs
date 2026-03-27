@@ -98,13 +98,15 @@ impl BuildLayoutService for BuildLayoutServiceImpl {
         self.projects
             .insert(Self::project_key(&build_id, ":"), root_project);
 
-        tracing::info!(
-            build_id = %build_id,
-            root_dir = %self.builds.get(&build_key).unwrap().root_dir,
-            build_name = %self.builds.get(&build_key).unwrap().build_name,
-            settings_file = %self.builds.get(&build_key).unwrap().settings_file,
-            "Build layout initialized"
-        );
+        if let Some(layout) = self.builds.get(&build_key) {
+            tracing::info!(
+                build_id = %build_id,
+                root_dir = %layout.root_dir,
+                build_name = %layout.build_name,
+                settings_file = %layout.settings_file,
+                "Build layout initialized"
+            );
+        }
 
         Ok(Response::new(InitBuildLayoutResponse {
             build_id,
@@ -137,7 +139,15 @@ impl BuildLayoutService for BuildLayoutServiceImpl {
         }
 
         // Validate that the subproject directory is under the build root
-        let layout = self.builds.get(&build_key).unwrap();
+        let layout = match self.builds.get(&build_key) {
+            Some(l) => l,
+            None => {
+                return Ok(Response::new(AddSubprojectResponse {
+                    added: false,
+                    error_message: format!("Build {} not found", req.build_id),
+                }));
+            }
+        };
         let project_dir = std::path::Path::new(&req.project_dir);
         let build_root = std::path::Path::new(&layout.root_dir);
         if !project_dir.starts_with(build_root) {

@@ -37,7 +37,8 @@ impl RemoteCacheStore {
             (Some(user), Some(pass)) => {
                 use std::io::Write;
                 let mut buf = Vec::new();
-                write!(buf, "{}:{}", user, pass).unwrap();
+                // write! to Vec<u8> is infallible
+                let _ = write!(buf, "{}:{}", user, pass);
                 Some(format!("Basic {}", base64_encode(&buf)))
             }
             _ => None,

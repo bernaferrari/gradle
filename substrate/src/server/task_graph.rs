@@ -209,10 +209,11 @@ impl TaskGraphServiceImpl {
             // Reduce in-degree for dependents
             if let Some(deps) = dependents.get(&task) {
                 for dep in deps {
-                    let degree = in_degree.get_mut(dep).unwrap();
-                    *degree -= 1;
-                    if *degree == 0 {
-                        queue.push_back(dep.clone());
+                    if let Some(degree) = in_degree.get_mut(dep) {
+                        *degree -= 1;
+                        if *degree == 0 {
+                            queue.push_back(dep.clone());
+                        }
                     }
                 }
             }
@@ -276,10 +277,11 @@ impl TaskGraphServiceImpl {
             topo_order.push(task.clone());
             if let Some(deps) = dependents.get(&task) {
                 for dep in deps {
-                    let degree = in_degree.get_mut(dep).unwrap();
-                    *degree -= 1;
-                    if *degree == 0 {
-                        queue.push_back(dep.clone());
+                    if let Some(degree) = in_degree.get_mut(dep) {
+                        *degree -= 1;
+                        if *degree == 0 {
+                            queue.push_back(dep.clone());
+                        }
                     }
                 }
             }
