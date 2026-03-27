@@ -47,5 +47,6 @@ pub mod task_graph;
 pub mod test_execution;
 pub mod toolchain;
 pub mod value_snapshot;
+pub mod version_catalog;
 pub mod work;
 pub mod worker_process;

@@ -43,6 +43,7 @@ use gradle_substrate_daemon::{
         test_execution_service_server::TestExecutionServiceServer,
         toolchain_service_server::ToolchainServiceServer,
         value_snapshot_service_server::ValueSnapshotServiceServer,
+        version_catalog_service_server::VersionCatalogServiceServer,
         work_service_server::WorkServiceServer,
         worker_process_service_server::WorkerProcessServiceServer,
     },
@@ -69,6 +70,7 @@ use gradle_substrate_daemon::{
         resource_management::ResourceManagementServiceImpl, scopes::ScopeRegistry,
         task_graph::TaskGraphServiceImpl, test_execution::TestExecutionServiceImpl,
         toolchain::ToolchainServiceImpl, value_snapshot::ValueSnapshotServiceImpl,
+        version_catalog::VersionCatalogServiceImpl,
         work::WorkServiceImpl, worker_process::WorkerProcessServiceImpl,
     },
     PROTOCOL_VERSION,
@@ -349,7 +351,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Gradle Substrate Daemon v{}", env!("CARGO_PKG_VERSION"));
     println!("Protocol version: {}", PROTOCOL_VERSION);
     println!("Listening on: {}", args.socket_path);
-    println!("Services: control, dag-executor, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console, test-execution, artifact-publishing, build-init, incremental-compilation, build-metrics, garbage-collection");
+    println!("Services: control, dag-executor, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console, test-execution, artifact-publishing, build-init, incremental-compilation, build-metrics, garbage-collection, version-catalog");
 
     // Phase 6: JVM Compatibility Host
     // The JVM host socket path arrives via handshake, so we spawn a background task
@@ -380,7 +382,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(DagExecutorServiceServer::new(dag_executor))
         .add_service(HashServiceServer::new(hash))
         .add_service(CacheServiceServer::new(cache))
-        .add_service(ClasspathServiceServer::new(ClasspathServiceImpl::default()))
+        .add_service(ClasspathServiceServer::new(ClasspathServiceImpl::new()))
         .add_service(ExecServiceServer::new(exec))
         .add_service(WorkServiceServer::new(work))
         .add_service(ExecutionPlanServiceServer::new(execution_plan))
@@ -391,7 +393,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             cache_orchestration,
         ))
         .add_service(FileFingerprintServiceServer::new(file_fingerprint))
-        .add_service(FileTreeServiceServer::new(FileTreeServiceImpl::default()))
+        .add_service(FileTreeServiceServer::new(FileTreeServiceImpl::new()))
         .add_service(ValueSnapshotServiceServer::new(value_snapshot))
         .add_service(TaskGraphServiceServer::new((*task_graph).clone()))
         .add_service(ConfigurationServiceServer::new(configuration))
@@ -421,6 +423,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ))
         .add_service(BuildMetricsServiceServer::new((*build_metrics).clone()))
         .add_service(GarbageCollectionServiceServer::new(garbage_collection))
+        .add_service(VersionCatalogServiceServer::new(VersionCatalogServiceImpl::new()))
         .serve_with_incoming_shutdown(
             tokio_stream::wrappers::UnixListenerStream::new(listener),
             shutdown_signal(),

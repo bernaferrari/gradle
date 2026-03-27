@@ -13,6 +13,7 @@ pub struct SubsystemModes {
     pub config_cache: bool,
     pub classpath: bool,
     pub file_tree: bool,
+    pub version_catalog: bool,
 }
 
 impl SubsystemModes {
@@ -29,6 +30,7 @@ impl SubsystemModes {
             "config_cache",
             "classpath",
             "file_tree",
+            "version_catalog",
         ]
     }
 
@@ -53,6 +55,7 @@ impl SubsystemModes {
             "config_cache" => self.config_cache,
             "classpath" => self.classpath,
             "file_tree" => self.file_tree,
+            "version_catalog" => self.version_catalog,
             _ => false,
         }
     }
@@ -76,6 +79,7 @@ impl SubsystemModes {
             "config_cache" => Some(std::mem::replace(&mut self.config_cache, authoritative)),
             "classpath" => Some(std::mem::replace(&mut self.classpath, authoritative)),
             "file_tree" => Some(std::mem::replace(&mut self.file_tree, authoritative)),
+            "version_catalog" => Some(std::mem::replace(&mut self.version_catalog, authoritative)),
             _ => None,
         }
     }
@@ -113,6 +117,7 @@ impl AuthoritativeConfig {
         modes.config_cache = authoritative;
         modes.classpath = authoritative;
         modes.file_tree = authoritative;
+        modes.version_catalog = authoritative;
     }
 
     /// Check whether a specific subsystem is in authoritative mode.
@@ -170,6 +175,7 @@ mod tests {
         assert!(modes.config_cache);
         assert!(modes.classpath);
         assert!(modes.file_tree);
+        assert!(modes.version_catalog);
     }
 
     #[test]
@@ -188,7 +194,7 @@ mod tests {
         config.set_subsystem("hashing", true);
         let modes = config.get_modes();
         let pairs = modes.as_pairs();
-        assert_eq!(pairs.len(), 10);
+        assert_eq!(pairs.len(), 11);
         assert!(pairs.iter().any(|(name, auth)| *name == "hashing" && *auth));
         assert!(pairs
             .iter()
