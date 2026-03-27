@@ -811,7 +811,7 @@ mod tests {
 
         // Results should be sorted alphabetically by dotted name
         let mut sorted_names: Vec<&str> = dotted_names.iter().map(|s| s.as_ref()).collect();
-        sorted_names.sort();
+        sorted_names.sort_unstable();
         for (i, expected) in sorted_names.iter().enumerate() {
             assert_eq!(
                 resp.results[i].name, *expected,
