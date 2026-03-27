@@ -114,14 +114,14 @@ pub(crate) fn is_network_filesystem(path: &str) -> bool {
 
 #[cfg(target_os = "macos")]
 fn path_str_for_statfs(path: &std::path::Path) -> String {
-    path.to_string_lossy().to_string()
+    path.to_string_lossy().into_owned()
 }
 
 /// Resolve symlinks in a path, returning the canonical path if follow_symlinks is true.
 pub(crate) fn resolve_path(path: &str, follow_symlinks: bool) -> String {
     if follow_symlinks {
         std::fs::canonicalize(path)
-            .map(|p| p.to_string_lossy().to_string())
+            .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|_| path.to_string())
     } else {
         path.to_string()
