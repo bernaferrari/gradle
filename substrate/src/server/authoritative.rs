@@ -100,13 +100,19 @@ impl AuthoritativeConfig {
     /// Set a single subsystem's authoritative mode. Returns the previous value, or `None` if the
     /// subsystem name is not recognised.
     pub fn set_subsystem(&self, subsystem: &str, authoritative: bool) -> Option<bool> {
-        let mut modes = self.modes.write().unwrap();
+        let mut modes = self
+            .modes
+            .write()
+            .expect("authoritative config lock should not be poisoned");
         modes.set(subsystem, authoritative)
     }
 
     /// Set all subsystems to the given authoritative mode.
     pub fn set_all(&self, authoritative: bool) {
-        let mut modes = self.modes.write().unwrap();
+        let mut modes = self
+            .modes
+            .write()
+            .expect("authoritative config lock should not be poisoned");
         modes.hashing = authoritative;
         modes.cache_keys = authoritative;
         modes.value_snapshots = authoritative;
@@ -122,13 +128,19 @@ impl AuthoritativeConfig {
 
     /// Check whether a specific subsystem is in authoritative mode.
     pub fn is_authoritative(&self, subsystem: &str) -> bool {
-        let modes = self.modes.read().unwrap();
+        let modes = self
+            .modes
+            .read()
+            .expect("authoritative config lock should not be poisoned");
         modes.get(subsystem)
     }
 
     /// Get a snapshot of all current subsystem modes.
     pub fn get_modes(&self) -> SubsystemModes {
-        let modes = self.modes.read().unwrap();
+        let modes = self
+            .modes
+            .read()
+            .expect("authoritative config lock should not be poisoned");
         modes.clone()
     }
 }

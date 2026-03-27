@@ -75,7 +75,7 @@ impl BuildExecution {
     }
 
     fn executing_count(&self) -> i32 {
-        self.executing.lock().unwrap().len() as i32
+        self.executing.lock().expect("executing lock should not be poisoned").len() as i32
     }
 
     fn pending_count(&self) -> i32 {
@@ -270,7 +270,7 @@ impl DagExecutorServiceImpl {
         }
         // Update ready queue
         if !newly_ready.is_empty() {
-            let mut queue = execution.ready_queue.lock().unwrap();
+            let mut queue = execution.ready_queue.lock().expect("ready_queue lock should not be poisoned");
             for task in &newly_ready {
                 queue.push_back(task.clone());
             }

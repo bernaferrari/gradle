@@ -110,7 +110,8 @@ impl ArtifactPublishingServiceImpl {
         if let Some(creds) = self.repos.get(&descriptor.repository_id) {
             use std::io::Write;
             let mut buf = Vec::new();
-            write!(buf, "{}:{}", creds.username, creds.password).unwrap();
+            // write! to Vec<u8> is infallible
+            let _ = write!(buf, "{}:{}", creds.username, creds.password);
             let auth = base64_encode(&buf);
             request = request.header("Authorization", format!("Basic {}", auth));
         }
@@ -146,7 +147,7 @@ impl ArtifactPublishingServiceImpl {
             if let Some(creds) = self.repos.get(&descriptor.repository_id) {
                 use std::io::Write;
                 let mut buf = Vec::new();
-                write!(buf, "{}:{}", creds.username, creds.password).unwrap();
+                let _ = write!(buf, "{}:{}", creds.username, creds.password); // write! to Vec<u8> is infallible
                 let auth = base64_encode(&buf);
                 req = req.header("Authorization", format!("Basic {}", auth));
             }
@@ -284,7 +285,7 @@ impl ArtifactPublishingService for ArtifactPublishingServiceImpl {
                     let mut head_req = self.http_client.head(&target_url);
                     let mut buf = Vec::new();
                     use std::io::Write;
-                    write!(buf, "{}:{}", creds.username, creds.password).unwrap();
+                    let _ = write!(buf, "{}:{}", creds.username, creds.password); // write! to Vec<u8> is infallible
                     let auth = base64_encode(&buf);
                     head_req = head_req.header("Authorization", format!("Basic {}", auth));
                     match head_req.send().await {

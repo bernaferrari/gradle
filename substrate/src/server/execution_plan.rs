@@ -336,7 +336,9 @@ impl ExecutionPlanService for ExecutionPlanServiceImpl {
         request: Request<PredictOutcomeRequest>,
     ) -> Result<Response<PredictOutcomeResponse>, Status> {
         let req = request.into_inner();
-        let work = req.work.unwrap();
+        let work = req.work.ok_or_else(|| {
+            Status::invalid_argument("work field is required in PredictOutcomeRequest")
+        })?;
 
         let (predicted, reasoning, confidence) = self.predict(&work);
 
@@ -370,7 +372,9 @@ impl ExecutionPlanService for ExecutionPlanServiceImpl {
         request: Request<ResolvePlanRequest>,
     ) -> Result<Response<ResolvePlanResponse>, Status> {
         let req = request.into_inner();
-        let work = req.work.unwrap();
+        let work = req.work.ok_or_else(|| {
+            Status::invalid_argument("work field is required in PredictOutcomeRequest")
+        })?;
         let fingerprint = Self::compute_fingerprint(&work);
 
         let (action, reasoning, cache_key_hint);

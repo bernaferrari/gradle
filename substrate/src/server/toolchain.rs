@@ -1048,7 +1048,22 @@ impl ToolchainService for ToolchainServiceImpl {
                 return;
             }
 
-            let extract_result = extract_result.unwrap();
+            let extract_result = match extract_result {
+                Ok(r) => r,
+                Err(e) => {
+                    yield Ok(ToolchainProgress {
+                        phase: "error".to_string(),
+                        progress_percent: 0,
+                        message: format!("Extraction failed: {}", e),
+                        success: false,
+                        error_message: e.to_string(),
+                        java_home: String::new(),
+                    sha256_verified: false,
+                    cache_hit: false,
+                    });
+                    return;
+                }
+            };
             if let Err(e) = extract_result {
                 yield Ok(ToolchainProgress {
                     phase: "error".to_string(),

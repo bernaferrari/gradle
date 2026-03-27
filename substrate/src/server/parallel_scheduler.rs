@@ -250,7 +250,10 @@ impl ParallelScheduler {
         }
 
         // Phase 3: Enqueue ready tasks
-        let mut queue = self.ready_queue.lock().unwrap();
+        let mut queue = self
+            .ready_queue
+            .lock()
+            .expect("ready_queue lock should not be poisoned");
         for task_path in &ready {
             let priority = self
                 .tasks
@@ -313,7 +316,10 @@ impl ParallelScheduler {
         }
 
         // Update priorities in the ready queue
-        let mut queue = self.ready_queue.lock().unwrap();
+        let mut queue = self
+            .ready_queue
+            .lock()
+            .expect("ready_queue lock should not be poisoned");
         let mut new_queue = BinaryHeap::new();
         while let Some(mut task) = queue.pop() {
             if let Some(cp) = critical_paths.get(&task.task_path) {
@@ -348,7 +354,10 @@ impl ParallelScheduler {
 
         // Try to pop from queue (single pass)
         let prioritized = {
-            let mut queue = self.ready_queue.lock().unwrap();
+            let mut queue = self
+                .ready_queue
+                .lock()
+                .expect("ready_queue lock should not be poisoned");
             let mut result = None;
             let mut requeue = Vec::new();
 
@@ -471,7 +480,10 @@ impl ParallelScheduler {
 
         // Enqueue newly ready tasks
         if !newly_ready.is_empty() {
-            let mut queue = self.ready_queue.lock().unwrap();
+            let mut queue = self
+                .ready_queue
+                .lock()
+                .expect("ready_queue lock should not be poisoned");
             for path in &newly_ready {
                 let priority = self
                     .tasks
@@ -591,7 +603,10 @@ impl ParallelScheduler {
 
     /// Get the number of tasks in the ready queue.
     pub fn ready_count(&self) -> usize {
-        self.ready_queue.lock().unwrap().len()
+        self.ready_queue
+            .lock()
+            .expect("ready_queue lock should not be poisoned")
+            .len()
     }
 
     /// Get total task count.

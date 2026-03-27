@@ -197,7 +197,9 @@ impl PluginServiceImpl {
             if let Some(entry) = self.registry.get(id.as_str()) {
                 for req in &entry.requires {
                     if id_set.contains(req.as_str()) {
-                        deps.get_mut(id).unwrap().push(req.clone());
+                        if let Some(deps_list) = deps.get_mut(id) {
+                            deps_list.push(req.clone());
+                        }
                     }
                 }
             }
@@ -211,7 +213,9 @@ impl PluginServiceImpl {
             in_degree.insert(id.clone(), 0);
         }
         for (id, reqs) in &deps {
-            *in_degree.get_mut(id).unwrap() += reqs.len();
+            if let Some(degree) = in_degree.get_mut(id) {
+                *degree += reqs.len();
+            }
         }
 
         let mut queue: std::collections::VecDeque<String> = in_degree
@@ -226,10 +230,11 @@ impl PluginServiceImpl {
             // Find all plugins that depend on this one
             for (other_id, reqs) in &deps {
                 if reqs.contains(&id) {
-                    let deg = in_degree.get_mut(other_id).unwrap();
-                    *deg -= 1;
-                    if *deg == 0 {
-                        queue.push_back(other_id.clone());
+                    if let Some(deg) = in_degree.get_mut(other_id) {
+                        *deg -= 1;
+                        if *deg == 0 {
+                            queue.push_back(other_id.clone());
+                        }
                     }
                 }
             }
@@ -321,7 +326,10 @@ impl PluginService for PluginServiceImpl {
             }));
         }
 
-        let entry = self.registry.get(&req.plugin_id).unwrap();
+        let entry = self
+            .registry
+            .get(&req.plugin_id)
+            .expect("plugin should exist after compatibility check");
         let mut order = self
             .apply_counters
             .entry(req.project_path.clone())
