@@ -357,6 +357,7 @@ impl IncrementalCompilationService for IncrementalCompilationServiceImpl {
 
         if let Some(ss) = self.source_sets.get(&req.source_set_id) {
             total_sources = ss.units.len() as i32;
+            decisions.reserve(total_sources as usize);
 
             if req.changed_files.is_empty() && !ss.classpath_changed {
                 up_to_date_count = total_sources;
@@ -496,7 +497,7 @@ impl IncrementalCompilationService for IncrementalCompilationServiceImpl {
 
         let previous: HashSet<String> = req.previous_processor_classes.iter().cloned().collect();
 
-        let mut changes = Vec::new();
+        let mut changes = Vec::with_capacity(current_processors.len() + previous.len());
         for added in current_processors.difference(&previous) {
             changes.push(AnnotationProcessorChange {
                 processor_class: added.clone(),
@@ -630,6 +631,7 @@ fn extract_class_references(data: &[u8]) -> Vec<String> {
     }
 
     let cp_count = u16::from_be_bytes([data[8], data[9]]) as usize;
+    refs.reserve(cp_count / 4); // roughly 1/4 of constant pool entries are class refs
     let mut offset = 10;
     let mut utf8_strings: HashMap<usize, String> = HashMap::with_capacity(cp_count);
 

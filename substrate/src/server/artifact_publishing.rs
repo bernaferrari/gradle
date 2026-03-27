@@ -351,7 +351,7 @@ impl ArtifactPublishingService for ArtifactPublishingServiceImpl {
             .map(|a| a.clone())
             .unwrap_or_default();
 
-        let mut artifacts = Vec::new();
+        let mut artifacts = Vec::with_capacity(artifact_ids.len());
         let mut uploaded = 0i32;
         let mut failed = 0i32;
         let mut pending = 0i32;

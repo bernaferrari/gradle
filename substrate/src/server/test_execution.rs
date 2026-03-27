@@ -219,7 +219,7 @@ impl TestExecutionService for TestExecutionServiceImpl {
         let mut total_failed = 0i32;
         let mut total_skipped = 0i32;
         let mut total_duration_ms = 0i64;
-        let mut suite_reports = Vec::new();
+        let mut suite_reports = Vec::with_capacity(suite_ids.len());
 
         for suite_id in &suite_ids {
             if let Some(suite) = self.suites.get(suite_id) {
@@ -279,7 +279,7 @@ impl TestExecutionService for TestExecutionServiceImpl {
             .map(|s| s.clone())
             .unwrap_or_default();
 
-        let mut results = Vec::new();
+        let mut results = Vec::with_capacity(suite_ids.len() * 4); // estimate ~4 matches per suite
 
         for suite_id in &suite_ids {
             if let Some(suite) = self.suites.get(suite_id) {
@@ -318,7 +318,7 @@ impl TestExecutionService for TestExecutionServiceImpl {
         let mut skipped = 0i32;
         let mut aborted = 0i32;
         let mut total_duration_ms = 0i64;
-        let mut failed_test_names = Vec::new();
+        let mut failed_test_names = Vec::with_capacity(suite_ids.len() * 2); // estimate ~2 failures per suite
 
         for suite_id in &suite_ids {
             if let Some(suite) = self.suites.get(suite_id) {
