@@ -861,6 +861,7 @@ dependencies = [
  "bincode",
  "blake3",
  "clap",
+ "crc32fast",
  "criterion",
  "dashmap",
  "flate2",

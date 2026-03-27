@@ -1,5 +1,6 @@
 mod copy;
 mod delete;
+mod jar;
 mod java_compile;
 mod mkdir_op;
 mod symlink;
@@ -8,6 +9,7 @@ mod test_exec;
 
 pub use copy::CopyTaskExecutor;
 pub use delete::DeleteTaskExecutor;
+pub use jar::JarTaskExecutor;
 pub use java_compile::JavaCompileExecutor;
 pub use mkdir_op::MkdirTaskExecutor;
 pub use symlink::SymlinkTaskExecutor;
@@ -67,7 +69,7 @@ impl TaskInput {
     pub fn is_native_supported(task_type: &str) -> bool {
         matches!(
             task_type,
-            "Copy" | "Delete" | "Sync" | "Mkdir" | "Symlink" | "JavaCompile" | "TestExec"
+            "Copy" | "Delete" | "Sync" | "Mkdir" | "Symlink" | "JavaCompile" | "TestExec" | "Jar"
         )
     }
 }
@@ -117,6 +119,9 @@ impl TaskExecutorRegistry {
 
         let test_exec = TestExecExecutor::new();
         executors.insert(test_exec.task_type().to_string(), Box::new(test_exec));
+
+        let jar_executor = JarTaskExecutor::new();
+        executors.insert(jar_executor.task_type().to_string(), Box::new(jar_executor));
 
         Self { executors }
     }
@@ -171,6 +176,7 @@ mod tests {
         assert!(types.contains(&"Symlink"));
         assert!(types.contains(&"JavaCompile"));
         assert!(types.contains(&"TestExec"));
+        assert!(types.contains(&"Jar"));
     }
 
     #[test]
