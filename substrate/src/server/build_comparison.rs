@@ -248,7 +248,7 @@ impl BuildComparisonService for BuildComparisonServiceImpl {
             .map(|(i, t)| (t.as_str(), i))
             .collect();
 
-        task_comparisons.sort_by(|a, b| {
+        task_comparisons.sort_unstable_by(|a, b| {
             let diff_cmp = b.duration_diff_ms.cmp(&a.duration_diff_ms);
             if diff_cmp != std::cmp::Ordering::Equal {
                 return diff_cmp;

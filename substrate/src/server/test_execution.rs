@@ -104,7 +104,7 @@ impl TestExecutionServiceImpl {
         }
 
         // Sort by flake rate descending
-        flaky.sort_by(|a, b| {
+        flaky.sort_unstable_by(|a, b| {
             b.flake_rate
                 .partial_cmp(&a.flake_rate)
                 .unwrap_or(std::cmp::Ordering::Equal)
