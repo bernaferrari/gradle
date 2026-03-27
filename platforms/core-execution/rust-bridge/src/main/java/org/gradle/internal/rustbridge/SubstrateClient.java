@@ -94,6 +94,12 @@ public class SubstrateClient implements Closeable {
     private final GarbageCollectionServiceGrpc.GarbageCollectionServiceBlockingStub garbageCollectionStub;
     // Phase 39: Parser
     private final ParserServiceGrpc.ParserServiceBlockingStub parserStub;
+    // Phase 40: Classpath hashing
+    private final ClasspathServiceGrpc.ClasspathServiceBlockingStub classpathStub;
+    // Phase 41: File tree traversal
+    private final FileTreeServiceGrpc.FileTreeServiceBlockingStub fileTreeStub;
+    // Phase 42: Version catalog parsing
+    private final VersionCatalogServiceGrpc.VersionCatalogServiceBlockingStub versionCatalogStub;
     // Phase 6: JVM Compatibility Host
     private final String jvmHostSocketPath;
 
@@ -137,6 +143,9 @@ public class SubstrateClient implements Closeable {
             this.buildMetricsStub = null;
             this.garbageCollectionStub = null;
             this.parserStub = null;
+            this.classpathStub = null;
+            this.fileTreeStub = null;
+            this.versionCatalogStub = null;
         } else {
             this.controlStub = ControlServiceGrpc.newBlockingStub(channel);
             this.hashStub = HashServiceGrpc.newBlockingStub(channel);
@@ -173,6 +182,9 @@ public class SubstrateClient implements Closeable {
             this.buildMetricsStub = BuildMetricsServiceGrpc.newBlockingStub(channel);
             this.garbageCollectionStub = GarbageCollectionServiceGrpc.newBlockingStub(channel);
             this.parserStub = ParserServiceGrpc.newBlockingStub(channel);
+            this.classpathStub = ClasspathServiceGrpc.newBlockingStub(channel);
+            this.fileTreeStub = FileTreeServiceGrpc.newBlockingStub(channel);
+            this.versionCatalogStub = VersionCatalogServiceGrpc.newBlockingStub(channel);
         }
     }
 
@@ -395,6 +407,21 @@ public class SubstrateClient implements Closeable {
     public ParserServiceGrpc.ParserServiceBlockingStub getParserStub() {
         throwIfNoop();
         return parserStub;
+    }
+
+    public ClasspathServiceGrpc.ClasspathServiceBlockingStub getClasspathStub() {
+        throwIfNoop();
+        return classpathStub;
+    }
+
+    public FileTreeServiceGrpc.FileTreeServiceBlockingStub getFileTreeStub() {
+        throwIfNoop();
+        return fileTreeStub;
+    }
+
+    public VersionCatalogServiceGrpc.VersionCatalogServiceBlockingStub getVersionCatalogStub() {
+        throwIfNoop();
+        return versionCatalogStub;
     }
 
     private void throwIfNoop() {
