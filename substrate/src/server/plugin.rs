@@ -224,7 +224,7 @@ impl PluginServiceImpl {
             .map(|(id, _)| id.clone())
             .collect();
 
-        let mut result = Vec::new();
+        let mut result = Vec::with_capacity(plugin_ids.len());
         while let Some(id) = queue.pop_front() {
             result.push(id.clone());
             // Find all plugins that depend on this one
