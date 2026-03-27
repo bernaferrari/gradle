@@ -239,10 +239,7 @@ fn stable_short_hash(raw: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(raw.as_bytes());
     let digest = hasher.finalize();
-    digest[..8]
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<String>()
+    super::cache::hex::encode(&digest[..8])
 }
 
 fn now_ms() -> i64 {
