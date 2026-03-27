@@ -43,50 +43,61 @@ const DEFAULT_EXCLUDES: &[&str] = &[
 /// - `?` — matches exactly one character (not path separator)
 /// - `**` — matches any number of directories or files
 fn ant_match(path: &str, pattern: &str) -> bool {
-    // Split both pattern and path into segments by '/'
-    let pat_segs: Vec<&str> = pattern.split('/').collect();
-    let path_segs: Vec<&str> = path.split('/').collect();
-    match_segments(&pat_segs, 0, &path_segs, 0)
+    match_segments(pattern, 0, path, 0)
 }
 
 /// Recursive segment matching with `**` support.
-fn match_segments(
-    pat: &[&str],
-    pi: usize,
-    path: &[&str],
-    si: usize,
-) -> bool {
-    if pi == pat.len() && si == path.len() {
-        return true;
-    }
-    if pi == pat.len() {
-        return false;
+/// Works directly on string slices without allocation.
+fn match_segments(pat: &str, pi: usize, path: &str, si: usize) -> bool {
+    let pat_rest = &pat[pi..];
+    let path_rest = &path[si..];
+
+    if pat_rest.is_empty() {
+        return path_rest.is_empty();
     }
 
-    let pat_seg = pat[pi];
+    // Extract next pattern segment (up to '/' or end)
+    let (pat_seg, next_pi) = match pat_rest.find('/') {
+        Some(pos) => (&pat_rest[..pos], pi + pos + 1),
+        None => (pat_rest, pat.len()),
+    };
 
     if pat_seg == "**" {
         // `**` can match zero or more path segments
-        // Try matching zero segments (skip the **)
-        if match_segments(pat, pi + 1, path, si) {
+        if match_segments(pat, next_pi, path, si) {
             return true;
         }
-        // Try matching one or more segments
-        for i in si..path.len() {
-            if match_segments(pat, pi + 1, path, i + 1) {
-                return true;
+        // Try consuming one path segment at a time
+        let mut offset = 0;
+        loop {
+            match path_rest[offset..].find('/') {
+                Some(pos) => {
+                    offset += pos + 1;
+                    if match_segments(pat, next_pi, path, si + offset) {
+                        return true;
+                    }
+                }
+                None => {
+                    // Try matching remaining path as last segment
+                    return match_segments(pat, next_pi, path, path.len());
+                }
             }
         }
-        return false;
     }
 
-    if si == path.len() {
-        return false;
-    }
+    // Extract next path segment
+    let (path_seg, next_si) = match path_rest.find('/') {
+        Some(pos) => (&path_rest[..pos], si + pos + 1),
+        None => {
+            if path_rest.is_empty() {
+                return false;
+            }
+            (path_rest, path.len())
+        }
+    };
 
-    // Match current segment using glob-style matching
-    if glob_match(pat_seg, path[si]) {
-        return match_segments(pat, pi + 1, path, si + 1);
+    if glob_match(pat_seg, path_seg) {
+        return match_segments(pat, next_pi, path, next_si);
     }
 
     false
@@ -94,42 +105,51 @@ fn match_segments(
 
 /// Match a single path segment against a glob pattern.
 /// `*` matches any chars except `/`, `?` matches exactly one char.
+/// Non-allocating byte-level matching.
 fn glob_match(pattern: &str, text: &str) -> bool {
-    let p: Vec<char> = pattern.chars().collect();
-    let t: Vec<char> = text.chars().collect();
-    glob_match_inner(&p, 0, &t, 0)
+    let p = pattern.as_bytes();
+    let t = text.as_bytes();
+    glob_match_impl(p, 0, t, 0)
 }
 
-fn glob_match_inner(p: &[char], pi: usize, t: &[char], ti: usize) -> bool {
-    if pi == p.len() && ti == t.len() {
-        return true;
-    }
-    if pi == p.len() {
-        return false;
-    }
+#[inline]
+fn glob_match_impl(p: &[u8], pi: usize, t: &[u8], ti: usize) -> bool {
+    let mut pi = pi;
+    let mut ti = ti;
 
-    match p[pi] {
-        '*' => {
-            // `*` matches zero or more characters
-            for i in ti..=t.len() {
-                if glob_match_inner(p, pi + 1, t, i) {
-                    return true;
+    loop {
+        if pi == p.len() {
+            return ti == t.len();
+        }
+
+        match p[pi] {
+            b'*' => {
+                // Skip consecutive stars
+                pi += 1;
+                while pi < p.len() && p[pi] == b'*' {
+                    pi += 1;
                 }
+                // `*` matches zero or more bytes
+                for i in ti..=t.len() {
+                    if glob_match_impl(p, pi, t, i) {
+                        return true;
+                    }
+                }
+                return false;
             }
-            false
-        }
-        '?' => {
-            if ti < t.len() {
-                glob_match_inner(p, pi + 1, t, ti + 1)
-            } else {
-                false
+            b'?' => {
+                if ti >= t.len() {
+                    return false;
+                }
+                pi += 1;
+                ti += 1;
             }
-        }
-        c => {
-            if ti < t.len() && t[ti] == c {
-                glob_match_inner(p, pi + 1, t, ti + 1)
-            } else {
-                false
+            c => {
+                if ti >= t.len() || t[ti] != c {
+                    return false;
+                }
+                pi += 1;
+                ti += 1;
             }
         }
     }
@@ -138,6 +158,11 @@ fn glob_match_inner(p: &[char], pi: usize, t: &[char], ti: usize) -> bool {
 /// Check if a path matches any of the given patterns.
 fn matches_any_pattern(path: &str, patterns: &[String]) -> bool {
     patterns.iter().any(|p| ant_match(path, p))
+}
+
+/// Check if a path matches any default exclude pattern.
+fn matches_default_exclude(path: &str) -> bool {
+    DEFAULT_EXCLUDES.iter().any(|p| ant_match(path, p))
 }
 
 impl FileTreeServiceImpl {
@@ -169,12 +194,7 @@ impl FileTreeServiceImpl {
         let include_metadata = req.include_metadata;
         let apply_default = req.apply_default_excludes;
 
-        let mut exclude_patterns: Vec<String> = req.exclude_patterns.clone();
-        if apply_default {
-            for de in DEFAULT_EXCLUDES {
-                exclude_patterns.push(de.to_string());
-            }
-        }
+        let exclude_patterns = &req.exclude_patterns;
 
         let include_patterns = &req.include_patterns;
 
@@ -191,8 +211,9 @@ impl FileTreeServiceImpl {
             include_dirs,
             follow_symlinks,
             include_metadata,
+            apply_default,
             include_patterns,
-            &exclude_patterns,
+            exclude_patterns,
             &mut entries,
             &mut total_size,
             &mut visited,
@@ -211,6 +232,7 @@ impl FileTreeServiceImpl {
         include_dirs: bool,
         follow_symlinks: bool,
         include_metadata: bool,
+        apply_default: bool,
         include_patterns: &[String],
         exclude_patterns: &[String],
         entries: &mut Vec<FileTreeEntry>,
@@ -267,7 +289,8 @@ impl FileTreeServiceImpl {
             let relative_normalized = relative.replace('\\', "/");
 
             // Check exclude patterns
-            if !exclude_patterns.is_empty() && matches_any_pattern(&relative_normalized, exclude_patterns)
+            if (apply_default && matches_default_exclude(&relative_normalized))
+                || (!exclude_patterns.is_empty() && matches_any_pattern(&relative_normalized, exclude_patterns))
             {
                 continue;
             }
@@ -306,6 +329,7 @@ impl FileTreeServiceImpl {
                     include_dirs,
                     follow_symlinks,
                     include_metadata,
+                    apply_default,
                     include_patterns,
                     exclude_patterns,
                     entries,
@@ -356,12 +380,14 @@ impl FileTreeServiceImpl {
             .iter()
             .map(|path| {
                 let normalized = path.replace('\\', "/");
-                let included = !(!include_patterns.is_empty()
-                    && !matches_any_pattern(&normalized, include_patterns)
-                    || matches_any_pattern(&normalized, exclude_patterns));
+                // Included if: passes include filter AND passes exclude filter
+                let passes_include = include_patterns.is_empty()
+                    || matches_any_pattern(&normalized, include_patterns);
+                let passes_exclude =
+                    exclude_patterns.is_empty() || !matches_any_pattern(&normalized, exclude_patterns);
                 PatternMatchResult {
                     path: path.clone(),
-                    included,
+                    included: passes_include && passes_exclude,
                 }
             })
             .collect()
