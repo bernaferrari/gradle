@@ -154,7 +154,7 @@ impl ValueSnapshotService for ValueSnapshotServiceImpl {
         request: Request<SnapshotValuesRequest>,
     ) -> Result<Response<SnapshotValuesResponse>, Status> {
         let req = request.into_inner();
-        let mut results = Vec::new();
+        let mut results = Vec::with_capacity(req.values.len());
         let mut composite_hasher = Md5::new();
 
         // Include implementation fingerprint in composite hash

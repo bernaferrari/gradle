@@ -1845,8 +1845,7 @@ fn split_version(version: &str) -> Vec<String> {
     for ch in version.chars() {
         if ch == '.' || ch == '-' {
             if !current.is_empty() {
-                parts.push(current.clone());
-                current.clear();
+                parts.push(std::mem::take(&mut current));
             }
         } else {
             current.push(ch);
@@ -1896,7 +1895,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             repo_urls
         };
 
-        let mut resolved = Vec::new();
+        let mut resolved = Vec::with_capacity(req.dependencies.len());
         for dep in &req.dependencies {
             let mut result = self.resolve_descriptor(dep, &repos).await;
             // Propagate scope from the request descriptor
