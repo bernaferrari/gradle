@@ -680,7 +680,7 @@ fn extract_class_references(data: &[u8]) -> Vec<String> {
         }
     }
 
-    refs.sort();
+    refs.sort_unstable();
     refs.dedup();
     refs
 }
