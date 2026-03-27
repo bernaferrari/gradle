@@ -184,7 +184,7 @@ impl TaskGraphServiceImpl {
             }
         }
 
-        let mut execution_order = Vec::new();
+        let mut execution_order = Vec::with_capacity(all_tasks.len());
         let mut order = 0i64;
         let mut visited_count = 0;
         let mut has_cycles = false;
@@ -272,7 +272,7 @@ impl TaskGraphServiceImpl {
             }
         }
 
-        let mut topo_order = Vec::new();
+        let mut topo_order = Vec::with_capacity(in_degree.len());
         while let Some(task) = queue.pop_front() {
             topo_order.push(task.clone());
             if let Some(deps) = dependents.get(&task) {
@@ -536,7 +536,7 @@ impl TaskGraphService for TaskGraphServiceImpl {
             Some(BuildId::from(req.build_id))
         };
 
-        let mut tasks = Vec::new();
+        let mut tasks = Vec::with_capacity(self.tasks.len());
         let mut completed = 0i32;
         let mut executing = 0i32;
         let mut skipped = 0i32;

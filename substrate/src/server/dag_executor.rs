@@ -533,7 +533,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
         let mut in_flight: usize = 0;
         let mut tasks_dispatched: usize = 0;
         let mut tasks_completed: usize = 0;
-        let mut task_details: Vec<TaskExecutionDetail> = Vec::new();
+        let mut task_details: Vec<TaskExecutionDetail> = Vec::with_capacity(total_tasks as usize);
         let mut jvm_forward_count: i32 = 0;
         let mut up_to_date_count: i32 = 0;
         let mut from_cache_count: i32 = 0;
