@@ -477,7 +477,7 @@ impl PluginService for PluginServiceImpl {
         }
 
         // Sort by name for deterministic output
-        extensions.sort_by(|a, b| a.name.cmp(&b.name));
+        extensions.sort_unstable_by(|a, b| a.name.cmp(&b.name));
 
         Ok(Response::new(GetExtensionsResponse { extensions }))
     }

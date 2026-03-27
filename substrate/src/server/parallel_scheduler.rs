@@ -289,7 +289,7 @@ impl ParallelScheduler {
         let all_paths: Vec<String> = self.tasks.iter().map(|e| e.task_path.clone()).collect();
 
         // Multiple passes until stable (simple iterative approach)
-        let mut critical_paths: HashMap<String, u64> = HashMap::new();
+        let mut critical_paths: HashMap<String, u64> = HashMap::with_capacity(task_count);
 
         for _ in 0..task_count {
             for path in &all_paths {
