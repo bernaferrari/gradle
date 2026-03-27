@@ -111,7 +111,8 @@ pub fn fingerprint_sha256_hex(plan: &CanonicalBuildPlan) -> Result<String, serde
     let canonical = canonical_json(plan)?;
     let mut hasher = Sha256::new();
     hasher.update(canonical.as_bytes());
-    Ok(format!("{:x}", hasher.finalize()))
+    let digest = hasher.finalize();
+    Ok(crate::server::cache::hex::encode(digest.as_ref()))
 }
 
 pub fn to_proto(plan: &CanonicalBuildPlan) -> BuildPlan {
