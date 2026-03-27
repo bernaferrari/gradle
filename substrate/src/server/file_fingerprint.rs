@@ -100,7 +100,7 @@ fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
 
     // Fields — collect public/protected field ABI during single pass
     let fields_count = read_u16(&mut cursor)?;
-    let mut public_field_abi = Vec::new();
+    let mut public_field_abi = Vec::with_capacity(fields_count as usize);
     for _ in 0..fields_count {
         let flags = read_u16(&mut cursor)?;
         let name_idx = read_u16(&mut cursor)?;
@@ -123,7 +123,7 @@ fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
 
     // Methods — collect public/protected method ABI during single pass
     let methods_count = read_u16(&mut cursor)?;
-    let mut public_method_abi = Vec::new();
+    let mut public_method_abi = Vec::with_capacity(methods_count as usize);
     for _ in 0..methods_count {
         let flags = read_u16(&mut cursor)?;
         let name_idx = read_u16(&mut cursor)?;
