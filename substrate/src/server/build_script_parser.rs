@@ -468,7 +468,7 @@ fn parse_dependencies_block(content: &str, result: &mut BuildScriptParseResult) 
         }
 
         // Sort by source position to maintain declaration order
-        found_deps.sort_by_key(|(pos, _)| *pos);
+        found_deps.sort_unstable_by_key(|(pos, _)| *pos);
         result
             .dependencies
             .extend(found_deps.into_iter().map(|(_, dep)| dep));
@@ -767,7 +767,7 @@ fn parse_plugin_management(content: &str, result: &mut BuildScriptParseResult) {
             }
 
             // Sort by source position to maintain declaration order
-            found_repos.sort_by_key(|(pos, _)| *pos);
+            found_repos.sort_unstable_by_key(|(pos, _)| *pos);
             for (_, repo) in found_repos {
                 pm.repositories.push(repo);
             }
@@ -1023,7 +1023,7 @@ fn parse_groovy_dependencies(content: &str, result: &mut BuildScriptParseResult)
         }
 
         // Sort by source position to maintain declaration order
-        found_deps.sort_by_key(|(pos, _)| *pos);
+        found_deps.sort_unstable_by_key(|(pos, _)| *pos);
         result
             .dependencies
             .extend(found_deps.into_iter().map(|(_, dep)| dep));
@@ -1103,7 +1103,7 @@ fn parse_repositories_block(content: &str, result: &mut BuildScriptParseResult) 
         }
 
         // Sort by source position to maintain declaration order
-        found_repos.sort_by_key(|(pos, _)| *pos);
+        found_repos.sort_unstable_by_key(|(pos, _)| *pos);
         result
             .repositories
             .extend(found_repos.into_iter().map(|(_, repo)| repo));
