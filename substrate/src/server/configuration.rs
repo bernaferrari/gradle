@@ -139,7 +139,7 @@ impl ProjectState {
         gradle_props: HashMap<String, String>,
         applied_plugins: Vec<String>,
     ) -> Self {
-        let mut layers = HashMap::new();
+        let mut layers = HashMap::with_capacity(3);
         layers.insert(PropertySource::GradleProperties, gradle_props);
         // Initialise empty layers so they can be mutated later.
         layers.insert(PropertySource::BuildScript, HashMap::new());
