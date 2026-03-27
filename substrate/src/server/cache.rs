@@ -94,21 +94,30 @@ impl LocalCacheStore {
         let path = self.key_to_path(key);
         let data_len = data.len() as u64;
 
-        // Check if we need to evict before storing
-        self.maybe_evict(data_len).await;
+        // Check existing entry size for accurate accounting
+        let existing_size = match fs::metadata(&path).await {
+            Ok(meta) => Some(meta.len()),
+            Err(_) => None,
+        };
 
-        // Check if this is an update (file already exists)
-        let is_update = fs::metadata(&path).await.is_ok();
+        // Check if we need to evict before storing (account for replacing existing)
+        let net_new = if let Some(old) = existing_size {
+            data_len.saturating_sub(old)
+        } else {
+            data_len
+        };
+        self.maybe_evict(net_new).await;
 
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).await?;
         }
         fs::write(&path, data).await?;
 
-        if is_update {
-            // Don't double-count for updates
-        } else {
+        if existing_size.is_none() {
             self.counters.entry_count.fetch_add(1, Ordering::Relaxed);
+        }
+        if let Some(old) = existing_size {
+            self.counters.total_bytes.fetch_sub(old, Ordering::Relaxed);
         }
         self.counters
             .total_bytes
@@ -177,20 +186,12 @@ impl LocalCacheStore {
 
         if let Ok(mut dir) = fs::read_dir(&self.base_dir).await {
             while let Ok(Some(entry)) = dir.next_entry().await {
-                if let Ok(metadata) = entry.metadata().await {
-                    let size = metadata.len();
-                    let modified = metadata
-                        .modified()
-                        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                    entries.push((entry.path(), size, modified));
-                }
-            }
-        }
-
-        // Also scan subdirectories (shard dirs like "aa/", "bb/")
-        if let Ok(mut dir) = fs::read_dir(&self.base_dir).await {
-            while let Ok(Some(entry)) = dir.next_entry().await {
-                if entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false) {
+                let file_type = match entry.file_type().await {
+                    Ok(ft) => ft,
+                    Err(_) => continue,
+                };
+                if file_type.is_dir() {
+                    // Scan shard subdirectories (e.g., "aa/", "bb/")
                     if let Ok(mut sub_dir) = fs::read_dir(entry.path()).await {
                         while let Ok(Some(sub_entry)) = sub_dir.next_entry().await {
                             if let Ok(metadata) = sub_entry.metadata().await {
@@ -201,6 +202,14 @@ impl LocalCacheStore {
                                 entries.push((sub_entry.path(), size, modified));
                             }
                         }
+                    }
+                } else if file_type.is_file() {
+                    if let Ok(metadata) = entry.metadata().await {
+                        let size = metadata.len();
+                        let modified = metadata
+                            .modified()
+                            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                        entries.push((entry.path(), size, modified));
                     }
                 }
             }
@@ -657,11 +666,10 @@ mod tests {
         let stats = store.get_stats();
         assert_eq!(stats.entry_count, 1);
 
-        // total_bytes reflects the sum of both stores (the implementation
-        // adds bytes on every store, even for overwrites)
+        // total_bytes accurately reflects only the current entry (not double-counted)
         assert_eq!(
             stats.total_bytes,
-            "first_value".len() as u64 + "second_value_replaces".len() as u64
+            "second_value_replaces".len() as u64
         );
     }
 
