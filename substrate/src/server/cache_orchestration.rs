@@ -162,7 +162,7 @@ impl BuildCacheOrchestrationServiceImpl {
         // 5. Work identity (appended last for uniqueness per task)
         gradle_put_string(&mut hasher, work_identity);
 
-        format!("{:x}", hasher.finalize())
+        crate::server::cache::hex::encode(hasher.finalize().as_ref())
     }
 }
 
