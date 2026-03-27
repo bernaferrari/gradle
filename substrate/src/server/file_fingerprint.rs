@@ -4,6 +4,8 @@ use std::path::Path;
 use md5::{Digest, Md5};
 use tonic::{Request, Response, Status};
 
+use crate::error::SubstrateError;
+
 use crate::proto::{
     file_fingerprint_service_server::FileFingerprintService, FileFingerprintEntry,
     FingerprintFilesRequest, FingerprintFilesResponse, FingerprintType,
@@ -766,8 +768,9 @@ impl FileFingerprintServiceImpl {
     fn fingerprint_file_with_strategy(
         path: &Path,
         strategy: NormalizationStrategy,
-    ) -> Result<(Vec<u8>, i64, i64), String> {
-        let metadata = std::fs::metadata(path).map_err(|e| format!("{}: {}", path.display(), e))?;
+    ) -> Result<(Vec<u8>, i64, i64), SubstrateError> {
+        let metadata = std::fs::metadata(path)
+            .map_err(|e| SubstrateError::Fingerprint { path: path.to_path_buf(), reason: e.to_string() })?;
         let size = metadata.len() as i64;
         let modified = metadata
             .modified()
@@ -780,8 +783,8 @@ impl FileFingerprintServiceImpl {
         if strategy == NormalizationStrategy::ClassAbi {
             if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                 if ext == "class" {
-                    let data =
-                        std::fs::read(path).map_err(|e| format!("{}: {}", path.display(), e))?;
+                    let data = std::fs::read(path)
+                        .map_err(|e| SubstrateError::Fingerprint { path: path.to_path_buf(), reason: e.to_string() })?;
                     if let Some(hash) = class_file_abi_hash(&data) {
                         return Ok((hash, size, modified));
                     }
@@ -792,12 +795,13 @@ impl FileFingerprintServiceImpl {
 
         // Compute MD5 hash of file content (matching Java's DefaultStreamHasher)
         let mut hasher = Md5::new();
-        let file = std::fs::File::open(path).map_err(|e| format!("{}: {}", path.display(), e))?;
+        let file = std::fs::File::open(path)
+            .map_err(|e| SubstrateError::Fingerprint { path: path.to_path_buf(), reason: e.to_string() })?;
         let mut reader = std::io::BufReader::new(file);
         let mut buffer = [0u8; 8192];
         loop {
             let n = std::io::Read::read(&mut reader, &mut buffer)
-                .map_err(|e| format!("{}: {}", path.display(), e))?;
+                .map_err(|e| SubstrateError::Fingerprint { path: path.to_path_buf(), reason: e.to_string() })?;
             if n == 0 {
                 break;
             }
@@ -812,7 +816,7 @@ impl FileFingerprintServiceImpl {
         dir: &Path,
         ignore_patterns: &[String],
         strategy: NormalizationStrategy,
-    ) -> Result<(Vec<FingerprintEntry>, Vec<u8>), String> {
+    ) -> Result<(Vec<FingerprintEntry>, Vec<u8>), SubstrateError> {
         let mut entries = Vec::new();
         let mut dir_hasher = Md5::new();
 
@@ -864,9 +868,9 @@ impl FileFingerprintServiceImpl {
         hasher: &mut Md5,
         ignore_patterns: &[String],
         strategy: NormalizationStrategy,
-    ) -> Result<(), String> {
-        let dir_entries =
-            std::fs::read_dir(current).map_err(|e| format!("{}: {}", current.display(), e))?;
+    ) -> Result<(), SubstrateError> {
+        let dir_entries = std::fs::read_dir(current)
+            .map_err(|e| SubstrateError::Fingerprint { path: current.to_path_buf(), reason: e.to_string() })?;
 
         let mut dir_entries: Vec<_> = dir_entries.filter_map(|e| e.ok()).collect();
         dir_entries.sort_by_key(|e| e.file_name());
@@ -972,7 +976,7 @@ impl FileFingerprintService for FileFingerprintServiceImpl {
                             Err(e) => {
                                 return Ok(Response::new(FingerprintFilesResponse {
                                     success: false,
-                                    error_message: e,
+                                    error_message: e.to_string(),
                                     collection_hash: Vec::new(),
                                     entries: Vec::new(),
                                 }));
@@ -1015,7 +1019,7 @@ impl FileFingerprintService for FileFingerprintServiceImpl {
                         Err(e) => {
                             return Ok(Response::new(FingerprintFilesResponse {
                                 success: false,
-                                error_message: e,
+                                error_message: e.to_string(),
                                 collection_hash: Vec::new(),
                                 entries: Vec::new(),
                             }));
