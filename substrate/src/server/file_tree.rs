@@ -42,7 +42,9 @@ const DEFAULT_EXCLUDES: &[&str] = &[
 /// - `*` — matches any number of characters (not path separator)
 /// - `?` — matches exactly one character (not path separator)
 /// - `**` — matches any number of directories or files
-fn ant_match(path: &str, pattern: &str) -> bool {
+///
+/// Check if an path matches an glob pattern. Supports `*`, `?`,, **` — matches any number of directories or files
+pub(crate) fn ant_match(path: &str, pattern: &str) -> bool {
     match_segments(pattern, 0, path, 0)
 }
 
