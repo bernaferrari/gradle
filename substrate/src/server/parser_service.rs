@@ -9,8 +9,11 @@ use crate::proto::{
     ParseBuildScriptRepositoriesRequest, ParseBuildScriptRepositoriesResponse,
     ParseBuildScriptRequest, ParseBuildScriptResponse, ParseBuildScriptSourceSetsRequest,
     ParseBuildScriptSourceSetsResponse, ParseBuildScriptTasksRequest,
-    ParseBuildScriptTasksResponse, ParseGroovyRequest, ParseGroovyResponse, PluginEntry,
-    RepositoryEntry, TaskEntry,
+    ParseBuildScriptTasksResponse, ParseBuildScriptTypedRequest, ParseBuildScriptTypedResponse,
+    ParseGroovyRequest, ParseGroovyResponse, PluginEntry, RepositoryEntry, TaskEntry,
+    TypedBuildScriptDep, TypedDependency, TypedDependencyResolutionManagement,
+    TypedPlugin, TypedPluginManagement, TypedRepository, TypedSubproject, TypedTaskConfig,
+    TypedVersionCatalogRef,
 };
 use crate::server::build_script_parser;
 use crate::server::groovy_parser::{self, ast::Stmt};
@@ -430,6 +433,131 @@ impl ParserService for ParserServiceImpl {
             source_sets: Vec::new(),
         }))
     }
+
+    // ----- ParseBuildScriptTyped --------------------------------------------
+
+    async fn parse_build_script_typed(
+        &self,
+        req: Request<ParseBuildScriptTypedRequest>,
+    ) -> Result<Response<ParseBuildScriptTypedResponse>, Status> {
+        let content = req.get_ref().script_content.clone();
+        let file_path = req.get_ref().file_path.clone();
+
+        let result = parse_script(&content, &file_path);
+
+        let script_type = match result.script_type {
+            build_script_parser::ScriptType::KotlinDsl => crate::proto::ScriptType::KotlinDslScript,
+            build_script_parser::ScriptType::Groovy => crate::proto::ScriptType::GroovyScript,
+            build_script_parser::ScriptType::Unknown => crate::proto::ScriptType::UnknownScript,
+        };
+
+        let plugins: Vec<TypedPlugin> = result
+            .plugins
+            .into_iter()
+            .map(|p| TypedPlugin {
+                id: p.id,
+                apply: p.apply,
+                version: p.version.unwrap_or_default(),
+                line: p.line.unwrap_or(0) as i32,
+            })
+            .collect();
+
+        let dependencies: Vec<TypedDependency> = result
+            .dependencies
+            .into_iter()
+            .map(|d| TypedDependency {
+                configuration: d.configuration,
+                notation: d.notation,
+                line: d.line.unwrap_or(0) as i32,
+            })
+            .collect();
+
+        let catalog_refs: Vec<TypedVersionCatalogRef> = result
+            .catalog_refs
+            .into_iter()
+            .map(|c| TypedVersionCatalogRef {
+                configuration: c.configuration,
+                alias: c.alias,
+            })
+            .collect();
+
+        let buildscript_deps: Vec<TypedBuildScriptDep> = result
+            .buildscript_deps
+            .into_iter()
+            .map(|d| TypedBuildScriptDep { notation: d.notation })
+            .collect();
+
+        let task_configs: Vec<TypedTaskConfig> = result
+            .task_configs
+            .into_iter()
+            .map(|t| TypedTaskConfig {
+                task_name: t.task_name,
+                depends_on: t.depends_on,
+                should_run_after: t.should_run_after,
+                enabled: t.enabled,
+                line: t.line.unwrap_or(0) as i32,
+            })
+            .collect();
+
+        let repositories: Vec<TypedRepository> = result
+            .repositories
+            .into_iter()
+            .map(|r| TypedRepository {
+                name: r.name,
+                repo_type: r.repo_type,
+            })
+            .collect();
+
+        let subprojects: Vec<TypedSubproject> = result
+            .subprojects
+            .into_iter()
+            .map(|s| TypedSubproject { path: s.path })
+            .collect();
+
+        let plugin_management = result.plugin_management.map(|pm| TypedPluginManagement {
+            repositories: pm
+                .repositories
+                .into_iter()
+                .map(|r| TypedRepository {
+                    name: r.name,
+                    repo_type: r.repo_type,
+                })
+                .collect(),
+        });
+
+        let dependency_resolution_management =
+            result
+                .dependency_resolution_management
+                .map(|drm| TypedDependencyResolutionManagement {
+                    repositories_mode: drm.repositories_mode.unwrap_or_default(),
+                    repositories: drm
+                        .repositories
+                        .into_iter()
+                        .map(|r| TypedRepository {
+                            name: r.name,
+                            repo_type: r.repo_type,
+                        })
+                        .collect(),
+                });
+
+        Ok(Response::new(ParseBuildScriptTypedResponse {
+            script_type: script_type as i32,
+            plugins,
+            dependencies,
+            catalog_refs,
+            buildscript_deps,
+            task_configs,
+            repositories,
+            subprojects,
+            plugin_management,
+            dependency_resolution_management,
+            source_compatibility: result.source_compatibility.unwrap_or_default(),
+            target_compatibility: result.target_compatibility.unwrap_or_default(),
+            group: result.group.unwrap_or_default(),
+            version: result.version.unwrap_or_default(),
+            warnings: result.warnings,
+        }))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -614,5 +742,150 @@ mod tests {
         for node in &resp.get_ref().nodes {
             assert!(node.properties.get("dialect").is_none());
         }
+    }
+
+    // ----- Typed IR tests ---------------------------------------------------
+
+    #[tokio::test]
+    async fn test_parse_typed_groovy_with_plugins_and_deps() {
+        let svc = ParserServiceImpl::default();
+        let req = Request::new(ParseBuildScriptTypedRequest {
+            script_content: r#"
+                plugins {
+                    id 'java'
+                }
+                dependencies {
+                    implementation 'com.example:lib:1.0'
+                    testImplementation 'junit:junit:4.13'
+                }
+            "#
+            .to_string(),
+            file_path: "build.gradle".to_string(),
+        });
+        let resp = svc.parse_build_script_typed(req).await.unwrap();
+        let r = resp.get_ref();
+        assert_eq!(r.script_type, crate::proto::ScriptType::GroovyScript as i32);
+        assert!(!r.plugins.is_empty());
+        assert_eq!(r.dependencies.len(), 2);
+        assert_eq!(r.dependencies[0].configuration, "implementation");
+        assert_eq!(r.dependencies[0].notation, "com.example:lib:1.0");
+        assert_eq!(r.dependencies[1].configuration, "testImplementation");
+    }
+
+    #[tokio::test]
+    async fn test_parse_typed_kotlin_dsl() {
+        let svc = ParserServiceImpl::default();
+        let req = Request::new(ParseBuildScriptTypedRequest {
+            script_content: r#"
+                plugins {
+                    id("java")
+                }
+            "#
+            .to_string(),
+            file_path: "build.gradle.kts".to_string(),
+        });
+        let resp = svc.parse_build_script_typed(req).await.unwrap();
+        assert_eq!(
+            resp.get_ref().script_type,
+            crate::proto::ScriptType::KotlinDslScript as i32
+        );
+        assert!(!resp.get_ref().plugins.is_empty());
+        assert_eq!(resp.get_ref().plugins[0].id, "java");
+    }
+
+    #[tokio::test]
+    async fn test_parse_typed_settings_with_subprojects() {
+        let svc = ParserServiceImpl::default();
+        let req = Request::new(ParseBuildScriptTypedRequest {
+            script_content: "include ':app', ':lib'\ninclude ':shared'".to_string(),
+            file_path: "settings.gradle".to_string(),
+        });
+        let resp = svc.parse_build_script_typed(req).await.unwrap();
+        assert_eq!(resp.get_ref().subprojects.len(), 3);
+        assert_eq!(resp.get_ref().subprojects[0].path, ":app");
+    }
+
+    #[tokio::test]
+    async fn test_parse_typed_empty_script() {
+        let svc = ParserServiceImpl::default();
+        let req = Request::new(ParseBuildScriptTypedRequest {
+            script_content: "".to_string(),
+            file_path: "build.gradle".to_string(),
+        });
+        let resp = svc.parse_build_script_typed(req).await.unwrap();
+        let r = resp.get_ref();
+        assert!(r.plugins.is_empty());
+        assert!(r.dependencies.is_empty());
+        assert!(r.repositories.is_empty());
+        assert!(r.task_configs.is_empty());
+        assert!(r.subprojects.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_parse_typed_task_config_with_depends_on() {
+        let svc = ParserServiceImpl::default();
+        let req = Request::new(ParseBuildScriptTypedRequest {
+            script_content: "tasks.named('test') { dependsOn 'compileJava' }".to_string(),
+            file_path: "build.gradle".to_string(),
+        });
+        let resp = svc.parse_build_script_typed(req).await.unwrap();
+        // The parser may or may not extract this — check it doesn't crash
+        // and returns valid structure
+        assert_eq!(
+            resp.get_ref().script_type,
+            crate::proto::ScriptType::GroovyScript as i32
+        );
+    }
+
+    #[tokio::test]
+    async fn test_parse_typed_with_repositories() {
+        let svc = ParserServiceImpl::default();
+        let req = Request::new(ParseBuildScriptTypedRequest {
+            script_content: r#"
+                repositories {
+                    mavenCentral()
+                    maven { url 'https://repo.example.com' }
+                }
+            "#
+            .to_string(),
+            file_path: "build.gradle".to_string(),
+        });
+        let resp = svc.parse_build_script_typed(req).await.unwrap();
+        assert!(!resp.get_ref().repositories.is_empty());
+        // The string-based parser may extract "maven" or "mavenCentral"
+        // depending on parsing; just verify repositories are populated
+        assert!(!resp.get_ref().repositories[0].name.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_parse_typed_catalog_refs() {
+        let svc = ParserServiceImpl::default();
+        let req = Request::new(ParseBuildScriptTypedRequest {
+            script_content: r#"
+                dependencies {
+                    implementation(libs.commons.lang3)
+                    testImplementation(libs.junit)
+                }
+            "#
+            .to_string(),
+            file_path: "build.gradle".to_string(),
+        });
+        let resp = svc.parse_build_script_typed(req).await.unwrap();
+        // The string-based parser should extract catalog refs
+        assert!(!resp.get_ref().catalog_refs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_parse_typed_unknown_file_type() {
+        let svc = ParserServiceImpl::default();
+        let req = Request::new(ParseBuildScriptTypedRequest {
+            script_content: "x = 42".to_string(),
+            file_path: "Makefile".to_string(),
+        });
+        let resp = svc.parse_build_script_typed(req).await.unwrap();
+        assert_eq!(
+            resp.get_ref().script_type,
+            crate::proto::ScriptType::UnknownScript as i32
+        );
     }
 }

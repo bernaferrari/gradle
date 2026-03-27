@@ -11,6 +11,8 @@ pub struct SubsystemModes {
     pub file_fingerprinting: bool,
     pub execution_plan: bool,
     pub config_cache: bool,
+    pub classpath: bool,
+    pub file_tree: bool,
 }
 
 impl SubsystemModes {
@@ -25,6 +27,8 @@ impl SubsystemModes {
             "file_fingerprinting",
             "execution_plan",
             "config_cache",
+            "classpath",
+            "file_tree",
         ]
     }
 
@@ -47,6 +51,8 @@ impl SubsystemModes {
             "file_fingerprinting" => self.file_fingerprinting,
             "execution_plan" => self.execution_plan,
             "config_cache" => self.config_cache,
+            "classpath" => self.classpath,
+            "file_tree" => self.file_tree,
             _ => false,
         }
     }
@@ -68,6 +74,8 @@ impl SubsystemModes {
             )),
             "execution_plan" => Some(std::mem::replace(&mut self.execution_plan, authoritative)),
             "config_cache" => Some(std::mem::replace(&mut self.config_cache, authoritative)),
+            "classpath" => Some(std::mem::replace(&mut self.classpath, authoritative)),
+            "file_tree" => Some(std::mem::replace(&mut self.file_tree, authoritative)),
             _ => None,
         }
     }
@@ -103,6 +111,8 @@ impl AuthoritativeConfig {
         modes.file_fingerprinting = authoritative;
         modes.execution_plan = authoritative;
         modes.config_cache = authoritative;
+        modes.classpath = authoritative;
+        modes.file_tree = authoritative;
     }
 
     /// Check whether a specific subsystem is in authoritative mode.
@@ -158,6 +168,8 @@ mod tests {
         assert!(modes.file_fingerprinting);
         assert!(modes.execution_plan);
         assert!(modes.config_cache);
+        assert!(modes.classpath);
+        assert!(modes.file_tree);
     }
 
     #[test]
@@ -176,7 +188,7 @@ mod tests {
         config.set_subsystem("hashing", true);
         let modes = config.get_modes();
         let pairs = modes.as_pairs();
-        assert_eq!(pairs.len(), 8);
+        assert_eq!(pairs.len(), 10);
         assert!(pairs.iter().any(|(name, auth)| *name == "hashing" && *auth));
         assert!(pairs
             .iter()
