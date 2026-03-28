@@ -463,7 +463,7 @@ impl PluginService for PluginServiceImpl {
         request: Request<GetExtensionsRequest>,
     ) -> Result<Response<GetExtensionsResponse>, Status> {
         let req = request.into_inner();
-        let mut extensions = Vec::new();
+        let mut extensions = Vec::with_capacity(self.extensions.len());
 
         for entry in self.extensions.iter() {
             if entry.key().0 == req.project_path {

@@ -307,7 +307,7 @@ impl BuildInitService for BuildInitServiceImpl {
         // Parse the settings file
         let parsed = Self::parse_settings_file(&root_dir, &req.settings_file);
 
-        let mut settings_details = Vec::new();
+        let mut settings_details = Vec::with_capacity(32);
         settings_details.push(SettingsDetailEntry {
             key: "settingsFileExists".to_string(),
             value: if parsed.settings_file_exists {
