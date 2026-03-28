@@ -722,7 +722,7 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
     ) -> Result<Response<GetWorkerStatusResponse>, Status> {
         let req = request.into_inner();
 
-        let mut workers = Vec::new();
+        let mut workers = Vec::with_capacity(self.workers.len());
         let mut idle_count = 0i32;
         let mut busy_count = 0i32;
 
