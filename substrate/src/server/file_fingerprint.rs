@@ -957,7 +957,7 @@ impl FileFingerprintService for FileFingerprintServiceImpl {
         request: Request<FingerprintFilesRequest>,
     ) -> Result<Response<FingerprintFilesResponse>, Status> {
         let req = request.into_inner();
-        let mut all_entries = Vec::new();
+        let mut all_entries = Vec::with_capacity(req.files.len());
         let mut collection_hasher = Md5::new();
         let strategy = NormalizationStrategy::from_str(&req.normalization_strategy);
 

@@ -360,7 +360,7 @@ impl ParallelScheduler {
                 .lock()
                 .expect("ready_queue lock should not be poisoned");
             let mut result = None;
-            let mut requeue = Vec::new();
+            let mut requeue = Vec::with_capacity(4);
 
             while let Some(task) = queue.pop() {
                 if let Some(t) = self.tasks.get(&task.task_path) {
@@ -435,7 +435,7 @@ impl ParallelScheduler {
         self.executing.remove(task_path);
         self.tasks_completed.fetch_add(1, Ordering::Relaxed);
 
-        let mut newly_ready = Vec::new();
+        let mut newly_ready = Vec::with_capacity(8);
 
         if success {
             // Check dependents
@@ -511,9 +511,9 @@ impl ParallelScheduler {
 
     /// Skip all transitive dependents of a failed task (BFS).
     fn skip_transitive_dependents(&self, failed_task: &str) {
-        let mut to_visit = Vec::new();
+        let mut to_visit: Vec<String> = Vec::with_capacity(16);
         if let Some(task) = self.tasks.get(failed_task) {
-            to_visit.extend(task.dependents.clone());
+            to_visit.extend(task.dependents.iter().cloned());
         }
 
         let mut visited = HashSet::new();

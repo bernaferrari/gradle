@@ -163,7 +163,8 @@ impl BuildComparisonService for BuildComparisonServiceImpl {
         let baseline = self.build_data.get(&comparison.baseline_build_id).unwrap();
         let candidate = self.build_data.get(&comparison.candidate_build_id).unwrap();
 
-        let mut task_comparisons = Vec::new();
+        let total_tasks = baseline.task_durations.len() + candidate.task_durations.len();
+        let mut task_comparisons = Vec::with_capacity(total_tasks);
         let mut only_baseline = 0i32;
         let mut only_candidate = 0i32;
         let mut changed_outcome = 0i32;
