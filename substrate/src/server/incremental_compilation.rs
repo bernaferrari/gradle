@@ -91,7 +91,7 @@ impl IncrementalCompilationServiceImpl {
         include_patterns: &[String],
         exclude_patterns: &[String],
     ) -> Vec<DiscoveredSource> {
-        let mut sources = Vec::new();
+        let mut sources = Vec::with_capacity(source_dirs.len() * 32);
         let include_globs: Vec<String> = if include_patterns.is_empty() {
             vec![
                 "**/*.java".to_string(),
@@ -169,7 +169,7 @@ impl IncrementalCompilationServiceImpl {
         output_dirs: &[String],
         target_files: &[String],
     ) -> Vec<ClassDependencyInfo> {
-        let mut results = Vec::new();
+        let mut results = Vec::with_capacity(target_files.len().min(64));
 
         // Build set of files to analyze
         let targets: HashSet<&str> = target_files.iter().map(|s| s.as_str()).collect();
@@ -712,7 +712,7 @@ fn is_primitive_descriptor(s: &str) -> bool {
 
 /// Recursively walk a directory.
 fn walk_dir_recursive(dir: &Path) -> Vec<std::io::Result<std::path::PathBuf>> {
-    let mut entries = Vec::new();
+    let mut entries = Vec::with_capacity(64);
     if let Ok(read_dir) = std::fs::read_dir(dir) {
         for entry in read_dir.flatten() {
             let path = entry.path();
