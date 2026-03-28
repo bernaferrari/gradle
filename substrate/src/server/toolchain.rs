@@ -844,9 +844,6 @@ impl ToolchainService for ToolchainServiceImpl {
                 if download_success {
                     break;
                 }
-                if download_success {
-                    break;
-                }
                 yield Ok(ToolchainProgress {
                     phase: "downloading".to_string(),
                     progress_percent: 15,
