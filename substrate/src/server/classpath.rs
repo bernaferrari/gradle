@@ -83,12 +83,38 @@ fn hash_bytes(algo: HashAlgo, data: &[u8]) -> Vec<u8> {
 }
 
 /// Hash a single file's content using the specified algorithm.
+/// Streams the file in 8KB chunks to avoid loading the entire file into memory.
 fn hash_file_content(path: &Path, algo: HashAlgo) -> Option<Vec<u8>> {
     let file = File::open(path).ok()?;
-    let mut reader = BufReader::new(file);
-    let mut buf = Vec::new();
-    reader.read_to_end(&mut buf).ok()?;
-    Some(hash_bytes(algo, &buf))
+    let mut reader = BufReader::with_capacity(8192, file);
+    let mut buf = [0u8; 8192];
+    match algo {
+        HashAlgo::Md5 => stream_hash::<Md5>(&mut reader, &mut buf),
+        HashAlgo::Sha1 => stream_hash::<Sha1>(&mut reader, &mut buf),
+        HashAlgo::Sha256 => stream_hash::<Sha256>(&mut reader, &mut buf),
+        HashAlgo::Sha3_256 => stream_hash::<Sha3_256>(&mut reader, &mut buf),
+        HashAlgo::Sha3_512 => stream_hash::<Sha3_512>(&mut reader, &mut buf),
+        HashAlgo::Blake3 => {
+            let mut hasher = Blake3Hasher::new();
+            loop {
+                let n = reader.read(&mut buf).ok()?;
+                if n == 0 { break; }
+                hasher.update(&buf[..n]);
+            }
+            Some(hasher.finalize().as_bytes().to_vec())
+        }
+    }
+}
+
+/// Generic streaming hash helper for Digest-implementing hashers.
+fn stream_hash<D: Digest>(reader: &mut impl Read, buf: &mut [u8]) -> Option<Vec<u8>> {
+    let mut hasher = D::new();
+    loop {
+        let n = reader.read(buf).ok()?;
+        if n == 0 { break; }
+        hasher.update(&buf[..n]);
+    }
+    Some(hasher.finalize().to_vec())
 }
 
 /// Hash metadata (path + size + mtime) using the specified algorithm.
