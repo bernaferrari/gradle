@@ -75,12 +75,13 @@ impl JarTaskExecutor {
         let second = ((time_of_day % 60) / 2) as u16;
 
         let dos_time = (second << 10) | (minute << 5) | hour;
-        let dos_date = ((day as u16) | (month << 5) | ((year - 1980) << 9)) as u16;
+        let dos_date = (day as u16) | (month << 5) | ((year - 1980) << 9);
 
         (dos_time, dos_date)
     }
 
     /// Write a ZIP local file header (30 bytes) + name.
+    #[allow(clippy::too_many_arguments)]
     fn write_local_file_header(
         out: &mut dyn Write,
         name: &[u8],
@@ -107,6 +108,7 @@ impl JarTaskExecutor {
     }
 
     /// Write a central directory file header (46 bytes) + name.
+    #[allow(clippy::too_many_arguments)]
     fn write_central_dir_entry(
         out: &mut dyn Write,
         name: &[u8],
@@ -263,8 +265,7 @@ impl JarTaskExecutor {
         }
 
         for (key, value) in options {
-            if key.starts_with("manifest.") {
-                let attr_name = &key["manifest.".len()..];
+            if let Some(attr_name) = key.strip_prefix("manifest.") {
                 manifest.push_str(&format!("{}: {}\r\n", attr_name, value));
             }
         }
@@ -342,7 +343,7 @@ impl JarTaskExecutor {
 }
 
 fn is_leap_year(year: u16) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
 }
 
 #[tonic::async_trait]

@@ -1838,21 +1838,21 @@ pub fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
 }
 
 /// Split a version string into numeric/non-numeric segments.
-fn split_version(version: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut current = String::new();
+/// Returns slices into the original string — zero allocation.
+fn split_version(version: &str) -> Vec<&str> {
+    let mut parts = Vec::with_capacity(8); // typical version has <8 segments
+    let mut start = 0;
 
-    for ch in version.chars() {
+    for (i, ch) in version.char_indices() {
         if ch == '.' || ch == '-' {
-            if !current.is_empty() {
-                parts.push(std::mem::take(&mut current));
+            if start < i {
+                parts.push(&version[start..i]);
             }
-        } else {
-            current.push(ch);
+            start = i + ch.len_utf8();
         }
     }
-    if !current.is_empty() {
-        parts.push(current);
+    if start < version.len() {
+        parts.push(&version[start..]);
     }
 
     parts
