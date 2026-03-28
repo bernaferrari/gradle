@@ -241,8 +241,8 @@ impl Parser {
             to_ast_span(&self.tokens[0].span)
         };
 
-        let mut statements = Vec::new();
-        let mut comments = Vec::new();
+        let mut statements = Vec::with_capacity(self.tokens.len() / 4);
+        let mut comments = Vec::with_capacity(self.tokens.len() / 8);
 
         while !self.at_end() {
             // Collect comments if they appear
