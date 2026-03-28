@@ -200,9 +200,9 @@ impl FileTreeServiceImpl {
 
         let include_patterns = &req.include_patterns;
 
-        let mut entries = Vec::new();
+        let mut entries = Vec::with_capacity(256);
         let mut total_size: i64 = 0;
-        let mut visited = HashSet::new();
+        let mut visited = HashSet::with_capacity(64);
 
         Self::walk_dir(
             root,
