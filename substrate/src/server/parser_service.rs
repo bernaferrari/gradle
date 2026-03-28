@@ -76,7 +76,7 @@ fn statement_summary(stmt: &Stmt) -> String {
 
 /// Convert a parsed Groovy `Script` into proto `GroovyNode`s.
 fn to_groovy_nodes(script: &groovy_parser::Script) -> Vec<GroovyNode> {
-    let mut nodes = Vec::new();
+    let mut nodes = Vec::with_capacity(script.statements.len());
     for stmt in &script.statements {
         let (line, col) = statement_span(stmt);
         nodes.push(GroovyNode {
@@ -178,7 +178,7 @@ impl ParserService for ParserServiceImpl {
         let file_path = req.get_ref().file_path.clone();
 
         let result = parse_script(&content, &file_path);
-        let mut elements = Vec::new();
+        let mut elements = Vec::with_capacity(result.plugins.len() + result.dependencies.len() + result.repositories.len() + result.subprojects.len());
 
         // Plugins
         for plugin in &result.plugins {
@@ -311,7 +311,7 @@ impl ParserService for ParserServiceImpl {
         let config_filter = req.get_ref().configuration_name.clone();
 
         let result = parse_script(&content, "build.gradle");
-        let mut entries = Vec::new();
+        let mut entries = Vec::with_capacity(result.dependencies.len());
 
         for dep in &result.dependencies {
             // Filter by configuration if requested
