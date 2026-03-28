@@ -63,7 +63,7 @@ impl IncrementalCompilationServiceImpl {
         }
 
         // BFS from changed files through reverse dependencies
-        let mut affected: HashSet<String> = HashSet::new();
+        let mut affected: HashSet<String> = HashSet::with_capacity(changed_files.len() + units.len());
         let mut queue: VecDeque<&str> = changed_files.iter().map(|s| s.as_str()).collect();
 
         while let Some(file) = queue.pop_front() {
@@ -516,7 +516,7 @@ impl IncrementalCompilationService for IncrementalCompilationServiceImpl {
         let req = request.into_inner();
 
         // Analyze class files in the processor classpath to find current processors
-        let mut current_processors: HashSet<String> = HashSet::new();
+        let mut current_processors: HashSet<String> = HashSet::with_capacity(req.annotation_processor_classpath.len());
         for cp_entry in &req.annotation_processor_classpath {
             let cp_path = Path::new(cp_entry);
             if !cp_path.is_dir() {
