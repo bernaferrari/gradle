@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 
 use dashmap::DashMap;
-use glob::glob;
 use tonic::{Request, Response, Status};
 
 use super::scopes::BuildId;
@@ -86,12 +85,14 @@ impl IncrementalCompilationServiceImpl {
     }
 
     /// Discover source files in the given directories matching include patterns.
+    /// Uses native directory walking with Ant-style pattern matching instead of
+    /// the `glob` crate, avoiding pattern compilation overhead and redundant
+    /// filesystem traversals when multiple include patterns share a source dir.
     fn discover_sources_impl(
         source_dirs: &[String],
         include_patterns: &[String],
         exclude_patterns: &[String],
     ) -> Vec<DiscoveredSource> {
-        let mut sources = Vec::with_capacity(source_dirs.len() * 32);
         let include_globs: Vec<String> = if include_patterns.is_empty() {
             vec![
                 "**/*.java".to_string(),
@@ -103,57 +104,92 @@ impl IncrementalCompilationServiceImpl {
             include_patterns.to_vec()
         };
 
+        let mut sources = Vec::with_capacity(source_dirs.len() * 32);
+
         for source_dir in source_dirs {
             let dir_path = Path::new(source_dir);
-            for pattern in &include_globs {
-                let full_pattern = dir_path.join(pattern).to_string_lossy().into_owned();
-                if let Ok(entries) = glob(&full_pattern) {
-                    for entry in entries.flatten() {
-                        let relative = entry
-                            .strip_prefix(dir_path)
-                            .unwrap_or(&entry)
-                            .to_string_lossy()
-                            .to_string();
+            if !dir_path.is_dir() {
+                continue;
+            }
 
-                        // Check exclude patterns using Ant-style matching (no filesystem access)
-                        let excluded = exclude_patterns.iter().any(|exc| {
-                            let abs_entry = entry.to_string_lossy();
-                            let full_exc_binding = dir_path.join(exc);
-                            let full_exc = full_exc_binding.to_string_lossy();
-                            crate::server::file_tree::ant_match(&abs_entry, &full_exc)
-                        });
+            // Walk directory once, match each file against all include patterns
+            let mut stack = vec![dir_path.to_path_buf()];
+            while let Some(current) = stack.pop() {
+                let Ok(entries) = std::fs::read_dir(&current) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let Ok(file_type) = entry.file_type() else {
+                        continue;
+                    };
+                    let entry_path = entry.path();
 
-                        if excluded {
-                            continue;
-                        }
-
-                        let extension = entry
-                            .extension()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .to_string();
-
-                        let metadata = std::fs::metadata(&entry);
-                        let (last_modified_ms, size_bytes) = match &metadata {
-                            Ok(m) => (
-                                m.modified()
-                                    .ok()
-                                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                                    .map(|d| d.as_millis() as i64)
-                                    .unwrap_or(0),
-                                m.len() as i64,
-                            ),
-                            Err(_) => (0, 0),
-                        };
-
-                        sources.push(DiscoveredSource {
-                            path: relative,
-                            source_dir: source_dir.clone(),
-                            extension,
-                            last_modified_ms,
-                            size_bytes,
-                        });
+                    if file_type.is_dir() {
+                        stack.push(entry_path);
+                        continue;
                     }
+
+                    if !file_type.is_file() {
+                        continue;
+                    }
+
+                    // Compute relative path once
+                    let relative = entry_path
+                        .strip_prefix(dir_path)
+                        .unwrap_or(&entry_path)
+                        .to_string_lossy()
+                        .to_string();
+
+                    // Check include patterns
+                    let included = include_globs.iter().any(|pat| {
+                        crate::server::file_tree::ant_match(&relative, pat)
+                    });
+                    if !included {
+                        continue;
+                    }
+
+                    // Check exclude patterns — support both relative and absolute exclude patterns
+                    let abs_entry = entry_path.to_string_lossy();
+                    let excluded = exclude_patterns.iter().any(|exc| {
+                        // Try relative match first
+                        if crate::server::file_tree::ant_match(&relative, exc) {
+                            return true;
+                        }
+                        // Try absolute match (exclude pattern may be absolute path)
+                        let full_exc_binding = dir_path.join(exc);
+                        let full_exc = full_exc_binding.to_string_lossy();
+                        crate::server::file_tree::ant_match(&abs_entry, &full_exc)
+                    });
+                    if excluded {
+                        continue;
+                    }
+
+                    let extension = entry_path
+                        .extension()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
+
+                    let metadata = std::fs::metadata(&entry_path);
+                    let (last_modified_ms, size_bytes) = match &metadata {
+                        Ok(m) => (
+                            m.modified()
+                                .ok()
+                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map(|d| d.as_millis() as i64)
+                                .unwrap_or(0),
+                            m.len() as i64,
+                        ),
+                        Err(_) => (0, 0),
+                    };
+
+                    sources.push(DiscoveredSource {
+                        path: relative,
+                        source_dir: source_dir.clone(),
+                        extension,
+                        last_modified_ms,
+                        size_bytes,
+                    });
                 }
             }
         }
@@ -482,12 +518,30 @@ impl IncrementalCompilationService for IncrementalCompilationServiceImpl {
         // Analyze class files in the processor classpath to find current processors
         let mut current_processors: HashSet<String> = HashSet::new();
         for cp_entry in &req.annotation_processor_classpath {
-            if let Ok(entries) = glob(&format!("{}/**/*.class", cp_entry)) {
+            let cp_path = Path::new(cp_entry);
+            if !cp_path.is_dir() {
+                continue;
+            }
+            let mut stack = vec![cp_path.to_path_buf()];
+            while let Some(current) = stack.pop() {
+                let Ok(entries) = std::fs::read_dir(&current) else {
+                    continue;
+                };
                 for entry in entries.flatten() {
-                    if let Ok(data) = std::fs::read(&entry) {
-                        if is_annotation_processor_class(&data) {
-                            if let Some(name) = extract_class_name(&data) {
-                                current_processors.insert(name);
+                    let Ok(file_type) = entry.file_type() else {
+                        continue;
+                    };
+                    let entry_path = entry.path();
+                    if file_type.is_dir() {
+                        stack.push(entry_path);
+                    } else if file_type.is_file()
+                        && entry_path.extension().is_some_and(|e| e == "class")
+                    {
+                        if let Ok(data) = std::fs::read(&entry_path) {
+                            if is_annotation_processor_class(&data) {
+                                if let Some(name) = extract_class_name(&data) {
+                                    current_processors.insert(name);
+                                }
                             }
                         }
                     }
