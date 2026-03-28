@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -57,7 +58,7 @@ impl GarbageCollectionServiceImpl {
         }
 
         let now = Self::now_ms();
-        let mut entries: Vec<(String, i64, i64)> = Vec::new(); // (path, mtime_ms, size_bytes)
+        let mut entries: Vec<(String, i64, i64)> = Vec::with_capacity(128); // (path, mtime_ms, size_bytes)
 
         // Walk subdirectories too (build cache uses shard dirs)
         let mut dirs_to_scan = vec![dir.to_path_buf()];
@@ -102,13 +103,13 @@ impl GarbageCollectionServiceImpl {
         // Sort by modification time (oldest first) for LRU-style eviction
         entries.sort_unstable_by_key(|e| e.1);
 
-        let mut to_remove = Vec::new();
+        let mut to_remove = HashSet::new();
 
         // Remove entries older than max_age_ms (max_age_ms == 0 means evict all)
         if max_age_ms >= 0 {
             for (path, mtime, _) in &entries {
                 if max_age_ms == 0 || now - mtime > max_age_ms {
-                    to_remove.push(path.clone());
+                    to_remove.insert(path.clone());
                 }
             }
         }
@@ -118,9 +119,14 @@ impl GarbageCollectionServiceImpl {
             let remaining = entries.len() as i32 - to_remove.len() as i32;
             if remaining > limit {
                 let excess = (remaining - limit) as usize;
+                let mut added = 0usize;
                 for (path, _, _) in &entries {
-                    if !to_remove.contains(path) && to_remove.len() < excess {
-                        to_remove.push(path.clone());
+                    if added >= excess {
+                        break;
+                    }
+                    if !to_remove.contains(path) {
+                        to_remove.insert(path.clone());
+                        added += 1;
                     }
                 }
             }
@@ -139,8 +145,7 @@ impl GarbageCollectionServiceImpl {
             }
         }
 
-        let remaining = entries.len() as i32 - removed;
-        Ok((removed, bytes_recovered, remaining))
+        let remaining = entries.len() as i32 - removed;        Ok((removed, bytes_recovered, remaining))
     }
 
     async fn dir_total_bytes(&self, dir: &Path, extension: &str) -> Result<i64, Status> {
