@@ -247,6 +247,7 @@ impl DagExecutorServiceImpl {
     fn try_unblock_dependents(execution: &BuildExecution, finished_task: &str) -> Vec<String> {
         let mut newly_ready = Vec::new();
         if let Some(deps) = execution.dependents.get(finished_task) {
+            newly_ready.reserve(deps.len());
             for dependent in deps {
                 if let Some(slot) = execution.tasks.get(dependent) {
                     if slot.status != "PENDING" {
@@ -286,7 +287,7 @@ impl DagExecutorServiceImpl {
                 to_visit.push_back(d.clone());
             }
         }
-        let mut visited = HashSet::new();
+        let mut visited = HashSet::with_capacity(to_visit.len() * 2);
         while let Some(task_path) = to_visit.pop_front() {
             if visited.contains(&task_path) {
                 continue;
@@ -329,15 +330,15 @@ impl DagExecutorServiceImpl {
 
     /// Get the current task statuses for a build.
     fn get_task_statuses(execution: &BuildExecution) -> Vec<TaskStatusEntry> {
-        execution
-            .tasks
-            .values()
-            .map(|t| TaskStatusEntry {
+        let mut result = Vec::with_capacity(execution.tasks.len());
+        for t in execution.tasks.values() {
+            result.push(TaskStatusEntry {
                 task_path: t.task_path.clone(),
                 status: t.status.clone(),
                 duration_ms: t.duration_ms,
-            })
-            .collect()
+            });
+        }
+        result
     }
 }
 
@@ -735,7 +736,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 }
 
                 let registry = Arc::clone(&self.executor_registry);
-                let contexts = task_contexts.clone();
+                let context_for_task = task_contexts.get(&task_path).cloned();
                 let tx = result_tx.clone();
                 let permit = semaphore.clone().acquire_owned().await.map_err(|_| {
                     Status::internal("Semaphore closed during build execution")
@@ -757,7 +758,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
 
                     let (success, outcome, exec_mode, error_msg) =
                         if let Some(executor) = registry.get(&task_type) {
-                            let input = build_task_input(&task_type, contexts.get(&task_path));
+                            let input = build_task_input(&task_type, context_for_task.as_ref());
                             let result = executor.execute(&input).await;
                             (
                                 result.success,
