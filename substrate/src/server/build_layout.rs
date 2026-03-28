@@ -220,7 +220,7 @@ impl BuildLayoutService for BuildLayoutServiceImpl {
             )));
         }
 
-        let mut all_projects = Vec::new();
+        let mut all_projects = Vec::with_capacity(self.projects.len());
         let mut root_node = None;
 
         for entry in self.projects.iter() {
@@ -284,8 +284,8 @@ impl BuildLayoutService for BuildLayoutServiceImpl {
         let req = request.into_inner();
 
         let prefix = format!("{}:", req.build_id);
-        let mut paths = Vec::new();
-        let mut dirs = Vec::new();
+        let mut paths = Vec::with_capacity(self.projects.len());
+        let mut dirs = Vec::with_capacity(self.projects.len());
 
         for entry in self.projects.iter() {
             if entry.key().starts_with(&prefix) {
