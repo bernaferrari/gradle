@@ -248,7 +248,7 @@ fn parse_info(bytes: &[u8]) -> Option<(String, String, String, String)> {
 
 /// Parse all `<conf>` elements inside `<configurations>`.
 fn parse_configurations(bytes: &[u8]) -> Vec<IvyConfiguration> {
-    let mut configs = Vec::new();
+    let mut configs = Vec::with_capacity(8);
     let pos = match find_open_tag(bytes, 0, b"configurations") {
         Some(p) => p,
         None => return configs,
@@ -296,7 +296,7 @@ fn parse_configurations(bytes: &[u8]) -> Vec<IvyConfiguration> {
 
 /// Parse all `<dependency>` elements inside `<dependencies>`.
 fn parse_dependencies(bytes: &[u8]) -> Vec<IvyDependency> {
-    let mut deps = Vec::new();
+    let mut deps = Vec::with_capacity(32);
     let pos = match find_open_tag(bytes, 0, b"dependencies") {
         Some(p) => p,
         None => return deps,
@@ -328,7 +328,7 @@ fn parse_dependencies(bytes: &[u8]) -> Vec<IvyDependency> {
         let optional = extract_attr(bytes, dep_pos, dep_tag_end, b"optional").as_deref() == Some("true");
 
         // Parse <exclude> children
-        let mut exclusions = Vec::new();
+        let mut exclusions = Vec::with_capacity(16);
         let dep_end = if is_self_closing(bytes, dep_pos, b"dependency") {
             dep_tag_end
         } else {
@@ -355,7 +355,7 @@ fn parse_dependencies(bytes: &[u8]) -> Vec<IvyDependency> {
         }
 
         // Parse <artifact> children
-        let mut artifacts = Vec::new();
+        let mut artifacts = Vec::with_capacity(8);
         let mut art_search = dep_tag_end;
         while art_search < dep_end {
             let art_pos = match find_open_tag(bytes, art_search, b"artifact") {
@@ -402,7 +402,7 @@ fn parse_dependencies(bytes: &[u8]) -> Vec<IvyDependency> {
 
 /// Parse all `<artifact>` elements inside `<publications>`.
 fn parse_publications(bytes: &[u8]) -> Vec<IvyArtifact> {
-    let mut pubs = Vec::new();
+    let mut pubs = Vec::with_capacity(8);
     let pos = match find_open_tag(bytes, 0, b"publications") {
         Some(p) => p,
         None => return pubs,
