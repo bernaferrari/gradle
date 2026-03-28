@@ -1721,8 +1721,12 @@ impl DependencyResolutionServiceImpl {
 /// Find an exact opening tag (e.g., `<dependency>`) in bytes.
 /// Ensures the tag is followed by `>` or whitespace (not part of a longer tag name).
 fn find_open_tag_exact(bytes: &[u8], from: usize, tag: &[u8]) -> Option<usize> {
-    let open = format!("<{}", std::str::from_utf8(tag).unwrap_or_default());
-    let open_bytes = open.as_bytes();
+    // Build "<tag" on the stack — avoids format!() heap allocation per call
+    let mut open_buf = [0u8; 64];
+    open_buf[0] = b'<';
+    let tag_len = tag.len().min(63);
+    open_buf[1..=tag_len].copy_from_slice(&tag[..tag_len]);
+    let open_bytes = &open_buf[..=tag_len];
     let mut search_from = from;
 
     while search_from < bytes.len() {
@@ -1762,8 +1766,13 @@ fn _find_tag(bytes: &[u8], from: usize, tag: &[u8]) -> Option<usize> {
 
 /// Find an end tag (e.g., `</dependency>`) in bytes.
 fn find_end_tag(bytes: &[u8], from: usize, tag: &[u8]) -> Option<usize> {
-    let close = format!("</{}", std::str::from_utf8(tag).unwrap_or_default());
-    let close_bytes = close.as_bytes();
+    // Build "</tag" on the stack — avoids format!() heap allocation
+    let mut close_buf = [0u8; 65];
+    close_buf[0] = b'<';
+    close_buf[1] = b'/';
+    let tag_len = tag.len().min(63);
+    close_buf[2..=tag_len + 1].copy_from_slice(&tag[..tag_len]);
+    let close_bytes = &close_buf[..=tag_len + 1];
     bytes[from..]
         .windows(close_bytes.len())
         .position(|w| w == close_bytes)
@@ -1772,10 +1781,18 @@ fn find_end_tag(bytes: &[u8], from: usize, tag: &[u8]) -> Option<usize> {
 
 /// Extract text content of a child tag within a parent block.
 fn extract_tag_text(bytes: &[u8], parent_start: usize, tag: &[u8]) -> Option<String> {
-    let open_tag = format!("<{}", std::str::from_utf8(tag).unwrap_or_default());
-    let close_tag = format!("</{}", std::str::from_utf8(tag).unwrap_or_default());
-    let open_bytes = open_tag.as_bytes();
-    let close_bytes = close_tag.as_bytes();
+    // Build open/close tag patterns on the stack
+    let mut open_buf = [0u8; 64];
+    open_buf[0] = b'<';
+    let tag_len = tag.len().min(63);
+    open_buf[1..=tag_len].copy_from_slice(&tag[..tag_len]);
+    let open_bytes = &open_buf[..=tag_len];
+
+    let mut close_buf = [0u8; 65];
+    close_buf[0] = b'<';
+    close_buf[1] = b'/';
+    close_buf[2..=tag_len + 1].copy_from_slice(&tag[..tag_len]);
+    let close_bytes = &close_buf[..=tag_len + 1];
 
     // Find the opening tag after parent_start
     let search_from = parent_start;
