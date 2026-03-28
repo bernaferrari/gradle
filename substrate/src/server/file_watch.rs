@@ -216,18 +216,13 @@ impl FileWatchServiceImpl {
     }
 
     /// Check if a file path matches the include/exclude patterns.
+    /// Uses zero-allocation Ant-style matching from file_tree module.
     fn matches_patterns(path: &str, include: &[String], exclude: &[String]) -> bool {
         // If no include patterns, accept everything
         if !include.is_empty() {
-            let mut matched = false;
-            for pattern in include {
-                if let Ok(glob) = glob::Pattern::new(pattern) {
-                    if glob.matches(path) {
-                        matched = true;
-                        break;
-                    }
-                }
-            }
+            let matched = include.iter().any(|pattern| {
+                crate::server::file_tree::ant_match(path, pattern)
+            });
             if !matched {
                 return false;
             }
@@ -235,10 +230,8 @@ impl FileWatchServiceImpl {
 
         // If exclude patterns match, reject
         for pattern in exclude {
-            if let Ok(glob) = glob::Pattern::new(pattern) {
-                if glob.matches(path) {
-                    return false;
-                }
+            if crate::server::file_tree::ant_match(path, pattern) {
+                return false;
             }
         }
 
