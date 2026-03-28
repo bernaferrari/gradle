@@ -103,7 +103,7 @@ impl GarbageCollectionServiceImpl {
         // Sort by modification time (oldest first) for LRU-style eviction
         entries.sort_unstable_by_key(|e| e.1);
 
-        let mut to_remove = HashSet::new();
+        let mut to_remove = HashSet::with_capacity(entries.len());
 
         // Remove entries older than max_age_ms (max_age_ms == 0 means evict all)
         if max_age_ms >= 0 {
