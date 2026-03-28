@@ -44,6 +44,22 @@ const CP_INVOKE_DYNAMIC: u8 = 18;
 const ACC_PUBLIC: u16 = 0x0001;
 const ACC_PROTECTED: u16 = 0x0004;
 
+/// Write a `usize` as decimal ASCII into `buf` and return the written slice.
+/// Zero heap allocation — uses only the provided stack buffer.
+fn write_int_to_buf(buf: &mut [u8; 20], mut val: usize) -> &[u8] {
+    if val == 0 {
+        buf[0] = b'0';
+        return &buf[..1];
+    }
+    let mut pos = buf.len();
+    while val > 0 {
+        pos -= 1;
+        buf[pos] = b'0' + (val % 10) as u8;
+        val /= 10;
+    }
+    &buf[pos..]
+}
+
 /// Reads a class file and extracts ABI-relevant information for fingerprinting.
 /// Only includes public/protected API elements, ignoring private implementation details.
 fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
@@ -201,33 +217,34 @@ fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
     // Include reference-type counts from the constant pool — these reflect
     // the external API surface (field/method references, string constants, etc.)
     // and ensure ABI changes involving added/removed references are detected.
+    let mut num_buf = [0u8; 20]; // enough for any usize
     hasher.update(b"refs=");
-    hasher.update(cp_stats.field_ref.to_string().as_bytes());
+    hasher.update(write_int_to_buf(&mut num_buf, cp_stats.field_ref));
     hasher.update(b",");
-    hasher.update(cp_stats.method_ref.to_string().as_bytes());
+    hasher.update(write_int_to_buf(&mut num_buf, cp_stats.method_ref));
     hasher.update(b",");
-    hasher.update(cp_stats.interface_method_ref.to_string().as_bytes());
+    hasher.update(write_int_to_buf(&mut num_buf, cp_stats.interface_method_ref));
     hasher.update(b",");
-    hasher.update(cp_stats.string.to_string().as_bytes());
+    hasher.update(write_int_to_buf(&mut num_buf, cp_stats.string));
     hasher.update(b",");
-    hasher.update(cp_stats.invoke_dynamic.to_string().as_bytes());
+    hasher.update(write_int_to_buf(&mut num_buf, cp_stats.invoke_dynamic));
     hasher.update(b",");
-    hasher.update(cp_stats.method_handle.to_string().as_bytes());
+    hasher.update(write_int_to_buf(&mut num_buf, cp_stats.method_handle));
     hasher.update(b",");
-    hasher.update(cp_stats.method_type.to_string().as_bytes());
+    hasher.update(write_int_to_buf(&mut num_buf, cp_stats.method_type));
     hasher.update(b";");
 
     // Include numeric constant pool counts for completeness — changes in
     // compile-time constants (Integer, Float, Long, Double) can affect
     // downstream compilation (e.g., constant folding, inlining).
     hasher.update(b"num_consts=");
-    hasher.update(cp_stats.integer.to_string().as_bytes());
+    hasher.update(write_int_to_buf(&mut num_buf, cp_stats.integer));
     hasher.update(b",");
-    hasher.update(cp_stats.float_.to_string().as_bytes());
+    hasher.update(write_int_to_buf(&mut num_buf, cp_stats.float_));
     hasher.update(b",");
-    hasher.update(cp_stats.long.to_string().as_bytes());
+    hasher.update(write_int_to_buf(&mut num_buf, cp_stats.long));
     hasher.update(b",");
-    hasher.update(cp_stats.double_.to_string().as_bytes());
+    hasher.update(write_int_to_buf(&mut num_buf, cp_stats.double_));
 
     Some(hasher.finalize().to_vec())
 }
