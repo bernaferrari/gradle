@@ -71,7 +71,7 @@ impl ToolchainServiceImpl {
 
     /// Detect system JDK installations from common paths, PATH, SDKMAN, and toolchain.properties.
     fn find_system_javas() -> Vec<(String, String)> {
-        let mut found = Vec::new();
+        let mut found = Vec::with_capacity(8);
 
         // 1. Check JAVA_HOME environment variable
         if let Ok(java_home) = std::env::var("JAVA_HOME") {
@@ -452,7 +452,7 @@ impl ToolchainServiceImpl {
         os: &str,
         arch: &str,
     ) -> Vec<String> {
-        let mut urls = Vec::new();
+        let mut urls = Vec::with_capacity(3);
 
         let os_part = match os {
             "macos" => "mac",
@@ -646,13 +646,17 @@ impl ToolchainServiceImpl {
 
         // Look for a single subdirectory that contains bin/java
         if let Ok(entries) = std::fs::read_dir(dir) {
-            let subdirs: Vec<_> = entries.flatten().filter(|e| e.path().is_dir()).collect();
-            if subdirs.len() == 1 {
-                let candidate = subdirs[0].path();
-                if candidate.join("bin/java").exists()
-                    || candidate.join("Contents/Home/bin/java").exists()
-                {
-                    return Some(candidate);
+            let mut subdirs = entries.flatten().filter(|e| e.path().is_dir());
+            let first = subdirs.next();
+            let second = subdirs.next();
+            if let Some(candidate_entry) = first {
+                if second.is_none() {
+                    let candidate = candidate_entry.path();
+                    if candidate.join("bin/java").exists()
+                        || candidate.join("Contents/Home/bin/java").exists()
+                    {
+                        return Some(candidate);
+                    }
                 }
             }
         }
@@ -679,9 +683,7 @@ impl ToolchainService for ToolchainServiceImpl {
     ) -> Result<Response<ListToolchainsResponse>, Status> {
         let _req = request.into_inner();
 
-        let mut toolchains = Vec::new();
-
-        // Report installed toolchains from registry
+        let mut toolchains = Vec::with_capacity(self.installations.len() + 4);
         for entry in self.installations.iter() {
             toolchains.push(ToolchainLocation {
                 language_version: entry.language_version.clone(),
@@ -1509,7 +1511,7 @@ impl ToolchainService for ToolchainServiceImpl {
         // subprocess spawns). Run on the blocking thread pool to avoid
         // starving the tokio runtime.
         let results = tokio::task::spawn_blocking(move || {
-            let mut results = Vec::new();
+            let mut results = Vec::with_capacity(8);
 
             // 1. JAVA_HOME
             if let Ok(java_home) = std::env::var("JAVA_HOME") {
