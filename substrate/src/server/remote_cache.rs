@@ -36,10 +36,14 @@ impl RemoteCacheStore {
         match (&self.username, &self.password) {
             (Some(user), Some(pass)) => {
                 use std::io::Write;
-                let mut buf = Vec::new();
+                let mut buf = Vec::with_capacity(user.len() + pass.len() + 1);
                 // write! to Vec<u8> is infallible
                 let _ = write!(buf, "{}:{}", user, pass);
-                Some(format!("Basic {}", base64_encode(&buf)))
+                let encoded = base64_encode(&buf);
+                let mut header = String::with_capacity(6 + encoded.len());
+                header.push_str("Basic ");
+                header.push_str(&encoded);
+                Some(header)
             }
             _ => None,
         }

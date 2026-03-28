@@ -912,8 +912,8 @@ impl DependencyResolutionServiceImpl {
             ResolutionStrategy::NearestDefinition => {
                 // Nearest wins — keep the first occurrence (shallowest in the tree)
                 let mut seen: std::collections::HashSet<(String, String)> =
-                    std::collections::HashSet::new();
-                let mut kept = Vec::new();
+                    std::collections::HashSet::with_capacity(deps.len());
+                let mut kept = Vec::with_capacity(deps.len());
 
                 for dep in deps.iter() {
                     let key = (dep.group.clone(), dep.name.clone());

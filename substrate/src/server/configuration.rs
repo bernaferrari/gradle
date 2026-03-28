@@ -177,11 +177,12 @@ impl ProjectState {
 
     /// All non-empty layers flattened, highest-precedence first.
     fn all_properties_sorted(&self) -> Vec<(String, String, PropertySource)> {
-        let mut entries: Vec<(String, String, PropertySource)> = Vec::with_capacity(64);
+        let total_props: usize = self.layers.values().map(|l| l.len()).sum();
+        let mut entries: Vec<(String, String, PropertySource)> = Vec::with_capacity(total_props);
         // Iterate layers from highest precedence to lowest.
         let mut sources: Vec<PropertySource> = self.layers.keys().copied().collect();
         sources.sort_unstable_by(|a, b| b.cmp(a));
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::with_capacity(total_props);
         for source in sources {
             if let Some(layer) = self.layers.get(&source) {
                 for (k, v) in layer {
