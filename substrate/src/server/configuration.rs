@@ -177,7 +177,7 @@ impl ProjectState {
 
     /// All non-empty layers flattened, highest-precedence first.
     fn all_properties_sorted(&self) -> Vec<(String, String, PropertySource)> {
-        let mut entries: Vec<(String, String, PropertySource)> = Vec::new();
+        let mut entries: Vec<(String, String, PropertySource)> = Vec::with_capacity(64);
         // Iterate layers from highest precedence to lowest.
         let mut sources: Vec<PropertySource> = self.layers.keys().copied().collect();
         sources.sort_unstable_by(|a, b| b.cmp(a));
@@ -700,7 +700,7 @@ impl ConfigurationService for ConfigurationServiceImpl {
             PropertySource::from_str_loose(&req.filter_source)
         };
 
-        let mut entries: Vec<PropertyEntry> = Vec::new();
+        let mut entries: Vec<PropertyEntry> = Vec::with_capacity(64);
 
         if let Some(source_filter) = filter {
             // Single-layer listing.

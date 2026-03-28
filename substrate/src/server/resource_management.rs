@@ -411,7 +411,7 @@ impl ResourceManagementService for ResourceManagementServiceImpl {
         }
 
         // Grant the reservation
-        let mut reserved = Vec::new();
+        let mut reserved = Vec::with_capacity(req.resources.len());
         for resource in &req.resources {
             if let Some(mut slot) = self.resources.get_mut(&resource.resource_type) {
                 slot.used += resource.amount;
@@ -478,7 +478,7 @@ impl ResourceManagementService for ResourceManagementServiceImpl {
         // Clean up stale reservations (older than 30 minutes)
         self.cleanup_stale_reservations(30 * 60 * 1000);
 
-        let mut usage = Vec::new();
+        let mut usage = Vec::with_capacity(self.resources.len());
         for entry in self.resources.iter() {
             usage.push(ResourceUsageEntry {
                 resource_type: entry.key().clone(),
