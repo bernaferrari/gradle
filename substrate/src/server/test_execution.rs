@@ -64,7 +64,7 @@ impl TestExecutionServiceImpl {
             .unwrap_or_default();
 
         let mut flaky = Vec::new();
-        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::with_capacity(suite_ids.len() * 4);
 
         for suite_id in &suite_ids {
             if let Some(suite) = self.suites.get(suite_id) {
