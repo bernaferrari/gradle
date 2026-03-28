@@ -33,6 +33,10 @@ impl ValueSnapshotServiceImpl {
 
     /// Normalize a path for fingerprinting: forward slashes, no trailing slash, lowercase drive on Windows.
     fn normalize_path(p: &str) -> String {
+        // Fast path: no backslashes and no trailing slash — return as-is
+        if !p.contains('\\') && !p.ends_with('/') {
+            return p.to_string();
+        }
         let p = p.replace('\\', "/");
         let p = p.trim_end_matches('/');
         p.to_string()
@@ -86,11 +90,19 @@ impl ValueSnapshotServiceImpl {
             })
             .collect();
         entries.sort_unstable_by_key(|(k, _)| *k);
-        entries
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect::<Vec<_>>()
-            .join(";")
+        // Build output string directly, avoiding intermediate Vec<String>
+        let estimated_len = entries.iter().map(|(k, v)| k.len() + v.len() + 2).sum::<usize>()
+            + entries.len().saturating_sub(1);
+        let mut out = String::with_capacity(estimated_len);
+        for (i, (k, v)) in entries.iter().enumerate() {
+            if i > 0 {
+                out.push(';');
+            }
+            out.push_str(k);
+            out.push('=');
+            out.push_str(v);
+        }
+        out
     }
 
     fn fingerprint_value(prop: &PropertyValue) -> Vec<u8> {
