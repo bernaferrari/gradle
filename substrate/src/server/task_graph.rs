@@ -120,9 +120,10 @@ impl TaskGraphServiceImpl {
     /// since they are already resolved (UP-TO-DATE, SKIPPED, etc.).
     /// Only resolves tasks belonging to the given build_id.
     fn resolve_plan(&self, build_id: &BuildId) -> (Vec<ExecutionNode>, i64, bool) {
-        let mut in_degree: HashMap<String, usize> = HashMap::new();
-        let mut dependents: HashMap<String, Vec<String>> = HashMap::new();
-        let mut all_tasks: HashSet<String> = HashSet::new();
+        let build_task_count = self.tasks.iter().filter(|e| e.key().0 == *build_id).count();
+        let mut in_degree: HashMap<String, usize> = HashMap::with_capacity(build_task_count);
+        let mut dependents: HashMap<String, Vec<String>> = HashMap::with_capacity(build_task_count);
+        let mut all_tasks: HashSet<String> = HashSet::with_capacity(build_task_count);
         let mut skipped_count = 0usize;
         let mut task_type_counts: HashMap<String, usize> = HashMap::new();
 
@@ -243,8 +244,9 @@ impl TaskGraphServiceImpl {
     fn calculate_critical_path(&self, build_id: &BuildId) -> i64 {
         // Topological sort via Kahn's algorithm, then DP for longest path.
         // DashMap iteration order is non-deterministic, so we must sort first.
-        let mut in_degree: HashMap<String, usize> = HashMap::new();
-        let mut dependents: HashMap<String, Vec<String>> = HashMap::new();
+        let build_task_count = self.tasks.iter().filter(|e| e.key().0 == *build_id).count();
+        let mut in_degree: HashMap<String, usize> = HashMap::with_capacity(build_task_count);
+        let mut dependents: HashMap<String, Vec<String>> = HashMap::with_capacity(build_task_count);
 
         for entry in self.tasks.iter() {
             // Skip tasks from other builds
@@ -288,7 +290,7 @@ impl TaskGraphServiceImpl {
         }
 
         // DP: longest path in topological order
-        let mut longest: HashMap<String, i64> = HashMap::new();
+        let mut longest: HashMap<String, i64> = HashMap::with_capacity(build_task_count);
         for task in &topo_order {
             if let Some(entry) = self.tasks.get(&(build_id.clone(), task.clone())) {
                 let mut max_dep = 0i64;
