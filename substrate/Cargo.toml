@@ -32,7 +32,6 @@ sha3 = "0.10"
 blake3 = "1"
 rayon = "1"
 notify.workspace = true
-glob.workspace = true
 reqwest.workspace = true
 quick-xml.workspace = true
 nix.workspace = true

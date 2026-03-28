@@ -19,7 +19,6 @@ tempfile = "3"
 dashmap = "6"
 uuid = { version = "1", features = ["v4"] }
 notify = { version = "6", features = ["macos_fsevent"] }
-glob = "0.3"
 reqwest = { version = "0.12", features = ["stream", "rustls-tls"] }
 quick-xml = "0.31"
 nix = { version = "0.27", features = ["signal", "process"] }
