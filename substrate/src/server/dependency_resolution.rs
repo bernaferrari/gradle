@@ -1079,12 +1079,7 @@ impl DependencyResolutionServiceImpl {
                             _ => format!("${{{}}}", key), // Leave unresolved
                         }
                     });
-                    result = format!(
-                        "{}{}{}",
-                        &result[..start],
-                        replacement,
-                        &result[start + end + 1..]
-                    );
+                    result.replace_range(start..start + end + 1, &replacement);
                 } else {
                     break;
                 }
