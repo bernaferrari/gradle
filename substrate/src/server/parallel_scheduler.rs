@@ -516,7 +516,7 @@ impl ParallelScheduler {
             to_visit.extend(task.dependents.iter().cloned());
         }
 
-        let mut visited = HashSet::new();
+        let mut visited = HashSet::with_capacity(16);
         while let Some(path) = to_visit.pop() {
             if visited.contains(&path) {
                 continue;
