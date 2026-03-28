@@ -855,7 +855,7 @@ impl AstExtractor {
     }
 
     fn try_extract_include(&self, mc: &MethodCall) -> Option<Vec<ParsedSubproject>> {
-        let mut subs = Vec::new();
+        let mut subs = Vec::with_capacity(mc.arguments.len());
         for arg in &mc.arguments {
             if let Some(path) = self.arg_to_string(arg) {
                 subs.push(ParsedSubproject { path });
