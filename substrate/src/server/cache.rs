@@ -182,7 +182,7 @@ impl LocalCacheStore {
 
     /// Scan cache directory for entries sorted by modification time (oldest first).
     async fn scan_entries_by_age(&self) -> Vec<(PathBuf, u64)> {
-        let mut entries = Vec::new();
+        let mut entries = Vec::with_capacity(64);
 
         if let Ok(mut dir) = fs::read_dir(&self.base_dir).await {
             while let Ok(Some(entry)) = dir.next_entry().await {
