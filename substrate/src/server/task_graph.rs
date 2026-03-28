@@ -89,7 +89,7 @@ impl TaskGraphServiceImpl {
     /// Marks affected tasks as `should_execute = true` so they will be
     /// included in the next execution plan. Returns the number of tasks invalidated.
     pub fn invalidate_tasks_for_files(&self, changed_files: &[String]) -> usize {
-        let mut invalidated = std::collections::HashSet::new();
+        let mut invalidated = std::collections::HashSet::with_capacity(changed_files.len() * 4);
         for file_path in changed_files {
             if let Some(entries) = self.file_to_tasks.get(file_path) {
                 for (bid, task_path) in entries.iter() {
