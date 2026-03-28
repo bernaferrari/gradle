@@ -65,8 +65,7 @@ impl HashAlgorithm {
 
     /// Case-insensitive byte slice comparison without allocation.
     fn eq_ignore_case(a: &[u8], b: &[u8]) -> bool {
-        a.len() == b.len()
-            && a.iter().zip(b).all(|(&ca, &cb)| ca.to_ascii_uppercase() == cb.to_ascii_uppercase())
+        a.eq_ignore_ascii_case(b)
     }
 
     /// Expected output length in bytes for this algorithm.

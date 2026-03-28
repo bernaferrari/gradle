@@ -159,7 +159,7 @@ fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
     if let Some(name) = get_class_name(&cp_entries, this_class) {
         hasher.update(b"class=");
         hasher.update(name.as_bytes());
-        hasher.update(&[0]); // separator
+        hasher.update([0]); // separator
     }
 
     // Include super class name
@@ -167,7 +167,7 @@ fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
         if let Some(name) = get_class_name(&cp_entries, super_class) {
             hasher.update(b"super=");
             hasher.update(name.as_bytes());
-            hasher.update(&[0]); // separator
+            hasher.update([0]); // separator
         }
     }
 
@@ -180,7 +180,7 @@ fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
     for iface in &iface_names {
         hasher.update(b"iface=");
         hasher.update(iface.as_bytes());
-        hasher.update(&[0]); // null separator
+        hasher.update([0]); // null separator
     }
 
 
@@ -188,13 +188,13 @@ fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
     public_field_abi.sort_unstable();
     hasher.update(b"fields=");
     hasher.update(public_field_abi.join(";").as_bytes());
-    hasher.update(&[0]); // null separator
+    hasher.update([0]); // null separator
 
     // Include public/protected methods (sorted)
     public_method_abi.sort_unstable();
     hasher.update(b"methods=");
     hasher.update(public_method_abi.join(";").as_bytes());
-    hasher.update(&[0]); // null separator
+    hasher.update([0]); // null separator
 
 
 
