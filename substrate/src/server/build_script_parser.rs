@@ -239,19 +239,45 @@ fn remove_line_comments(content: &str) -> String {
     result
 }
 
-/// Check if character at index is escaped with backslash.
+/// Check if character at byte index is escaped with backslash.
 fn is_escaped(content: &str, index: usize) -> bool {
     if index == 0 {
         return false;
     }
-    let mut count = 0;
+    let bytes = content.as_bytes();
+    let mut count = 0usize;
     let mut pos = index - 1;
-    let chars: Vec<char> = content.chars().collect();
-    while pos > 0 && chars.get(pos) == Some(&'\\') {
+    while pos > 0 && bytes[pos] == b'\\' {
         count += 1;
         pos -= 1;
     }
+    if bytes[pos] == b'\\' {
+        count += 1;
+    }
     count % 2 == 1
+}
+
+/// Find all occurrences of `keyword(` in haystack, returning byte offsets.
+/// Zero-allocation: uses byte-level comparison instead of format! + str::find.
+fn find_keyword_paren(haystack: &str, keyword: &str) -> Vec<usize> {
+    let bytes = haystack.as_bytes();
+    let kw = keyword.as_bytes();
+    let kw_len = kw.len();
+    let needle_len = kw_len + 1; // keyword + '('
+    let mut results = Vec::new();
+    let mut pos = 0;
+    while pos + needle_len <= bytes.len() {
+        if let Some(idx) = memchr::memchr(b'(', &bytes[pos..]) {
+            let abs = pos + idx;
+            if abs >= kw_len && &bytes[abs - kw_len..abs] == kw {
+                results.push(abs - kw_len);
+            }
+            pos = abs + 1;
+        } else {
+            break;
+        }
+    }
+    results
 }
 
 /// Extract a string literal from a Kotlin DSL or Groovy string argument.
@@ -342,24 +368,21 @@ fn find_matching_paren(content: &str) -> Option<usize> {
 
 /// Find the position of a top-level block: `keyword { ... }`
 fn find_top_level_block(content: &str, keyword: &str) -> Option<(usize, String)> {
-    // Look for `keyword` followed by whitespace and `{`
-    let search = format!("{} ", keyword);
-    let pos = match content.find(&search) {
-        Some(p) => Some(p),
-        None => {
-            // Try keyword immediately followed by `{`
-            let alt = format!("{}{{", keyword);
-            content.find(&alt)
-        }
-    };
+    let bytes = content.as_bytes();
+    let kw_bytes = keyword.as_bytes();
+    let kw_len = kw_bytes.len();
 
-    let pos = pos?;
-    let after_keyword = &content[pos + keyword.len()..];
+    let pos = (0..bytes.len().saturating_sub(kw_len))
+        .find(|&i| {
+            &bytes[i..i + kw_len] == kw_bytes
+                && i + kw_len < bytes.len()
+                && (bytes[i + kw_len] == b' ' || bytes[i + kw_len] == b'{')
+        })?;
 
-    // Skip whitespace to find `{`
+    let after_keyword = &content[pos + kw_len..];
     let brace_pos = after_keyword.find('{')?;
 
-    let abs_brace = pos + keyword.len() + brace_pos;
+    let abs_brace = pos + kw_len + brace_pos;
     let block = find_brace_block(content, abs_brace)?;
     Some((abs_brace, block))
 }
@@ -426,10 +449,9 @@ fn parse_dependencies_block(content: &str, result: &mut BuildScriptParseResult) 
         let mut found_deps: Vec<(usize, ParsedDependency)> = Vec::new();
 
         for kw in &config_keywords {
-            let pattern = format!("{}(", kw);
-            let mut search_from = 0;
-            while let Some(i) = block[search_from..].find(&pattern) {
-                let abs_i = search_from + i;
+            let kw_len = kw.len() + 1; // keyword + '('
+            let matches = find_keyword_paren(&block, kw);
+            for abs_i in matches {
                 // Ensure the match is not part of a longer identifier
                 if abs_i > 0
                     && block
@@ -437,10 +459,9 @@ fn parse_dependencies_block(content: &str, result: &mut BuildScriptParseResult) 
                         .get(abs_i - 1)
                         .is_some_and(|c| c.is_ascii_alphabetic())
                 {
-                    search_from = abs_i + 1;
                     continue;
                 }
-                let args_start = abs_i + pattern.len();
+                let args_start = abs_i + kw_len;
                 if let Some(close) = find_matching_paren(&block[args_start..]) {
                     let args = &block[args_start..args_start + close];
                     if let Some(notation) = extract_string_literal(args) {
@@ -463,7 +484,6 @@ fn parse_dependencies_block(content: &str, result: &mut BuildScriptParseResult) 
                         ));
                     }
                 }
-                search_from = abs_i + 1;
             }
         }
 
@@ -477,8 +497,8 @@ fn parse_dependencies_block(content: &str, result: &mut BuildScriptParseResult) 
     // Parse standalone dependency declarations outside a block:
     // val implementation by platform.deps(...)
     for kw in &["implementation", "api", "compileOnly", "runtimeOnly"] {
-        let pattern = format!("val {} by ", kw);
-        if let Some(_i) = content.find(&pattern) {
+        let needle = format!("val {} by ", kw);
+        if content.contains(&needle) {
             result.warnings.push(format!(
                 "Version catalog dependency '{}' not fully parsed",
                 kw
@@ -511,11 +531,9 @@ fn parse_version_catalog_refs(content: &str, result: &mut BuildScriptParseResult
 
         for kw in &config_keywords {
             // Kotlin DSL pattern: config(libs.something)
-            let pattern = format!("{}(", kw);
-            let mut search_from = 0;
-            while let Some(i) = block[search_from..].find(&pattern) {
-                let abs_i = search_from + i;
-
+            let kw_len = kw.len() + 1; // keyword + '('
+            let matches = find_keyword_paren(&block, kw);
+            for abs_i in matches {
                 // Ensure not part of a longer identifier
                 if abs_i > 0
                     && block
@@ -523,11 +541,10 @@ fn parse_version_catalog_refs(content: &str, result: &mut BuildScriptParseResult
                         .get(abs_i - 1)
                         .is_some_and(|c| c.is_ascii_alphabetic())
                 {
-                    search_from = abs_i + 1;
                     continue;
                 }
 
-                let args_start = abs_i + pattern.len();
+                let args_start = abs_i + kw_len;
                 if let Some(close) = find_matching_paren(&block[args_start..]) {
                     let args = block[args_start..args_start + close].trim();
 
@@ -559,15 +576,17 @@ fn parse_version_catalog_refs(content: &str, result: &mut BuildScriptParseResult
                         }
                     }
                 }
-                search_from = abs_i + 1;
             }
 
             // Groovy DSL pattern: config libs.something (no parens)
-            let space_pattern = format!("{} ", kw);
             let mut search_from = 0;
-            while let Some(i) = block[search_from..].find(&space_pattern) {
+            while let Some(i) = block[search_from..].find(kw) {
                 let abs_i = search_from + i;
-
+                let next_idx = abs_i + kw.len();
+                if next_idx >= block.len() || block.as_bytes()[next_idx] != b' ' {
+                    search_from = abs_i + 1;
+                    continue;
+                }
                 // Ensure not part of a longer identifier
                 if abs_i > 0
                     && block
@@ -579,7 +598,7 @@ fn parse_version_catalog_refs(content: &str, result: &mut BuildScriptParseResult
                     continue;
                 }
 
-                let rest = block[abs_i + space_pattern.len()..].trim();
+                let rest = block[next_idx + 1..].trim();
                 // Check if this starts with libs. and extract the alias
                 if let Some(alias) = rest.split_whitespace().next() {
                     if alias.starts_with("libs.") {
@@ -910,64 +929,43 @@ fn parse_groovy_dependencies(content: &str, result: &mut BuildScriptParseResult)
         let mut found_deps: Vec<(usize, ParsedDependency)> = Vec::new();
 
         for kw in &config_keywords {
-            // Groovy: implementation 'com.example:lib:1.0'
-            let single_quote = format!("{} '", kw);
-            // Groovy: implementation "com.example:lib:1.0"
-            let double_quote = format!("{} \"", kw);
-            // Groovy: implementation("com.example:lib:1.0") or implementation('...')
-            let paren_form = format!("{}(", kw);
+            let kw_bytes = kw.as_bytes();
+            let kw_len = kw_bytes.len();
+            let kw_paren_len = kw_len + 1; // keyword + '('
+            let kw_quote_len = kw_len + 2; // keyword + ' ' + quote
             let mut search_from = 0;
-
-            #[cfg(test)]
-            eprintln!(
-                "[DEBUG] kw={}, single_quote={:?}, paren_form={:?}",
-                kw, single_quote, paren_form
-            );
+            let block_bytes = block.as_bytes();
 
             while search_from < block.len() {
-                // Try single-quote form first: implementation 'group:artifact:ver'
-                let found = if let Some(i) = block[search_from..].find(&single_quote) {
-                    let abs_i = search_from + i;
-                    // Ensure not part of a longer identifier
-                    if abs_i > 0
-                        && block
-                            .as_bytes()
-                            .get(abs_i - 1)
-                            .is_some_and(|c| c.is_ascii_alphabetic())
-                    {
-                        search_from = abs_i + 1;
-                        continue;
-                    }
-                    let val_start = abs_i + single_quote.len();
-                    if let Some(end) = block[val_start..].find('\'') {
-                        let notation = block[val_start..val_start + end].to_string();
-                        found_deps.push((
-                            abs_i,
-                            ParsedDependency {
-                                configuration: kw.to_string(),
-                                notation,
-                                ..Default::default()
-                            },
-                        ));
-                        search_from = val_start + end + 1;
-                        continue;
-                    }
-                    abs_i
-                } else {
-                    // single_quote not found — try double-quote form from current position
-                    if let Some(i) = block[search_from..].find(&double_quote) {
-                        let abs_i = search_from + i;
-                        if abs_i > 0
-                            && block
-                                .as_bytes()
-                                .get(abs_i - 1)
-                                .is_some_and(|c| c.is_ascii_alphabetic())
-                        {
-                            search_from = abs_i + 1;
-                            continue;
-                        }
-                        let val_start = abs_i + double_quote.len();
-                        if let Some(end) = block[val_start..].find('"') {
+                // Find next occurrence of keyword in remaining block
+                let Some(kw_start) = block[search_from..].find(kw) else {
+                    break;
+                };
+                let abs_i = search_from + kw_start;
+
+                // Check what follows the keyword
+                if abs_i + kw_len >= block.len() {
+                    break;
+                }
+                let after_kw = block_bytes[abs_i + kw_len];
+
+                // Ensure not part of a longer identifier
+                if abs_i > 0
+                    && block_bytes
+                        .get(abs_i - 1)
+                        .is_some_and(|c| c.is_ascii_alphabetic())
+                {
+                    search_from = abs_i + 1;
+                    continue;
+                }
+
+                let mut advanced = false;
+
+                if after_kw == b' ' && abs_i + kw_quote_len <= block.len() {
+                    let quote_char = block_bytes[abs_i + kw_len + 1];
+                    if quote_char == b'\'' || quote_char == b'"' {
+                        let val_start = abs_i + kw_quote_len;
+                        if let Some(end) = block[val_start..].find(quote_char as char) {
                             let notation = block[val_start..val_start + end].to_string();
                             found_deps.push((
                                 abs_i,
@@ -978,29 +976,13 @@ fn parse_groovy_dependencies(content: &str, result: &mut BuildScriptParseResult)
                                 },
                             ));
                             search_from = val_start + end + 1;
-                            continue;
+                            advanced = true;
                         }
-                        abs_i
-                    } else {
-                        search_from
                     }
-                };
+                }
 
-                // Try paren form: implementation("...") or implementation('...')
-                if let Some(i) = block[found..].find(&paren_form) {
-                    let abs_i = found + i;
-                    // Ensure not part of a longer identifier
-                    if abs_i > 0
-                        && block
-                            .as_bytes()
-                            .get(abs_i - 1)
-                            .is_some_and(|c| c.is_ascii_alphabetic())
-                    {
-                        search_from = abs_i + 1;
-                        continue;
-                    }
-                    let args_start = abs_i + paren_form.len();
-                    // Use find_matching_paren to handle nested parens like exclude(group: 'x', module: 'y')
+                if !advanced && after_kw == b'(' {
+                    let args_start = abs_i + kw_paren_len;
                     if let Some(close) = find_matching_paren(&block[args_start..]) {
                         let args = &block[args_start..args_start + close];
                         if let Some(notation) = extract_string_literal(args) {
@@ -1013,12 +995,14 @@ fn parse_groovy_dependencies(content: &str, result: &mut BuildScriptParseResult)
                                 },
                             ));
                         }
-                        search_from = abs_i + close + paren_form.len() + 1;
-                        continue;
+                        search_from = abs_i + close + kw_paren_len + 1;
+                        advanced = true;
                     }
                 }
 
-                search_from = block.len();
+                if !advanced {
+                    search_from = abs_i + 1;
+                }
             }
         }
 

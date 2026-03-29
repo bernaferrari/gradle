@@ -158,7 +158,12 @@ impl VersionCatalogServiceImpl {
         let toml: VersionCatalogToml =
             toml::from_str(content).map_err(|e| format!("TOML parse error: {}", e))?;
 
-        let mut catalog = VersionCatalog::default();
+        let mut catalog = VersionCatalog {
+            versions: Vec::with_capacity(toml.versions.len()),
+            libraries: Vec::with_capacity(toml.libraries.len()),
+            bundles: Vec::with_capacity(toml.bundles.len()),
+            plugins: Vec::with_capacity(toml.plugins.len()),
+        };
 
         // Parse versions
         for (alias, value) in &toml.versions {
