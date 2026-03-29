@@ -28,8 +28,8 @@ impl ClasspathServiceImpl {
 /// Minimum entry count to trigger parallel hashing via rayon.
 const PARALLEL_THRESHOLD: usize = 8;
 
-/// Resolved hash algorithm — avoids repeated `.to_uppercase()` allocations
-/// on every entry in the hot path.
+/// Resolved hash algorithm — zero-allocation case-insensitive matching
+/// on every entry in the hot path (no `.to_uppercase()` heap alloc).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HashAlgo {
     Md5,
@@ -42,14 +42,32 @@ enum HashAlgo {
 
 impl HashAlgo {
     fn from_name(name: &str) -> Self {
-        match name.to_uppercase().as_str() {
-            "" | "MD5" => Self::Md5,
-            "SHA-1" | "SHA1" => Self::Sha1,
-            "SHA-256" | "SHA256" => Self::Sha256,
-            "SHA3-256" | "SHA3_256" => Self::Sha3_256,
-            "SHA3-512" | "SHA3_512" => Self::Sha3_512,
-            "BLAKE3" => Self::Blake3,
-            _ => Self::Md5, // default fallback
+        // Case-insensitive matching without heap allocation
+        match name.as_bytes() {
+            b"" | b"MD5" | b"md5" => Self::Md5,
+            b"SHA-1" | b"sha-1" | b"SHA1" | b"sha1" => Self::Sha1,
+            b"SHA-256" | b"sha-256" | b"SHA256" | b"sha256" => Self::Sha256,
+            b"SHA3-256" | b"sha3-256" | b"SHA3_256" | b"sha3_256" => Self::Sha3_256,
+            b"SHA3-512" | b"sha3-512" | b"SHA3_512" | b"sha3_512" => Self::Sha3_512,
+            b"BLAKE3" | b"blake3" => Self::Blake3,
+            other => {
+                // Fallback for mixed-case
+                if other.eq_ignore_ascii_case(b"MD5") {
+                    Self::Md5
+                } else if other.eq_ignore_ascii_case(b"SHA-1") || other.eq_ignore_ascii_case(b"SHA1") {
+                    Self::Sha1
+                } else if other.eq_ignore_ascii_case(b"SHA-256") || other.eq_ignore_ascii_case(b"SHA256") {
+                    Self::Sha256
+                } else if other.eq_ignore_ascii_case(b"SHA3-256") || other.eq_ignore_ascii_case(b"SHA3_256") {
+                    Self::Sha3_256
+                } else if other.eq_ignore_ascii_case(b"SHA3-512") || other.eq_ignore_ascii_case(b"SHA3_512") {
+                    Self::Sha3_512
+                } else if other.eq_ignore_ascii_case(b"BLAKE3") {
+                    Self::Blake3
+                } else {
+                    Self::Md5 // default fallback
+                }
+            }
         }
     }
 
