@@ -188,25 +188,24 @@ impl ClasspathServiceImpl {
             return (hash, vec![]);
         }
 
-        let mut sorted: Vec<_> = entries.iter().collect();
+        let mut sorted: Vec<_> = Vec::with_capacity(entries.len());
+        sorted.extend(entries.iter());
         sorted.sort_unstable_by_key(|e| &e.absolute_path);
 
-        let entry_hashes: Vec<(String, Vec<u8>)> = if sorted.len() >= PARALLEL_THRESHOLD {
-            sorted
+        let mut entry_hashes: Vec<(String, Vec<u8>)> = Vec::with_capacity(entries.len());
+        if sorted.len() >= PARALLEL_THRESHOLD {
+            entry_hashes = sorted
                 .par_iter()
                 .map(|entry| {
                     let hash = hash_entry(entry, algo, ignore_timestamps);
                     (entry.absolute_path.clone(), hash)
                 })
-                .collect()
+                .collect();
         } else {
-            sorted
-                .iter()
-                .map(|entry| {
-                    let hash = hash_entry(entry, algo, ignore_timestamps);
-                    (entry.absolute_path.clone(), hash)
-                })
-                .collect()
+            entry_hashes.extend(sorted.iter().map(|entry| {
+                let hash = hash_entry(entry, algo, ignore_timestamps);
+                (entry.absolute_path.clone(), hash)
+            }));
         };
 
         let classpath_hash = composite_hash(&entry_hashes, algo);
