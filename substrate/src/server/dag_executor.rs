@@ -379,8 +379,9 @@ impl DagExecutorService for DagExecutorServiceImpl {
         };
 
         // Build task slots and dependents map
-        let mut tasks = HashMap::new();
-        let mut dependents: HashMap<String, Vec<String>> = HashMap::new();
+        let task_count = plan_response.execution_order.len();
+        let mut tasks = HashMap::with_capacity(task_count);
+        let mut dependents: HashMap<String, Vec<String>> = HashMap::with_capacity(task_count);
         let mut ready_queue = VecDeque::new();
 
         for node in &plan_response.execution_order {
