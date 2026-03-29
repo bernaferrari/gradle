@@ -549,7 +549,8 @@ impl IncrementalCompilationService for IncrementalCompilationServiceImpl {
             }
         }
 
-        let previous: HashSet<String> = req.previous_processor_classes.iter().cloned().collect();
+        let mut previous: HashSet<String> = HashSet::with_capacity(req.previous_processor_classes.len());
+        previous.extend(req.previous_processor_classes.iter().cloned());
 
         let mut changes = Vec::with_capacity(current_processors.len() + previous.len());
         for added in current_processors.difference(&previous) {
