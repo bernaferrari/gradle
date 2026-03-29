@@ -1290,7 +1290,7 @@ impl DependencyResolutionServiceImpl {
         dep: &DependencyDescriptor,
         repos: &[RepositoryDescriptor],
     ) -> ResolvedDependency {
-        let mut visited = std::collections::HashSet::new();
+        let mut visited = std::collections::HashSet::with_capacity(64);
         self.resolve_recursive(dep, repos, &mut visited, 0).await
     }
 
@@ -1434,7 +1434,7 @@ impl DependencyResolutionServiceImpl {
         let mut managed = Self::parse_dependency_management(pom_content);
 
         let mut current_pom = pom_content.to_string();
-        let mut visited_parents = std::collections::HashSet::new();
+        let mut visited_parents = std::collections::HashSet::with_capacity(8);
 
         for _ in 0..MAX_PARENT_DEPTH {
             let parent = match Self::parse_parent_pom(&current_pom) {
