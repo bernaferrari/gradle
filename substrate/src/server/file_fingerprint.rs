@@ -860,7 +860,8 @@ impl FileFingerprintServiceImpl {
 
     fn should_ignore(path: &Path, ignore_patterns: &[String]) -> bool {
         let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        let path_str = path.to_string_lossy();
+        let path_lossy = path.to_string_lossy();
+        let path_bytes = path_lossy.as_bytes();
 
         for pattern in ignore_patterns {
             // Exact filename match
@@ -874,13 +875,14 @@ impl FileFingerprintServiceImpl {
                     return true;
                 }
             }
-            // Directory/partial path match: if path contains the pattern as a path component
-            if path_str.contains(&format!("/{}", pattern)) {
-                return true;
-            }
-            // Endswith for directory patterns like "build"
-            if path_str.ends_with(&format!("/{}", pattern)) {
-                return true;
+            // Directory/partial path match: if path contains "/pattern" as substring
+            if path_bytes.len() > pattern.len() {
+                let needle_len = pattern.len() + 1;
+                for i in 0..=path_bytes.len() - needle_len {
+                    if path_bytes[i] == b'/' && &path_bytes[i + 1..i + needle_len] == pattern.as_bytes() {
+                        return true;
+                    }
+                }
             }
         }
         false
