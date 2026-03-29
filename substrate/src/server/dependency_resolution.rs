@@ -32,12 +32,18 @@ pub enum DependencyScope {
 impl DependencyScope {
     /// Parse a scope string (case-insensitive).
     pub fn from_str_loose(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "compile" | "compileonly" | "api" => DependencyScope::Compile,
-            "runtime" | "implementation" | "runtimeonly" => DependencyScope::Runtime,
-            "test" | "testimplementation" | "testruntimeonly" => DependencyScope::Test,
-            "provided" => DependencyScope::Provided,
-            "system" => DependencyScope::System,
+        match s.as_bytes() {
+            b"compile" | b"compileonly" | b"api"
+            | b"Compile" | b"CompileOnly" | b"Api"
+            | b"COMPILE" | b"COMPILEONLY" | b"API" => DependencyScope::Compile,
+            b"runtime" | b"implementation" | b"runtimeonly"
+            | b"Runtime" | b"Implementation" | b"RuntimeOnly"
+            | b"RUNTIME" | b"IMPLEMENTATION" | b"RUNTIMEONLY" => DependencyScope::Runtime,
+            b"test" | b"testimplementation" | b"testruntimeonly"
+            | b"Test" | b"TestImplementation" | b"TestRuntimeOnly"
+            | b"TEST" | b"TESTIMPLEMENTATION" | b"TESTRUNTIMEONLY" => DependencyScope::Test,
+            b"provided" | b"Provided" | b"PROVIDED" => DependencyScope::Provided,
+            b"system" | b"System" | b"SYSTEM" => DependencyScope::System,
             _ => DependencyScope::Compile,
         }
     }
