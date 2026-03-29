@@ -116,7 +116,7 @@ fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
 
     // Fields — collect public/protected field ABI during single pass
     let fields_count = read_u16(&mut cursor)?;
-    let mut public_field_abi = Vec::with_capacity(fields_count as usize);
+    let mut public_field_abi: Vec<(&str, &str)> = Vec::with_capacity(fields_count as usize);
     for _ in 0..fields_count {
         let flags = read_u16(&mut cursor)?;
         let name_idx = read_u16(&mut cursor)?;
@@ -132,14 +132,14 @@ fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
                 get_utf8(&cp_entries, name_idx),
                 get_utf8(&cp_entries, desc_idx),
             ) {
-                public_field_abi.push(format!("{}:{}", name, desc));
+                public_field_abi.push((name, desc));
             }
         }
     }
 
     // Methods — collect public/protected method ABI during single pass
     let methods_count = read_u16(&mut cursor)?;
-    let mut public_method_abi = Vec::with_capacity(methods_count as usize);
+    let mut public_method_abi: Vec<(&str, &str)> = Vec::with_capacity(methods_count as usize);
     for _ in 0..methods_count {
         let flags = read_u16(&mut cursor)?;
         let name_idx = read_u16(&mut cursor)?;
@@ -155,7 +155,7 @@ fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
                 get_utf8(&cp_entries, name_idx),
                 get_utf8(&cp_entries, desc_idx),
             ) {
-                public_method_abi.push(format!("{}:{}", name, desc));
+                public_method_abi.push((name, desc));
             }
         }
     }
@@ -203,13 +203,27 @@ fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
     // Include public/protected fields (sorted)
     public_field_abi.sort_unstable();
     hasher.update(b"fields=");
-    hasher.update(public_field_abi.join(";").as_bytes());
+    for (i, (name, desc)) in public_field_abi.iter().enumerate() {
+        if i > 0 {
+            hasher.update(b";");
+        }
+        hasher.update(name.as_bytes());
+        hasher.update(b":");
+        hasher.update(desc.as_bytes());
+    }
     hasher.update([0]); // null separator
 
     // Include public/protected methods (sorted)
     public_method_abi.sort_unstable();
     hasher.update(b"methods=");
-    hasher.update(public_method_abi.join(";").as_bytes());
+    for (i, (name, desc)) in public_method_abi.iter().enumerate() {
+        if i > 0 {
+            hasher.update(b";");
+        }
+        hasher.update(name.as_bytes());
+        hasher.update(b":");
+        hasher.update(desc.as_bytes());
+    }
     hasher.update([0]); // null separator
 
 

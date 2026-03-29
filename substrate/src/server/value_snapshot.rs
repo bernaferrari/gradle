@@ -55,7 +55,16 @@ impl ValueSnapshotServiceImpl {
             .collect();
         paths.sort_unstable();
         paths.dedup();
-        paths.join(";")
+        let estimated_len = paths.iter().map(|p| p.len()).sum::<usize>()
+            + paths.len().saturating_sub(1);
+        let mut out = String::with_capacity(estimated_len);
+        for (i, p) in paths.iter().enumerate() {
+            if i > 0 {
+                out.push(';');
+            }
+            out.push_str(p);
+        }
+        out
     }
 
     /// Normalize a comma-separated value list.
@@ -71,7 +80,16 @@ impl ValueSnapshotServiceImpl {
             .collect();
         values.sort_unstable();
         values.dedup();
-        values.join(",")
+        let estimated_len = values.iter().map(|v| v.len()).sum::<usize>()
+            + values.len().saturating_sub(1);
+        let mut out = String::with_capacity(estimated_len);
+        for (i, v) in values.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            out.push_str(v);
+        }
+        out
     }
 
     /// Normalize a key=value map serialization (e.g., "k1=v1;k2=v2").
