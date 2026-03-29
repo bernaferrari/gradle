@@ -720,7 +720,10 @@ impl ConfigurationService for ConfigurationServiceImpl {
 
         // Optionally include command-line properties.
         if filter.is_none() && req.include_inherited {
-            let mut seen_keys: HashSet<String> = entries.iter().map(|e| e.key.clone()).collect();
+            let mut seen_keys: HashSet<String> = HashSet::with_capacity(entries.len() + self.command_line_props.len());
+            for e in &entries {
+                seen_keys.insert(e.key.clone());
+            }
             for kv in self.command_line_props.iter() {
                 if seen_keys.insert(kv.key().clone()) {
                     entries.push(PropertyEntry {
