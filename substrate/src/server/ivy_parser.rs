@@ -59,25 +59,23 @@ pub struct IvyArtifact {
 
 /// Find the start position of `<tag>` (exact match) starting from `from`.
 fn find_open_tag(bytes: &[u8], from: usize, tag: &[u8]) -> Option<usize> {
-    let open = b"<";
-    let needle = {
-        let mut v = open.to_vec();
-        v.extend_from_slice(tag);
-        v
-    };
+    let needle_len = 1 + tag.len();
     let mut pos = from;
-    while pos < bytes.len() {
-        if let Some(idx) = bytes[pos..].windows(needle.len()).position(|w| w == &needle[..]) {
+    while pos + needle_len <= bytes.len() {
+        if let Some(idx) = memchr::memchr(b'<', &bytes[pos..]) {
             let abs = pos + idx;
-            // Ensure it's actually a tag boundary (next char is whitespace or '>')
-            let end = abs + needle.len();
-            if end < bytes.len() {
+            if abs + needle_len > bytes.len() {
+                break;
+            }
+            if &bytes[abs + 1..abs + needle_len] == tag {
+                let end = abs + needle_len;
+                if end >= bytes.len() {
+                    return Some(abs);
+                }
                 let next = bytes[end];
                 if next == b'>' || next == b' ' || next == b'\n' || next == b'\r' || next == b'/' {
                     return Some(abs);
                 }
-            } else {
-                return Some(abs);
             }
             pos = abs + 1;
         } else {
@@ -89,16 +87,11 @@ fn find_open_tag(bytes: &[u8], from: usize, tag: &[u8]) -> Option<usize> {
 
 /// Find the matching closing `</tag>` for a tag opened at `open_pos`.
 fn find_end_tag(bytes: &[u8], open_pos: usize, tag: &[u8]) -> Option<usize> {
-    let close_needle = {
-        let mut v = b"</".to_vec();
-        v.extend_from_slice(tag);
-        v.push(b'>');
-        v
-    };
+    let needle_len = 2 + tag.len(); // </tag>
     let mut pos = open_pos + 1;
-    while pos < bytes.len() {
-        if let Some(idx) = bytes[pos..].windows(close_needle.len()).position(|w| w == &close_needle[..]) {
-            return Some(pos + idx + close_needle.len());
+    while pos + needle_len <= bytes.len() {
+        if bytes[pos] == b'<' && bytes[pos + 1] == b'/' && &bytes[pos + 2..pos + needle_len] == tag && bytes[pos + needle_len] == b'>' {
+            return Some(pos + needle_len + 1);
         }
         pos += 1;
     }
@@ -108,23 +101,22 @@ fn find_end_tag(bytes: &[u8], open_pos: usize, tag: &[u8]) -> Option<usize> {
 /// Extract text content of `<tag>...</tag>` within the range [from, to).
 #[allow(dead_code)]
 fn extract_tag(bytes: &[u8], from: usize, to: usize, tag: &[u8]) -> String {
-    let open_needle = {
-        let mut v = b"<".to_vec();
-        v.extend_from_slice(tag);
-        v.push(b'>');
-        v
-    };
-    if let Some(start) = bytes[from..to].windows(open_needle.len()).position(|w| w == &open_needle[..]) {
-        let content_start = from + start + open_needle.len();
-        let close_needle = {
-            let mut v = b"</".to_vec();
-            v.extend_from_slice(tag);
-            v.push(b'>');
-            v
-        };
-        if let Some(end) = bytes[content_start..to].windows(close_needle.len()).position(|w| w == &close_needle[..]) {
-            return String::from_utf8_lossy(&bytes[content_start..content_start + end]).trim().to_owned();
+    let open_len = 2 + tag.len(); // <tag>
+    let mut pos = from;
+    while pos + open_len <= to {
+        if bytes[pos] == b'<' && &bytes[pos + 1..pos + 1 + tag.len()] == tag && bytes[pos + 1 + tag.len()] == b'>' {
+            let content_start = pos + open_len;
+            let close_len = 3 + tag.len(); // </tag>
+            let mut cpos = content_start;
+            while cpos + close_len <= to {
+                if bytes[cpos] == b'<' && bytes[cpos + 1] == b'/' && &bytes[cpos + 2..cpos + 2 + tag.len()] == tag && bytes[cpos + 2 + tag.len()] == b'>' {
+                    return String::from_utf8_lossy(&bytes[content_start..cpos]).trim().to_owned();
+                }
+                cpos += 1;
+            }
+            break;
         }
+        pos += 1;
     }
     String::new()
 }
@@ -132,17 +124,18 @@ fn extract_tag(bytes: &[u8], from: usize, to: usize, tag: &[u8]) -> String {
 /// Extract an attribute value from a tag at `pos`. Returns the value between
 /// the first `"` after `attr=` and the closing `"`.
 fn extract_attr(bytes: &[u8], from: usize, to: usize, attr: &[u8]) -> Option<String> {
-    let needle = {
-        let mut v = attr.to_vec();
-        v.extend_from_slice(b"=\"");
-        v
-    };
-    if let Some(start) = bytes[from..to].windows(needle.len()).position(|w| w == &needle[..]) {
-        let val_start = from + start + needle.len();
-        if let Some(end) = bytes[val_start..to].iter().position(|&b| b == b'"') {
-            let val = String::from_utf8_lossy(&bytes[val_start..val_start + end]).into_owned();
-            return Some(val);
+    let needle_len = attr.len() + 2; // attr="
+    let mut pos = from;
+    while pos + needle_len <= to {
+        if &bytes[pos..pos + attr.len()] == attr && bytes[pos + attr.len()] == b'=' && bytes[pos + attr.len() + 1] == b'"' {
+            let val_start = pos + needle_len;
+            if let Some(end) = bytes[val_start..to].iter().position(|&b| b == b'"') {
+                let val = String::from_utf8_lossy(&bytes[val_start..val_start + end]).into_owned();
+                return Some(val);
+            }
+            break;
         }
+        pos += 1;
     }
     None
 }

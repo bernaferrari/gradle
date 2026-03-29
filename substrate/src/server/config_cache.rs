@@ -80,17 +80,18 @@ impl ConfigurationCacheServiceImpl {
     }
 
     fn disk_path(&self, cache_key: &str) -> PathBuf {
-        let safe_key = cache_key
-            .chars()
-            .map(|c| {
-                if c.is_alphanumeric() || c == '-' || c == '_' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect::<String>();
-        self.cache_dir.join(format!("{}.bin", safe_key))
+        let mut safe_key = String::with_capacity(cache_key.len());
+        for c in cache_key.chars() {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                safe_key.push(c);
+            } else {
+                safe_key.push('_');
+            }
+        }
+        let mut path = self.cache_dir.clone();
+        path.push(safe_key);
+        path.set_extension("bin");
+        path
     }
 
     fn persist_to_disk(&self, cache_key: &str, entry: &ConfigCacheEntry) {
@@ -116,17 +117,21 @@ impl ConfigurationCacheServiceImpl {
         InvalidationTriggers {
             build_script_hash: req.build_script_hash.clone(),
             settings_script_hash: req.settings_script_hash.clone(),
-            init_script_hashes: req
-                .init_script_hashes
-                .iter()
-                .map(|e| (e.path.clone(), e.hash.clone()))
-                .collect(),
+            init_script_hashes: {
+                let mut v = Vec::with_capacity(req.init_script_hashes.len());
+                for e in &req.init_script_hashes {
+                    v.push((e.path.clone(), e.hash.clone()));
+                }
+                v
+            },
             gradle_version: req.gradle_version.clone(),
-            relevant_system_properties: req
-                .system_properties
-                .iter()
-                .map(|e| (e.key.clone(), e.value.clone()))
-                .collect(),
+            relevant_system_properties: {
+                let mut v = Vec::with_capacity(req.system_properties.len());
+                for e in &req.system_properties {
+                    v.push((e.key.clone(), e.value.clone()));
+                }
+                v
+            },
         }
     }
 
@@ -135,17 +140,21 @@ impl ConfigurationCacheServiceImpl {
         InvalidationTriggers {
             build_script_hash: req.build_script_hash.clone(),
             settings_script_hash: req.settings_script_hash.clone(),
-            init_script_hashes: req
-                .init_script_hashes
-                .iter()
-                .map(|e| (e.path.clone(), e.hash.clone()))
-                .collect(),
+            init_script_hashes: {
+                let mut v = Vec::with_capacity(req.init_script_hashes.len());
+                for e in &req.init_script_hashes {
+                    v.push((e.path.clone(), e.hash.clone()));
+                }
+                v
+            },
             gradle_version: req.gradle_version.clone(),
-            relevant_system_properties: req
-                .system_properties
-                .iter()
-                .map(|e| (e.key.clone(), e.value.clone()))
-                .collect(),
+            relevant_system_properties: {
+                let mut v = Vec::with_capacity(req.system_properties.len());
+                for e in &req.system_properties {
+                    v.push((e.key.clone(), e.value.clone()));
+                }
+                v
+            },
         }
     }
 
@@ -155,7 +164,7 @@ impl ConfigurationCacheServiceImpl {
             return;
         }
         if let Some(mut keys) = self.build_id_index.get_mut(build_id) {
-            if !keys.contains(&cache_key.to_string()) {
+            if !keys.iter().any(|k| k == cache_key) {
                 keys.push(cache_key.to_string());
             }
         } else {
