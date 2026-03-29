@@ -193,7 +193,7 @@ impl JavaCompileExecutor {
                 let path = entry.path();
                 if path.is_dir() {
                     Self::collect_class_files_recursive(&path, files);
-                } else if path.extension().and_then(|e| e.to_str()) == Some("class") {
+                } else if path.extension().is_some_and(|e| e == "class") {
                     files.push(path);
                 }
             }
