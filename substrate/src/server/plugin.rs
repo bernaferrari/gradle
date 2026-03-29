@@ -188,7 +188,7 @@ impl PluginServiceImpl {
 
         // Collect requirements per plugin (owned strings to avoid lifetime issues)
         let mut deps: std::collections::HashMap<String, Vec<String>> =
-            std::collections::HashMap::new();
+            std::collections::HashMap::with_capacity(plugin_ids.len());
         for id in &id_set {
             deps.insert(id.to_string(), Vec::new());
         }
@@ -208,7 +208,7 @@ impl PluginServiceImpl {
         // Kahn's algorithm for topological sort
         // in_degree[plugin] = number of requirements that plugin has (within the set)
         let mut in_degree: std::collections::HashMap<String, usize> =
-            std::collections::HashMap::new();
+            std::collections::HashMap::with_capacity(plugin_ids.len());
         for id in plugin_ids {
             in_degree.insert(id.clone(), 0);
         }
