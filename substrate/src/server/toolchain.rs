@@ -213,7 +213,7 @@ impl ToolchainServiceImpl {
         Self::scan_toolchain_properties(&mut found);
 
         // Deduplicate by java_home path
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = std::collections::HashSet::with_capacity(found.len());
         found.retain(|(home, _)| seen.insert(home.clone()));
 
         found
