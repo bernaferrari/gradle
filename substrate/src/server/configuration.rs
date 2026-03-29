@@ -431,17 +431,12 @@ impl ConfigurationServiceImpl {
         // --- Layer 3: Environment variables ---
         // Gradle checks ORG_GRADLE_PROJECT_<UPPER_CASE_NAME> first, then
         // GRADLE_PROPERTY_<UPPER_CASE_NAME>.
-        let env_key = format!(
-            "ORG_GRADLE_PROJECT_{}",
-            property_name.replace('.', "_").to_uppercase()
-        );
+        let env_suffix = property_name.replace('.', "_").to_uppercase();
+        let env_key = format!("ORG_GRADLE_PROJECT_{}", env_suffix);
         if let Ok(value) = std::env::var(&env_key) {
             return Some((value, PropertySource::EnvVariable.as_str().to_string()));
         }
-        let env_key_alt = format!(
-            "GRADLE_PROPERTY_{}",
-            property_name.replace('.', "_").to_uppercase()
-        );
+        let env_key_alt = format!("GRADLE_PROPERTY_{}", env_suffix);
         if let Ok(value) = std::env::var(&env_key_alt) {
             return Some((value, PropertySource::EnvVariable.as_str().to_string()));
         }
