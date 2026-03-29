@@ -105,7 +105,7 @@ fn hash_file_with_algorithm(
         HashAlgorithm::Md5 => {
             let mut hasher = Md5::new();
             if with_signature {
-                hasher.update(compute_gradle_signature());
+                hasher.update(gradle_signature());
             }
             stream_hash(&mut reader, &mut hasher, path, file_len)?;
             Ok(hasher.finalize().to_vec())
@@ -196,20 +196,19 @@ fn stream_hash_blake3<R: Read>(
     Ok(())
 }
 
-/// Compute the Gradle DefaultStreamHasher signature prefix.
+/// Gradle DefaultStreamHasher signature prefix, computed once.
 /// signature = MD5(int32_le(9) + "SIGNATURE" + int32_le(52) + "CLASS:org.gradle.internal.hash.DefaultStreamHasher")
-fn compute_gradle_signature() -> [u8; 16] {
-    let mut sig_hasher = Md5::new();
+static GRADLE_SIGNATURE: std::sync::OnceLock<[u8; 16]> = std::sync::OnceLock::new();
 
-    let sig_label = b"SIGNATURE";
-    sig_hasher.update((sig_label.len() as i32).to_le_bytes());
-    sig_hasher.update(sig_label);
-
-    let class_name = b"CLASS:org.gradle.internal.hash.DefaultStreamHasher";
-    sig_hasher.update((class_name.len() as i32).to_le_bytes());
-    sig_hasher.update(class_name);
-
-    sig_hasher.finalize().into()
+fn gradle_signature() -> &'static [u8; 16] {
+    GRADLE_SIGNATURE.get_or_init(|| {
+        let mut sig_hasher = md5::Md5::new();
+        sig_hasher.update(9i32.to_le_bytes());
+        sig_hasher.update(b"SIGNATURE");
+        sig_hasher.update(52i32.to_le_bytes());
+        sig_hasher.update(b"CLASS:org.gradle.internal.hash.DefaultStreamHasher");
+        sig_hasher.finalize().into()
+    })
 }
 
 #[tonic::async_trait]
@@ -413,10 +412,7 @@ mod tests {
 
     #[test]
     fn test_gradle_signature_deterministic() {
-        let sig1 = compute_gradle_signature();
-        let sig2 = compute_gradle_signature();
-        assert_eq!(sig1, sig2);
-        assert_eq!(sig1.len(), 16);
+        assert_eq!(gradle_signature().len(), 16);
     }
 
     // --- SHA3-256 tests ---
@@ -976,7 +972,7 @@ mod tests {
         // The hash of an empty file with Gradle signature should equal MD5(signature || empty)
         let expected = {
             let mut hasher = Md5::new();
-            hasher.update(compute_gradle_signature());
+            hasher.update(gradle_signature());
             hasher.finalize().to_vec()
         };
         assert_eq!(resp.results[0].hash_bytes, expected);
