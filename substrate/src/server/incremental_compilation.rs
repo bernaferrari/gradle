@@ -208,7 +208,8 @@ impl IncrementalCompilationServiceImpl {
         let mut results = Vec::with_capacity(target_files.len().min(64));
 
         // Build set of files to analyze
-        let targets: HashSet<&str> = target_files.iter().map(|s| s.as_str()).collect();
+        let mut targets: HashSet<&str> = HashSet::with_capacity(target_files.len());
+        targets.extend(target_files.iter().map(|s| s.as_str()));
 
         for output_dir in output_dirs {
             let dir = Path::new(output_dir);
