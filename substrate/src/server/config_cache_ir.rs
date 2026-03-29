@@ -58,21 +58,18 @@ impl InvalidationTriggers {
             .map(|(p, h)| (p.as_str(), h.as_str()))
             .collect();
 
-        for path in init_map.keys() {
-            if !cur_init_map.contains_key(path) {
-                changed.push(format!("init_script_removed:{}", path));
+        for (path, hash) in &init_map {
+            match cur_init_map.get(path) {
+                None => changed.push(format!("init_script_removed:{}", path)),
+                Some(cur_hash) if hash != cur_hash => {
+                    changed.push(format!("init_script_changed:{}", path));
+                }
+                _ => {}
             }
         }
         for path in cur_init_map.keys() {
             if !init_map.contains_key(path) {
                 changed.push(format!("init_script_added:{}", path));
-            }
-        }
-        for (path, hash) in &init_map {
-            if let Some(cur_hash) = cur_init_map.get(path) {
-                if hash != cur_hash {
-                    changed.push(format!("init_script_changed:{}", path));
-                }
             }
         }
 
@@ -88,21 +85,18 @@ impl InvalidationTriggers {
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
 
-        for key in prop_map.keys() {
-            if !cur_prop_map.contains_key(key) {
-                changed.push(format!("property_removed:{}", key));
+        for (key, val) in &prop_map {
+            match cur_prop_map.get(key) {
+                None => changed.push(format!("property_removed:{}", key)),
+                Some(cur_val) if val != cur_val => {
+                    changed.push(format!("property_changed:{}", key));
+                }
+                _ => {}
             }
         }
         for key in cur_prop_map.keys() {
             if !prop_map.contains_key(key) {
                 changed.push(format!("property_added:{}", key));
-            }
-        }
-        for (key, val) in &prop_map {
-            if let Some(cur_val) = cur_prop_map.get(key) {
-                if val != cur_val {
-                    changed.push(format!("property_changed:{}", key));
-                }
             }
         }
 
