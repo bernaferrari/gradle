@@ -101,11 +101,10 @@ impl BuildCacheOrchestrationServiceImpl {
         let to_remove_count = self.stored_keys.len() - MAX_STORED_KEYS / 2;
 
         // Collect entries sorted by sequence number (oldest first)
-        let mut sequenced: Vec<(i64, String)> = self
-            .stored_keys
-            .iter()
-            .map(|entry| (entry.value().sequence, entry.key().clone()))
-            .collect();
+        let mut sequenced: Vec<(i64, String)> = Vec::with_capacity(self.stored_keys.len());
+        for entry in self.stored_keys.iter() {
+            sequenced.push((entry.value().sequence, entry.key().clone()));
+        }
         sequenced.sort_unstable_by_key(|(seq, _)| *seq);
 
         for (_seq, key) in sequenced.into_iter().take(to_remove_count) {
@@ -132,7 +131,8 @@ impl BuildCacheOrchestrationServiceImpl {
 
         // 2. Input properties — sorted by property name, each as (name, value_hash)
         //    Gradle's algorithm: putString(propertyName) then valueSnapshot.appendToHasher()
-        let mut sorted_props: Vec<_> = input_property_hashes.iter().collect();
+        let mut sorted_props: Vec<_> = Vec::with_capacity(input_property_hashes.len());
+        sorted_props.extend(input_property_hashes.iter());
         sorted_props.sort_unstable_by_key(|(k, _)| *k);
         for (key, hash) in sorted_props {
             gradle_put_string(&mut hasher, key);
@@ -143,7 +143,8 @@ impl BuildCacheOrchestrationServiceImpl {
         }
 
         // 3. Input file hashes — sorted by property name, each as (name, fingerprint_hash)
-        let mut sorted_files: Vec<_> = input_file_hashes.iter().collect();
+        let mut sorted_files: Vec<_> = Vec::with_capacity(input_file_hashes.len());
+        sorted_files.extend(input_file_hashes.iter());
         sorted_files.sort_unstable_by_key(|(k, _)| *k);
         for (key, hash) in sorted_files {
             gradle_put_string(&mut hasher, key);
@@ -153,7 +154,8 @@ impl BuildCacheOrchestrationServiceImpl {
         }
 
         // 4. Output property names — sorted alphabetically
-        let mut sorted_outputs: Vec<_> = output_property_names.iter().collect();
+        let mut sorted_outputs: Vec<_> = Vec::with_capacity(output_property_names.len());
+        sorted_outputs.extend(output_property_names.iter());
         sorted_outputs.sort_unstable();
         for output in sorted_outputs {
             gradle_put_string(&mut hasher, output);
