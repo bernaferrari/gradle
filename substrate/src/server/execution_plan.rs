@@ -143,7 +143,9 @@ impl ExecutionPlanServiceImpl {
     /// Persist an execution record to the history service.
     fn persist_record(&self, work_identity: &str, record: &ExecutionRecord) {
         if let Some(ph) = &self.persistent_history {
-            let key = format!("__exec_record__:{}", work_identity);
+            let mut key = String::with_capacity(16 + work_identity.len());
+            key.push_str("__exec_record__:");
+            key.push_str(work_identity);
             if let Ok(state) = bincode::serialize(record) {
                 let ts = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -239,7 +241,8 @@ impl ExecutionPlanServiceImpl {
         let mut hasher = Md5::new();
 
         // Include scalar input properties in sorted order
-        let mut sorted_props: Vec<_> = work.input_properties.iter().collect();
+        let mut sorted_props: Vec<_> = Vec::with_capacity(work.input_properties.len());
+        sorted_props.extend(work.input_properties.iter());
         sorted_props.sort_unstable_by_key(|(k, _)| *k);
         for (key, value) in &sorted_props {
             hasher.update(key.as_bytes());
@@ -249,7 +252,8 @@ impl ExecutionPlanServiceImpl {
         }
 
         // Include file fingerprints in sorted order
-        let mut sorted_files: Vec<_> = work.input_file_fingerprints.iter().collect();
+        let mut sorted_files: Vec<_> = Vec::with_capacity(work.input_file_fingerprints.len());
+        sorted_files.extend(work.input_file_fingerprints.iter());
         sorted_files.sort_unstable_by_key(|(k, _)| *k);
         for (key, hash) in &sorted_files {
             hasher.update(key.as_bytes());
