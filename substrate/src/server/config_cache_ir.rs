@@ -47,16 +47,16 @@ impl InvalidationTriggers {
         }
 
         // Init scripts: check for added/removed/changed
-        let init_map: std::collections::HashMap<&str, &str> = self
-            .init_script_hashes
-            .iter()
-            .map(|(p, h)| (p.as_str(), h.as_str()))
-            .collect();
-        let cur_init_map: std::collections::HashMap<&str, &str> = current
-            .init_script_hashes
-            .iter()
-            .map(|(p, h)| (p.as_str(), h.as_str()))
-            .collect();
+        let mut init_map: std::collections::HashMap<&str, &str> =
+            std::collections::HashMap::with_capacity(self.init_script_hashes.len());
+        for (p, h) in &self.init_script_hashes {
+            init_map.insert(p.as_str(), h.as_str());
+        }
+        let mut cur_init_map: std::collections::HashMap<&str, &str> =
+            std::collections::HashMap::with_capacity(current.init_script_hashes.len());
+        for (p, h) in &current.init_script_hashes {
+            cur_init_map.insert(p.as_str(), h.as_str());
+        }
 
         for (path, hash) in &init_map {
             match cur_init_map.get(path) {
@@ -74,16 +74,16 @@ impl InvalidationTriggers {
         }
 
         // System properties: check for added/removed/changed
-        let prop_map: std::collections::HashMap<&str, &str> = self
-            .relevant_system_properties
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect();
-        let cur_prop_map: std::collections::HashMap<&str, &str> = current
-            .relevant_system_properties
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect();
+        let mut prop_map: std::collections::HashMap<&str, &str> =
+            std::collections::HashMap::with_capacity(self.relevant_system_properties.len());
+        for (k, v) in &self.relevant_system_properties {
+            prop_map.insert(k.as_str(), v.as_str());
+        }
+        let mut cur_prop_map: std::collections::HashMap<&str, &str> =
+            std::collections::HashMap::with_capacity(current.relevant_system_properties.len());
+        for (k, v) in &current.relevant_system_properties {
+            cur_prop_map.insert(k.as_str(), v.as_str());
+        }
 
         for (key, val) in &prop_map {
             match cur_prop_map.get(key) {
