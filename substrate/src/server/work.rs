@@ -81,7 +81,8 @@ impl WorkService for WorkServiceImpl {
         let req = request.into_inner();
 
         // Compute a deterministic input hash from sorted key-value pairs.
-        let mut input_parts: Vec<(&String, &String)> = req.input_properties.iter().collect();
+        let mut input_parts: Vec<(&String, &String)> = Vec::with_capacity(req.input_properties.len());
+        input_parts.extend(req.input_properties.iter());
         input_parts.sort_unstable_by(|(ka, va), (kb, vb)| {
             let key_cmp = ka.as_str().cmp(kb.as_str());
             if key_cmp == std::cmp::Ordering::Equal {
