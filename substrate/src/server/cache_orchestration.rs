@@ -207,14 +207,14 @@ impl BuildCacheOrchestrationService for BuildCacheOrchestrationServiceImpl {
         request: Request<ProbeCacheRequest>,
     ) -> Result<Response<ProbeCacheResponse>, Status> {
         let req = request.into_inner();
-        let key = String::from_utf8_lossy(&req.cache_key).into_owned();
+        let hex_key = hex::encode(&req.cache_key);
+        let key = String::from_utf8(req.cache_key).unwrap_or_default();
 
         // First check the metadata index (tracks what was stored this session)
         if let Some(entry) = self.stored_keys.get(&key) {
             // If we have a local cache reference, verify the entry actually exists on disk
             if let Some(cache) = &self.local_cache {
                 // The cache service hex-encodes keys, so we must match that format
-                let hex_key = hex::encode(&req.cache_key);
                 match cache.contains(&hex_key).await {
                     Ok(true) => {
                         self.cache_hits.fetch_add(1, Ordering::Relaxed);
@@ -254,7 +254,6 @@ impl BuildCacheOrchestrationService for BuildCacheOrchestrationServiceImpl {
 
         // Not in metadata — check local cache directly for entries stored before this session
         if let Some(cache) = &self.local_cache {
-            let hex_key = hex::encode(&req.cache_key);
             if let Ok(true) = cache.contains(&hex_key).await {
                 self.cache_hits.fetch_add(1, Ordering::Relaxed);
                 return Ok(Response::new(ProbeCacheResponse {
@@ -280,7 +279,7 @@ impl BuildCacheOrchestrationService for BuildCacheOrchestrationServiceImpl {
         request: Request<StoreOutputsRequest>,
     ) -> Result<Response<StoreOutputsResponse>, Status> {
         let req = request.into_inner();
-        let key = String::from_utf8_lossy(&req.cache_key).into_owned();
+        let key = String::from_utf8(req.cache_key).unwrap_or_default();
 
         // Use monotonically increasing sequence for eviction ordering
         let seq = self.sequence.fetch_add(1, Ordering::Relaxed);
