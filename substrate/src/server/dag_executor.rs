@@ -245,9 +245,9 @@ impl DagExecutorServiceImpl {
     /// Try to mark dependents as ready after a task finishes.
     /// Returns list of newly ready task paths.
     fn try_unblock_dependents(execution: &BuildExecution, finished_task: &str) -> Vec<String> {
-        let mut newly_ready = Vec::new();
+        let dep_count = execution.dependents.get(finished_task).map_or(0, |d| d.len());
+        let mut newly_ready = Vec::with_capacity(dep_count);
         if let Some(deps) = execution.dependents.get(finished_task) {
-            newly_ready.reserve(deps.len());
             for dependent in deps {
                 if let Some(slot) = execution.tasks.get(dependent) {
                     if slot.status != "PENDING" {
@@ -1145,14 +1145,13 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 executing.remove(&req.task_path);
             }
 
-            let mut newly_ready = Vec::new();
-
-            if req.success {
-                newly_ready = Self::try_unblock_dependents(&execution, &req.task_path);
+            let newly_ready = if req.success {
+                Self::try_unblock_dependents(&execution, &req.task_path)
             } else {
                 execution.failure_message = req.failure_message.clone();
                 Self::skip_transitive_dependents(&mut execution, &req.task_path);
-            }
+                Vec::new()
+            };
 
             let was_executing = execution.status == "EXECUTING";
             Self::check_build_completion(&mut execution);
