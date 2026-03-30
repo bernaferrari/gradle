@@ -90,10 +90,18 @@ fn find_end_tag(bytes: &[u8], open_pos: usize, tag: &[u8]) -> Option<usize> {
     let needle_len = 2 + tag.len(); // </tag>
     let mut pos = open_pos + 1;
     while pos + needle_len <= bytes.len() {
-        if bytes[pos] == b'<' && bytes[pos + 1] == b'/' && &bytes[pos + 2..pos + needle_len] == tag && bytes[pos + needle_len] == b'>' {
-            return Some(pos + needle_len + 1);
+        if let Some(idx) = memchr::memchr(b'<', &bytes[pos..]) {
+            let abs = pos + idx;
+            if abs + needle_len > bytes.len() {
+                break;
+            }
+            if bytes[abs + 1] == b'/' && &bytes[abs + 2..abs + needle_len] == tag && bytes[abs + needle_len] == b'>' {
+                return Some(abs + needle_len + 1);
+            }
+            pos = abs + 1;
+        } else {
+            break;
         }
-        pos += 1;
     }
     None
 }
