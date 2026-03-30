@@ -1,3 +1,8 @@
+//! Server implementations for all 38 gRPC services.
+//!
+//! Services are organized by subsystem. Authoritative subsystems have their
+//! mode controlled via `SubsystemModes` in `authoritative.rs`.
+
 pub mod artifact_publishing;
 pub mod ast_extractor;
 pub mod authoritative;
@@ -6,6 +11,7 @@ pub mod build_comparison;
 pub mod build_event_stream;
 pub mod build_init;
 pub mod build_layout;
+pub mod build_model_cache;
 pub mod build_metrics;
 pub mod build_operations;
 pub mod build_plan_ir;
@@ -32,12 +38,15 @@ pub mod file_tree;
 pub mod file_watch;
 pub mod garbage_collection;
 pub mod groovy_parser;
+pub mod ide_lsp;
 pub mod hash;
 pub mod incremental_compilation;
 pub mod ivy_parser;
+pub mod native_compile;
 pub mod parallel_scheduler;
 pub mod parser_service;
 pub mod plugin;
+pub mod platform;
 pub mod problem_reporting;
 pub mod remote_cache;
 pub mod resource_management;

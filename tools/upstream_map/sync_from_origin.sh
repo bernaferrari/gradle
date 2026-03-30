@@ -106,6 +106,22 @@ if ! ./tools/upstream_map/check_drift.sh; then
 fi
 note_bead "Upstream drift check passed."
 
+echo "Regenerating proto stubs..."
+./gradlew -q :rust-bridge:syncProtos
+cargo build -p gradle-substrate-daemon 2>/dev/null
+python3 tools/upstream_map/check_proto_lock.py --update
+python3 tools/upstream_map/proto_version.py --update
+note_bead "Proto stubs regenerated and locks updated."
+
+echo "Running upstream drift check (post-regen)..."
+if ! ./tools/upstream_map/check_drift.sh; then
+  rollback
+  note_bead "Post-regeneration drift check failed."
+  echo "Drift checks failed after proto regeneration."
+  exit 1
+fi
+note_bead "Post-regeneration drift check passed."
+
 echo "Running strict stabilization (${STABILIZATION_MODE})..."
 if ! ./tools/stabilization/run_strict_stabilization.sh "$STABILIZATION_MODE"; then
   rollback
