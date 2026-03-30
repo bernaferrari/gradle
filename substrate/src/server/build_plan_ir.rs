@@ -56,6 +56,13 @@ pub struct CanonicalBuildPlanToolchainRequest {
 
 impl CanonicalBuildPlan {
     pub fn normalized(mut self) -> Self {
+        self.normalize_mut();
+        self
+    }
+
+    /// In-place normalization — sorts projects, tasks, dependencies, toolchains.
+    /// Use when the caller already has a mutable reference to avoid cloning.
+    pub fn normalize_mut(&mut self) {
         self.projects.sort_unstable_by(|a, b| {
             (&a.path, &a.name, &a.project_dir).cmp(&(&b.path, &b.name, &b.project_dir))
         });
@@ -88,8 +95,6 @@ impl CanonicalBuildPlan {
                 &b.implementation,
             ))
         });
-
-        self
     }
 }
 
@@ -107,12 +112,19 @@ pub fn canonical_json(plan: &CanonicalBuildPlan) -> Result<String, serde_json::E
     serde_json::to_string(&plan.clone().normalized())
 }
 
-pub fn fingerprint_sha256_hex(plan: &CanonicalBuildPlan) -> Result<String, serde_json::Error> {
-    let canonical = canonical_json(plan)?;
+/// Fingerprint an already-normalized plan (no clone needed).
+pub fn fingerprint_normalized(plan: &CanonicalBuildPlan) -> Result<String, serde_json::Error> {
+    let canonical = serde_json::to_string(plan)?;
     let mut hasher = Sha256::new();
     hasher.update(canonical.as_bytes());
     let digest = hasher.finalize();
     Ok(crate::server::cache::hex::encode(digest.as_ref()))
+}
+
+pub fn fingerprint_sha256_hex(plan: &CanonicalBuildPlan) -> Result<String, serde_json::Error> {
+    let mut plan = plan.clone();
+    plan.normalize_mut();
+    fingerprint_normalized(&plan)
 }
 
 pub fn to_proto(plan: &CanonicalBuildPlan) -> BuildPlan {
@@ -216,8 +228,10 @@ pub fn from_proto(plan: &BuildPlan) -> CanonicalBuildPlan {
 }
 
 pub fn to_envelope(plan: &CanonicalBuildPlan) -> Result<BuildPlanEnvelope, serde_json::Error> {
-    let proto_plan = to_proto(plan);
-    let fingerprint = fingerprint_sha256_hex(plan)?;
+    let mut normalized = plan.clone();
+    normalized.normalize_mut();
+    let proto_plan = to_proto(&normalized);
+    let fingerprint = fingerprint_normalized(&normalized)?;
     Ok(BuildPlanEnvelope {
         plan: Some(proto_plan),
         plan_fingerprint_sha256: fingerprint,
