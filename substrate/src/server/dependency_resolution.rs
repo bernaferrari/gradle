@@ -234,6 +234,21 @@ impl DependencyResolutionServiceImpl {
         }
     }
 
+    /// Convert a Maven group id ("org.gradle") to a path ("org/gradle").
+    /// Pre-allocates the result string to avoid repeated `replace` allocations.
+    fn group_to_path(group: &str) -> String {
+        let dot_count = group.bytes().filter(|&b| b == b'.').count();
+        let mut path = String::with_capacity(group.len() + dot_count);
+        for b in group.bytes() {
+            if b == b'.' {
+                path.push('/');
+            } else {
+                path.push(b as char);
+            }
+        }
+        path
+    }
+
     /// Compute the local filesystem path for an artifact using Maven repository layout.
     fn artifact_path(
         &self,
@@ -243,7 +258,7 @@ impl DependencyResolutionServiceImpl {
         classifier: &str,
         extension: &str,
     ) -> PathBuf {
-        let group_path = group.replace('.', "/");
+        let group_path = Self::group_to_path(group);
         let filename = if classifier.is_empty() {
             format!("{}-{}.{}", name, version, extension)
         } else {
@@ -469,7 +484,7 @@ impl DependencyResolutionServiceImpl {
         name: &str,
         repo: &RepositoryDescriptor,
     ) -> Result<MavenMetadata, String> {
-        let group_path = group.replace('.', "/");
+        let group_path = Self::group_to_path(group);
         let path = format!("{}/{}/maven-metadata.xml", group_path, name);
         let req = self.build_request(repo, &path);
 
@@ -492,7 +507,15 @@ impl DependencyResolutionServiceImpl {
     }
 
     fn artifact_cache_key(group: &str, name: &str, version: &str, classifier: &str) -> String {
-        format!("{}:{}:{}:{}", group, name, version, classifier)
+        let mut key = String::with_capacity(group.len() + name.len() + version.len() + classifier.len() + 3);
+        key.push_str(group);
+        key.push(':');
+        key.push_str(name);
+        key.push(':');
+        key.push_str(version);
+        key.push(':');
+        key.push_str(classifier);
+        key
     }
 
     /// Fetch a POM file from a Maven repository and parse it.
@@ -503,7 +526,7 @@ impl DependencyResolutionServiceImpl {
         version: &str,
         repo: &RepositoryDescriptor,
     ) -> Result<String, String> {
-        let group_path = group.replace('.', "/");
+        let group_path = Self::group_to_path(group);
         let path = format!(
             "{}/{}/{}/{}-{}.pom",
             group_path, name, version, name, version
@@ -798,7 +821,10 @@ impl DependencyResolutionServiceImpl {
                 for (idx, dep) in deps.iter().enumerate() {
                     let key = (dep.group.clone(), dep.name.clone());
                     // Check if a forced version exists (key is "group:name" -> version)
-                    let forced_key = format!("{}:{}", dep.group, dep.name);
+                    let mut forced_key = String::with_capacity(dep.group.len() + dep.name.len() + 1);
+                    forced_key.push_str(&dep.group);
+                    forced_key.push(':');
+                    forced_key.push_str(&dep.name);
                     if let Some(forced_ver) = forced.get(&forced_key) {
                         if dep.selected_version == *forced_ver {
                             best.insert(key, idx);
@@ -870,7 +896,10 @@ impl DependencyResolutionServiceImpl {
 
                 for (idx, dep) in deps.iter().enumerate() {
                     let key = (dep.group.clone(), dep.name.clone());
-                    let pref_key = format!("{}:{}", dep.group, dep.name);
+                    let mut pref_key = String::with_capacity(dep.group.len() + dep.name.len() + 1);
+                    pref_key.push_str(&dep.group);
+                    pref_key.push(':');
+                    pref_key.push_str(&dep.name);
                     let is_preferred = preferred
                         .get(&pref_key)
                         .map(|v| dep.selected_version == *v)
@@ -881,8 +910,10 @@ impl DependencyResolutionServiceImpl {
                         best.insert(key, idx);
                     } else if let Some(&prev_idx) = best.get(&key) {
                         // Check if previous was preferred — if so, keep it
-                        let prev_key =
-                            format!("{}:{}", deps[prev_idx].group, deps[prev_idx].name);
+                        let mut prev_key = String::with_capacity(deps[prev_idx].group.len() + deps[prev_idx].name.len() + 1);
+                        prev_key.push_str(&deps[prev_idx].group);
+                        prev_key.push(':');
+                        prev_key.push_str(&deps[prev_idx].name);
                         let prev_preferred = preferred
                             .get(&prev_key)
                             .map(|v| deps[prev_idx].selected_version == *v)
@@ -1357,7 +1388,7 @@ impl DependencyResolutionServiceImpl {
             let artifact_url = format!(
                 "{}/{}/{}/{}-{}.jar",
                 repo_base,
-                group.replace('.', "/"),
+                Self::group_to_path(&group),
                 name,
                 name,
                 selected_version
@@ -1404,7 +1435,7 @@ impl DependencyResolutionServiceImpl {
         let artifact_url = format!(
             "{}/{}/{}/{}-{}.jar",
             repo_base,
-            group.replace('.', "/"),
+            Self::group_to_path(&group),
             name,
             name,
             selected_version
