@@ -401,8 +401,8 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
             }
 
             // Fallback: legacy input_hashes comparison.
-            let mut cached = entry.input_hashes.clone();
-            let mut requested = req.input_hashes.clone();
+            let mut cached = entry.input_hashes;
+            let mut requested = req.input_hashes;
             cached.sort_unstable();
             requested.sort_unstable();
             if cached == requested {
