@@ -696,7 +696,14 @@ fn extract_class_references(data: &[u8]) -> Vec<String> {
     let cp_count = u16::from_be_bytes([data[8], data[9]]) as usize;
     refs.reserve(cp_count / 4); // roughly 1/4 of constant pool entries are class refs
     let mut offset = 10;
-    let mut utf8_strings: HashMap<usize, String> = HashMap::with_capacity(cp_count);
+
+    // Store UTF8 string locations as (offset, len) ranges instead of allocating Strings.
+    // Only convert to String when a CONSTANT_Class actually references them.
+    let mut utf8_entries: HashMap<usize, (usize, usize)> = HashMap::with_capacity(cp_count);
+
+    // Collect CONSTANT_Class name indices first for a two-pass approach that
+    // avoids allocating Strings for unreferenced UTF8 entries.
+    let mut class_name_indices: Vec<usize> = Vec::with_capacity(cp_count / 4);
 
     for idx in 1..cp_count {
         if offset >= data.len() {
@@ -715,8 +722,7 @@ fn extract_class_references(data: &[u8]) -> Vec<String> {
                 if offset + len > data.len() {
                     break;
                 }
-                let s = String::from_utf8_lossy(&data[offset..offset + len]).into_owned();
-                utf8_strings.insert(idx, s);
+                utf8_entries.insert(idx, (offset, len));
                 offset += len;
             }
             3 | 4 => offset += 4,
@@ -730,12 +736,7 @@ fn extract_class_references(data: &[u8]) -> Vec<String> {
                 }
                 let name_idx = u16::from_be_bytes([data[offset], data[offset + 1]]) as usize;
                 offset += 2;
-                if let Some(name) = utf8_strings.get(&name_idx) {
-                    // Skip array types and primitives
-                    if !name.starts_with('[') && !is_primitive_descriptor(name) {
-                        refs.push(name.clone());
-                    }
-                }
+                class_name_indices.push(name_idx);
             }
             8 => offset += 2,
             9..=12 => offset += 4,
@@ -743,6 +744,17 @@ fn extract_class_references(data: &[u8]) -> Vec<String> {
             17 => offset += 4,
             19 => offset += 2,
             _ => break,
+        }
+    }
+
+    // Now resolve only the UTF8 strings that are actually referenced by class entries
+    for name_idx in &class_name_indices {
+        if let Some(&(utf8_offset, utf8_len)) = utf8_entries.get(name_idx) {
+            let name = String::from_utf8_lossy(&data[utf8_offset..utf8_offset + utf8_len]);
+            // Skip array types and primitives
+            if !name.starts_with('[') && !is_primitive_descriptor(&name) {
+                refs.push(name.into_owned());
+            }
         }
     }
 
