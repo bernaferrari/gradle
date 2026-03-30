@@ -27,6 +27,8 @@ fn main() {
         "proto/v1/jvmhost.proto",
         "proto/v1/parser.proto",
         "proto/v1/versioncatalog.proto",
+        "proto/v1/ide.proto",
+        "proto/v1/native_compile.proto",
     ];
 
     tonic_build::configure()

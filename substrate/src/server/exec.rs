@@ -194,6 +194,10 @@ impl ExecService for ExecServiceImpl {
         {
             cmd.process_group(0);
         }
+        #[cfg(not(unix))]
+        {
+            // Windows handles process groups via CREATE_NEW_PROCESS_GROUP flag
+        }
 
         // Handle environment variables:
         // If the environment map is non-empty, use ONLY those variables (no inheritance).

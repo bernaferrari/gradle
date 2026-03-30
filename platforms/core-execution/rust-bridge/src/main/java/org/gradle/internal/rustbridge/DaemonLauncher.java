@@ -21,6 +21,7 @@ public class DaemonLauncher {
     private static final String SOCKET_NAME = "substrate.sock";
     private static final String JVM_HOST_SOCKET_NAME = "jvm-host.sock";
     private static final String SUBSTRATE_DIR_NAME = ".gradle-substrate";
+    private static final String BINARY_NAME = "gradle-substrate-daemon";
 
     private final File daemonBinary;
     private final File socketDirectory;
@@ -46,6 +47,50 @@ public class DaemonLauncher {
 
     public static DaemonLauncher withJvmHost(File daemonBinary, File socketDirectory) {
         return new DaemonLauncher(daemonBinary, socketDirectory, false, true);
+    }
+
+    /**
+     * Resolve the substrate daemon binary for the current platform.
+     * Tries platform-specific path first, then generic fallback.
+     */
+    public static File resolveBinary(File installDir) {
+        String platform = detectPlatform();
+        File platformSpecific = new File(installDir, "lib/substrate/" + BINARY_NAME + "-" + platform);
+        if (platformSpecific.exists()) {
+            return platformSpecific;
+        }
+        // Windows uses .exe extension
+        if (platform.contains("windows")) {
+            File withExe = new File(installDir, "lib/substrate/" + BINARY_NAME + "-" + platform + ".exe");
+            if (withExe.exists()) {
+                return withExe;
+            }
+        }
+        // Fallback to generic path
+        return new File(installDir, "lib/" + BINARY_NAME);
+    }
+
+    private static String detectPlatform() {
+        String osName = System.getProperty("os.name", "").toLowerCase();
+        String osArch = System.getProperty("os.arch", "").toLowerCase();
+
+        String os;
+        if (osName.contains("win")) {
+            os = "windows";
+        } else if (osName.contains("mac")) {
+            os = "macos";
+        } else {
+            os = "linux";
+        }
+
+        String arch;
+        if (osArch.contains("aarch64") || osArch.contains("arm64")) {
+            arch = "aarch64";
+        } else {
+            arch = "x86_64";
+        }
+
+        return os + "-" + arch;
     }
 
     public String getSocketPath() {

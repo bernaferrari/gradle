@@ -124,6 +124,10 @@ struct Args {
     /// Remote cache password for HTTP Basic auth
     #[arg(long, env = "SUBSTRATE_REMOTE_CACHE_PASSWORD")]
     remote_cache_password: Option<String>,
+
+    /// Run as LSP server over stdio instead of gRPC daemon
+    #[arg(long)]
+    lsp: bool,
 }
 
 fn init_logging(level: &str) {
@@ -166,6 +170,10 @@ async fn shutdown_signal() {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     init_logging(&args.log_level);
+
+    if args.lsp {
+        return Ok(gradle_substrate_daemon::server::ide_lsp::run_lsp_server()?);
+    }
 
     let socket_path = PathBuf::from(&args.socket_path);
 
