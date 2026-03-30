@@ -794,8 +794,13 @@ impl NormalizationStrategy {
     }
 
     /// Replace a path entry with a hash-based identifier for HashOnly strategy.
+    /// Uses zero-padded hex to avoid collisions from leading-zero stripping.
     fn hash_only_path(hash: &[u8]) -> String {
-        format!("hash-{:x}", Md5::digest(hash))
+        let hex = crate::server::cache::hex::encode(hash);
+        let mut s = String::with_capacity(5 + hex.len());
+        s.push_str("hash-");
+        s.push_str(&hex);
+        s
     }
 }
 
