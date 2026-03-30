@@ -16,12 +16,15 @@ message StartWatchingRequest {
   string root_path = 1;
   repeated string include_patterns = 2;
   repeated string exclude_patterns = 3;
+  int32 debounce_ms = 4;       // debounce interval in ms (0 = default 100ms)
+  bool follow_symlinks = 5;    // whether to follow symlinks when resolving paths
 }
 
 message StartWatchingResponse {
   bool watching = 1;
   string watch_id = 2;
   int64 files_watched = 3;
+  bool polling_mode = 4;       // true if using polling fallback (network FS, watcher error)
 }
 
 message StopWatchingRequest { string watch_id = 1; }
@@ -48,4 +51,5 @@ message GetWatchStatsResponse {
   int64 changes_detected = 2;
   int64 last_poll_time_ms = 3;
   int64 watch_start_time_ms = 4;
+  bool polling_mode = 5;
 }

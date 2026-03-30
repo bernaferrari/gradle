@@ -68,6 +68,10 @@ service PluginService {
   rpc HasPlugin(HasPluginRequest) returns (HasPluginResponse);
   rpc GetAppliedPlugins(GetAppliedPluginsRequest) returns (GetAppliedPluginsResponse);
   rpc CheckPluginCompatibility(CheckPluginCompatibilityRequest) returns (CheckPluginCompatibilityResponse);
+  rpc GetExtension(GetExtensionRequest) returns (GetExtensionResponse);
+  rpc GetExtensions(GetExtensionsRequest) returns (GetExtensionsResponse);
+  rpc RegisterConvention(RegisterConventionRequest) returns (RegisterConventionResponse);
+  rpc ResolveConvention(ResolveConventionRequest) returns (ResolveConventionResponse);
 }
 
 message RegisterPluginRequest {
@@ -113,6 +117,65 @@ message PluginInfo {
   string version = 3;
   int64 applied_at_ms = 4;
   int32 apply_order = 5;
+}
+
+// --- Extension value access ---
+
+message GetExtensionRequest {
+  string project_path = 1;
+  string extension_name = 2;
+  // Fully-qualified property path, e.g. "android.buildTypes.release.minifyEnabled"
+  string property_path = 3;
+}
+
+message GetExtensionResponse {
+  bool found = 1;
+  string value = 2;
+  string extension_type = 3;  // e.g. "com.android.build.gradle.LibraryExtension"
+  map<string, string> properties = 4;
+  string error_message = 5;
+}
+
+message GetExtensionsRequest {
+  string project_path = 1;
+}
+
+message GetExtensionsResponse {
+  repeated ExtensionInfo extensions = 1;
+}
+
+message ExtensionInfo {
+  string name = 1;
+  string type = 2;
+  string source_plugin = 3;  // which plugin created this extension
+  map<string, string> properties = 4;
+}
+
+// --- Convention mapping ---
+
+message RegisterConventionRequest {
+  string project_path = 1;
+  string plugin_id = 2;
+  // Convention mapping rules: key=property_pattern, value=default_value
+  map<string, string> conventions = 3;
+  // Source of the convention (e.g. "java", "android", "kotlin")
+  string convention_source = 4;
+}
+
+message RegisterConventionResponse { bool registered = 1; }
+
+message ResolveConventionRequest {
+  string project_path = 1;
+  string property_name = 2;
+  // Ordered list of convention sources to try (first match wins)
+  repeated string preferred_sources = 3;
+}
+
+message ResolveConventionResponse {
+  bool found = 1;
+  string value = 2;
+  string source = 3;  // which convention source provided the value
+  string resolved_by = 4;  // "convention" or "explicit"
 }
 
 // --- GetProperty RPC ---
@@ -204,6 +267,13 @@ message StoreConfigCacheRequest {
   int64 entry_count = 3;
   repeated string input_hashes = 4;
   int64 timestamp_ms = 5;
+  // Phase graph invalidation triggers
+  string build_script_hash = 6;
+  string settings_script_hash = 7;
+  repeated ScriptHashEntry init_script_hashes = 8;
+  string gradle_version = 9;
+  repeated StringEntry system_properties = 10;
+  string build_id = 11;
 }
 message StoreConfigCacheResponse {
   bool stored = 1;
@@ -219,16 +289,38 @@ message LoadConfigCacheResponse {
 message ValidateConfigRequest {
   string cache_key = 1;
   repeated string input_hashes = 2;
+  // Phase graph invalidation triggers for granular validation
+  string build_script_hash = 3;
+  string settings_script_hash = 4;
+  repeated ScriptHashEntry init_script_hashes = 5;
+  string gradle_version = 6;
+  repeated StringEntry system_properties = 7;
 }
 message ValidateConfigResponse {
   bool valid = 1;
   string reason = 2;
+  // Names of triggers that caused invalidation
+  repeated string invalidated_triggers = 3;
 }
 message CleanConfigCacheRequest {
   int64 max_age_ms = 1;
   int32 max_entries = 2;
+  // If non-empty, only clean entries belonging to this build ID
+  string build_id = 3;
 }
 message CleanConfigCacheResponse {
   int32 entries_removed = 1;
   int64 space_recovered_bytes = 2;
+}
+
+// Key-value pair for script hashes (path → hash).
+message ScriptHashEntry {
+  string path = 1;
+  string hash = 2;
+}
+
+// Key-value pair for system properties (key → value).
+message StringEntry {
+  string key = 1;
+  string value = 2;
 }

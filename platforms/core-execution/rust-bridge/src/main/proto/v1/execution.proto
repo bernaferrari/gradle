@@ -61,6 +61,7 @@ message RecordOutcomeRequest {
   string actual_outcome = 3;
   bool prediction_correct = 4;
   int64 duration_ms = 5;
+  string input_fingerprint = 6;
 }
 message RecordOutcomeResponse { bool acknowledged = 1; }
 
@@ -98,6 +99,7 @@ message GetHistoryStatsResponse {
 
 service DagExecutorService {
   rpc StartBuild(StartBuildRequest) returns (StartBuildResponse);
+  rpc RunBuild(RunBuildRequest) returns (RunBuildResponse);
   rpc CancelBuild(CancelBuildRequest) returns (CancelBuildResponse);
   rpc GetNextTask(GetNextTaskRequest) returns (GetNextTaskResponse);
   rpc NotifyTaskStarted(NotifyTaskStartedRequest) returns (NotifyTaskStartedResponse);
@@ -176,4 +178,36 @@ message AwaitBuildCompletionResponse {
   int32 tasks_skipped = 5;
   int64 total_duration_ms = 6;
   string failure_message = 7;
+}
+
+message RunBuildRequest {
+  string build_id = 1;
+  int32 max_parallelism = 2;
+  repeated string task_filter = 3;
+  // Per-task execution context: task_path -> JSON with source_files, target_dir, options.
+  map<string, string> task_contexts = 4;
+}
+
+message RunBuildResponse {
+  string build_id = 1;
+  string final_status = 2;
+  int32 total_tasks = 3;
+  int32 tasks_succeeded = 4;
+  int32 tasks_failed = 5;
+  int32 tasks_skipped = 6;
+  int32 tasks_forwarded_to_jvm = 7;
+  int64 total_duration_ms = 8;
+  string failure_message = 9;
+  repeated TaskExecutionDetail task_details = 10;
+  int32 tasks_up_to_date = 11;
+  int32 tasks_from_cache = 12;
+}
+
+message TaskExecutionDetail {
+  string task_path = 1;
+  string task_type = 2;
+  string outcome = 3;
+  int64 duration_ms = 4;
+  string execution_mode = 5; // "native" or "jvm_forward"
+  string error_message = 6;
 }

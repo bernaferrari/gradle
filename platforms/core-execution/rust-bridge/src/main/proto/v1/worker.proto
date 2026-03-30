@@ -11,6 +11,8 @@ service WorkerProcessService {
   rpc StopWorker(StopWorkerRequest) returns (StopWorkerResponse);
   rpc GetWorkerStatus(GetWorkerStatusRequest) returns (GetWorkerStatusResponse);
   rpc ConfigurePool(ConfigurePoolRequest) returns (ConfigurePoolResponse);
+  rpc RenewLease(RenewLeaseRequest) returns (RenewLeaseResponse);
+  rpc SendWork(SendWorkRequest) returns (SendWorkResponse);
 }
 
 message WorkerSpec {
@@ -21,6 +23,7 @@ message WorkerSpec {
   map<string, string> jvm_args = 5;
   int32 max_memory_mb = 6;
   bool daemon = 7;
+  string isolation_mode = 8; // "process", "classloader", "app_classloader", "none"
 }
 
 message WorkerHandle {
@@ -30,6 +33,9 @@ message WorkerHandle {
   string connect_address = 4;
   int64 started_at_ms = 5;
   bool healthy = 6;
+  int64 lease_expires_at_ms = 7;  // 0 = no lease
+  string lease_holder = 8;         // who holds the lease
+  string current_work = 9;        // display name of current work item
 }
 
 message AcquireWorkerRequest {
@@ -73,6 +79,8 @@ message WorkerStatus {
   int64 last_used_ms = 6;
   int64 memory_used_bytes = 7;
   int32 tasks_completed = 8;
+  string current_work = 9;
+  int64 lease_expires_at_ms = 10;
 }
 
 message GetWorkerStatusResponse {
@@ -90,3 +98,23 @@ message ConfigurePoolRequest {
 }
 
 message ConfigurePoolResponse { bool applied = 1; }
+
+message RenewLeaseRequest {
+  string worker_id = 1;
+  int64 duration_ms = 2;
+}
+
+message RenewLeaseResponse { bool renewed = 1; }
+
+message SendWorkRequest {
+  string worker_id = 1;
+  string action_class = 2;
+  string parameters_json = 3;
+  int64 timeout_ms = 4;
+  string display_name = 5;
+}
+
+message SendWorkResponse {
+  bool accepted = 1;
+  string error_message = 2;
+}
