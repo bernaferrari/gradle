@@ -64,7 +64,8 @@ impl IncrementalCompilationServiceImpl {
 
         // BFS from changed files through reverse dependencies
         let mut affected: HashSet<String> = HashSet::with_capacity(changed_files.len() + units.len());
-        let mut queue: VecDeque<&str> = changed_files.iter().map(|s| s.as_str()).collect();
+        let mut queue: VecDeque<&str> = VecDeque::with_capacity(changed_files.len());
+        queue.extend(changed_files.iter().map(|s| s.as_str()));
 
         while let Some(file) = queue.pop_front() {
             if affected.contains(file) {
