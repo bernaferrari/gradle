@@ -135,6 +135,10 @@ impl WorkerProcessServiceImpl {
         {
             cmd.process_group(0);
         }
+        #[cfg(not(unix))]
+        {
+            // Windows handles process groups via CREATE_NEW_PROCESS_GROUP flag
+        }
 
         cmd.stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())

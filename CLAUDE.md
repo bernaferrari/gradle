@@ -54,11 +54,11 @@ bd close <id>         # Complete work
 
 ```bash
 cargo check                    # Check compilation
-cargo test                     # Run all 560 tests (495 unit + 12 differential + 3 cross-language + 47 integration + 3 E2E)
+cargo test                     # Run all 1152 tests (1090 unit + 50 integration + 12 differential)
 cargo test --test integration_test  # Integration tests only (over Unix sockets)
 cargo test --test e2e_lifecycle_test   # E2E lifecycle tests (event fan-out validation)
 cargo clippy                   # Lint check (must be clean)
-cargo bench                    # Run all 8 criterion benchmarks
+cargo bench                    # Run all 9 criterion benchmarks
 ```
 
 ## Architecture Overview
@@ -66,8 +66,8 @@ cargo bench                    # Run all 8 criterion benchmarks
 Strangler-fig migration of Gradle's execution substrate to Rust. Rust daemon (substrate/) communicates with JVM via gRPC over Unix domain sockets.
 
 **Key files:**
-- `substrate/src/main.rs` — Daemon binary, wires all 34 services + JVM host connection
-- `substrate/src/server/` — Service implementations (32 files)
+- `substrate/src/main.rs` — Daemon binary, wires all 38 services + JVM host connection
+- `substrate/src/server/` — Service implementations (51 files)
 - `substrate/src/client/jvm_host.rs` — Rust client for JVM callback RPC
 - `substrate/proto/v1/substrate.proto` — gRPC service + message definitions (incl. JvmHostService)
 - `substrate/tests/` — Integration + E2E tests
@@ -78,8 +78,8 @@ Strangler-fig migration of Gradle's execution substrate to Rust. Rust daemon (su
 
 **Epic:** `gradle-fork-5bh` — Run `bd show gradle-fork-5bh` for full task breakdown.
 
-**Completed phases (1-4, 7):** Core daemon, 33 service implementations, cross-service integration, testing/benchmarks, native DAG executor.
-**Current phase (5):** Java bridge clients — all 34 services have clients; hash + 4 shadow listeners now wired.
+**Completed phases (1-4, 7):** Core daemon, 38 service implementations, cross-service integration, testing/benchmarks, native DAG executor.
+**Current phase (5):** Java bridge clients — all 38 services have clients; 11 authoritative subsystems defined.
 **Next steps:** Shadow validation across all subsystems, then authoritative flip per service.
 
 ## Conventions & Patterns

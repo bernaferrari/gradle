@@ -63,9 +63,53 @@ def main() -> int:
         action="store_true",
         help="rewrite lock file from current proto files",
     )
+    parser.add_argument(
+        "--per-file-diff",
+        action="store_true",
+        help="compare per-file SHA-256 against lock to identify specific changes",
+    )
     args = parser.parse_args()
 
     expected = compute_lock_content()
+
+    if args.per_file_diff:
+        if not LOCK_FILE.exists():
+            print(f"Missing lock file: {LOCK_FILE.relative_to(ROOT)}")
+            return 1
+        actual = LOCK_FILE.read_text(encoding="utf-8")
+        if actual == expected:
+            print("No per-file changes detected.")
+            return 0
+        # Parse both lock files into (sha, path) pairs
+        def parse_lock(content):
+            result = {}
+            for line in content.strip().splitlines():
+                if line.startswith("#") or line.startswith("root-"):
+                    continue
+                parts = line.split("  ", 1)
+                if len(parts) == 2:
+                    result[parts[1]] = parts[0]
+            return result
+        old_files = parse_lock(actual)
+        new_files = parse_lock(expected)
+        added = [p for p in new_files if p not in old_files]
+        removed = [p for p in old_files if p not in new_files]
+        modified = [p for p in new_files if p in old_files and old_files[p] != new_files[p]]
+        if added:
+            print(f"Added ({len(added)}):")
+            for p in added:
+                print(f"  + {p}")
+        if removed:
+            print(f"Removed ({len(removed)}):")
+            for p in removed:
+                print(f"  - {p}")
+        if modified:
+            print(f"Modified ({len(modified)}):")
+            for p in modified:
+                print(f"  ~ {p}")
+        if not added and not removed and not modified:
+            print("No per-file changes detected.")
+        return 0
 
     if args.update:
         LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)

@@ -34,6 +34,9 @@ fi
 echo "== Proto contract lock"
 python3 tools/upstream_map/check_proto_lock.py
 
+echo "== Proto version tracking"
+python3 tools/upstream_map/proto_version.py --check
+
 echo "== Upstream map + metadata validation"
 python3 tools/upstream_map/sync_metadata.py --check
 python3 tools/upstream_map/validate_map.py

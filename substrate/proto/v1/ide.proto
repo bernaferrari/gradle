@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+service IdeModelService {
+  // Get the project model for IDE consumption (projects, tasks, dependencies, source sets).
+  rpc GetProjectModel(GetProjectModelRequest) returns (GetProjectModelResponse);
+
+  // Get task descriptions for display in IDE tool windows.
+  rpc GetTaskDescriptions(GetTaskDescriptionsRequest) returns (GetTaskDescriptionsResponse);
+
+  // Get dependency information for a project.
+  rpc GetDependencies(GetDependenciesRequest) returns (GetDependenciesResponse);
+}
+
+message GetProjectModelRequest {
+  string project_path = 1;
+  bool include_subprojects = 2;
+}
+
+message IdeProject {
+  string name = 1;
+  string path = 2;
+  string description = 3;
+  repeated IdeSourceSet source_sets = 4;
+  repeated string tasks = 5;
+}
+
+message IdeSourceSet {
+  string name = 1;
+  repeated string source_dirs = 2;
+  repeated string resource_dirs = 3;
+  repeated string output_dirs = 4;
+}
+
+message GetProjectModelResponse {
+  repeated IdeProject projects = 1;
+  string error_message = 2;
+}
+
+message GetTaskDescriptionsRequest {
+  string project_path = 1;
+}
+
+message IdeTaskDescription {
+  string name = 1;
+  string group = 2;
+  string description = 3;
+  bool is_public = 4;
+  repeated string depends_on = 5;
+}
+
+message GetTaskDescriptionsResponse {
+  repeated IdeTaskDescription tasks = 1;
+}
+
+message GetDependenciesRequest {
+  string project_path = 1;
+  string configuration = 2;
+}
+
+message IdeDependency {
+  string group = 1;
+  string artifact = 2;
+  string version = 3;
+  string configuration = 4;
+}
+
+message GetDependenciesResponse {
+  repeated IdeDependency dependencies = 1;
+}
