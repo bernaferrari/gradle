@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service ClasspathService {
+  rpc HashClasspath(HashClasspathRequest) returns (HashClasspathResponse);
+  rpc CompareClasspaths(CompareClasspathsRequest) returns (CompareClasspathsResponse);
+}
+
+enum ClasspathEntryType {
+  JAR = 0;
+  DIRECTORY = 1;
+}
+
+message ClasspathEntry {
+  string absolute_path = 1;
+  ClasspathEntryType entry_type = 2;
+  int64 length = 3;
+  int64 last_modified = 4;
+}
+
+message HashClasspathRequest {
+  repeated ClasspathEntry entries = 1;
+  string algorithm = 2;
+  bool ignore_timestamps = 3;
+  bool include_entry_hashes = 4;
+}
+
+message ClasspathEntryHash {
+  string absolute_path = 1;
+  bytes hash = 2;
+  int64 size = 3;
+}
+
+message HashClasspathResponse {
+  bytes classpath_hash = 1;
+  repeated ClasspathEntryHash entries = 2;
+  string algorithm_used = 3;
+}
+
+message CompareClasspathsRequest {
+  bytes previous_hash = 1;
+  repeated ClasspathEntry current_entries = 2;
+  string algorithm = 3;
+}
+
+message ClasspathDifference {
+  string change_type = 1;
+  string absolute_path = 2;
+}
+
+message CompareClasspathsResponse {
+  bool changed = 1;
+  bytes new_hash = 2;
+  repeated ClasspathDifference differences = 3;
+}

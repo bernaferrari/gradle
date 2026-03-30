@@ -26,6 +26,9 @@ service ParserService {
 
   // Extract source set declarations from a build script
   rpc ParseBuildScriptSourceSets(ParseBuildScriptSourceSetsRequest) returns (ParseBuildScriptSourceSetsResponse);
+
+  // Parse a build script and return strongly-typed IR
+  rpc ParseBuildScriptTyped(ParseBuildScriptTypedRequest) returns (ParseBuildScriptTypedResponse);
 }
 
 // --- Groovy AST ---
@@ -33,6 +36,12 @@ service ParserService {
 message ParseGroovyRequest {
   string script_content = 1;
   string file_path = 2;
+  Dialect dialect = 3;
+}
+
+enum Dialect {
+  GROOVY = 0;
+  KOTLIN_DSL = 1;
 }
 
 message ParseGroovyResponse {
@@ -158,4 +167,83 @@ message SourceSetEntry {
   string name = 1;
   repeated string src_dirs = 2;
   repeated string resource_dirs = 3;
+}
+
+// --- Typed Build Script IR ---
+
+message ParseBuildScriptTypedRequest {
+  string script_content = 1;
+  string file_path = 2;
+}
+
+message ParseBuildScriptTypedResponse {
+  ScriptType script_type = 1;
+  repeated TypedPlugin plugins = 2;
+  repeated TypedDependency dependencies = 3;
+  repeated TypedVersionCatalogRef catalog_refs = 4;
+  repeated TypedBuildScriptDep buildscript_deps = 5;
+  repeated TypedTaskConfig task_configs = 6;
+  repeated TypedRepository repositories = 7;
+  repeated TypedSubproject subprojects = 8;
+  TypedPluginManagement plugin_management = 9;
+  TypedDependencyResolutionManagement dependency_resolution_management = 10;
+  string source_compatibility = 11;
+  string target_compatibility = 12;
+  string group = 13;
+  string version = 14;
+  repeated string warnings = 15;
+}
+
+enum ScriptType {
+  UNKNOWN_SCRIPT = 0;
+  KOTLIN_DSL_SCRIPT = 1;
+  GROOVY_SCRIPT = 2;
+}
+
+message TypedPlugin {
+  string id = 1;
+  bool apply = 2;
+  string version = 3;
+  int32 line = 4;
+}
+
+message TypedDependency {
+  string configuration = 1;
+  string notation = 2;
+  int32 line = 3;
+}
+
+message TypedVersionCatalogRef {
+  string configuration = 1;
+  string alias = 2;
+}
+
+message TypedBuildScriptDep {
+  string notation = 1;
+}
+
+message TypedTaskConfig {
+  string task_name = 1;
+  repeated string depends_on = 2;
+  repeated string should_run_after = 3;
+  bool enabled = 4;
+  int32 line = 5;
+}
+
+message TypedRepository {
+  string name = 1;
+  string repo_type = 2;
+}
+
+message TypedSubproject {
+  string path = 1;
+}
+
+message TypedPluginManagement {
+  repeated TypedRepository repositories = 1;
+}
+
+message TypedDependencyResolutionManagement {
+  string repositories_mode = 1;
+  repeated TypedRepository repositories = 2;
 }
