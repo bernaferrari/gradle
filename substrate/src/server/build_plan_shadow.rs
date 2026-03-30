@@ -7,7 +7,7 @@ use crate::client::jvm_host_bridge::JvmHostBridge;
 use crate::proto::{GetBuildEnvironmentResponse, GetBuildModelResponse};
 
 use super::build_plan_ir::{
-    fingerprint_sha256_hex, validate_schema_version, CanonicalBuildPlan,
+    fingerprint_normalized, validate_schema_version, CanonicalBuildPlan,
     CanonicalBuildPlanProject, CanonicalBuildPlanToolchainRequest, BUILD_PLAN_SCHEMA_VERSION,
 };
 
@@ -54,10 +54,14 @@ impl BuildPlanShadowStore {
     ) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
         validate_schema_version(plan)
             .map_err(|e| format!("build plan schema validation failed: {}", e))?;
-        let fingerprint = fingerprint_sha256_hex(plan)?;
+
+        // Clone once, normalize in-place, then fingerprint without further cloning.
+        let mut normalized = plan.clone();
+        normalized.normalize_mut();
+        let fingerprint = fingerprint_normalized(&normalized)?;
 
         let artifact = BuildPlanShadowArtifact {
-            plan: plan.clone().normalized(),
+            plan: normalized,
             fingerprint_sha256: fingerprint,
             stored_at_ms: now_ms(),
             source: source.to_string(),
@@ -457,7 +461,7 @@ fn diff_expected_vs_artifact(
         }
     }
 
-    match fingerprint_sha256_hex(&actual) {
+    match fingerprint_normalized(&actual) {
         Ok(fp) if fp != artifact.fingerprint_sha256 => mismatches.push(format!(
             "fingerprint mismatch: expected '{}' got '{}'",
             fp, artifact.fingerprint_sha256
@@ -475,6 +479,7 @@ fn diff_expected_vs_artifact(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::build_plan_ir::fingerprint_sha256_hex; // used in test assertions
 
     #[test]
     fn canonical_plan_from_jvm_extracts_projects_and_toolchain() {
