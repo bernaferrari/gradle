@@ -28,6 +28,7 @@ message ExecutionNode {
   repeated string dependencies = 2;
   int64 execution_order = 3;
   int64 estimated_duration_ms = 4;
+  string task_type = 5;
 }
 message ResolveExecutionPlanResponse {
   repeated ExecutionNode execution_order = 1;

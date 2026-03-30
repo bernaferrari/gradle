@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service FileTreeService {
+  rpc TraverseFileTree(TraverseFileTreeRequest) returns (TraverseFileTreeResponse);
+  rpc MatchPatterns(MatchPatternsRequest) returns (MatchPatternsResponse);
+}
+
+message TraverseFileTreeRequest {
+  string root_dir = 1;
+  repeated string include_patterns = 2;
+  repeated string exclude_patterns = 3;
+  bool include_files = 4;
+  bool include_dirs = 5;
+  bool follow_symlinks = 6;
+  int32 max_depth = 7;
+  bool include_metadata = 8;
+  bool apply_default_excludes = 9;
+}
+
+message FileTreeEntry {
+  string relative_path = 1;
+  string absolute_path = 2;
+  bool is_directory = 3;
+  int64 size = 4;
+  int64 last_modified_ms = 5;
+}
+
+message TraverseFileTreeResponse {
+  repeated FileTreeEntry entries = 1;
+  int32 total_entries = 2;
+  int64 total_size = 3;
+  string error_message = 4;
+}
+
+message MatchPatternsRequest {
+  repeated string paths = 1;
+  repeated string include_patterns = 2;
+  repeated string exclude_patterns = 3;
+}
+
+message PatternMatchResult {
+  string path = 1;
+  bool included = 2;
+}
+
+message MatchPatternsResponse {
+  repeated PatternMatchResult results = 1;
+}

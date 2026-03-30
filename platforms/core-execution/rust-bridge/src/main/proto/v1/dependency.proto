@@ -5,6 +5,8 @@ package gradle.substrate.v1;
 option java_multiple_files = true;
 option java_package = "gradle.substrate.v1";
 
+import "v1/configuration.proto";
+
 service DependencyResolutionService {
   rpc ResolveDependencies(ResolveDependenciesRequest) returns (ResolveDependenciesResponse);
   rpc CheckArtifactCache(CheckArtifactCacheRequest) returns (CheckArtifactCacheResponse);
@@ -12,6 +14,7 @@ service DependencyResolutionService {
   rpc RecordResolution(RecordResolutionRequest) returns (RecordResolutionResponse);
   rpc GetResolutionStats(GetResolutionStatsRequest) returns (GetResolutionStatsResponse);
   rpc AddArtifactToCache(AddArtifactToCacheRequest) returns (AddArtifactToCacheResponse);
+  rpc VerifyDependencyChecksums(VerifyDependencyChecksumsRequest) returns (VerifyDependencyChecksumsResponse);
 }
 
 message DependencyDescriptor {
@@ -21,6 +24,12 @@ message DependencyDescriptor {
   string classifier = 4;
   string extension = 5;
   bool transitive = 6;
+  // Dependency scope: "compile", "runtime", "test", "provided", "system".
+  string scope = 7;
+  bool changing = 8;
+  bool optional = 9;
+  // Ivy conf mapping (e.g., "compile->default(compile)").
+  string ivy_conf = 10;
 }
 
 message RepositoryDescriptor {
@@ -29,6 +38,10 @@ message RepositoryDescriptor {
   bool m2compatible = 3;
   bool allow_insecure_protocol = 4;
   map<string, string> credentials = 5;
+  // Repository layout: "maven" (default) or "ivy".
+  string layout = 6;
+  // Ivy artifact pattern (e.g., "[organisation]/[module]/[revision]/[type]s/[artifact]-[revision].[ext]").
+  string ivy_pattern = 7;
 }
 
 message ResolveDependenciesRequest {
@@ -37,6 +50,10 @@ message ResolveDependenciesRequest {
   repeated RepositoryDescriptor repositories = 3;
   repeated string attributes = 4;
   bool lenient = 5;
+  // Resolution strategy configuration.
+  ResolutionStrategyConfig resolution_strategy = 6;
+  // Target scope for resolution (e.g., "compile", "runtime").
+  string target_scope = 7;
 }
 
 message ResolvedDependency {
@@ -50,6 +67,8 @@ message ResolvedDependency {
   string artifact_url = 8;
   int64 artifact_size = 9;
   string artifact_sha256 = 10;
+  // Resolved scope.
+  string scope = 11;
 }
 
 message ResolveDependenciesResponse {
@@ -125,3 +144,44 @@ message AddArtifactToCacheRequest {
 }
 
 message AddArtifactToCacheResponse { bool accepted = 1; }
+
+// --- Resolution strategy ---
+
+message ResolutionStrategyConfig {
+  // Strategy: "highest_version", "force", "prefer", "fail_on_conflict", "nearest".
+  string strategy = 1;
+  // Forced versions: group:name -> version.
+  repeated StringEntry forced_versions = 2;
+  // Preferred versions: group:name -> version.
+  repeated StringEntry preferred_versions = 3;
+}
+
+// --- Dependency verification ---
+
+message VerifyDependencyChecksumsRequest {
+  repeated ChecksumEntry entries = 1;
+  // If true, reject the entire request on any mismatch.
+  bool strict = 2;
+}
+
+message VerifyDependencyChecksumsResponse {
+  bool all_matched = 1;
+  repeated ChecksumFailure failures = 2;
+}
+
+message ChecksumEntry {
+  string group = 1;
+  string name = 2;
+  string version = 3;
+  string classifier = 4;
+  string expected_sha256 = 5;
+  string actual_sha256 = 6;
+}
+
+message ChecksumFailure {
+  string group = 1;
+  string name = 2;
+  string version = 3;
+  string expected_sha256 = 4;
+  string actual_sha256 = 5;
+}

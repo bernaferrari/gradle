@@ -339,6 +339,7 @@ fn bench_conflict_resolution(c: &mut Criterion) {
             artifact_url: String::new(),
             artifact_size: 0,
             artifact_sha256: String::new(),
+            scope: "compile".to_string(),
         });
     }
 
