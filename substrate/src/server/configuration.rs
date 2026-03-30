@@ -423,7 +423,9 @@ impl ConfigurationServiceImpl {
         // --- Layer 2: System properties ---
         // In a Rust substrate we check for org.gradle.<name> env vars first,
         // then fall back to a generic system-property lookup.
-        let sys_prop = format!("org.gradle.{}", property_name);
+        let mut sys_prop = String::with_capacity(12 + property_name.len());
+        sys_prop.push_str("org.gradle.");
+        sys_prop.push_str(property_name);
         if let Ok(value) = std::env::var(&sys_prop) {
             return Some((value, PropertySource::SystemProperty.as_str().to_string()));
         }
@@ -431,12 +433,24 @@ impl ConfigurationServiceImpl {
         // --- Layer 3: Environment variables ---
         // Gradle checks ORG_GRADLE_PROJECT_<UPPER_CASE_NAME> first, then
         // GRADLE_PROPERTY_<UPPER_CASE_NAME>.
-        let env_suffix = property_name.replace('.', "_").to_uppercase();
-        let env_key = format!("ORG_GRADLE_PROJECT_{}", env_suffix);
+        // Single-pass: replace '.' with '_' and uppercase in one allocation.
+        let mut env_suffix = String::with_capacity(property_name.len());
+        for b in property_name.bytes() {
+            if b == b'.' {
+                env_suffix.push('_');
+            } else {
+                env_suffix.push((b.to_ascii_uppercase()) as char);
+            }
+        }
+        let mut env_key = String::with_capacity(19 + env_suffix.len());
+        env_key.push_str("ORG_GRADLE_PROJECT_");
+        env_key.push_str(&env_suffix);
         if let Ok(value) = std::env::var(&env_key) {
             return Some((value, PropertySource::EnvVariable.as_str().to_string()));
         }
-        let env_key_alt = format!("GRADLE_PROPERTY_{}", env_suffix);
+        let mut env_key_alt = String::with_capacity(16 + env_suffix.len());
+        env_key_alt.push_str("GRADLE_PROPERTY_");
+        env_key_alt.push_str(&env_suffix);
         if let Ok(value) = std::env::var(&env_key_alt) {
             return Some((value, PropertySource::EnvVariable.as_str().to_string()));
         }

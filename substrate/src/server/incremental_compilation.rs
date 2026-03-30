@@ -556,17 +556,23 @@ impl IncrementalCompilationService for IncrementalCompilationServiceImpl {
 
         let mut changes = Vec::with_capacity(current_processors.len() + previous.len());
         for added in current_processors.difference(&previous) {
+            let mut details = String::with_capacity(26 + added.len());
+            details.push_str("New annotation processor: ");
+            details.push_str(added);
             changes.push(AnnotationProcessorChange {
                 processor_class: added.clone(),
                 change_type: "added".to_string(),
-                details: format!("New annotation processor: {}", added),
+                details,
             });
         }
         for removed in previous.difference(&current_processors) {
+            let mut details = String::with_capacity(32 + removed.len());
+            details.push_str("Annotation processor removed: ");
+            details.push_str(removed);
             changes.push(AnnotationProcessorChange {
                 processor_class: removed.clone(),
                 change_type: "removed".to_string(),
-                details: format!("Annotation processor removed: {}", removed),
+                details,
             });
         }
 

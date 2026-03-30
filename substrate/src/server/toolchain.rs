@@ -44,6 +44,38 @@ struct JavaProbeInfo {
     vendor: String,
 }
 
+/// Case-insensitive substring search without heap allocation.
+/// `needle` must be lowercase ASCII.
+fn contains_ci(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    let first = needle[0];
+    let first_upper = first.to_ascii_uppercase();
+    let mut pos = 0;
+    while pos + needle.len() <= haystack.len() {
+        let window = &haystack[pos..];
+        let idx = match (memchr::memchr(first, window), memchr::memchr(first_upper, window)) {
+            (Some(a), Some(b)) => a.min(b),
+            (Some(a), None) => a,
+            (None, Some(b)) => b,
+            (None, None) => return false,
+        };
+        if idx + needle.len() > window.len() {
+            return false;
+        }
+        let candidate = &window[idx..idx + needle.len()];
+        if candidate.iter().zip(needle.iter()).all(|(h, n)| h.to_ascii_lowercase() == *n) {
+            return true;
+        }
+        pos += idx + 1;
+    }
+    false
+}
+
 impl Default for ToolchainServiceImpl {
     fn default() -> Self {
         Self::new(std::path::PathBuf::new())
@@ -398,24 +430,24 @@ impl ToolchainServiceImpl {
     /// Detect JDK vendor from `java -version` output.
     /// More specific vendor strings are checked first to avoid false matches.
     fn detect_vendor(output: &str) -> String {
-        let lower = output.to_lowercase();
-        if lower.contains("temurin") || lower.contains("adoptium") {
+        let bytes = output.as_bytes();
+        if contains_ci(bytes, b"temurin") || contains_ci(bytes, b"adoptium") {
             "Temurin".to_string()
-        } else if lower.contains("corretto") {
+        } else if contains_ci(bytes, b"corretto") {
             "Corretto".to_string()
-        } else if lower.contains("zulu") {
+        } else if contains_ci(bytes, b"zulu") {
             "Zulu".to_string()
-        } else if lower.contains("microsoft") {
+        } else if contains_ci(bytes, b"microsoft") {
             "Microsoft".to_string()
-        } else if lower.contains("graalvm") || lower.contains("graal") {
+        } else if contains_ci(bytes, b"graalvm") || contains_ci(bytes, b"graal") {
             "GraalVM".to_string()
-        } else if lower.contains("semeru") || lower.contains("ibm") {
+        } else if contains_ci(bytes, b"semeru") || contains_ci(bytes, b"ibm") {
             "Semeru".to_string()
-        } else if lower.contains("liberica") || lower.contains("bellsoft") {
+        } else if contains_ci(bytes, b"liberica") || contains_ci(bytes, b"bellsoft") {
             "Liberica".to_string()
-        } else if lower.contains("oracle") {
+        } else if contains_ci(bytes, b"oracle") {
             "Oracle".to_string()
-        } else if lower.contains("openjdk") {
+        } else if contains_ci(bytes, b"openjdk") {
             "OpenJDK".to_string()
         } else {
             String::new()
@@ -471,15 +503,15 @@ impl ToolchainServiceImpl {
         let series = if major >= 17 { "" } else { "8" };
 
         // Vendor-specific URL construction based on implementation name
-        let impl_lower = implementation.to_lowercase();
+        let impl_bytes = implementation.as_bytes();
 
-        if impl_lower.contains("corretto") || impl_lower.contains("amazon") {
+        if contains_ci(impl_bytes, b"corretto") || contains_ci(impl_bytes, b"amazon") {
             // Amazon Corretto
             urls.push(format!(
                 "https://corretto.aws/downloads/latest/{}/amazon-corretto-{}-{}-{}-{}.{}",
                 version, version, os_part, arch_part, version, ext
             ));
-        } else if impl_lower.contains("microsoft") || impl_lower.contains("msft") {
+        } else if contains_ci(impl_bytes, b"microsoft") || contains_ci(impl_bytes, b"msft") {
             // Microsoft Build of OpenJDK
             urls.push(format!(
                 "https://aka.ms/download-jdk/microsoft-jdk-{}-{}-{}{}.{}",
@@ -489,7 +521,7 @@ impl ToolchainServiceImpl {
                 if os == "windows" { "-windows" } else { "" },
                 ext
             ));
-        } else if impl_lower.contains("zulu") || impl_lower.contains("azul") {
+        } else if contains_ci(impl_bytes, b"zulu") || contains_ci(impl_bytes, b"azul") {
             // Azul Zulu
             urls.push(format!(
                 "https://cdn.azul.com/zulu/bin/zulu{}-ea-jdk{}_{}-{}.{}",
@@ -499,7 +531,7 @@ impl ToolchainServiceImpl {
                 arch_part,
                 ext
             ));
-        } else if impl_lower.contains("graalvm") || impl_lower.contains("oracle") {
+        } else if contains_ci(impl_bytes, b"graalvm") || contains_ci(impl_bytes, b"oracle") {
             // Oracle GraalVM / Oracle JDK
             urls.push(format!(
                 "https://download.oracle.com/graalvm/{}/latest/graalvm-jdk-{}_{}-{}_bin.{}",
@@ -518,14 +550,14 @@ impl ToolchainServiceImpl {
         }
 
         // Always add Corretto and Microsoft as fallbacks
-        if !impl_lower.contains("corretto") && !impl_lower.contains("amazon") {
+        if !contains_ci(impl_bytes, b"corretto") && !contains_ci(impl_bytes, b"amazon") {
             urls.push(format!(
                 "https://corretto.aws/downloads/latest/{}/amazon-corretto-{}-{}-{}-{}.{}",
                 version, version, os_part, arch_part, version, ext
             ));
         }
 
-        if !impl_lower.contains("microsoft") && !impl_lower.contains("msft") {
+        if !contains_ci(impl_bytes, b"microsoft") && !contains_ci(impl_bytes, b"msft") {
             urls.push(format!(
                 "https://aka.ms/download-jdk/microsoft-jdk-{}-{}-{}{}.{}",
                 version,
