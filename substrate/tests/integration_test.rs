@@ -34,6 +34,7 @@ use gradle_substrate_daemon::server::{
     garbage_collection::GarbageCollectionServiceImpl,
     hash::HashServiceImpl,
     incremental_compilation::IncrementalCompilationServiceImpl,
+    parser_service::ParserServiceImpl,
     plugin::PluginServiceImpl,
     problem_reporting::ProblemReportingServiceImpl,
     resource_management::ResourceManagementServiceImpl,
@@ -136,6 +137,7 @@ async fn spawn_test_server() -> (String, tempfile::TempDir) {
     let artifact_publishing = ArtifactPublishingServiceImpl::new();
     let build_init = BuildInitServiceImpl::new();
     let incremental_compilation = IncrementalCompilationServiceImpl::new();
+    let parser = ParserServiceImpl::new();
     let garbage_collection = GarbageCollectionServiceImpl::new(
         cache_dir.clone(),
         history_dir.clone(),
@@ -276,6 +278,7 @@ async fn spawn_test_server() -> (String, tempfile::TempDir) {
             .add_service(version_catalog_service_server::VersionCatalogServiceServer::new(
                 VersionCatalogServiceImpl::new(),
             ))
+            .add_service(parser_service_server::ParserServiceServer::new(parser))
             .serve_with_incoming(UnixListenerStream::new(listener))
             .await;
     });
@@ -4483,4 +4486,98 @@ kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
     let kotlin_plugin = &resp.plugins[0];
     assert_eq!(kotlin_plugin.id, "org.jetbrains.kotlin.jvm");
     assert_eq!(kotlin_plugin.version_ref, "kotlin");
+}
+
+// ============================================================
+// Test 51: Parser service end-to-end
+// ============================================================
+
+#[tokio::test]
+async fn test_parser_service_e2e() {
+    let (socket_path, _dir) = spawn_test_server().await;
+    let channel = connect(&socket_path).await;
+    let mut client = parser_service_client::ParserServiceClient::new(channel);
+
+    let groovy_script = r#"
+plugins {
+    id 'java'
+    id 'com.example.my-plugin' version '1.0'
+}
+
+dependencies {
+    implementation 'org.apache.commons:commons-lang3:3.14.0'
+    testImplementation 'junit:junit:4.13.2'
+}
+
+repositories {
+    mavenCentral()
+    maven { url 'https://repo.spring.io/milestone' }
+}
+
+task integrationTest {
+    dependsOn test
+}
+"#;
+
+    // Test parse_build_script
+    let resp = client
+        .parse_build_script(Request::new(ParseBuildScriptRequest {
+            script_content: groovy_script.to_string(),
+            file_path: "build.gradle".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(!resp.elements.is_empty(), "should extract elements");
+    assert_eq!(resp.error_count, 0, "should have no parse errors");
+
+    // Verify specific elements exist
+    let has_plugin = resp
+        .elements
+        .iter()
+        .any(|e| e.element_type == "plugin" && e.properties.get("id").map_or(false, |id| id == "java"));
+    assert!(has_plugin, "should find java plugin element");
+
+    let has_dep = resp
+        .elements
+        .iter()
+        .any(|e| e.element_type == "dependency" && e.raw_text.contains("commons-lang3"));
+    assert!(has_dep, "should find commons-lang3 dependency element");
+
+    // Test parse_build_script_typed
+    let typed_resp = client
+        .parse_build_script_typed(Request::new(ParseBuildScriptTypedRequest {
+            script_content: groovy_script.to_string(),
+            file_path: "build.gradle".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(typed_resp.script_type(), ScriptType::GroovyScript);
+    assert!(!typed_resp.plugins.is_empty(), "typed should extract plugins");
+    assert!(!typed_resp.dependencies.is_empty(), "typed should extract dependencies");
+    assert!(!typed_resp.repositories.is_empty(), "typed should extract repositories");
+    assert!(!typed_resp.task_configs.is_empty(), "typed should extract task configs");
+
+    // Verify typed plugins
+    let java_plugin = typed_resp.plugins.iter().find(|p| p.id == "java");
+    assert!(java_plugin.is_some(), "should find java plugin");
+
+    // Verify typed dependencies
+    let commons_dep = typed_resp
+        .dependencies
+        .iter()
+        .find(|d| d.notation.contains("commons-lang3"));
+    assert!(commons_dep.is_some(), "should find commons-lang3 dependency");
+
+    // Verify typed task config with dependsOn
+    let integration_task = typed_resp
+        .task_configs
+        .iter()
+        .find(|t| t.task_name == "integrationTest");
+    assert!(integration_task.is_some(), "should find integrationTest task");
+    let integration_task = integration_task.unwrap();
+    assert!(integration_task.depends_on.contains(&"test".to_string()));
 }
