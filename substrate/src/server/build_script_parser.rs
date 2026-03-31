@@ -11,43 +11,11 @@ pub use super::build_script_types::*;
 pub fn parse_build_script(content: &str, file_name: &str) -> BuildScriptParseResult {
     let script_type = detect_script_type(file_name, content);
 
-    // Try AST-based extraction first — it provides line numbers and
-    // structurally robust results.
-    let ast_result = crate::server::groovy_parser::parse(content);
-    if ast_result.errors.is_empty() {
-        let mut result = super::ast_extractor::extract_from_ast(&ast_result.script, script_type);
-        result.script_type = script_type;
-
-        // If the AST extractor found nothing but the content clearly has
-        // blocks, the parser likely consumed multi-line constructs as
-        // single expressions. Fall back to string-based extraction.
-        // Only consider "substantial" elements — settings scripts with just
-        // subprojects/include should fall through to string-based extraction
-        // which handles pluginManagement/dependencyResolutionManagement.
-        let has_elements = !result.plugins.is_empty()
-            || !result.dependencies.is_empty()
-            || !result.repositories.is_empty()
-            || !result.task_configs.is_empty();
-
-        // If the parser consumed the entire script as a single statement,
-        // the AST extraction is likely incomplete (parser's no-paren
-        // greediness merged multiple top-level blocks). Fall back.
-        let single_statement = ast_result.script.statements.len() <= 1;
-        let multi_block = content.matches('{').count() > 1;
-
-        if has_elements && !(single_statement && multi_block) || !content.contains('{') {
-            if script_type == ScriptType::Unknown {
-                result
-                    .warnings
-                    .push("Unknown build script type".to_string());
-            }
-            return result;
-        }
-        // Fall through to string-based extraction
-    }
-
-    // Fallback: string-based extraction for scripts that the parser
-    // cannot fully handle (partial parse / error recovery).
+    // The Groovy/Kotlin AST-based parser has known bugs with `apply false`
+    // handling, chained method calls, and multi-config dependency blocks.
+    // Use the string-based parser which handles common Gradle DSL patterns
+    // reliably. The AST parser is kept for reference and future work.
+    // TODO: Fix the Groovy AST parser to handle all patterns correctly.
     match script_type {
         ScriptType::KotlinDsl => parse_kotlin_dsl(content),
         ScriptType::Groovy => parse_groovy(content),
