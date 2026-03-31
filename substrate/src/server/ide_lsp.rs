@@ -40,6 +40,7 @@ struct ServerInfo {
 /// LSP request envelope.
 #[derive(Debug, Deserialize)]
 struct LspRequest {
+    #[allow(dead_code)]
     jsonrpc: String,
     id: Option<serde_json::Value>,
     method: String,
