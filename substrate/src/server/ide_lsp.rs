@@ -85,7 +85,7 @@ pub fn run_lsp_server() -> io::Result<()> {
 
         let content_length: usize = line
             .strip_prefix("Content-Length:")
-            .unwrap()
+            .unwrap_or("")
             .trim()
             .parse()
             .unwrap_or(0);

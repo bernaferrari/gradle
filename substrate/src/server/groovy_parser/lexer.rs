@@ -369,7 +369,7 @@ impl<'src> Lexer<'src> {
         let mut s = String::new();
         while let Some(c) = self.peek_char() {
             if predicate(c) {
-                s.push(self.next_char().unwrap());
+                s.push(self.next_char().expect("character should be available after peek"));
             } else {
                 break;
             }
@@ -407,7 +407,7 @@ impl<'src> Lexer<'src> {
             };
         }
 
-        let c = self.peek_char().unwrap();
+        let c = self.peek_char().expect("character should be available after peek");
 
         // Whitespace
         if c.is_whitespace() {
@@ -671,8 +671,10 @@ impl<'src> Lexer<'src> {
                                             break;
                                         }
                                     }
-                                    Some('"') | Some('\'') => {
-                                        let sc = self.peek_char().unwrap();
+                                    Some('\"') | Some('\'') => {
+                                        let sc = self
+                                            .peek_char()
+                                            .expect("quote char should be available");
                                         let open = sc;
                                         self.next_char();
                                         text.push(sc);
@@ -834,7 +836,7 @@ impl<'src> Lexer<'src> {
 
     fn lex_number(&mut self) -> Token {
         let span = self.span_start();
-        let first = self.peek_char().unwrap();
+        let first = self.peek_char().expect("character should be available after peek");
 
         // Detect base prefix
         if first == '0' {
@@ -865,11 +867,11 @@ impl<'src> Lexer<'src> {
         if self.peek_char() == Some('e') || self.peek_char() == Some('E') {
             // Tentatively consume 'e'/'E'
             let _save_offset = self.offset;
-            let exp_char = self.next_char().unwrap();
+            let exp_char = self.next_char().expect("character should be available after next");
             let mut exp_text = String::from(exp_char);
             if let Some(sign) = self.peek_char() {
                 if sign == '+' || sign == '-' {
-                    exp_text.push(self.next_char().unwrap());
+                    exp_text.push(self.next_char().expect("character should be available after next"));
                 }
             }
             let exp_digits: String = self.consume_while(|c| c.is_ascii_digit());
@@ -889,23 +891,23 @@ impl<'src> Lexer<'src> {
 
         let suffix = match self.peek_char() {
             Some('L') | Some('l') if !is_float => {
-                let ch = self.next_char().unwrap();
+                let ch = self.next_char().expect("character should be available after next");
                 let s: String = ch.to_string();
                 s
             }
             Some('F') | Some('f') => {
-                let ch = self.next_char().unwrap();
+                let ch = self.next_char().expect("character should be available after next");
                 let s: String = ch.to_string();
                 s
             }
             Some('D') | Some('d') => {
-                let ch = self.next_char().unwrap();
+                let ch = self.next_char().expect("character should be available after next");
                 let s: String = ch.to_string();
                 s
             }
             Some('G') | Some('g') => {
                 // Groovy BigDecimal suffix
-                let ch = self.next_char().unwrap();
+                let ch = self.next_char().expect("character should be available after next");
                 let s: String = ch.to_string();
                 s
             }
@@ -932,8 +934,8 @@ impl<'src> Lexer<'src> {
     /// Lex a number with an explicit radix prefix (0x, 0b, 0o).
     fn lex_radix_number(&mut self, radix: u32) -> Token {
         let span = self.span_start();
-        let zero = self.next_char().unwrap(); // '0'
-        let base_char = self.next_char().unwrap(); // 'x'/'b'/'o'
+        let zero = self.next_char().expect("character should be available after next"); // '0'
+        let base_char = self.next_char().expect("character should be available after next"); // 'x'/'b'/'o'
         let mut text = String::from(zero);
         text.push(base_char);
 
@@ -956,7 +958,7 @@ impl<'src> Lexer<'src> {
 
         // Hex literals can have L suffix
         let suffix = if self.peek_char() == Some('L') || self.peek_char() == Some('l') {
-            let ch = self.next_char().unwrap();
+            let ch = self.next_char().expect("character should be available after next");
             ch.to_string()
         } else {
             String::new()
@@ -991,7 +993,7 @@ impl<'src> Lexer<'src> {
     // -- Operators / punctuation -------------------------------------------
 
     fn lex_operator_or_punct(&mut self) -> Token {
-        let c = self.peek_char().unwrap();
+        let c = self.peek_char().expect("character should be available after peek");
         let c2 = self.peek2_char();
         let c3 = self.peek3_char();
 

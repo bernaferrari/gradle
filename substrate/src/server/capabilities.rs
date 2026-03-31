@@ -353,7 +353,7 @@ impl CapabilityRegistry {
 
     /// Return a snapshot of the audit log.
     pub fn audit_log(&self) -> Vec<CapabilityAuditEntry> {
-        self.audit_log.lock().unwrap().clone()
+        self.audit_log.lock().expect("audit log mutex should not be poisoned").clone()
     }
 
     /// Record an access attempt in the audit log.
@@ -375,7 +375,7 @@ impl CapabilityRegistry {
         granted: bool,
         scope_label: &str,
     ) -> Result<(), CapabilityError> {
-        let mut log = self.audit_log.lock().unwrap();
+        let mut log = self.audit_log.lock().expect("audit log mutex should not be poisoned");
         // Cap audit log at 100_000 entries to prevent unbounded growth
         if log.len() >= 100_000 {
             return Err(CapabilityError::AuditLogFull);
