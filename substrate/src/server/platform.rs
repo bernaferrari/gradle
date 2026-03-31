@@ -55,15 +55,18 @@ impl PlatformOps for UnixPlatform {
     fn total_memory_bytes() -> u64 {
         #[cfg(target_os = "macos")]
         {
-            use std::ffi::CString;
-            let mut mib = [
-                libc::CTL_HW as i32,
-                libc::HW_MEMSIZE as i32,
-            ];
+            let mut mib = [libc::CTL_HW, libc::HW_MEMSIZE];
             let mut mem: u64 = 0;
             let mut len = std::mem::size_of::<u64>() as libc::size_t;
             unsafe {
-                libc::sysctl(mib.as_mut_ptr(), 2, &mut mem as *mut _ as *mut libc::c_void, &mut len, std::ptr::null_mut(), 0);
+                libc::sysctl(
+                    mib.as_mut_ptr(),
+                    2,
+                    &mut mem as *mut _ as *mut libc::c_void,
+                    &mut len,
+                    std::ptr::null_mut(),
+                    0,
+                );
             }
             mem
         }
