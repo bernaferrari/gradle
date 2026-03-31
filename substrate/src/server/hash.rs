@@ -203,10 +203,12 @@ static GRADLE_SIGNATURE: std::sync::OnceLock<[u8; 16]> = std::sync::OnceLock::ne
 fn gradle_signature() -> &'static [u8; 16] {
     GRADLE_SIGNATURE.get_or_init(|| {
         let mut sig_hasher = md5::Md5::new();
-        sig_hasher.update(9i32.to_le_bytes());
-        sig_hasher.update(b"SIGNATURE");
-        sig_hasher.update(52i32.to_le_bytes());
-        sig_hasher.update(b"CLASS:org.gradle.internal.hash.DefaultStreamHasher");
+        let sig_label = b"SIGNATURE";
+        sig_hasher.update((sig_label.len() as i32).to_le_bytes());
+        sig_hasher.update(sig_label);
+        let class_name = b"CLASS:org.gradle.internal.hash.DefaultStreamHasher";
+        sig_hasher.update((class_name.len() as i32).to_le_bytes());
+        sig_hasher.update(class_name);
         sig_hasher.finalize().into()
     })
 }
