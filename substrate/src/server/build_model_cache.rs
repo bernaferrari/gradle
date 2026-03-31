@@ -3,7 +3,6 @@
 //! Populated from JVM via JvmHostService during bootstrap.
 //! Invalidated on file watch events (build script changes).
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use dashmap::DashMap;
 

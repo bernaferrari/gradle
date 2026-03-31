@@ -1624,10 +1624,33 @@ fn parse_gstring_parts(text: &str, base_span: Span) -> Vec<StringPart> {
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /// Parse a Gradle Groovy DSL source string into a `ParseResult`.
+///
+/// Runs on a larger-than-default stack to avoid stack overflow when parsing
+/// very large build scripts (synthetic benchmarks or extremely large real
+/// scripts). The recursive-descent parser can consume significant stack
+/// depth on deeply nested or very long inputs.
 pub fn parse(source: &str) -> ParseResult {
-    let tokens = tokenize(source);
-    let parser = Parser::new(tokens);
-    parser.parse()
+    // For small inputs, parse inline on the current stack to avoid thread
+    // creation overhead. For large inputs (above ~10 KB), spawn a thread
+    // with increased stack size to prevent stack overflow.
+    const STACK_THRESHOLD: usize = 10 * 1024; // 10 KB
+
+    if source.len() < STACK_THRESHOLD {
+        let tokens = tokenize(source);
+        let parser = Parser::new(tokens);
+        parser.parse()
+    } else {
+        let source = source.to_string();
+        let handle = std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024) // 8 MB stack
+            .spawn(move || {
+                let tokens = tokenize(&source);
+                let parser = Parser::new(tokens);
+                parser.parse()
+            })
+            .expect("failed to spawn parser thread");
+        handle.join().expect("parser thread panicked")
+    }
 }
 
 /// Parse a Gradle Groovy DSL source string, returning just the AST or the first error.

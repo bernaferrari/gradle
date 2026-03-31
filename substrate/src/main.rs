@@ -356,10 +356,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let listener = UnixListener::bind(&socket_path)?;
 
-    println!("Gradle Substrate Daemon v{}", env!("CARGO_PKG_VERSION"));
-    println!("Protocol version: {}", PROTOCOL_VERSION);
+    // Print startup banner with version metadata
+    let commit = env!("APP_COMMIT", "git commit hash");
+    let target = env!("APP_TARGET", "build target triple");
+    let profile = env!("APP_PROFILE", "build profile");
+    println!("Gradle Substrate Daemon v{} ({} {} {})", env!("CARGO_PKG_VERSION"), commit, target, profile);
+    println!("Protocol version: {PROTOCOL_VERSION}");
     println!("Listening on: {}", args.socket_path);
-    println!("Services: control, dag-executor, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console, test-execution, artifact-publishing, build-init, incremental-compilation, build-metrics, garbage-collection, version-catalog");
+    println!("Cache dir: {}", args.cache_dir);
+    println!("Services: 39 (control, dag-executor, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console, test-execution, artifact-publishing, build-init, incremental-compilation, build-metrics, garbage-collection, version-catalog, parser, classpath, filewatch, jvmhost)");
 
     // Phase 6: JVM Compatibility Host
     // The JVM host socket path arrives via handshake, so we spawn a background task

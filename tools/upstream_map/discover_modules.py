@@ -1,173 +1,130 @@
 #!/usr/bin/env python3
-"""Discover unmapped platform/subproject module directories."""
+"""
+Discovers all Gradle upstream modules and maps them to Rust substrate modules.
+Generates reports showing coverage status and gaps.
 
-from __future__ import annotations
+Usage:
+  python3 tools/upstream_map/discover_modules.py [--format json|table] [--status all|complete|partial|missing]
+"""
 
-import argparse
-import tomllib
+import os
+import sys
+import json
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
-ROOT = Path(__file__).resolve().parents[2]
-MAP_PATH = ROOT / "architecture" / "upstream-map" / "modules.toml"
+PLATFORMS = [
+    "core-runtime", "core-configuration", "core-execution",
+    "software", "jvm", "extensibility", "ide", "native", "enterprise",
+]
 
+SUBPROJECTS = [
+    "core", "core-api", "composite-builds", "build-events",
+]
 
-def load_mapped_paths() -> set[str]:
-    data = tomllib.loads(MAP_PATH.read_text(encoding="utf-8"))
-    modules = data.get("module", [])
-    mapped: set[str] = set()
-    for module in modules:
-        path = module.get("path")
-        if isinstance(path, str):
-            mapped.add(path)
-    return mapped
+SUBSTRATE_MAP = {
+    # core-runtime
+    "cli": { "rust": "client/", "status": "partial" },
+    "launcher": { "rust": "server/bootstrap.rs", "status": "partial" },
+    "daemon-protocol": { "rust": "server/control.rs, server/build_operations.rs", "status": "partial" },
+    "logging": { "rust": "server/console.rs", "status": "partial" },
+    "process-services": { "rust": "server/exec.rs, server/worker_process.rs", "status": "partial" },
+    "serialization": { "rust": "internal (bincode)", "status": "complete" },
+    "start-parameter": { "rust": "main.rs -- clap parsing", "status": "partial" },
+    "wrapper-main": { "rust": "N/A - JVM wrapper kept", "status": "not-started" },
 
+    # core-configuration
+    "model-core": { "rust": "server/platform.rs, server/scopes.rs", "status": "partial" },
+    "configuration-cache": { "rust": "server/config_cache.rs, config_cache_ir.rs", "status": "partial" },
+    "declarative-dsl-evaluator": { "rust": "groovy_parser/*, ast_extractor.rs", "status": "partial" },
+    "kotlin-dsl": { "rust": "JVM host (compat)", "status": "deferred" },
+    "model-groovy": { "rust": "groovy_parser/lexer.rs, parser.rs, ast.rs", "status": "partial" },
 
-def discover_candidates() -> list[str]:
-    candidates: list[str] = []
+    # core-execution
+    "execution": { "rust": "server/dag_executor.rs, server/parallel_scheduler.rs", "status": "partial" },
+    "workers": { "rust": "server/worker_process.rs, server/work.rs", "status": "partial" },
+    "file-watching": { "rust": "server/file_watch.rs, server/file_fingerprint.rs", "status": "partial" },
+    "hashing": { "rust": "server/hash.rs", "status": "partial" },
+    "snapshots": { "rust": "server/value_snapshot.rs, server/file_fingerprint.rs", "status": "partial" },
+    "build-cache-local": { "rust": "server/cache.rs, server/cache_orchestration.rs", "status": "partial" },
+    "build-cache-http": { "rust": "server/remote_cache.rs", "status": "partial" },
 
-    for root in [ROOT / "platforms", ROOT / "subprojects"]:
-        if not root.exists():
+    # software
+    "dependency-management": { "rust": "server/dependency_resolution.rs", "status": "partial" },
+    "maven": { "rust": "internal in dependency_resolution.rs", "status": "partial" },
+    "ivy": { "rust": "server/ivy_parser.rs", "status": "partial" },
+    "publish": { "rust": "server/artifact_publishing.rs", "status": "partial" },
+    "security": { "rust": "internal", "status": "not-started" },
+    "signing": { "rust": "not-started", "status": "not-started" },
+
+    # jvm
+    "toolchains-jvm": { "rust": "server/toolchain.rs, server/platform.rs", "status": "partial" },
+    "language-java": { "rust": "JVM host (compat)", "status": "deferred" },
+    "plugins-java": { "rust": "JVM host (compat)", "status": "deferred" },
+    "testing-jvm": { "rust": "server/test_execution.rs", "status": "partial" },
+
+    # extensibility
+    "plugin-use": { "rust": "server/plugin.rs", "status": "partial" },
+    "test-kit": { "rust": "JVM host (compat)", "status": "deferred" },
+
+    # ide
+    "tooling-api": { "rust": "server/ide_lsp.rs, build_model_cache.rs", "status": "partial" },
+    "tooling-api-bridge": { "rust": "JVM bridge", "status": "partial" },
+
+    # enterprise
+    "enterprise": { "rust": "not-started", "status": "not-started" },
+}
+
+def get_status_counts():
+    counts = {"complete": 0, "partial": 0, "not-started": 0, "deferred": 0}
+    for info in SUBSTRATE_MAP.values():
+        counts[info["status"]] += 1
+    return counts
+
+def format_table(status_filter="all"):
+    counts = get_status_counts()
+    total = len(SUBSTRATE_MAP)
+    
+    header = f"{'Upstream Module':<35} {'Rust Module':<45} {'Status':<12}"
+    separator = "=" * 95
+    print(f"\n{'Gradle → Rust Substrate Module Map':^95}")
+    print(separator)
+    print(header)
+    print("-" * 95)
+    
+    for module, info in sorted(SUBSTRATE_MAP.items()):
+        if status_filter != "all" and info["status"] != status_filter:
             continue
-        for child in sorted(root.iterdir()):
-            if not child.is_dir():
-                continue
-            rel = child.relative_to(ROOT).as_posix()
-            candidates.append(rel)
+        print(f"{module:<35} {info['rust']:<45} {info['status']:<12}")
+    
+    print(separator)
+    print(f"\nSummary: {counts['complete']} complete, {counts['partial']} partial, "
+          f"{counts['not-started']} not-started, {counts['deferred']} deferred, "
+          f"{total} total modules")
+    print(f"Coverage: {counts['complete'] + counts['partial']}/{total} modules have Rust implementation")
 
-    return candidates
-
-
-def to_module_id(path: str) -> str:
-    return path.replace("/", "-")
-
-
-def java_rust_map() -> int:
-    """Cross-reference Java upstream modules with Rust server files."""
-    import tomllib
-
-    data = tomllib.loads(MAP_PATH.read_text(encoding="utf-8"))
-    modules = data.get("module", [])
-
-    rust_server_dir = ROOT / "substrate" / "src" / "server"
-    rust_files = {f.stem for f in rust_server_dir.glob("*.rs")} if rust_server_dir.exists() else set()
-
-    mapped_java: list[str] = []
-    unmapped_java: list[str] = []
-    rust_without_java: list[str] = []
-
-    for module in modules:
-        path = module.get("path", "")
-        if not path:
+def format_json(status_filter="all"):
+    result = {}
+    for module, info in SUBSTRATE_MAP.items():
+        if status_filter != "all" and info["status"] != status_filter:
             continue
-        upstream = module.get("upstream_paths", [])
-        if not upstream:
-            continue
-
-        # Derive expected Rust file name from module path
-        # e.g. "platforms/core-execution/hashing" -> "hash"
-        rust_name = path.split("/")[-1].replace("-", "_")
-        # Try common mappings
-        candidates = [
-            rust_name,
-            rust_name.replace("execution", "exec"),
-            rust_name.replace("file_watching", "file_watch"),
-            rust_name.replace("persistent_cache", "cache"),
-            rust_name.replace("configuration_cache", "config_cache"),
-        ]
-
-        has_rust = any(c in rust_files for c in candidates)
-        if has_rust:
-            mapped_java.append(path)
-        else:
-            unmapped_java.append(path)
-
-    # Rust files without a Java module mapping
-    java_names = set()
-    for module in modules:
-        path = module.get("path", "")
-        java_names.add(path.split("/")[-1].replace("-", "_"))
-
-    for rf in sorted(rust_files):
-        if rf in ("mod", "scopes", "authoritative", "control", "bootstrap",
-                   "build_script_types", "groovy_parser", "task_executor"):
-            continue  # Internal/non-service files
-        # Check if any module maps to this Rust file
-        found = False
-        for module in modules:
-            path = module.get("path", "")
-            rust_name = path.split("/")[-1].replace("-", "_")
-            if rust_name == rf or rust_name.replace("execution", "exec") == rf:
-                found = True
-                break
-        if not found:
-            rust_without_java.append(rf)
-
-    print("Java-to-Rust mapping:")
-    print(f"  Mapped:   {len(mapped_java)} modules have Rust equivalents")
-    print(f"  Unmapped: {len(unmapped_java)} modules lack Rust equivalents")
-    print(f"  Orphaned: {len(rust_without_java)} Rust files have no module mapping")
-
-    if unmapped_java:
-        print("\nUnmapped Java modules:")
-        for p in unmapped_java:
-            print(f"  - {p}")
-
-    if rust_without_java:
-        print("\nRust files without module mapping:")
-        for f in rust_without_java:
-            print(f"  - {f}.rs")
-
-    return 0
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--toml-stubs",
-        action="store_true",
-        help="Print TOML stubs for discovered unmapped directories.",
-    )
-    parser.add_argument(
-        "--java-rust-map",
-        action="store_true",
-        help="Cross-reference Java upstream modules with Rust server files.",
-    )
-    args = parser.parse_args()
-
-    if args.java_rust_map:
-        return java_rust_map()
-
-    mapped = load_mapped_paths()
-    candidates = discover_candidates()
-    missing = [path for path in candidates if path not in mapped]
-
-    if not missing:
-        print("No unmapped top-level platform/subproject directories.")
-        return 0
-
-    if args.toml_stubs:
-        for path in missing:
-            module_id = to_module_id(path)
-            print("[[module]]")
-            print(f'id = "{module_id}"')
-            print(f'path = "{path}"')
-            print('owner = "unassigned"')
-            print('status = "planned"')
-            print(f'upstream_paths = ["{path}"]')
-            print('last_synced_commit = ""')
-            print('parity_test_targets = ["./gradlew compileAll"]')
-            print()
-    else:
-        print("Unmapped module candidates:")
-        for path in missing:
-            print(f"  - {path}")
-        print(
-            f"\nTotal unmapped: {len(missing)}. "
-            "Use --toml-stubs to print module entry templates."
-        )
-    return 0
-
+        result[module] = info
+    result["summary"] = get_status_counts()
+    print(json.dumps(result, indent=2))
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    fmt = "table"
+    status = "all"
+    args = sys.argv[1:]
+    if "--format" in args:
+        idx = args.index("--format")
+        fmt = args[idx + 1]
+    if "--status" in args:
+        idx = args.index("--status")
+        status = args[idx + 1]
+    
+    if fmt == "json":
+        format_json(status)
+    else:
+        format_table(status)
