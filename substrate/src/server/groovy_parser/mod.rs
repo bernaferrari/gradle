@@ -17,7 +17,6 @@
 //! let result = groovy_parser::parse("compileSdk 34");
 //! if result.has_errors() {
 //!     for err in &result.errors {
-//!         eprintln!("{}", err);
 //!     }
 //! }
 //! ```

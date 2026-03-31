@@ -164,7 +164,7 @@ fn handle_initialize(id: Option<&serde_json::Value>) -> LspResponse {
     LspResponse {
         jsonrpc: "2.0".to_string(),
         id: id.cloned(),
-        result: Some(serde_json::to_value(result).unwrap()),
+        result: Some(serde_json::to_value(result).unwrap_or_default()),
         error: None,
     }
 }
