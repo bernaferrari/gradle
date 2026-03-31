@@ -33,10 +33,10 @@ impl TaskExecutor for SymlinkTaskExecutor {
             return result;
         }
 
-        for (i, target) in input.source_files.iter().enumerate() {
-            let link_path = if input.source_files.len() == 2 && i == 0 {
+        for target in input.source_files.iter() {
+            let link_path = if input.source_files.len() == 2 {
                 // Two-file mode: source_files[0] = target, source_files[1] = link
-                input.source_files.get(1).unwrap().clone()
+                input.source_files[1].clone()
             } else {
                 // Multi-file mode: link created in target_dir with same name
                 input
