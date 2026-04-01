@@ -480,7 +480,9 @@ mod tests {
     }
 
     /// gRPC overhead breakdown: compare direct, batch-parallel, and gRPC paths.
+    /// NOTE: Run serially with -- --ignored --test-threads=1 to avoid Tokio contention.
     #[test]
+    #[ignore = "Run with: cargo test --test benchmarks -- --ignored --test-threads=1"]
     fn test_grpc_overhead_breakdown() {
         println!("\n--- gRPC Overhead Breakdown (8KB file) ---");
 
