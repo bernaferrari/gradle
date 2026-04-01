@@ -12,6 +12,7 @@ pub mod client;
 pub mod error;
 #[allow(missing_docs)]
 pub mod server;
+pub mod unsafe_audit;
 
 // Use jemalloc in test builds to prevent runaway RSS.
 // macOS system malloc retains freed pages, causing ~150GB RSS

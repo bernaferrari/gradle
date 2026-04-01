@@ -3,8 +3,10 @@
 //! Services are organized by subsystem. Authoritative subsystems have their
 //! mode controlled via `SubsystemModes` in `authoritative.rs`.
 
+pub mod api_boundary;
 pub mod artifact_publishing;
 pub mod ast_extractor;
+pub mod atomic_write;
 pub mod authoritative;
 pub mod bootstrap;
 pub mod build_comparison;
@@ -28,7 +30,9 @@ pub mod config_cache_ir;
 pub mod configuration;
 pub mod console;
 pub mod control;
+pub mod corruption_detection;
 pub mod dag_executor;
+pub mod deterministic_cache;
 pub mod dependency_resolution;
 pub mod event_dispatcher;
 pub mod exec;
@@ -53,6 +57,7 @@ pub mod remote_cache;
 pub mod resource_management;
 pub mod schema_versioned;
 pub mod scopes;
+pub mod secret_hygiene;
 pub mod task_abi;
 pub mod typed_scopes;
 pub mod task_executor;
@@ -63,3 +68,5 @@ pub mod value_snapshot;
 pub mod version_catalog;
 pub mod work;
 pub mod worker_process;
+pub mod unsafe_confinement;
+pub mod integrity_verification;
