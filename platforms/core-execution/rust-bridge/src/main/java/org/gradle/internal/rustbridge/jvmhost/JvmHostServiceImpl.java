@@ -1,18 +1,12 @@
 package org.gradle.internal.rustbridge.jvmhost;
 
+import gradle.substrate.v1.BuildPlan;
+import gradle.substrate.v1.BuildPlanProject;
+
 import org.gradle.api.logging.Logging;
-import org.gradle.api.artifacts.Configuration;
-import org.gradle.api.artifacts.Dependency;
-import org.gradle.api.artifacts.result.ResolvedArtifactResult;
-import org.gradle.api.artifacts.result.ResolvedDependencyResult;
-import org.gradle.api.artifacts.type.ArtifactTypeContainer;
-import org.gradle.api.artifacts.type.ArtifactTypeDefinition;
 import org.jspecify.annotations.Nullable;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * Implementation of the JVM Compatibility Host service.
@@ -104,6 +98,31 @@ public class JvmHostServiceImpl {
     }
 
     /**
+     * Return a JVM-host build-plan envelope when the compatibility side can provide one.
+     *
+     * <p>This first implementation is deliberately conservative: it exposes the authoritative
+     * project model from Gradle and marks task data as not yet available instead of fabricating
+     * realized task nodes.</p>
+     */
+    public BuildPlan getBuildPlan(String buildId) {
+        BuildPlan.Builder plan = BuildPlan.newBuilder()
+            .setSchemaVersion(1)
+            .setBuildId(buildId)
+            .putMetadata("source", "jvm-host")
+            .putMetadata("taskSource", "not-yet-realized");
+
+        for (ProjectModelEntry entry : getProjectModels()) {
+            plan.addProjects(BuildPlanProject.newBuilder()
+                .setPath(entry.getPath())
+                .setName(entry.getName())
+                .setProjectDir(projectDirFromBuildFile(entry.getBuildFile()))
+                .build());
+        }
+
+        return plan.build();
+    }
+
+    /**
      * Interface for providing project model data to the JVM host.
      * Implemented by a BuildSession-scoped adapter that reads from Gradle's model.
      */
@@ -148,5 +167,13 @@ public class JvmHostServiceImpl {
         public String getName() { return name; }
         public String getVersion() { return version; }
         public String getConfiguration() { return configuration; }
+    }
+
+    private static String projectDirFromBuildFile(String buildFile) {
+        if (buildFile == null || buildFile.isEmpty()) {
+            return "";
+        }
+        java.io.File parent = new java.io.File(buildFile).getParentFile();
+        return parent == null ? "" : parent.getAbsolutePath();
     }
 }

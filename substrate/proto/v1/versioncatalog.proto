@@ -3,7 +3,7 @@ syntax = "proto3";
 package gradle.substrate.v1;
 
 option java_multiple_files = true;
-option java_package = "org.gradle.substrate.v1";
+option java_package = "gradle.substrate.v1";
 
 // Parses Gradle version catalogs (libs.versions.toml).
 service VersionCatalogService {

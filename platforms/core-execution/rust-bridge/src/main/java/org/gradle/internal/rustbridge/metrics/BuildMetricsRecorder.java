@@ -1,12 +1,6 @@
 package org.gradle.internal.rustbridge.metrics;
 
 import org.gradle.api.logging.Logging;
-import org.gradle.api.tasks.testing.TestDescriptor;
-import org.gradle.api.tasks.testing.TestListener;
-import org.gradle.api.tasks.testing.TestResult;
-import org.gradle.internal.buildoption.InternalOptions;
-import org.gradle.internal.buildoption.RustSubstrateOptions;
-import org.gradle.internal.rustbridge.SubstrateClient;
 import org.slf4j.Logger;
 
 import java.util.concurrent.atomic.AtomicInteger;
@@ -101,14 +95,14 @@ public class BuildMetricsRecorder {
      * Record bytes stored to cache.
      */
     public void recordCacheStore(long bytes) {
-        metricsClient.recordCounter(buildId, "cache.bytes_stored", bytes);
+        metricsClient.recordCounter(buildId, "cache.bytes_stored", (double) bytes);
     }
 
     /**
      * Record bytes loaded from cache.
      */
     public void recordCacheLoad(long bytes) {
-        metricsClient.recordCounter(buildId, "cache.bytes_loaded", bytes);
+        metricsClient.recordCounter(buildId, "cache.bytes_loaded", (double) bytes);
     }
 
     /**

@@ -4514,7 +4514,7 @@ repositories {
     maven { url 'https://repo.spring.io/milestone' }
 }
 
-task integrationTest {
+task integrationTest(type: Test) {
     dependsOn test
 }
 "#;
@@ -4580,4 +4580,5 @@ task integrationTest {
     assert!(integration_task.is_some(), "should find integrationTest task");
     let integration_task = integration_task.unwrap();
     assert!(integration_task.depends_on.contains(&"test".to_string()));
+    assert_eq!(integration_task.task_type, "Test");
 }

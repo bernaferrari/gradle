@@ -8,11 +8,24 @@
 
 ## Supported
 
-- Document behavior that currently matches upstream.
+- `platforms/core-execution` is the active mixed-mode landing zone for the Rust substrate.
+- The repository contains a Rust daemon workspace plus a JVM bridge module that keeps the
+  current migration centered on execution, cache, hashing, snapshots, workers, and
+  adjacent runtime services.
+- The stabilization workflow documents the intended compile, regression, and end-to-end
+  gates for this platform.
+- The active JVM bridge now covers more than the original minimal subset: lifecycle
+  listeners, cache registration, JVM-host project-model wiring, exec shadow classes,
+  reflective test-execution shadowing, and the legacy `RustBridgeServices` compatibility
+  shim are compile-safe and exercised by the strict stabilization gate.
 
 ## Gaps
 
-- Document known behavior gaps against upstream.
+- The canonical build-plan handoff is still thinner than Gradle's full execution contract.
+- The active JVM bridge wiring is still narrower than the full set of bridge sources in
+  the module.
+- Upstream-sync metadata exists, but some modules still lack concrete last-synced commit
+  information.
 
 ## Validation
 

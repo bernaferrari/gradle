@@ -1,7 +1,6 @@
 package org.gradle.internal.rustbridge.eventstream;
 
 import org.gradle.api.Task;
-import org.gradle.api.execution.TaskExecutionListener;
 import org.gradle.api.logging.Logging;
 import org.gradle.api.tasks.TaskState;
 import org.slf4j.Logger;
@@ -14,7 +13,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * Forwards JVM task execution events to the Rust substrate via gRPC.
  * Implements {@link TaskExecutionListener} to capture beforeExecute and afterExecute.
  */
-public class TaskExecutionEventForwarder implements TaskExecutionListener {
+@SuppressWarnings("deprecation")
+public class TaskExecutionEventForwarder implements org.gradle.api.execution.TaskExecutionListener {
 
     private static final Logger LOGGER = Logging.getLogger(TaskExecutionEventForwarder.class);
 
@@ -59,7 +59,7 @@ public class TaskExecutionEventForwarder implements TaskExecutionListener {
             Map<String, String> props = new HashMap<>();
             props.put("task_path", task.getPath());
             props.put("task_type", task.getClass().getSimpleName());
-            props.put("outcome", state.getOutcome() != null ? state.getOutcome().name() : "UNKNOWN");
+            props.put("outcome", determineOutcome(state));
             props.put("duration_ms", String.valueOf(durationMs));
             props.put("did_work", String.valueOf(state.getDidWork()));
             if (state.getSkipMessage() != null) {
@@ -77,5 +77,24 @@ public class TaskExecutionEventForwarder implements TaskExecutionListener {
         } catch (Exception e) {
             LOGGER.debug("[substrate:lifecycle] afterExecute event failed", e);
         }
+    }
+
+    private static String determineOutcome(TaskState state) {
+        if (state.getFailure() != null) {
+            return "FAILED";
+        }
+        if (state.getUpToDate()) {
+            return "UP_TO_DATE";
+        }
+        if (state.getNoSource()) {
+            return "NO_SOURCE";
+        }
+        if (state.getSkipped()) {
+            return "SKIPPED";
+        }
+        if (state.getExecuted()) {
+            return state.getDidWork() ? "SUCCESS" : "NO_WORK";
+        }
+        return "UNKNOWN";
     }
 }

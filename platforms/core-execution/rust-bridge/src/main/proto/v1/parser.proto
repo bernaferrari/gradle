@@ -228,6 +228,10 @@ message TypedTaskConfig {
   repeated string should_run_after = 3;
   bool enabled = 4;
   int32 line = 5;
+  string task_type = 6;
+  repeated string must_run_after = 7;
+  repeated string finalized_by = 8;
+  repeated string declared_outputs = 9;
 }
 
 message TypedRepository {

@@ -32,6 +32,7 @@ dependencies {
     implementation(projects.processServices)
     implementation(projects.processServicesBase)
     implementation(projects.modelCore)
+    compileOnly(projects.internalInstrumentationApi)
 
     testImplementation(projects.testingBase)
     testImplementation(projects.baseServicesGroovy)
@@ -92,28 +93,9 @@ tasks.named<JavaCompile>("compileJava") {
     // Add proto-compiled classes to the classpath
     classpath = files(compileProtoJava.flatMap { it.destinationDirectory }) + classpath
 
-    // Exclude proto-generated sources from the main compile (they're compiled separately)
-    // Also exclude files that depend on :core or :testing-base (JVM compat issues).
-    // These will be moved to appropriate modules in a follow-up.
+    // Exclude proto-generated sources from the main compile (they're compiled separately).
     val excludedDirs = listOf(
-        "build/generated/source/proto",
-        "src/main/java/org/gradle/internal/rustbridge/bootstrap/BootstrapLifecycleListener.java",
-        "src/main/java/org/gradle/internal/rustbridge/shadow/BuildFinishMismatchLogger.java",
-        "src/main/java/org/gradle/internal/rustbridge/buildresult/BuildResultShadowListener.java",
-        "src/main/java/org/gradle/internal/rustbridge/jvmhost/ProjectModelProviderAdapter.java",
-        "src/main/java/org/gradle/internal/rustbridge/jvmhost/JvmHostServer.java",
-        "src/main/java/org/gradle/internal/rustbridge/testexec/TestExecutionShadowListener.java",
-        "src/main/java/org/gradle/internal/rustbridge/testexec/RustTestExecutionClient.java",
-        "src/main/java/org/gradle/internal/rustbridge/metrics/BuildMetricsRecorder.java",
-        "src/main/java/org/gradle/internal/rustbridge/DaemonLauncher.java",
-        "src/main/java/org/gradle/internal/rustbridge/RustBridgeServices.java",
-        // Exec/worker shadow paths are under active refactor; keep them out of compile until APIs settle.
-        "src/main/java/org/gradle/internal/rustbridge/exec/ShadowingExecActionFactory.java",
-        "src/main/java/org/gradle/internal/rustbridge/exec/RustExecAction.java",
-        "src/main/java/org/gradle/internal/rustbridge/exec/RustProcessHandle.java",
-        "src/main/java/org/gradle/internal/rustbridge/worker/ShadowingWorkerPool.java",
-        // Cache service registration still depends on internal configuration APIs.
-        "src/main/java/org/gradle/internal/rustbridge/cache/RustBridgeCacheServices.java"
+        "build/generated/source/proto"
     )
     setSource(source.filter { file ->
         excludedDirs.none { file.absolutePath.contains(it) }
@@ -123,20 +105,9 @@ tasks.named<JavaCompile>("compileJava") {
     options.compilerArgs.add("-proc:none")
 }
 
-// Exclude test files that depend on excluded main sources
+// Exclude test files that still depend on excluded main sources
 tasks.named<JavaCompile>("compileTestJava") {
     exclude("**/jvmhost/JvmHostServerTest.java")
-}
-
-tasks.named<GroovyCompile>("compileTestGroovy") {
-    exclude(
-        "**/bootstrap/BootstrapLifecycleListenerTest.groovy",
-        "**/buildresult/BuildResultShadowListenerTest.groovy",
-        "**/cache/RustBuildCacheServiceTest.groovy",
-        "**/shadow/BuildFinishMismatchLoggerTest.groovy",
-        "**/snapshot/ShadowingInputFingerprinterTest.groovy",
-        "**/testexec/TestExecutionShadowListenerTest.groovy"
-    )
 }
 
 // Add proto-compiled classes to the main source set output so tests can see them

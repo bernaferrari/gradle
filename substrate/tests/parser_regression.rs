@@ -777,6 +777,44 @@ tasks.register("hello") {
     }
 
     #[test]
+    fn kotlin_typed_task_register_extracts_type_and_outputs() {
+        let r = parse_kotlin(
+            r#"
+tasks.register<JavaCompile>("compileJava") {
+    dependsOn("generateSources")
+    mustRunAfter("processResources")
+    finalizedBy("check")
+    destinationDirectory = layout.buildDirectory.dir("classes/java/main")
+}
+"#,
+        );
+        assert_eq!(r.task_configs.len(), 1);
+        assert_eq!(r.task_configs[0].task_name, "compileJava");
+        assert_eq!(r.task_configs[0].task_type.as_deref(), Some("JavaCompile"));
+        assert_eq!(r.task_configs[0].must_run_after, vec!["processResources"]);
+        assert_eq!(r.task_configs[0].finalized_by, vec!["check"]);
+        assert_eq!(
+            r.task_configs[0].declared_outputs,
+            vec!["classes/java/main"]
+        );
+    }
+
+    #[test]
+    fn kotlin_named_task_extracts_type() {
+        let r = parse_kotlin(
+            r#"
+tasks.named<Test>("test") {
+    shouldRunAfter("compileJava")
+}
+"#,
+        );
+        assert_eq!(r.task_configs.len(), 1);
+        assert_eq!(r.task_configs[0].task_name, "test");
+        assert_eq!(r.task_configs[0].task_type.as_deref(), Some("Test"));
+        assert_eq!(r.task_configs[0].should_run_after, vec!["compileJava"]);
+    }
+
+    #[test]
     fn kotlin_task_with_depends_on() {
         let r = parse_kotlin(
             r#"

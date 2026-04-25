@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+service NativeCompileService {
+  // Get compiler information (path, version, supported languages).
+  rpc GetCompilerInfo(GetCompilerInfoRequest) returns (GetCompilerInfoResponse);
+
+  // Parse a compile_commands.json file and return structured entries.
+  rpc ParseCompileCommands(ParseCompileCommandsRequest) returns (ParseCompileCommandsResponse);
+}
+
+message GetCompilerInfoRequest {
+  string compiler = 1; // e.g., "clang", "gcc", "swiftc"
+}
+
+message CompilerInfo {
+  string name = 1;
+  string path = 2;
+  string version = 3;
+  string target_triple = 4;
+  repeated string supported_languages = 5;
+}
+
+message GetCompilerInfoResponse {
+  repeated CompilerInfo compilers = 1;
+  string error_message = 2;
+}
+
+message ParseCompileCommandsRequest {
+  // Path to compile_commands.json or directory containing it.
+  string path = 1;
+}
+
+message CompileCommand {
+  string directory = 1;
+  string file = 2;
+  string command = 3;
+  repeated string arguments = 4;
+  string output = 5;
+}
+
+message ParseCompileCommandsResponse {
+  repeated CompileCommand entries = 1;
+  int32 total_entries = 2;
+  string error_message = 3;
+}

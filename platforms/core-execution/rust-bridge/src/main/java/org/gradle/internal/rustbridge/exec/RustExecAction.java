@@ -78,14 +78,7 @@ public class RustExecAction implements ExecAction {
             LOGGER.debug("Error pumping process output", e);
         }
 
-        int exitCode;
-        try {
-            exitCode = handle.waitForFinish().getExitValue();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            handle.abort();
-            throw new ProcessExecutionException("Process interrupted", e);
-        }
+        int exitCode = handle.waitForFinish().getExitValue();
 
         if (!ignoreExitValue && exitCode != 0) {
             throw new ProcessExecutionException(
@@ -327,14 +320,13 @@ public class RustExecAction implements ExecAction {
     @Override
     public ProcessForkOptions copyTo(ProcessForkOptions options) {
         options.setExecutable(this.executable);
-        options.setArgs(this.args);
+        if (options instanceof ExecSpec) {
+            ((ExecSpec) options).setArgs(this.args);
+        }
         options.setWorkingDir(this.workingDir);
         options.setEnvironment(this.environment);
         if (options instanceof BaseExecSpec) {
             ((BaseExecSpec) options).setIgnoreExitValue(this.ignoreExitValue);
-        }
-        if (options instanceof ExecSpec) {
-            // nothing extra needed
         }
         return this;
     }

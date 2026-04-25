@@ -13,6 +13,14 @@ if ! git diff --quiet -- "$proto_a" "$proto_b"; then
   preexisting_proto_changes=1
 fi
 
+echo "== Proto parity (checked-in trees)"
+if ! diff -qr "$proto_a" "$proto_b" >/tmp/rust-bridge-proto-diff.txt; then
+  echo "Checked-in proto mismatch detected between $proto_a and $proto_b."
+  echo "Run './gradlew -q :rust-bridge:syncProtos' and commit the result."
+  sed -n '1,80p' /tmp/rust-bridge-proto-diff.txt
+  exit 1
+fi
+
 echo "== Proto sync"
 ./gradlew -q :rust-bridge:syncProtos
 

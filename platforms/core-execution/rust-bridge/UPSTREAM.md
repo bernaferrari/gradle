@@ -19,3 +19,5 @@
 
 - This module is the JVM compatibility bridge and should keep upstream naming and runtime boundaries.
 - Protocol changes must remain synchronized with `substrate/proto/v1`.
+- Until an upstream sync commit is recorded here, treat parity as "locally validated mixed
+  mode" rather than "fully audited against a specific upstream revision."

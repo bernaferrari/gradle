@@ -1,19 +1,18 @@
 package org.gradle.internal.rustbridge.buildresult
 
-import org.gradle.initialization.RootBuildLifecycleListener
 import org.gradle.internal.rustbridge.history.RustExecutionHistoryClient
 import org.gradle.internal.rustbridge.metrics.RustBuildMetricsClient
 import spock.lang.Specification
 
 class BuildResultShadowListenerTest extends Specification {
 
-    def "implements RootBuildLifecycleListener"() {
+    def "implements lifecycle callbacks"() {
         given:
         def client = Mock(RustBuildResultClient)
         def listener = new BuildResultShadowListener(client)
 
         expect:
-        listener instanceof RootBuildLifecycleListener
+        listener instanceof org.gradle.internal.rustbridge.RootBuildLifecycleBridge.Callbacks
     }
 
     def "single-arg constructor sets client and null metrics/history"() {
@@ -153,12 +152,13 @@ class BuildResultShadowListenerTest extends Specification {
         def client = Mock(RustBuildResultClient)
         def historyClient = Mock(RustExecutionHistoryClient)
         def listener = new BuildResultShadowListener(client, null, historyClient)
-        def stats = Mock(gradle.substrate.v1.GetHistoryStatsResponse)
-        stats.getEntryCount() >> 5
-        stats.getTotalBytesStored() >> 10240
-        stats.getHitRate() >> 0.85
-        stats.getStores() >> 100
-        stats.getRemoves() >> 10
+        def stats = gradle.substrate.v1.GetHistoryStatsResponse.newBuilder()
+            .setEntryCount(5)
+            .setTotalBytesStored(10240)
+            .setHitRate(0.85d)
+            .setStores(100)
+            .setRemoves(10)
+            .build()
 
         when:
         listener.beforeComplete(null)
@@ -172,8 +172,9 @@ class BuildResultShadowListenerTest extends Specification {
         def client = Mock(RustBuildResultClient)
         def historyClient = Mock(RustExecutionHistoryClient)
         def listener = new BuildResultShadowListener(client, null, historyClient)
-        def stats = Mock(gradle.substrate.v1.GetHistoryStatsResponse)
-        stats.getEntryCount() >> 0
+        def stats = gradle.substrate.v1.GetHistoryStatsResponse.newBuilder()
+            .setEntryCount(0)
+            .build()
 
         when:
         listener.beforeComplete(null)
@@ -216,8 +217,9 @@ class BuildResultShadowListenerTest extends Specification {
         def metricsClient = Mock(RustBuildMetricsClient)
         def historyClient = Mock(RustExecutionHistoryClient)
         def listener = new BuildResultShadowListener(client, metricsClient, historyClient)
-        def stats = Mock(gradle.substrate.v1.GetHistoryStatsResponse)
-        stats.getEntryCount() >> 0
+        def stats = gradle.substrate.v1.GetHistoryStatsResponse.newBuilder()
+            .setEntryCount(0)
+            .build()
 
         when:
         listener.beforeComplete(null)

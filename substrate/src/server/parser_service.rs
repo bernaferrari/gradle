@@ -496,6 +496,10 @@ impl ParserService for ParserServiceImpl {
                 should_run_after: t.should_run_after,
                 enabled: t.enabled,
                 line: t.line.unwrap_or(0) as i32,
+                task_type: t.task_type.unwrap_or_default(),
+                must_run_after: t.must_run_after,
+                finalized_by: t.finalized_by,
+                declared_outputs: t.declared_outputs,
             })
             .collect();
 

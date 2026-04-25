@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package gradle.substrate.v1;
 
+import "v1/buildplan.proto";
+
 option java_multiple_files = true;
 option java_package = "gradle.substrate.v1";
 
@@ -10,6 +12,7 @@ service JvmHostService {
   rpc GetBuildModel(GetBuildModelRequest) returns (GetBuildModelResponse);
   rpc ResolveConfiguration(ResolveConfigRequest) returns (ResolveConfigResponse);
   rpc GetBuildEnvironment(GetBuildEnvironmentRequest) returns (GetBuildEnvironmentResponse);
+  rpc GetBuildPlan(GetBuildPlanRequest) returns (GetBuildPlanResponse);
 }
 message EvaluateScriptRequest {
   string script_path = 1;
@@ -62,4 +65,11 @@ message GetBuildEnvironmentResponse {
   int32 available_processors = 6;
   int64 max_memory_bytes = 7;
   map<string, string> system_properties = 8;
+}
+message GetBuildPlanRequest { string build_id = 1; }
+message GetBuildPlanResponse {
+  bool success = 1;
+  string error_message = 2;
+  BuildPlan plan = 3;
+  string source = 4;
 }

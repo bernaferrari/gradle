@@ -7,10 +7,11 @@ use gradle_substrate_daemon::client::jvm_host::JvmHostClient;
 use gradle_substrate_daemon::client::jvm_host_bridge::JvmHostBridge;
 use gradle_substrate_daemon::proto::jvm_host_service_server::{JvmHostService, JvmHostServiceServer};
 use gradle_substrate_daemon::proto::{
-    EvaluateScriptRequest, EvaluateScriptResponse, GetBuildEnvironmentRequest,
-    GetBuildEnvironmentResponse, GetBuildModelRequest, GetBuildModelResponse, ProjectModel,
-    ResolveConfigRequest, ResolveConfigResponse,
+    BuildPlan, EvaluateScriptRequest, EvaluateScriptResponse, GetBuildEnvironmentRequest,
+    GetBuildEnvironmentResponse, GetBuildModelRequest, GetBuildModelResponse, GetBuildPlanRequest,
+    GetBuildPlanResponse, ProjectModel, ResolveConfigRequest, ResolveConfigResponse,
 };
+use gradle_substrate_daemon::server::build_plan_ir::BUILD_PLAN_SCHEMA_VERSION;
 use gradle_substrate_daemon::server::build_plan_shadow::{
     BuildPlanShadowStore, capture_and_persist_shadow_from_jvm, verify_shadow_against_jvm,
 };
@@ -20,6 +21,7 @@ use tonic::{Request, Response, Status};
 
 struct AlternatingMockJvmHostService {
     model_calls: AtomicUsize,
+    resolve_calls: AtomicUsize,
 }
 
 #[tonic::async_trait]
@@ -64,13 +66,59 @@ impl JvmHostService for AlternatingMockJvmHostService {
         Ok(Response::new(GetBuildModelResponse { projects }))
     }
 
+    async fn get_build_plan(
+        &self,
+        request: Request<GetBuildPlanRequest>,
+    ) -> Result<Response<GetBuildPlanResponse>, Status> {
+        Ok(Response::new(GetBuildPlanResponse {
+            success: true,
+            error_message: String::new(),
+            plan: Some(BuildPlan {
+                schema_version: BUILD_PLAN_SCHEMA_VERSION,
+                build_id: request.into_inner().build_id,
+                projects: Vec::new(),
+                tasks: Vec::new(),
+                dependencies: Vec::new(),
+                toolchains: Vec::new(),
+                metadata: HashMap::from([(
+                    "provider".to_string(),
+                    "alternating-mock-build-plan".to_string(),
+                )]),
+            }),
+            source: "mock-jvm-host".to_string(),
+        }))
+    }
+
     async fn resolve_configuration(
         &self,
-        _request: Request<ResolveConfigRequest>,
+        request: Request<ResolveConfigRequest>,
     ) -> Result<Response<ResolveConfigResponse>, Status> {
+        let request = request.into_inner();
+        let call_number = self.resolve_calls.fetch_add(1, Ordering::SeqCst);
+        let mut artifacts = match request.configuration_name.as_str() {
+            "compileClasspath" => vec![
+                gradle_substrate_daemon::proto::ResolvedArtifact {
+                    group: "org.example".to_string(),
+                    name: "alpha".to_string(),
+                    version: "1.0.0".to_string(),
+                    configuration: request.configuration_name.clone(),
+                },
+                gradle_substrate_daemon::proto::ResolvedArtifact {
+                    group: "org.example".to_string(),
+                    name: "beta".to_string(),
+                    version: "2.0.0".to_string(),
+                    configuration: request.configuration_name.clone(),
+                },
+            ],
+            _ => Vec::new(),
+        };
+        if call_number % 2 == 1 {
+            artifacts.reverse();
+        }
+
         Ok(Response::new(ResolveConfigResponse {
             success: true,
-            artifacts: Vec::new(),
+            artifacts,
             error_message: String::new(),
         }))
     }
@@ -100,6 +148,7 @@ async fn spawn_mock_server() -> (String, tempfile::TempDir) {
     let stream = tokio_stream::wrappers::UnixListenerStream::new(uds);
     let service = AlternatingMockJvmHostService {
         model_calls: AtomicUsize::new(0),
+        resolve_calls: AtomicUsize::new(0),
     };
 
     tokio::spawn(async move {
@@ -181,4 +230,43 @@ async fn shadow_capture_is_partitioned_by_build_id() {
     let path_a = store.artifact_path_for_build_id(build_ids[0]);
     let path_b = store.artifact_path_for_build_id(build_ids[1]);
     assert_ne!(path_a, path_b);
+}
+
+#[tokio::test]
+async fn shadow_capture_is_order_insensitive_across_dependency_resolution_ordering() {
+    let (socket_path, _server_dir) = spawn_mock_server().await;
+    let client = JvmHostClient::connect(&socket_path).await.unwrap();
+    let bridge = JvmHostBridge::new();
+    bridge.set_client(client).await;
+
+    let cache_dir = tempfile::tempdir().unwrap();
+    let store = BuildPlanShadowStore::new(PathBuf::from(cache_dir.path()));
+    let build_id = "shadow-diff-dependencies";
+
+    let _ = capture_and_persist_shadow_from_jvm(&bridge, &store, build_id)
+        .await
+        .unwrap()
+        .expect("expected first shadow artifact");
+    let first = store.load_plan(build_id).unwrap().expect("first artifact");
+
+    let _ = capture_and_persist_shadow_from_jvm(&bridge, &store, build_id)
+        .await
+        .unwrap()
+        .expect("expected second shadow artifact");
+    let second = store.load_plan(build_id).unwrap().expect("second artifact");
+
+    assert_eq!(first.fingerprint_sha256, second.fingerprint_sha256);
+    assert_eq!(
+        first.plan.metadata.get("dependencyCount"),
+        second.plan.metadata.get("dependencyCount")
+    );
+
+    let report = verify_shadow_against_jvm(&bridge, &store, build_id)
+        .await
+        .unwrap();
+    assert!(
+        report.is_match(),
+        "expected no mismatches, got: {:?}",
+        report.mismatches
+    );
 }

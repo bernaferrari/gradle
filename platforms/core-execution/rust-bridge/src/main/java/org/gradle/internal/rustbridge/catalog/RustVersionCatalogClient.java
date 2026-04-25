@@ -1,6 +1,6 @@
 package org.gradle.internal.rustbridge.catalog;
 
-import org.gradle.substrate.v1.*;
+import gradle.substrate.v1.*;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
 import org.slf4j.Logger;

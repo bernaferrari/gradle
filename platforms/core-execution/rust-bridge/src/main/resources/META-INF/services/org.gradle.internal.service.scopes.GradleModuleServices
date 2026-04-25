@@ -1,1 +1,2 @@
 org.gradle.internal.rustbridge.RustBridgeCoreServices
+org.gradle.internal.rustbridge.cache.RustBridgeCacheServices
