@@ -376,6 +376,32 @@ fn parse_plugins_block(content: &str, result: &mut BuildScriptParseResult) {
                 }
             }
         }
+
+        // Kotlin shorthand plugin accessors such as `java` inside a plugins block.
+        for line in block.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty()
+                || trimmed.starts_with("id(")
+                || trimmed.contains('(')
+                || trimmed.contains(' ')
+                || trimmed.contains('=')
+                || trimmed == "{"
+                || trimmed == "}"
+            {
+                continue;
+            }
+
+            if trimmed
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+                && !result.plugins.iter().any(|plugin| plugin.id == trimmed)
+            {
+                result.plugins.push(ParsedPlugin {
+                    id: trimmed.to_string(),
+                    ..Default::default()
+                });
+            }
+        }
     }
 
     // Also parse standalone `apply(plugin = "...")` or `apply(plugin: "...")`
@@ -1095,53 +1121,74 @@ fn find_brace_block_end(content: &str) -> Option<usize> {
 
 /// Parse tasks block in Kotlin DSL.
 fn parse_tasks_block(content: &str, result: &mut BuildScriptParseResult) {
-    // Kotlin DSL: tasks.register("foo") { dependsOn("bar") }
-    for (i, _) in content.match_indices("tasks.register(") {
-        let args_start = i + 15;
-        if let Some(close) = content[args_start..].find(')') {
-            let args = &content[args_start..args_start + close];
-            if let Some(task_name) = extract_string_literal(args) {
-                let mut task_config = ParsedTaskConfig {
-                    task_name,
-                    depends_on: Vec::new(),
-                    should_run_after: Vec::new(),
-                    enabled: true,
-                    ..Default::default()
-                };
+    for method_name in ["register", "named"] {
+        parse_kotlin_task_invocations(content, method_name, result);
+    }
+}
 
-                // Find the block after the register call
-                let after_close = args_start + close + 1;
-                let rest = &content[after_close..];
-                if let Some(brace_start) = rest.find('{') {
-                    if let Some(block) = find_brace_block(content, after_close + brace_start) {
-                        // Parse dependsOn("...")
-                        for (di, _) in block.match_indices("dependsOn(") {
-                            let da = di + 10;
-                            if let Some(dc) = block[da..].find(')') {
-                                if let Some(dep) = extract_string_literal(&block[da..da + dc]) {
-                                    task_config.depends_on.push(dep);
-                                }
-                            }
-                        }
-                        // Parse shouldRunAfter("...")
-                        for (di, _) in block.match_indices("shouldRunAfter(") {
-                            let da = di + 15;
-                            if let Some(dc) = block[da..].find(')') {
-                                if let Some(dep) = extract_string_literal(&block[da..da + dc]) {
-                                    task_config.should_run_after.push(dep);
-                                }
-                            }
-                        }
-                        // Parse enabled = false
-                        if block.contains("enabled = false") || block.contains("enabled=false") {
-                            task_config.enabled = false;
-                        }
-                    }
-                }
+fn parse_kotlin_task_invocations(
+    content: &str,
+    method_name: &str,
+    result: &mut BuildScriptParseResult,
+) {
+    let needle = format!("tasks.{method_name}");
+    for (i, _) in content.match_indices(&needle) {
+        let mut cursor = i + needle.len();
+        skip_ascii_whitespace(content, &mut cursor);
 
-                result.task_configs.push(task_config);
+        let mut task_type = None;
+        if content.as_bytes().get(cursor) == Some(&b'<') {
+            if let Some((generic, next_cursor)) = extract_angle_bracket_content(content, cursor) {
+                task_type = normalize_task_type(&generic);
+                cursor = next_cursor;
+                skip_ascii_whitespace(content, &mut cursor);
             }
         }
+
+        if content.as_bytes().get(cursor) != Some(&b'(') {
+            continue;
+        }
+        let open_paren = cursor;
+        let Some(close_paren) = find_matching_delimiter(content, open_paren, b'(', b')') else {
+            continue;
+        };
+
+        let args = &content[open_paren + 1..close_paren];
+        let Some(task_name) = extract_first_string_literal(args) else {
+            continue;
+        };
+
+        let mut task_config = ParsedTaskConfig {
+            task_name,
+            task_type,
+            ..Default::default()
+        };
+
+        let mut after_close = close_paren + 1;
+        skip_ascii_whitespace(content, &mut after_close);
+        if content.as_bytes().get(after_close) == Some(&b'.') {
+            if let Some(configure_offset) = content[after_close..].find(".configure") {
+                let configure_start = after_close + configure_offset + ".configure".len();
+                let mut configure_cursor = configure_start;
+                skip_ascii_whitespace(content, &mut configure_cursor);
+                if content.as_bytes().get(configure_cursor) == Some(&b'(') {
+                    if let Some(configure_close) =
+                        find_matching_delimiter(content, configure_cursor, b'(', b')')
+                    {
+                        after_close = configure_close + 1;
+                    }
+                }
+                skip_ascii_whitespace(content, &mut after_close);
+            }
+        }
+
+        if content.as_bytes().get(after_close) == Some(&b'{') {
+            if let Some(block) = find_brace_block(content, after_close) {
+                populate_task_block_properties(&block, &mut task_config);
+            }
+        }
+
+        result.task_configs.push(task_config);
     }
 }
 
@@ -1165,14 +1212,17 @@ fn parse_groovy_tasks(content: &str, result: &mut BuildScriptParseResult) {
 
         let mut task_config = ParsedTaskConfig {
             task_name,
-            depends_on: Vec::new(),
-            should_run_after: Vec::new(),
-            enabled: true,
             ..Default::default()
         };
 
         // Find the task block
         let search_from = i + 5 + name_end;
+        if after[name_end..].starts_with('(') {
+            if let Some(signature_end) = after[name_end..].find(')') {
+                let signature = &after[name_end + 1..name_end + signature_end];
+                task_config.task_type = extract_groovy_task_type(signature);
+            }
+        }
         let rest = &content[search_from..];
         if let Some(brace_pos) = rest.find('{') {
             if let Some(block) = find_brace_block(content, search_from + brace_pos) {
@@ -1206,14 +1256,229 @@ fn parse_groovy_tasks(content: &str, result: &mut BuildScriptParseResult) {
                         }
                     }
                 }
+                // mustRunAfter 'bar' or mustRunAfter "bar" or mustRunAfter bar
+                for (di, _) in block.match_indices("mustRunAfter ") {
+                    let da = di + 13;
+                    let rest = block[da..].trim_start();
+                    if let Some(dep) = extract_string_literal(rest) {
+                        task_config.must_run_after.push(dep);
+                    } else {
+                        let end = rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len());
+                        let dep = rest[..end].trim().trim_matches(',').to_string();
+                        if !dep.is_empty() {
+                            task_config.must_run_after.push(dep);
+                        }
+                    }
+                }
+                // finalizedBy 'bar' or finalizedBy "bar" or finalizedBy bar
+                for (di, _) in block.match_indices("finalizedBy ") {
+                    let da = di + 12;
+                    let rest = block[da..].trim_start();
+                    if let Some(dep) = extract_string_literal(rest) {
+                        task_config.finalized_by.push(dep);
+                    } else {
+                        let end = rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len());
+                        let dep = rest[..end].trim().trim_matches(',').to_string();
+                        if !dep.is_empty() {
+                            task_config.finalized_by.push(dep);
+                        }
+                    }
+                }
                 if block.contains("enabled = false") || block.contains("enabled false") {
                     task_config.enabled = false;
                 }
+                task_config.declared_outputs = collect_declared_outputs(&block);
             }
         }
 
         result.task_configs.push(task_config);
     }
+}
+
+fn populate_task_block_properties(block: &str, task_config: &mut ParsedTaskConfig) {
+    task_config.depends_on = collect_call_string_literals(block, "dependsOn");
+    task_config.should_run_after = collect_call_string_literals(block, "shouldRunAfter");
+    task_config.must_run_after = collect_call_string_literals(block, "mustRunAfter");
+    task_config.finalized_by = collect_call_string_literals(block, "finalizedBy");
+    task_config.declared_outputs = collect_declared_outputs(block);
+
+    if block.contains("enabled = false") || block.contains("enabled=false") {
+        task_config.enabled = false;
+    }
+}
+
+fn collect_call_string_literals(content: &str, method_name: &str) -> Vec<String> {
+    let needle = format!("{method_name}(");
+    let mut values = Vec::new();
+
+    for (i, _) in content.match_indices(&needle) {
+        let open_paren = i + method_name.len();
+        let Some(close_paren) = find_matching_delimiter(content, open_paren, b'(', b')') else {
+            continue;
+        };
+        values.extend(extract_string_literals(&content[open_paren + 1..close_paren]));
+    }
+
+    dedup_preserve_order(values)
+}
+
+fn collect_declared_outputs(block: &str) -> Vec<String> {
+    let mut outputs = Vec::new();
+    for line in block.lines() {
+        let trimmed = line.trim();
+        if trimmed.contains("outputs.dir(")
+            || trimmed.contains("outputs.file(")
+            || trimmed.contains("destinationDirectory")
+            || trimmed.contains("archiveFile")
+        {
+            outputs.extend(extract_string_literals(trimmed));
+        }
+    }
+
+    dedup_preserve_order(outputs)
+}
+
+fn extract_groovy_task_type(signature: &str) -> Option<String> {
+    let type_pos = signature.find("type:")?;
+    let type_decl = signature[type_pos + 5..]
+        .split([',', ')'])
+        .next()
+        .unwrap_or("")
+        .trim();
+    normalize_task_type(type_decl)
+}
+
+fn extract_angle_bracket_content(content: &str, start: usize) -> Option<(String, usize)> {
+    if content.as_bytes().get(start) != Some(&b'<') {
+        return None;
+    }
+
+    let bytes = content.as_bytes();
+    let mut depth = 0i32;
+    let mut i = start;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'<' => depth += 1,
+            b'>' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((content[start + 1..i].trim().to_string(), i + 1));
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+fn extract_first_string_literal(content: &str) -> Option<String> {
+    extract_string_literals(content).into_iter().next()
+}
+
+fn extract_string_literals(content: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let bytes = content.as_bytes();
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        let quote = bytes[i];
+        if quote != b'"' && quote != b'\'' {
+            i += 1;
+            continue;
+        }
+
+        let start = i + 1;
+        i += 1;
+        while i < bytes.len() {
+            if bytes[i] == quote && !is_escaped(content, i) {
+                values.push(content[start..i].to_string());
+                i += 1;
+                break;
+            }
+            i += 1;
+        }
+    }
+
+    values
+}
+
+fn normalize_task_type(task_type: &str) -> Option<String> {
+    let normalized = task_type
+        .trim()
+        .trim_end_matches("::class")
+        .trim_end_matches(".class")
+        .trim();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized.to_string())
+    }
+}
+
+fn skip_ascii_whitespace(content: &str, cursor: &mut usize) {
+    while content
+        .as_bytes()
+        .get(*cursor)
+        .is_some_and(|byte| byte.is_ascii_whitespace())
+    {
+        *cursor += 1;
+    }
+}
+
+fn find_matching_delimiter(
+    content: &str,
+    open_index: usize,
+    open: u8,
+    close: u8,
+) -> Option<usize> {
+    let bytes = content.as_bytes();
+    if bytes.get(open_index) != Some(&open) {
+        return None;
+    }
+
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut string_char = b'"';
+    let mut i = open_index;
+    while i < bytes.len() {
+        let byte = bytes[i];
+        if in_string {
+            if byte == string_char && !is_escaped(content, i) {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        match byte {
+            b'"' | b'\'' => {
+                in_string = true;
+                string_char = byte;
+            }
+            _ if byte == open => depth += 1,
+            _ if byte == close => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+fn dedup_preserve_order(values: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut deduped = Vec::new();
+    for value in values {
+        if !value.is_empty() && seen.insert(value.clone()) {
+            deduped.push(value);
+        }
+    }
+    deduped
 }
 
 /// Parse top-level assignments: group, version, sourceCompatibility, targetCompatibility.
@@ -1422,6 +1687,20 @@ plugins {
     }
 
     #[test]
+    fn test_parse_kotlin_dsl_plugin_shorthand() {
+        let content = r#"
+plugins {
+    java
+    application
+}
+"#;
+        let result = parse_build_script(content, "build.gradle.kts");
+        assert_eq!(result.plugins.len(), 2);
+        assert_eq!(result.plugins[0].id, "java");
+        assert_eq!(result.plugins[1].id, "application");
+    }
+
+    #[test]
     fn test_parse_kotlin_dsl_dependencies() {
         let content = r#"
 dependencies {
@@ -1500,6 +1779,48 @@ tasks.register("integrationTest") {
         assert_eq!(result.task_configs[0].depends_on, vec!["test"]);
         assert_eq!(result.task_configs[0].should_run_after, vec!["build"]);
         assert!(result.task_configs[0].enabled);
+    }
+
+    #[test]
+    fn test_parse_typed_kotlin_task_registration() {
+        let content = r#"
+tasks.register<JavaCompile>("compileJava") {
+    dependsOn("generateSources")
+    mustRunAfter("processResources")
+    finalizedBy("check")
+    destinationDirectory = layout.buildDirectory.dir("classes/java/main")
+}
+"#;
+        let result = parse_build_script(content, "build.gradle.kts");
+        assert_eq!(result.task_configs.len(), 1);
+        assert_eq!(result.task_configs[0].task_name, "compileJava");
+        assert_eq!(result.task_configs[0].task_type.as_deref(), Some("JavaCompile"));
+        assert_eq!(result.task_configs[0].depends_on, vec!["generateSources"]);
+        assert_eq!(result.task_configs[0].must_run_after, vec!["processResources"]);
+        assert_eq!(result.task_configs[0].finalized_by, vec!["check"]);
+        assert_eq!(
+            result.task_configs[0].declared_outputs,
+            vec!["classes/java/main"]
+        );
+    }
+
+    #[test]
+    fn test_parse_named_kotlin_task_configuration() {
+        let content = r#"
+tasks.named<Test>("test") {
+    outputs.dir("build/test-results/test")
+    shouldRunAfter("compileJava")
+}
+"#;
+        let result = parse_build_script(content, "build.gradle.kts");
+        assert_eq!(result.task_configs.len(), 1);
+        assert_eq!(result.task_configs[0].task_name, "test");
+        assert_eq!(result.task_configs[0].task_type.as_deref(), Some("Test"));
+        assert_eq!(result.task_configs[0].should_run_after, vec!["compileJava"]);
+        assert_eq!(
+            result.task_configs[0].declared_outputs,
+            vec!["build/test-results/test"]
+        );
     }
 
     #[test]
@@ -1741,6 +2062,7 @@ task integrationTest(type: Test) {
         assert_eq!(result.dependencies.len(), 2);
         assert_eq!(result.task_configs.len(), 1);
         assert_eq!(result.task_configs[0].task_name, "integrationTest");
+        assert_eq!(result.task_configs[0].task_type.as_deref(), Some("Test"));
         assert_eq!(result.task_configs[0].should_run_after, vec!["test"]);
     }
 

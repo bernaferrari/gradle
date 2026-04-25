@@ -7,8 +7,10 @@ import org.gradle.internal.rustbridge.jvmhost.JvmHostServiceImpl;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -20,7 +22,6 @@ public class DaemonLauncher {
     private static final Logger LOGGER = Logging.getLogger(DaemonLauncher.class);
     private static final String SOCKET_NAME = "substrate.sock";
     private static final String JVM_HOST_SOCKET_NAME = "jvm-host.sock";
-    private static final String SUBSTRATE_DIR_NAME = ".gradle-substrate";
     private static final String BINARY_NAME = "gradle-substrate-daemon";
 
     private final File daemonBinary;
@@ -71,8 +72,8 @@ public class DaemonLauncher {
     }
 
     private static String detectPlatform() {
-        String osName = System.getProperty("os.name", "").toLowerCase();
-        String osArch = System.getProperty("os.arch", "").toLowerCase();
+        String osName = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        String osArch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
 
         String os;
         if (osName.contains("win")) {
@@ -239,7 +240,7 @@ public class DaemonLauncher {
                 int n;
                 while ((n = input.read(buffer)) != -1) {
                     // Log daemon output at debug level
-                    String output = new String(buffer, 0, n);
+                    String output = new String(buffer, 0, n, StandardCharsets.UTF_8);
                     LOGGER.debug("[substrate] {}", output.trim());
                 }
             } catch (IOException e) {
@@ -300,7 +301,7 @@ public class DaemonLauncher {
     private static void forceKill(Process process) {
         try {
             // Unix-only: use kill -9 to force kill the process
-            String osName = System.getProperty("os.name", "").toLowerCase();
+            String osName = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
             if (osName.contains("nix") || osName.contains("nux") || osName.contains("mac")) {
                 Runtime.getRuntime().exec(new String[]{"kill", "-9", String.valueOf(getProcessId(process))});
             } else {

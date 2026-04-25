@@ -1,29 +1,36 @@
 package org.gradle.internal.rustbridge.testexec;
 
-import org.gradle.api.logging.Logging;
-import org.gradle.api.tasks.testing.TestDescriptor;
-import org.gradle.api.tasks.testing.TestListener;
-import org.gradle.api.tasks.testing.TestResult;
+import gradle.substrate.v1.DetectFlakyTestsRequest;
 import gradle.substrate.v1.DetectFlakyTestsResponse;
 import gradle.substrate.v1.FlakyTestInfo;
+import gradle.substrate.v1.RegisterTestSuiteRequest;
+import gradle.substrate.v1.ReportTestResultRequest;
+import gradle.substrate.v1.TestResultEntry;
+import gradle.substrate.v1.TestSuiteDescriptor;
+import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
 import org.slf4j.Logger;
 
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * A {@link TestListener} that shadows test execution events to the Rust substrate.
- * Fire-and-forget: never affects build correctness.
+ * Compile-safe compatibility listener for Gradle test execution events.
  *
- * Note: TestListener is @DeprecatedInGradleScope (not config-cache compatible),
- * but is still functional when config cache is disabled. Since shadow mode is
- * opt-in, this is acceptable.
+ * <p>The runtime Gradle test listener API lives in a Java 17-oriented module, while this
+ * bridge still compiles for Java 8. To avoid pinning the bridge to that classpath, the
+ * listener handles event payloads reflectively and can expose a dynamic proxy when the
+ * runtime test API is present.</p>
  */
-public class TestExecutionShadowListener implements TestListener {
+public class TestExecutionShadowListener {
 
     private static final Logger LOGGER = Logging.getLogger(TestExecutionShadowListener.class);
+    private static final String TEST_LISTENER_CLASS = "org.gradle.api.tasks.testing.TestListener";
 
     private final SubstrateClient client;
     private final AtomicInteger suiteCount = new AtomicInteger(0);
@@ -37,46 +44,58 @@ public class TestExecutionShadowListener implements TestListener {
         this.client = client;
     }
 
-    @Override
-    public void beforeSuite(TestDescriptor suite) {
+    public Object asListenerProxy() {
+        try {
+            Class<?> listenerType = Class.forName(TEST_LISTENER_CLASS, false, getClass().getClassLoader());
+            InvocationHandler handler = new DispatchingInvocationHandler();
+            return Proxy.newProxyInstance(listenerType.getClassLoader(), new Class<?>[] { listenerType }, handler);
+        } catch (ClassNotFoundException e) {
+            LOGGER.debug("[substrate:testexec] runtime TestListener API unavailable", e);
+            return null;
+        }
+    }
+
+    public void beforeSuite(Object suite) {
         if (client.isNoop()) {
             return;
         }
 
         try {
             client.getTestExecutionStub().registerTestSuite(
-                gradle.substrate.v1.RegisterTestSuiteRequest.newBuilder()
+                RegisterTestSuiteRequest.newBuilder()
                     .setBuildId("build")
-                    .setSuite(gradle.substrate.v1.TestSuiteDescriptor.newBuilder()
-                        .setSuiteId(suite.getClassName() != null ? suite.getClassName() : "suite-" + suiteCount.incrementAndGet())
-                        .setSuiteName(suite.getName())
-                        .setSuiteType(suite.getClassName() != null ? "junit" : "unknown")
+                    .setSuite(TestSuiteDescriptor.newBuilder()
+                        .setSuiteId(defaultSuiteId(suite))
+                        .setSuiteName(stringValue(suite, "getName", "suite"))
+                        .setSuiteType(stringValue(suite, "getClassName", "").isEmpty() ? "unknown" : "junit")
                         .setTestCount(0)
-                        .setModulePath(suite.getClassName() != null ? "" : "")
+                        .setModulePath("")
                         .build())
                     .build()
             );
         } catch (Exception e) {
-            LOGGER.debug("[substrate:testexec] shadow beforeSuite failed for {}", suite.getName(), e);
+            LOGGER.debug("[substrate:testexec] shadow beforeSuite failed for {}", stringValue(suite, "getName", "suite"), e);
         }
     }
 
-    @Override
-    public void afterSuite(TestDescriptor suite, TestResult result) {
+    public void afterSuite(Object suite, Object result) {
         if (client.isNoop()) {
             return;
         }
 
         try {
-            LOGGER.debug("[substrate:testexec] suite '{}' completed: {} passed, {} failed, {} skipped",
-                suite.getName(), result.getSuccessfulTestCount(),
-                result.getFailedTestCount(), result.getSkippedTestCount());
+            LOGGER.debug(
+                "[substrate:testexec] suite '{}' completed: {} passed, {} failed, {} skipped",
+                stringValue(suite, "getName", "suite"),
+                longValue(result, "getSuccessfulTestCount"),
+                longValue(result, "getFailedTestCount"),
+                longValue(result, "getSkippedTestCount")
+            );
 
-            // Query Rust for flaky test detection on the root suite (top-level completion)
-            if (suite.getParent() == null && result.getTestCount() > 0) {
+            if (objectValue(suite, "getParent") == null && longValue(result, "getTestCount") > 0) {
                 DetectFlakyTestsResponse flakyResponse = client.getTestExecutionStub()
                     .detectFlakyTests(
-                        gradle.substrate.v1.DetectFlakyTestsRequest.newBuilder()
+                        DetectFlakyTestsRequest.newBuilder()
                             .setBuildId("build")
                             .build()
                     );
@@ -85,9 +104,11 @@ public class TestExecutionShadowListener implements TestListener {
                     for (FlakyTestInfo flaky : flakyResponse.getFlakyTestsList()) {
                         LOGGER.warn(
                             "  - {} > {} (flake rate: {}%, {}/{} runs failed)",
-                            flaky.getTestClass(), flaky.getTestName(),
+                            flaky.getTestClass(),
+                            flaky.getTestName(),
                             String.format("%.1f", flaky.getFlakeRate() * 100),
-                            flaky.getFailCount(), flaky.getPassCount() + flaky.getFailCount()
+                            flaky.getFailCount(),
+                            flaky.getPassCount() + flaky.getFailCount()
                         );
                     }
                 }
@@ -97,13 +118,11 @@ public class TestExecutionShadowListener implements TestListener {
         }
     }
 
-    @Override
-    public void beforeTest(TestDescriptor testDescriptor) {
+    public void beforeTest(Object testDescriptor) {
         // Nothing to do before individual test
     }
 
-    @Override
-    public void afterTest(TestDescriptor testDescriptor, TestResult result) {
+    public void afterTest(Object testDescriptor, Object result) {
         if (client.isNoop()) {
             return;
         }
@@ -111,47 +130,102 @@ public class TestExecutionShadowListener implements TestListener {
         try {
             testCount.incrementAndGet();
 
-            String outcome;
-            switch (result.getResultType()) {
-                case SUCCESS:
-                    outcome = "PASSED";
-                    passCount.incrementAndGet();
-                    break;
-                case FAILURE:
-                    outcome = "FAILED";
-                    failCount.incrementAndGet();
-                    failedTests.add(testDescriptor.getName());
-                    break;
-                case SKIPPED:
-                default:
-                    outcome = "SKIPPED";
-                    skipCount.incrementAndGet();
-                    break;
+            String outcome = stringValue(objectValue(result, "getResultType"), "toString", "SKIPPED");
+            if ("SUCCESS".equals(outcome)) {
+                passCount.incrementAndGet();
+                outcome = "PASSED";
+            } else if ("FAILURE".equals(outcome)) {
+                failCount.incrementAndGet();
+                failedTests.add(stringValue(testDescriptor, "getName", "unknown"));
+                outcome = "FAILED";
+            } else {
+                skipCount.incrementAndGet();
+                outcome = "SKIPPED";
             }
 
-            String suiteId = testDescriptor.getClassName() != null
-                ? testDescriptor.getClassName()
-                : "unknown";
+            String suiteId = defaultSuiteId(testDescriptor);
+            long startTime = longValue(result, "getStartTime");
+            long endTime = longValue(result, "getEndTime");
+            Throwable failure = throwableValue(result, "getException");
 
             client.getTestExecutionStub().reportTestResult(
-                gradle.substrate.v1.ReportTestResultRequest.newBuilder()
+                ReportTestResultRequest.newBuilder()
                     .setBuildId("build")
-                    .setResult(gradle.substrate.v1.TestResultEntry.newBuilder()
-                        .setTestId(suiteId + "." + testDescriptor.getName())
+                    .setResult(TestResultEntry.newBuilder()
+                        .setTestId(suiteId + "." + stringValue(testDescriptor, "getName", "unknown"))
                         .setSuiteId(suiteId)
-                        .setTestName(testDescriptor.getName())
+                        .setTestName(stringValue(testDescriptor, "getName", "unknown"))
                         .setTestClass(suiteId)
                         .setOutcome(outcome)
-                        .setStartTimeMs(result.getStartTime())
-                        .setEndTimeMs(result.getEndTime())
-                        .setDurationMs(result.getEndTime() - result.getStartTime())
-                        .setFailureMessage(result.getException() != null ? result.getException().getMessage() : "")
-                        .setFailureType(result.getException() != null ? result.getException().getClass().getSimpleName() : "")
+                        .setStartTimeMs(startTime)
+                        .setEndTimeMs(endTime)
+                        .setDurationMs(endTime - startTime)
+                        .setFailureMessage(failure != null && failure.getMessage() != null ? failure.getMessage() : "")
+                        .setFailureType(failure != null ? failure.getClass().getSimpleName() : "")
                         .build())
                     .build()
             );
         } catch (Exception e) {
-            LOGGER.debug("[substrate:testexec] shadow afterTest failed for {}", testDescriptor.getName(), e);
+            LOGGER.debug(
+                "[substrate:testexec] shadow afterTest failed for {}",
+                stringValue(testDescriptor, "getName", "unknown"),
+                e
+            );
+        }
+    }
+
+    private String defaultSuiteId(Object descriptor) {
+        String className = stringValue(descriptor, "getClassName", "");
+        return className.isEmpty() ? "suite-" + suiteCount.incrementAndGet() : className;
+    }
+
+    private static String stringValue(Object target, String methodName, String defaultValue) {
+        Object value = objectValue(target, methodName);
+        return value == null ? defaultValue : String.valueOf(value);
+    }
+
+    private static long longValue(Object target, String methodName) {
+        Object value = objectValue(target, methodName);
+        return value instanceof Number ? ((Number) value).longValue() : 0L;
+    }
+
+    private static Throwable throwableValue(Object target, String methodName) {
+        Object value = objectValue(target, methodName);
+        return value instanceof Throwable ? (Throwable) value : null;
+    }
+
+    private static Object objectValue(Object target, String methodName) {
+        if (target == null) {
+            return null;
+        }
+        try {
+            Method method = target.getClass().getMethod(methodName);
+            return method.invoke(target);
+        } catch (NoSuchMethodException e) {
+            return null;
+        } catch (IllegalAccessException e) {
+            return null;
+        } catch (InvocationTargetException e) {
+            return null;
+        }
+    }
+
+    private class DispatchingInvocationHandler implements InvocationHandler {
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) {
+            String methodName = method.getName();
+            if ("beforeSuite".equals(methodName) && args != null && args.length == 1) {
+                beforeSuite(args[0]);
+            } else if ("afterSuite".equals(methodName) && args != null && args.length == 2) {
+                afterSuite(args[0], args[1]);
+            } else if ("beforeTest".equals(methodName) && args != null && args.length == 1) {
+                beforeTest(args[0]);
+            } else if ("afterTest".equals(methodName) && args != null && args.length == 2) {
+                afterTest(args[0], args[1]);
+            } else if ("toString".equals(methodName)) {
+                return "TestExecutionShadowListenerProxy";
+            }
+            return null;
         }
     }
 }

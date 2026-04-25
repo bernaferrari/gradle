@@ -37,7 +37,9 @@ public class ShadowingWorkerPool {
         try {
             gradle.substrate.v1.GetWorkerStatusResponse rustResponse =
                 rustClient.getWorkerStatus(workerKey);
-            String rustStatus = rustResponse.getStatus().name();
+            String rustStatus = rustResponse.getWorkersCount() > 0
+                ? rustResponse.getWorkers(0).getState()
+                : (rustResponse.getPoolSize() > 0 ? "POOL_ACTIVE" : "UNKNOWN");
 
             if (javaStatus.equals(rustStatus)) {
                 mismatchReporter.reportMatch();

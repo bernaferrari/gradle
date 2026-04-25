@@ -3,6 +3,7 @@ package org.gradle.internal.rustbridge.snapshot
 import com.google.common.collect.ImmutableSortedMap
 import org.gradle.api.internal.file.FileCollectionStructureVisitor
 import org.gradle.internal.execution.InputFingerprinter
+import org.gradle.internal.execution.InputVisitor
 import org.gradle.internal.fingerprint.CurrentFileCollectionFingerprint
 import org.gradle.internal.fingerprint.FileCollectionFingerprint
 import org.gradle.internal.snapshot.ValueSnapshot
@@ -12,7 +13,7 @@ class ShadowingInputFingerprinterTest extends Specification {
 
     def "implements InputFingerprinter"() {
         expect:
-        ShadowingInputFingerprinter instanceof InputFingerprinter
+        InputFingerprinter.isAssignableFrom(ShadowingInputFingerprinter)
     }
 
     def "delegates to the real InputFingerprinter"() {
@@ -93,13 +94,16 @@ class ShadowingInputFingerprinterTest extends Specification {
             ImmutableSortedMap.of(),
             ImmutableSortedMap.of(),
             { visitor ->
-                visitor.visitInputProperty("myProp", { -> "value" } as InputFingerprinter.ValueSupplier)
+                visitor.visitInputProperty("myProp", { -> "value" } as InputVisitor.ValueSupplier)
             },
             Mock(FileCollectionStructureVisitor)
         )
 
         then:
-        1 * delegate.fingerprintInputProperties(_, _, _, _, _, _) >> result
+        1 * delegate.fingerprintInputProperties(_, _, _, _, _, _) >> { args ->
+            args[4].accept(Mock(InputVisitor))
+            result
+        }
         1 * shadowingSnapshotter.snapshot({ it.containsKey("myProp") }, "") >> { throw new RuntimeException("shadow failed") }
         actual.is(result)
         noExceptionThrown()
@@ -119,14 +123,17 @@ class ShadowingInputFingerprinterTest extends Specification {
             ImmutableSortedMap.of(),
             ImmutableSortedMap.of(),
             { visitor ->
-                visitor.visitInputProperty("propA", { -> "valueA" } as InputFingerprinter.ValueSupplier)
-                visitor.visitInputProperty("propB", { -> "valueB" } as InputFingerprinter.ValueSupplier)
+                visitor.visitInputProperty("propA", { -> "valueA" } as InputVisitor.ValueSupplier)
+                visitor.visitInputProperty("propB", { -> "valueB" } as InputVisitor.ValueSupplier)
             },
             Mock(FileCollectionStructureVisitor)
         )
 
         then:
-        1 * delegate.fingerprintInputProperties(_, _, _, _, _, _) >> result
+        1 * delegate.fingerprintInputProperties(_, _, _, _, _, _) >> { args ->
+            args[4].accept(Mock(InputVisitor))
+            result
+        }
         1 * shadowingSnapshotter.snapshot({ it.size() == 2 && it["propA"] == "valueA" && it["propB"] == "valueB" }, "")
     }
 

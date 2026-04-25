@@ -32,6 +32,12 @@ message BuildPlanTask {
   map<string, string> inputs = 5;
   repeated string outputs = 6;
   string worker_isolation = 7;
+  repeated string should_run_after = 8;
+  repeated string must_run_after = 9;
+  repeated string finalized_by = 10;
+  string cacheability = 11;
+  repeated string local_state = 12;
+  repeated string destroyables = 13;
 }
 
 message BuildPlanDependency {

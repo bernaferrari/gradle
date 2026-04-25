@@ -17,11 +17,10 @@ import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Process handle backed by the Rust substrate daemon.
@@ -79,6 +78,9 @@ public class RustProcessHandle implements ExecHandle {
     public ExecHandle start() {
         state = ExecHandleState.STARTED;
         for (ExecHandleListener listener : listeners) {
+            listener.beforeExecutionStarted(this);
+        }
+        for (ExecHandleListener listener : listeners) {
             listener.executionStarted(this);
         }
         return this;
@@ -120,7 +122,7 @@ public class RustProcessHandle implements ExecHandle {
         }
 
         try {
-            ExecWaitResponse response = client.getExecStub().waitExec(
+            ExecWaitResponse response = client.getExecStub().wait(
                 ExecWaitRequest.newBuilder().setPid(pid).build()
             );
             exitCode = response.getExitCode();
@@ -172,39 +174,15 @@ public class RustProcessHandle implements ExecHandle {
      * Returns when the process exits or the stream ends.
      */
     public void pumpOutput(OutputStream stdout, OutputStream stderr) throws IOException {
-        CountDownLatch latch = new CountDownLatch(1);
-
-        client.getExecStub().subscribeOutput(
-            ExecOutputRequest.newBuilder().setPid(pid).build(),
-            new StreamObserver<ExecOutputChunk>() {
-                @Override
-                public void onNext(ExecOutputChunk chunk) {
-                    try {
-                        OutputStream target = chunk.getIsStderr() ? stderr : stdout;
-                        if (target != null) {
-                            target.write(chunk.getData().toByteArray());
-                        }
-                    } catch (IOException e) {
-                        // Stream consumer failed
-                    }
-                }
-
-                @Override
-                public void onError(Throwable t) {
-                    latch.countDown();
-                }
-
-                @Override
-                public void onCompleted() {
-                    latch.countDown();
-                }
-            }
+        Iterator<ExecOutputChunk> chunks = client.getExecStub().subscribeOutput(
+            ExecOutputRequest.newBuilder().setPid(pid).build()
         );
-
-        try {
-            latch.await(60, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+        while (chunks.hasNext()) {
+            ExecOutputChunk chunk = chunks.next();
+            OutputStream target = chunk.getIsStderr() ? stderr : stdout;
+            if (target != null) {
+                target.write(chunk.getData().toByteArray());
+            }
         }
     }
 

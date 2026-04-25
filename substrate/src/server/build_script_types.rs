@@ -54,10 +54,18 @@ pub struct ParsedTaskDependency {
 pub struct ParsedTaskConfig {
     /// The task name.
     pub task_name: String,
+    /// Optional declared task type/class (e.g. "JavaCompile", "Test").
+    pub task_type: Option<String>,
     /// Dependencies declared on this task.
     pub depends_on: Vec<String>,
     /// shouldRunAfter dependencies.
     pub should_run_after: Vec<String>,
+    /// mustRunAfter dependencies.
+    pub must_run_after: Vec<String>,
+    /// finalizedBy dependencies.
+    pub finalized_by: Vec<String>,
+    /// Declared output paths captured from the build script.
+    pub declared_outputs: Vec<String>,
     /// Whether the task is enabled (default: true).
     pub enabled: bool,
     /// Line number in the source file (from AST, None from string-based extraction).
@@ -68,8 +76,12 @@ impl Default for ParsedTaskConfig {
     fn default() -> Self {
         Self {
             task_name: String::new(),
+            task_type: None,
             depends_on: Vec::new(),
             should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            declared_outputs: Vec::new(),
             enabled: true,
             line: None,
         }

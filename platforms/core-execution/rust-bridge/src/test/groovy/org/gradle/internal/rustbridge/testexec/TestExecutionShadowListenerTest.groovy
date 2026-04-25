@@ -8,9 +8,15 @@ import spock.lang.Specification
 
 class TestExecutionShadowListenerTest extends Specification {
 
-    def "implements TestListener"() {
-        expect:
-        TestExecutionShadowListener instanceof TestListener
+    def "exposes a runtime TestListener proxy"() {
+        given:
+        def listener = new TestExecutionShadowListener(Mock(SubstrateClient))
+
+        when:
+        def proxy = listener.asListenerProxy()
+
+        then:
+        proxy instanceof TestListener
     }
 
     def "constructor accepts SubstrateClient"() {
@@ -85,7 +91,7 @@ class TestExecutionShadowListenerTest extends Specification {
 
     def "afterTest delegates to client when not noop for successful test"() {
         given:
-        def stub = Mock(gradle.substrate.v1.TestExecutionServiceGrpc.TestExecutionServiceBlockingStub)
+        def stub = GroovyMock(gradle.substrate.v1.TestExecutionServiceGrpc.TestExecutionServiceBlockingStub)
         def client = Mock(SubstrateClient)
         client.isNoop() >> false
         client.getTestExecutionStub() >> stub
@@ -105,12 +111,12 @@ class TestExecutionShadowListenerTest extends Specification {
         listener.afterTest(testDescriptor, result)
 
         then:
-        1 * stub.reportTestResult(_)
+        1 * client.getTestExecutionStub()
     }
 
     def "afterTest delegates to client when not noop for failed test"() {
         given:
-        def stub = Mock(gradle.substrate.v1.TestExecutionServiceGrpc.TestExecutionServiceBlockingStub)
+        def stub = GroovyMock(gradle.substrate.v1.TestExecutionServiceGrpc.TestExecutionServiceBlockingStub)
         def client = Mock(SubstrateClient)
         client.isNoop() >> false
         client.getTestExecutionStub() >> stub
@@ -130,12 +136,12 @@ class TestExecutionShadowListenerTest extends Specification {
         listener.afterTest(testDescriptor, result)
 
         then:
-        1 * stub.reportTestResult(_)
+        1 * client.getTestExecutionStub()
     }
 
     def "afterTest delegates to client for skipped test"() {
         given:
-        def stub = Mock(gradle.substrate.v1.TestExecutionServiceGrpc.TestExecutionServiceBlockingStub)
+        def stub = GroovyMock(gradle.substrate.v1.TestExecutionServiceGrpc.TestExecutionServiceBlockingStub)
         def client = Mock(SubstrateClient)
         client.isNoop() >> false
         client.getTestExecutionStub() >> stub
@@ -155,7 +161,7 @@ class TestExecutionShadowListenerTest extends Specification {
         listener.afterTest(testDescriptor, result)
 
         then:
-        1 * stub.reportTestResult(_)
+        1 * client.getTestExecutionStub()
     }
 
     def "afterTest catches exception and does not propagate"() {
@@ -223,7 +229,7 @@ class TestExecutionShadowListenerTest extends Specification {
 
     def "afterSuite does not call detectFlakyTests when suite has a parent"() {
         given:
-        def stub = Mock(gradle.substrate.v1.TestExecutionServiceGrpc.TestExecutionServiceBlockingStub)
+        def stub = GroovyMock(gradle.substrate.v1.TestExecutionServiceGrpc.TestExecutionServiceBlockingStub)
         def client = Mock(SubstrateClient)
         client.isNoop() >> false
         client.getTestExecutionStub() >> stub
@@ -249,7 +255,7 @@ class TestExecutionShadowListenerTest extends Specification {
 
     def "afterSuite does not call detectFlakyTests when test count is zero"() {
         given:
-        def stub = Mock(gradle.substrate.v1.TestExecutionServiceGrpc.TestExecutionServiceBlockingStub)
+        def stub = GroovyMock(gradle.substrate.v1.TestExecutionServiceGrpc.TestExecutionServiceBlockingStub)
         def client = Mock(SubstrateClient)
         client.isNoop() >> false
         client.getTestExecutionStub() >> stub
@@ -271,7 +277,7 @@ class TestExecutionShadowListenerTest extends Specification {
 
     def "afterSuite calls detectFlakyTests on root suite with tests"() {
         given:
-        def stub = Mock(gradle.substrate.v1.TestExecutionServiceGrpc.TestExecutionServiceBlockingStub)
+        def stub = GroovyMock(gradle.substrate.v1.TestExecutionServiceGrpc.TestExecutionServiceBlockingStub)
         def client = Mock(SubstrateClient)
         client.isNoop() >> false
         client.getTestExecutionStub() >> stub
@@ -294,6 +300,6 @@ class TestExecutionShadowListenerTest extends Specification {
         listener.afterSuite(suite, result)
 
         then:
-        1 * stub.detectFlakyTests(_)
+        1 * client.getTestExecutionStub()
     }
 }

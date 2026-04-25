@@ -15,19 +15,18 @@ class BootstrapLifecycleListenerTest extends Specification {
 
         then:
         listener != null
-        listener instanceof org.gradle.initialization.RootBuildLifecycleListener
+        listener instanceof org.gradle.internal.rustbridge.RootBuildLifecycleBridge.Callbacks
     }
 
     def "constructor stores projectDir and parallelism"() {
         given:
         def client = Mock(RustBootstrapClient)
-
-        when:
         def listener = new BootstrapLifecycleListener(client, "/my/project", 8)
 
+        when:
+        listener.afterStart()
+
         then:
-        // The constructor stores these values internally; verify via behavior
-        // afterStart will pass projectDir and parallelism to the client
         1 * client.initBuild(
             { it instanceof String }, // buildId (UUID)
             "/my/project",            // projectDir
@@ -38,9 +37,6 @@ class BootstrapLifecycleListenerTest extends Specification {
         ) >> new RustBootstrapClient.BuildInitResult(
             "build-123", "1.0.0", "v1", 8
         )
-
-        and:
-        listener.afterStart()
     }
 
     def "afterStart calls initBuild on the bootstrap client"() {
@@ -56,7 +52,7 @@ class BootstrapLifecycleListenerTest extends Specification {
         1 * client.initBuild(
             _ as String,
             "/test/dir",
-            _ as long,
+            _ as Long,
             2,
             _ as Map,
             _ as List

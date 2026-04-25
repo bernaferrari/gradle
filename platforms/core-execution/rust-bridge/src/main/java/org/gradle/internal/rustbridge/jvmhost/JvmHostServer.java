@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -14,6 +15,7 @@ import java.util.regex.Pattern;
 
 import gradle.substrate.v1.*;
 import io.grpc.Server;
+import io.grpc.netty.shaded.io.netty.channel.ServerChannel;
 import io.grpc.stub.StreamObserver;
 
 /**
@@ -53,7 +55,7 @@ public class JvmHostServer implements Closeable {
 
         this.server = io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder
             .forAddress(new io.grpc.netty.shaded.io.netty.channel.unix.DomainSocketAddress(socketPath))
-            .channelType(io.grpc.netty.shaded.io.netty.channel.unix.DomainServerSocketChannel.class)
+            .channelType(domainServerChannelType())
             .addService(new JvmHostServiceGrpc.JvmHostServiceImplBase() {
                 @Override
                 public void evaluateScript(
@@ -72,7 +74,7 @@ public class JvmHostServer implements Closeable {
                         if (content.isEmpty() && !scriptPath.isEmpty()) {
                             Path p = java.nio.file.Paths.get(scriptPath);
                             if (Files.exists(p)) {
-                                content = Files.readString(p);
+                                content = new String(Files.readAllBytes(p), StandardCharsets.UTF_8);
                             } else {
                                 responseObserver.onNext(EvaluateScriptResponse.newBuilder()
                                     .setSuccess(false)
@@ -124,6 +126,30 @@ public class JvmHostServer implements Closeable {
                             io.grpc.Status.INTERNAL
                                 .withDescription("Failed to retrieve build model: " + e.getMessage())
                                 .asRuntimeException());
+                    }
+                }
+
+                @Override
+                public void getBuildPlan(
+                    GetBuildPlanRequest request,
+                    StreamObserver<GetBuildPlanResponse> responseObserver) {
+                    try {
+                        LOGGER.debug("[substrate-jvmhost] getBuildPlan called for build {}", request.getBuildId());
+                        BuildPlan plan = serviceImpl.getBuildPlan(request.getBuildId());
+                        responseObserver.onNext(GetBuildPlanResponse.newBuilder()
+                            .setSuccess(true)
+                            .setSource("jvm-host")
+                            .setPlan(plan)
+                            .build());
+                        responseObserver.onCompleted();
+                    } catch (Exception e) {
+                        LOGGER.error("[substrate-jvmhost] getBuildPlan failed", e);
+                        responseObserver.onNext(GetBuildPlanResponse.newBuilder()
+                            .setSuccess(false)
+                            .setErrorMessage("Build plan unavailable: " + e.getMessage())
+                            .setSource("jvm-host")
+                            .build());
+                        responseObserver.onCompleted();
                     }
                 }
 
@@ -187,6 +213,23 @@ public class JvmHostServer implements Closeable {
             .build();
     }
 
+    @SuppressWarnings("unchecked")
+    private static Class<? extends ServerChannel> domainServerChannelType() throws IOException {
+        try {
+            return (Class<? extends ServerChannel>) Class.forName(
+                "io.grpc.netty.shaded.io.netty.channel.epoll.EpollServerDomainSocketChannel"
+            );
+        } catch (ClassNotFoundException ignored) {
+            try {
+                return (Class<? extends ServerChannel>) Class.forName(
+                    "io.grpc.netty.shaded.io.netty.channel.kqueue.KQueueServerDomainSocketChannel"
+                );
+            } catch (ClassNotFoundException e) {
+                throw new IOException("No Netty domain socket server channel is available", e);
+            }
+        }
+    }
+
     /**
      * Start the JVM host server.
      */
@@ -225,7 +268,8 @@ public class JvmHostServer implements Closeable {
             // Clean up socket file
             try {
                 Files.deleteIfExists(java.nio.file.Paths.get(socketPath));
-            } catch (IOException ignored) {
+            } catch (IOException e) {
+                LOGGER.debug("[substrate] failed to delete JVM host socket {}", socketPath, e);
             }
             LOGGER.info("[substrate] JVM host server stopped");
         }

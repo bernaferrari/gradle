@@ -37,6 +37,18 @@ pub struct CanonicalBuildPlanTask {
     pub inputs: BTreeMap<String, String>,
     pub outputs: Vec<String>,
     pub worker_isolation: String,
+    #[serde(default)]
+    pub should_run_after: Vec<String>,
+    #[serde(default)]
+    pub must_run_after: Vec<String>,
+    #[serde(default)]
+    pub finalized_by: Vec<String>,
+    #[serde(default)]
+    pub cacheability: String,
+    #[serde(default)]
+    pub local_state: Vec<String>,
+    #[serde(default)]
+    pub destroyables: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,6 +82,11 @@ impl CanonicalBuildPlan {
         for task in &mut self.tasks {
             task.depends_on.sort_unstable();
             task.outputs.sort_unstable();
+            task.should_run_after.sort_unstable();
+            task.must_run_after.sort_unstable();
+            task.finalized_by.sort_unstable();
+            task.local_state.sort_unstable();
+            task.destroyables.sort_unstable();
         }
         self.tasks.sort_unstable_by(|a, b| {
             (&a.path, &a.project_path, &a.implementation_id).cmp(&(
@@ -152,6 +169,12 @@ pub fn to_proto(plan: &CanonicalBuildPlan) -> BuildPlan {
                 inputs: btree_to_hashmap(t.inputs),
                 outputs: t.outputs,
                 worker_isolation: t.worker_isolation,
+                should_run_after: t.should_run_after,
+                must_run_after: t.must_run_after,
+                finalized_by: t.finalized_by,
+                cacheability: t.cacheability,
+                local_state: t.local_state,
+                destroyables: t.destroyables,
             })
             .collect(),
         dependencies: normalized
@@ -201,6 +224,12 @@ pub fn from_proto(plan: &BuildPlan) -> CanonicalBuildPlan {
                 inputs: hashmap_to_btree(&t.inputs),
                 outputs: t.outputs.clone(),
                 worker_isolation: t.worker_isolation.clone(),
+                should_run_after: t.should_run_after.clone(),
+                must_run_after: t.must_run_after.clone(),
+                finalized_by: t.finalized_by.clone(),
+                cacheability: t.cacheability.clone(),
+                local_state: t.local_state.clone(),
+                destroyables: t.destroyables.clone(),
             })
             .collect(),
         dependencies: plan
@@ -280,6 +309,12 @@ mod tests {
                     "/repo/app/build/reports/tests".to_string(),
                 ],
                 worker_isolation: "process".to_string(),
+                should_run_after: Vec::new(),
+                must_run_after: Vec::new(),
+                finalized_by: Vec::new(),
+                cacheability: "cacheable".to_string(),
+                local_state: Vec::new(),
+                destroyables: Vec::new(),
             }],
             dependencies: vec![CanonicalBuildPlanDependency {
                 project_path: ":app".to_string(),

@@ -7,13 +7,12 @@ import gradle.substrate.v1.GetTestReportResponse;
 import gradle.substrate.v1.GetTestResultsByOutcomeRequest;
 import gradle.substrate.v1.GetTestResultsByOutcomeResponse;
 import gradle.substrate.v1.GetTestSummaryRequest;
-import gradle.substrate.v1.GetTestSummaryResponse;
 import gradle.substrate.v1.RegisterTestSuiteRequest;
 import gradle.substrate.v1.RegisterTestSuiteResponse;
 import gradle.substrate.v1.ReportTestResultRequest;
 import gradle.substrate.v1.ReportTestResultResponse;
-import gradle.substrate.v1.TestExecutionServiceGrpc;
 import gradle.substrate.v1.TestResultEntry;
+import gradle.substrate.v1.TestSummaryResponse;
 import gradle.substrate.v1.TestSuiteDescriptor;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
@@ -146,9 +145,9 @@ public class RustTestExecutionClient {
         }
     }
 
-    public GetTestSummaryResponse getTestSummary(String buildId) {
+    public TestSummaryResponse getTestSummary(String buildId) {
         if (client.isNoop()) {
-            return GetTestSummaryResponse.getDefaultInstance();
+            return TestSummaryResponse.getDefaultInstance();
         }
 
         try {
@@ -158,7 +157,7 @@ public class RustTestExecutionClient {
                     .build());
         } catch (Exception e) {
             LOGGER.debug("[substrate:testexec] get test summary failed", e);
-            return GetTestSummaryResponse.getDefaultInstance();
+            return TestSummaryResponse.getDefaultInstance();
         }
     }
 }

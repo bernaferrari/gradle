@@ -36,7 +36,7 @@ fn build_plan_ir_golden_fingerprint_is_stable_and_order_insensitive() {
 
     // Golden lock: this hash should only change when canonicalization policy or
     // fixture semantics intentionally change.
-    let expected = "36358745888389d08b45dcddd60a09666592e2589a16f4f7644044ae73132a3d";
+    let expected = "5dae4c79298d4de5dbf576b1b7e929caec06f50d795399def93c9bf10aed6cc0";
     assert_eq!(fp_a, expected, "unexpected canonical fingerprint drift");
 }
 

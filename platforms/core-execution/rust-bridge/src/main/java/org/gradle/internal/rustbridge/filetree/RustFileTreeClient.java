@@ -127,8 +127,8 @@ public class RustFileTreeClient {
      * Traverses a directory tree with include/exclude patterns.
      *
      * @param rootDir root directory to traverse
-     * @param includePatterns Ant-style include patterns (e.g. "**/*.java")
-     * @param excludePatterns Ant-style exclude patterns (e.g. "**/test/**")
+     * @param includePatterns Ant-style include patterns (for example, Java source globs)
+     * @param excludePatterns Ant-style exclude patterns (for example, test-directory globs)
      * @param includeFiles whether to include files in the result
      * @param includeDirs whether to include directories in the result
      * @param followSymlinks whether to follow symbolic links

@@ -734,10 +734,8 @@ impl AstExtractor {
 
         let mut config = ParsedTaskConfig {
             task_name,
-            depends_on: Vec::new(),
-            should_run_after: Vec::new(),
-            enabled: true,
             line,
+            ..Default::default()
         };
 
         if let Some(closure) = Self::get_closure(mc) {

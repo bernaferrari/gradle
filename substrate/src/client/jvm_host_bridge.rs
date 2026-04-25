@@ -5,7 +5,7 @@ use tonic::Status;
 use super::jvm_host::JvmHostClient;
 use crate::proto::{
     EvaluateScriptResponse, GetBuildEnvironmentResponse, GetBuildModelResponse,
-    ResolveConfigResponse,
+    GetBuildPlanResponse, ResolveConfigResponse,
 };
 
 /// Shared bridge to the JVM host, allowing multiple services to call back
@@ -61,6 +61,21 @@ impl JvmHostBridge {
             None => return Ok(None),
         };
         let response = client.get_build_model(build_id).await?;
+        Ok(Some(response))
+    }
+
+    /// Get the realized build plan from the JVM host when available.
+    /// Returns `None` if the JVM host is not connected.
+    pub async fn get_build_plan(
+        &self,
+        build_id: &str,
+    ) -> Result<Option<GetBuildPlanResponse>, Status> {
+        let mut guard = self.client.lock().await;
+        let client = match guard.as_mut() {
+            Some(c) => c,
+            None => return Ok(None),
+        };
+        let response = client.get_build_plan(build_id).await?;
         Ok(Some(response))
     }
 
@@ -131,6 +146,9 @@ mod tests {
 
         let model = bridge.get_build_model("build-1").await.unwrap();
         assert!(model.is_none());
+
+        let plan = bridge.get_build_plan("build-1").await.unwrap();
+        assert!(plan.is_none());
 
         let resolved = bridge
             .resolve_configuration("build-1", "compileClasspath", ":app")

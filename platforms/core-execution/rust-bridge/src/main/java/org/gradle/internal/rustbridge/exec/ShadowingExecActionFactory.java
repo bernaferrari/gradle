@@ -7,6 +7,7 @@ import org.gradle.process.internal.ExecAction;
 import org.gradle.process.internal.ExecActionFactory;
 import org.gradle.process.internal.JavaExecAction;
 import org.gradle.process.internal.ExecHandleListener;
+import org.gradle.process.CommandLineArgumentProvider;
 import org.gradle.process.ExecResult;
 import org.gradle.process.ProcessExecutionException;
 import org.slf4j.Logger;
@@ -172,25 +173,33 @@ public class ShadowingExecActionFactory implements ExecActionFactory {
 
         // --- Delegate all ExecSpec setters to Java ---
 
-        @Override public ExecAction setCommandLine(Object... commandLine) { javaDelegate.setCommandLine(commandLine); return this; }
-        @Override public ExecAction setCommandLine(String... commandLine) { javaDelegate.setCommandLine(commandLine); return this; }
-        @Override public ExecAction setCommandLine(List<String> commandLine) { javaDelegate.setCommandLine(commandLine); return this; }
+        @Override public ExecAction commandLine(Object... commandLine) { javaDelegate.commandLine(commandLine); return this; }
+        @Override public ExecAction commandLine(Iterable<?> commandLine) { javaDelegate.commandLine(commandLine); return this; }
+        @Override public void setCommandLine(Object... commandLine) { javaDelegate.setCommandLine(commandLine); }
+        @Override public void setCommandLine(Iterable<?> commandLine) { javaDelegate.setCommandLine(commandLine); }
+        @Override public void setCommandLine(List<String> commandLine) { javaDelegate.setCommandLine(commandLine); }
+        @Override public ExecAction setArgs(List<String> arguments) { javaDelegate.setArgs(arguments); return this; }
         @Override public ExecAction setArgs(Iterable<?> arguments) { javaDelegate.setArgs(arguments); return this; }
-        @Override public ExecAction setArgs(Object... arguments) { javaDelegate.setArgs(arguments); return this; }
         @Override public ExecAction args(Object... arguments) { javaDelegate.args(arguments); return this; }
         @Override public ExecAction args(Iterable<?> arguments) { javaDelegate.args(arguments); return this; }
         @Override public ExecAction setIgnoreExitValue(boolean ignoreExitValue) { javaDelegate.setIgnoreExitValue(ignoreExitValue); return this; }
         @Override public ExecAction setStandardInput(InputStream input) { javaDelegate.setStandardInput(input); return this; }
         @Override public ExecAction setStandardOutput(OutputStream output) { javaDelegate.setStandardOutput(output); return this; }
         @Override public ExecAction setErrorOutput(OutputStream output) { javaDelegate.setErrorOutput(output); return this; }
-        @Override public ExecAction setExecutable(Object executable) { javaDelegate.setExecutable(executable); return this; }
-        @Override public ExecAction setWorkingDir(File dir) { javaDelegate.setWorkingDir(dir); return this; }
-        @Override public ExecAction setEnvironment(Map<String, ?> environmentVariables) { javaDelegate.setEnvironment(environmentVariables); return this; }
+        @Override public void setExecutable(String executable) { javaDelegate.setExecutable(executable); }
+        @Override public void setExecutable(Object executable) { javaDelegate.setExecutable(executable); }
+        @Override public void setWorkingDir(File dir) { javaDelegate.setWorkingDir(dir); }
+        @Override public void setWorkingDir(Object dir) { javaDelegate.setWorkingDir(dir); }
+        @Override public void setEnvironment(Map<String, ?> environmentVariables) { javaDelegate.setEnvironment(environmentVariables); }
         @Override public ExecAction environment(String name, Object value) { javaDelegate.environment(name, value); return this; }
         @Override public ExecAction environment(Map<String, ?> environmentVariables) { javaDelegate.environment(environmentVariables); return this; }
-        @Override public ExecAction copyTo(org.gradle.process.ExecSpec destination) { javaDelegate.copyTo(destination); return this; }
+        @Override public org.gradle.process.ProcessForkOptions executable(Object executable) { javaDelegate.executable(executable); return this; }
+        @Override public org.gradle.process.ProcessForkOptions workingDir(Object dir) { javaDelegate.workingDir(dir); return this; }
+        @Override public org.gradle.process.ProcessForkOptions copyTo(org.gradle.process.ProcessForkOptions destination) { javaDelegate.copyTo(destination); return this; }
         @Override public List<String> getCommandLine() { return javaDelegate.getCommandLine(); }
         @Override public List<String> getArgs() { return javaDelegate.getArgs(); }
+        @Override public List<CommandLineArgumentProvider> getArgumentProviders() { return javaDelegate.getArgumentProviders(); }
+        @Override public String getExecutable() { return javaDelegate.getExecutable(); }
         @Override public File getWorkingDir() { return javaDelegate.getWorkingDir(); }
         @Override public Map<String, Object> getEnvironment() { return javaDelegate.getEnvironment(); }
         @Override public boolean isIgnoreExitValue() { return javaDelegate.isIgnoreExitValue(); }

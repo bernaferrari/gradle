@@ -1,7 +1,6 @@
 package org.gradle.internal.rustbridge.eventstream;
 
 import org.gradle.BuildListener;
-import org.gradle.api.InitializationResult;
 import org.gradle.api.invocation.Gradle;
 import org.gradle.BuildResult;
 import org.gradle.api.logging.Logging;
@@ -15,6 +14,7 @@ import java.util.Map;
  * Implements {@link BuildListener} to capture settingsEvaluated, projectsLoaded,
  * projectsEvaluated, and buildFinished events.
  */
+@SuppressWarnings("deprecation")
 public class BuildLifecycleEventForwarder implements BuildListener {
 
     private static final Logger LOGGER = Logging.getLogger(BuildLifecycleEventForwarder.class);
@@ -89,7 +89,7 @@ public class BuildLifecycleEventForwarder implements BuildListener {
     public void buildFinished(BuildResult result) {
         try {
             Map<String, String> props = new HashMap<>();
-            props.put("action", result.getAction().name());
+            props.put("action", result.getAction());
             if (result.getFailure() != null) {
                 props.put("failure", result.getFailure().getMessage());
             }

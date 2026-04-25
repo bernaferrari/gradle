@@ -41,7 +41,7 @@ public final class RustDaemonSidecarLauncher {
             try {
                 return SubstrateClient.connect(socketPath);
             } catch (Exception e) {
-                LOGGER.debug("[substrate] existing socket connect failed: {}", e.getMessage());
+                LOGGER.warn("[substrate] existing socket connect failed, cleaning up stale socket and falling back to relaunch: {}", e.getMessage());
                 try {
                     Files.deleteIfExists(socket);
                 } catch (IOException ignored) {
@@ -52,7 +52,7 @@ public final class RustDaemonSidecarLauncher {
 
         File daemonBinary = resolveDaemonBinary(options);
         if (daemonBinary == null || !daemonBinary.exists()) {
-            LOGGER.debug("[substrate] daemon binary not found, using no-op client");
+            LOGGER.warn("[substrate] daemon binary not found at {}, using no-op client", daemonBinary);
             return SubstrateClient.noop();
         }
 
@@ -61,19 +61,20 @@ public final class RustDaemonSidecarLauncher {
                 try {
                     launchDaemon(daemonBinary, socketPath);
                 } catch (Exception e) {
-                    LOGGER.debug("[substrate] daemon launch failed: {}", e.getMessage(), e);
+                    LOGGER.warn("[substrate] daemon launch failed, using no-op client: {}", e.getMessage(), e);
                     return SubstrateClient.noop();
                 }
             }
         }
 
         if (!Files.exists(socket)) {
+            LOGGER.warn("[substrate] daemon launch did not create socket {}, using no-op client", socketPath);
             return SubstrateClient.noop();
         }
         try {
             return SubstrateClient.connect(socketPath);
         } catch (Exception e) {
-            LOGGER.debug("[substrate] post-launch connect failed: {}", e.getMessage(), e);
+            LOGGER.warn("[substrate] post-launch connect failed, using no-op client: {}", e.getMessage(), e);
             return SubstrateClient.noop();
         }
     }

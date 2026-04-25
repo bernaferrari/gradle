@@ -17,6 +17,7 @@ import java.util.Map;
  * <p>Collects project properties and applied plugin names, then delegates to
  * {@link ShadowingPropertyResolver} for Rust shadow comparison.</p>
  */
+@SuppressWarnings("deprecation")
 public class PropertyShadowEvaluationListener implements ProjectEvaluationListener {
 
     private final ShadowingPropertyResolver propertyResolver;

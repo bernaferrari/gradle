@@ -1,12 +1,12 @@
 package org.gradle.internal.rustbridge.shadow;
 
-import org.gradle.initialization.RootBuildLifecycleListener;
+import org.gradle.internal.rustbridge.RootBuildLifecycleBridge;
 import org.jspecify.annotations.Nullable;
 
 /**
  * Build lifecycle listener that logs shadow mode mismatch summary at build end.
  */
-public class BuildFinishMismatchLogger implements RootBuildLifecycleListener {
+public class BuildFinishMismatchLogger implements RootBuildLifecycleBridge.Callbacks {
 
     private final HashMismatchReporter reporter;
 

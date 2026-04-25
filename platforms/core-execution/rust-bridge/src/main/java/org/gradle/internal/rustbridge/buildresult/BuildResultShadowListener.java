@@ -1,7 +1,7 @@
 package org.gradle.internal.rustbridge.buildresult;
 
 import org.gradle.api.logging.Logging;
-import org.gradle.initialization.RootBuildLifecycleListener;
+import org.gradle.internal.rustbridge.RootBuildLifecycleBridge;
 import org.gradle.internal.rustbridge.history.RustExecutionHistoryClient;
 import org.gradle.internal.rustbridge.metrics.BuildMetricsRecorder;
 import org.gradle.internal.rustbridge.metrics.RustBuildMetricsClient;
@@ -9,10 +9,10 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 /**
- * A {@link RootBuildLifecycleListener} that reports build results to the Rust substrate
+ * Reports build results to the Rust substrate
  * when a build completes. Also feeds the build metrics recorder for performance tracking.
  */
-public class BuildResultShadowListener implements RootBuildLifecycleListener {
+public class BuildResultShadowListener implements RootBuildLifecycleBridge.Callbacks {
 
     private static final Logger LOGGER = Logging.getLogger(BuildResultShadowListener.class);
 

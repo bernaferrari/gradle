@@ -6,7 +6,8 @@ use tonic::{Request, Status};
 use crate::proto::{
     jvm_host_service_client::JvmHostServiceClient, EvaluateScriptRequest, EvaluateScriptResponse,
     GetBuildEnvironmentRequest, GetBuildEnvironmentResponse, GetBuildModelRequest,
-    GetBuildModelResponse, ResolveConfigRequest, ResolveConfigResponse,
+    GetBuildModelResponse, GetBuildPlanRequest, GetBuildPlanResponse, ResolveConfigRequest,
+    ResolveConfigResponse,
 };
 
 /// Client for calling back into the JVM via the JvmHostService.
@@ -69,6 +70,18 @@ impl JvmHostClient {
             build_id: build_id.to_string(),
         });
         let response = self.client.get_build_model(request).await?;
+        Ok(response.into_inner())
+    }
+
+    /// Request the JVM for a realized build plan when the compatibility host can provide one.
+    pub async fn get_build_plan(
+        &mut self,
+        build_id: &str,
+    ) -> Result<GetBuildPlanResponse, Status> {
+        let request = Request::new(GetBuildPlanRequest {
+            build_id: build_id.to_string(),
+        });
+        let response = self.client.get_build_plan(request).await?;
         Ok(response.into_inner())
     }
 
@@ -182,6 +195,28 @@ mod tests {
                 ],
             };
             tracing::debug!(build_id = %req.build_id, "Mock: returning build model");
+            Ok(Response::new(response))
+        }
+
+        async fn get_build_plan(
+            &self,
+            request: tonic::Request<crate::proto::GetBuildPlanRequest>,
+        ) -> Result<Response<crate::proto::GetBuildPlanResponse>, tonic::Status> {
+            let req = request.into_inner();
+            let response = crate::proto::GetBuildPlanResponse {
+                success: true,
+                error_message: String::new(),
+                plan: Some(crate::proto::BuildPlan {
+                    schema_version: crate::server::build_plan_ir::BUILD_PLAN_SCHEMA_VERSION,
+                    build_id: req.build_id,
+                    projects: Vec::new(),
+                    tasks: Vec::new(),
+                    dependencies: Vec::new(),
+                    toolchains: Vec::new(),
+                    metadata: HashMap::new(),
+                }),
+                source: "mock-jvm-host".to_string(),
+            };
             Ok(Response::new(response))
         }
 

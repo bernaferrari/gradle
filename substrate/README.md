@@ -19,12 +19,12 @@ A Rust implementation of Gradle's build execution substrate, communicating with 
 │  └──────────────────┬──────────────────────────────────────────┘   │
 └─────────────────────┼─────────────────────────────────────────────┘
                       │ gRPC over Unix domain socket
-                      │ (proto/v1/substrate.proto)
+                      │ (proto/v1/*.proto)
                       │
 ┌─────────────────────┼─────────────────────────────────────────────┐
 │                     ▼                      Rust Substrate Daemon   │
 │  ┌──────────────────────────────────────────────────────────┐     │
-│  │                   39 gRPC Services                       │     │
+│  │                   41 gRPC Services                       │     │
 │  │                                                          │     │
 │  │  Core Services:                                          │     │
 │  │  ├── hash.rs          - File hashing (MD5/SHA1/SHA256)   │     │
@@ -70,7 +70,7 @@ A Rust implementation of Gradle's build execution substrate, communicating with 
 # Build
 cargo build
 
-# Run all tests (1,247 unit + 102 parser + 51 integration + 46 differential + 7 benchmarks)
+# Run the full Rust test suite
 cargo test
 
 # Check for warnings (must be zero)
@@ -80,18 +80,23 @@ cargo clippy
 ./target/debug/gradle-substrate-daemon --socket-path /tmp/gradle-substrate.sock --log-level debug
 ```
 
-## Test Coverage
+## Validation
 
-| Test Suite | Count | Status |
-|------------|-------|--------|
-| Unit tests | 1,244 + 3 ignored | ✅ All pass |
-| Parser regression | 102 | ✅ All pass |
-| Integration (gRPC) | 51 | ✅ All pass |
-| Differential | 46 | ✅ All pass |
-| Benchmarks | 7 | ✅ All pass |
-| Clippy warnings | 0 | ✅ Clean |
+The substrate is validated through a mix of targeted Rust regression suites, bridge-side
+shadow tests, and the repository stabilization flow described in
+`architecture/rust-substrate-stabilization.md`.
 
-**Note:** 3 symlink tests are `#[ignore]`d due to macOS sandbox ELOOP issues (`/var` → `/private/var` symlink resolution). These pass on real macOS but fail in sandboxed test environments.
+High-signal commands:
+
+```bash
+cargo test -p gradle-substrate-daemon --test hash_compatibility_test
+cargo test -p gradle-substrate-daemon --test build_plan_ir_golden_test
+./tools/stabilization/run_strict_stabilization.sh quick
+```
+
+**Note:** some symlink-oriented tests are intentionally ignored in sandboxed macOS
+environments because `/var` and `/private/var` can produce ELOOP behavior that does not
+represent the non-sandboxed runtime.
 
 ## Build Script Parsing
 
@@ -115,7 +120,7 @@ The Groovy/Kotlin AST parser (`groovy_parser/`) is fully implemented but current
 ## Proto Contract
 
 All 29 protocol buffer definitions are in `substrate/proto/v1/`. They define:
-- 39 gRPC service interfaces
+- 41 gRPC service interfaces
 - 300+ message types for data exchange
 - Versioned protocol contract between JVM and Rust daemon
 
@@ -153,9 +158,12 @@ python3 tools/corpus_runner/run.py --projects /path/to/project1 /path/to/project
 ## JVM Bridge
 
 The JVM compatibility host in `platforms/core-execution/rust-bridge/` provides:
-- gRPC client stubs for all 39 services
+- gRPC client stubs for all substrate proto services
 - Shadow listeners that compare Rust and JVM outputs
 - Build model hosting for DSL evaluation
+- A mixed-mode bridge where the active module service layer now covers daemon attach,
+  optional JVM-host attach, lifecycle shadow listeners, cache registration, and the
+  compile-safe execution/configuration/cache shadowing slice
 
 ## Directory Structure
 
@@ -165,19 +173,19 @@ substrate/
 ├── build.rs                # Proto compilation + version injection
 ├── proto/v1/               # 29 .proto files
 ├── src/
-│   ├── main.rs             # Daemon binary (wires all 39 services)
+│   ├── main.rs             # Daemon binary (wires substrate services)
 │   ├── lib.rs              # Library exports
 │   ├── error.rs            # 42 error types
 │   ├── client/             # JVM host gRPC client
-│   └── server/             # 59 server modules (56 services + 3 infra)
+│   └── server/             # Service implementations and infrastructure
 │       ├── groovy_parser/  # Lexer (1,800 loc) + Parser (2,274 loc) + AST
 │       └── task_executor/  # 8 task executor implementations
 ├── tests/
-│   ├── integration_test.rs # 51 gRPC integration tests
-│   ├── parser_regression.rs# 102 parser edge case tests
-│   ├── differential_test.rs# 12 determinism tests
-│   ├── benchmarks.rs       # 7 performance benchmarks
-│   └── differential/       # 46 fine-grained differential tests
+│   ├── integration_test.rs # gRPC integration coverage
+│   ├── parser_regression.rs# parser edge case coverage
+│   ├── differential_test.rs# determinism and parity checks
+│   ├── benchmarks.rs       # focused benchmarks
+│   └── differential/       # fine-grained differential tests
 ```
 
 ## Design Decisions

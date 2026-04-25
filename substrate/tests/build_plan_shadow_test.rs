@@ -7,11 +7,12 @@ use gradle_substrate_daemon::client::jvm_host_bridge::JvmHostBridge;
 use gradle_substrate_daemon::proto::bootstrap_service_server::BootstrapService;
 use gradle_substrate_daemon::proto::jvm_host_service_server::{JvmHostService, JvmHostServiceServer};
 use gradle_substrate_daemon::proto::{
-    InitBuildRequest,
-    EvaluateScriptRequest, EvaluateScriptResponse, GetBuildEnvironmentRequest,
-    GetBuildEnvironmentResponse, GetBuildModelRequest, GetBuildModelResponse, ProjectModel,
-    ResolveConfigRequest, ResolveConfigResponse,
+    BuildPlan, EvaluateScriptRequest, EvaluateScriptResponse, GetBuildEnvironmentRequest,
+    GetBuildEnvironmentResponse, GetBuildModelRequest, GetBuildModelResponse, GetBuildPlanRequest,
+    GetBuildPlanResponse, InitBuildRequest, ProjectModel, ResolveConfigRequest,
+    ResolveConfigResponse,
 };
+use gradle_substrate_daemon::server::build_plan_ir::BUILD_PLAN_SCHEMA_VERSION;
 use gradle_substrate_daemon::server::bootstrap::BootstrapServiceImpl;
 use gradle_substrate_daemon::server::build_plan_shadow::{
     capture_and_persist_shadow_from_jvm, verify_shadow_against_jvm, BuildPlanShadowStore,
@@ -21,7 +22,9 @@ use tokio::net::UnixListener;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
-struct MockJvmHostService;
+struct MockJvmHostService {
+    repo_root: PathBuf,
+}
 
 #[tonic::async_trait]
 impl JvmHostService for MockJvmHostService {
@@ -46,26 +49,83 @@ impl JvmHostService for MockJvmHostService {
                 ProjectModel {
                     path: ":".to_string(),
                     name: "root".to_string(),
-                    build_file: "/repo/build.gradle.kts".to_string(),
+                    build_file: self
+                        .repo_root
+                        .join("build.gradle.kts")
+                        .to_string_lossy()
+                        .into_owned(),
                     subprojects: vec![":app".to_string()],
                 },
                 ProjectModel {
                     path: ":app".to_string(),
                     name: format!("app-{}", build_id),
-                    build_file: "/repo/app/build.gradle.kts".to_string(),
+                    build_file: self
+                        .repo_root
+                        .join("app")
+                        .join("build.gradle.kts")
+                        .to_string_lossy()
+                        .into_owned(),
                     subprojects: vec![],
                 },
             ],
         }))
     }
 
+    async fn get_build_plan(
+        &self,
+        request: Request<GetBuildPlanRequest>,
+    ) -> Result<Response<GetBuildPlanResponse>, Status> {
+        Ok(Response::new(GetBuildPlanResponse {
+            success: true,
+            error_message: String::new(),
+            plan: Some(BuildPlan {
+                schema_version: BUILD_PLAN_SCHEMA_VERSION,
+                build_id: request.into_inner().build_id,
+                projects: Vec::new(),
+                tasks: Vec::new(),
+                dependencies: Vec::new(),
+                toolchains: Vec::new(),
+                metadata: HashMap::from([(
+                    "provider".to_string(),
+                    "mock-build-plan".to_string(),
+                )]),
+            }),
+            source: "mock-jvm-host".to_string(),
+        }))
+    }
+
     async fn resolve_configuration(
         &self,
-        _request: Request<ResolveConfigRequest>,
+        request: Request<ResolveConfigRequest>,
     ) -> Result<Response<ResolveConfigResponse>, Status> {
+        let req = request.into_inner();
+        let artifacts = match req.configuration_name.as_str() {
+            "compileClasspath" => vec![
+                gradle_substrate_daemon::proto::ResolvedArtifact {
+                    group: "org.example".to_string(),
+                    name: "core-lib".to_string(),
+                    version: "1.0.0".to_string(),
+                    configuration: req.configuration_name.clone(),
+                },
+                gradle_substrate_daemon::proto::ResolvedArtifact {
+                    group: "org.example".to_string(),
+                    name: format!("{}-impl", req.project_path.trim_start_matches(':')),
+                    version: "1.0.0".to_string(),
+                    configuration: req.configuration_name.clone(),
+                },
+            ],
+            "runtimeClasspath" => vec![gradle_substrate_daemon::proto::ResolvedArtifact {
+                group: "org.example".to_string(),
+                name: "runtime-lib".to_string(),
+                version: "2.0.0".to_string(),
+                configuration: req.configuration_name.clone(),
+            }],
+            _ => Vec::new(),
+        };
+
         Ok(Response::new(ResolveConfigResponse {
             success: true,
-            artifacts: Vec::new(),
+            artifacts,
             error_message: String::new(),
         }))
     }
@@ -87,27 +147,85 @@ impl JvmHostService for MockJvmHostService {
     }
 }
 
-async fn spawn_mock_server() -> (String, tempfile::TempDir) {
+fn create_mock_repo(root: &std::path::Path) {
+    std::fs::create_dir_all(root.join("app")).unwrap();
+    std::fs::write(
+        root.join("build.gradle.kts"),
+        r#"
+            plugins {
+                java
+            }
+
+            repositories {
+                mavenCentral()
+            }
+
+            group = "org.example.shadow"
+            version = "1.0.0"
+
+            java {
+                sourceCompatibility = JavaVersion.VERSION_17
+                targetCompatibility = JavaVersion.VERSION_17
+            }
+
+            tasks.register("lint") {
+                dependsOn("check")
+                shouldRunAfter("test")
+            }
+        "#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("app").join("build.gradle.kts"),
+        r#"
+            dependencies {
+                implementation("org.example:feature-lib:1.2.3")
+            }
+
+            tasks.register<JavaCompile>("compileJava") {
+                dependsOn("generateSources")
+                mustRunAfter("processResources")
+                finalizedBy("check")
+                destinationDirectory = layout.buildDirectory.dir("classes/java/main")
+            }
+
+            tasks.register<Test>("integrationTest") {
+                dependsOn("test")
+                shouldRunAfter("compileJava")
+                outputs.dir("build/test-results/integrationTest")
+                enabled = false
+            }
+        "#,
+    )
+    .unwrap();
+}
+
+async fn spawn_mock_server() -> (String, tempfile::TempDir, PathBuf) {
     let temp_dir = tempfile::tempdir().unwrap();
+    let repo_root = temp_dir.path().join("repo");
+    create_mock_repo(&repo_root);
     let socket_path = temp_dir.path().join("jvm-host.sock");
 
     let uds = UnixListener::bind(&socket_path).unwrap();
     let stream = tokio_stream::wrappers::UnixListenerStream::new(uds);
+    let service = MockJvmHostService {
+        repo_root: repo_root.clone(),
+    };
 
     tokio::spawn(async move {
         Server::builder()
-            .add_service(JvmHostServiceServer::new(MockJvmHostService))
+            .add_service(JvmHostServiceServer::new(service))
             .serve_with_incoming(stream)
             .await
             .unwrap();
     });
 
-    (socket_path.to_string_lossy().to_string(), temp_dir)
+    (socket_path.to_string_lossy().to_string(), temp_dir, repo_root)
 }
 
 #[tokio::test]
 async fn capture_and_persist_shadow_build_plan_artifact() {
-    let (socket_path, _tmp_server_dir) = spawn_mock_server().await;
+    let (socket_path, _tmp_server_dir, _repo_root) = spawn_mock_server().await;
     let client = JvmHostClient::connect(&socket_path).await.unwrap();
 
     let bridge = JvmHostBridge::new();
@@ -127,6 +245,224 @@ async fn capture_and_persist_shadow_build_plan_artifact() {
     assert_eq!(loaded.source, "jvm-host-shadow");
     assert!(!loaded.fingerprint_sha256.is_empty());
     assert_eq!(loaded.plan.toolchains.len(), 1);
+    assert_eq!(loaded.plan.toolchains[0].version, "17");
+    assert!(
+        loaded.plan.tasks.iter().any(|task| task.path == ":lint"),
+        "expected root task declarations to be captured"
+    );
+    assert!(
+        loaded
+            .plan
+            .tasks
+            .iter()
+            .any(|task| task.path == ":app:integrationTest"),
+        "expected subproject task declarations to be captured"
+    );
+    assert!(
+        loaded
+            .plan
+            .dependencies
+            .iter()
+            .any(|dep| dep.configuration == "compileClasspath"),
+        "expected shadow plan to capture resolved dependencies"
+    );
+    let expected_dependency_count = loaded.plan.dependencies.len().to_string();
+    assert_eq!(
+        loaded.plan.metadata.get("dependencyCount").map(String::as_str),
+        Some(expected_dependency_count.as_str())
+    );
+    let expected_task_count = loaded.plan.tasks.len().to_string();
+    assert_eq!(
+        loaded.plan.metadata.get("taskCount").map(String::as_str),
+        Some(expected_task_count.as_str())
+    );
+    assert_eq!(
+        loaded
+            .plan
+            .metadata
+            .get("parsedBuildScriptCount")
+            .map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(
+        loaded
+            .plan
+            .metadata
+            .get("taskDependencyEdgeCount")
+            .map(String::as_str),
+        Some("3")
+    );
+    assert_eq!(
+        loaded
+            .plan
+            .metadata
+            .get("taskSoftDependencyEdgeCount")
+            .map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(
+        loaded
+            .plan
+            .metadata
+            .get("taskMustRunAfterEdgeCount")
+            .map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        loaded
+            .plan
+            .metadata
+            .get("taskFinalizerEdgeCount")
+            .map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        loaded
+            .plan
+            .metadata
+            .get("disabledTaskCount")
+            .map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        loaded
+            .plan
+            .metadata
+            .get("dependencyConfigurationCount")
+            .map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        loaded
+            .plan
+            .metadata
+            .get("groupAssignmentCount")
+            .map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        loaded
+            .plan
+            .metadata
+            .get("versionAssignmentCount")
+            .map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        loaded
+            .plan
+            .metadata
+            .get("typedTaskCount")
+            .map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(
+        loaded
+            .plan
+            .metadata
+            .get("declaredTaskOutputCount")
+            .map(String::as_str),
+        Some("2")
+    );
+
+    let lint_task = loaded
+        .plan
+        .tasks
+        .iter()
+        .find(|task| task.path == ":lint")
+        .expect("expected lint task");
+    assert_eq!(
+        lint_task.inputs.get("projectGroup").map(String::as_str),
+        Some("org.example.shadow")
+    );
+    assert_eq!(
+        lint_task.inputs.get("projectVersion").map(String::as_str),
+        Some("1.0.0")
+    );
+    assert_eq!(
+        lint_task
+            .inputs
+            .get("projectRepositoryTypes")
+            .map(String::as_str),
+        Some("maven")
+    );
+    let integration_test = loaded
+        .plan
+        .tasks
+        .iter()
+        .find(|task| task.path == ":app:integrationTest")
+        .expect("expected integrationTest task");
+    assert_eq!(
+        integration_test
+            .inputs
+            .get("projectDeclaredDependencyCount")
+            .map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        integration_test
+            .inputs
+            .get("projectDependencyConfigurations")
+            .map(String::as_str),
+        Some("implementation")
+    );
+    assert_eq!(
+        integration_test.inputs.get("taskType").map(String::as_str),
+        Some("Test")
+    );
+    assert_eq!(integration_test.worker_isolation, "process");
+    assert_eq!(
+        integration_test
+            .inputs
+            .get("shouldRunAfter")
+            .map(String::as_str),
+        Some(":app:compileJava")
+    );
+    assert_eq!(
+        integration_test.outputs,
+        vec!["build/test-results/integrationTest".to_string()]
+    );
+
+    let compile_java = loaded
+        .plan
+        .tasks
+        .iter()
+        .find(|task| task.path == ":app:compileJava")
+        .expect("expected compileJava task");
+    assert_eq!(
+        compile_java.implementation_id,
+        "org.gradle.api.tasks.compile.JavaCompile"
+    );
+    assert_eq!(compile_java.worker_isolation, "process");
+    assert_eq!(
+        compile_java.inputs.get("taskType").map(String::as_str),
+        Some("JavaCompile")
+    );
+    assert_eq!(
+        compile_java
+            .inputs
+            .get("mustRunAfter")
+            .map(String::as_str),
+        Some(":app:processResources")
+    );
+    assert_eq!(
+        compile_java
+            .inputs
+            .get("finalizedBy")
+            .map(String::as_str),
+        Some(":app:check")
+    );
+    assert_eq!(
+        compile_java
+            .inputs
+            .get("nativeCandidate")
+            .map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(
+        compile_java.outputs,
+        vec!["classes/java/main".to_string()]
+    );
 
     let report = verify_shadow_against_jvm(&bridge, &store, "build-it")
         .await
@@ -140,7 +476,7 @@ async fn capture_and_persist_shadow_build_plan_artifact() {
 
 #[tokio::test]
 async fn bootstrap_init_build_persists_per_build_shadow_artifact() {
-    let (socket_path, _tmp_server_dir) = spawn_mock_server().await;
+    let (socket_path, _tmp_server_dir, repo_root) = spawn_mock_server().await;
     let client = JvmHostClient::connect(&socket_path).await.unwrap();
 
     let bridge = Arc::new(JvmHostBridge::new());
@@ -159,7 +495,7 @@ async fn bootstrap_init_build_persists_per_build_shadow_artifact() {
     let _ = bootstrap
         .init_build(Request::new(InitBuildRequest {
             build_id: build_id.to_string(),
-            project_dir: "/repo".to_string(),
+            project_dir: repo_root.to_string_lossy().into_owned(),
             start_time_ms: 1,
             requested_parallelism: 1,
             system_properties: HashMap::new(),
@@ -195,7 +531,7 @@ async fn bootstrap_init_build_persists_per_build_shadow_artifact() {
 
 #[tokio::test]
 async fn detect_shadow_mismatch_after_manual_mutation() {
-    let (socket_path, _tmp_server_dir) = spawn_mock_server().await;
+    let (socket_path, _tmp_server_dir, _repo_root) = spawn_mock_server().await;
     let client = JvmHostClient::connect(&socket_path).await.unwrap();
 
     let bridge = JvmHostBridge::new();
