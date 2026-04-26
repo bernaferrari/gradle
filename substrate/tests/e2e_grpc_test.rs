@@ -12,22 +12,19 @@ use gradle_substrate_daemon::proto::{
     ParseBuildScriptDependenciesRequest, ParseBuildScriptRepositoriesRequest,
     ParseBuildScriptRequest,
 };
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 use std::time::Duration;
-use tokio::sync::OnceCell;
 use tonic::transport::{Channel, Endpoint, Uri};
 
-const SOCKET_PATH: &str = "/tmp/substrate-test.sock";
-static DAEMON_READY: OnceCell<()> = OnceCell::const_new();
-
-async fn connect_result() -> Result<Channel, tonic::transport::Error> {
+async fn connect_result(socket_path: &Path) -> Result<Channel, tonic::transport::Error> {
     let endpoint = Endpoint::from_static("http://[::]:0")
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(10));
 
     #[cfg(unix)]
     {
-        let path = std::path::PathBuf::from(SOCKET_PATH);
+        let path = socket_path.to_path_buf();
         endpoint
             .connect_with_connector(tower::service_fn(move |_: Uri| {
                 let path = path.clone();
@@ -44,69 +41,100 @@ async fn connect_result() -> Result<Channel, tonic::transport::Error> {
     }
 }
 
-async fn ensure_daemon_running() {
-    DAEMON_READY
-        .get_or_init(|| async {
-            ensure_daemon_running_inner().await;
-        })
-        .await;
+struct TestDaemon {
+    socket_path: PathBuf,
+    _temp_dir: tempfile::TempDir,
+    child: Child,
 }
 
-async fn ensure_daemon_running_inner() {
-    if Path::new(SOCKET_PATH).exists() {
-        if connect_result().await.is_ok() {
-            return;
+impl TestDaemon {
+    async fn start() -> Self {
+        let temp_dir = tempfile::tempdir().expect("Failed to create e2e daemon temp dir");
+        let socket_path = temp_dir.path().join("substrate.sock");
+        eprintln!("[e2e] Starting daemon at {}...", socket_path.display());
+
+        let daemon_bin = std::env::var("SUBSTRATE_DAEMON_BIN").unwrap_or_else(|_| {
+            if let Ok(path) = std::env::var("CARGO_BIN_EXE_gradle-substrate-daemon") {
+                return path;
+            }
+
+            // CARGO_MANIFEST_DIR points to substrate/, workspace root is one level up.
+            let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
+            let workspace = Path::new(&manifest).parent().unwrap_or(Path::new("."));
+            let debug_bin = workspace
+                .join("target")
+                .join("debug")
+                .join("gradle-substrate-daemon");
+            if debug_bin.exists() {
+                return debug_bin.to_string_lossy().to_string();
+            }
+
+            workspace
+                .join("target")
+                .join("release")
+                .join("gradle-substrate-daemon")
+                .to_string_lossy()
+                .to_string()
+        });
+
+        let child = Command::new(&daemon_bin)
+            .arg("--socket-path")
+            .arg(&socket_path)
+            .arg("--log-level")
+            .arg("error")
+            .arg("--cache-dir")
+            .arg(temp_dir.path().join("cache"))
+            .arg("--history-dir")
+            .arg(temp_dir.path().join("history"))
+            .arg("--config-cache-dir")
+            .arg(temp_dir.path().join("config-cache"))
+            .arg("--toolchain-dir")
+            .arg(temp_dir.path().join("toolchains"))
+            .arg("--artifact-store-dir")
+            .arg(temp_dir.path().join("artifacts"))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("Failed to start daemon");
+
+        let mut daemon = Self {
+            socket_path,
+            _temp_dir: temp_dir,
+            child,
+        };
+
+        for _ in 0..50 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            if connect_result(&daemon.socket_path).await.is_ok() {
+                return daemon;
+            }
+            if let Ok(Some(status)) = daemon.child.try_wait() {
+                panic!("Daemon exited before accepting connections: {status}");
+            }
         }
-        let _ = std::fs::remove_file(SOCKET_PATH);
+        panic!("Daemon failed to start within 5 seconds");
     }
-    eprintln!("[e2e] Starting daemon...");
 
-    let daemon_bin = std::env::var("SUBSTRATE_DAEMON_BIN").unwrap_or_else(|_| {
-        if let Ok(path) = std::env::var("CARGO_BIN_EXE_gradle-substrate-daemon") {
-            return path;
-        }
-
-        // CARGO_MANIFEST_DIR points to substrate/, workspace root is one level up.
-        let manifest = std::env::var("CARGO_MANIFEST_DIR")
-            .unwrap_or_else(|_| ".".to_string());
-        let workspace = Path::new(&manifest).parent().unwrap_or(Path::new("."));
-        let debug_bin = workspace
-            .join("target")
-            .join("debug")
-            .join("gradle-substrate-daemon");
-        if debug_bin.exists() {
-            return debug_bin.to_string_lossy().to_string();
-        }
-
-        workspace
-            .join("target")
-            .join("release")
-            .join("gradle-substrate-daemon")
-            .to_string_lossy()
-            .to_string()
-    });
-
-    std::process::Command::new(&daemon_bin)
-        .arg("--socket-path")
-        .arg(SOCKET_PATH)
-        .arg("--log-level")
-        .arg("warn")
-        .spawn()
-        .expect("Failed to start daemon");
-
-    for _ in 0..50 {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        if connect_result().await.is_ok() {
-            return;
-        }
+    async fn connect(&self) -> Channel {
+        connect_result(&self.socket_path)
+            .await
+            .expect("Failed to connect to substrate daemon via UDS")
     }
-    panic!("Daemon failed to start within 5 seconds");
 }
 
-async fn connect() -> Channel {
-    connect_result()
-        .await
-        .expect("Failed to connect to substrate daemon via UDS")
+impl Drop for TestDaemon {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let _ = std::fs::remove_file(&self.socket_path);
+    }
+}
+
+async fn test_channel() -> (TestDaemon, Channel) {
+    let daemon = TestDaemon::start().await;
+    let channel = daemon.connect().await;
+    (daemon, channel)
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -125,8 +153,7 @@ fn temp_file(name: &str, content: &[u8]) -> std::path::PathBuf {
 
 #[tokio::test]
 async fn test_control_handshake() {
-    ensure_daemon_running().await;
-    let channel = connect().await;
+    let (_daemon, channel) = test_channel().await;
     let mut client = ControlServiceClient::new(channel);
 
     let resp = client
@@ -153,8 +180,7 @@ async fn test_control_handshake() {
 
 #[tokio::test]
 async fn test_hash_batch_md5() {
-    ensure_daemon_running().await;
-    let channel = connect().await;
+    let (_daemon, channel) = test_channel().await;
     let mut client = HashServiceClient::new(channel);
 
     let file = temp_file("e2e_md5.txt", b"Hello, Gradle Rust Substrate!");
@@ -193,8 +219,7 @@ async fn test_hash_batch_md5() {
 
 #[tokio::test]
 async fn test_hash_batch_sha256() {
-    ensure_daemon_running().await;
-    let channel = connect().await;
+    let (_daemon, channel) = test_channel().await;
     let mut client = HashServiceClient::new(channel);
 
     let file = temp_file("e2e_sha256.txt", b"SHA-256 verification content\n");
@@ -226,8 +251,7 @@ async fn test_hash_batch_sha256() {
 
 #[tokio::test]
 async fn test_hash_batch_multiple_files_distinct_hashes() {
-    ensure_daemon_running().await;
-    let channel = connect().await;
+    let (_daemon, channel) = test_channel().await;
     let mut client = HashServiceClient::new(channel);
 
     let f1 = temp_file("e2e_multi_a.txt", b"content A");
@@ -281,8 +305,7 @@ async fn test_hash_batch_multiple_files_distinct_hashes() {
 
 #[tokio::test]
 async fn test_hash_batch_empty() {
-    ensure_daemon_running().await;
-    let channel = connect().await;
+    let (_daemon, channel) = test_channel().await;
     let mut client = HashServiceClient::new(channel);
 
     let resp = client
@@ -300,8 +323,7 @@ async fn test_hash_batch_empty() {
 
 #[tokio::test]
 async fn test_hash_batch_nonexistent_file_returns_error() {
-    ensure_daemon_running().await;
-    let channel = connect().await;
+    let (_daemon, channel) = test_channel().await;
     let mut client = HashServiceClient::new(channel);
 
     let resp = client
@@ -332,8 +354,7 @@ async fn test_hash_batch_nonexistent_file_returns_error() {
 
 #[tokio::test]
 async fn test_parser_build_script_elements() {
-    ensure_daemon_running().await;
-    let channel = connect().await;
+    let (_daemon, channel) = test_channel().await;
     let mut client = ParserServiceClient::new(channel);
 
     let resp = client
@@ -357,8 +378,7 @@ async fn test_parser_build_script_elements() {
 
 #[tokio::test]
 async fn test_parser_dependencies_extraction() {
-    ensure_daemon_running().await;
-    let channel = connect().await;
+    let (_daemon, channel) = test_channel().await;
     let mut client = ParserServiceClient::new(channel);
 
     let resp = client.parse_build_script_dependencies(ParseBuildScriptDependenciesRequest {
@@ -376,8 +396,7 @@ async fn test_parser_dependencies_extraction() {
 
 #[tokio::test]
 async fn test_parser_plugins_extraction() {
-    ensure_daemon_running().await;
-    let channel = connect().await;
+    let (_daemon, channel) = test_channel().await;
     let mut client = ParserServiceClient::new(channel);
 
     // Use content known to parse correctly (same as unit test)
@@ -407,8 +426,7 @@ dependencies {
 
 #[tokio::test]
 async fn test_parser_repositories_extraction() {
-    ensure_daemon_running().await;
-    let channel = connect().await;
+    let (_daemon, channel) = test_channel().await;
     let mut client = ParserServiceClient::new(channel);
 
     let resp = client
@@ -429,8 +447,7 @@ async fn test_parser_repositories_extraction() {
 
 #[tokio::test]
 async fn test_parser_empty_script() {
-    ensure_daemon_running().await;
-    let channel = connect().await;
+    let (_daemon, channel) = test_channel().await;
     let mut client = ParserServiceClient::new(channel);
 
     let resp = client
