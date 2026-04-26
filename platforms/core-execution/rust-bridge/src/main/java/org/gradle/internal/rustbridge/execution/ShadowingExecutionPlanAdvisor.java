@@ -13,7 +13,8 @@ import org.slf4j.Logger;
  *
  * <p>In shadow mode: runs both Java and Rust, reports matches/mismatches,
  * and keeps Java as effective result. In authoritative mode: Rust result
- * is used when available, with Java fallback on errors.</p>
+ * is used when available; Rust errors produce explicit {@code rust-error}
+ * metadata instead of falling back to Java.</p>
  */
 public class ShadowingExecutionPlanAdvisor {
 
@@ -87,7 +88,8 @@ public class ShadowingExecutionPlanAdvisor {
 
     /**
      * Ask Rust for prediction and return effective prediction.
-     * In authoritative mode, Rust prediction is used when available; Java fallback is used on error.
+     * In authoritative mode, Rust prediction is used when available; Rust errors
+     * fail closed with UNKNOWN instead of falling back to Java.
      */
     public EffectivePredictionResult advisePredictionOrFallback(
         String workIdentity,
@@ -134,6 +136,9 @@ public class ShadowingExecutionPlanAdvisor {
                 "execution-plan:" + workIdentity, e
             );
             LOGGER.debug("[substrate:execution-plan] shadow predict failed for {}", workIdentity, e);
+            if (authoritative) {
+                return new EffectivePredictionResult("UNKNOWN", "rust-error");
+            }
             return new EffectivePredictionResult(javaPrediction, "java-fallback");
         }
     }
