@@ -20,8 +20,7 @@ use gradle_substrate_daemon::{
         build_metrics_service_server::BuildMetricsServiceServer,
         build_operations_service_server::BuildOperationsServiceServer,
         build_result_service_server::BuildResultServiceServer,
-        cache_service_server::CacheServiceServer,
-        classpath_service_server::ClasspathServiceServer,
+        cache_service_server::CacheServiceServer, classpath_service_server::ClasspathServiceServer,
         configuration_cache_service_server::ConfigurationCacheServiceServer,
         configuration_service_server::ConfigurationServiceServer,
         console_service_server::ConsoleServiceServer, control_service_server::ControlServiceServer,
@@ -52,26 +51,24 @@ use gradle_substrate_daemon::{
         bootstrap::BootstrapServiceImpl, build_comparison::BuildComparisonServiceImpl,
         build_event_stream::BuildEventStreamServiceImpl, build_init::BuildInitServiceImpl,
         build_layout::BuildLayoutServiceImpl, build_metrics::BuildMetricsServiceImpl,
-        build_operations::BuildOperationsServiceImpl, build_result::BuildResultServiceImpl,
-        build_plan_shadow::BuildPlanShadowStore,
-        cache::CacheServiceImpl, cache_orchestration::BuildCacheOrchestrationServiceImpl,
-        classpath::ClasspathServiceImpl,
+        build_operations::BuildOperationsServiceImpl, build_plan_shadow::BuildPlanShadowStore,
+        build_result::BuildResultServiceImpl, cache::CacheServiceImpl,
+        cache_orchestration::BuildCacheOrchestrationServiceImpl, classpath::ClasspathServiceImpl,
         config_cache::ConfigurationCacheServiceImpl, configuration::ConfigurationServiceImpl,
         console::ConsoleServiceImpl, control::ControlServiceImpl,
         dag_executor::DagExecutorServiceImpl,
         dependency_resolution::DependencyResolutionServiceImpl, exec::ExecServiceImpl,
         execution_history::ExecutionHistoryServiceImpl, execution_plan::ExecutionPlanServiceImpl,
         file_fingerprint::FileFingerprintServiceImpl, file_tree::FileTreeServiceImpl,
-        file_watch::FileWatchServiceImpl,
-        garbage_collection::GarbageCollectionServiceImpl, hash::HashServiceImpl,
-        incremental_compilation::IncrementalCompilationServiceImpl,
+        file_watch::FileWatchServiceImpl, garbage_collection::GarbageCollectionServiceImpl,
+        hash::HashServiceImpl, incremental_compilation::IncrementalCompilationServiceImpl,
         parser_service::ParserServiceImpl, plugin::PluginServiceImpl,
         problem_reporting::ProblemReportingServiceImpl,
         resource_management::ResourceManagementServiceImpl, scopes::ScopeRegistry,
         task_graph::TaskGraphServiceImpl, test_execution::TestExecutionServiceImpl,
         toolchain::ToolchainServiceImpl, value_snapshot::ValueSnapshotServiceImpl,
-        version_catalog::VersionCatalogServiceImpl,
-        work::WorkServiceImpl, worker_process::WorkerProcessServiceImpl,
+        version_catalog::VersionCatalogServiceImpl, work::WorkServiceImpl,
+        worker_process::WorkerProcessServiceImpl,
     },
     PROTOCOL_VERSION,
 };
@@ -286,7 +283,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&build_metrics)
             as Arc<dyn gradle_substrate_daemon::server::event_dispatcher::EventDispatcher>,
     ];
-    let build_event_stream = BuildEventStreamServiceImpl::with_dispatchers(event_dispatchers.clone());
+    let build_event_stream =
+        BuildEventStreamServiceImpl::with_dispatchers(event_dispatchers.clone());
 
     // Scope registry — tracks session→build membership for proper scope isolation
     let scope_registry = Arc::new(ScopeRegistry::new());
@@ -319,7 +317,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&task_graph),
         Arc::new(execution_plan.clone()),
         event_dispatchers,
-    );
+    )
+    .with_jvm_host_bridge(Arc::clone(&jvm_bridge));
 
     // Phase 25: Worker process management
     let worker_process = WorkerProcessServiceImpl::new();
@@ -442,7 +441,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ))
         .add_service(BuildMetricsServiceServer::new((*build_metrics).clone()))
         .add_service(GarbageCollectionServiceServer::new(garbage_collection))
-        .add_service(VersionCatalogServiceServer::new(VersionCatalogServiceImpl::new()))
+        .add_service(VersionCatalogServiceServer::new(
+            VersionCatalogServiceImpl::new(),
+        ))
         .serve_with_incoming_shutdown(
             tokio_stream::wrappers::UnixListenerStream::new(listener),
             shutdown_signal(),

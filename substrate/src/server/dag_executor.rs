@@ -9,6 +9,7 @@ use super::event_dispatcher::EventDispatcher;
 use super::scopes::BuildId;
 use super::work::WorkerScheduler;
 
+use crate::client::jvm_host_bridge::SharedJvmHostBridge;
 use crate::proto::{
     dag_executor_service_server::DagExecutorService,
     execution_plan_service_server::ExecutionPlanService,
@@ -16,10 +17,9 @@ use crate::proto::{
     AwaitBuildCompletionResponse, BuildEventMessage, CancelBuildRequest, CancelBuildResponse,
     GetBuildStatusRequest, GetBuildStatusResponse, GetNextTaskRequest, GetNextTaskResponse,
     NotifyTaskFinishedRequest, NotifyTaskFinishedResponse, NotifyTaskStartedRequest,
-    NotifyTaskStartedResponse, PredictedOutcome, RecordOutcomeRequest,
-    ResolveExecutionPlanRequest, ResolvePlanRequest, RunBuildRequest, RunBuildResponse,
-    StartBuildRequest, StartBuildResponse, TaskExecutionDetail, TaskFinishedRequest,
-    TaskStartedRequest, TaskStatusEntry, WorkMetadata,
+    NotifyTaskStartedResponse, PredictedOutcome, RecordOutcomeRequest, ResolveExecutionPlanRequest,
+    ResolvePlanRequest, RunBuildRequest, RunBuildResponse, StartBuildRequest, StartBuildResponse,
+    TaskExecutionDetail, TaskFinishedRequest, TaskStartedRequest, TaskStatusEntry, WorkMetadata,
 };
 use crate::server::task_executor::{TaskExecutorRegistry, TaskInput};
 
@@ -75,7 +75,10 @@ impl BuildExecution {
     }
 
     fn executing_count(&self) -> i32 {
-        self.executing.lock().expect("executing lock should not be poisoned").len() as i32
+        self.executing
+            .lock()
+            .expect("executing lock should not be poisoned")
+            .len() as i32
     }
 
     fn pending_count(&self) -> i32 {
@@ -171,6 +174,8 @@ pub struct DagExecutorServiceImpl {
     dispatchers: Vec<Arc<dyn EventDispatcher>>,
     /// Native task executor registry for RunBuild authoritative execution.
     executor_registry: Arc<TaskExecutorRegistry>,
+    /// JVM compatibility host bridge for explicit legacy task execution.
+    jvm_host_bridge: Option<SharedJvmHostBridge>,
     request_counter: AtomicI64,
     builds_started: AtomicI64,
 }
@@ -184,6 +189,7 @@ impl Clone for DagExecutorServiceImpl {
             execution_plan: Arc::clone(&self.execution_plan),
             dispatchers: self.dispatchers.clone(),
             executor_registry: Arc::clone(&self.executor_registry),
+            jvm_host_bridge: self.jvm_host_bridge.clone(),
             request_counter: AtomicI64::new(self.request_counter.load(Ordering::Relaxed)),
             builds_started: AtomicI64::new(self.builds_started.load(Ordering::Relaxed)),
         }
@@ -215,9 +221,15 @@ impl DagExecutorServiceImpl {
             execution_plan,
             dispatchers,
             executor_registry: Arc::new(TaskExecutorRegistry::new()),
+            jvm_host_bridge: None,
             request_counter: AtomicI64::new(0),
             builds_started: AtomicI64::new(0),
         }
+    }
+
+    pub fn with_jvm_host_bridge(mut self, bridge: SharedJvmHostBridge) -> Self {
+        self.jvm_host_bridge = Some(bridge);
+        self
     }
 
     /// Dispatch an event to all registered dispatchers.
@@ -245,7 +257,10 @@ impl DagExecutorServiceImpl {
     /// Try to mark dependents as ready after a task finishes.
     /// Returns list of newly ready task paths.
     fn try_unblock_dependents(execution: &BuildExecution, finished_task: &str) -> Vec<String> {
-        let dep_count = execution.dependents.get(finished_task).map_or(0, |d| d.len());
+        let dep_count = execution
+            .dependents
+            .get(finished_task)
+            .map_or(0, |d| d.len());
         let mut newly_ready = Vec::with_capacity(dep_count);
         if let Some(deps) = execution.dependents.get(finished_task) {
             for dependent in deps {
@@ -271,7 +286,10 @@ impl DagExecutorServiceImpl {
         }
         // Update ready queue
         if !newly_ready.is_empty() {
-            let mut queue = execution.ready_queue.lock().expect("ready_queue lock should not be poisoned");
+            let mut queue = execution
+                .ready_queue
+                .lock()
+                .expect("ready_queue lock should not be poisoned");
             for task in &newly_ready {
                 queue.push_back(task.clone());
             }
@@ -577,66 +595,73 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 // Phase 2a: Check execution plan for UP-TO-DATE / FROM_CACHE.
                 let context_json = task_contexts.get(&task_path).cloned();
                 let work_meta = context_json.as_ref().and_then(|json| {
-                    serde_json::from_str::<serde_json::Value>(json).ok().and_then(|v| {
-                        Some(WorkMetadata {
-                            work_identity: v.get("work_identity")?.as_str()?.to_string(),
-                            display_name: v
-                                .get("display_name")
-                                .and_then(|d| d.as_str())
-                                .unwrap_or(&task_path)
-                                .to_string(),
-                            implementation_class: v
-                                .get("implementation_class")
-                                .and_then(|c| c.as_str())
-                                .unwrap_or(&task_type)
-                                .to_string(),
-                            input_properties: v
-                                .get("input_properties")
-                                .and_then(|p| p.as_object())
-                                .map(|obj| {
-                                    obj.iter()
-                                        .filter_map(|(k, val)| val.as_str().map(|s| (k.clone(), s.to_string())))
-                                        .collect()
-                                })
-                                .unwrap_or_default(),
-                            input_file_fingerprints: v
-                                .get("input_file_fingerprints")
-                                .and_then(|f| f.as_object())
-                                .map(|obj| {
-                                    obj.iter()
-                                        .filter_map(|(k, val)| val.as_str().map(|s| (k.clone(), s.to_string())))
-                                        .collect()
-                                })
-                                .unwrap_or_default(),
-                            caching_enabled: v
-                                .get("caching_enabled")
-                                .and_then(|c| c.as_bool())
-                                .unwrap_or(false),
-                            can_load_from_cache: v
-                                .get("can_load_from_cache")
-                                .and_then(|c| c.as_bool())
-                                .unwrap_or(false),
-                            has_previous_execution_state: v
-                                .get("has_previous_execution_state")
-                                .and_then(|c| c.as_bool())
-                                .unwrap_or(false),
-                            rebuild_reasons: v
-                                .get("rebuild_reasons")
-                                .and_then(|r| r.as_array())
-                                .map(|arr| {
-                                    arr.iter()
-                                        .filter_map(|val| val.as_str().map(|s| s.to_string()))
-                                        .collect()
-                                })
-                                .unwrap_or_default(),
+                    serde_json::from_str::<serde_json::Value>(json)
+                        .ok()
+                        .and_then(|v| {
+                            Some(WorkMetadata {
+                                work_identity: v.get("work_identity")?.as_str()?.to_string(),
+                                display_name: v
+                                    .get("display_name")
+                                    .and_then(|d| d.as_str())
+                                    .unwrap_or(&task_path)
+                                    .to_string(),
+                                implementation_class: v
+                                    .get("implementation_class")
+                                    .and_then(|c| c.as_str())
+                                    .unwrap_or(&task_type)
+                                    .to_string(),
+                                input_properties: v
+                                    .get("input_properties")
+                                    .and_then(|p| p.as_object())
+                                    .map(|obj| {
+                                        obj.iter()
+                                            .filter_map(|(k, val)| {
+                                                val.as_str().map(|s| (k.clone(), s.to_string()))
+                                            })
+                                            .collect()
+                                    })
+                                    .unwrap_or_default(),
+                                input_file_fingerprints: v
+                                    .get("input_file_fingerprints")
+                                    .and_then(|f| f.as_object())
+                                    .map(|obj| {
+                                        obj.iter()
+                                            .filter_map(|(k, val)| {
+                                                val.as_str().map(|s| (k.clone(), s.to_string()))
+                                            })
+                                            .collect()
+                                    })
+                                    .unwrap_or_default(),
+                                caching_enabled: v
+                                    .get("caching_enabled")
+                                    .and_then(|c| c.as_bool())
+                                    .unwrap_or(false),
+                                can_load_from_cache: v
+                                    .get("can_load_from_cache")
+                                    .and_then(|c| c.as_bool())
+                                    .unwrap_or(false),
+                                has_previous_execution_state: v
+                                    .get("has_previous_execution_state")
+                                    .and_then(|c| c.as_bool())
+                                    .unwrap_or(false),
+                                rebuild_reasons: v
+                                    .get("rebuild_reasons")
+                                    .and_then(|r| r.as_array())
+                                    .map(|arr| {
+                                        arr.iter()
+                                            .filter_map(|val| val.as_str().map(|s| s.to_string()))
+                                            .collect()
+                                    })
+                                    .unwrap_or_default(),
+                            })
                         })
-                    })
                 });
 
                 if let Some(ref meta) = work_meta {
                     // Store work_metadata on the task slot for later outcome recording.
                     let build_id_clone = build_id_str.clone();
-                    if let Some(mut execution) = self.builds.get_mut(&BuildId::from(build_id_clone)) {
+                    if let Some(mut execution) = self.builds.get_mut(&BuildId::from(build_id_clone))
+                    {
                         if let Some(slot) = execution.tasks.get_mut(&task_path) {
                             slot.work_metadata = Some(meta.clone());
                             slot.input_fingerprint =
@@ -749,9 +774,13 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 let context_for_task = task_contexts.get(&task_path).cloned();
                 let tx = result_tx.clone();
                 let allow_jvm_forwarding_for_task = allow_jvm_forwarding;
-                let permit = semaphore.clone().acquire_owned().await.map_err(|_| {
-                    Status::internal("Semaphore closed during build execution")
-                })?;
+                let jvm_host_bridge = self.jvm_host_bridge.clone();
+                let build_id_for_task = build_id_str.clone();
+                let permit = semaphore
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| Status::internal("Semaphore closed during build execution"))?;
 
                 tasks_dispatched += 1;
                 in_flight += 1;
@@ -767,30 +796,76 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 tokio::spawn(async move {
                     let exec_start = now_ms();
 
-                    let (success, outcome, exec_mode, error_msg) =
-                        if let Some(executor) = registry.get(&task_type) {
-                            let input = build_task_input(&task_type, context_for_task.as_ref());
-                            let result = executor.execute(&input).await;
-                            (
-                                result.success,
-                                if result.success {
-                                    "EXECUTED".to_string()
-                                } else {
-                                    "FAILED".to_string()
-                                },
-                                "native".to_string(),
-                                result.error_message,
-                            )
-                        } else if allow_jvm_forwarding_for_task {
-                            // Compatibility mode only: task execution must be handled by the JVM side.
-                            (
-                                true,
-                                "JVM_FORWARD".to_string(),
-                                "jvm_forward".to_string(),
-                                String::new(),
-                            )
+                    let (success, outcome, exec_mode, error_msg) = if let Some(executor) =
+                        registry.get(&task_type)
+                    {
+                        let input = build_task_input(&task_type, context_for_task.as_ref());
+                        let result = executor.execute(&input).await;
+                        (
+                            result.success,
+                            if result.success {
+                                "EXECUTED".to_string()
+                            } else {
+                                "FAILED".to_string()
+                            },
+                            "native".to_string(),
+                            result.error_message,
+                        )
+                    } else if allow_jvm_forwarding_for_task {
+                        if let Some(bridge) = jvm_host_bridge {
+                            match bridge
+                                .execute_task(
+                                    &build_id_for_task,
+                                    &task_path,
+                                    &task_type,
+                                    context_for_task.as_deref().unwrap_or("{}"),
+                                    0,
+                                )
+                                .await
+                            {
+                                Ok(Some(response)) => (
+                                    response.success,
+                                    if response.outcome.is_empty() {
+                                        if response.success {
+                                            "EXECUTED".to_string()
+                                        } else {
+                                            "FAILED".to_string()
+                                        }
+                                    } else {
+                                        response.outcome
+                                    },
+                                    if response.execution_mode.is_empty() {
+                                        "jvm_host".to_string()
+                                    } else {
+                                        response.execution_mode
+                                    },
+                                    response.error_message,
+                                ),
+                                Ok(None) => (
+                                    false,
+                                    "FAILED".to_string(),
+                                    "jvm_host_unavailable".to_string(),
+                                    "JVM forwarding requested but JVM host is not connected"
+                                        .to_string(),
+                                ),
+                                Err(status) => (
+                                    false,
+                                    "FAILED".to_string(),
+                                    "jvm_host_error".to_string(),
+                                    format!("JVM task execution RPC failed: {}", status),
+                                ),
+                            }
                         } else {
                             (
+                                false,
+                                "FAILED".to_string(),
+                                "jvm_host_unavailable".to_string(),
+                                "JVM forwarding requested but no JVM host bridge is configured"
+                                    .to_string(),
+                            )
+                        }
+                    } else {
+                        (
                                 false,
                                 "FAILED".to_string(),
                                 "missing_executor".to_string(),
@@ -799,7 +874,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                                     task_type
                                 ),
                             )
-                        };
+                    };
 
                     drop(permit);
 
@@ -849,10 +924,10 @@ impl DagExecutorService for DagExecutorServiceImpl {
                         if let Some(slot) = execution.tasks.get(&task_path_for_meta) {
                             if let Some(ref meta) = slot.work_metadata {
                                 let predicted = slot.predicted_outcome;
-                                let prediction_correct =
-                                    (predicted == PredictedOutcome::PredictedExecute as i32
-                                        && actual_outcome == "EXECUTED")
-                                        || (predicted == PredictedOutcome::PredictedUnknown as i32);
+                                let prediction_correct = (predicted
+                                    == PredictedOutcome::PredictedExecute as i32
+                                    && actual_outcome == "EXECUTED")
+                                    || (predicted == PredictedOutcome::PredictedUnknown as i32);
 
                                 let _ = self
                                     .execution_plan
@@ -870,7 +945,9 @@ impl DagExecutorService for DagExecutorServiceImpl {
                     }
                 }
 
-                if result.execution_mode == "jvm_forward" {
+                if result.execution_mode == "jvm_host"
+                    || result.execution_mode.starts_with("mock-jvm")
+                {
                     jvm_forward_count += 1;
                 }
                 if !result.success && failure_message.is_empty() {
@@ -921,9 +998,16 @@ impl DagExecutorService for DagExecutorServiceImpl {
             total_tasks,
             tasks_succeeded: task_details
                 .iter()
-                .filter(|d| d.outcome == "EXECUTED" || d.outcome == "UP_TO_DATE" || d.outcome == "FROM_CACHE")
+                .filter(|d| {
+                    d.outcome == "EXECUTED"
+                        || d.outcome == "UP_TO_DATE"
+                        || d.outcome == "FROM_CACHE"
+                })
                 .count() as i32,
-            tasks_failed: task_details.iter().filter(|d| d.outcome == "FAILED").count() as i32,
+            tasks_failed: task_details
+                .iter()
+                .filter(|d| d.outcome == "FAILED")
+                .count() as i32,
             tasks_skipped: task_details
                 .iter()
                 .filter(|d| d.outcome == "JVM_FORWARD")
@@ -1375,7 +1459,98 @@ impl DagExecutorService for DagExecutorServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::jvm_host::JvmHostClient;
+    use crate::client::jvm_host_bridge::JvmHostBridge;
+    use crate::proto::jvm_host_service_server::{JvmHostService, JvmHostServiceServer};
     use crate::proto::RegisterTaskRequest;
+    use tokio::net::UnixListener;
+    use tonic::transport::Server;
+
+    struct MockJvmTaskHost;
+
+    #[tonic::async_trait]
+    impl JvmHostService for MockJvmTaskHost {
+        async fn evaluate_script(
+            &self,
+            _request: Request<crate::proto::EvaluateScriptRequest>,
+        ) -> Result<Response<crate::proto::EvaluateScriptResponse>, Status> {
+            Ok(Response::new(crate::proto::EvaluateScriptResponse {
+                success: true,
+                error_message: String::new(),
+                applied_plugins: Vec::new(),
+            }))
+        }
+
+        async fn get_build_model(
+            &self,
+            _request: Request<crate::proto::GetBuildModelRequest>,
+        ) -> Result<Response<crate::proto::GetBuildModelResponse>, Status> {
+            Ok(Response::new(crate::proto::GetBuildModelResponse {
+                projects: Vec::new(),
+            }))
+        }
+
+        async fn resolve_configuration(
+            &self,
+            _request: Request<crate::proto::ResolveConfigRequest>,
+        ) -> Result<Response<crate::proto::ResolveConfigResponse>, Status> {
+            Ok(Response::new(crate::proto::ResolveConfigResponse {
+                success: true,
+                artifacts: Vec::new(),
+                error_message: String::new(),
+            }))
+        }
+
+        async fn get_build_environment(
+            &self,
+            _request: Request<crate::proto::GetBuildEnvironmentRequest>,
+        ) -> Result<Response<crate::proto::GetBuildEnvironmentResponse>, Status> {
+            Ok(Response::new(crate::proto::GetBuildEnvironmentResponse {
+                java_version: "17".to_string(),
+                java_home: "/mock/java".to_string(),
+                gradle_version: "mock".to_string(),
+                os_name: "mock".to_string(),
+                os_arch: "mock".to_string(),
+                available_processors: 1,
+                max_memory_bytes: 1024,
+                system_properties: Default::default(),
+            }))
+        }
+
+        async fn get_build_plan(
+            &self,
+            request: Request<crate::proto::GetBuildPlanRequest>,
+        ) -> Result<Response<crate::proto::GetBuildPlanResponse>, Status> {
+            Ok(Response::new(crate::proto::GetBuildPlanResponse {
+                success: true,
+                error_message: String::new(),
+                plan: Some(crate::proto::BuildPlan {
+                    schema_version: super::super::build_plan_ir::BUILD_PLAN_SCHEMA_VERSION,
+                    build_id: request.into_inner().build_id,
+                    projects: Vec::new(),
+                    tasks: Vec::new(),
+                    dependencies: Vec::new(),
+                    toolchains: Vec::new(),
+                    metadata: Default::default(),
+                }),
+                source: "mock-jvm-host".to_string(),
+            }))
+        }
+
+        async fn execute_task(
+            &self,
+            request: Request<crate::proto::ExecuteTaskRequest>,
+        ) -> Result<Response<crate::proto::ExecuteTaskResponse>, Status> {
+            let req = request.into_inner();
+            Ok(Response::new(crate::proto::ExecuteTaskResponse {
+                success: true,
+                outcome: "EXECUTED".to_string(),
+                error_message: String::new(),
+                duration_ms: 11,
+                execution_mode: format!("mock-jvm:{}", req.task_type),
+            }))
+        }
+    }
 
     fn make_svc() -> DagExecutorServiceImpl {
         let task_graph = Arc::new(super::super::task_graph::TaskGraphServiceImpl::new());
@@ -1397,6 +1572,34 @@ mod tests {
             Arc::new(super::super::execution_plan::ExecutionPlanServiceImpl::default()),
             Vec::new(),
         )
+    }
+
+    async fn make_mock_jvm_bridge() -> (SharedJvmHostBridge, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let socket_path = dir.path().join("jvm-task-host.sock");
+        let listener = UnixListener::bind(&socket_path).unwrap();
+
+        tokio::spawn(async move {
+            Server::builder()
+                .add_service(JvmHostServiceServer::new(MockJvmTaskHost))
+                .serve_with_incoming(tokio_stream::wrappers::UnixListenerStream::new(listener))
+                .await
+                .unwrap();
+        });
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        let bridge = Arc::new(JvmHostBridge::new());
+        let client = JvmHostClient::connect(&socket_path.to_string_lossy())
+            .await
+            .unwrap();
+        bridge.set_client(client).await;
+
+        (bridge, dir)
+    }
+
+    async fn make_svc_with_mock_jvm_host() -> (DagExecutorServiceImpl, tempfile::TempDir) {
+        let (bridge, dir) = make_mock_jvm_bridge().await;
+        (make_svc().with_jvm_host_bridge(bridge), dir)
     }
 
     /// Helper to register tasks in the task graph before starting a build.
@@ -1580,16 +1783,19 @@ mod tests {
         let store = Arc::new(super::super::build_plan_shadow::BuildPlanShadowStore::new(
             temp.path().to_path_buf(),
         ));
-        let history = Arc::new(super::super::execution_history::ExecutionHistoryServiceImpl::new(
-            temp.path().join("history"),
-        ));
+        let history = Arc::new(
+            super::super::execution_history::ExecutionHistoryServiceImpl::new(
+                temp.path().join("history"),
+            ),
+        );
         let task_graph = Arc::new(
             super::super::task_graph::TaskGraphServiceImpl::with_history_and_shadow(
                 history,
                 Arc::clone(&store),
             ),
         );
-        let svc = make_svc_with_task_graph(Arc::clone(&task_graph));
+        let (bridge, _jvm_host_dir) = make_mock_jvm_bridge().await;
+        let svc = make_svc_with_task_graph(Arc::clone(&task_graph)).with_jvm_host_bridge(bridge);
         let build_id = "dag-shadow-build";
 
         register_chain(&svc, build_id, &[(":staleFallback", "StaleTask", &[])]).await;
@@ -2366,7 +2572,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_build_simple_chain_jvm_forward() {
-        let svc = make_svc();
+        let (svc, _jvm_host_dir) = make_svc_with_mock_jvm_host().await;
         register_chain(
             &svc,
             "rb-chain",
@@ -2394,13 +2600,13 @@ mod tests {
         assert_eq!(resp.total_tasks, 3);
         assert_eq!(resp.plan_source, "registered-tasks");
         assert_eq!(resp.tasks_forwarded_to_jvm, 3);
-        assert_eq!(resp.tasks_succeeded, 0);
+        assert_eq!(resp.tasks_succeeded, 3);
         assert_eq!(resp.tasks_failed, 0);
         assert_eq!(resp.task_details.len(), 3);
-        // All tasks should have JVM_FORWARD outcome
+        // All tasks should have a real JVM-host response.
         for d in &resp.task_details {
-            assert_eq!(d.execution_mode, "jvm_forward");
-            assert_eq!(d.outcome, "JVM_FORWARD");
+            assert_eq!(d.execution_mode, "mock-jvm:UnknownTask");
+            assert_eq!(d.outcome, "EXECUTED");
         }
     }
 
@@ -2435,9 +2641,11 @@ mod tests {
         let store = Arc::new(super::super::build_plan_shadow::BuildPlanShadowStore::new(
             temp.path().to_path_buf(),
         ));
-        let history = Arc::new(super::super::execution_history::ExecutionHistoryServiceImpl::new(
-            temp.path().join("history"),
-        ));
+        let history = Arc::new(
+            super::super::execution_history::ExecutionHistoryServiceImpl::new(
+                temp.path().join("history"),
+            ),
+        );
         let task_graph = Arc::new(
             super::super::task_graph::TaskGraphServiceImpl::with_history_and_shadow(
                 history,
@@ -2446,6 +2654,7 @@ mod tests {
         );
         let svc = make_svc_with_task_graph(Arc::clone(&task_graph));
         let build_id = "rb-shadow-source";
+        let output_dir = temp.path().join("shadow-output");
 
         register_chain(&svc, build_id, &[(":staleFallback", "StaleTask", &[])]).await;
 
@@ -2458,7 +2667,7 @@ mod tests {
                     tasks: vec![super::super::build_plan_ir::CanonicalBuildPlanTask {
                         path: ":fromShadow".to_string(),
                         project_path: ":".to_string(),
-                        implementation_id: "ShadowTask".to_string(),
+                        implementation_id: "Mkdir".to_string(),
                         depends_on: Vec::new(),
                         inputs: Default::default(),
                         outputs: Vec::new(),
@@ -2483,8 +2692,15 @@ mod tests {
                 build_id: build_id.to_string(),
                 max_parallelism: 1,
                 task_filter: vec![],
-                task_contexts: Default::default(),
-                allow_jvm_forwarding: true,
+                task_contexts: HashMap::from([(
+                    ":fromShadow".to_string(),
+                    serde_json::json!({
+                        "source_files": [output_dir.to_string_lossy()],
+                        "target_dir": ""
+                    })
+                    .to_string(),
+                )]),
+                allow_jvm_forwarding: false,
             }))
             .await
             .unwrap()
@@ -2493,10 +2709,11 @@ mod tests {
         assert_eq!(resp.final_status, "COMPLETED");
         assert_eq!(resp.plan_source, "build-plan-shadow");
         assert_eq!(resp.total_tasks, 1);
-        assert_eq!(resp.tasks_forwarded_to_jvm, 1);
+        assert_eq!(resp.tasks_forwarded_to_jvm, 0);
+        assert_eq!(resp.tasks_succeeded, 1);
         assert_eq!(resp.task_details.len(), 1);
         assert_eq!(resp.task_details[0].task_path, ":fromShadow");
-        assert_eq!(resp.task_details[0].task_type, "ShadowTask");
+        assert_eq!(resp.task_details[0].task_type, "Mkdir");
     }
 
     #[tokio::test]
@@ -2505,12 +2722,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("output");
 
-        register_chain(
-            &svc,
-            "rb-mkdir",
-            &[(":createDir", "Mkdir", &[])],
-        )
-        .await;
+        register_chain(&svc, "rb-mkdir", &[(":createDir", "Mkdir", &[])]).await;
 
         let ctx = serde_json::json!({
             "source_files": [target.to_string_lossy()],
@@ -2548,12 +2760,7 @@ mod tests {
         let target_dir = dir.path().join("dest");
         std::fs::write(&src, "hello world").unwrap();
 
-        register_chain(
-            &svc,
-            "rb-copy",
-            &[(":copyFiles", "Copy", &[])],
-        )
-        .await;
+        register_chain(&svc, "rb-copy", &[(":copyFiles", "Copy", &[])]).await;
 
         let ctx = serde_json::json!({
             "source_files": [src.to_string_lossy()],
@@ -2584,7 +2791,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_build_diamond_jvm_forward() {
-        let svc = make_svc();
+        let (svc, _jvm_host_dir) = make_svc_with_mock_jvm_host().await;
         //    :root
         //   /     \
         //  :left  :right
@@ -2621,7 +2828,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_build_mixed_native_and_jvm() {
-        let svc = make_svc();
+        let (svc, _jvm_host_dir) = make_svc_with_mock_jvm_host().await;
         let dir = tempfile::tempdir().unwrap();
         let mkdir_target = dir.path().join("classes");
 
@@ -2632,7 +2839,11 @@ mod tests {
                 (":mkdir", "Mkdir", &[]),
                 (":compileJava", "JavaCompile", &[":mkdir"]),
                 (":processResources", "Copy", &[":mkdir"]),
-                (":classes", "UnknownTask", &[":compileJava", ":processResources"]),
+                (
+                    ":classes",
+                    "UnknownTask",
+                    &[":compileJava", ":processResources"],
+                ),
             ],
         )
         .await;
@@ -2689,10 +2900,7 @@ mod tests {
         register_chain(
             &svc,
             "rb-fail",
-            &[
-                (":copy", "Copy", &[]),
-                (":downstream", "Mkdir", &[":copy"]),
-            ],
+            &[(":copy", "Copy", &[]), (":downstream", "Mkdir", &[":copy"])],
         )
         .await;
 
@@ -2793,7 +3001,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_build_returns_task_details() {
-        let svc = make_svc();
+        let (svc, _jvm_host_dir) = make_svc_with_mock_jvm_host().await;
 
         register_chain(
             &svc,
@@ -2802,7 +3010,8 @@ mod tests {
         )
         .await;
 
-        let ctx = serde_json::json!({"source_files": ["/tmp/rb-details-test"], "target_dir": ""}).to_string();
+        let ctx = serde_json::json!({"source_files": ["/tmp/rb-details-test"], "target_dir": ""})
+            .to_string();
         let mut contexts = HashMap::new();
         contexts.insert(":b".to_string(), ctx);
 
@@ -2820,7 +3029,7 @@ mod tests {
 
         assert_eq!(resp.task_details.len(), 2);
         assert_eq!(resp.task_details[0].task_path, ":a");
-        assert_eq!(resp.task_details[0].execution_mode, "jvm_forward");
+        assert_eq!(resp.task_details[0].execution_mode, "mock-jvm:UnknownTask");
         assert_eq!(resp.task_details[1].task_path, ":b");
         assert_eq!(resp.task_details[1].execution_mode, "native");
         assert!(resp.task_details[1].duration_ms >= 0);
@@ -2831,12 +3040,7 @@ mod tests {
     async fn test_run_build_skips_up_to_date_tasks() {
         let svc = make_svc();
 
-        register_chain(
-            &svc,
-            "build-utd",
-            &[(":compileJava", "JavaCompile", &[])],
-        )
-        .await;
+        register_chain(&svc, "build-utd", &[(":compileJava", "JavaCompile", &[])]).await;
 
         let dir = tempfile::tempdir().unwrap();
 
@@ -2876,12 +3080,7 @@ mod tests {
         // or succeed depending on the environment — either way, history is recorded)
 
         // Second run: same inputs → should be UP-TO-DATE
-        register_chain(
-            &svc,
-            "build-utd-2",
-            &[(":compileJava", "JavaCompile", &[])],
-        )
-        .await;
+        register_chain(&svc, "build-utd-2", &[(":compileJava", "JavaCompile", &[])]).await;
 
         let ctx2 = serde_json::json!({
             "work_identity": ":project:compileJava",
@@ -2915,7 +3114,10 @@ mod tests {
 
         assert_eq!(resp2.total_tasks, 1);
         // Second run with same fingerprint should be UP-TO-DATE
-        assert_eq!(resp2.tasks_up_to_date, 1, "task should be UP-TO-DATE on second run");
+        assert_eq!(
+            resp2.tasks_up_to_date, 1,
+            "task should be UP-TO-DATE on second run"
+        );
         assert_eq!(resp2.tasks_succeeded, 1);
     }
 
@@ -3022,14 +3224,9 @@ mod tests {
     /// Test that tasks without work_metadata in context always execute.
     #[tokio::test]
     async fn test_run_build_no_metadata_always_executes() {
-        let svc = make_svc();
+        let (svc, _jvm_host_dir) = make_svc_with_mock_jvm_host().await;
 
-        register_chain(
-            &svc,
-            "build-no-meta",
-            &[(":a", "UnknownTask", &[])],
-        )
-        .await;
+        register_chain(&svc, "build-no-meta", &[(":a", "UnknownTask", &[])]).await;
 
         // No task_contexts at all → no work_metadata → always execute
         let resp = svc
@@ -3121,7 +3318,10 @@ mod tests {
             .into_inner();
 
         // Should NOT be UP-TO-DATE despite matching fingerprint
-        assert_eq!(resp.tasks_up_to_date, 0, "rebuild_reasons should force execution");
+        assert_eq!(
+            resp.tasks_up_to_date, 0,
+            "rebuild_reasons should force execution"
+        );
         assert_eq!(resp.total_tasks, 1);
     }
 
@@ -3130,12 +3330,7 @@ mod tests {
     async fn test_run_build_records_outcome_to_history() {
         let svc = make_svc();
 
-        register_chain(
-            &svc,
-            "build-record",
-            &[(":task", "Mkdir", &[])],
-        )
-        .await;
+        register_chain(&svc, "build-record", &[(":task", "Mkdir", &[])]).await;
 
         let dir = tempfile::tempdir().unwrap();
 
@@ -3178,12 +3373,7 @@ mod tests {
         );
 
         // Run again with same inputs → should be UP-TO-DATE (proves history is being used)
-        register_chain(
-            &svc,
-            "build-record-2",
-            &[(":task", "Mkdir", &[])],
-        )
-        .await;
+        register_chain(&svc, "build-record-2", &[(":task", "Mkdir", &[])]).await;
 
         let mut contexts2 = HashMap::new();
         contexts2.insert(":task".to_string(), ctx);

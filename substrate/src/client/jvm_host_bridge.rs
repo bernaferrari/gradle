@@ -4,8 +4,8 @@ use tonic::Status;
 
 use super::jvm_host::JvmHostClient;
 use crate::proto::{
-    EvaluateScriptResponse, GetBuildEnvironmentResponse, GetBuildModelResponse,
-    GetBuildPlanResponse, ResolveConfigResponse,
+    EvaluateScriptResponse, ExecuteTaskResponse, GetBuildEnvironmentResponse,
+    GetBuildModelResponse, GetBuildPlanResponse, ResolveConfigResponse,
 };
 
 /// Shared bridge to the JVM host, allowing multiple services to call back
@@ -79,6 +79,27 @@ impl JvmHostBridge {
         Ok(Some(response))
     }
 
+    /// Execute a legacy JVM task through the compatibility host.
+    /// Returns `None` if the JVM host is not connected.
+    pub async fn execute_task(
+        &self,
+        build_id: &str,
+        task_path: &str,
+        task_type: &str,
+        parameters_json: &str,
+        timeout_ms: i64,
+    ) -> Result<Option<ExecuteTaskResponse>, Status> {
+        let mut guard = self.client.lock().await;
+        let client = match guard.as_mut() {
+            Some(c) => c,
+            None => return Ok(None),
+        };
+        let response = client
+            .execute_task(build_id, task_path, task_type, parameters_json, timeout_ms)
+            .await?;
+        Ok(Some(response))
+    }
+
     /// Resolve a dependency configuration via the JVM.
     /// Returns `None` if the JVM host is not connected.
     pub async fn resolve_configuration(
@@ -149,6 +170,12 @@ mod tests {
 
         let plan = bridge.get_build_plan("build-1").await.unwrap();
         assert!(plan.is_none());
+
+        let task = bridge
+            .execute_task("build-1", ":legacy", "LegacyTask", "{}", 30_000)
+            .await
+            .unwrap();
+        assert!(task.is_none());
 
         let resolved = bridge
             .resolve_configuration("build-1", "compileClasspath", ":app")
