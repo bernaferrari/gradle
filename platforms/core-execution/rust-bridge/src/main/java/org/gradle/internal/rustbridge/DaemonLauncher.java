@@ -28,18 +28,28 @@ public class DaemonLauncher {
     private final File socketDirectory;
     private final boolean noop;
     private final boolean enableJvmHost;
+    private final String noopReason;
     private Process daemonProcess;
     private JvmHostServer jvmHostServer;
 
     private DaemonLauncher(File daemonBinary, File socketDirectory, boolean noop, boolean enableJvmHost) {
+        this(daemonBinary, socketDirectory, noop, enableJvmHost, "");
+    }
+
+    private DaemonLauncher(File daemonBinary, File socketDirectory, boolean noop, boolean enableJvmHost, String noopReason) {
         this.daemonBinary = daemonBinary;
         this.socketDirectory = socketDirectory;
         this.noop = noop;
         this.enableJvmHost = enableJvmHost;
+        this.noopReason = noopReason;
     }
 
     public static DaemonLauncher noop() {
-        return new DaemonLauncher(null, null, true, false);
+        return noop("substrate-disabled");
+    }
+
+    public static DaemonLauncher noop(String reason) {
+        return new DaemonLauncher(null, null, true, false, reason);
     }
 
     public static DaemonLauncher of(File daemonBinary, File socketDirectory) {
@@ -123,7 +133,7 @@ public class DaemonLauncher {
      */
     public SubstrateClient launchOrConnect() throws IOException {
         if (noop) {
-            return SubstrateClient.noop();
+            return SubstrateClient.noop(noopReason);
         }
 
         Path socketFile = new File(socketDirectory, SOCKET_NAME).toPath();
@@ -152,8 +162,9 @@ public class DaemonLauncher {
         Files.createDirectories(socketDirectory.toPath());
 
         if (!daemonBinary.exists()) {
-            LOGGER.warn("[substrate] Daemon binary not found at {}, using no-op mode", daemonBinary);
-            return SubstrateClient.noop();
+            String reason = "daemon-binary-missing:" + daemonBinary.getAbsolutePath();
+            LOGGER.warn("[substrate] Daemon binary not found at {}, using no-op mode ({})", daemonBinary, reason);
+            return SubstrateClient.noop(reason);
         }
 
         // Phase 6: Start JVM Compatibility Host before launching the Rust daemon.

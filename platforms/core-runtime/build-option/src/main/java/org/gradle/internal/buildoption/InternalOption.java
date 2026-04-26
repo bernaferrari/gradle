@@ -61,6 +61,7 @@ public abstract class InternalOption<T extends @Nullable Object> implements Opti
 
     public static boolean isInternalOption(String name) {
         return name.startsWith(INTERNAL_PROPERTY_PREFIX) ||
+            name.startsWith("org.gradle.rust.substrate.") ||
             name.equals("org.gradle.unsafe.suppress-gradle-api"); // TODO: remove this exception, once the property is either removed or becomes public
     }
 }

@@ -17,7 +17,7 @@ import java.nio.file.Path;
  * <p>KISS behavior:
  * 1) connect to existing socket if available;
  * 2) otherwise launch daemon binary (if available);
- * 3) fail open to {@link SubstrateClient#noop()}.</p>
+ * 3) fail open to {@link SubstrateClient#noop(String)} only in non-authoritative mode.</p>
  */
 public final class RustDaemonSidecarLauncher {
 
@@ -32,7 +32,7 @@ public final class RustDaemonSidecarLauncher {
 
     public static SubstrateClient connectOrLaunch(InternalOptions options) {
         if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
-            return SubstrateClient.noop();
+            return SubstrateClient.noop("substrate-disabled");
         }
 
         String socketPath = resolveSocketPath();
@@ -52,8 +52,11 @@ public final class RustDaemonSidecarLauncher {
 
         File daemonBinary = resolveDaemonBinary(options);
         if (daemonBinary == null || !daemonBinary.exists()) {
-            LOGGER.warn("[substrate] daemon binary not found at {}, using no-op client", daemonBinary);
-            return SubstrateClient.noop();
+            return unavailableClient(
+                options,
+                "daemon-binary-missing:" + (daemonBinary == null ? "<unresolved>" : daemonBinary.getAbsolutePath()),
+                null
+            );
         }
 
         synchronized (LAUNCH_LOCK) {
@@ -61,22 +64,29 @@ public final class RustDaemonSidecarLauncher {
                 try {
                     launchDaemon(daemonBinary, socketPath);
                 } catch (Exception e) {
-                    LOGGER.warn("[substrate] daemon launch failed, using no-op client: {}", e.getMessage(), e);
-                    return SubstrateClient.noop();
+                    return unavailableClient(options, "daemon-launch-failed:" + e.getMessage(), e);
                 }
             }
         }
 
         if (!Files.exists(socket)) {
-            LOGGER.warn("[substrate] daemon launch did not create socket {}, using no-op client", socketPath);
-            return SubstrateClient.noop();
+            return unavailableClient(options, "daemon-socket-not-created:" + socketPath, null);
         }
         try {
             return SubstrateClient.connect(socketPath);
         } catch (Exception e) {
-            LOGGER.warn("[substrate] post-launch connect failed, using no-op client: {}", e.getMessage(), e);
-            return SubstrateClient.noop();
+            return unavailableClient(options, "post-launch-connect-failed:" + e.getMessage(), e);
         }
+    }
+
+    private static SubstrateClient unavailableClient(InternalOptions options, String reason, Exception failure) {
+        if (RustSubstrateOptions.isAuthoritative(options)) {
+            throw failure == null
+                ? new SubstrateException("Rust substrate is authoritative but unavailable: " + reason)
+                : new SubstrateException("Rust substrate is authoritative but unavailable: " + reason, failure);
+        }
+        LOGGER.warn("[substrate] using no-op client: {}", reason, failure);
+        return SubstrateClient.noop(reason);
     }
 
     private static String resolveSocketPath() {
