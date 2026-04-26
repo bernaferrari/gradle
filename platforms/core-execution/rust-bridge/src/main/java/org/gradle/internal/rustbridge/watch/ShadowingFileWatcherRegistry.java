@@ -1,6 +1,7 @@
 package org.gradle.internal.rustbridge.watch;
 
 import org.gradle.api.logging.Logging;
+import org.gradle.internal.rustbridge.SubstrateException;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
 import org.gradle.internal.snapshot.FileSystemLocationSnapshot;
 import org.gradle.internal.snapshot.SnapshotHierarchy;
@@ -18,11 +19,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * A {@link FileWatcherRegistry} that delegates all operations to the Java registry
+ * A {@link FileWatcherRegistry} that delegates operations to the Java registry
  * while shadowing watch registrations against the Rust FileWatchService.
  *
  * <p>All results come from the Java registry. Rust shadowing is fire-and-forget
- * and never affects build correctness.</p>
+ * and never affects build correctness in shadow mode. In authoritative mode,
+ * Rust watch startup failure aborts registration instead of silently falling
+ * back to the Java watcher.</p>
  */
 public class ShadowingFileWatcherRegistry implements FileWatcherRegistry {
 
@@ -65,27 +68,20 @@ public class ShadowingFileWatcherRegistry implements FileWatcherRegistry {
 
     @Override
     public void registerWatchableHierarchy(File watchableHierarchy, SnapshotHierarchy root) {
+        String path = watchableHierarchy.getAbsolutePath();
+        if (authoritative) {
+            startRustWatchOrFail(path);
+            delegate.registerWatchableHierarchy(watchableHierarchy, root);
+            return;
+        }
+
         delegate.registerWatchableHierarchy(watchableHierarchy, root);
 
-        String path = watchableHierarchy.getAbsolutePath();
         if (rustClient != null) {
             try {
-                RustFileWatchClient.WatchResult result = rustClient.startWatching(
-                    path, Collections.emptyList(), Collections.emptyList());
-
-                if (result.isSuccess() && result.isWatching()) {
-                    synchronized (lock) {
-                        activeWatchIds.add(result.getWatchId());
-                    }
-                    rustWatchHealthy.set(true);
-                    LOGGER.debug("[substrate:watch] shadow watch started for {} (id={})",
-                        path, result.getWatchId());
-                } else {
-                    onRustWatchFailure(path, new RuntimeException(result.getErrorMessage()));
-                }
+                startRustWatch(path);
             } catch (Exception e) {
-                onRustWatchFailure(path, e);
-                LOGGER.debug("[substrate:watch] shadow watch start failed for {}", path, e);
+                onRustWatchFailure(path, e, false);
             }
         }
     }
@@ -120,11 +116,9 @@ public class ShadowingFileWatcherRegistry implements FileWatcherRegistry {
         // Shadow: report match for the build's change processing
         long javaCount = javaChangeCount.getAndSet(0);
         if (javaCount > 0 && rustClient != null) {
-            if (!authoritative || rustWatchHealthy.get()) {
+            if (rustWatchHealthy.get()) {
                 mismatchReporter.reportMatch();
                 LOGGER.debug("[substrate:watch] shadow OK: {} changes processed in build", javaCount);
-            } else {
-                LOGGER.debug("[substrate:watch] authoritative fallback active: using Java watcher for {} changes", javaCount);
             }
         }
 
@@ -168,10 +162,44 @@ public class ShadowingFileWatcherRegistry implements FileWatcherRegistry {
         return rustWatchHealthy.get();
     }
 
-    private void onRustWatchFailure(String path, Exception e) {
+    private void startRustWatchOrFail(String path) {
+        if (rustClient == null) {
+            RuntimeException failure = new RuntimeException("Rust file watcher client is unavailable");
+            onRustWatchFailure(path, failure, true);
+            throw new SubstrateException("Rust file watcher is authoritative but unavailable for " + path, failure);
+        }
+        try {
+            startRustWatch(path);
+        } catch (Exception e) {
+            onRustWatchFailure(path, e, true);
+            throw new SubstrateException("Rust file watcher is authoritative but failed to watch " + path, e);
+        }
+    }
+
+    private void startRustWatch(String path) {
+        RustFileWatchClient.WatchResult result = rustClient.startWatching(
+            path, Collections.emptyList(), Collections.emptyList());
+
+        if (result.isSuccess() && result.isWatching()) {
+            synchronized (lock) {
+                activeWatchIds.add(result.getWatchId());
+            }
+            rustWatchHealthy.set(true);
+            LOGGER.debug("[substrate:watch] shadow watch started for {} (id={})",
+                path, result.getWatchId());
+        } else {
+            throw new RuntimeException(result.getErrorMessage());
+        }
+    }
+
+    private void onRustWatchFailure(String path, Exception e, boolean failClosed) {
         mismatchReporter.reportRustError("watch:" + path, e);
-        if (authoritative && rustWatchHealthy.compareAndSet(true, false)) {
-            LOGGER.info("[substrate:watch] authoritative fallback to Java watcher for {}", path);
+        if (rustWatchHealthy.compareAndSet(true, false)) {
+            if (failClosed) {
+                LOGGER.info("[substrate:watch] authoritative Rust watcher failed for {}", path);
+            } else {
+                LOGGER.debug("[substrate:watch] shadow watch start failed for {}", path, e);
+            }
         }
     }
 }
