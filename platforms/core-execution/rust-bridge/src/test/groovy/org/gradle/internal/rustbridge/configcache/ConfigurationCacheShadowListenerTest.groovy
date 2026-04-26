@@ -171,7 +171,7 @@ class ConfigurationCacheShadowListenerTest extends Specification {
         listener.getValidateCount() == 1
     }
 
-    def "authoritative store falls back to java result when rust store throws"() {
+    def "authoritative store fails closed when rust store throws"() {
         given:
         def client = Mock(RustConfigCacheClient)
         def reporter = Mock(HashMismatchReporter)
@@ -183,7 +183,7 @@ class ConfigurationCacheShadowListenerTest extends Specification {
 
         then:
         listener.isAuthoritative()
-        effectiveStored
+        !effectiveStored
         1 * client.storeConfigCacheStrict("key-1", configBytes, 2, ["hash-a"]) >> {
             throw new RuntimeException("rpc down")
         }
@@ -215,7 +215,27 @@ class ConfigurationCacheShadowListenerTest extends Specification {
         listener.getLoadCount() == 1
     }
 
-    def "authoritative validate falls back to java decision when rust validate throws"() {
+    def "authoritative load fails closed when rust load throws"() {
+        given:
+        def client = Mock(RustConfigCacheClient)
+        def reporter = Mock(HashMismatchReporter)
+        def listener = new ConfigurationCacheShadowListener(client, reporter, true)
+        def javaBytes = "java-config".getBytes()
+
+        when:
+        def result = listener.loadAuthoritativeOrFallback("key-1", javaBytes, true)
+
+        then:
+        1 * client.loadConfigCacheStrict("key-1") >> {
+            throw new RuntimeException("socket closed")
+        }
+        1 * reporter.reportRustError("config-cache:load:key-1", _ as RuntimeException)
+        !result.isFound()
+        result.getSerializedConfig().length == 0
+        result.getSource() == "rust-error"
+    }
+
+    def "authoritative validate fails closed when rust validate throws"() {
         given:
         def client = Mock(RustConfigCacheClient)
         def reporter = Mock(HashMismatchReporter)
@@ -229,8 +249,8 @@ class ConfigurationCacheShadowListenerTest extends Specification {
             throw new RuntimeException("socket closed")
         }
         1 * reporter.reportRustError("config-cache:validate:key-1", _ as RuntimeException)
-        result.isValid()
-        result.getReason() == "java valid"
-        result.getSource() == "java-fallback"
+        !result.isValid()
+        result.getReason() == "rust validation failed: socket closed"
+        result.getSource() == "rust-error"
     }
 }

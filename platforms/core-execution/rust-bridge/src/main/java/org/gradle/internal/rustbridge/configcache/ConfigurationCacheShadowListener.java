@@ -140,10 +140,10 @@ public class ConfigurationCacheShadowListener {
     }
 
     /**
-     * Attempt Rust store as authoritative path and fall back to Java result on failure.
+     * Attempt Rust store as authoritative path.
      *
-     * @param javaStored the Java-side fallback outcome for this store operation
-     * @return the effective persisted outcome after Rust-first with Java fallback
+     * @param javaStored the Java-side outcome, used only in non-authoritative shadow mode
+     * @return the effective persisted outcome
      */
     public boolean storeAuthoritativeOrFallback(
         String cacheKey,
@@ -163,13 +163,13 @@ public class ConfigurationCacheShadowListener {
             if (rustStored) {
                 return true;
             }
-            LOGGER.debug("[substrate:config-cache] authoritative store fallback to Java for key={}", cacheKey);
-            return javaStored;
+            LOGGER.debug("[substrate:config-cache] authoritative store failed in Rust for key={}", cacheKey);
+            return false;
         } catch (Exception e) {
             reportRustError("store", cacheKey, e);
-            LOGGER.debug("[substrate:config-cache] authoritative store error for key={}, using Java fallback: {}",
+            LOGGER.debug("[substrate:config-cache] authoritative store error for key={}, failing closed: {}",
                 cacheKey, e.getMessage());
-            return javaStored;
+            return false;
         }
     }
 
@@ -191,7 +191,7 @@ public class ConfigurationCacheShadowListener {
     }
 
     /**
-     * Attempt Rust load as authoritative path and fall back to Java result on failure.
+     * Attempt Rust load as authoritative path.
      */
     public EffectiveLoadResult loadAuthoritativeOrFallback(
         String cacheKey,
@@ -216,13 +216,14 @@ public class ConfigurationCacheShadowListener {
                     "rust"
                 );
             }
-            LOGGER.debug("[substrate:config-cache] authoritative load fallback to Java for key={}", cacheKey);
+            LOGGER.debug("[substrate:config-cache] authoritative load missed in Rust for key={}", cacheKey);
+            return new EffectiveLoadResult(false, new byte[0], 0, 0, "rust-miss");
         } catch (Exception e) {
             reportRustError("load", cacheKey, e);
-            LOGGER.debug("[substrate:config-cache] authoritative load error for key={}, using Java fallback: {}",
+            LOGGER.debug("[substrate:config-cache] authoritative load error for key={}, failing closed: {}",
                 cacheKey, e.getMessage());
+            return new EffectiveLoadResult(false, new byte[0], 0, 0, "rust-error");
         }
-        return new EffectiveLoadResult(javaFound, javaConfigBytes, 0, 0, "java-fallback");
     }
 
     /**
@@ -243,7 +244,7 @@ public class ConfigurationCacheShadowListener {
     }
 
     /**
-     * Attempt Rust validation as authoritative path and fall back to Java decision on failure.
+     * Attempt Rust validation as authoritative path.
      */
     public EffectiveValidationResult validateAuthoritativeOrFallback(
         String cacheKey,
@@ -263,14 +264,14 @@ public class ConfigurationCacheShadowListener {
             return new EffectiveValidationResult(rustResult.isValid(), rustResult.getReason(), "rust");
         } catch (Exception e) {
             reportRustError("validate", cacheKey, e);
-            LOGGER.debug("[substrate:config-cache] authoritative validate error for key={}, using Java fallback: {}",
+            LOGGER.debug("[substrate:config-cache] authoritative validate error for key={}, failing closed: {}",
                 cacheKey, e.getMessage());
-            return new EffectiveValidationResult(javaValid, javaReason, "java-fallback");
+            return new EffectiveValidationResult(false, "rust validation failed: " + e.getMessage(), "rust-error");
         }
     }
 
     /**
-     * Attempt Rust validation as authoritative path and fall back to Java decision on failure.
+     * Attempt Rust validation as authoritative path.
      */
     public EffectiveValidationResult validateAuthoritativeOrFallback(
         String cacheKey,
