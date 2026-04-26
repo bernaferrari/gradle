@@ -358,7 +358,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
             .task_graph
             .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
                 build_id: req.build_id.clone(),
-                prefer_build_plan_shadow: false,
+                prefer_build_plan_shadow: true,
             }))
             .await
             .map_err(|e| Status::internal(format!("Failed to resolve execution plan: {}", e)))?
@@ -1367,6 +1367,17 @@ mod tests {
         )
     }
 
+    fn make_svc_with_task_graph(
+        task_graph: Arc<super::super::task_graph::TaskGraphServiceImpl>,
+    ) -> DagExecutorServiceImpl {
+        DagExecutorServiceImpl::new(
+            Arc::new(WorkerScheduler::new(4)),
+            task_graph,
+            Arc::new(super::super::execution_plan::ExecutionPlanServiceImpl::default()),
+            Vec::new(),
+        )
+    }
+
     /// Helper to register tasks in the task graph before starting a build.
     async fn register_chain(
         svc: &DagExecutorServiceImpl,
@@ -1540,6 +1551,80 @@ mod tests {
         assert_eq!(status.total_tasks, 3);
         assert_eq!(status.completed_tasks, 3);
         assert_eq!(status.failed_tasks, 0);
+    }
+
+    #[tokio::test]
+    async fn test_start_build_prefers_build_plan_shadow_over_registered_tasks() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(super::super::build_plan_shadow::BuildPlanShadowStore::new(
+            temp.path().to_path_buf(),
+        ));
+        let history = Arc::new(super::super::execution_history::ExecutionHistoryServiceImpl::new(
+            temp.path().join("history"),
+        ));
+        let task_graph = Arc::new(
+            super::super::task_graph::TaskGraphServiceImpl::with_history_and_shadow(
+                history,
+                Arc::clone(&store),
+            ),
+        );
+        let svc = make_svc_with_task_graph(Arc::clone(&task_graph));
+        let build_id = "dag-shadow-build";
+
+        register_chain(&svc, build_id, &[(":staleFallback", "StaleTask", &[])]).await;
+
+        store
+            .persist_plan(
+                &super::super::build_plan_ir::CanonicalBuildPlan {
+                    schema_version: super::super::build_plan_ir::BUILD_PLAN_SCHEMA_VERSION,
+                    build_id: build_id.to_string(),
+                    projects: Vec::new(),
+                    tasks: vec![super::super::build_plan_ir::CanonicalBuildPlanTask {
+                        path: ":fromShadow".to_string(),
+                        project_path: ":".to_string(),
+                        implementation_id: "ShadowTask".to_string(),
+                        depends_on: Vec::new(),
+                        inputs: Default::default(),
+                        outputs: Vec::new(),
+                        worker_isolation: "compat-jvm".to_string(),
+                        should_run_after: Vec::new(),
+                        must_run_after: Vec::new(),
+                        finalized_by: Vec::new(),
+                        cacheability: "unknown".to_string(),
+                        local_state: Vec::new(),
+                        destroyables: Vec::new(),
+                    }],
+                    dependencies: Vec::new(),
+                    toolchains: Vec::new(),
+                    metadata: Default::default(),
+                },
+                "test-shadow",
+            )
+            .unwrap();
+
+        let started = svc
+            .start_build(Request::new(StartBuildRequest {
+                build_id: build_id.to_string(),
+                max_parallelism: 1,
+                task_filter: Vec::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(started.accepted);
+        assert_eq!(started.total_tasks, 1);
+
+        let next = svc
+            .get_next_task(Request::new(GetNextTaskRequest {
+                build_id: build_id.to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(next.task_path, ":fromShadow");
+        assert_eq!(next.task_type, "ShadowTask");
     }
 
     #[tokio::test]

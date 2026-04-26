@@ -146,7 +146,12 @@ impl TaskGraphServiceImpl {
         self.tasks.iter().any(|entry| entry.key().0 == *build_id)
     }
 
-    fn hydrate_from_shadow_plan(&self, build_id: &BuildId, build_id_str: &str) -> usize {
+    fn hydrate_from_shadow_plan(
+        &self,
+        build_id: &BuildId,
+        build_id_str: &str,
+        replace_existing: bool,
+    ) -> usize {
         let Some(store) = self.build_plan_shadow_store.as_ref() else {
             return 0;
         };
@@ -162,6 +167,10 @@ impl TaskGraphServiceImpl {
                 return 0;
             }
         };
+
+        if replace_existing {
+            self.cleanup_build(build_id);
+        }
 
         let mut loaded = 0usize;
         for task in artifact.plan.tasks {
@@ -474,14 +483,11 @@ impl TaskGraphService for TaskGraphServiceImpl {
 
         let had_registered_tasks = self.has_registered_tasks(&build_id);
         let hydrated_task_count = if req.prefer_build_plan_shadow {
-            if had_registered_tasks {
-                self.cleanup_build(&build_id);
-            }
-            self.hydrate_from_shadow_plan(&build_id, &req.build_id)
+            self.hydrate_from_shadow_plan(&build_id, &req.build_id, true)
         } else if had_registered_tasks {
             0
         } else {
-            self.hydrate_from_shadow_plan(&build_id, &req.build_id)
+            self.hydrate_from_shadow_plan(&build_id, &req.build_id, false)
         };
         let has_registered_after_hydration = self.has_registered_tasks(&build_id);
         let plan_source = if hydrated_task_count > 0 {
@@ -872,6 +878,40 @@ mod tests {
         assert_eq!(resp.total_tasks, 1);
         assert_eq!(resp.execution_order[0].task_path, ":fromShadow");
         assert_eq!(resp.plan_source, "build-plan-shadow");
+    }
+
+    #[tokio::test]
+    async fn test_prefer_build_plan_shadow_keeps_registered_tasks_when_shadow_missing() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(BuildPlanShadowStore::new(temp.path().to_path_buf()));
+        let history = Arc::new(ExecutionHistoryServiceImpl::new(
+            temp.path().join("history"),
+        ));
+        let svc = TaskGraphServiceImpl::with_history_and_shadow(history, store);
+
+        svc.register_task(Request::new(RegisterTaskRequest {
+            build_id: "missing-shadow-build".to_string(),
+            task_path: ":registered".to_string(),
+            depends_on: Vec::new(),
+            should_execute: true,
+            task_type: "Registered".to_string(),
+            input_files: Vec::new(),
+        }))
+        .await
+        .unwrap();
+
+        let resp = svc
+            .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
+                build_id: "missing-shadow-build".to_string(),
+                prefer_build_plan_shadow: true,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.total_tasks, 1);
+        assert_eq!(resp.execution_order[0].task_path, ":registered");
+        assert_eq!(resp.plan_source, "registered-tasks");
     }
 
     #[tokio::test]
