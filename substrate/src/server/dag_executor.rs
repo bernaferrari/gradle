@@ -16,10 +16,9 @@ use crate::proto::{
     AwaitBuildCompletionResponse, BuildEventMessage, CancelBuildRequest, CancelBuildResponse,
     GetBuildStatusRequest, GetBuildStatusResponse, GetNextTaskRequest, GetNextTaskResponse,
     NotifyTaskFinishedRequest, NotifyTaskFinishedResponse, NotifyTaskStartedRequest,
-    NotifyTaskStartedResponse, PredictedOutcome, RecordOutcomeRequest,
-    ResolveExecutionPlanRequest, ResolvePlanRequest, RunBuildRequest, RunBuildResponse,
-    StartBuildRequest, StartBuildResponse, TaskExecutionDetail, TaskFinishedRequest,
-    TaskStartedRequest, TaskStatusEntry, WorkMetadata,
+    NotifyTaskStartedResponse, PredictedOutcome, RecordOutcomeRequest, ResolveExecutionPlanRequest,
+    ResolvePlanRequest, RunBuildRequest, RunBuildResponse, StartBuildRequest, StartBuildResponse,
+    TaskExecutionDetail, TaskFinishedRequest, TaskStartedRequest, TaskStatusEntry, WorkMetadata,
 };
 use crate::server::task_executor::{TaskExecutorRegistry, TaskInput};
 
@@ -75,7 +74,10 @@ impl BuildExecution {
     }
 
     fn executing_count(&self) -> i32 {
-        self.executing.lock().expect("executing lock should not be poisoned").len() as i32
+        self.executing
+            .lock()
+            .expect("executing lock should not be poisoned")
+            .len() as i32
     }
 
     fn pending_count(&self) -> i32 {
@@ -245,7 +247,10 @@ impl DagExecutorServiceImpl {
     /// Try to mark dependents as ready after a task finishes.
     /// Returns list of newly ready task paths.
     fn try_unblock_dependents(execution: &BuildExecution, finished_task: &str) -> Vec<String> {
-        let dep_count = execution.dependents.get(finished_task).map_or(0, |d| d.len());
+        let dep_count = execution
+            .dependents
+            .get(finished_task)
+            .map_or(0, |d| d.len());
         let mut newly_ready = Vec::with_capacity(dep_count);
         if let Some(deps) = execution.dependents.get(finished_task) {
             for dependent in deps {
@@ -271,7 +276,10 @@ impl DagExecutorServiceImpl {
         }
         // Update ready queue
         if !newly_ready.is_empty() {
-            let mut queue = execution.ready_queue.lock().expect("ready_queue lock should not be poisoned");
+            let mut queue = execution
+                .ready_queue
+                .lock()
+                .expect("ready_queue lock should not be poisoned");
             for task in &newly_ready {
                 queue.push_back(task.clone());
             }
@@ -358,6 +366,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
             .task_graph
             .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
                 build_id: req.build_id.clone(),
+                prefer_build_plan_shadow: false,
             }))
             .await
             .map_err(|e| Status::internal(format!("Failed to resolve execution plan: {}", e)))?
@@ -568,66 +577,73 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 // Phase 2a: Check execution plan for UP-TO-DATE / FROM_CACHE.
                 let context_json = task_contexts.get(&task_path).cloned();
                 let work_meta = context_json.as_ref().and_then(|json| {
-                    serde_json::from_str::<serde_json::Value>(json).ok().and_then(|v| {
-                        Some(WorkMetadata {
-                            work_identity: v.get("work_identity")?.as_str()?.to_string(),
-                            display_name: v
-                                .get("display_name")
-                                .and_then(|d| d.as_str())
-                                .unwrap_or(&task_path)
-                                .to_string(),
-                            implementation_class: v
-                                .get("implementation_class")
-                                .and_then(|c| c.as_str())
-                                .unwrap_or(&task_type)
-                                .to_string(),
-                            input_properties: v
-                                .get("input_properties")
-                                .and_then(|p| p.as_object())
-                                .map(|obj| {
-                                    obj.iter()
-                                        .filter_map(|(k, val)| val.as_str().map(|s| (k.clone(), s.to_string())))
-                                        .collect()
-                                })
-                                .unwrap_or_default(),
-                            input_file_fingerprints: v
-                                .get("input_file_fingerprints")
-                                .and_then(|f| f.as_object())
-                                .map(|obj| {
-                                    obj.iter()
-                                        .filter_map(|(k, val)| val.as_str().map(|s| (k.clone(), s.to_string())))
-                                        .collect()
-                                })
-                                .unwrap_or_default(),
-                            caching_enabled: v
-                                .get("caching_enabled")
-                                .and_then(|c| c.as_bool())
-                                .unwrap_or(false),
-                            can_load_from_cache: v
-                                .get("can_load_from_cache")
-                                .and_then(|c| c.as_bool())
-                                .unwrap_or(false),
-                            has_previous_execution_state: v
-                                .get("has_previous_execution_state")
-                                .and_then(|c| c.as_bool())
-                                .unwrap_or(false),
-                            rebuild_reasons: v
-                                .get("rebuild_reasons")
-                                .and_then(|r| r.as_array())
-                                .map(|arr| {
-                                    arr.iter()
-                                        .filter_map(|val| val.as_str().map(|s| s.to_string()))
-                                        .collect()
-                                })
-                                .unwrap_or_default(),
+                    serde_json::from_str::<serde_json::Value>(json)
+                        .ok()
+                        .and_then(|v| {
+                            Some(WorkMetadata {
+                                work_identity: v.get("work_identity")?.as_str()?.to_string(),
+                                display_name: v
+                                    .get("display_name")
+                                    .and_then(|d| d.as_str())
+                                    .unwrap_or(&task_path)
+                                    .to_string(),
+                                implementation_class: v
+                                    .get("implementation_class")
+                                    .and_then(|c| c.as_str())
+                                    .unwrap_or(&task_type)
+                                    .to_string(),
+                                input_properties: v
+                                    .get("input_properties")
+                                    .and_then(|p| p.as_object())
+                                    .map(|obj| {
+                                        obj.iter()
+                                            .filter_map(|(k, val)| {
+                                                val.as_str().map(|s| (k.clone(), s.to_string()))
+                                            })
+                                            .collect()
+                                    })
+                                    .unwrap_or_default(),
+                                input_file_fingerprints: v
+                                    .get("input_file_fingerprints")
+                                    .and_then(|f| f.as_object())
+                                    .map(|obj| {
+                                        obj.iter()
+                                            .filter_map(|(k, val)| {
+                                                val.as_str().map(|s| (k.clone(), s.to_string()))
+                                            })
+                                            .collect()
+                                    })
+                                    .unwrap_or_default(),
+                                caching_enabled: v
+                                    .get("caching_enabled")
+                                    .and_then(|c| c.as_bool())
+                                    .unwrap_or(false),
+                                can_load_from_cache: v
+                                    .get("can_load_from_cache")
+                                    .and_then(|c| c.as_bool())
+                                    .unwrap_or(false),
+                                has_previous_execution_state: v
+                                    .get("has_previous_execution_state")
+                                    .and_then(|c| c.as_bool())
+                                    .unwrap_or(false),
+                                rebuild_reasons: v
+                                    .get("rebuild_reasons")
+                                    .and_then(|r| r.as_array())
+                                    .map(|arr| {
+                                        arr.iter()
+                                            .filter_map(|val| val.as_str().map(|s| s.to_string()))
+                                            .collect()
+                                    })
+                                    .unwrap_or_default(),
+                            })
                         })
-                    })
                 });
 
                 if let Some(ref meta) = work_meta {
                     // Store work_metadata on the task slot for later outcome recording.
                     let build_id_clone = build_id_str.clone();
-                    if let Some(mut execution) = self.builds.get_mut(&BuildId::from(build_id_clone)) {
+                    if let Some(mut execution) = self.builds.get_mut(&BuildId::from(build_id_clone))
+                    {
                         if let Some(slot) = execution.tasks.get_mut(&task_path) {
                             slot.work_metadata = Some(meta.clone());
                             slot.input_fingerprint =
@@ -739,9 +755,11 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 let registry = Arc::clone(&self.executor_registry);
                 let context_for_task = task_contexts.get(&task_path).cloned();
                 let tx = result_tx.clone();
-                let permit = semaphore.clone().acquire_owned().await.map_err(|_| {
-                    Status::internal("Semaphore closed during build execution")
-                })?;
+                let permit = semaphore
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| Status::internal("Semaphore closed during build execution"))?;
 
                 tasks_dispatched += 1;
                 in_flight += 1;
@@ -829,10 +847,10 @@ impl DagExecutorService for DagExecutorServiceImpl {
                         if let Some(slot) = execution.tasks.get(&task_path_for_meta) {
                             if let Some(ref meta) = slot.work_metadata {
                                 let predicted = slot.predicted_outcome;
-                                let prediction_correct =
-                                    (predicted == PredictedOutcome::PredictedExecute as i32
-                                        && actual_outcome == "EXECUTED")
-                                        || (predicted == PredictedOutcome::PredictedUnknown as i32);
+                                let prediction_correct = (predicted
+                                    == PredictedOutcome::PredictedExecute as i32
+                                    && actual_outcome == "EXECUTED")
+                                    || (predicted == PredictedOutcome::PredictedUnknown as i32);
 
                                 let _ = self
                                     .execution_plan
@@ -900,9 +918,16 @@ impl DagExecutorService for DagExecutorServiceImpl {
             total_tasks,
             tasks_succeeded: task_details
                 .iter()
-                .filter(|d| d.outcome == "EXECUTED" || d.outcome == "UP_TO_DATE" || d.outcome == "FROM_CACHE")
+                .filter(|d| {
+                    d.outcome == "EXECUTED"
+                        || d.outcome == "UP_TO_DATE"
+                        || d.outcome == "FROM_CACHE"
+                })
                 .count() as i32,
-            tasks_failed: task_details.iter().filter(|d| d.outcome == "FAILED").count() as i32,
+            tasks_failed: task_details
+                .iter()
+                .filter(|d| d.outcome == "FAILED")
+                .count() as i32,
             tasks_skipped: task_details
                 .iter()
                 .filter(|d| d.outcome == "JVM_FORWARD")
@@ -2300,12 +2325,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("output");
 
-        register_chain(
-            &svc,
-            "rb-mkdir",
-            &[(":createDir", "Mkdir", &[])],
-        )
-        .await;
+        register_chain(&svc, "rb-mkdir", &[(":createDir", "Mkdir", &[])]).await;
 
         let ctx = serde_json::json!({
             "source_files": [target.to_string_lossy()],
@@ -2342,12 +2362,7 @@ mod tests {
         let target_dir = dir.path().join("dest");
         std::fs::write(&src, "hello world").unwrap();
 
-        register_chain(
-            &svc,
-            "rb-copy",
-            &[(":copyFiles", "Copy", &[])],
-        )
-        .await;
+        register_chain(&svc, "rb-copy", &[(":copyFiles", "Copy", &[])]).await;
 
         let ctx = serde_json::json!({
             "source_files": [src.to_string_lossy()],
@@ -2424,7 +2439,11 @@ mod tests {
                 (":mkdir", "Mkdir", &[]),
                 (":compileJava", "JavaCompile", &[":mkdir"]),
                 (":processResources", "Copy", &[":mkdir"]),
-                (":classes", "UnknownTask", &[":compileJava", ":processResources"]),
+                (
+                    ":classes",
+                    "UnknownTask",
+                    &[":compileJava", ":processResources"],
+                ),
             ],
         )
         .await;
@@ -2480,10 +2499,7 @@ mod tests {
         register_chain(
             &svc,
             "rb-fail",
-            &[
-                (":copy", "Copy", &[]),
-                (":downstream", "Mkdir", &[":copy"]),
-            ],
+            &[(":copy", "Copy", &[]), (":downstream", "Mkdir", &[":copy"])],
         )
         .await;
 
@@ -2590,7 +2606,8 @@ mod tests {
         )
         .await;
 
-        let ctx = serde_json::json!({"source_files": ["/tmp/rb-details-test"], "target_dir": ""}).to_string();
+        let ctx = serde_json::json!({"source_files": ["/tmp/rb-details-test"], "target_dir": ""})
+            .to_string();
         let mut contexts = HashMap::new();
         contexts.insert(":b".to_string(), ctx);
 
@@ -2618,12 +2635,7 @@ mod tests {
     async fn test_run_build_skips_up_to_date_tasks() {
         let svc = make_svc();
 
-        register_chain(
-            &svc,
-            "build-utd",
-            &[(":compileJava", "JavaCompile", &[])],
-        )
-        .await;
+        register_chain(&svc, "build-utd", &[(":compileJava", "JavaCompile", &[])]).await;
 
         let dir = tempfile::tempdir().unwrap();
 
@@ -2662,12 +2674,7 @@ mod tests {
         // or succeed depending on the environment — either way, history is recorded)
 
         // Second run: same inputs → should be UP-TO-DATE
-        register_chain(
-            &svc,
-            "build-utd-2",
-            &[(":compileJava", "JavaCompile", &[])],
-        )
-        .await;
+        register_chain(&svc, "build-utd-2", &[(":compileJava", "JavaCompile", &[])]).await;
 
         let ctx2 = serde_json::json!({
             "work_identity": ":project:compileJava",
@@ -2700,7 +2707,10 @@ mod tests {
 
         assert_eq!(resp2.total_tasks, 1);
         // Second run with same fingerprint should be UP-TO-DATE
-        assert_eq!(resp2.tasks_up_to_date, 1, "task should be UP-TO-DATE on second run");
+        assert_eq!(
+            resp2.tasks_up_to_date, 1,
+            "task should be UP-TO-DATE on second run"
+        );
         assert_eq!(resp2.tasks_succeeded, 1);
     }
 
@@ -2807,12 +2817,7 @@ mod tests {
     async fn test_run_build_no_metadata_always_executes() {
         let svc = make_svc();
 
-        register_chain(
-            &svc,
-            "build-no-meta",
-            &[(":a", "UnknownTask", &[])],
-        )
-        .await;
+        register_chain(&svc, "build-no-meta", &[(":a", "UnknownTask", &[])]).await;
 
         // No task_contexts at all → no work_metadata → always execute
         let resp = svc
@@ -2901,7 +2906,10 @@ mod tests {
             .into_inner();
 
         // Should NOT be UP-TO-DATE despite matching fingerprint
-        assert_eq!(resp.tasks_up_to_date, 0, "rebuild_reasons should force execution");
+        assert_eq!(
+            resp.tasks_up_to_date, 0,
+            "rebuild_reasons should force execution"
+        );
         assert_eq!(resp.total_tasks, 1);
     }
 
@@ -2910,12 +2918,7 @@ mod tests {
     async fn test_run_build_records_outcome_to_history() {
         let svc = make_svc();
 
-        register_chain(
-            &svc,
-            "build-record",
-            &[(":task", "Mkdir", &[])],
-        )
-        .await;
+        register_chain(&svc, "build-record", &[(":task", "Mkdir", &[])]).await;
 
         let dir = tempfile::tempdir().unwrap();
 
@@ -2957,12 +2960,7 @@ mod tests {
         );
 
         // Run again with same inputs → should be UP-TO-DATE (proves history is being used)
-        register_chain(
-            &svc,
-            "build-record-2",
-            &[(":task", "Mkdir", &[])],
-        )
-        .await;
+        register_chain(&svc, "build-record-2", &[(":task", "Mkdir", &[])]).await;
 
         let mut contexts2 = HashMap::new();
         contexts2.insert(":task".to_string(), ctx);

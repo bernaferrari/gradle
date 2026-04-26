@@ -275,9 +275,11 @@ async fn spawn_test_server() -> (String, tempfile::TempDir) {
             .add_service(file_tree_service_server::FileTreeServiceServer::new(
                 FileTreeServiceImpl::new(),
             ))
-            .add_service(version_catalog_service_server::VersionCatalogServiceServer::new(
-                VersionCatalogServiceImpl::new(),
-            ))
+            .add_service(
+                version_catalog_service_server::VersionCatalogServiceServer::new(
+                    VersionCatalogServiceImpl::new(),
+                ),
+            )
             .add_service(parser_service_server::ParserServiceServer::new(parser))
             .serve_with_incoming(UnixListenerStream::new(listener))
             .await;
@@ -635,6 +637,7 @@ async fn test_task_graph_e2e() {
     let response = client
         .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
             build_id: "test-build".to_string(),
+            prefer_build_plan_shadow: false,
         }))
         .await
         .unwrap()
@@ -1808,6 +1811,7 @@ async fn test_full_build_lifecycle() {
     let plan = task_client
         .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
             build_id: "lifecycle-build".to_string(),
+            prefer_build_plan_shadow: false,
         }))
         .await
         .unwrap()
@@ -4278,6 +4282,7 @@ async fn test_task_graph_with_execution_history_integration() {
     let plan = task_graph_client
         .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
             build_id: "integration-test-build".to_string(),
+            prefer_build_plan_shadow: false,
         }))
         .await
         .unwrap()
@@ -4359,14 +4364,12 @@ async fn test_classpath_service_hash_and_compare() {
     let compare_resp2 = client
         .compare_classpaths(Request::new(CompareClasspathsRequest {
             previous_hash: hash_resp.classpath_hash.clone(),
-            current_entries: vec![
-                ClasspathEntry {
-                    absolute_path: "/tmp/a.jar".to_string(),
-                    entry_type: 0,
-                    length: 1024,
-                    last_modified: 9999, // changed mtime
-                },
-            ],
+            current_entries: vec![ClasspathEntry {
+                absolute_path: "/tmp/a.jar".to_string(),
+                entry_type: 0,
+                length: 1024,
+                last_modified: 9999, // changed mtime
+            }],
             algorithm: "SHA-256".to_string(),
         }))
         .await
@@ -4386,7 +4389,11 @@ async fn test_file_tree_service_traverse_and_match() {
     // Create a temp directory structure
     let tmp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(tmp.path().join("src/main/java/com")).unwrap();
-    std::fs::write(tmp.path().join("src/main/java/com/App.java"), "class App {}").unwrap();
+    std::fs::write(
+        tmp.path().join("src/main/java/com/App.java"),
+        "class App {}",
+    )
+    .unwrap();
     std::fs::write(tmp.path().join("src/main/java/com/Util.kt"), "fun util()").unwrap();
     std::fs::write(tmp.path().join("build.gradle"), "plugins { id 'java' }").unwrap();
 
@@ -4436,8 +4443,7 @@ async fn test_file_tree_service_traverse_and_match() {
 async fn test_version_catalog_service_parse() {
     let (socket_path, _dir) = spawn_test_server().await;
     let channel = connect(&socket_path).await;
-    let mut client =
-        version_catalog_service_client::VersionCatalogServiceClient::new(channel);
+    let mut client = version_catalog_service_client::VersionCatalogServiceClient::new(channel);
 
     let toml_content = r#"
 [versions]
@@ -4533,10 +4539,9 @@ task integrationTest(type: Test) {
     assert_eq!(resp.error_count, 0, "should have no parse errors");
 
     // Verify specific elements exist
-    let has_plugin = resp
-        .elements
-        .iter()
-        .any(|e| e.element_type == "plugin" && e.properties.get("id").map_or(false, |id| id == "java"));
+    let has_plugin = resp.elements.iter().any(|e| {
+        e.element_type == "plugin" && e.properties.get("id").map_or(false, |id| id == "java")
+    });
     assert!(has_plugin, "should find java plugin element");
 
     let has_dep = resp
@@ -4556,10 +4561,22 @@ task integrationTest(type: Test) {
         .into_inner();
 
     assert_eq!(typed_resp.script_type(), ScriptType::GroovyScript);
-    assert!(!typed_resp.plugins.is_empty(), "typed should extract plugins");
-    assert!(!typed_resp.dependencies.is_empty(), "typed should extract dependencies");
-    assert!(!typed_resp.repositories.is_empty(), "typed should extract repositories");
-    assert!(!typed_resp.task_configs.is_empty(), "typed should extract task configs");
+    assert!(
+        !typed_resp.plugins.is_empty(),
+        "typed should extract plugins"
+    );
+    assert!(
+        !typed_resp.dependencies.is_empty(),
+        "typed should extract dependencies"
+    );
+    assert!(
+        !typed_resp.repositories.is_empty(),
+        "typed should extract repositories"
+    );
+    assert!(
+        !typed_resp.task_configs.is_empty(),
+        "typed should extract task configs"
+    );
 
     // Verify typed plugins
     let java_plugin = typed_resp.plugins.iter().find(|p| p.id == "java");
@@ -4570,14 +4587,20 @@ task integrationTest(type: Test) {
         .dependencies
         .iter()
         .find(|d| d.notation.contains("commons-lang3"));
-    assert!(commons_dep.is_some(), "should find commons-lang3 dependency");
+    assert!(
+        commons_dep.is_some(),
+        "should find commons-lang3 dependency"
+    );
 
     // Verify typed task config with dependsOn
     let integration_task = typed_resp
         .task_configs
         .iter()
         .find(|t| t.task_name == "integrationTest");
-    assert!(integration_task.is_some(), "should find integrationTest task");
+    assert!(
+        integration_task.is_some(),
+        "should find integrationTest task"
+    );
     let integration_task = integration_task.unwrap();
     assert!(integration_task.depends_on.contains(&"test".to_string()));
     assert_eq!(integration_task.task_type, "Test");

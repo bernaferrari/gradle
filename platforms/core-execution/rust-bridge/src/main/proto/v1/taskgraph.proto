@@ -25,7 +25,10 @@ message RegisterTaskRequest {
 message RegisterTaskResponse { bool success = 1; }
 message ClearBuildTasksRequest { string build_id = 1; }
 message ClearBuildTasksResponse { int32 cleared_tasks = 1; }
-message ResolveExecutionPlanRequest { string build_id = 1; }
+message ResolveExecutionPlanRequest {
+  string build_id = 1;
+  bool prefer_build_plan_shadow = 2;
+}
 message ExecutionNode {
   string task_path = 1;
   repeated string dependencies = 2;

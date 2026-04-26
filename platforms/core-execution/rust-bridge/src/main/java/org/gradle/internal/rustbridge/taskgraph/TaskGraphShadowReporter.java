@@ -102,7 +102,7 @@ public class TaskGraphShadowReporter {
         }
 
         try {
-            RustTaskGraphClient.ExecutionPlanResult shadowPlan = rustClient.resolveExecutionPlan(buildId);
+            RustTaskGraphClient.ExecutionPlanResult shadowPlan = rustClient.resolveExecutionPlan(buildId, true);
             EffectiveExecutionGraphResult shadowResult = effectiveResultFromRustPlan(
                 shadowPlan,
                 taskPaths,

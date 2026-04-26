@@ -636,6 +636,7 @@ async fn test_task_graph_resolution_determinism() {
 
         tc.resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
             build_id: "det-build".to_string(),
+            prefer_build_plan_shadow: false,
         }))
         .await
         .unwrap()

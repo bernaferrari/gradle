@@ -82,7 +82,8 @@ class TaskGraphShadowReporterTest extends Specification {
 
         def missingShadowPlan = RustTaskGraphClient.ExecutionPlanResult.error("missing shadow artifact")
         rustClient.registerTask(_, _, _, _, _) >> true
-        rustClient.resolveExecutionPlan("build-123") >>> [missingShadowPlan, planResult]
+        rustClient.resolveExecutionPlan("build-123", true) >> missingShadowPlan
+        rustClient.resolveExecutionPlan("build-123") >> planResult
 
         when:
         reporter.compareExecutionGraph(taskPaths, taskDeps, "build-123")
@@ -108,7 +109,7 @@ class TaskGraphShadowReporterTest extends Specification {
             [node1, node2], 2, 1, 0, false, "build-plan-shadow"
         )
         assert shadowResult.planSource == "build-plan-shadow"
-        rustClient.resolveExecutionPlan("build-123") >> shadowResult
+        rustClient.resolveExecutionPlan("build-123", true) >> shadowResult
 
         when:
         def result = reporter.resolveExecutionGraphOrFallback(taskPaths, taskDeps, "build-123")
@@ -140,8 +141,7 @@ class TaskGraphShadowReporterTest extends Specification {
         def planResult = RustTaskGraphClient.ExecutionPlanResult.success(
             [node1, node2, node3], 3, 3, 0, false)
 
-        rustClient.registerTask(_, _, _, _, _) >> true
-        rustClient.resolveExecutionPlan(_) >> planResult
+        rustClient.resolveExecutionPlan("build-123", true) >> planResult
 
         when:
         reporter.compareExecutionGraph(taskPaths, taskDeps, "build-123")
@@ -161,7 +161,8 @@ class TaskGraphShadowReporterTest extends Specification {
 
         def errorResult = RustTaskGraphClient.ExecutionPlanResult.error("connection refused")
         rustClient.registerTask(_, _, _, _, _) >> true
-        rustClient.resolveExecutionPlan(_) >> errorResult
+        rustClient.resolveExecutionPlan("build-123", true) >> errorResult
+        rustClient.resolveExecutionPlan("build-123") >> errorResult
 
         when:
         reporter.compareExecutionGraph(taskPaths, taskDeps, "build-123")
@@ -192,8 +193,7 @@ class TaskGraphShadowReporterTest extends Specification {
         def planResult = RustTaskGraphClient.ExecutionPlanResult.success(
             [node1, node2, node3], 3, 3, 0, false)
 
-        rustClient.registerTask(_, _, _, _, _) >> true
-        rustClient.resolveExecutionPlan(_) >> planResult
+        rustClient.resolveExecutionPlan("build-123", true) >> planResult
 
         when:
         reporter.compareExecutionGraph(taskPaths, taskDeps, "build-123")
@@ -212,8 +212,7 @@ class TaskGraphShadowReporterTest extends Specification {
 
         def node1 = gradle.substrate.v1.ExecutionNode.newBuilder().setTaskPath(":a").build()
         def node2 = gradle.substrate.v1.ExecutionNode.newBuilder().setTaskPath(":b").build()
-        rustClient.registerTask(_, _, _, _, _) >> true
-        rustClient.resolveExecutionPlan("build-123") >> RustTaskGraphClient.ExecutionPlanResult.success(
+        rustClient.resolveExecutionPlan("build-123", true) >> RustTaskGraphClient.ExecutionPlanResult.success(
             [node1, node2], 2, 1, 0, false
         )
 
@@ -235,6 +234,7 @@ class TaskGraphShadowReporterTest extends Specification {
         def taskDeps = [":a": [], ":b": [":a"]]
 
         rustClient.registerTask(_, _, _, _, _) >> true
+        rustClient.resolveExecutionPlan("build-123", true) >> RustTaskGraphClient.ExecutionPlanResult.error("rpc unavailable")
         rustClient.resolveExecutionPlan("build-123") >> RustTaskGraphClient.ExecutionPlanResult.error("rpc unavailable")
 
         when:

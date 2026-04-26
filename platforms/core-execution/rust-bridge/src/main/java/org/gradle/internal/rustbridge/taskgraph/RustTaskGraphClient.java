@@ -72,6 +72,14 @@ public class RustTaskGraphClient {
      * Resolve the execution plan (topological sort) from the Rust task graph.
      */
     public ExecutionPlanResult resolveExecutionPlan(String buildId) {
+        return resolveExecutionPlan(buildId, false);
+    }
+
+    /**
+     * Resolve the execution plan, optionally forcing Rust to prefer the persisted
+     * JVM-host build-plan shadow over any registered fallback tasks.
+     */
+    public ExecutionPlanResult resolveExecutionPlan(String buildId, boolean preferBuildPlanShadow) {
         if (client.isNoop()) {
             return ExecutionPlanResult.error("Substrate client is in no-op mode");
         }
@@ -80,6 +88,7 @@ public class RustTaskGraphClient {
             ResolveExecutionPlanResponse response = client.getTaskGraphStub()
                 .resolveExecutionPlan(ResolveExecutionPlanRequest.newBuilder()
                     .setBuildId(buildId)
+                    .setPreferBuildPlanShadow(preferBuildPlanShadow)
                     .build());
 
             return ExecutionPlanResult.success(
