@@ -187,6 +187,7 @@ message RunBuildRequest {
   repeated string task_filter = 3;
   // Per-task execution context: task_path -> JSON with source_files, target_dir, options.
   map<string, string> task_contexts = 4;
+  bool allow_jvm_forwarding = 5;
 }
 
 message RunBuildResponse {
