@@ -105,11 +105,6 @@ tasks.named<JavaCompile>("compileJava") {
     options.compilerArgs.add("-proc:none")
 }
 
-// Exclude test files that still depend on excluded main sources
-tasks.named<JavaCompile>("compileTestJava") {
-    exclude("**/jvmhost/JvmHostServerTest.java")
-}
-
 // Add proto-compiled classes to the main source set output so tests can see them
 sourceSets.main.get().output.dir(
     mapOf("builtBy" to compileProtoJava),
