@@ -105,7 +105,7 @@ public class TaskGraphShadowReporter {
             // Register all tasks with Rust
             for (String taskPath : taskPaths) {
                 List<String> deps = taskDependencies.getOrDefault(taskPath, new ArrayList<>());
-                rustClient.registerTask(taskPath, deps, true, "Task");
+                rustClient.registerTask(buildId, taskPath, deps, true, "Task");
             }
 
             // Resolve Rust execution plan

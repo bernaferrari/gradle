@@ -25,7 +25,7 @@ public class RustTaskGraphClient {
     /**
      * Register a task with its dependencies in the Rust task graph.
      */
-    public boolean registerTask(String taskPath, List<String> dependsOn,
+    public boolean registerTask(String buildId, String taskPath, List<String> dependsOn,
                                 boolean shouldExecute, String taskType) {
         if (client.isNoop()) {
             return false;
@@ -34,6 +34,7 @@ public class RustTaskGraphClient {
         try {
             RegisterTaskResponse response = client.getTaskGraphStub()
                 .registerTask(RegisterTaskRequest.newBuilder()
+                    .setBuildId(buildId)
                     .setTaskPath(taskPath)
                     .addAllDependsOn(dependsOn)
                     .setShouldExecute(shouldExecute)
