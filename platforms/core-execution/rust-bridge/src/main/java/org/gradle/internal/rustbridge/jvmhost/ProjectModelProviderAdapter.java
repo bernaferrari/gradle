@@ -100,6 +100,41 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     }
 
     @Override
+    public List<BuildPlanTask> getSelectedBuildPlanTasks(BuildPlanTaskSelectionSnapshot.Snapshot selectedGraph) {
+        if (projectStateRegistry == null) {
+            return new ArrayList<>();
+        }
+
+        Map<String, Task> tasksByPath = new LinkedHashMap<>();
+        try {
+            for (Object projectState : getAllProjects(projectStateRegistry)) {
+                if (!booleanValue(projectState, "isCreated")) {
+                    continue;
+                }
+                Object mutableModel = invoke(projectState, "getMutableModel");
+                if (!(mutableModel instanceof Project)) {
+                    continue;
+                }
+                for (Task task : ((Project) mutableModel).getTasks()) {
+                    tasksByPath.put(task.getPath(), task);
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to index realized tasks for selected graph", e);
+            return new ArrayList<>();
+        }
+
+        List<BuildPlanTask> tasks = new ArrayList<>();
+        for (String taskPath : selectedGraph.getTaskPaths()) {
+            Task task = tasksByPath.get(taskPath);
+            if (task != null) {
+                tasks.add(toBuildPlanTask(task, selectedGraph.getDependencies(taskPath)));
+            }
+        }
+        return tasks;
+    }
+
+    @Override
     public List<JvmHostServiceImpl.ResolvedArtifactEntry> resolveArtifacts(
             String projectPath, String configurationName) {
         if (projectStateRegistry == null) {
@@ -186,7 +221,11 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         return tasks;
     }
 
-    private static BuildPlanTask toBuildPlanTask(Task task) {
+    public static BuildPlanTask toBuildPlanTask(Task task) {
+        return toBuildPlanTask(task, null);
+    }
+
+    private static BuildPlanTask toBuildPlanTask(Task task, @Nullable List<String> selectedDependencyPaths) {
         Class<?> taskType = GeneratedSubclasses.unpackType(task);
         String taskTypeName = taskType.getName();
         String shortTaskTypeName = taskType.getSimpleName();
@@ -213,7 +252,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             .setCacheability(cacheability(task, taskType))
             .putAllInputs(inputs);
 
-        builder.addAllDependsOn(taskDependencyPaths(task, task.getTaskDependencies()));
+        builder.addAllDependsOn(selectedDependencyPaths == null
+            ? taskDependencyPaths(task, task.getTaskDependencies())
+            : selectedDependencyPaths);
         builder.addAllShouldRunAfter(taskDependencyPaths(task, task.getShouldRunAfter()));
         builder.addAllMustRunAfter(taskDependencyPaths(task, task.getMustRunAfter()));
         builder.addAllFinalizedBy(taskDependencyPaths(task, task.getFinalizedBy()));

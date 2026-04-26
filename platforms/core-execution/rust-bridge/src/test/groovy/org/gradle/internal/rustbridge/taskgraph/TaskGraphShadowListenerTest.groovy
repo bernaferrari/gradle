@@ -2,6 +2,7 @@ package org.gradle.internal.rustbridge.taskgraph
 
 import org.gradle.api.Task
 import org.gradle.api.execution.TaskExecutionGraph
+import org.gradle.internal.rustbridge.jvmhost.BuildPlanTaskSelectionSnapshot
 import spock.lang.Specification
 
 class TaskGraphShadowListenerTest extends Specification {
@@ -20,9 +21,9 @@ class TaskGraphShadowListenerTest extends Specification {
 
         def graph = Mock(TaskExecutionGraph)
         graph.getAllTasks() >> [taskA, taskB, taskC]
-        graph.getDependencies(taskA) >> ([] as Set<Task>)
-        graph.getDependencies(taskB) >> ([] as Set<Task>)
-        graph.getDependencies(taskC) >> ([taskA, taskB] as Set<Task>)
+        graph.getDependencies(_ as Task) >> { Task task ->
+            task.is(taskC) ? new LinkedHashSet<Task>([taskA, taskB]) : new LinkedHashSet<Task>()
+        }
 
         when:
         listener.graphPopulated(graph)
@@ -30,14 +31,13 @@ class TaskGraphShadowListenerTest extends Specification {
         then:
         1 * reporter.compareExecutionGraph(
             [":app:compileJava", ":app:processResources", ":app:classes"],
-            _,
+            { deps ->
+                deps[":app:compileJava"] == [] &&
+                    deps[":app:processResources"] == [] &&
+                    deps[":app:classes"].containsAll([":app:compileJava", ":app:processResources"])
+            },
             "build"
         )
-
-        def capturedDeps = _
-        capturedDeps[":app:compileJava"] == []
-        capturedDeps[":app:processResources"] == []
-        capturedDeps[":app:classes"].containsAll([":app:compileJava", ":app:processResources"])
     }
 
     def "graphPopulated handles empty graph"() {
@@ -69,9 +69,9 @@ class TaskGraphShadowListenerTest extends Specification {
 
         def graph = Mock(TaskExecutionGraph)
         graph.getAllTasks() >> [libTask, utilTask, appTask]
-        graph.getDependencies(libTask) >> ([] as Set<Task>)
-        graph.getDependencies(utilTask) >> ([] as Set<Task>)
-        graph.getDependencies(appTask) >> ([libTask, utilTask] as Set<Task>)
+        graph.getDependencies(_ as Task) >> { Task task ->
+            task.is(appTask) ? new LinkedHashSet<Task>([libTask, utilTask]) : new LinkedHashSet<Task>()
+        }
 
         when:
         listener.graphPopulated(graph)
@@ -86,6 +86,34 @@ class TaskGraphShadowListenerTest extends Specification {
             } as Map,
             "build"
         )
+    }
+
+    def "graphPopulated records selected task graph snapshot"() {
+        given:
+        def reporter = Mock(TaskGraphShadowReporter)
+        def snapshot = new BuildPlanTaskSelectionSnapshot()
+        def listener = new TaskGraphShadowListener(reporter, snapshot)
+
+        def compile = Mock(Task)
+        def classes = Mock(Task)
+        compile.getPath() >> ":app:compileJava"
+        classes.getPath() >> ":app:classes"
+
+        def graph = Mock(TaskExecutionGraph)
+        graph.getAllTasks() >> [compile, classes]
+        graph.getDependencies(_ as Task) >> { Task task ->
+            task.is(classes) ? new LinkedHashSet<Task>([compile]) : new LinkedHashSet<Task>()
+        }
+
+        when:
+        listener.graphPopulated(graph)
+
+        then:
+        def selected = snapshot.snapshot()
+        selected.populated
+        selected.taskPaths == [":app:compileJava", ":app:classes"]
+        selected.getDependencies(":app:classes") == [":app:compileJava"]
+        1 * reporter.compareExecutionGraph(_, _, "build")
     }
 
     def "constructor stores reporter reference"() {

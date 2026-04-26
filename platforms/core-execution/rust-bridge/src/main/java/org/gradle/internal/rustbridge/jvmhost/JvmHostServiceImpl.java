@@ -23,6 +23,9 @@ public class JvmHostServiceImpl {
     @Nullable
     private ProjectModelProvider projectModelProvider;
 
+    @Nullable
+    private BuildPlanTaskSelectionSnapshot taskSelectionSnapshot;
+
     public JvmHostServiceImpl() {
     }
 
@@ -32,6 +35,10 @@ public class JvmHostServiceImpl {
      */
     public void setProjectModelProvider(@Nullable ProjectModelProvider provider) {
         this.projectModelProvider = provider;
+    }
+
+    public void setTaskSelectionSnapshot(@Nullable BuildPlanTaskSelectionSnapshot snapshot) {
+        this.taskSelectionSnapshot = snapshot;
     }
 
     /**
@@ -119,9 +126,17 @@ public class JvmHostServiceImpl {
                 .build());
         }
 
+        String taskSource = "jvm-host-realized-tasks";
         List<BuildPlanTask> tasks = getBuildPlanTasks();
+        if (taskSelectionSnapshot != null) {
+            BuildPlanTaskSelectionSnapshot.Snapshot selectedGraph = taskSelectionSnapshot.snapshot();
+            if (selectedGraph.isPopulated()) {
+                tasks = getSelectedBuildPlanTasks(selectedGraph);
+                taskSource = "jvm-host-selected-task-graph";
+            }
+        }
         plan.addAllTasks(tasks);
-        plan.putMetadata("taskSource", tasks.isEmpty() ? "jvm-host-empty" : "jvm-host-realized-tasks");
+        plan.putMetadata("taskSource", tasks.isEmpty() ? taskSource + "-empty" : taskSource);
         plan.putMetadata("jvmHostTaskCount", Integer.toString(tasks.size()));
 
         return plan.build();
@@ -134,6 +149,13 @@ public class JvmHostServiceImpl {
         return projectModelProvider.getBuildPlanTasks();
     }
 
+    public List<BuildPlanTask> getSelectedBuildPlanTasks(BuildPlanTaskSelectionSnapshot.Snapshot selectedGraph) {
+        if (projectModelProvider == null) {
+            return java.util.Collections.emptyList();
+        }
+        return projectModelProvider.getSelectedBuildPlanTasks(selectedGraph);
+    }
+
     /**
      * Interface for providing project model data to the JVM host.
      * Implemented by a BuildSession-scoped adapter that reads from Gradle's model.
@@ -141,6 +163,7 @@ public class JvmHostServiceImpl {
     public interface ProjectModelProvider {
         List<ProjectModelEntry> getProjectModels();
         List<BuildPlanTask> getBuildPlanTasks();
+        List<BuildPlanTask> getSelectedBuildPlanTasks(BuildPlanTaskSelectionSnapshot.Snapshot selectedGraph);
         List<ResolvedArtifactEntry> resolveArtifacts(String projectPath, String configurationName);
     }
 

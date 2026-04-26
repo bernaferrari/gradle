@@ -14,12 +14,16 @@ import org.gradle.internal.rustbridge.configcache.RustConfigCacheClient;
 import org.gradle.internal.rustbridge.dependency.DependencyResolutionShadowListener;
 import org.gradle.internal.rustbridge.dependency.RustDependencyResolutionClient;
 import org.gradle.internal.rustbridge.history.RustExecutionHistoryClient;
+import org.gradle.internal.rustbridge.jvmhost.BuildPlanTaskSelectionSnapshot;
 import org.gradle.internal.rustbridge.jvmhost.JvmHostServiceImpl;
 import org.gradle.internal.rustbridge.jvmhost.ProjectModelProviderAdapter;
 import org.gradle.internal.rustbridge.metrics.RustBuildMetricsClient;
 import org.gradle.internal.rustbridge.shadow.BuildFinishMismatchLogger;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
 import org.gradle.internal.rustbridge.shadow.ShadowingBuildCacheKeyComputer;
+import org.gradle.internal.rustbridge.taskgraph.RustTaskGraphClient;
+import org.gradle.internal.rustbridge.taskgraph.TaskGraphShadowListener;
+import org.gradle.internal.rustbridge.taskgraph.TaskGraphShadowReporter;
 import org.gradle.internal.rustbridge.testexec.TestExecutionShadowListener;
 import org.gradle.internal.service.PrivateService;
 import org.gradle.internal.service.Provides;
@@ -152,6 +156,17 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
         }
 
         @Provides
+        RustTaskGraphClient createRustTaskGraphClient(SubstrateClient client) {
+            return new RustTaskGraphClient(client);
+        }
+
+        @Provides
+        @PrivateService
+        BuildPlanTaskSelectionSnapshot createBuildPlanTaskSelectionSnapshot() {
+            return new BuildPlanTaskSelectionSnapshot();
+        }
+
+        @Provides
         ShadowingBuildCacheKeyComputer createShadowingBuildCacheKeyComputer(
             BuildCacheOrchestrationClient cacheOrchestrationClient,
             HashMismatchReporter mismatchReporter,
@@ -206,6 +221,7 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
         @PrivateService
         void wireProjectModelProvider(
             DaemonLauncher daemonLauncher,
+            BuildPlanTaskSelectionSnapshot taskSelectionSnapshot,
             ServiceRegistry services,
             InternalOptions options
         ) {
@@ -215,7 +231,38 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
             JvmHostServiceImpl serviceImpl = daemonLauncher.getJvmHostServiceImpl();
             if (serviceImpl != null) {
                 serviceImpl.setProjectModelProvider(ProjectModelProviderAdapter.fromServiceRegistry(services));
+                serviceImpl.setTaskSelectionSnapshot(taskSelectionSnapshot);
             }
+        }
+
+        @Provides
+        @Nullable
+        TaskGraphShadowListener createTaskGraphShadowListener(
+            RustTaskGraphClient rustTaskGraphClient,
+            BuildPlanTaskSelectionSnapshot taskSelectionSnapshot,
+            HashMismatchReporter mismatchReporter,
+            ListenerManager listenerManager,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+                return null;
+            }
+            RustTaskGraphClient activeClient = RustSubstrateOptions.isSubsystemEnabled(
+                options,
+                RustSubstrateOptions.ENABLE_RUST_TASK_GRAPH
+            ) ? rustTaskGraphClient : null;
+            boolean authoritative = RustSubstrateOptions.isSubsystemAuthoritative(
+                options,
+                RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_TASK_GRAPH
+            );
+            TaskGraphShadowReporter reporter = new TaskGraphShadowReporter(
+                activeClient,
+                mismatchReporter,
+                authoritative
+            );
+            TaskGraphShadowListener listener = new TaskGraphShadowListener(reporter, taskSelectionSnapshot);
+            listenerManager.addListener(listener);
+            return listener;
         }
 
         @Provides
