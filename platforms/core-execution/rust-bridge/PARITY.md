@@ -20,8 +20,8 @@
   is now back in the compile-safe bridge surface.
 - The legacy `RustBridgeServices` type is now a compile-safe compatibility shim over the
   validated core service layer instead of a stale duplicated registrar.
-- The bridge compile/test gate validates the active service layer plus proto-generated
-  classes and the currently re-enabled bootstrap/build-result/mismatch test slice.
+- The bridge compile/test gate validates the active service layer, proto-generated
+  classes, and the full `:rust-bridge:test` suite in strict full stabilization.
 
 ## Gaps
 
@@ -37,6 +37,7 @@
 - `./gradlew -q :rust-bridge:syncProtos`
 - `./gradlew -q :rust-bridge:compileJava :rust-bridge:testClasses`
 - `./tools/stabilization/run_strict_stabilization.sh quick`
+- `./tools/stabilization/run_strict_stabilization.sh full`
 
 ## Next Sync Actions
 
