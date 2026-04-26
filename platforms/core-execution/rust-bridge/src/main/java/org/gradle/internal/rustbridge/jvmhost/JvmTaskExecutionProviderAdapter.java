@@ -3,10 +3,8 @@ package org.gradle.internal.rustbridge.jvmhost;
 import gradle.substrate.v1.ExecuteTaskRequest;
 import gradle.substrate.v1.ExecuteTaskResponse;
 
-import org.gradle.api.Action;
 import org.gradle.api.Task;
 import org.gradle.api.logging.Logging;
-import org.gradle.api.tasks.StopExecutionException;
 import org.gradle.api.tasks.TaskContainer;
 import org.gradle.api.tasks.TaskState;
 import org.gradle.internal.service.ServiceRegistry;
@@ -17,15 +15,14 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.List;
 
 /**
  * Executes realized JVM task actions for the compatibility host.
  *
  * <p>The Rust daemon owns DAG scheduling, while this adapter delegates a realized legacy task
- * back into Gradle's JVM execution services when they are available. If those internal services
- * are not visible from the compatibility host, it falls back to the narrower public-action path
- * and reports that explicitly as {@code jvm_host_actions}.</p>
+ * back into Gradle's JVM execution services. If those internal services are not visible from the
+ * compatibility host, the task is reported as unsupported instead of executing a degraded fallback.
+ * </p>
  */
 public class JvmTaskExecutionProviderAdapter implements JvmHostServiceImpl.TaskExecutionProvider {
     private static final Logger LOGGER = Logging.getLogger(JvmTaskExecutionProviderAdapter.class);
@@ -84,74 +81,7 @@ public class JvmTaskExecutionProviderAdapter implements JvmHostServiceImpl.TaskE
         if (gradleEngineResponse != null) {
             return gradleEngineResponse;
         }
-
-        if (!task.getEnabled()) {
-            return ExecuteTaskResponse.newBuilder()
-                .setSuccess(true)
-                .setOutcome("SKIPPED")
-                .setExecutionMode("jvm_host_actions")
-                .setErrorMessage("Task is disabled")
-                .setDurationMs(elapsedSince(startedAt))
-                .build();
-        }
-
-        try {
-            if (!isOnlyIfSatisfied(task)) {
-                return ExecuteTaskResponse.newBuilder()
-                    .setSuccess(true)
-                    .setOutcome("SKIPPED")
-                    .setExecutionMode("jvm_host_actions")
-                    .setErrorMessage("Task onlyIf predicate was not satisfied")
-                    .setDurationMs(elapsedSince(startedAt))
-                    .build();
-            }
-        } catch (RuntimeException e) {
-            return failed(startedAt, e, "jvm_host_actions");
-        }
-
-        List<Action<? super Task>> actions = task.getActions();
-        if (actions.isEmpty()) {
-            task.setDidWork(false);
-            return ExecuteTaskResponse.newBuilder()
-                .setSuccess(true)
-                .setOutcome("EXECUTED")
-                .setExecutionMode("jvm_host_actions")
-                .setDurationMs(elapsedSince(startedAt))
-                .build();
-        }
-
-        try {
-            for (Action<? super Task> action : actions) {
-                try {
-                    action.execute(task);
-                } catch (RuntimeException e) {
-                    if (isStopActionException(e)) {
-                        LOGGER.debug("[substrate-jvmhost] Task action stopped for {}", taskPath, e);
-                        continue;
-                    }
-                    if (isStopExecutionException(e)) {
-                        LOGGER.debug("[substrate-jvmhost] Task execution stopped for {}", taskPath, e);
-                        return ExecuteTaskResponse.newBuilder()
-                            .setSuccess(true)
-                            .setOutcome("SKIPPED")
-                            .setExecutionMode("jvm_host_actions")
-                            .setErrorMessage(e.getMessage() == null ? "" : e.getMessage())
-                            .setDurationMs(elapsedSince(startedAt))
-                            .build();
-                    }
-                    throw e;
-                }
-            }
-            task.setDidWork(true);
-            return ExecuteTaskResponse.newBuilder()
-                .setSuccess(true)
-                .setOutcome("EXECUTED")
-                .setExecutionMode("jvm_host_actions")
-                .setDurationMs(elapsedSince(startedAt))
-                .build();
-        } catch (RuntimeException e) {
-            return failed(startedAt, e, "jvm_host_actions");
-        }
+        return unsupported("Gradle task execution services are unavailable for task: " + taskPath);
     }
 
     @Nullable
@@ -201,7 +131,7 @@ public class JvmTaskExecutionProviderAdapter implements JvmHostServiceImpl.TaskE
                 .setDurationMs(elapsedSince(startedAt))
                 .build();
         } catch (ClassNotFoundException | NoSuchMethodException e) {
-            LOGGER.debug("[substrate-jvmhost] Gradle task engine is unavailable; falling back to public task actions", e);
+            LOGGER.debug("[substrate-jvmhost] Gradle task engine is unavailable", e);
             return null;
         } catch (ReflectiveOperationException | RuntimeException e) {
             return failed(startedAt, unwrapRuntimeFailure(e), "jvm_gradle_task_executer");
@@ -229,38 +159,6 @@ public class JvmTaskExecutionProviderAdapter implements JvmHostServiceImpl.TaskE
         if (prepareFailure instanceof Exception) {
             throw new IllegalStateException("Task mutation resolution failed", (Exception) prepareFailure);
         }
-    }
-
-    private static boolean isOnlyIfSatisfied(Task task) {
-        try {
-            Method method = task.getClass().getMethod("getOnlyIf");
-            Object spec = method.invoke(task);
-            if (spec == null) {
-                return true;
-            }
-            Method isSatisfiedBy = spec.getClass().getMethod("isSatisfiedBy", Object.class);
-            Object result = isSatisfiedBy.invoke(spec, task);
-            return !(result instanceof Boolean) || (Boolean) result;
-        } catch (NoSuchMethodException e) {
-            return true;
-        } catch (IllegalAccessException e) {
-            throw new IllegalStateException("Failed to evaluate onlyIf for " + task.getPath(), e);
-        } catch (InvocationTargetException e) {
-            Throwable cause = e.getCause();
-            if (cause instanceof RuntimeException) {
-                throw (RuntimeException) cause;
-            }
-            throw new IllegalStateException("Failed to evaluate onlyIf for " + task.getPath(), cause);
-        }
-    }
-
-    private static boolean isStopActionException(RuntimeException e) {
-        return e.getClass().getName().equals("org.gradle.api.tasks.StopActionException");
-    }
-
-    private static boolean isStopExecutionException(RuntimeException e) {
-        return e instanceof StopExecutionException
-            || e.getClass().getName().equals("org.gradle.api.tasks.StopExecutionException");
     }
 
     @Nullable

@@ -3,7 +3,6 @@ package org.gradle.internal.rustbridge.jvmhost;
 import gradle.substrate.v1.ExecuteTaskRequest;
 import gradle.substrate.v1.ExecuteTaskResponse;
 
-import org.gradle.api.Action;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.tasks.TaskContainer;
@@ -14,28 +13,22 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
 
 public class JvmTaskExecutionProviderAdapterTest {
     @Test
-    public void executesRealizedTaskActions() {
-        AtomicBoolean actionRan = new AtomicBoolean(false);
-        AtomicBoolean didWork = new AtomicBoolean(false);
-        Task task = task(":legacy", Collections.singletonList(t -> actionRan.set(true)), didWork);
+    public void reportsUnsupportedWhenGradleTaskEngineIsUnavailable() {
+        Task task = task(":legacy");
         JvmTaskExecutionProviderAdapter adapter = new JvmTaskExecutionProviderAdapter(registryFor(task));
 
         ExecuteTaskResponse response = adapter.executeTask(request(":legacy"));
 
-        assertTrue(response.getSuccess());
-        assertEquals("EXECUTED", response.getOutcome());
-        assertEquals("jvm_host_actions", response.getExecutionMode());
-        assertTrue(actionRan.get());
-        assertTrue(didWork.get());
+        assertFalse(response.getSuccess());
+        assertEquals("UNSUPPORTED", response.getOutcome());
+        assertEquals("jvm_unsupported", response.getExecutionMode());
+        assertEquals("Gradle task execution services are unavailable for task: :legacy", response.getErrorMessage());
     }
 
     @Test
@@ -76,7 +69,7 @@ public class JvmTaskExecutionProviderAdapterTest {
         });
     }
 
-    private static Task task(String path, List<Action<? super Task>> actions, AtomicBoolean didWork) {
+    private static Task task(String path) {
         TaskState state = state(false, null, false, false, false);
         return proxy(Task.class, (proxy, method, args) -> {
             switch (method.getName()) {
@@ -88,11 +81,6 @@ public class JvmTaskExecutionProviderAdapterTest {
                     return true;
                 case "getState":
                     return state;
-                case "getActions":
-                    return actions;
-                case "setDidWork":
-                    didWork.set((Boolean) args[0]);
-                    return null;
                 case "compareTo":
                     return 0;
                 default:
