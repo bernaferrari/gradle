@@ -24,6 +24,7 @@ public class SubstrateClient implements Closeable {
 
     private final ManagedChannel channel;
     private final boolean noop;
+    private final String noopReason;
 
     // Phase 0: Control
     private final ControlServiceGrpc.ControlServiceBlockingStub controlStub;
@@ -103,9 +104,10 @@ public class SubstrateClient implements Closeable {
     // Phase 6: JVM Compatibility Host
     private final String jvmHostSocketPath;
 
-    private SubstrateClient(ManagedChannel channel, boolean noop, String jvmHostSocketPath) {
+    private SubstrateClient(ManagedChannel channel, boolean noop, String noopReason, String jvmHostSocketPath) {
         this.channel = channel;
         this.noop = noop;
+        this.noopReason = noopReason;
         this.jvmHostSocketPath = jvmHostSocketPath;
         if (noop) {
             this.controlStub = null;
@@ -204,7 +206,7 @@ public class SubstrateClient implements Closeable {
             .forAddress(new DomainSocketAddress(socketPath))
             .usePlaintext()
             .build();
-        SubstrateClient client = new SubstrateClient(channel, false, jvmHostSocketPath);
+        SubstrateClient client = new SubstrateClient(channel, false, "", jvmHostSocketPath);
         try {
             client.performHandshake();
         } catch (IOException e) {
@@ -218,11 +220,20 @@ public class SubstrateClient implements Closeable {
      * Creates a no-op client that does nothing. Used when the substrate is disabled.
      */
     public static SubstrateClient noop() {
-        return new SubstrateClient(null, true, null);
+        return noop("disabled");
+    }
+
+    public static SubstrateClient noop(String reason) {
+        String normalizedReason = reason == null || reason.trim().isEmpty() ? "unspecified" : reason.trim();
+        return new SubstrateClient(null, true, normalizedReason, null);
     }
 
     public boolean isNoop() {
         return noop;
+    }
+
+    public String getNoopReason() {
+        return noopReason;
     }
 
     /**
@@ -426,7 +437,7 @@ public class SubstrateClient implements Closeable {
 
     private void throwIfNoop() {
         if (noop) {
-            throw new SubstrateException("Substrate client is in no-op mode");
+            throw new SubstrateException("Substrate client is in no-op mode: " + noopReason);
         }
     }
 

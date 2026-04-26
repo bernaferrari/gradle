@@ -81,7 +81,7 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
                 String javaHome = System.getProperty("java.home");
                 File installDir = new File(javaHome).getParentFile();
                 if (installDir == null) {
-                    return DaemonLauncher.noop();
+                    return DaemonLauncher.noop("daemon-install-dir-unavailable:" + javaHome);
                 }
                 daemonBinary = DaemonLauncher.resolveBinary(installDir);
             } else {
@@ -103,13 +103,28 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
             try {
                 client = launcher.launchOrConnect();
             } catch (Exception e) {
-                LOGGER.warn("[substrate] daemon launch/connect failed, bridge is running in no-op fallback mode: {}", e.getMessage(), e);
-                client = SubstrateClient.noop();
+                client = unavailableClient(options, "daemon-launch-or-connect-failed:" + e.getMessage(), e);
             }
             if (RustSubstrateOptions.isSubstrateEnabled(options) && client.isNoop()) {
-                LOGGER.warn("[substrate] Rust substrate is enabled but bridge is running in no-op fallback mode");
+                if (RustSubstrateOptions.isAuthoritative(options)) {
+                    throw new SubstrateException("Rust substrate is authoritative but unavailable: " + client.getNoopReason());
+                }
+                LOGGER.warn(
+                    "[substrate] Rust substrate is enabled but bridge is running in no-op fallback mode: {}",
+                    client.getNoopReason()
+                );
             }
             return client;
+        }
+
+        static SubstrateClient unavailableClient(InternalOptions options, String reason, @Nullable Throwable cause) {
+            if (RustSubstrateOptions.isAuthoritative(options)) {
+                throw cause == null
+                    ? new SubstrateException("Rust substrate is authoritative but unavailable: " + reason)
+                    : new SubstrateException("Rust substrate is authoritative but unavailable: " + reason, cause);
+            }
+            LOGGER.warn("[substrate] bridge is running in no-op fallback mode: {}", reason, cause);
+            return SubstrateClient.noop(reason);
         }
     }
 
