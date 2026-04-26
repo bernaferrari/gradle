@@ -23,7 +23,7 @@ struct TrackedWorker {
     worker_key: String,
     pid: u32,
     child: Option<tokio::process::Child>,
-    /// Whether this is a stub worker (no real process, spawned as fallback).
+    /// Whether this is a compatibility stub for non-process isolation.
     is_stub: bool,
     state: String,
     started_at_ms: i64,
@@ -241,7 +241,7 @@ impl WorkerProcessServiceImpl {
         }
     }
 
-    /// Insert a stub worker (no real process) and return the response.
+    /// Insert an explicit compatibility stub worker for non-process isolation.
     fn insert_stub_worker(
         &self,
         worker_id: String,
@@ -569,23 +569,27 @@ impl WorkerProcessService for WorkerProcessServiceImpl {
             }));
         }
 
-        let worker_id = self.generate_worker_id();
-
         // Try to spawn a real JVM process
-        let spawn_result = self.spawn_worker(&spec).await;
+        let (pid, child) = match self.spawn_worker(&spec).await {
+            Ok(spawned) => spawned,
+            Err(error) => {
+                tracing::warn!(
+                    worker_key = %worker_key,
+                    error = %error,
+                    "Failed to spawn process-isolated worker"
+                );
+                return Ok(Response::new(AcquireWorkerResponse {
+                    worker: None,
+                    reused: false,
+                    error_message: format!(
+                        "Failed to spawn process-isolated worker for key {}: {}",
+                        worker_key, error
+                    ),
+                }));
+            }
+        };
 
-        // If spawn fails, fall back to stub behavior
-        if let Err(e) = &spawn_result {
-            tracing::warn!(
-                worker_key = %worker_key,
-                error = %e,
-                "Failed to spawn real worker, using stub PID"
-            );
-            return Ok(self.insert_stub_worker(worker_id, worker_key, spec, now));
-        }
-
-        let (pid, child) = spawn_result
-            .expect("spawn result should be Ok after error branch was handled");
+        let worker_id = self.generate_worker_id();
 
         let lease_expires = if req.timeout_ms > 0 {
             now + req.timeout_ms
@@ -1612,6 +1616,41 @@ mod tests {
         // process mode should return a worker (may be stub if spawn fails)
         assert!(resp.worker.is_some());
         assert!(!resp.worker.as_ref().unwrap().connect_address.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_process_worker_spawn_failure_returns_error_not_stub() {
+        let svc = WorkerProcessServiceImpl::new();
+
+        let mut spec = make_spec("bad-process-worker");
+        spec.java_home = "/path/to/nonexistent/java/home".to_string();
+        spec.isolation_mode = "process".to_string();
+
+        let resp = svc
+            .acquire_worker(Request::new(AcquireWorkerRequest {
+                spec: Some(spec),
+                timeout_ms: 5000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.worker.is_none());
+        assert!(!resp.reused);
+        assert!(resp
+            .error_message
+            .contains("Failed to spawn process-isolated worker"));
+
+        let status = svc
+            .get_worker_status(Request::new(GetWorkerStatusRequest {
+                worker_key: "bad-process-worker".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(status.pool_size, 0);
+        assert_eq!(status.idle_count, 0);
     }
 
     #[tokio::test]
