@@ -14,11 +14,13 @@ use gradle_substrate_daemon::proto::{
 };
 use std::path::Path;
 use std::time::Duration;
+use tokio::sync::OnceCell;
 use tonic::transport::{Channel, Endpoint, Uri};
 
 const SOCKET_PATH: &str = "/tmp/substrate-test.sock";
+static DAEMON_READY: OnceCell<()> = OnceCell::const_new();
 
-async fn connect() -> Channel {
+async fn connect_result() -> Result<Channel, tonic::transport::Error> {
     let endpoint = Endpoint::from_static("http://[::]:0")
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(10));
@@ -35,7 +37,6 @@ async fn connect() -> Channel {
                 }
             }))
             .await
-            .expect("Failed to connect to substrate daemon via UDS")
     }
     #[cfg(not(unix))]
     {
@@ -44,16 +45,39 @@ async fn connect() -> Channel {
 }
 
 async fn ensure_daemon_running() {
+    DAEMON_READY
+        .get_or_init(|| async {
+            ensure_daemon_running_inner().await;
+        })
+        .await;
+}
+
+async fn ensure_daemon_running_inner() {
     if Path::new(SOCKET_PATH).exists() {
-        return;
+        if connect_result().await.is_ok() {
+            return;
+        }
+        let _ = std::fs::remove_file(SOCKET_PATH);
     }
     eprintln!("[e2e] Starting daemon...");
 
     let daemon_bin = std::env::var("SUBSTRATE_DAEMON_BIN").unwrap_or_else(|_| {
+        if let Ok(path) = std::env::var("CARGO_BIN_EXE_gradle-substrate-daemon") {
+            return path;
+        }
+
         // CARGO_MANIFEST_DIR points to substrate/, workspace root is one level up.
         let manifest = std::env::var("CARGO_MANIFEST_DIR")
             .unwrap_or_else(|_| ".".to_string());
         let workspace = Path::new(&manifest).parent().unwrap_or(Path::new("."));
+        let debug_bin = workspace
+            .join("target")
+            .join("debug")
+            .join("gradle-substrate-daemon");
+        if debug_bin.exists() {
+            return debug_bin.to_string_lossy().to_string();
+        }
+
         workspace
             .join("target")
             .join("release")
@@ -72,11 +96,17 @@ async fn ensure_daemon_running() {
 
     for _ in 0..50 {
         tokio::time::sleep(Duration::from_millis(100)).await;
-        if Path::new(SOCKET_PATH).exists() {
+        if connect_result().await.is_ok() {
             return;
         }
     }
     panic!("Daemon failed to start within 5 seconds");
+}
+
+async fn connect() -> Channel {
+    connect_result()
+        .await
+        .expect("Failed to connect to substrate daemon via UDS")
 }
 
 fn hex(bytes: &[u8]) -> String {
