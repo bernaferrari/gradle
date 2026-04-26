@@ -370,6 +370,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 error_message: "Task graph contains cycles".to_string(),
                 total_tasks: 0,
                 critical_path_ms: 0,
+                plan_source: plan_response.plan_source,
             }));
         }
 
@@ -435,6 +436,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 error_message: "No tasks to execute".to_string(),
                 total_tasks: 0,
                 critical_path_ms: 0,
+                plan_source: plan_response.plan_source,
             }));
         }
 
@@ -480,6 +482,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
             total_tasks = total_tasks,
             critical_path_ms = plan_response.critical_path_ms,
             ready_tasks = plan_response.ready_to_execute,
+            plan_source = %plan_response.plan_source,
             "Build execution started"
         );
 
@@ -488,6 +491,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
             error_message: String::new(),
             total_tasks,
             critical_path_ms: plan_response.critical_path_ms,
+            plan_source: plan_response.plan_source,
         }))
     }
 
@@ -509,6 +513,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
             .await?;
 
         if !start_resp.get_ref().accepted {
+            let plan_source = start_resp.get_ref().plan_source.clone();
             return Ok(Response::new(RunBuildResponse {
                 build_id: build_id_str.clone(),
                 final_status: "FAILED".to_string(),
@@ -522,10 +527,12 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 task_details: vec![],
                 tasks_up_to_date: 0,
                 tasks_from_cache: 0,
+                plan_source,
             }));
         }
 
         let total_tasks = start_resp.get_ref().total_tasks;
+        let plan_source = start_resp.get_ref().plan_source.clone();
         let max_parallelism = req.max_parallelism.max(1) as usize;
         let task_contexts = req.task_contexts;
 
@@ -891,6 +898,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
             jvm_forwarded = jvm_forward_count,
             up_to_date = up_to_date_count,
             from_cache = from_cache_count,
+            plan_source = %plan_source,
             duration_ms = total_duration,
             "RunBuild completed"
         );
@@ -914,6 +922,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
             task_details,
             tasks_up_to_date: up_to_date_count,
             tasks_from_cache: from_cache_count,
+            plan_source,
         }))
     }
 
@@ -1614,6 +1623,7 @@ mod tests {
 
         assert!(started.accepted);
         assert_eq!(started.total_tasks, 1);
+        assert_eq!(started.plan_source, "build-plan-shadow");
 
         let next = svc
             .get_next_task(Request::new(GetNextTaskRequest {
@@ -2369,6 +2379,7 @@ mod tests {
 
         assert_eq!(resp.final_status, "COMPLETED");
         assert_eq!(resp.total_tasks, 3);
+        assert_eq!(resp.plan_source, "registered-tasks");
         assert_eq!(resp.tasks_forwarded_to_jvm, 3);
         assert_eq!(resp.tasks_succeeded, 0);
         assert_eq!(resp.tasks_failed, 0);
@@ -2378,6 +2389,75 @@ mod tests {
             assert_eq!(d.execution_mode, "jvm_forward");
             assert_eq!(d.outcome, "JVM_FORWARD");
         }
+    }
+
+    #[tokio::test]
+    async fn test_run_build_reports_shadow_plan_source() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(super::super::build_plan_shadow::BuildPlanShadowStore::new(
+            temp.path().to_path_buf(),
+        ));
+        let history = Arc::new(super::super::execution_history::ExecutionHistoryServiceImpl::new(
+            temp.path().join("history"),
+        ));
+        let task_graph = Arc::new(
+            super::super::task_graph::TaskGraphServiceImpl::with_history_and_shadow(
+                history,
+                Arc::clone(&store),
+            ),
+        );
+        let svc = make_svc_with_task_graph(Arc::clone(&task_graph));
+        let build_id = "rb-shadow-source";
+
+        register_chain(&svc, build_id, &[(":staleFallback", "StaleTask", &[])]).await;
+
+        store
+            .persist_plan(
+                &super::super::build_plan_ir::CanonicalBuildPlan {
+                    schema_version: super::super::build_plan_ir::BUILD_PLAN_SCHEMA_VERSION,
+                    build_id: build_id.to_string(),
+                    projects: Vec::new(),
+                    tasks: vec![super::super::build_plan_ir::CanonicalBuildPlanTask {
+                        path: ":fromShadow".to_string(),
+                        project_path: ":".to_string(),
+                        implementation_id: "ShadowTask".to_string(),
+                        depends_on: Vec::new(),
+                        inputs: Default::default(),
+                        outputs: Vec::new(),
+                        worker_isolation: "compat-jvm".to_string(),
+                        should_run_after: Vec::new(),
+                        must_run_after: Vec::new(),
+                        finalized_by: Vec::new(),
+                        cacheability: "unknown".to_string(),
+                        local_state: Vec::new(),
+                        destroyables: Vec::new(),
+                    }],
+                    dependencies: Vec::new(),
+                    toolchains: Vec::new(),
+                    metadata: Default::default(),
+                },
+                "test-shadow",
+            )
+            .unwrap();
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: build_id.to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: Default::default(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.final_status, "COMPLETED");
+        assert_eq!(resp.plan_source, "build-plan-shadow");
+        assert_eq!(resp.total_tasks, 1);
+        assert_eq!(resp.tasks_forwarded_to_jvm, 1);
+        assert_eq!(resp.task_details.len(), 1);
+        assert_eq!(resp.task_details[0].task_path, ":fromShadow");
+        assert_eq!(resp.task_details[0].task_type, "ShadowTask");
     }
 
     #[tokio::test]

@@ -118,6 +118,7 @@ message StartBuildResponse {
   string error_message = 2;
   int32 total_tasks = 3;
   int64 critical_path_ms = 4;
+  string plan_source = 5;
 }
 message CancelBuildRequest {
   string build_id = 1;
@@ -201,6 +202,7 @@ message RunBuildResponse {
   repeated TaskExecutionDetail task_details = 10;
   int32 tasks_up_to_date = 11;
   int32 tasks_from_cache = 12;
+  string plan_source = 13;
 }
 
 message TaskExecutionDetail {
