@@ -27,6 +27,7 @@ class RunResult:
     exit_code: int
     output: str
     tasks: list[str]
+    substrate_noop: bool = False
     
     def to_dict(self):
         return {
@@ -34,16 +35,61 @@ class RunResult:
             "output_preview": self.output[:1000] if self.output else "",
             "tasks": self.tasks,
             "task_count": len(self.tasks),
+            "substrate_noop": self.substrate_noop,
         }
 
-def run_build(project_dir: str, substrate: bool = False, timeout: int = 300) -> RunResult:
-    """Run gradle on a project directory."""
+
+def build_gradle_command(
+    project_dir: str,
+    substrate: bool = False,
+    tasks: list[str] | None = None,
+    substrate_mode: str = "shadow",
+    daemon_binary: str | None = None,
+) -> list[str]:
+    """Build the Gradle invocation used by corpus runs."""
     cmd = ["./gradlew"] if os.path.exists(os.path.join(project_dir, "gradlew")) else ["gradle"]
-    cmd.extend(["clean", "build", "--no-daemon", "--console=plain"])
+    cmd.extend(tasks or ["clean", "build"])
+    cmd.extend(["--no-daemon", "--console=plain"])
     
     if substrate:
-        # Enable Rust substrate mode
-        cmd.extend(["-Dorg.gradle.rust.substrate.enable=true"])
+        # Keep this in sync with RustSubstrateOptions.java.
+        cmd.extend([
+            "-Dorg.gradle.rust.substrate.enabled=true",
+            f"-Dorg.gradle.rust.substrate.mode={substrate_mode}",
+        ])
+        if daemon_binary:
+            cmd.append(f"-Dorg.gradle.rust.substrate.daemon.path={daemon_binary}")
+
+    return cmd
+
+
+def detect_substrate_noop(output: str) -> bool:
+    """Detect when a substrate run fell back to Java/no-op instead of exercising Rust."""
+    markers = (
+        "no-op fallback mode",
+        "Substrate client is in no-op mode",
+        "daemon-binary-missing:",
+        "substrate-disabled",
+    )
+    return any(marker in output for marker in markers)
+
+
+def run_build(
+    project_dir: str,
+    substrate: bool = False,
+    timeout: int = 300,
+    tasks: list[str] | None = None,
+    substrate_mode: str = "shadow",
+    daemon_binary: str | None = None,
+) -> RunResult:
+    """Run gradle on a project directory."""
+    cmd = build_gradle_command(
+        project_dir,
+        substrate=substrate,
+        tasks=tasks,
+        substrate_mode=substrate_mode,
+        daemon_binary=daemon_binary,
+    )
     
     try:
         result = subprocess.run(
@@ -53,6 +99,7 @@ def run_build(project_dir: str, substrate: bool = False, timeout: int = 300) -> 
             text=True,
             timeout=timeout,
         )
+        output = result.stdout + result.stderr
         
         # Extract tasks from output
         tasks = []
@@ -63,8 +110,9 @@ def run_build(project_dir: str, substrate: bool = False, timeout: int = 300) -> 
         
         return RunResult(
             exit_code=result.returncode,
-            output=result.stdout,
+            output=output,
             tasks=tasks,
+            substrate_noop=substrate and detect_substrate_noop(output),
         )
     except subprocess.TimeoutExpired:
         return RunResult(
@@ -85,6 +133,14 @@ def main():
     parser.add_argument("--projects", nargs="+", help="Multiple projects to run")
     parser.add_argument("--mode", choices=["reference", "shadow"], default="reference",
                        help="Run mode: reference (compare upstream vs substrate) or shadow")
+    parser.add_argument("--tasks", nargs="+", default=["clean", "build"],
+                       help="Gradle tasks to run for each project")
+    parser.add_argument("--substrate-mode", choices=["shadow", "authoritative"], default="shadow",
+                       help="Rust substrate mode used for the candidate run")
+    parser.add_argument("--daemon-binary", default=None,
+                       help="Path to gradle-substrate-daemon for the substrate run")
+    parser.add_argument("--allow-noop-substrate", action="store_true",
+                       help="Do not fail if the substrate candidate falls back to no-op mode")
     parser.add_argument("--timeout", type=int, default=300, help="Timeout per project in seconds")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
     parser.add_argument("--output-dir", default=None, help="Directory for results")
@@ -115,21 +171,37 @@ def main():
         
         # Run upstream
         print("  Running upstream Gradle...")
-        upstream = run_build(project, substrate=False, timeout=args.timeout)
+        upstream = run_build(project, substrate=False, timeout=args.timeout, tasks=args.tasks)
         
         # Run with substrate
         print("  Running Rust substrate...")
-        substrate = run_build(project, substrate=True, timeout=args.timeout)
+        substrate = run_build(
+            project,
+            substrate=True,
+            timeout=args.timeout,
+            tasks=args.tasks,
+            substrate_mode=args.substrate_mode,
+            daemon_binary=args.daemon_binary,
+        )
+        substrate_usable = args.allow_noop_substrate or not substrate.substrate_noop
         
         results[os.path.basename(project)] = {
             "upstream": upstream.to_dict(),
             "substrate": substrate.to_dict(),
-            "match": upstream.tasks == substrate.tasks and upstream.exit_code == substrate.exit_code,
+            "match": (
+                substrate_usable
+                and upstream.tasks == substrate.tasks
+                and upstream.exit_code == substrate.exit_code
+            ),
         }
+        if substrate.substrate_noop and not args.allow_noop_substrate:
+            results[os.path.basename(project)]["error"] = "Substrate candidate used no-op fallback"
         
         if args.verbose:
             print(f"    Upstream tasks: {len(upstream.tasks)}")
             print(f"    Substrate tasks: {len(substrate.tasks)}")
+            if substrate.substrate_noop:
+                print("    Substrate candidate used no-op fallback")
             if upstream.tasks != substrate.tasks:
                 missing = set(upstream.tasks) - set(substrate.tasks)
                 extra = set(substrate.tasks) - set(upstream.tasks)

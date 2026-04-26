@@ -11,8 +11,11 @@ python3 tools/corpus_runner/run.py --projects /path/to/corpus
 # Run on a single project
 python3 tools/corpus_runner/run.py --project /path/to/single/project
 
-# Run in shadow mode (Rust + JVM in parallel)
-python3 tools/corpus_runner/run.py --project /path/to/project --mode shadow
+# Run in shadow mode with an explicit substrate daemon binary
+python3 tools/corpus_runner/run.py \
+  --project /path/to/project \
+  --substrate-mode shadow \
+  --daemon-binary /path/to/gradle-substrate-daemon
 
 # Run with verbose output
 python3 tools/corpus_runner/run.py --project /path/to/project --verbose
@@ -31,6 +34,10 @@ It then compares:
 - Build duration (informational only)
 - Output files
 - Diagnostics/warnings
+
+The substrate candidate is considered invalid if Gradle reports that it used
+no-op fallback mode. Use `--allow-noop-substrate` only when explicitly testing
+fallback behavior rather than Rust parity.
 
 ## Corpus Structure
 
