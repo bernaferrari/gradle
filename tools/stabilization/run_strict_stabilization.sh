@@ -23,6 +23,7 @@ run_step() {
 echo "Strict stabilization mode: ${MODE}"
 
 run_step "Run upstream drift checks (proto + map + metadata)" ./tools/upstream_map/check_drift.sh
+run_step "Run corpus runner contract tests" python3 -m unittest discover -s tools/corpus_runner -p 'test_*.py'
 
 run_step "Compile Java bridge and bridge test classes" ./gradlew -q :rust-bridge:compileJava :rust-bridge:testClasses
 run_step "Type-check Rust daemon" cargo check -p gradle-substrate-daemon
