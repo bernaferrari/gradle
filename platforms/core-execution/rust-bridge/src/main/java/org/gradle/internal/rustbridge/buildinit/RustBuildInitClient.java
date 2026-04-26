@@ -12,6 +12,7 @@ import gradle.substrate.v1.RecordSettingsDetailResponse;
 import gradle.substrate.v1.SettingsDetailEntry;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.rustbridge.SubstrateException;
 import org.slf4j.Logger;
 
 import java.util.List;
@@ -36,7 +37,7 @@ public class RustBuildInitClient {
                                                         List<String> requestedBuildFeatures,
                                                         String currentDir) {
         if (client.isNoop()) {
-            return InitBuildSettingsResponse.getDefaultInstance();
+            throw unavailable("init build settings");
         }
 
         try {
@@ -52,13 +53,13 @@ public class RustBuildInitClient {
                     .build());
         } catch (Exception e) {
             LOGGER.debug("[substrate:buildinit] init build settings failed", e);
-            return InitBuildSettingsResponse.getDefaultInstance();
+            throw failed("init build settings", e);
         }
     }
 
     public boolean recordSettingsDetail(String buildId, String key, String value) {
         if (client.isNoop()) {
-            return false;
+            throw unavailable("record settings detail");
         }
 
         try {
@@ -75,13 +76,13 @@ public class RustBuildInitClient {
             return response.getAccepted();
         } catch (Exception e) {
             LOGGER.debug("[substrate:buildinit] record settings detail failed", e);
-            return false;
+            throw failed("record settings detail", e);
         }
     }
 
     public GetBuildInitStatusResponse getBuildInitStatus(String buildId) {
         if (client.isNoop()) {
-            return GetBuildInitStatusResponse.getDefaultInstance();
+            throw unavailable("get build init status");
         }
 
         try {
@@ -91,14 +92,14 @@ public class RustBuildInitClient {
                     .build());
         } catch (Exception e) {
             LOGGER.debug("[substrate:buildinit] get build init status failed", e);
-            return GetBuildInitStatusResponse.getDefaultInstance();
+            throw failed("get build init status", e);
         }
     }
 
     public boolean recordInitScript(String buildId, String scriptPath,
                                      boolean success, String errorMessage, long durationMs) {
         if (client.isNoop()) {
-            return false;
+            throw unavailable("record init script");
         }
 
         try {
@@ -113,7 +114,18 @@ public class RustBuildInitClient {
             return response.getAccepted();
         } catch (Exception e) {
             LOGGER.debug("[substrate:buildinit] record init script failed", e);
-            return false;
+            throw failed("record init script", e);
         }
+    }
+
+    private SubstrateException unavailable(String operation) {
+        return new SubstrateException("Rust build init service is unavailable for " + operation + ": " + client.getNoopReason());
+    }
+
+    private SubstrateException failed(String operation, Exception cause) {
+        if (cause instanceof SubstrateException) {
+            return (SubstrateException) cause;
+        }
+        return new SubstrateException("Rust build init service failed to " + operation, cause);
     }
 }

@@ -14,6 +14,7 @@ import gradle.substrate.v1.WorkerProcessServiceGrpc;
 import gradle.substrate.v1.WorkerSpec;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.rustbridge.SubstrateException;
 import org.slf4j.Logger;
 
 import java.util.List;
@@ -91,7 +92,7 @@ public class RustWorkerProcessClient {
                                         String workingDir, Map<String, String> jvmArgs,
                                         int maxMemoryMb, boolean daemon, long timeoutMs) {
         if (client.isNoop()) {
-            return new AcquireResult(false, null, false, "Substrate not available");
+            throw unavailable("acquire worker");
         }
 
         try {
@@ -125,7 +126,7 @@ public class RustWorkerProcessClient {
             }
         } catch (Exception e) {
             LOGGER.debug("[substrate:worker] acquire worker failed", e);
-            return new AcquireResult(false, null, false, e.getMessage());
+            throw failed("acquire worker", e);
         }
     }
 
@@ -134,7 +135,7 @@ public class RustWorkerProcessClient {
      */
     public boolean releaseWorker(String workerId, boolean healthy) {
         if (client.isNoop()) {
-            return false;
+            throw unavailable("release worker");
         }
 
         try {
@@ -146,7 +147,7 @@ public class RustWorkerProcessClient {
             return response.getAccepted();
         } catch (Exception e) {
             LOGGER.debug("[substrate:worker] release worker failed", e);
-            return false;
+            throw failed("release worker", e);
         }
     }
 
@@ -155,7 +156,7 @@ public class RustWorkerProcessClient {
      */
     public boolean stopWorker(String workerId, boolean force) {
         if (client.isNoop()) {
-            return false;
+            throw unavailable("stop worker");
         }
 
         try {
@@ -167,7 +168,7 @@ public class RustWorkerProcessClient {
             return response.getStopped();
         } catch (Exception e) {
             LOGGER.debug("[substrate:worker] stop worker failed", e);
-            return false;
+            throw failed("stop worker", e);
         }
     }
 
@@ -176,7 +177,7 @@ public class RustWorkerProcessClient {
      */
     public GetWorkerStatusResponse getWorkerStatus(String workerKey) {
         if (client.isNoop()) {
-            return GetWorkerStatusResponse.getDefaultInstance();
+            throw unavailable("get worker status");
         }
 
         try {
@@ -188,7 +189,7 @@ public class RustWorkerProcessClient {
                 .getWorkerStatus(builder.build());
         } catch (Exception e) {
             LOGGER.debug("[substrate:worker] get worker status failed", e);
-            return GetWorkerStatusResponse.getDefaultInstance();
+            throw failed("get worker status", e);
         }
     }
 
@@ -198,7 +199,7 @@ public class RustWorkerProcessClient {
     public boolean configurePool(int maxPoolSize, long idleTimeoutMs, int maxPerKey,
                                   boolean enableHealthChecks) {
         if (client.isNoop()) {
-            return false;
+            throw unavailable("configure pool");
         }
 
         try {
@@ -212,7 +213,18 @@ public class RustWorkerProcessClient {
             return response.getApplied();
         } catch (Exception e) {
             LOGGER.debug("[substrate:worker] configure pool failed", e);
-            return false;
+            throw failed("configure pool", e);
         }
+    }
+
+    private SubstrateException unavailable(String operation) {
+        return new SubstrateException("Rust worker process service is unavailable for " + operation + ": " + client.getNoopReason());
+    }
+
+    private SubstrateException failed(String operation, Exception cause) {
+        if (cause instanceof SubstrateException) {
+            return (SubstrateException) cause;
+        }
+        return new SubstrateException("Rust worker process service failed to " + operation, cause);
     }
 }

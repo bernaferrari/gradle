@@ -16,6 +16,7 @@ import gradle.substrate.v1.TestSummaryResponse;
 import gradle.substrate.v1.TestSuiteDescriptor;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.rustbridge.SubstrateException;
 import org.slf4j.Logger;
 
 import java.util.List;
@@ -37,7 +38,7 @@ public class RustTestExecutionClient {
     public boolean registerTestSuite(String buildId, String suiteId, String suiteName,
                                       String suiteType, int testCount, String modulePath) {
         if (client.isNoop()) {
-            return false;
+            throw unavailable("register test suite");
         }
 
         try {
@@ -57,7 +58,7 @@ public class RustTestExecutionClient {
             return response.getAccepted();
         } catch (Exception e) {
             LOGGER.debug("[substrate:testexec] register test suite failed for {}", suiteId, e);
-            return false;
+            throw failed("register test suite", e);
         }
     }
 
@@ -67,7 +68,7 @@ public class RustTestExecutionClient {
                                      String failureMessage, String failureType,
                                      List<String> failureStackTrace) {
         if (client.isNoop()) {
-            return false;
+            throw unavailable("report test result");
         }
 
         try {
@@ -92,13 +93,13 @@ public class RustTestExecutionClient {
             return response.getAccepted();
         } catch (Exception e) {
             LOGGER.debug("[substrate:testexec] report test result failed for {}", testId, e);
-            return false;
+            throw failed("report test result", e);
         }
     }
 
     public GetTestReportResponse getTestReport(String buildId) {
         if (client.isNoop()) {
-            return GetTestReportResponse.getDefaultInstance();
+            throw unavailable("get test report");
         }
 
         try {
@@ -108,13 +109,13 @@ public class RustTestExecutionClient {
                     .build());
         } catch (Exception e) {
             LOGGER.debug("[substrate:testexec] get test report failed", e);
-            return GetTestReportResponse.getDefaultInstance();
+            throw failed("get test report", e);
         }
     }
 
     public GetTestResultsByOutcomeResponse getTestResultsByOutcome(String buildId, String outcome) {
         if (client.isNoop()) {
-            return GetTestResultsByOutcomeResponse.getDefaultInstance();
+            throw unavailable("get test results by outcome");
         }
 
         try {
@@ -125,13 +126,13 @@ public class RustTestExecutionClient {
                     .build());
         } catch (Exception e) {
             LOGGER.debug("[substrate:testexec] get test results by outcome failed", e);
-            return GetTestResultsByOutcomeResponse.getDefaultInstance();
+            throw failed("get test results by outcome", e);
         }
     }
 
     public DetectFlakyTestsResponse detectFlakyTests(String buildId) {
         if (client.isNoop()) {
-            return DetectFlakyTestsResponse.getDefaultInstance();
+            throw unavailable("detect flaky tests");
         }
 
         try {
@@ -141,13 +142,13 @@ public class RustTestExecutionClient {
                     .build());
         } catch (Exception e) {
             LOGGER.debug("[substrate:testexec] detect flaky tests failed", e);
-            return DetectFlakyTestsResponse.getDefaultInstance();
+            throw failed("detect flaky tests", e);
         }
     }
 
     public TestSummaryResponse getTestSummary(String buildId) {
         if (client.isNoop()) {
-            return TestSummaryResponse.getDefaultInstance();
+            throw unavailable("get test summary");
         }
 
         try {
@@ -157,7 +158,18 @@ public class RustTestExecutionClient {
                     .build());
         } catch (Exception e) {
             LOGGER.debug("[substrate:testexec] get test summary failed", e);
-            return TestSummaryResponse.getDefaultInstance();
+            throw failed("get test summary", e);
         }
+    }
+
+    private SubstrateException unavailable(String operation) {
+        return new SubstrateException("Rust test execution service is unavailable for " + operation + ": " + client.getNoopReason());
+    }
+
+    private SubstrateException failed(String operation, Exception cause) {
+        if (cause instanceof SubstrateException) {
+            return (SubstrateException) cause;
+        }
+        return new SubstrateException("Rust test execution service failed to " + operation, cause);
     }
 }

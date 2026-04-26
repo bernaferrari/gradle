@@ -11,6 +11,7 @@ import gradle.substrate.v1.ReportProblemRequest;
 import gradle.substrate.v1.ReportProblemResponse;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.rustbridge.SubstrateException;
 import org.slf4j.Logger;
 
 import java.util.List;
@@ -34,7 +35,7 @@ public class RustProblemReportingClient {
                                   int lineNumber, int column, String contextualLabel,
                                   String documentationUrl) {
         if (client.isNoop()) {
-            return false;
+            throw unavailable("report problem");
         }
 
         try {
@@ -59,13 +60,13 @@ public class RustProblemReportingClient {
             return response.getAccepted();
         } catch (Exception e) {
             LOGGER.debug("[substrate:problems] report problem failed", e);
-            return false;
+            throw failed("report problem", e);
         }
     }
 
     public GetProblemsResponse getProblems(String buildId) {
         if (client.isNoop()) {
-            return GetProblemsResponse.getDefaultInstance();
+            throw unavailable("get problems");
         }
 
         try {
@@ -75,13 +76,13 @@ public class RustProblemReportingClient {
                     .build());
         } catch (Exception e) {
             LOGGER.debug("[substrate:problems] get problems failed", e);
-            return GetProblemsResponse.getDefaultInstance();
+            throw failed("get problems", e);
         }
     }
 
     public GetProblemsResponse getProblemsBySeverity(String buildId, String severity) {
         if (client.isNoop()) {
-            return GetProblemsResponse.getDefaultInstance();
+            throw unavailable("get problems by severity");
         }
 
         try {
@@ -92,13 +93,13 @@ public class RustProblemReportingClient {
                     .build());
         } catch (Exception e) {
             LOGGER.debug("[substrate:problems] get problems by severity failed", e);
-            return GetProblemsResponse.getDefaultInstance();
+            throw failed("get problems by severity", e);
         }
     }
 
     public int clearProblems(String buildId) {
         if (client.isNoop()) {
-            return 0;
+            throw unavailable("clear problems");
         }
 
         try {
@@ -109,7 +110,18 @@ public class RustProblemReportingClient {
             return response.getCleared();
         } catch (Exception e) {
             LOGGER.debug("[substrate:problems] clear problems failed", e);
-            return 0;
+            throw failed("clear problems", e);
         }
+    }
+
+    private SubstrateException unavailable(String operation) {
+        return new SubstrateException("Rust problem reporting service is unavailable for " + operation + ": " + client.getNoopReason());
+    }
+
+    private SubstrateException failed(String operation, Exception cause) {
+        if (cause instanceof SubstrateException) {
+            return (SubstrateException) cause;
+        }
+        return new SubstrateException("Rust problem reporting service failed to " + operation, cause);
     }
 }

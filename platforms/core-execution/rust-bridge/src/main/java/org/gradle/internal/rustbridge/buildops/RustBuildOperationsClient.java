@@ -13,6 +13,7 @@ import gradle.substrate.v1.StartOperationResponse;
 import gradle.substrate.v1.StreamEventsRequest;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.rustbridge.SubstrateException;
 import org.slf4j.Logger;
 
 import java.util.Collections;
@@ -37,7 +38,7 @@ public class RustBuildOperationsClient {
     public boolean startOperation(String operationId, String displayName,
                                    String operationType, String parentId, Map<String, String> metadata) {
         if (client.isNoop()) {
-            return false;
+            throw unavailable("start operation");
         }
 
         try {
@@ -54,14 +55,14 @@ public class RustBuildOperationsClient {
             return response.getSuccess();
         } catch (Exception e) {
             LOGGER.debug("[substrate:buildops] start operation failed for {}", operationId, e);
-            return false;
+            throw failed("start operation", e);
         }
     }
 
     public boolean completeOperation(String operationId, long durationMs,
                                       boolean success, String outcome) {
         if (client.isNoop()) {
-            return false;
+            throw unavailable("complete operation");
         }
 
         try {
@@ -75,14 +76,14 @@ public class RustBuildOperationsClient {
             return response.getSuccess();
         } catch (Exception e) {
             LOGGER.debug("[substrate:buildops] complete operation failed for {}", operationId, e);
-            return false;
+            throw failed("complete operation", e);
         }
     }
 
     public boolean reportProgress(String operationId, String message,
                                    float progress, long elapsedMs) {
         if (client.isNoop()) {
-            return false;
+            throw unavailable("report progress");
         }
 
         try {
@@ -96,13 +97,13 @@ public class RustBuildOperationsClient {
             return response.getAcknowledged();
         } catch (Exception e) {
             LOGGER.debug("[substrate:buildops] report progress failed for {}", operationId, e);
-            return false;
+            throw failed("report progress", e);
         }
     }
 
     public GetBuildSummaryResponse getBuildSummary() {
         if (client.isNoop()) {
-            return GetBuildSummaryResponse.getDefaultInstance();
+            throw unavailable("get build summary");
         }
 
         try {
@@ -110,7 +111,7 @@ public class RustBuildOperationsClient {
                 .getBuildSummary(GetBuildSummaryRequest.newBuilder().build());
         } catch (Exception e) {
             LOGGER.debug("[substrate:buildops] get build summary failed", e);
-            return GetBuildSummaryResponse.getDefaultInstance();
+            throw failed("get build summary", e);
         }
     }
 
@@ -119,7 +120,7 @@ public class RustBuildOperationsClient {
      */
     public Iterator<BuildEvent> streamEvents(String buildId) {
         if (client.isNoop()) {
-            return Collections.emptyIterator();
+            throw unavailable("stream events");
         }
 
         try {
@@ -129,7 +130,18 @@ public class RustBuildOperationsClient {
                     .build());
         } catch (Exception e) {
             LOGGER.debug("[substrate:buildops] stream events failed for build {}", buildId, e);
-            return Collections.emptyIterator();
+            throw failed("stream events", e);
         }
+    }
+
+    private SubstrateException unavailable(String operation) {
+        return new SubstrateException("Rust build operations service is unavailable for " + operation + ": " + client.getNoopReason());
+    }
+
+    private SubstrateException failed(String operation, Exception cause) {
+        if (cause instanceof SubstrateException) {
+            return (SubstrateException) cause;
+        }
+        return new SubstrateException("Rust build operations service failed to " + operation, cause);
     }
 }
