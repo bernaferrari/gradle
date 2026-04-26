@@ -16,6 +16,7 @@ import org.gradle.internal.rustbridge.dependency.RustDependencyResolutionClient;
 import org.gradle.internal.rustbridge.history.RustExecutionHistoryClient;
 import org.gradle.internal.rustbridge.jvmhost.BuildPlanTaskSelectionSnapshot;
 import org.gradle.internal.rustbridge.jvmhost.JvmHostServiceImpl;
+import org.gradle.internal.rustbridge.jvmhost.JvmTaskExecutionProviderAdapter;
 import org.gradle.internal.rustbridge.jvmhost.ProjectModelProviderAdapter;
 import org.gradle.internal.rustbridge.metrics.RustBuildMetricsClient;
 import org.gradle.internal.rustbridge.shadow.BuildFinishMismatchLogger;
@@ -232,6 +233,7 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
             if (serviceImpl != null) {
                 serviceImpl.setProjectModelProvider(ProjectModelProviderAdapter.fromServiceRegistry(services));
                 serviceImpl.setTaskSelectionSnapshot(taskSelectionSnapshot);
+                serviceImpl.setTaskExecutionProvider(JvmTaskExecutionProviderAdapter.fromServiceRegistry(services));
             }
         }
 
