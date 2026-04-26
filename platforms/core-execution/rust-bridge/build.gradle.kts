@@ -68,7 +68,7 @@ tasks.named<ProcessResources>("processResources") {
 // This works around javac's inability to resolve proto types when compiling 800+ files
 // together with Gradle's strict-compile flags (-XDshouldStopPolicyIfError=FLOW, etc.)
 
-val compileProtoJava by tasks.registering(JavaCompile::class) {
+val compileProtoJava = tasks.register<JavaCompile>("compileProtoJava") {
     description = "Compiles protobuf-generated Java and gRPC sources"
     group = "build"
 
