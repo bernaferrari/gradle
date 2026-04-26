@@ -2,6 +2,7 @@ package org.gradle.internal.rustbridge.jvmhost;
 
 import gradle.substrate.v1.BuildPlan;
 import gradle.substrate.v1.BuildPlanProject;
+import gradle.substrate.v1.BuildPlanTask;
 
 import org.gradle.api.logging.Logging;
 import org.jspecify.annotations.Nullable;
@@ -108,8 +109,7 @@ public class JvmHostServiceImpl {
         BuildPlan.Builder plan = BuildPlan.newBuilder()
             .setSchemaVersion(1)
             .setBuildId(buildId)
-            .putMetadata("source", "jvm-host")
-            .putMetadata("taskSource", "not-yet-realized");
+            .putMetadata("source", "jvm-host");
 
         for (ProjectModelEntry entry : getProjectModels()) {
             plan.addProjects(BuildPlanProject.newBuilder()
@@ -119,7 +119,19 @@ public class JvmHostServiceImpl {
                 .build());
         }
 
+        List<BuildPlanTask> tasks = getBuildPlanTasks();
+        plan.addAllTasks(tasks);
+        plan.putMetadata("taskSource", tasks.isEmpty() ? "jvm-host-empty" : "jvm-host-realized-tasks");
+        plan.putMetadata("jvmHostTaskCount", Integer.toString(tasks.size()));
+
         return plan.build();
+    }
+
+    public List<BuildPlanTask> getBuildPlanTasks() {
+        if (projectModelProvider == null) {
+            return java.util.Collections.emptyList();
+        }
+        return projectModelProvider.getBuildPlanTasks();
     }
 
     /**
@@ -128,6 +140,7 @@ public class JvmHostServiceImpl {
      */
     public interface ProjectModelProvider {
         List<ProjectModelEntry> getProjectModels();
+        List<BuildPlanTask> getBuildPlanTasks();
         List<ResolvedArtifactEntry> resolveArtifacts(String projectPath, String configurationName);
     }
 

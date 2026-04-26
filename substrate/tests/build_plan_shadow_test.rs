@@ -5,15 +5,17 @@ use std::sync::Arc;
 use gradle_substrate_daemon::client::jvm_host::JvmHostClient;
 use gradle_substrate_daemon::client::jvm_host_bridge::JvmHostBridge;
 use gradle_substrate_daemon::proto::bootstrap_service_server::BootstrapService;
-use gradle_substrate_daemon::proto::jvm_host_service_server::{JvmHostService, JvmHostServiceServer};
-use gradle_substrate_daemon::proto::{
-    BuildPlan, EvaluateScriptRequest, EvaluateScriptResponse, GetBuildEnvironmentRequest,
-    GetBuildEnvironmentResponse, GetBuildModelRequest, GetBuildModelResponse, GetBuildPlanRequest,
-    GetBuildPlanResponse, InitBuildRequest, ProjectModel, ResolveConfigRequest,
-    ResolveConfigResponse,
+use gradle_substrate_daemon::proto::jvm_host_service_server::{
+    JvmHostService, JvmHostServiceServer,
 };
-use gradle_substrate_daemon::server::build_plan_ir::BUILD_PLAN_SCHEMA_VERSION;
+use gradle_substrate_daemon::proto::{
+    BuildPlan, BuildPlanTask, EvaluateScriptRequest, EvaluateScriptResponse,
+    GetBuildEnvironmentRequest, GetBuildEnvironmentResponse, GetBuildModelRequest,
+    GetBuildModelResponse, GetBuildPlanRequest, GetBuildPlanResponse, InitBuildRequest,
+    ProjectModel, ResolveConfigRequest, ResolveConfigResponse,
+};
 use gradle_substrate_daemon::server::bootstrap::BootstrapServiceImpl;
+use gradle_substrate_daemon::server::build_plan_ir::BUILD_PLAN_SCHEMA_VERSION;
 use gradle_substrate_daemon::server::build_plan_shadow::{
     capture_and_persist_shadow_from_jvm, verify_shadow_against_jvm, BuildPlanShadowStore,
 };
@@ -24,6 +26,84 @@ use tonic::{Request, Response, Status};
 
 struct MockJvmHostService {
     repo_root: PathBuf,
+}
+
+fn mock_build_plan_tasks() -> Vec<BuildPlanTask> {
+    vec![
+        BuildPlanTask {
+            path: ":lint".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.api.DefaultTask".to_string(),
+            depends_on: vec![":check".to_string()],
+            inputs: HashMap::from([
+                ("source".to_string(), "mock-jvm-task-model".to_string()),
+                ("projectGroup".to_string(), "org.example.shadow".to_string()),
+                ("projectVersion".to_string(), "1.0.0".to_string()),
+                ("projectRepositoryTypes".to_string(), "maven".to_string()),
+                ("shouldRunAfter".to_string(), ":test".to_string()),
+            ]),
+            outputs: Vec::new(),
+            worker_isolation: "compat-jvm".to_string(),
+            should_run_after: vec![":test".to_string()],
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "unknown".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+        },
+        BuildPlanTask {
+            path: ":app:compileJava".to_string(),
+            project_path: ":app".to_string(),
+            implementation_id: "org.gradle.api.tasks.compile.JavaCompile".to_string(),
+            depends_on: vec![":app:generateSources".to_string()],
+            inputs: HashMap::from([
+                ("source".to_string(), "mock-jvm-task-model".to_string()),
+                ("taskType".to_string(), "JavaCompile".to_string()),
+                (
+                    "mustRunAfter".to_string(),
+                    ":app:processResources".to_string(),
+                ),
+                ("finalizedBy".to_string(), ":app:check".to_string()),
+                ("nativeCandidate".to_string(), "true".to_string()),
+            ]),
+            outputs: vec!["classes/java/main".to_string()],
+            worker_isolation: "process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: vec![":app:processResources".to_string()],
+            finalized_by: vec![":app:check".to_string()],
+            cacheability: "declared-outputs".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+        },
+        BuildPlanTask {
+            path: ":app:integrationTest".to_string(),
+            project_path: ":app".to_string(),
+            implementation_id: "org.gradle.api.tasks.testing.Test".to_string(),
+            depends_on: vec![":app:test".to_string()],
+            inputs: HashMap::from([
+                ("source".to_string(), "mock-jvm-task-model".to_string()),
+                ("taskType".to_string(), "Test".to_string()),
+                ("enabled".to_string(), "false".to_string()),
+                ("shouldRunAfter".to_string(), ":app:compileJava".to_string()),
+                (
+                    "projectDeclaredDependencyCount".to_string(),
+                    "1".to_string(),
+                ),
+                (
+                    "projectDependencyConfigurations".to_string(),
+                    "implementation".to_string(),
+                ),
+            ]),
+            outputs: vec!["build/test-results/integrationTest".to_string()],
+            worker_isolation: "process".to_string(),
+            should_run_after: vec![":app:compileJava".to_string()],
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "declared-outputs".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+        },
+    ]
 }
 
 #[tonic::async_trait]
@@ -82,13 +162,10 @@ impl JvmHostService for MockJvmHostService {
                 schema_version: BUILD_PLAN_SCHEMA_VERSION,
                 build_id: request.into_inner().build_id,
                 projects: Vec::new(),
-                tasks: Vec::new(),
+                tasks: mock_build_plan_tasks(),
                 dependencies: Vec::new(),
                 toolchains: Vec::new(),
-                metadata: HashMap::from([(
-                    "provider".to_string(),
-                    "mock-build-plan".to_string(),
-                )]),
+                metadata: HashMap::from([("provider".to_string(), "mock-build-plan".to_string())]),
             }),
             source: "mock-jvm-host".to_string(),
         }))
@@ -220,7 +297,11 @@ async fn spawn_mock_server() -> (String, tempfile::TempDir, PathBuf) {
             .unwrap();
     });
 
-    (socket_path.to_string_lossy().to_string(), temp_dir, repo_root)
+    (
+        socket_path.to_string_lossy().to_string(),
+        temp_dir,
+        repo_root,
+    )
 }
 
 #[tokio::test]
@@ -268,7 +349,11 @@ async fn capture_and_persist_shadow_build_plan_artifact() {
     );
     let expected_dependency_count = loaded.plan.dependencies.len().to_string();
     assert_eq!(
-        loaded.plan.metadata.get("dependencyCount").map(String::as_str),
+        loaded
+            .plan
+            .metadata
+            .get("dependencyCount")
+            .map(String::as_str),
         Some(expected_dependency_count.as_str())
     );
     let expected_task_count = loaded.plan.tasks.len().to_string();
@@ -439,17 +524,11 @@ async fn capture_and_persist_shadow_build_plan_artifact() {
         Some("JavaCompile")
     );
     assert_eq!(
-        compile_java
-            .inputs
-            .get("mustRunAfter")
-            .map(String::as_str),
+        compile_java.inputs.get("mustRunAfter").map(String::as_str),
         Some(":app:processResources")
     );
     assert_eq!(
-        compile_java
-            .inputs
-            .get("finalizedBy")
-            .map(String::as_str),
+        compile_java.inputs.get("finalizedBy").map(String::as_str),
         Some(":app:check")
     );
     assert_eq!(
@@ -459,10 +538,7 @@ async fn capture_and_persist_shadow_build_plan_artifact() {
             .map(String::as_str),
         Some("true")
     );
-    assert_eq!(
-        compile_java.outputs,
-        vec!["classes/java/main".to_string()]
-    );
+    assert_eq!(compile_java.outputs, vec!["classes/java/main".to_string()]);
 
     let report = verify_shadow_against_jvm(&bridge, &store, "build-it")
         .await
@@ -547,14 +623,10 @@ async fn detect_shadow_mismatch_after_manual_mutation() {
         .expect("expected initial artifact");
 
     let artifact_path = store.artifact_path_for_build_id(build_id);
-    let mut json: serde_json::Value = serde_json::from_slice(&std::fs::read(&artifact_path).unwrap())
-        .unwrap();
+    let mut json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&artifact_path).unwrap()).unwrap();
     json["plan"]["projects"][0]["name"] = serde_json::Value::String("tampered".to_string());
-    std::fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&json).unwrap(),
-    )
-    .unwrap();
+    std::fs::write(&artifact_path, serde_json::to_vec_pretty(&json).unwrap()).unwrap();
 
     let report = verify_shadow_against_jvm(&bridge, &store, build_id)
         .await

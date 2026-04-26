@@ -1,19 +1,22 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use gradle_substrate_daemon::client::jvm_host::JvmHostClient;
 use gradle_substrate_daemon::client::jvm_host_bridge::JvmHostBridge;
-use gradle_substrate_daemon::proto::jvm_host_service_server::{JvmHostService, JvmHostServiceServer};
+use gradle_substrate_daemon::proto::jvm_host_service_server::{
+    JvmHostService, JvmHostServiceServer,
+};
 use gradle_substrate_daemon::proto::{
-    BuildPlan, EvaluateScriptRequest, EvaluateScriptResponse, GetBuildEnvironmentRequest,
-    GetBuildEnvironmentResponse, GetBuildModelRequest, GetBuildModelResponse, GetBuildPlanRequest,
-    GetBuildPlanResponse, ProjectModel, ResolveConfigRequest, ResolveConfigResponse,
+    BuildPlan, BuildPlanTask, EvaluateScriptRequest, EvaluateScriptResponse,
+    GetBuildEnvironmentRequest, GetBuildEnvironmentResponse, GetBuildModelRequest,
+    GetBuildModelResponse, GetBuildPlanRequest, GetBuildPlanResponse, ProjectModel,
+    ResolveConfigRequest, ResolveConfigResponse,
 };
 use gradle_substrate_daemon::server::build_plan_ir::BUILD_PLAN_SCHEMA_VERSION;
 use gradle_substrate_daemon::server::build_plan_shadow::{
-    BuildPlanShadowStore, capture_and_persist_shadow_from_jvm, verify_shadow_against_jvm,
+    capture_and_persist_shadow_from_jvm, verify_shadow_against_jvm, BuildPlanShadowStore,
 };
 use tokio::net::UnixListener;
 use tonic::transport::Server;
@@ -22,6 +25,41 @@ use tonic::{Request, Response, Status};
 struct AlternatingMockJvmHostService {
     model_calls: AtomicUsize,
     resolve_calls: AtomicUsize,
+}
+
+fn mock_build_plan_tasks() -> Vec<BuildPlanTask> {
+    vec![
+        BuildPlanTask {
+            path: ":assemble".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.api.DefaultTask".to_string(),
+            depends_on: vec![":app:classes".to_string()],
+            inputs: HashMap::from([("source".to_string(), "mock-jvm-task-model".to_string())]),
+            outputs: Vec::new(),
+            worker_isolation: "compat-jvm".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "unknown".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+        },
+        BuildPlanTask {
+            path: ":app:classes".to_string(),
+            project_path: ":app".to_string(),
+            implementation_id: "org.gradle.api.DefaultTask".to_string(),
+            depends_on: Vec::new(),
+            inputs: HashMap::from([("source".to_string(), "mock-jvm-task-model".to_string())]),
+            outputs: Vec::new(),
+            worker_isolation: "compat-jvm".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "unknown".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+        },
+    ]
 }
 
 #[tonic::async_trait]
@@ -77,7 +115,7 @@ impl JvmHostService for AlternatingMockJvmHostService {
                 schema_version: BUILD_PLAN_SCHEMA_VERSION,
                 build_id: request.into_inner().build_id,
                 projects: Vec::new(),
-                tasks: Vec::new(),
+                tasks: mock_build_plan_tasks(),
                 dependencies: Vec::new(),
                 toolchains: Vec::new(),
                 metadata: HashMap::from([(
