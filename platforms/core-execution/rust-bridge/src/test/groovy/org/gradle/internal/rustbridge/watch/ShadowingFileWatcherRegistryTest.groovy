@@ -1,6 +1,7 @@
 package org.gradle.internal.rustbridge.watch
 
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter
+import org.gradle.internal.rustbridge.SubstrateException
 import org.gradle.internal.watch.registry.FileWatcherRegistry
 import spock.lang.Specification
 
@@ -110,7 +111,7 @@ class ShadowingFileWatcherRegistryTest extends Specification {
         1 * reporter.reportRustError("watch:/tmp/test-watch", _ as RuntimeException)
     }
 
-    def "authoritative mode marks Rust watcher unhealthy on watch start failure"() {
+    def "authoritative mode fails closed on watch start failure"() {
         given:
         def delegate = Mock(FileWatcherRegistry)
         def rustClient = Mock(RustFileWatchClient)
@@ -124,12 +125,31 @@ class ShadowingFileWatcherRegistryTest extends Specification {
         registry.registerWatchableHierarchy(watchableDir, root)
 
         then:
-        1 * delegate.registerWatchableHierarchy(watchableDir, root)
+        thrown(SubstrateException)
+        0 * delegate.registerWatchableHierarchy(_, _)
         1 * rustClient.startWatching("/tmp/test-watch", [], []) >> watchResult
         1 * watchResult.isSuccess() >> false
         1 * watchResult.getErrorMessage() >> "watch failed"
         1 * reporter.reportRustError("watch:/tmp/test-watch", _ as RuntimeException)
         registry.isAuthoritative()
+        !registry.isRustWatchHealthy()
+    }
+
+    def "authoritative mode fails closed when Rust client is unavailable"() {
+        given:
+        def delegate = Mock(FileWatcherRegistry)
+        def reporter = Mock(HashMismatchReporter)
+        def registry = new ShadowingFileWatcherRegistry(delegate, null, reporter, true)
+        def watchableDir = new File("/tmp/test-watch")
+        def root = Mock(org.gradle.internal.snapshot.SnapshotHierarchy)
+
+        when:
+        registry.registerWatchableHierarchy(watchableDir, root)
+
+        then:
+        thrown(SubstrateException)
+        0 * delegate.registerWatchableHierarchy(_, _)
+        1 * reporter.reportRustError("watch:/tmp/test-watch", _ as RuntimeException)
         !registry.isRustWatchHealthy()
     }
 
@@ -307,7 +327,7 @@ class ShadowingFileWatcherRegistryTest extends Specification {
         1 * reporter.reportMatch()
     }
 
-    def "authoritative mode suppresses shadow match reporting when Rust watcher is unhealthy"() {
+    def "authoritative mode fails before Java change fallback when Rust watcher is unhealthy"() {
         given:
         def delegate = Mock(FileWatcherRegistry)
         def rustClient = Mock(RustFileWatchClient)
@@ -319,15 +339,13 @@ class ShadowingFileWatcherRegistryTest extends Specification {
 
         when:
         registry.registerWatchableHierarchy(watchableDir, root) // make watcher unhealthy
-        registry.recordJavaChange()
-        registry.updateVfsAfterBuildFinished(root)
 
         then:
-        1 * delegate.registerWatchableHierarchy(watchableDir, root)
+        thrown(SubstrateException)
+        0 * delegate.registerWatchableHierarchy(_, _)
         1 * rustClient.startWatching("/tmp/test-watch", [], []) >> watchResult
         1 * watchResult.isSuccess() >> false
         1 * watchResult.getErrorMessage() >> "watch failed"
-        1 * delegate.updateVfsAfterBuildFinished(root) >> root
         1 * reporter.reportRustError("watch:/tmp/test-watch", _ as RuntimeException)
         0 * reporter.reportMatch()
     }
