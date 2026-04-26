@@ -13,6 +13,7 @@ use crate::proto::{
 };
 
 use super::execution_history::ExecutionHistoryServiceImpl;
+use super::build_plan_shadow::BuildPlanShadowStore;
 use super::scopes::BuildId;
 
 /// Task graph node stored internally.
@@ -39,6 +40,8 @@ pub struct TaskGraphServiceImpl {
     /// Reverse index: file path -> list of (build_id, task_path) that depend on it.
     /// Used by file-watch integration to invalidate tasks when their inputs change.
     file_to_tasks: Arc<DashMap<String, Vec<(BuildId, String)>>>,
+    /// Optional persisted canonical build-plan source populated by the JVM host.
+    build_plan_shadow_store: Option<Arc<BuildPlanShadowStore>>,
 }
 
 impl Clone for TaskGraphServiceImpl {
@@ -48,6 +51,7 @@ impl Clone for TaskGraphServiceImpl {
             request_counter: Arc::clone(&self.request_counter),
             history: self.history.clone(),
             file_to_tasks: Arc::clone(&self.file_to_tasks),
+            build_plan_shadow_store: self.build_plan_shadow_store.clone(),
         }
     }
 }
@@ -65,6 +69,7 @@ impl TaskGraphServiceImpl {
             request_counter: Arc::new(AtomicI64::new(0)),
             history: None,
             file_to_tasks: Arc::new(DashMap::new()),
+            build_plan_shadow_store: None,
         }
     }
 
@@ -74,6 +79,20 @@ impl TaskGraphServiceImpl {
             request_counter: Arc::new(AtomicI64::new(0)),
             history: Some(history),
             file_to_tasks: Arc::new(DashMap::new()),
+            build_plan_shadow_store: None,
+        }
+    }
+
+    pub fn with_history_and_shadow(
+        history: Arc<ExecutionHistoryServiceImpl>,
+        build_plan_shadow_store: Arc<BuildPlanShadowStore>,
+    ) -> Self {
+        Self {
+            tasks: Arc::new(DashMap::new()),
+            request_counter: Arc::new(AtomicI64::new(0)),
+            history: Some(history),
+            file_to_tasks: Arc::new(DashMap::new()),
+            build_plan_shadow_store: Some(build_plan_shadow_store),
         }
     }
 
@@ -113,6 +132,57 @@ impl TaskGraphServiceImpl {
             tasks.retain(|(bid, _)| bid != build_id);
             !tasks.is_empty()
         });
+    }
+
+    fn has_registered_tasks(&self, build_id: &BuildId) -> bool {
+        self.tasks.iter().any(|entry| entry.key().0 == *build_id)
+    }
+
+    fn hydrate_from_shadow_plan(&self, build_id: &BuildId, build_id_str: &str) -> usize {
+        let Some(store) = self.build_plan_shadow_store.as_ref() else {
+            return 0;
+        };
+        let artifact = match store.load_plan(build_id_str) {
+            Ok(Some(artifact)) => artifact,
+            Ok(None) => return 0,
+            Err(error) => {
+                tracing::warn!(
+                    build_id = %build_id_str,
+                    error = %error,
+                    "Failed loading build-plan shadow artifact for task graph hydration"
+                );
+                return 0;
+            }
+        };
+
+        let mut loaded = 0usize;
+        for task in artifact.plan.tasks {
+            let estimated = self.lookup_historical_duration(&task.path);
+            self.tasks.insert(
+                (build_id.clone(), task.path.clone()),
+                TaskNode {
+                    task_path: task.path,
+                    depends_on: task.depends_on,
+                    should_execute: true,
+                    task_type: task.implementation_id,
+                    estimated_duration_ms: estimated,
+                    status: "PENDING".to_string(),
+                    start_time_ms: 0,
+                    duration_ms: 0,
+                },
+            );
+            loaded += 1;
+        }
+
+        if loaded > 0 {
+            tracing::info!(
+                build_id = %build_id_str,
+                task_count = loaded,
+                source = %artifact.source,
+                "Hydrated task graph from build-plan shadow artifact"
+            );
+        }
+        loaded
     }
 
     /// Kahn's algorithm for topological sort with parallel scheduling.
@@ -374,6 +444,10 @@ impl TaskGraphService for TaskGraphServiceImpl {
 
         tracing::debug!(build_id = %req.build_id, "Resolving execution plan");
 
+        if !self.has_registered_tasks(&build_id) {
+            self.hydrate_from_shadow_plan(&build_id, &req.build_id);
+        }
+
         let (execution_order, critical_path_ms, has_cycles) = self.resolve_plan(&build_id);
 
         let total = self.tasks.iter().filter(|e| e.key().0 == build_id).count() as i32;
@@ -614,6 +688,76 @@ mod tests {
 
     fn make_svc() -> TaskGraphServiceImpl {
         TaskGraphServiceImpl::new()
+    }
+
+    #[tokio::test]
+    async fn test_resolve_hydrates_from_build_plan_shadow_when_no_tasks_registered() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(BuildPlanShadowStore::new(temp.path().to_path_buf()));
+        let history = Arc::new(ExecutionHistoryServiceImpl::new(temp.path().join("history")));
+        let svc = TaskGraphServiceImpl::with_history_and_shadow(history, Arc::clone(&store));
+        let build_id = "shadow-build";
+
+        store
+            .persist_plan(
+                &super::super::build_plan_ir::CanonicalBuildPlan {
+                    schema_version: super::super::build_plan_ir::BUILD_PLAN_SCHEMA_VERSION,
+                    build_id: build_id.to_string(),
+                    projects: Vec::new(),
+                    tasks: vec![
+                        super::super::build_plan_ir::CanonicalBuildPlanTask {
+                            path: ":compileJava".to_string(),
+                            project_path: ":".to_string(),
+                            implementation_id: "JavaCompile".to_string(),
+                            depends_on: vec![":generateSources".to_string()],
+                            inputs: Default::default(),
+                            outputs: Vec::new(),
+                            worker_isolation: "process".to_string(),
+                            should_run_after: Vec::new(),
+                            must_run_after: Vec::new(),
+                            finalized_by: Vec::new(),
+                            cacheability: "unknown".to_string(),
+                            local_state: Vec::new(),
+                            destroyables: Vec::new(),
+                        },
+                        super::super::build_plan_ir::CanonicalBuildPlanTask {
+                            path: ":generateSources".to_string(),
+                            project_path: ":".to_string(),
+                            implementation_id: "GenerateSources".to_string(),
+                            depends_on: Vec::new(),
+                            inputs: Default::default(),
+                            outputs: Vec::new(),
+                            worker_isolation: "compat-jvm".to_string(),
+                            should_run_after: Vec::new(),
+                            must_run_after: Vec::new(),
+                            finalized_by: Vec::new(),
+                            cacheability: "unknown".to_string(),
+                            local_state: Vec::new(),
+                            destroyables: Vec::new(),
+                        },
+                    ],
+                    dependencies: Vec::new(),
+                    toolchains: Vec::new(),
+                    metadata: Default::default(),
+                },
+                "test-shadow",
+            )
+            .unwrap();
+
+        let resp = svc
+            .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
+                build_id: build_id.to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!resp.has_cycles);
+        assert_eq!(resp.total_tasks, 2);
+        assert_eq!(resp.execution_order.len(), 2);
+        assert_eq!(resp.execution_order[0].task_path, ":generateSources");
+        assert_eq!(resp.execution_order[1].task_path, ":compileJava");
+        assert_eq!(resp.execution_order[1].task_type, "JavaCompile");
     }
 
     #[tokio::test]

@@ -251,9 +251,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 10: Value snapshotting
     let value_snapshot = ValueSnapshotServiceImpl::new();
 
-    // Phase 11: Task graph (wired to execution history for duration estimates)
-    let task_graph = Arc::new(TaskGraphServiceImpl::with_history(
+    // Build-plan shadow store location (kept under configuration cache root).
+    let config_cache_dir = PathBuf::from(&args.config_cache_dir);
+    let gc_config_cache_dir = config_cache_dir.clone();
+    let build_plan_shadow_store = Arc::new(BuildPlanShadowStore::new(config_cache_dir.clone()));
+
+    // Phase 11: Task graph (wired to execution history + JVM-host build-plan shadows)
+    let task_graph = Arc::new(TaskGraphServiceImpl::with_history_and_shadow(
         execution_history.clone(),
+        Arc::clone(&build_plan_shadow_store),
     ));
 
     // Phase 12: Configuration
@@ -284,11 +290,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Scope registry — tracks session→build membership for proper scope isolation
     let scope_registry = Arc::new(ScopeRegistry::new());
-
-    // Build-plan shadow store location (kept under configuration cache root).
-    let config_cache_dir = PathBuf::from(&args.config_cache_dir);
-    let gc_config_cache_dir = config_cache_dir.clone();
-    let build_plan_shadow_store = Arc::new(BuildPlanShadowStore::new(config_cache_dir.clone()));
 
     // Phase 15: Bootstrap (wired to scope registry + event stream for lifecycle events)
     let bootstrap = BootstrapServiceImpl::with_scope_registry_and_shadow(
