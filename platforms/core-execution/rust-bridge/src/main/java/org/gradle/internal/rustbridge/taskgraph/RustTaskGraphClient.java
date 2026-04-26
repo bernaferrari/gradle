@@ -87,7 +87,8 @@ public class RustTaskGraphClient {
                 response.getTotalTasks(),
                 response.getReadyToExecute(),
                 response.getCriticalPathMs(),
-                response.getHasCycles()
+                response.getHasCycles(),
+                response.getPlanSource()
             );
         } catch (Exception e) {
             return ExecutionPlanResult.error("Rust task graph resolve failed: " + e.getMessage());
@@ -104,12 +105,14 @@ public class RustTaskGraphClient {
         private final int readyToExecute;
         private final long criticalPathMs;
         private final boolean hasCycles;
+        private final String planSource;
         private final String errorMessage;
 
         private ExecutionPlanResult(boolean success,
                                     List<gradle.substrate.v1.ExecutionNode> executionOrder,
                                     int totalTasks, int readyToExecute,
                                     long criticalPathMs, boolean hasCycles,
+                                    String planSource,
                                     String errorMessage) {
             this.success = success;
             this.executionOrder = executionOrder;
@@ -117,6 +120,7 @@ public class RustTaskGraphClient {
             this.readyToExecute = readyToExecute;
             this.criticalPathMs = criticalPathMs;
             this.hasCycles = hasCycles;
+            this.planSource = planSource;
             this.errorMessage = errorMessage;
         }
 
@@ -125,12 +129,21 @@ public class RustTaskGraphClient {
             int totalTasks, int readyToExecute,
             long criticalPathMs, boolean hasCycles
         ) {
+            return success(executionOrder, totalTasks, readyToExecute, criticalPathMs, hasCycles, "unknown");
+        }
+
+        public static ExecutionPlanResult success(
+            List<gradle.substrate.v1.ExecutionNode> executionOrder,
+            int totalTasks, int readyToExecute,
+            long criticalPathMs, boolean hasCycles,
+            String planSource
+        ) {
             return new ExecutionPlanResult(true, executionOrder, totalTasks,
-                readyToExecute, criticalPathMs, hasCycles, null);
+                readyToExecute, criticalPathMs, hasCycles, planSource, null);
         }
 
         public static ExecutionPlanResult error(String errorMessage) {
-            return new ExecutionPlanResult(false, null, 0, 0, 0, false, errorMessage);
+            return new ExecutionPlanResult(false, null, 0, 0, 0, false, "error", errorMessage);
         }
 
         public boolean isSuccess() { return success; }
@@ -139,6 +152,7 @@ public class RustTaskGraphClient {
         public int getReadyToExecute() { return readyToExecute; }
         public long getCriticalPathMs() { return criticalPathMs; }
         public boolean hasCycles() { return hasCycles; }
+        public String getPlanSource() { return planSource; }
         public String getErrorMessage() { return errorMessage; }
     }
 }

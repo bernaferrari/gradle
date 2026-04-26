@@ -104,9 +104,11 @@ class TaskGraphShadowReporterTest extends Specification {
         def taskDeps = [":a": [], ":b": [":a"]]
         def node1 = gradle.substrate.v1.ExecutionNode.newBuilder().setTaskPath(":a").build()
         def node2 = gradle.substrate.v1.ExecutionNode.newBuilder().setTaskPath(":b").build()
-        rustClient.resolveExecutionPlan("build-123") >> RustTaskGraphClient.ExecutionPlanResult.success(
-            [node1, node2], 2, 1, 0, false
+        def shadowResult = RustTaskGraphClient.ExecutionPlanResult.success(
+            [node1, node2], 2, 1, 0, false, "build-plan-shadow"
         )
+        assert shadowResult.planSource == "build-plan-shadow"
+        rustClient.resolveExecutionPlan("build-123") >> shadowResult
 
         when:
         def result = reporter.resolveExecutionGraphOrFallback(taskPaths, taskDeps, "build-123")
