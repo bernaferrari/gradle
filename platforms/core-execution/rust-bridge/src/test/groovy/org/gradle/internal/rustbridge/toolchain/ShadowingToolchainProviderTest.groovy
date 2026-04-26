@@ -1,5 +1,7 @@
 package org.gradle.internal.rustbridge.toolchain
 
+import org.gradle.internal.rustbridge.SubstrateClient
+import org.gradle.internal.rustbridge.SubstrateException
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter
 import spock.lang.Specification
 
@@ -49,6 +51,24 @@ class ShadowingToolchainProviderTest extends Specification {
 
         then:
         1 * reporter.reportRustError("toolchain-list:windows/x86_64", _ as RuntimeException)
+    }
+
+    def "authoritative compareToolchainLists rethrows Rust error after reporting it"() {
+        given:
+        def failure = new SubstrateException("daemon down")
+        def rustClient = Mock(RustToolchainServiceClient) {
+            listToolchains(_, _) >> { throw failure }
+        }
+        def reporter = Mock(HashMismatchReporter)
+        def provider = new ShadowingToolchainProvider(rustClient, reporter, true)
+
+        when:
+        provider.compareToolchainLists("linux", "x86_64", [])
+
+        then:
+        def thrownFailure = thrown(SubstrateException)
+        thrownFailure.is(failure)
+        1 * reporter.reportRustError("toolchain-list:linux/x86_64", failure)
     }
 
     def "compareToolchainVerification reports match when both valid"() {
@@ -158,5 +178,34 @@ class ShadowingToolchainProviderTest extends Specification {
 
         then:
         !provider.isAuthoritative()
+    }
+
+    def "RustToolchainServiceClient throws on no-op list instead of returning an empty result"() {
+        given:
+        def client = new RustToolchainServiceClient(SubstrateClient.noop("missing daemon"))
+
+        when:
+        client.listToolchains("macos", "aarch64")
+
+        then:
+        def failure = thrown(SubstrateException)
+        failure.message.contains("missing daemon")
+    }
+
+    def "RustToolchainServiceClient throws on no-op query instead of returning a default response"() {
+        given:
+        def client = new RustToolchainServiceClient(SubstrateClient.noop("missing daemon"))
+
+        when:
+        client.getJavaHome("17", "hotspot")
+
+        then:
+        thrown(SubstrateException)
+
+        when:
+        client.verifyToolchain("/jdk", "17")
+
+        then:
+        thrown(SubstrateException)
     }
 }

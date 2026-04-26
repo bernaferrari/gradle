@@ -12,6 +12,7 @@ import gradle.substrate.v1.VerifyToolchainRequest;
 import gradle.substrate.v1.VerifyToolchainResponse;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.rustbridge.SubstrateException;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
@@ -34,7 +35,7 @@ public class RustToolchainServiceClient {
 
     public List<ToolchainLocation> listToolchains(String os, String arch) {
         if (client.isNoop()) {
-            return java.util.Collections.emptyList();
+            throw unavailable("list toolchains");
         }
 
         try {
@@ -46,13 +47,13 @@ public class RustToolchainServiceClient {
             return response.getToolchainsList();
         } catch (Exception e) {
             LOGGER.debug("[substrate:toolchain] list toolchains failed", e);
-            return java.util.Collections.emptyList();
+            throw failed("list toolchains", e);
         }
     }
 
     public VerifyToolchainResponse verifyToolchain(String javaHome, String expectedVersion) {
         if (client.isNoop()) {
-            return VerifyToolchainResponse.getDefaultInstance();
+            throw unavailable("verify toolchain");
         }
 
         try {
@@ -63,13 +64,13 @@ public class RustToolchainServiceClient {
                     .build());
         } catch (Exception e) {
             LOGGER.debug("[substrate:toolchain] verify toolchain failed", e);
-            return VerifyToolchainResponse.getDefaultInstance();
+            throw failed("verify toolchain", e);
         }
     }
 
     public GetJavaHomeResponse getJavaHome(String languageVersion, String implementation) {
         if (client.isNoop()) {
-            return GetJavaHomeResponse.getDefaultInstance();
+            throw unavailable("get java home");
         }
 
         try {
@@ -80,7 +81,7 @@ public class RustToolchainServiceClient {
                     .build());
         } catch (Exception e) {
             LOGGER.debug("[substrate:toolchain] get java home failed", e);
-            return GetJavaHomeResponse.getDefaultInstance();
+            throw failed("get java home", e);
         }
     }
 
@@ -94,7 +95,7 @@ public class RustToolchainServiceClient {
                                                     String vendor, String os, String arch,
                                                     List<String> downloadUrls) {
         if (client.isNoop()) {
-            return Collections.emptyList();
+            throw unavailable("ensure toolchain");
         }
 
         try {
@@ -117,7 +118,18 @@ public class RustToolchainServiceClient {
             return Collections.unmodifiableList(progress);
         } catch (Exception e) {
             LOGGER.debug("[substrate:toolchain] ensure toolchain failed", e);
-            return Collections.emptyList();
+            throw failed("ensure toolchain", e);
         }
+    }
+
+    private SubstrateException unavailable(String operation) {
+        return new SubstrateException("Rust toolchain service is unavailable for " + operation + ": " + client.getNoopReason());
+    }
+
+    private SubstrateException failed(String operation, Exception cause) {
+        if (cause instanceof SubstrateException) {
+            return (SubstrateException) cause;
+        }
+        return new SubstrateException("Rust toolchain service failed to " + operation, cause);
     }
 }

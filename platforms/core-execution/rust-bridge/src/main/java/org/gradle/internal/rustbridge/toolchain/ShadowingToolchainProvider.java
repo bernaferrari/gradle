@@ -55,6 +55,7 @@ public class ShadowingToolchainProvider {
             }
         } catch (Exception e) {
             mismatchReporter.reportRustError("toolchain-list:" + os + "/" + arch, e);
+            rethrowIfAuthoritative(e);
         }
     }
 
@@ -79,6 +80,7 @@ public class ShadowingToolchainProvider {
             }
         } catch (Exception e) {
             mismatchReporter.reportRustError("toolchain-verify:" + javaHome, e);
+            rethrowIfAuthoritative(e);
         }
     }
 
@@ -105,10 +107,20 @@ public class ShadowingToolchainProvider {
             }
         } catch (Exception e) {
             mismatchReporter.reportRustError("java-home:" + languageVersion, e);
+            rethrowIfAuthoritative(e);
         }
     }
 
     public boolean isAuthoritative() {
         return authoritative;
+    }
+
+    private void rethrowIfAuthoritative(Exception e) {
+        if (authoritative) {
+            if (e instanceof RuntimeException) {
+                throw (RuntimeException) e;
+            }
+            throw new IllegalStateException("Rust toolchain service failed in authoritative mode", e);
+        }
     }
 }
