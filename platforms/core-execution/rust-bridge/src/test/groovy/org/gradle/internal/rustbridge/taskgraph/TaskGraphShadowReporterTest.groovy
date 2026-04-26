@@ -172,6 +172,28 @@ class TaskGraphShadowReporterTest extends Specification {
         noExceptionThrown()
     }
 
+    def "non-authoritative resolve reports Java shadow source when Rust fails"() {
+        given:
+        def rustClient = Mock(RustTaskGraphClient)
+        def mismatchReporter = Mock(HashMismatchReporter)
+        def reporter = new TaskGraphShadowReporter(rustClient, mismatchReporter)
+
+        def taskPaths = [":a", ":b"]
+        def taskDeps = [":a": [], ":b": [":a"]]
+
+        rustClient.registerTask(_, _, _, _, _) >> true
+        rustClient.resolveExecutionPlan("build-123", true) >> RustTaskGraphClient.ExecutionPlanResult.error("rpc unavailable")
+        rustClient.resolveExecutionPlan("build-123") >> RustTaskGraphClient.ExecutionPlanResult.error("rpc unavailable")
+
+        when:
+        def result = reporter.resolveExecutionGraphOrFallback(taskPaths, taskDeps, "build-123")
+
+        then:
+        result.source == "java-shadow"
+        result.executionOrder == taskPaths
+        1 * mismatchReporter.reportRustError("task-graph:build-123", _ as RuntimeException)
+    }
+
     def "compareExecutionGraph reports match for different but valid topological order"() {
         given:
         def rustClient = Mock(RustTaskGraphClient)

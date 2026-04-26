@@ -50,7 +50,7 @@ public class RustTaskGraphClient {
     }
 
     /**
-     * Clear all task graph state for a build before Java fallback registration.
+     * Clear all task graph state for a build before Java shadow registration.
      */
     public int clearBuildTasks(String buildId) {
         if (client.isNoop()) {
@@ -77,7 +77,7 @@ public class RustTaskGraphClient {
 
     /**
      * Resolve the execution plan, optionally forcing Rust to prefer the persisted
-     * JVM-host build-plan shadow over any registered fallback tasks.
+     * JVM-host build-plan shadow over any registered Java shadow tasks.
      */
     public ExecutionPlanResult resolveExecutionPlan(String buildId, boolean preferBuildPlanShadow) {
         if (client.isNoop()) {

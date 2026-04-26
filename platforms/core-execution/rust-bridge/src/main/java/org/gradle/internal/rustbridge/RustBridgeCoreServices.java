@@ -42,7 +42,7 @@ import java.io.File;
  *
  * <p>This intentionally avoids heavyweight launcher/compat classes that are still
  * excluded from this module's compile, while activating the Rust paths that are
- * already stable in shadow/authoritative fallback mode.</p>
+ * already stable in shadow mode or fail-closed authoritative mode.</p>
  */
 public class RustBridgeCoreServices extends AbstractGradleModuleServices {
 
