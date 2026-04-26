@@ -13,6 +13,7 @@ import gradle.substrate.v1.AddSubprojectRequest;
 import gradle.substrate.v1.AddSubprojectResponse;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.rustbridge.SubstrateException;
 import org.slf4j.Logger;
 
 import java.util.List;
@@ -34,7 +35,7 @@ public class RustBuildLayoutClient {
     public InitBuildLayoutResponse initBuildLayout(String rootDir, String settingsFile,
                                                      String buildFile, String buildName) {
         if (client.isNoop()) {
-            return InitBuildLayoutResponse.getDefaultInstance();
+            throw unavailable("init build layout");
         }
 
         try {
@@ -47,14 +48,14 @@ public class RustBuildLayoutClient {
                     .build());
         } catch (Exception e) {
             LOGGER.debug("[substrate:layout] init build layout failed", e);
-            return InitBuildLayoutResponse.getDefaultInstance();
+            throw failed("init build layout", e);
         }
     }
 
     public boolean addSubproject(String buildId, String projectPath, String projectDir,
                                   String buildFile, String displayName) {
         if (client.isNoop()) {
-            return false;
+            throw unavailable("add subproject");
         }
 
         try {
@@ -69,13 +70,13 @@ public class RustBuildLayoutClient {
             return response.getAdded();
         } catch (Exception e) {
             LOGGER.debug("[substrate:layout] add subproject failed for {}", projectPath, e);
-            return false;
+            throw failed("add subproject", e);
         }
     }
 
     public GetProjectTreeResponse getProjectTree(String buildId) {
         if (client.isNoop()) {
-            return GetProjectTreeResponse.getDefaultInstance();
+            throw unavailable("get project tree");
         }
 
         try {
@@ -85,13 +86,13 @@ public class RustBuildLayoutClient {
                     .build());
         } catch (Exception e) {
             LOGGER.debug("[substrate:layout] get project tree failed", e);
-            return GetProjectTreeResponse.getDefaultInstance();
+            throw failed("get project tree", e);
         }
     }
 
     public GetBuildFilePathResponse getBuildFilePath(String buildId, String projectPath) {
         if (client.isNoop()) {
-            return GetBuildFilePathResponse.getDefaultInstance();
+            throw unavailable("get build file path");
         }
 
         try {
@@ -102,13 +103,13 @@ public class RustBuildLayoutClient {
                     .build());
         } catch (Exception e) {
             LOGGER.debug("[substrate:layout] get build file path failed", e);
-            return GetBuildFilePathResponse.getDefaultInstance();
+            throw failed("get build file path", e);
         }
     }
 
     public List<String> listProjects(String buildId) {
         if (client.isNoop()) {
-            return java.util.Collections.emptyList();
+            throw unavailable("list projects");
         }
 
         try {
@@ -119,7 +120,18 @@ public class RustBuildLayoutClient {
             return response.getProjectPathsList();
         } catch (Exception e) {
             LOGGER.debug("[substrate:layout] list projects failed", e);
-            return java.util.Collections.emptyList();
+            throw failed("list projects", e);
         }
+    }
+
+    private SubstrateException unavailable(String operation) {
+        return new SubstrateException("Rust build layout service is unavailable for " + operation + ": " + client.getNoopReason());
+    }
+
+    private SubstrateException failed(String operation, Exception cause) {
+        if (cause instanceof SubstrateException) {
+            return (SubstrateException) cause;
+        }
+        return new SubstrateException("Rust build layout service failed to " + operation, cause);
     }
 }

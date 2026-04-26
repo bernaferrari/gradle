@@ -12,6 +12,7 @@ import gradle.substrate.v1.ReportTaskResultResponse;
 import gradle.substrate.v1.TaskResult;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.rustbridge.SubstrateException;
 import org.slf4j.Logger;
 
 import java.util.List;
@@ -34,7 +35,7 @@ public class RustBuildResultClient {
                                      long durationMs, boolean didWork, String cacheKey,
                                      long startTimeMs, long endTimeMs, String failureMessage) {
         if (client.isNoop()) {
-            return false;
+            throw unavailable("report task result");
         }
 
         try {
@@ -56,14 +57,14 @@ public class RustBuildResultClient {
             return response.getAccepted();
         } catch (Exception e) {
             LOGGER.debug("[substrate:buildresult] report task result failed for {}", taskPath, e);
-            return false;
+            throw failed("report task result", e);
         }
     }
 
     public boolean reportBuildFailure(String buildId, String failureType, String failureMessage,
                                        List<String> failedTaskPaths) {
         if (client.isNoop()) {
-            return false;
+            throw unavailable("report build failure");
         }
 
         try {
@@ -77,13 +78,13 @@ public class RustBuildResultClient {
             return response.getAccepted();
         } catch (Exception e) {
             LOGGER.debug("[substrate:buildresult] report build failure failed", e);
-            return false;
+            throw failed("report build failure", e);
         }
     }
 
     public GetBuildResultResponse getBuildResult(String buildId) {
         if (client.isNoop()) {
-            return GetBuildResultResponse.getDefaultInstance();
+            throw unavailable("get build result");
         }
 
         try {
@@ -93,13 +94,13 @@ public class RustBuildResultClient {
                     .build());
         } catch (Exception e) {
             LOGGER.debug("[substrate:buildresult] get build result failed", e);
-            return GetBuildResultResponse.getDefaultInstance();
+            throw failed("get build result", e);
         }
     }
 
     public GetTaskSummaryResponse getTaskSummary(String buildId) {
         if (client.isNoop()) {
-            return GetTaskSummaryResponse.getDefaultInstance();
+            throw unavailable("get task summary");
         }
 
         try {
@@ -109,7 +110,18 @@ public class RustBuildResultClient {
                     .build());
         } catch (Exception e) {
             LOGGER.debug("[substrate:buildresult] get task summary failed", e);
-            return GetTaskSummaryResponse.getDefaultInstance();
+            throw failed("get task summary", e);
         }
+    }
+
+    private SubstrateException unavailable(String operation) {
+        return new SubstrateException("Rust build result service is unavailable for " + operation + ": " + client.getNoopReason());
+    }
+
+    private SubstrateException failed(String operation, Exception cause) {
+        if (cause instanceof SubstrateException) {
+            return (SubstrateException) cause;
+        }
+        return new SubstrateException("Rust build result service failed to " + operation, cause);
     }
 }
