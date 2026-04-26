@@ -9,6 +9,8 @@ import gradle.substrate.v1.HealthCheckRequest;
 import gradle.substrate.v1.HealthCheckResponse;
 import gradle.substrate.v1.InitBuildRequest;
 import gradle.substrate.v1.InitBuildResponse;
+import gradle.substrate.v1.RefreshBuildPlanShadowRequest;
+import gradle.substrate.v1.RefreshBuildPlanShadowResponse;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
 import org.slf4j.Logger;
@@ -132,6 +134,35 @@ public class RustBootstrapClient {
             return response.getAcknowledged();
         } catch (Exception e) {
             LOGGER.debug("[substrate:bootstrap] complete build failed", e);
+            return false;
+        }
+    }
+
+    /**
+     * Refresh the persisted build-plan shadow artifact after Gradle has populated
+     * the selected task graph.
+     */
+    public boolean refreshBuildPlanShadow(String buildId) {
+        if (client.isNoop()) {
+            return false;
+        }
+
+        try {
+            RefreshBuildPlanShadowResponse response = client.getBootstrapStub()
+                .refreshBuildPlanShadow(RefreshBuildPlanShadowRequest.newBuilder()
+                    .setBuildId(buildId != null ? buildId : "")
+                    .build());
+
+            if (response.getRefreshed()) {
+                LOGGER.debug("[substrate:bootstrap] refreshed build-plan shadow for {} at {}",
+                    response.getBuildId(), response.getArtifactPath());
+            } else {
+                LOGGER.debug("[substrate:bootstrap] build-plan shadow refresh skipped for {}: {}",
+                    response.getBuildId(), response.getErrorMessage());
+            }
+            return response.getRefreshed();
+        } catch (Exception e) {
+            LOGGER.debug("[substrate:bootstrap] refresh build-plan shadow failed", e);
             return false;
         }
     }

@@ -2,6 +2,8 @@ package org.gradle.internal.rustbridge.taskgraph
 
 import org.gradle.api.Task
 import org.gradle.api.execution.TaskExecutionGraph
+import org.gradle.internal.rustbridge.bootstrap.RustBootstrapClient
+import org.gradle.internal.rustbridge.eventstream.BuildIdHolder
 import org.gradle.internal.rustbridge.jvmhost.BuildPlanTaskSelectionSnapshot
 import spock.lang.Specification
 
@@ -114,6 +116,59 @@ class TaskGraphShadowListenerTest extends Specification {
         selected.taskPaths == [":app:compileJava", ":app:classes"]
         selected.getDependencies(":app:classes") == [":app:compileJava"]
         1 * reporter.compareExecutionGraph(_, _, "build")
+    }
+
+    def "graphPopulated refreshes build-plan shadow after selected graph snapshot"() {
+        given:
+        def reporter = Mock(TaskGraphShadowReporter)
+        def snapshot = new BuildPlanTaskSelectionSnapshot()
+        def bootstrapClient = Mock(RustBootstrapClient)
+        def listener = new TaskGraphShadowListener(reporter, snapshot, bootstrapClient)
+        BuildIdHolder.setBuildId("build-selected")
+
+        def compile = Mock(Task)
+        def classes = Mock(Task)
+        compile.getPath() >> ":app:compileJava"
+        classes.getPath() >> ":app:classes"
+
+        def graph = Mock(TaskExecutionGraph)
+        graph.getAllTasks() >> [compile, classes]
+        graph.getDependencies(_ as Task) >> { Task task ->
+            task.is(classes) ? new LinkedHashSet<Task>([compile]) : new LinkedHashSet<Task>()
+        }
+
+        when:
+        listener.graphPopulated(graph)
+
+        then:
+        1 * bootstrapClient.refreshBuildPlanShadow("build-selected") >> {
+            assert snapshot.snapshot().populated
+            assert snapshot.snapshot().taskPaths == [":app:compileJava", ":app:classes"]
+            true
+        }
+        1 * reporter.compareExecutionGraph(_, _, "build-selected")
+
+        cleanup:
+        BuildIdHolder.clear()
+    }
+
+    def "graphPopulated does not refresh build-plan shadow without bootstrap build id"() {
+        given:
+        def reporter = Mock(TaskGraphShadowReporter)
+        def snapshot = new BuildPlanTaskSelectionSnapshot()
+        def bootstrapClient = Mock(RustBootstrapClient)
+        def listener = new TaskGraphShadowListener(reporter, snapshot, bootstrapClient)
+        BuildIdHolder.clear()
+
+        def graph = Mock(TaskExecutionGraph)
+        graph.getAllTasks() >> []
+
+        when:
+        listener.graphPopulated(graph)
+
+        then:
+        0 * bootstrapClient.refreshBuildPlanShadow(_)
+        1 * reporter.compareExecutionGraph([], [:], "build")
     }
 
     def "constructor stores reporter reference"() {
