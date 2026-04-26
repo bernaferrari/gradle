@@ -2,15 +2,25 @@ package org.gradle.internal.rustbridge.hash
 
 import org.gradle.internal.hash.FileHasher
 import org.gradle.internal.hash.HashCode
+import org.gradle.internal.rustbridge.SubstrateException
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter
 import spock.lang.Specification
 
 
 class ShadowingFileHasherTest extends Specification {
 
+    private static HashCode hash(int value) {
+        return HashCode.fromBytes([
+            (byte) ((value >> 24) & 0xff),
+            (byte) ((value >> 16) & 0xff),
+            (byte) ((value >> 8) & 0xff),
+            (byte) (value & 0xff)
+        ] as byte[])
+    }
+
     def "implements FileHasher interface"() {
         expect:
-        ShadowingFileHasher instanceof FileHasher
+        FileHasher.isAssignableFrom(ShadowingFileHasher)
     }
 
     def "constructor stores all three delegates"() {
@@ -30,8 +40,8 @@ class ShadowingFileHasherTest extends Specification {
 
     def "hash(File) returns Java result and reports match"() {
         given:
-        def javaHash = HashCode.fromInt(42)
-        def rustHash = HashCode.fromInt(42)
+        def javaHash = hash(42)
+        def rustHash = hash(42)
         def javaDelegate = Mock(FileHasher) {
             hash(_) >> javaHash
         }
@@ -54,8 +64,8 @@ class ShadowingFileHasherTest extends Specification {
 
     def "hash(File) reports mismatch when hashes differ"() {
         given:
-        def javaHash = HashCode.fromInt(42)
-        def rustHash = HashCode.fromInt(99)
+        def javaHash = hash(42)
+        def rustHash = hash(99)
         def javaDelegate = Mock(FileHasher) {
             hash(_) >> javaHash
         }
@@ -77,7 +87,7 @@ class ShadowingFileHasherTest extends Specification {
 
     def "hash(File) reports Rust error and still returns Java result"() {
         given:
-        def javaHash = HashCode.fromInt(42)
+        def javaHash = hash(42)
         def javaDelegate = Mock(FileHasher) {
             hash(_) >> javaHash
         }
@@ -100,8 +110,8 @@ class ShadowingFileHasherTest extends Specification {
 
     def "hash(File, long, long) returns Java result and reports match"() {
         given:
-        def javaHash = HashCode.fromInt(42)
-        def rustHash = HashCode.fromInt(42)
+        def javaHash = hash(42)
+        def rustHash = hash(42)
         def javaDelegate = Mock(FileHasher) {
             hash(_, _, _) >> javaHash
         }
@@ -122,8 +132,8 @@ class ShadowingFileHasherTest extends Specification {
 
     def "hash(File, long, long) reports mismatch when hashes differ"() {
         given:
-        def javaHash = HashCode.fromInt(10)
-        def rustHash = HashCode.fromInt(20)
+        def javaHash = hash(10)
+        def rustHash = hash(20)
         def javaDelegate = Mock(FileHasher) {
             hash(_, _, _) >> javaHash
         }
@@ -144,7 +154,7 @@ class ShadowingFileHasherTest extends Specification {
 
     def "hash(File, long, long) reports Rust error and still returns Java result"() {
         given:
-        def javaHash = HashCode.fromInt(42)
+        def javaHash = hash(42)
         def javaDelegate = Mock(FileHasher) {
             hash(_, _, _) >> javaHash
         }
@@ -193,10 +203,10 @@ class ShadowingFileHasherTest extends Specification {
         !hasher.isAuthoritative()
     }
 
-    def "authoritative hash(File) returns Rust result"() {
+    def "authoritative hash(File) returns Rust result when Java validation matches"() {
         given:
-        def javaHash = HashCode.fromInt(10)
-        def rustHash = HashCode.fromInt(20)
+        def javaHash = hash(20)
+        def rustHash = hash(20)
         def javaDelegate = Mock(FileHasher) {
             hash(_) >> javaHash
         }
@@ -212,12 +222,35 @@ class ShadowingFileHasherTest extends Specification {
 
         then:
         result.is(rustHash)
-        1 * reporter.reportMismatch(file.getAbsolutePath(), javaHash, rustHash)
+        1 * reporter.reportMatch()
     }
 
-    def "authoritative hash(File) falls back to Java on Rust failure"() {
+    def "authoritative hash(File) fails closed on Rust mismatch"() {
         given:
-        def javaHash = HashCode.fromInt(42)
+        def javaHash = hash(10)
+        def rustHash = hash(20)
+        def javaDelegate = Mock(FileHasher) {
+            hash(_) >> javaHash
+        }
+        def rustDelegate = Mock(FileHasher) {
+            hash(_) >> rustHash
+        }
+        def reporter = Mock(HashMismatchReporter)
+        def hasher = new ShadowingFileHasher(javaDelegate, rustDelegate, reporter, true)
+        def file = new File("/tmp/test.txt")
+
+        when:
+        hasher.hash(file)
+
+        then:
+        thrown(SubstrateException)
+        1 * reporter.reportMismatch(file.getAbsolutePath(), javaHash, rustHash)
+        0 * reporter.reportRustError(_, _)
+    }
+
+    def "authoritative hash(File) fails closed on Rust failure"() {
+        given:
+        def javaHash = hash(42)
         def javaDelegate = Mock(FileHasher) {
             hash(_) >> javaHash
         }
@@ -229,17 +262,17 @@ class ShadowingFileHasherTest extends Specification {
         def file = new File("/tmp/test.txt")
 
         when:
-        def result = hasher.hash(file)
+        hasher.hash(file)
 
         then:
-        result.is(javaHash)
+        thrown(SubstrateException)
         1 * reporter.reportRustError(file.getAbsolutePath(), _)
     }
 
-    def "authoritative hash(File, long, long) returns Rust result"() {
+    def "authoritative hash(File, long, long) returns Rust result when Java validation matches"() {
         given:
-        def javaHash = HashCode.fromInt(10)
-        def rustHash = HashCode.fromInt(20)
+        def rustHash = hash(20)
+        def javaHash = hash(20)
         def javaDelegate = Mock(FileHasher) {
             hash(_, _, _) >> javaHash
         }
@@ -255,5 +288,25 @@ class ShadowingFileHasherTest extends Specification {
 
         then:
         result.is(rustHash)
+        1 * reporter.reportMatch()
+    }
+
+    def "authoritative hash(File, long, long) fails closed on Rust failure"() {
+        given:
+        def javaDelegate = Mock(FileHasher)
+        def rustDelegate = Mock(FileHasher) {
+            hash(_, _, _) >> { throw new RuntimeException("Rust unavailable") }
+        }
+        def reporter = Mock(HashMismatchReporter)
+        def hasher = new ShadowingFileHasher(javaDelegate, rustDelegate, reporter, true)
+        def file = new File("/tmp/test.txt")
+
+        when:
+        hasher.hash(file, 1024L, 9999L)
+
+        then:
+        thrown(SubstrateException)
+        1 * reporter.reportRustError(file.getAbsolutePath(), _)
+        0 * javaDelegate._
     }
 }
