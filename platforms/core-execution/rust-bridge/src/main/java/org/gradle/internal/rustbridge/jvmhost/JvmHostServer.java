@@ -154,6 +154,27 @@ public class JvmHostServer implements Closeable {
                 }
 
                 @Override
+                public void executeTask(
+                    ExecuteTaskRequest request,
+                    StreamObserver<ExecuteTaskResponse> responseObserver) {
+                    try {
+                        LOGGER.debug("[substrate-jvmhost] executeTask called for {} ({})",
+                            request.getTaskPath(), request.getTaskType());
+                        responseObserver.onNext(serviceImpl.executeTask(request));
+                        responseObserver.onCompleted();
+                    } catch (Exception e) {
+                        LOGGER.error("[substrate-jvmhost] executeTask failed", e);
+                        responseObserver.onNext(ExecuteTaskResponse.newBuilder()
+                            .setSuccess(false)
+                            .setOutcome("FAILED")
+                            .setExecutionMode("jvm_host")
+                            .setErrorMessage("JVM task execution failed: " + e.getMessage())
+                            .build());
+                        responseObserver.onCompleted();
+                    }
+                }
+
+                @Override
                 public void resolveConfiguration(
                     ResolveConfigRequest request,
                     StreamObserver<ResolveConfigResponse> responseObserver) {

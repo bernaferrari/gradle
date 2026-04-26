@@ -5,9 +5,9 @@ use tonic::{Request, Status};
 
 use crate::proto::{
     jvm_host_service_client::JvmHostServiceClient, EvaluateScriptRequest, EvaluateScriptResponse,
-    GetBuildEnvironmentRequest, GetBuildEnvironmentResponse, GetBuildModelRequest,
-    GetBuildModelResponse, GetBuildPlanRequest, GetBuildPlanResponse, ResolveConfigRequest,
-    ResolveConfigResponse,
+    ExecuteTaskRequest, ExecuteTaskResponse, GetBuildEnvironmentRequest,
+    GetBuildEnvironmentResponse, GetBuildModelRequest, GetBuildModelResponse, GetBuildPlanRequest,
+    GetBuildPlanResponse, ResolveConfigRequest, ResolveConfigResponse,
 };
 
 /// Client for calling back into the JVM via the JvmHostService.
@@ -74,14 +74,31 @@ impl JvmHostClient {
     }
 
     /// Request the JVM for a realized build plan when the compatibility host can provide one.
-    pub async fn get_build_plan(
-        &mut self,
-        build_id: &str,
-    ) -> Result<GetBuildPlanResponse, Status> {
+    pub async fn get_build_plan(&mut self, build_id: &str) -> Result<GetBuildPlanResponse, Status> {
         let request = Request::new(GetBuildPlanRequest {
             build_id: build_id.to_string(),
         });
         let response = self.client.get_build_plan(request).await?;
+        Ok(response.into_inner())
+    }
+
+    /// Execute a legacy JVM task through the compatibility host.
+    pub async fn execute_task(
+        &mut self,
+        build_id: &str,
+        task_path: &str,
+        task_type: &str,
+        parameters_json: &str,
+        timeout_ms: i64,
+    ) -> Result<ExecuteTaskResponse, Status> {
+        let request = Request::new(ExecuteTaskRequest {
+            build_id: build_id.to_string(),
+            task_path: task_path.to_string(),
+            task_type: task_type.to_string(),
+            parameters_json: parameters_json.to_string(),
+            timeout_ms,
+        });
+        let response = self.client.execute_task(request).await?;
         Ok(response.into_inner())
     }
 
@@ -220,6 +237,20 @@ mod tests {
             Ok(Response::new(response))
         }
 
+        async fn execute_task(
+            &self,
+            request: tonic::Request<crate::proto::ExecuteTaskRequest>,
+        ) -> Result<Response<crate::proto::ExecuteTaskResponse>, tonic::Status> {
+            let req = request.into_inner();
+            Ok(Response::new(crate::proto::ExecuteTaskResponse {
+                success: true,
+                outcome: "EXECUTED".to_string(),
+                error_message: String::new(),
+                duration_ms: 7,
+                execution_mode: format!("mock-jvm:{}", req.task_type),
+            }))
+        }
+
         async fn resolve_configuration(
             &self,
             request: tonic::Request<crate::proto::ResolveConfigRequest>,
@@ -356,6 +387,22 @@ mod tests {
         assert_eq!(result.artifacts[0].configuration, "compileClasspath");
         assert_eq!(result.artifacts[1].group, "org.slf4j");
         assert_eq!(result.error_message, "");
+    }
+
+    #[tokio::test]
+    async fn test_execute_task() {
+        let (socket_path, _dir) = spawn_mock_server().await;
+        let mut client = JvmHostClient::connect(&socket_path).await.unwrap();
+
+        let result = client
+            .execute_task("build-123", ":legacy", "LegacyTask", "{}", 30_000)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.outcome, "EXECUTED");
+        assert_eq!(result.duration_ms, 7);
+        assert_eq!(result.execution_mode, "mock-jvm:LegacyTask");
     }
 
     #[tokio::test]

@@ -9,10 +9,10 @@ use gradle_substrate_daemon::proto::jvm_host_service_server::{
     JvmHostService, JvmHostServiceServer,
 };
 use gradle_substrate_daemon::proto::{
-    BuildPlan, BuildPlanTask, EvaluateScriptRequest, EvaluateScriptResponse,
-    GetBuildEnvironmentRequest, GetBuildEnvironmentResponse, GetBuildModelRequest,
-    GetBuildModelResponse, GetBuildPlanRequest, GetBuildPlanResponse, ProjectModel,
-    ResolveConfigRequest, ResolveConfigResponse,
+    BuildPlan, BuildPlanTask, EvaluateScriptRequest, EvaluateScriptResponse, ExecuteTaskRequest,
+    ExecuteTaskResponse, GetBuildEnvironmentRequest, GetBuildEnvironmentResponse,
+    GetBuildModelRequest, GetBuildModelResponse, GetBuildPlanRequest, GetBuildPlanResponse,
+    ProjectModel, ResolveConfigRequest, ResolveConfigResponse,
 };
 use gradle_substrate_daemon::server::build_plan_ir::BUILD_PLAN_SCHEMA_VERSION;
 use gradle_substrate_daemon::server::build_plan_shadow::{
@@ -174,6 +174,22 @@ impl JvmHostService for AlternatingMockJvmHostService {
             available_processors: 8,
             max_memory_bytes: 4_000_000_000,
             system_properties: HashMap::new(),
+        }))
+    }
+
+    async fn execute_task(
+        &self,
+        request: Request<ExecuteTaskRequest>,
+    ) -> Result<Response<ExecuteTaskResponse>, Status> {
+        Ok(Response::new(ExecuteTaskResponse {
+            success: false,
+            outcome: "UNSUPPORTED".to_string(),
+            error_message: format!(
+                "Mock JVM host does not execute {}",
+                request.into_inner().task_path
+            ),
+            duration_ms: 0,
+            execution_mode: "mock-jvm-unsupported".to_string(),
         }))
     }
 }

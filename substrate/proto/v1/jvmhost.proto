@@ -13,6 +13,7 @@ service JvmHostService {
   rpc ResolveConfiguration(ResolveConfigRequest) returns (ResolveConfigResponse);
   rpc GetBuildEnvironment(GetBuildEnvironmentRequest) returns (GetBuildEnvironmentResponse);
   rpc GetBuildPlan(GetBuildPlanRequest) returns (GetBuildPlanResponse);
+  rpc ExecuteTask(ExecuteTaskRequest) returns (ExecuteTaskResponse);
 }
 message EvaluateScriptRequest {
   string script_path = 1;
@@ -72,4 +73,18 @@ message GetBuildPlanResponse {
   string error_message = 2;
   BuildPlan plan = 3;
   string source = 4;
+}
+message ExecuteTaskRequest {
+  string build_id = 1;
+  string task_path = 2;
+  string task_type = 3;
+  string parameters_json = 4;
+  int64 timeout_ms = 5;
+}
+message ExecuteTaskResponse {
+  bool success = 1;
+  string outcome = 2;
+  string error_message = 3;
+  int64 duration_ms = 4;
+  string execution_mode = 5;
 }

@@ -3,6 +3,8 @@ package org.gradle.internal.rustbridge.jvmhost;
 import gradle.substrate.v1.BuildPlan;
 import gradle.substrate.v1.BuildPlanProject;
 import gradle.substrate.v1.BuildPlanTask;
+import gradle.substrate.v1.ExecuteTaskRequest;
+import gradle.substrate.v1.ExecuteTaskResponse;
 
 import org.gradle.api.logging.Logging;
 import org.jspecify.annotations.Nullable;
@@ -26,6 +28,9 @@ public class JvmHostServiceImpl {
     @Nullable
     private BuildPlanTaskSelectionSnapshot taskSelectionSnapshot;
 
+    @Nullable
+    private TaskExecutionProvider taskExecutionProvider;
+
     public JvmHostServiceImpl() {
     }
 
@@ -39,6 +44,10 @@ public class JvmHostServiceImpl {
 
     public void setTaskSelectionSnapshot(@Nullable BuildPlanTaskSelectionSnapshot snapshot) {
         this.taskSelectionSnapshot = snapshot;
+    }
+
+    public void setTaskExecutionProvider(@Nullable TaskExecutionProvider provider) {
+        this.taskExecutionProvider = provider;
     }
 
     /**
@@ -156,6 +165,18 @@ public class JvmHostServiceImpl {
         return projectModelProvider.getSelectedBuildPlanTasks(selectedGraph);
     }
 
+    public ExecuteTaskResponse executeTask(ExecuteTaskRequest request) {
+        if (taskExecutionProvider == null) {
+            return ExecuteTaskResponse.newBuilder()
+                .setSuccess(false)
+                .setOutcome("UNSUPPORTED")
+                .setExecutionMode("jvm_unsupported")
+                .setErrorMessage("No JVM task execution provider is registered for " + request.getTaskPath())
+                .build();
+        }
+        return taskExecutionProvider.executeTask(request);
+    }
+
     /**
      * Interface for providing project model data to the JVM host.
      * Implemented by a BuildSession-scoped adapter that reads from Gradle's model.
@@ -165,6 +186,10 @@ public class JvmHostServiceImpl {
         List<BuildPlanTask> getBuildPlanTasks();
         List<BuildPlanTask> getSelectedBuildPlanTasks(BuildPlanTaskSelectionSnapshot.Snapshot selectedGraph);
         List<ResolvedArtifactEntry> resolveArtifacts(String projectPath, String configurationName);
+    }
+
+    public interface TaskExecutionProvider {
+        ExecuteTaskResponse executeTask(ExecuteTaskRequest request);
     }
 
     public static class ProjectModelEntry {
