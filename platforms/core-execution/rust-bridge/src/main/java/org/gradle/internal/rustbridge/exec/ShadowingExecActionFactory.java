@@ -2,6 +2,7 @@ package org.gradle.internal.rustbridge.exec;
 
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.rustbridge.SubstrateException;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
 import org.gradle.process.internal.ExecAction;
 import org.gradle.process.internal.ExecActionFactory;
@@ -24,7 +25,7 @@ import java.util.Map;
  * <p>In shadow mode, each exec action runs both Java and Rust implementations,
  * comparing exit codes. Java result is always authoritative.</p>
  *
- * <p>In authoritative mode, Rust handles execution with Java fallback.</p>
+ * <p>In authoritative mode, Rust handles execution and Rust failures fail closed.</p>
  */
 public class ShadowingExecActionFactory implements ExecActionFactory {
 
@@ -34,6 +35,7 @@ public class ShadowingExecActionFactory implements ExecActionFactory {
     private final SubstrateClient client;
     private final HashMismatchReporter mismatchReporter;
     private final boolean authoritative;
+    private final RustActionFactory rustActionFactory;
 
     public ShadowingExecActionFactory(
         ExecActionFactory javaDelegate,
@@ -41,25 +43,43 @@ public class ShadowingExecActionFactory implements ExecActionFactory {
         HashMismatchReporter mismatchReporter,
         boolean authoritative
     ) {
+        this(javaDelegate, client, mismatchReporter, authoritative, RustExecAction::new);
+    }
+
+    ShadowingExecActionFactory(
+        ExecActionFactory javaDelegate,
+        SubstrateClient client,
+        HashMismatchReporter mismatchReporter,
+        boolean authoritative,
+        RustActionFactory rustActionFactory
+    ) {
         this.javaDelegate = javaDelegate;
         this.client = client;
         this.mismatchReporter = mismatchReporter;
         this.authoritative = authoritative;
+        this.rustActionFactory = rustActionFactory;
     }
 
     @Override
     public ExecAction newExecAction() {
         if (client.isNoop()) {
+            if (authoritative) {
+                throw new SubstrateException("Authoritative Rust exec is unavailable: " + client.getNoopReason());
+            }
             return javaDelegate.newExecAction();
         }
 
         ExecAction javaAction = javaDelegate.newExecAction();
-        return new ShadowingExecAction(javaAction, new RustExecAction(client), mismatchReporter, authoritative);
+        return new ShadowingExecAction(javaAction, rustActionFactory.create(client), mismatchReporter, authoritative);
     }
 
     @Override
     public JavaExecAction newJavaExecAction() {
         return javaDelegate.newJavaExecAction();
+    }
+
+    interface RustActionFactory {
+        ExecAction create(SubstrateClient client);
     }
 
     /**
@@ -68,13 +88,13 @@ public class ShadowingExecActionFactory implements ExecActionFactory {
     private static class ShadowingExecAction implements ExecAction {
 
         private final ExecAction javaDelegate;
-        private final RustExecAction rustDelegate;
+        private final ExecAction rustDelegate;
         private final HashMismatchReporter mismatchReporter;
         private final boolean authoritative;
 
         ShadowingExecAction(
             ExecAction javaDelegate,
-            RustExecAction rustDelegate,
+            ExecAction rustDelegate,
             HashMismatchReporter mismatchReporter,
             boolean authoritative
         ) {
@@ -138,11 +158,21 @@ public class ShadowingExecActionFactory implements ExecActionFactory {
             try {
                 syncToRust();
                 return rustDelegate.execute();
+            } catch (ProcessExecutionException e) {
+                String commandDescription = getCommandDescription();
+                mismatchReporter.reportRustError("exec:" + commandDescription, e);
+                LOGGER.debug("[substrate:exec] authoritative execution failed for {}",
+                    commandDescription, e);
+                throw e;
             } catch (Exception e) {
-                mismatchReporter.reportRustError("exec:" + getCommandDescription(), e);
-                LOGGER.debug("[substrate:exec] authoritative execution failed, falling back to Java for {}",
-                    getCommandDescription(), e);
-                return javaDelegate.execute();
+                String commandDescription = getCommandDescription();
+                mismatchReporter.reportRustError("exec:" + commandDescription, e);
+                LOGGER.debug("[substrate:exec] authoritative execution failed for {}",
+                    commandDescription, e);
+                throw new ProcessExecutionException(
+                    "Authoritative Rust exec failed for " + commandDescription,
+                    e
+                );
             }
         }
 
@@ -160,6 +190,7 @@ public class ShadowingExecActionFactory implements ExecActionFactory {
                 }
             } catch (Exception e) {
                 LOGGER.debug("[substrate:exec] failed to sync exec config to Rust", e);
+                throw new IllegalStateException("Failed to sync exec config to Rust", e);
             }
         }
 
