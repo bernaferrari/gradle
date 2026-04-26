@@ -1,5 +1,7 @@
 package org.gradle.internal.rustbridge.taskgraph;
 
+import gradle.substrate.v1.ClearBuildTasksRequest;
+import gradle.substrate.v1.ClearBuildTasksResponse;
 import gradle.substrate.v1.RegisterTaskRequest;
 import gradle.substrate.v1.RegisterTaskResponse;
 import gradle.substrate.v1.ResolveExecutionPlanRequest;
@@ -44,6 +46,25 @@ public class RustTaskGraphClient {
             return response.getSuccess();
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    /**
+     * Clear all task graph state for a build before Java fallback registration.
+     */
+    public int clearBuildTasks(String buildId) {
+        if (client.isNoop()) {
+            return 0;
+        }
+
+        try {
+            ClearBuildTasksResponse response = client.getTaskGraphStub()
+                .clearBuildTasks(ClearBuildTasksRequest.newBuilder()
+                    .setBuildId(buildId)
+                    .build());
+            return response.getClearedTasks();
+        } catch (Exception e) {
+            return 0;
         }
     }
 

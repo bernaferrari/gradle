@@ -6,14 +6,15 @@ use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
-    task_graph_service_server::TaskGraphService, ExecutionNode, GetProgressRequest,
-    GetProgressResponse, RegisterTaskRequest, RegisterTaskResponse, ResolveExecutionPlanRequest,
-    ResolveExecutionPlanResponse, TaskFinishedRequest, TaskFinishedResponse, TaskProgress,
-    TaskStartedRequest, TaskStartedResponse,
+    task_graph_service_server::TaskGraphService, ClearBuildTasksRequest, ClearBuildTasksResponse,
+    ExecutionNode, GetProgressRequest, GetProgressResponse, RegisterTaskRequest,
+    RegisterTaskResponse, ResolveExecutionPlanRequest, ResolveExecutionPlanResponse,
+    TaskFinishedRequest, TaskFinishedResponse, TaskProgress, TaskStartedRequest,
+    TaskStartedResponse,
 };
 
-use super::execution_history::ExecutionHistoryServiceImpl;
 use super::build_plan_shadow::BuildPlanShadowStore;
+use super::execution_history::ExecutionHistoryServiceImpl;
 use super::scopes::BuildId;
 
 /// Task graph node stored internally.
@@ -132,6 +133,13 @@ impl TaskGraphServiceImpl {
             tasks.retain(|(bid, _)| bid != build_id);
             !tasks.is_empty()
         });
+    }
+
+    fn build_task_count(&self, build_id: &BuildId) -> usize {
+        self.tasks
+            .iter()
+            .filter(|entry| entry.key().0 == *build_id)
+            .count()
     }
 
     fn has_registered_tasks(&self, build_id: &BuildId) -> bool {
@@ -434,6 +442,26 @@ impl TaskGraphService for TaskGraphServiceImpl {
         Ok(Response::new(RegisterTaskResponse { success: true }))
     }
 
+    async fn clear_build_tasks(
+        &self,
+        request: Request<ClearBuildTasksRequest>,
+    ) -> Result<Response<ClearBuildTasksResponse>, Status> {
+        let req = request.into_inner();
+        if req.build_id.is_empty() {
+            return Err(Status::invalid_argument("build_id must not be empty"));
+        }
+
+        let build_id = BuildId::from(req.build_id.clone());
+        let cleared_tasks = self.build_task_count(&build_id) as i32;
+        self.cleanup_build(&build_id);
+        tracing::debug!(
+            build_id = %req.build_id,
+            cleared_tasks = cleared_tasks,
+            "Cleared task graph state for build"
+        );
+        Ok(Response::new(ClearBuildTasksResponse { cleared_tasks }))
+    }
+
     async fn resolve_execution_plan(
         &self,
         request: Request<ResolveExecutionPlanRequest>,
@@ -694,7 +722,9 @@ mod tests {
     async fn test_resolve_hydrates_from_build_plan_shadow_when_no_tasks_registered() {
         let temp = tempfile::tempdir().unwrap();
         let store = Arc::new(BuildPlanShadowStore::new(temp.path().to_path_buf()));
-        let history = Arc::new(ExecutionHistoryServiceImpl::new(temp.path().join("history")));
+        let history = Arc::new(ExecutionHistoryServiceImpl::new(
+            temp.path().join("history"),
+        ));
         let svc = TaskGraphServiceImpl::with_history_and_shadow(history, Arc::clone(&store));
         let build_id = "shadow-build";
 
@@ -814,6 +844,53 @@ mod tests {
         assert_eq!(resp.execution_order[0].execution_order, 1);
         assert_eq!(resp.execution_order[1].execution_order, 2);
         assert_eq!(resp.execution_order[2].execution_order, 3);
+    }
+
+    #[tokio::test]
+    async fn test_clear_build_tasks_removes_only_requested_build() {
+        let svc = make_svc();
+
+        for (build_id, task_path) in [("build-a", ":a"), ("build-a", ":b"), ("build-b", ":other")] {
+            svc.register_task(Request::new(RegisterTaskRequest {
+                build_id: build_id.to_string(),
+                task_path: task_path.to_string(),
+                depends_on: Vec::new(),
+                should_execute: true,
+                task_type: "Task".to_string(),
+                input_files: vec![format!("{}.txt", task_path)],
+            }))
+            .await
+            .unwrap();
+        }
+
+        let cleared = svc
+            .clear_build_tasks(Request::new(ClearBuildTasksRequest {
+                build_id: "build-a".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(cleared.cleared_tasks, 2);
+
+        let build_a = svc
+            .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
+                build_id: "build-a".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        let build_b = svc
+            .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
+                build_id: "build-b".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(build_a.total_tasks, 0);
+        assert_eq!(build_b.total_tasks, 1);
+        assert_eq!(build_b.execution_order[0].task_path, ":other");
     }
 
     #[tokio::test]
