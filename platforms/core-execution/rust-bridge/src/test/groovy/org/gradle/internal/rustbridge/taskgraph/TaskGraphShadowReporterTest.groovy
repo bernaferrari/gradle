@@ -80,8 +80,9 @@ class TaskGraphShadowReporterTest extends Specification {
         def planResult = RustTaskGraphClient.ExecutionPlanResult.success(
             [node1, node2, node3], 3, 3, 0, false)
 
+        def missingShadowPlan = RustTaskGraphClient.ExecutionPlanResult.error("missing shadow artifact")
         rustClient.registerTask(_, _, _, _, _) >> true
-        rustClient.resolveExecutionPlan(_) >> planResult
+        rustClient.resolveExecutionPlan("build-123") >>> [missingShadowPlan, planResult]
 
         when:
         reporter.compareExecutionGraph(taskPaths, taskDeps, "build-123")
@@ -90,6 +91,30 @@ class TaskGraphShadowReporterTest extends Specification {
         1 * rustClient.registerTask("build-123", ":app:compileJava", [], true, "Task")
         1 * rustClient.registerTask("build-123", ":app:processResources", [], true, "Task")
         1 * rustClient.registerTask("build-123", ":app:classes", [":app:compileJava", ":app:processResources"], true, "Task")
+    }
+
+    def "compareExecutionGraph uses existing Rust shadow plan without Java registration"() {
+        given:
+        def rustClient = Mock(RustTaskGraphClient)
+        def mismatchReporter = Mock(HashMismatchReporter)
+        def reporter = new TaskGraphShadowReporter(rustClient, mismatchReporter)
+
+        def taskPaths = [":a", ":b"]
+        def taskDeps = [":a": [], ":b": [":a"]]
+        def node1 = gradle.substrate.v1.ExecutionNode.newBuilder().setTaskPath(":a").build()
+        def node2 = gradle.substrate.v1.ExecutionNode.newBuilder().setTaskPath(":b").build()
+        rustClient.resolveExecutionPlan("build-123") >> RustTaskGraphClient.ExecutionPlanResult.success(
+            [node1, node2], 2, 1, 0, false
+        )
+
+        when:
+        def result = reporter.resolveExecutionGraphOrFallback(taskPaths, taskDeps, "build-123")
+
+        then:
+        result.source == "java-shadow"
+        result.executionOrder == taskPaths
+        0 * rustClient.registerTask(_, _, _, _, _)
+        1 * mismatchReporter.reportMatch()
     }
 
     def "compareExecutionGraph reports match when Rust returns same order"() {
