@@ -158,6 +158,10 @@ struct TaskExecResult {
     error_message: String,
 }
 
+fn is_jvm_execution_mode(mode: &str) -> bool {
+    mode == "jvm_host" || mode.starts_with("mock-jvm") || mode.starts_with("jvm_")
+}
+
 /// DAG Executor service.
 /// Orchestrates build execution by managing task scheduling, parallelism,
 /// cancellation, and event dispatch.
@@ -945,9 +949,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                     }
                 }
 
-                if result.execution_mode == "jvm_host"
-                    || result.execution_mode.starts_with("mock-jvm")
-                {
+                if is_jvm_execution_mode(&result.execution_mode) {
                     jvm_forward_count += 1;
                 }
                 if !result.success && failure_message.is_empty() {
@@ -1010,7 +1012,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 .count() as i32,
             tasks_skipped: task_details
                 .iter()
-                .filter(|d| d.outcome == "JVM_FORWARD")
+                .filter(|d| d.outcome == "SKIPPED")
                 .count() as i32,
             tasks_forwarded_to_jvm: jvm_forward_count,
             total_duration_ms: total_duration,
@@ -1542,12 +1544,17 @@ mod tests {
             request: Request<crate::proto::ExecuteTaskRequest>,
         ) -> Result<Response<crate::proto::ExecuteTaskResponse>, Status> {
             let req = request.into_inner();
+            let execution_mode = if req.task_type == "GradleEngineTask" {
+                "jvm_gradle_task_executer".to_string()
+            } else {
+                format!("mock-jvm:{}", req.task_type)
+            };
             Ok(Response::new(crate::proto::ExecuteTaskResponse {
                 success: true,
                 outcome: "EXECUTED".to_string(),
                 error_message: String::new(),
                 duration_ms: 11,
-                execution_mode: format!("mock-jvm:{}", req.task_type),
+                execution_mode,
             }))
         }
     }
@@ -2608,6 +2615,39 @@ mod tests {
             assert_eq!(d.execution_mode, "mock-jvm:UnknownTask");
             assert_eq!(d.outcome, "EXECUTED");
         }
+    }
+
+    #[tokio::test]
+    async fn test_run_build_counts_gradle_engine_jvm_execution_mode() {
+        let (svc, _jvm_host_dir) = make_svc_with_mock_jvm_host().await;
+        register_chain(
+            &svc,
+            "rb-gradle-engine-jvm",
+            &[(":legacy", "GradleEngineTask", &[])],
+        )
+        .await;
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "rb-gradle-engine-jvm".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: Default::default(),
+                allow_jvm_forwarding: true,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.final_status, "COMPLETED");
+        assert_eq!(resp.tasks_forwarded_to_jvm, 1);
+        assert_eq!(resp.tasks_succeeded, 1);
+        assert_eq!(resp.task_details.len(), 1);
+        assert_eq!(
+            resp.task_details[0].execution_mode,
+            "jvm_gradle_task_executer"
+        );
+        assert_eq!(resp.task_details[0].outcome, "EXECUTED");
     }
 
     #[tokio::test]
