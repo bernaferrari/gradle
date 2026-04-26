@@ -88,6 +88,7 @@ class TaskGraphShadowReporterTest extends Specification {
         reporter.compareExecutionGraph(taskPaths, taskDeps, "build-123")
 
         then:
+        1 * rustClient.clearBuildTasks("build-123")
         1 * rustClient.registerTask("build-123", ":app:compileJava", [], true, "Task")
         1 * rustClient.registerTask("build-123", ":app:processResources", [], true, "Task")
         1 * rustClient.registerTask("build-123", ":app:classes", [":app:compileJava", ":app:processResources"], true, "Task")
@@ -113,6 +114,7 @@ class TaskGraphShadowReporterTest extends Specification {
         then:
         result.source == "java-shadow"
         result.executionOrder == taskPaths
+        0 * rustClient.clearBuildTasks(_)
         0 * rustClient.registerTask(_, _, _, _, _)
         1 * mismatchReporter.reportMatch()
     }

@@ -7,6 +7,7 @@ option java_package = "gradle.substrate.v1";
 
 service TaskGraphService {
   rpc RegisterTask(RegisterTaskRequest) returns (RegisterTaskResponse);
+  rpc ClearBuildTasks(ClearBuildTasksRequest) returns (ClearBuildTasksResponse);
   rpc ResolveExecutionPlan(ResolveExecutionPlanRequest) returns (ResolveExecutionPlanResponse);
   rpc TaskStarted(TaskStartedRequest) returns (TaskStartedResponse);
   rpc TaskFinished(TaskFinishedRequest) returns (TaskFinishedResponse);
@@ -22,6 +23,8 @@ message RegisterTaskRequest {
   repeated string input_files = 10;
 }
 message RegisterTaskResponse { bool success = 1; }
+message ClearBuildTasksRequest { string build_id = 1; }
+message ClearBuildTasksResponse { int32 cleared_tasks = 1; }
 message ResolveExecutionPlanRequest { string build_id = 1; }
 message ExecutionNode {
   string task_path = 1;

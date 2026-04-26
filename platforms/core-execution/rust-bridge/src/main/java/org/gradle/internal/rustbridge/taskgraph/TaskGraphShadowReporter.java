@@ -114,6 +114,8 @@ public class TaskGraphShadowReporter {
                 return shadowResult;
             }
 
+            rustClient.clearBuildTasks(buildId);
+
             // Register all tasks with Rust
             for (String taskPath : taskPaths) {
                 List<String> deps = taskDependencies.getOrDefault(taskPath, new ArrayList<>());
