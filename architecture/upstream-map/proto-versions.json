@@ -24,12 +24,12 @@
     "substrate/proto/v1/publishing.proto": "af2342ec10366507d18dec6281789bc919e12d89aafd53d95c8fc98ffa875759",
     "substrate/proto/v1/reporting.proto": "39bcddc178407be3b79963dbc6bb18ae25390fe611f43759a916b5bf9c79f71d",
     "substrate/proto/v1/resources.proto": "6086354865578cca09d675fe7986cbe346c27344f389a886b39fc0927ee8dda6",
-    "substrate/proto/v1/taskgraph.proto": "ee2aa5ab8e585d1965a2531bef83b38ed05b6f51e5a149355c370783b6836673",
+    "substrate/proto/v1/taskgraph.proto": "d1323af51af889615520d2b51df4616f352941ddae8bfe6a257ea6ef39608d1e",
     "substrate/proto/v1/testexec.proto": "55e1af5b3072c9df38e526980c168dc223822876c637ce1179892dcf54bf0588",
     "substrate/proto/v1/toolchain.proto": "c8971e9f07b229beafc3873ef1e06d2300db9027ecf401555c493d55d7cf78e7",
     "substrate/proto/v1/versioncatalog.proto": "f728acadfc98061950c12935d13d27165420b04f860a471007e823e73b5c3c31",
     "substrate/proto/v1/worker.proto": "8f12ef298925c58a16ec2927d9e62a8882fac4d07eae7945d581741366f5b491"
   },
-  "root_sha256": "8dce305c6eb6597b3b4ee86768e9b5b4180795ce94d2921c07a15037b6003f4d",
-  "timestamp": "2026-04-26T02:10:23.474324+00:00"
+  "root_sha256": "8093b9244ee23440571531ab2a706fbe32f5b45416a22076190f3b5414ff4695",
+  "timestamp": "2026-04-26T02:14:49.320195+00:00"
 }

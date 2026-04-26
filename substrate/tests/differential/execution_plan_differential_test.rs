@@ -417,6 +417,7 @@ async fn test_linear_chain_topological_order() {
     let plan = tg_client
         .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
             build_id: build_id.to_string(),
+            prefer_build_plan_shadow: false,
         }))
         .await
         .unwrap()
@@ -492,6 +493,7 @@ async fn test_diamond_dependency_topological_order() {
     let plan = tg_client
         .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
             build_id: build_id.to_string(),
+            prefer_build_plan_shadow: false,
         }))
         .await
         .unwrap()
@@ -597,6 +599,7 @@ async fn test_large_dag_topological_order() {
     let plan = tg_client
         .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
             build_id: build_id.to_string(),
+            prefer_build_plan_shadow: false,
         }))
         .await
         .unwrap()
@@ -689,6 +692,7 @@ async fn test_cycle_detection() {
     let plan = tg_client
         .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
             build_id: build_id.to_string(),
+            prefer_build_plan_shadow: false,
         }))
         .await
         .unwrap()
@@ -741,6 +745,7 @@ async fn test_self_cycle_detection() {
     let plan = tg_client
         .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
             build_id: build_id.to_string(),
+            prefer_build_plan_shadow: false,
         }))
         .await
         .unwrap()
@@ -1145,6 +1150,7 @@ async fn test_build_isolation_separate_build_ids() {
     let plan1 = tg_client
         .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
             build_id: build_id_1.to_string(),
+            prefer_build_plan_shadow: false,
         }))
         .await
         .unwrap()
@@ -1153,6 +1159,7 @@ async fn test_build_isolation_separate_build_ids() {
     let plan2 = tg_client
         .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
             build_id: build_id_2.to_string(),
+            prefer_build_plan_shadow: false,
         }))
         .await
         .unwrap()
@@ -1220,6 +1227,7 @@ async fn test_multiple_independent_roots() {
     let plan = tg_client
         .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
             build_id: build_id.to_string(),
+            prefer_build_plan_shadow: false,
         }))
         .await
         .unwrap()
@@ -1274,6 +1282,7 @@ async fn test_empty_graph_no_tasks() {
     let plan = tg_client
         .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
             build_id: build_id.to_string(),
+            prefer_build_plan_shadow: false,
         }))
         .await
         .unwrap()
@@ -1348,6 +1357,7 @@ async fn test_topological_sort_matches_reference_implementation() {
     let plan = tg_client
         .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
             build_id: build_id.to_string(),
+            prefer_build_plan_shadow: false,
         }))
         .await
         .unwrap()

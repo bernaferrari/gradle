@@ -473,15 +473,21 @@ impl TaskGraphService for TaskGraphServiceImpl {
         tracing::debug!(build_id = %req.build_id, "Resolving execution plan");
 
         let had_registered_tasks = self.has_registered_tasks(&build_id);
-        let hydrated_task_count = if had_registered_tasks {
+        let hydrated_task_count = if req.prefer_build_plan_shadow {
+            if had_registered_tasks {
+                self.cleanup_build(&build_id);
+            }
+            self.hydrate_from_shadow_plan(&build_id, &req.build_id)
+        } else if had_registered_tasks {
             0
         } else {
             self.hydrate_from_shadow_plan(&build_id, &req.build_id)
         };
-        let plan_source = if had_registered_tasks {
-            "registered-tasks"
-        } else if hydrated_task_count > 0 {
+        let has_registered_after_hydration = self.has_registered_tasks(&build_id);
+        let plan_source = if hydrated_task_count > 0 {
             "build-plan-shadow"
+        } else if has_registered_after_hydration {
+            "registered-tasks"
         } else {
             "empty"
         };
@@ -789,6 +795,7 @@ mod tests {
         let resp = svc
             .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
                 build_id: build_id.to_string(),
+                prefer_build_plan_shadow: false,
             }))
             .await
             .unwrap()
@@ -800,6 +807,70 @@ mod tests {
         assert_eq!(resp.execution_order[0].task_path, ":generateSources");
         assert_eq!(resp.execution_order[1].task_path, ":compileJava");
         assert_eq!(resp.execution_order[1].task_type, "JavaCompile");
+        assert_eq!(resp.plan_source, "build-plan-shadow");
+    }
+
+    #[tokio::test]
+    async fn test_prefer_build_plan_shadow_replaces_registered_tasks() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(BuildPlanShadowStore::new(temp.path().to_path_buf()));
+        let history = Arc::new(ExecutionHistoryServiceImpl::new(
+            temp.path().join("history"),
+        ));
+        let svc = TaskGraphServiceImpl::with_history_and_shadow(history, Arc::clone(&store));
+        let build_id = "prefer-shadow-build";
+
+        svc.register_task(Request::new(RegisterTaskRequest {
+            build_id: build_id.to_string(),
+            task_path: ":staleFallbackTask".to_string(),
+            depends_on: Vec::new(),
+            should_execute: true,
+            task_type: "Stale".to_string(),
+            input_files: Vec::new(),
+        }))
+        .await
+        .unwrap();
+
+        store
+            .persist_plan(
+                &super::super::build_plan_ir::CanonicalBuildPlan {
+                    schema_version: super::super::build_plan_ir::BUILD_PLAN_SCHEMA_VERSION,
+                    build_id: build_id.to_string(),
+                    projects: Vec::new(),
+                    tasks: vec![super::super::build_plan_ir::CanonicalBuildPlanTask {
+                        path: ":fromShadow".to_string(),
+                        project_path: ":".to_string(),
+                        implementation_id: "ShadowTask".to_string(),
+                        depends_on: Vec::new(),
+                        inputs: Default::default(),
+                        outputs: Vec::new(),
+                        worker_isolation: "compat-jvm".to_string(),
+                        should_run_after: Vec::new(),
+                        must_run_after: Vec::new(),
+                        finalized_by: Vec::new(),
+                        cacheability: "unknown".to_string(),
+                        local_state: Vec::new(),
+                        destroyables: Vec::new(),
+                    }],
+                    dependencies: Vec::new(),
+                    toolchains: Vec::new(),
+                    metadata: Default::default(),
+                },
+                "test-shadow",
+            )
+            .unwrap();
+
+        let resp = svc
+            .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
+                build_id: build_id.to_string(),
+                prefer_build_plan_shadow: true,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.total_tasks, 1);
+        assert_eq!(resp.execution_order[0].task_path, ":fromShadow");
         assert_eq!(resp.plan_source, "build-plan-shadow");
     }
 
@@ -843,6 +914,7 @@ mod tests {
         let resp = svc
             .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
                 build_id: "test".to_string(),
+                prefer_build_plan_shadow: false,
             }))
             .await
             .unwrap()
@@ -890,6 +962,7 @@ mod tests {
         let build_a = svc
             .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
                 build_id: "build-a".to_string(),
+                prefer_build_plan_shadow: false,
             }))
             .await
             .unwrap()
@@ -897,6 +970,7 @@ mod tests {
         let build_b = svc
             .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
                 build_id: "build-b".to_string(),
+                prefer_build_plan_shadow: false,
             }))
             .await
             .unwrap()
@@ -938,6 +1012,7 @@ mod tests {
         let resp = svc
             .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
                 build_id: "test".to_string(),
+                prefer_build_plan_shadow: false,
             }))
             .await
             .unwrap()
@@ -984,6 +1059,7 @@ mod tests {
         let resp = svc
             .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
                 build_id: "test".to_string(),
+                prefer_build_plan_shadow: false,
             }))
             .await
             .unwrap()
@@ -1095,6 +1171,7 @@ mod tests {
         let resp = svc
             .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
                 build_id: "test".to_string(),
+                prefer_build_plan_shadow: false,
             }))
             .await
             .unwrap()
@@ -1163,6 +1240,7 @@ mod tests {
         let resp = svc
             .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
                 build_id: "test".to_string(),
+                prefer_build_plan_shadow: false,
             }))
             .await
             .unwrap()
@@ -1203,6 +1281,7 @@ mod tests {
         let resp = svc
             .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
                 build_id: "test".to_string(),
+                prefer_build_plan_shadow: false,
             }))
             .await
             .unwrap()
@@ -1272,6 +1351,7 @@ mod tests {
         let resp = svc
             .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
                 build_id: "empty".to_string(),
+                prefer_build_plan_shadow: false,
             }))
             .await
             .unwrap()
@@ -1327,6 +1407,7 @@ mod tests {
         let plan1 = svc
             .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
                 build_id: "build-1".to_string(),
+                prefer_build_plan_shadow: false,
             }))
             .await
             .unwrap()
@@ -1340,6 +1421,7 @@ mod tests {
         let plan2 = svc
             .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
                 build_id: "build-2".to_string(),
+                prefer_build_plan_shadow: false,
             }))
             .await
             .unwrap()
