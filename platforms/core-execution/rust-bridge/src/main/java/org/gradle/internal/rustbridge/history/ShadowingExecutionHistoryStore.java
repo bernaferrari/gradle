@@ -20,11 +20,11 @@ import java.util.Optional;
  * An {@link ExecutionHistoryStore} that delegates to both Java and Rust stores.
  *
  * <p>In shadow mode (authoritative=false): reads come from Java, writes go to both.
- * In authoritative mode (authoritative=true): reads come from Rust first (with Java fallback),
- * writes go to both.</p>
+ * In authoritative mode (authoritative=true): reads come from Rust only, writes go to both.</p>
  *
  * <p>Once validated in shadow mode, authoritative mode can be enabled to use the Rust store
- * as the primary, with Java as the fallback for correctness.</p>
+ * as the primary. Rust misses or unreadable state are treated as cache misses so
+ * stale Java execution history cannot silently influence authoritative builds.</p>
  */
 public class ShadowingExecutionHistoryStore implements ExecutionHistoryStore {
 
@@ -65,31 +65,14 @@ public class ShadowingExecutionHistoryStore implements ExecutionHistoryStore {
         loadCount++;
 
         if (authoritative) {
-            // Try Rust first in authoritative mode
-            try {
-                RustExecutionHistoryClient.HistoryEntry rustEntry = rustClient.load(key);
-                if (rustEntry != null) {
-                    rustHitCount++;
-                    LOGGER.debug("[substrate:history] authoritative load HIT from Rust: {}", key);
-                    PreviousExecutionState state = serializer.deserialize(rustEntry.getSerializedState());
-                    if (state != null) {
-                        return Optional.of(state);
-                    }
-                } else {
-                    rustMissCount++;
-                }
-            } catch (Exception e) {
-                rustErrorCount++;
-                LOGGER.debug("[substrate:history] authoritative load from Rust failed for {}: {}", key, e.getMessage());
-            }
-            // Fall through to Java
+            return loadAuthoritative(key);
         }
 
         // Read from Java (always available as fallback)
         Optional<PreviousExecutionState> result = javaDelegate.load(key);
 
         // In shadow mode, verify against Rust
-        if (!authoritative && result.isPresent()) {
+        if (result.isPresent()) {
             try {
                 RustExecutionHistoryClient.HistoryEntry rustEntry = rustClient.load(key);
                 if (rustEntry != null) {
@@ -104,6 +87,32 @@ public class ShadowingExecutionHistoryStore implements ExecutionHistoryStore {
         }
 
         return result;
+    }
+
+    private Optional<PreviousExecutionState> loadAuthoritative(String key) {
+        try {
+            RustExecutionHistoryClient.HistoryEntry rustEntry = rustClient.load(key);
+            if (rustEntry == null) {
+                rustMissCount++;
+                LOGGER.debug("[substrate:history] authoritative load MISS from Rust: {}", key);
+                return Optional.empty();
+            }
+
+            PreviousExecutionState state = serializer.deserialize(rustEntry.getSerializedState());
+            if (state == null) {
+                rustMissCount++;
+                LOGGER.debug("[substrate:history] authoritative load unreadable from Rust: {}", key);
+                return Optional.empty();
+            }
+
+            rustHitCount++;
+            LOGGER.debug("[substrate:history] authoritative load HIT from Rust: {}", key);
+            return Optional.of(state);
+        } catch (Exception e) {
+            rustErrorCount++;
+            LOGGER.debug("[substrate:history] authoritative load from Rust failed for {}: {}", key, e.getMessage());
+            return Optional.empty();
+        }
     }
 
     @Override
@@ -164,7 +173,10 @@ public class ShadowingExecutionHistoryStore implements ExecutionHistoryStore {
         public long getRustHits() { return rustHits; }
         public long getRustMisses() { return rustMisses; }
         public long getErrors() { return errors; }
-        public double getErrorRate() { return stores == 0 ? 0 : (double) errors / stores; }
+        public double getErrorRate() {
+            long attempts = stores + errors;
+            return attempts == 0 ? 0 : (double) errors / attempts;
+        }
         public double getHitRate() { return loads == 0 ? 0 : (double) rustHits / loads; }
 
         @Override

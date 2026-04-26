@@ -39,12 +39,12 @@ class ShadowingExecutionHistoryStoreTest extends Specification {
         then:
         shadowStore instanceof ExecutionHistoryStore
 
-        when: "authoritative load - Rust returns null, Java returns empty"
+        when: "authoritative load - Rust returns null"
         shadowStore.load("some-key")
 
-        then: "Rust is queried first in authoritative mode"
+        then: "Rust is the only source of truth in authoritative mode"
         1 * rustClient.load("some-key") >> null
-        1 * javaDelegate.load("some-key") >> Optional.empty()
+        0 * javaDelegate.load(_)
     }
 
     def "store writes to both Java and Rust"() {
@@ -178,12 +178,11 @@ class ShadowingExecutionHistoryStoreTest extends Specification {
         store.getStats().getRustHits() == 1
     }
 
-    def "load in authoritative mode falls back to Java when Rust returns null"() {
+    def "load in authoritative mode returns empty when Rust returns null"() {
         given:
         def javaDelegate = Mock(ExecutionHistoryStore)
         def rustClient = Mock(RustExecutionHistoryClient)
         def serializer = Mock(ShadowingExecutionHistoryStore.ExecutionHistorySerializer)
-        def prevState = Mock(PreviousExecutionState)
 
         when:
         def store = new ShadowingExecutionHistoryStore(javaDelegate, rustClient, serializer, true)
@@ -191,20 +190,18 @@ class ShadowingExecutionHistoryStoreTest extends Specification {
 
         then:
         1 * rustClient.load("task-key") >> null
-        1 * javaDelegate.load("task-key") >> Optional.of(prevState)
+        0 * javaDelegate.load(_)
 
         and:
-        result.isPresent()
-        result.get() == prevState
+        !result.isPresent()
         store.getStats().getRustMisses() == 1
     }
 
-    def "load in authoritative mode falls back to Java when Rust throws"() {
+    def "load in authoritative mode returns empty when Rust throws"() {
         given:
         def javaDelegate = Mock(ExecutionHistoryStore)
         def rustClient = Mock(RustExecutionHistoryClient)
         def serializer = Mock(ShadowingExecutionHistoryStore.ExecutionHistorySerializer)
-        def prevState = Mock(PreviousExecutionState)
 
         when:
         def store = new ShadowingExecutionHistoryStore(javaDelegate, rustClient, serializer, true)
@@ -212,19 +209,18 @@ class ShadowingExecutionHistoryStoreTest extends Specification {
 
         then:
         1 * rustClient.load("task-key") >> { throw new RuntimeException("gRPC error") }
-        1 * javaDelegate.load("task-key") >> Optional.of(prevState)
+        0 * javaDelegate.load(_)
 
         and:
-        result.isPresent()
-        store.getStats().getRustErrors() == 0  // load errors are not counted in rustErrorCount; only store errors
+        !result.isPresent()
+        store.getStats().getErrors() == 1
     }
 
-    def "load in authoritative mode falls back to Java when deserialization fails"() {
+    def "load in authoritative mode returns empty when deserialization fails"() {
         given:
         def javaDelegate = Mock(ExecutionHistoryStore)
         def rustClient = Mock(RustExecutionHistoryClient)
         def serializer = Mock(ShadowingExecutionHistoryStore.ExecutionHistorySerializer)
-        def prevState = Mock(PreviousExecutionState)
         def rustEntry = Mock(RustExecutionHistoryClient.HistoryEntry)
 
         when:
@@ -235,11 +231,11 @@ class ShadowingExecutionHistoryStoreTest extends Specification {
         1 * rustClient.load("task-key") >> rustEntry
         1 * rustEntry.getSerializedState() >> new byte[0]
         1 * serializer.deserialize(_ as byte[]) >> null
-        1 * javaDelegate.load("task-key") >> Optional.of(prevState)
+        0 * javaDelegate.load(_)
 
         and:
-        result.isPresent()
-        result.get() == prevState
+        !result.isPresent()
+        store.getStats().getRustMisses() == 1
     }
 
     def "remove delegates to both Java and Rust"() {
@@ -345,8 +341,8 @@ class ShadowingExecutionHistoryStoreTest extends Specification {
         1 * javaDelegate.store("key", executionState)
         1 * rustClient.store("key", _ as byte[]) >> false
 
-        expect: "1 error out of 0 successful stores -- errorRate is errors/stores where stores is the field, not successful stores"
-        store.getStats().getErrorRate() == Double.POSITIVE_INFINITY
+        expect: "1 error out of 1 Rust store attempt"
+        store.getStats().getErrorRate() == 1.0
     }
 
     def "ShadowStats hitRate is zero when no loads"() {
