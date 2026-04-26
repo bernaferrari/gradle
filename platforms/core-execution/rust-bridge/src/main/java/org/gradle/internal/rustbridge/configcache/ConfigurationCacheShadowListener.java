@@ -49,7 +49,7 @@ public class ConfigurationCacheShadowListener {
     }
 
     /**
-     * Effective load decision returned by authoritative-or-fallback mode.
+     * Effective load decision returned by authoritative-or-shadow mode.
      */
     public static class EffectiveLoadResult {
         private final boolean found;
@@ -94,7 +94,7 @@ public class ConfigurationCacheShadowListener {
     }
 
     /**
-     * Effective validation decision returned by authoritative-or-fallback mode.
+     * Effective validation decision returned by authoritative-or-shadow mode.
      */
     public static class EffectiveValidationResult {
         private final boolean valid;

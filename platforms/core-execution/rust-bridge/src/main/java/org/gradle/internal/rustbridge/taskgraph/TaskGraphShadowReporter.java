@@ -50,7 +50,7 @@ public class TaskGraphShadowReporter {
     }
 
     /**
-     * Effective task graph decision in authoritative-or-fallback mode.
+     * Effective task graph decision in authoritative-or-shadow mode.
      */
     public static class EffectiveExecutionGraphResult {
         private final List<String> executionOrder;
@@ -145,13 +145,13 @@ public class TaskGraphShadowReporter {
             }
             return authoritative
                 ? authoritativeFailureResult()
-                : new EffectiveExecutionGraphResult(taskPaths, "java-fallback");
+                : new EffectiveExecutionGraphResult(taskPaths, "java-shadow");
         } catch (Exception e) {
             mismatchReporter.reportRustError("task-graph:" + buildId, e);
             LOGGER.debug("[substrate:taskgraph] shadow comparison failed", e);
             return authoritative
                 ? authoritativeFailureResult()
-                : new EffectiveExecutionGraphResult(taskPaths, "java-fallback");
+                : new EffectiveExecutionGraphResult(taskPaths, "java-shadow");
         }
     }
 

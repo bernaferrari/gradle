@@ -79,4 +79,21 @@ class ShadowingExecutionPlanAdvisorTest extends Specification {
         result.source == "rust-error"
         !result.rustSource
     }
+
+    def "shadow mode reports rust error with java-shadow source"() {
+        given:
+        def rustClient = Mock(ExecutionPlanClient)
+        def reporter = Mock(HashMismatchReporter)
+        def advisor = new ShadowingExecutionPlanAdvisor(rustClient, reporter, false)
+
+        when:
+        def result = advisor.advisePredictionOrFallback(":app:test", "EXECUTE", 2L)
+
+        then:
+        1 * rustClient.predictOutcome(_) >> { throw new RuntimeException("socket closed") }
+        1 * reporter.reportRustError("execution-plan::app:test", _ as Exception)
+        result.prediction == "EXECUTE"
+        result.source == "java-shadow"
+        !result.rustSource
+    }
 }

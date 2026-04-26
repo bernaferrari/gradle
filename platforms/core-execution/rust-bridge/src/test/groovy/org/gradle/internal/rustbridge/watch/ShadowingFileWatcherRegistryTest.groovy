@@ -327,7 +327,7 @@ class ShadowingFileWatcherRegistryTest extends Specification {
         1 * reporter.reportMatch()
     }
 
-    def "authoritative mode fails before Java change fallback when Rust watcher is unhealthy"() {
+    def "authoritative mode fails before Java change processing when Rust watcher is unhealthy"() {
         given:
         def delegate = Mock(FileWatcherRegistry)
         def rustClient = Mock(RustFileWatchClient)

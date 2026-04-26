@@ -46,7 +46,7 @@ public class ShadowingExecutionPlanAdvisor {
     }
 
     /**
-     * Effective prediction result for authoritative-or-fallback mode.
+     * Effective prediction result for authoritative-or-shadow mode.
      */
     public static class EffectivePredictionResult {
         private final String prediction;
@@ -139,7 +139,7 @@ public class ShadowingExecutionPlanAdvisor {
             if (authoritative) {
                 return new EffectivePredictionResult("UNKNOWN", "rust-error");
             }
-            return new EffectivePredictionResult(javaPrediction, "java-fallback");
+            return new EffectivePredictionResult(javaPrediction, "java-shadow");
         }
     }
 
