@@ -82,15 +82,6 @@ public class BuildOperationShadowListener implements BuildOperationListener {
             String opType = op.getName() != null ? op.getName() : "unknown";
             String displayName = op.getDisplayName();
 
-            client.getBuildOperationsStub().completeOperation(
-                gradle.substrate.v1.CompleteOperationRequest.newBuilder()
-                    .setOperationId(id)
-                    .setDurationMs(durationMs)
-                    .setSuccess(success)
-                    .setOutcome(outcome)
-                    .build()
-            );
-
             // Update aggregate stats
             totalOperations.incrementAndGet();
             totalDurationMs.addAndGet(durationMs);
@@ -113,6 +104,15 @@ public class BuildOperationShadowListener implements BuildOperationListener {
                     .min(Map.Entry.comparingByValue())
                     .ifPresent(entry -> slowestOps.remove(entry.getKey()));
             }
+
+            client.getBuildOperationsStub().completeOperation(
+                gradle.substrate.v1.CompleteOperationRequest.newBuilder()
+                    .setOperationId(id)
+                    .setDurationMs(durationMs)
+                    .setSuccess(success)
+                    .setOutcome(outcome)
+                    .build()
+            );
         } catch (Exception e) {
             LOGGER.debug("[substrate:buildops] shadow finish failed for {}", op.getDisplayName(), e);
         }

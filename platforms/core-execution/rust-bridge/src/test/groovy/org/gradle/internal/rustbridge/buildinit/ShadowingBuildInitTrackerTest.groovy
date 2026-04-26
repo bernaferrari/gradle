@@ -8,8 +8,7 @@ class ShadowingBuildInitTrackerTest extends Specification {
     def "compareInitStatus reports match when status and settings count agree"() {
         given:
         def rustResponse = gradle.substrate.v1.GetBuildInitStatusResponse.newBuilder()
-            .setInitialized(true)
-            .setSettingsDetailsCount(5)
+            .setStatus(status(true, 5))
             .build()
         def rustClient = Mock(RustBuildInitClient) {
             getBuildInitStatus("build-1") >> rustResponse
@@ -28,8 +27,7 @@ class ShadowingBuildInitTrackerTest extends Specification {
     def "compareInitStatus reports mismatch when initialized differs"() {
         given:
         def rustResponse = gradle.substrate.v1.GetBuildInitStatusResponse.newBuilder()
-            .setInitialized(false)
-            .setSettingsDetailsCount(0)
+            .setStatus(status(false, 0))
             .build()
         def rustClient = Mock(RustBuildInitClient) {
             getBuildInitStatus("build-1") >> rustResponse
@@ -47,8 +45,7 @@ class ShadowingBuildInitTrackerTest extends Specification {
     def "compareInitStatus reports mismatch when settings count differs"() {
         given:
         def rustResponse = gradle.substrate.v1.GetBuildInitStatusResponse.newBuilder()
-            .setInitialized(true)
-            .setSettingsDetailsCount(3)
+            .setStatus(status(true, 3))
             .build()
         def rustClient = Mock(RustBuildInitClient) {
             getBuildInitStatus("build-1") >> rustResponse
@@ -76,5 +73,19 @@ class ShadowingBuildInitTrackerTest extends Specification {
 
         then:
         1 * reporter.reportRustError("build-init:status:build-1", _ as RuntimeException)
+    }
+
+    private static gradle.substrate.v1.BuildInitStatus status(boolean initialized, int settingsCount) {
+        def builder = gradle.substrate.v1.BuildInitStatus.newBuilder()
+            .setInitialized(initialized)
+        settingsCount.times { index ->
+            builder.addSettingsDetails(
+                gradle.substrate.v1.SettingsDetailEntry.newBuilder()
+                    .setKey("setting-$index")
+                    .setValue("value-$index")
+                    .build()
+            )
+        }
+        builder.build()
     }
 }

@@ -5,6 +5,7 @@ import org.gradle.internal.logging.text.StyledTextOutputFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,6 +30,8 @@ public class HashMismatchReporter {
     private final AtomicLong totalMatches = new AtomicLong(0);
     private final AtomicLong totalMismatches = new AtomicLong(0);
     private final AtomicLong totalErrors = new AtomicLong(0);
+    private final AtomicLong totalRustErrors = new AtomicLong(0);
+    private final AtomicLong totalJavaErrors = new AtomicLong(0);
 
     private final ConcurrentHashMap<String, SubsystemStats> subsystemStats = new ConcurrentHashMap<>();
 
@@ -152,6 +155,14 @@ public class HashMismatchReporter {
         return totalErrors.get();
     }
 
+    public long getTotalRustErrors() {
+        return totalRustErrors.get();
+    }
+
+    public long getTotalJavaErrors() {
+        return totalJavaErrors.get();
+    }
+
     public long getTotalChecks() {
         return totalMatches.get() + totalMismatches.get() + totalErrors.get();
     }
@@ -162,6 +173,19 @@ public class HashMismatchReporter {
             return 0.0;
         }
         return (double) totalMismatches.get() / total;
+    }
+
+    /**
+     * Backward-compatible summary view used by older bridge tests and callers.
+     */
+    public MismatchSummary getSummary() {
+        return new MismatchSummary(
+            Math.toIntExact(totalMatches.get()),
+            Math.toIntExact(totalMismatches.get()),
+            Math.toIntExact(totalRustErrors.get()),
+            Math.toIntExact(totalJavaErrors.get()),
+            new ArrayList<String>()
+        );
     }
 
     /**
@@ -287,6 +311,7 @@ public class HashMismatchReporter {
     }
 
     public void reportRustError(String subsystem, Exception error) {
+        totalRustErrors.incrementAndGet();
         reportError(subsystem);
         if (reportingEnabled) {
             LOGGER.debug("[{}] Rust error in subsystem '{}': {}", reporterName, subsystem, error.getMessage(), error);
@@ -294,6 +319,7 @@ public class HashMismatchReporter {
     }
 
     public void reportJavaError(String subsystem, Exception error) {
+        totalJavaErrors.incrementAndGet();
         reportError(subsystem);
         if (reportingEnabled) {
             LOGGER.debug("[{}] Java error in subsystem '{}': {}", reporterName, subsystem, error.getMessage(), error);

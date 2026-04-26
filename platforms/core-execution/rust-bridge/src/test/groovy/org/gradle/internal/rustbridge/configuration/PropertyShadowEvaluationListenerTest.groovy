@@ -3,6 +3,7 @@ package org.gradle.internal.rustbridge.configuration
 import org.gradle.api.Project
 import org.gradle.api.ProjectState
 import org.gradle.api.Plugin
+import org.gradle.api.plugins.PluginContainer
 import spock.lang.Specification
 
 class PropertyShadowEvaluationListenerTest extends Specification {
@@ -52,14 +53,13 @@ class PropertyShadowEvaluationListenerTest extends Specification {
         def listener = new PropertyShadowEvaluationListener(resolver)
         def project = Mock(Project)
         def state = Mock(ProjectState)
-        def plugin = Mock(Plugin)
+        def plugin = new TestPlugin()
         def projectDir = new File("/tmp/test-project")
 
         project.getPath() >> ":"
         project.getProjectDir() >> projectDir
         project.getProperties() >> ["version": "1.0", "group": "com.example"]
-        project.getPlugins() >> [plugin]
-        plugin.getClass() >> TestPlugin.class
+        project.getPlugins() >> plugins(plugin)
         state.getFailure() >> null
 
         when:
@@ -70,7 +70,7 @@ class PropertyShadowEvaluationListenerTest extends Specification {
             ":",
             "/tmp/test-project",
             ["version": "1.0", "group": "com.example"],
-            ["org.gradle.internal.rustbridge.configuration.TestPlugin"]
+            [TestPlugin.name]
         )
         1 * resolver.shadowResolveProperty(":", "version", "1.0")
         1 * resolver.shadowResolveProperty(":", "group", "com.example")
@@ -87,7 +87,7 @@ class PropertyShadowEvaluationListenerTest extends Specification {
         project.getPath() >> ":"
         project.getProjectDir() >> projectDir
         project.getProperties() >> ["version": "1.0", "nullable": null, "group": "com.example"]
-        project.getPlugins() >> []
+        project.getPlugins() >> plugins()
         state.getFailure() >> null
 
         when:
@@ -116,7 +116,7 @@ class PropertyShadowEvaluationListenerTest extends Specification {
         project.getPath() >> ":app"
         project.getProjectDir() >> projectDir
         project.getProperties() >> [:]
-        project.getPlugins() >> []
+        project.getPlugins() >> plugins()
         state.getFailure() >> null
 
         when:
@@ -138,7 +138,7 @@ class PropertyShadowEvaluationListenerTest extends Specification {
         project.getPath() >> ":"
         project.getProjectDir() >> projectDir
         project.getProperties() >> ["version": "1.0"]
-        project.getPlugins() >> []
+        project.getPlugins() >> plugins()
         state.getFailure() >> null
 
         resolver.registerProject(_, _, _, _) >> { throw new RuntimeException("rust connection failed") }
@@ -161,7 +161,7 @@ class PropertyShadowEvaluationListenerTest extends Specification {
         project.getPath() >> ":"
         project.getProjectDir() >> projectDir
         project.getProperties() >> ["version": "1.0"]
-        project.getPlugins() >> []
+        project.getPlugins() >> plugins()
         state.getFailure() >> null
 
         resolver.shadowResolveProperty(_, _, _) >> { throw new RuntimeException("shadow resolution failed") }
@@ -176,5 +176,11 @@ class PropertyShadowEvaluationListenerTest extends Specification {
     static class TestPlugin implements Plugin<Project> {
         @Override
         void apply(Project project) {}
+    }
+
+    private PluginContainer plugins(Plugin<?>... appliedPlugins) {
+        def container = Mock(PluginContainer)
+        container.iterator() >> appliedPlugins.toList().iterator()
+        container
     }
 }

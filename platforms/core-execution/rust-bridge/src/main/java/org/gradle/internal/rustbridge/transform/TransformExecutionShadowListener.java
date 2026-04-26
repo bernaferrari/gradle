@@ -80,16 +80,6 @@ public class TransformExecutionShadowListener implements TransformExecutionListe
 
             boolean success = true;
 
-            // Complete the operation with real duration
-            client.getBuildOperationsStub().completeOperation(
-                gradle.substrate.v1.CompleteOperationRequest.newBuilder()
-                    .setOperationId(opId)
-                    .setDurationMs(durationMs)
-                    .setSuccess(success)
-                    .setOutcome(success ? "SUCCESS" : "FAILED")
-                    .build()
-            );
-
             // Update aggregate stats
             transformCountCompleted.incrementAndGet();
             totalTransformTimeMs.addAndGet(durationMs);
@@ -102,6 +92,16 @@ public class TransformExecutionShadowListener implements TransformExecutionListe
             LOGGER.debug(
                 "[substrate:transform] shadow OK: {} on {} ({}ms)",
                 transformName, subject.getDisplayName(), durationMs
+            );
+
+            // Complete the operation with real duration
+            client.getBuildOperationsStub().completeOperation(
+                gradle.substrate.v1.CompleteOperationRequest.newBuilder()
+                    .setOperationId(opId)
+                    .setDurationMs(durationMs)
+                    .setSuccess(success)
+                    .setOutcome(success ? "SUCCESS" : "FAILED")
+                    .build()
             );
         } catch (Exception e) {
             LOGGER.debug("[substrate:transform] shadow after failed for {}", transform.getDisplayName(), e);
