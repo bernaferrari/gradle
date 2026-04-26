@@ -68,6 +68,8 @@ cargo test -p gradle-substrate-daemon --test differential build_plan_shadow_diff
 step=$((step + 1))
 
 if [[ "$MODE" == "full" ]]; then
+  run_step "Run full Java rust-bridge test suite" ./gradlew -q :rust-bridge:test
+  run_step "Run full Rust workspace test suite" cargo test --workspace
   run_step "Build release daemon binary" cargo build -p gradle-substrate-daemon --release
   run_step "Run daemon e2e smoke test" ./substrate/scripts/e2e-smoke-test.sh "$ROOT_DIR/target/release/gradle-substrate-daemon"
 fi
