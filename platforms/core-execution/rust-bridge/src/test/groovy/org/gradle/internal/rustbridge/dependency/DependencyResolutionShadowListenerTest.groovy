@@ -200,7 +200,7 @@ class DependencyResolutionShadowListenerTest extends Specification {
         1 * reporter.reportMatch()
     }
 
-    def "authoritative mode falls back when strict recording fails"() {
+    def "authoritative mode reports rust error when strict recording fails"() {
         given:
         def client = Mock(RustDependencyResolutionClient)
         def reporter = Mock(HashMismatchReporter)
@@ -224,6 +224,6 @@ class DependencyResolutionShadowListenerTest extends Specification {
             throw new RuntimeException("rpc down")
         }
         1 * reporter.reportRustError("dep-resolve:compileClasspath", _ as RuntimeException)
-        1 * client.recordResolution("compileClasspath", _, 0, true, 0)
+        0 * client.recordResolution("compileClasspath", _, 0, true, 0)
     }
 }

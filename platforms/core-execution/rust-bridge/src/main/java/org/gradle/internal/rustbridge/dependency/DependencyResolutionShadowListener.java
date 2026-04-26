@@ -144,9 +144,7 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
                 return "rust";
             } catch (Exception e) {
                 mismatchReporter.reportRustError("dep-resolve:" + configName, e);
-                // Listener side-effects must never fail the Java resolution path.
-                client.recordResolution(configName, durationMs, artifactCount, javaSuccess, failureCount);
-                return "java-fallback";
+                return "rust-error";
             }
         }
 
