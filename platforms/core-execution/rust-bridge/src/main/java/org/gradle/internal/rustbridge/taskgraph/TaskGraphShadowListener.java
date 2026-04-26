@@ -3,6 +3,8 @@ package org.gradle.internal.rustbridge.taskgraph;
 import org.gradle.api.Task;
 import org.gradle.api.execution.TaskExecutionGraph;
 import org.gradle.api.execution.TaskExecutionGraphListener;
+import org.gradle.internal.rustbridge.jvmhost.BuildPlanTaskSelectionSnapshot;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -21,9 +23,19 @@ import java.util.stream.Collectors;
 public class TaskGraphShadowListener implements TaskExecutionGraphListener {
 
     private final TaskGraphShadowReporter reporter;
+    @Nullable
+    private final BuildPlanTaskSelectionSnapshot taskSelectionSnapshot;
 
     public TaskGraphShadowListener(TaskGraphShadowReporter reporter) {
+        this(reporter, null);
+    }
+
+    public TaskGraphShadowListener(
+        TaskGraphShadowReporter reporter,
+        @Nullable BuildPlanTaskSelectionSnapshot taskSelectionSnapshot
+    ) {
         this.reporter = reporter;
+        this.taskSelectionSnapshot = taskSelectionSnapshot;
     }
 
     @Override
@@ -38,6 +50,10 @@ public class TaskGraphShadowListener implements TaskExecutionGraphListener {
             Set<Task> deps = graph.getDependencies(task);
             taskDependencies.put(path,
                 deps.stream().map(Task::getPath).collect(Collectors.toList()));
+        }
+
+        if (taskSelectionSnapshot != null) {
+            taskSelectionSnapshot.recordSelectedTasks(taskPaths, taskDependencies);
         }
 
         reporter.compareExecutionGraph(taskPaths, taskDependencies, "build");
