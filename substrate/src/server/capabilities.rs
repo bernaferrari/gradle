@@ -17,6 +17,8 @@
 //!
 //! ```rust
 //! use gradle_substrate_daemon::server::capabilities::*;
+//! use std::path::PathBuf;
+//! use std::sync::Arc;
 //!
 //! let registry = Arc::new(CapabilityRegistry::new());
 //! let token_id = CapabilityBuilder::new(CapabilityScope::Global)
@@ -719,7 +721,15 @@ impl RepositoryCapability {
 /// # Example
 ///
 /// ```rust
-/// let token_id = CapabilityBuilder::new(CapabilityScope::Build(BuildId::from("b1".into())))
+/// use gradle_substrate_daemon::server::capabilities::{
+///     CapabilityBuilder, CapabilityRegistry, CapabilityScope,
+/// };
+/// use gradle_substrate_daemon::server::scopes::BuildId;
+/// use std::path::PathBuf;
+/// use std::sync::Arc;
+///
+/// let registry = Arc::new(CapabilityRegistry::new());
+/// let token_id = CapabilityBuilder::new(CapabilityScope::Build(BuildId::from(String::from("b1"))))
 ///     .allow_read(PathBuf::from("/project/src"))
 ///     .allow_write(PathBuf::from("/project/build"))
 ///     .allow_env("GRADLE_HOME".to_string())
