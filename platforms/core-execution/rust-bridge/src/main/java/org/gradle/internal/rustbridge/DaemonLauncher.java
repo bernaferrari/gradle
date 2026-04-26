@@ -224,7 +224,7 @@ public class DaemonLauncher {
     }
 
     @Nullable
-    private String startJvmHostIfEnabled() {
+    private String startJvmHostIfEnabled() throws IOException {
         if (!enableJvmHost) {
             return null;
         }
@@ -237,9 +237,8 @@ public class DaemonLauncher {
             jvmHostServer.start();
             return jvmHostSocketPath;
         } catch (IOException e) {
-            LOGGER.warn("[substrate] Failed to start JVM host server, continuing without: {}", e.getMessage());
             jvmHostServer = null;
-            return null;
+            throw new IOException("JVM host was requested but failed to start at " + jvmHostSocketPath, e);
         }
     }
 
