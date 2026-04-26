@@ -102,6 +102,18 @@ public class TaskGraphShadowReporter {
         }
 
         try {
+            RustTaskGraphClient.ExecutionPlanResult shadowPlan = rustClient.resolveExecutionPlan(buildId);
+            EffectiveExecutionGraphResult shadowResult = effectiveResultFromRustPlan(
+                shadowPlan,
+                taskPaths,
+                taskDependencies,
+                buildId,
+                false
+            );
+            if (shadowResult != null) {
+                return shadowResult;
+            }
+
             // Register all tasks with Rust
             for (String taskPath : taskPaths) {
                 List<String> deps = taskDependencies.getOrDefault(taskPath, new ArrayList<>());
@@ -112,28 +124,55 @@ public class TaskGraphShadowReporter {
             RustTaskGraphClient.ExecutionPlanResult rustResult =
                 rustClient.resolveExecutionPlan(buildId);
 
-            if (!rustResult.isSuccess()) {
+            EffectiveExecutionGraphResult result = effectiveResultFromRustPlan(
+                rustResult,
+                taskPaths,
+                taskDependencies,
+                buildId,
+                true
+            );
+            return result != null ? result : new EffectiveExecutionGraphResult(taskPaths, "java-fallback");
+        } catch (Exception e) {
+            mismatchReporter.reportRustError("task-graph:" + buildId, e);
+            LOGGER.debug("[substrate:taskgraph] shadow comparison failed", e);
+            return new EffectiveExecutionGraphResult(taskPaths, "java-fallback");
+        }
+    }
+
+    private EffectiveExecutionGraphResult effectiveResultFromRustPlan(
+        RustTaskGraphClient.ExecutionPlanResult rustResult,
+        List<String> taskPaths,
+        java.util.Map<String, List<String>> taskDependencies,
+        String buildId,
+        boolean reportFailures
+    ) {
+        if (!rustResult.isSuccess()) {
+            if (reportFailures) {
                 mismatchReporter.reportRustError(
                     "task-graph:" + buildId,
                     new RuntimeException(rustResult.getErrorMessage())
                 );
                 LOGGER.debug("[substrate:taskgraph] Rust resolve failed: {}",
                     rustResult.getErrorMessage());
-                return new EffectiveExecutionGraphResult(taskPaths, "java-fallback");
             }
+            return null;
+        }
 
-            if (rustResult.hasCycles()) {
+        if (rustResult.hasCycles()) {
+            if (reportFailures) {
                 LOGGER.warn("[substrate:taskgraph] Rust detected cycles that Java did not");
                 mismatchReporter.reportMismatch(
                     "task-graph:" + buildId,
                     "java:no-cycles",
                     "rust:cycles"
                 );
-                return new EffectiveExecutionGraphResult(taskPaths, "java-fallback");
             }
+            return null;
+        }
 
-            // Compare task counts
-            if (rustResult.getTotalTasks() != taskPaths.size()) {
+        // Compare task counts
+        if (rustResult.getTotalTasks() != taskPaths.size()) {
+            if (reportFailures) {
                 LOGGER.warn("[substrate:taskgraph] Task count mismatch: java={}, rust={}",
                     taskPaths.size(), rustResult.getTotalTasks());
                 mismatchReporter.reportMismatch(
@@ -141,18 +180,34 @@ public class TaskGraphShadowReporter {
                     Integer.toString(taskPaths.size()),
                     Integer.toString(rustResult.getTotalTasks())
                 );
-                return new EffectiveExecutionGraphResult(taskPaths, "java-fallback");
             }
+            return null;
+        }
 
-            // Compare execution order
-            List<String> rustOrder = new ArrayList<>();
-            for (gradle.substrate.v1.ExecutionNode node : rustResult.getExecutionOrder()) {
-                rustOrder.add(node.getTaskPath());
+        // Compare execution order
+        List<String> rustOrder = new ArrayList<>();
+        for (gradle.substrate.v1.ExecutionNode node : rustResult.getExecutionOrder()) {
+            rustOrder.add(node.getTaskPath());
+        }
+
+        if (rustOrder.equals(taskPaths)) {
+            mismatchReporter.reportMatch();
+            LOGGER.debug("[substrate:taskgraph] shadow OK: {} tasks, order matches",
+                taskPaths.size());
+            if (authoritative) {
+                return new EffectiveExecutionGraphResult(
+                    Collections.unmodifiableList(new ArrayList<>(rustOrder)),
+                    "rust"
+                );
             }
-
-            if (rustOrder.equals(taskPaths)) {
+            return new EffectiveExecutionGraphResult(taskPaths, "java-shadow");
+        } else {
+            // Order may differ if Java uses a different tie-breaking strategy.
+            // Check that the ordering is still topologically valid relative to Java.
+            boolean isValid = validateTopologicalOrder(rustOrder, taskDependencies);
+            if (isValid) {
                 mismatchReporter.reportMatch();
-                LOGGER.debug("[substrate:taskgraph] shadow OK: {} tasks, order matches",
+                LOGGER.debug("[substrate:taskgraph] shadow OK: {} tasks, different valid order",
                     taskPaths.size());
                 if (authoritative) {
                     return new EffectiveExecutionGraphResult(
@@ -162,34 +217,16 @@ public class TaskGraphShadowReporter {
                 }
                 return new EffectiveExecutionGraphResult(taskPaths, "java-shadow");
             } else {
-                // Order may differ if Java uses a different tie-breaking strategy.
-                // Check that the ordering is still topologically valid relative to Java.
-                boolean isValid = validateTopologicalOrder(rustOrder, taskDependencies);
-                if (isValid) {
-                    mismatchReporter.reportMatch();
-                    LOGGER.debug("[substrate:taskgraph] shadow OK: {} tasks, different valid order",
-                        taskPaths.size());
-                    if (authoritative) {
-                        return new EffectiveExecutionGraphResult(
-                            Collections.unmodifiableList(new ArrayList<>(rustOrder)),
-                            "rust"
-                        );
-                    }
-                    return new EffectiveExecutionGraphResult(taskPaths, "java-shadow");
-                } else {
+                if (reportFailures) {
                     mismatchReporter.reportMismatch(
                         "task-graph-order:" + buildId,
                         taskPaths.toString(),
                         rustOrder.toString()
                     );
                     LOGGER.warn("[substrate:taskgraph] Rust execution order violates Java dependencies");
-                    return new EffectiveExecutionGraphResult(taskPaths, "java-fallback");
                 }
+                return null;
             }
-        } catch (Exception e) {
-            mismatchReporter.reportRustError("task-graph:" + buildId, e);
-            LOGGER.debug("[substrate:taskgraph] shadow comparison failed", e);
-            return new EffectiveExecutionGraphResult(taskPaths, "java-fallback");
         }
     }
 
