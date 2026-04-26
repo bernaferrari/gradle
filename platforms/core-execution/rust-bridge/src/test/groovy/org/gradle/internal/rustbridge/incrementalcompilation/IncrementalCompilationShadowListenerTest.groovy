@@ -63,12 +63,11 @@ class IncrementalCompilationShadowListenerTest extends Specification {
         given:
         def client = Mock(RustIncrementalCompilationClient)
         def listener = new IncrementalCompilationShadowListener(client)
-        def response = Mock(gradle.substrate.v1.GetRebuildSetResponse)
-        response.getTotalSources() >> 10
-        response.getMustRecompileCount() >> 3
-        response.getUpToDateCount() >> 7
-        response.getDecisionsCount() >> 10
-        response.getDecisionsList() >> []
+        def response = gradle.substrate.v1.GetRebuildSetResponse.newBuilder()
+            .setTotalSources(10)
+            .setMustRecompileCount(3)
+            .setUpToDateCount(7)
+            .build()
 
         when:
         listener.reportChangedFiles("build-1", "ss-1", ["Foo.java", "Bar.java"])
@@ -96,10 +95,12 @@ class IncrementalCompilationShadowListenerTest extends Specification {
         given:
         def client = Mock(RustIncrementalCompilationClient)
         def listener = new IncrementalCompilationShadowListener(client)
-        def stateInfo = Mock(gradle.substrate.v1.IncrementalStateInfo)
-        stateInfo.getTotalCompiled() >> 25
-        def response = Mock(gradle.substrate.v1.GetIncrementalStateResponse)
-        response.getState() >> stateInfo
+        def stateInfo = gradle.substrate.v1.IncrementalState.newBuilder()
+            .setTotalCompiled(25)
+            .build()
+        def response = gradle.substrate.v1.GetIncrementalStateResponse.newBuilder()
+            .setState(stateInfo)
+            .build()
 
         when:
         listener.queryIncrementalState("build-1", "ss-1")

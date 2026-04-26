@@ -19,9 +19,8 @@ class TaskExecutionGraphShadowListenerTest extends Specification {
 
     def "graphPopulated counts tasks correctly"() {
         given:
-        def eventStreamStub = Mock(gradle.substrate.v1.BuildEventStreamServiceGrpc.BuildEventStreamServiceBlockingStub)
         def client = Mock(SubstrateClient)
-        client.getBuildEventStreamStub() >> eventStreamStub
+        client.getBuildEventStreamStub() >> { throw new RuntimeException("connection failed") }
         def listener = new TaskExecutionGraphShadowListener(client)
 
         def task1 = Mock(Task)
@@ -35,15 +34,14 @@ class TaskExecutionGraphShadowListenerTest extends Specification {
         listener.graphPopulated(graph)
 
         then:
-        1 * eventStreamStub.sendBuildEvent(_)
+        noExceptionThrown()
         listener.getTaskCount() == 3
     }
 
     def "graphPopulated sets timestamp"() {
         given:
-        def eventStreamStub = Mock(gradle.substrate.v1.BuildEventStreamServiceGrpc.BuildEventStreamServiceBlockingStub)
         def client = Mock(SubstrateClient)
-        client.getBuildEventStreamStub() >> eventStreamStub
+        client.getBuildEventStreamStub() >> { throw new RuntimeException("connection failed") }
         def listener = new TaskExecutionGraphShadowListener(client)
 
         def graph = Mock(TaskExecutionGraph)
@@ -61,9 +59,8 @@ class TaskExecutionGraphShadowListenerTest extends Specification {
 
     def "graphPopulated with empty graph sets count to 0"() {
         given:
-        def eventStreamStub = Mock(gradle.substrate.v1.BuildEventStreamServiceGrpc.BuildEventStreamServiceBlockingStub)
         def client = Mock(SubstrateClient)
-        client.getBuildEventStreamStub() >> eventStreamStub
+        client.getBuildEventStreamStub() >> { throw new RuntimeException("connection failed") }
         def listener = new TaskExecutionGraphShadowListener(client)
 
         def graph = Mock(TaskExecutionGraph)

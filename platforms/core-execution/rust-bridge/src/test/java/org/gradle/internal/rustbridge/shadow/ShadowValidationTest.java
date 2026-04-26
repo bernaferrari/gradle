@@ -213,7 +213,7 @@ public class ShadowValidationTest {
     public void getMismatchRate_bySubsystem_delegates() {
         for (int i = 0; i < 90; i++) reporter.reportMatch("parser");
         reporter.reportMismatch("parser", "x", "y");
-        assertEquals(10.0 / 91.0, reporter.getMismatchRate("parser"), 0.0001);
+        assertEquals(1.0 / 91.0, reporter.getMismatchRate("parser"), 0.0001);
     }
 
     @Test
