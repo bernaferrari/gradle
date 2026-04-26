@@ -225,7 +225,7 @@ class TaskGraphShadowReporterTest extends Specification {
         result.executionOrder == [":a", ":b"]
     }
 
-    def "authoritative resolve falls back to java order when rust resolve fails"() {
+    def "authoritative resolve fails closed when rust resolve fails"() {
         given:
         def rustClient = Mock(RustTaskGraphClient)
         def mismatchReporter = Mock(HashMismatchReporter)
@@ -242,8 +242,8 @@ class TaskGraphShadowReporterTest extends Specification {
 
         then:
         !result.rustSource
-        result.source == "java-fallback"
-        result.executionOrder == taskPaths
+        result.source == "rust-error"
+        result.executionOrder == []
         1 * mismatchReporter.reportRustError("task-graph:build-123", _ as RuntimeException)
     }
 }

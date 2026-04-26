@@ -63,7 +63,7 @@ class ShadowingExecutionPlanAdvisorTest extends Specification {
         result.rustSource
     }
 
-    def "authoritative mode falls back to java prediction on rust error"() {
+    def "authoritative mode fails closed on rust error"() {
         given:
         def rustClient = Mock(ExecutionPlanClient)
         def reporter = Mock(HashMismatchReporter)
@@ -75,8 +75,8 @@ class ShadowingExecutionPlanAdvisorTest extends Specification {
         then:
         1 * rustClient.predictOutcome(_) >> { throw new RuntimeException("socket closed") }
         1 * reporter.reportRustError("execution-plan::app:test", _ as Exception)
-        result.prediction == "EXECUTE"
-        result.source == "java-fallback"
+        result.prediction == "UNKNOWN"
+        result.source == "rust-error"
         !result.rustSource
     }
 }

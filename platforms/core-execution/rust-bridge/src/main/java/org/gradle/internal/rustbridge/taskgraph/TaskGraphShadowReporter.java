@@ -17,7 +17,8 @@ import java.util.List;
  * and compares the topological ordering with Gradle's Java resolver.
  * In authoritative mode, a valid Rust plan becomes the effective order
  * returned by {@link #resolveExecutionGraphOrFallback(List, java.util.Map, String)};
- * otherwise Java order is used as fallback.</p>
+ * otherwise explicit {@code rust-error} metadata is returned instead of falling
+ * back to Java.</p>
  */
 public class TaskGraphShadowReporter {
 
@@ -90,14 +91,20 @@ public class TaskGraphShadowReporter {
 
     /**
      * Resolve Rust task graph and return effective execution order.
-     * In authoritative mode, returns Rust order when valid; otherwise Java order fallback.
+     * In authoritative mode, returns Rust order when valid; otherwise an explicit Rust failure.
      */
     public EffectiveExecutionGraphResult resolveExecutionGraphOrFallback(
         List<String> taskPaths,
         java.util.Map<String, List<String>> taskDependencies,
         String buildId
     ) {
-        if (rustClient == null || taskPaths.isEmpty()) {
+        if (taskPaths.isEmpty()) {
+            return new EffectiveExecutionGraphResult(taskPaths, "java-shadow");
+        }
+        if (rustClient == null) {
+            if (authoritative) {
+                return authoritativeFailureResult();
+            }
             return new EffectiveExecutionGraphResult(taskPaths, "java-shadow");
         }
 
@@ -133,12 +140,23 @@ public class TaskGraphShadowReporter {
                 buildId,
                 true
             );
-            return result != null ? result : new EffectiveExecutionGraphResult(taskPaths, "java-fallback");
+            if (result != null) {
+                return result;
+            }
+            return authoritative
+                ? authoritativeFailureResult()
+                : new EffectiveExecutionGraphResult(taskPaths, "java-fallback");
         } catch (Exception e) {
             mismatchReporter.reportRustError("task-graph:" + buildId, e);
             LOGGER.debug("[substrate:taskgraph] shadow comparison failed", e);
-            return new EffectiveExecutionGraphResult(taskPaths, "java-fallback");
+            return authoritative
+                ? authoritativeFailureResult()
+                : new EffectiveExecutionGraphResult(taskPaths, "java-fallback");
         }
+    }
+
+    private EffectiveExecutionGraphResult authoritativeFailureResult() {
+        return new EffectiveExecutionGraphResult(Collections.emptyList(), "rust-error");
     }
 
     private EffectiveExecutionGraphResult effectiveResultFromRustPlan(
