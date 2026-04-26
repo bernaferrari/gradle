@@ -3,6 +3,8 @@ package org.gradle.internal.rustbridge.taskgraph;
 import org.gradle.api.Task;
 import org.gradle.api.execution.TaskExecutionGraph;
 import org.gradle.api.execution.TaskExecutionGraphListener;
+import org.gradle.internal.rustbridge.bootstrap.RustBootstrapClient;
+import org.gradle.internal.rustbridge.eventstream.BuildIdHolder;
 import org.gradle.internal.rustbridge.jvmhost.BuildPlanTaskSelectionSnapshot;
 import org.jspecify.annotations.Nullable;
 
@@ -25,17 +27,28 @@ public class TaskGraphShadowListener implements TaskExecutionGraphListener {
     private final TaskGraphShadowReporter reporter;
     @Nullable
     private final BuildPlanTaskSelectionSnapshot taskSelectionSnapshot;
+    @Nullable
+    private final RustBootstrapClient bootstrapClient;
 
     public TaskGraphShadowListener(TaskGraphShadowReporter reporter) {
-        this(reporter, null);
+        this(reporter, null, null);
     }
 
     public TaskGraphShadowListener(
         TaskGraphShadowReporter reporter,
         @Nullable BuildPlanTaskSelectionSnapshot taskSelectionSnapshot
     ) {
+        this(reporter, taskSelectionSnapshot, null);
+    }
+
+    public TaskGraphShadowListener(
+        TaskGraphShadowReporter reporter,
+        @Nullable BuildPlanTaskSelectionSnapshot taskSelectionSnapshot,
+        @Nullable RustBootstrapClient bootstrapClient
+    ) {
         this.reporter = reporter;
         this.taskSelectionSnapshot = taskSelectionSnapshot;
+        this.bootstrapClient = bootstrapClient;
     }
 
     @Override
@@ -56,6 +69,12 @@ public class TaskGraphShadowListener implements TaskExecutionGraphListener {
             taskSelectionSnapshot.recordSelectedTasks(taskPaths, taskDependencies);
         }
 
-        reporter.compareExecutionGraph(taskPaths, taskDependencies, "build");
+        String activeBuildId = BuildIdHolder.getBuildId();
+        String buildId = activeBuildId.isEmpty() ? "build" : activeBuildId;
+        if (bootstrapClient != null && !activeBuildId.isEmpty()) {
+            bootstrapClient.refreshBuildPlanShadow(activeBuildId);
+        }
+
+        reporter.compareExecutionGraph(taskPaths, taskDependencies, buildId);
     }
 }

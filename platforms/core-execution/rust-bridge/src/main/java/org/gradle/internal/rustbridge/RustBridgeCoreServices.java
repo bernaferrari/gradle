@@ -239,6 +239,7 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
         @Nullable
         TaskGraphShadowListener createTaskGraphShadowListener(
             RustTaskGraphClient rustTaskGraphClient,
+            RustBootstrapClient bootstrapClient,
             BuildPlanTaskSelectionSnapshot taskSelectionSnapshot,
             HashMismatchReporter mismatchReporter,
             ListenerManager listenerManager,
@@ -260,7 +261,11 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
                 mismatchReporter,
                 authoritative
             );
-            TaskGraphShadowListener listener = new TaskGraphShadowListener(reporter, taskSelectionSnapshot);
+            TaskGraphShadowListener listener = new TaskGraphShadowListener(
+                reporter,
+                taskSelectionSnapshot,
+                bootstrapClient
+            );
             listenerManager.addListener(listener);
             return listener;
         }

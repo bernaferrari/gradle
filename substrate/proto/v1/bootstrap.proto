@@ -7,6 +7,7 @@ option java_package = "gradle.substrate.v1";
 
 service BootstrapService {
   rpc InitBuild(InitBuildRequest) returns (InitBuildResponse);
+  rpc RefreshBuildPlanShadow(RefreshBuildPlanShadowRequest) returns (RefreshBuildPlanShadowResponse);
   rpc CompleteBuild(CompleteBuildRequest) returns (CompleteBuildResponse);
   rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
   rpc GetSubstrateInfo(GetSubstrateInfoRequest) returns (GetSubstrateInfoResponse);
@@ -26,6 +27,13 @@ message InitBuildResponse {
   string substrate_version = 2;
   string protocol_version = 3;
   int32 max_parallelism = 4;
+}
+message RefreshBuildPlanShadowRequest { string build_id = 1; }
+message RefreshBuildPlanShadowResponse {
+  string build_id = 1;
+  bool refreshed = 2;
+  string artifact_path = 3;
+  string error_message = 4;
 }
 message CompleteBuildRequest {
   string build_id = 1;

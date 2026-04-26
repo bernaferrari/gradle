@@ -5,14 +5,15 @@ use std::time::Instant;
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
-use crate::client::jvm_host_bridge::JvmHostBridge;
-use super::scopes::{BuildId, ScopeRegistry, SessionId};
-use super::build_plan_shadow::{capture_and_persist_shadow_from_jvm, BuildPlanShadowStore};
 use super::build_event_stream::BuildEventStreamServiceImpl;
+use super::build_plan_shadow::{capture_and_persist_shadow_from_jvm, BuildPlanShadowStore};
+use super::scopes::{BuildId, ScopeRegistry, SessionId};
+use crate::client::jvm_host_bridge::JvmHostBridge;
 use crate::proto::{
-    bootstrap_service_server::BootstrapService, CompleteBuildRequest, CompleteBuildResponse,
-    GetSubstrateInfoRequest, GetSubstrateInfoResponse, HealthCheckRequest, HealthCheckResponse,
-    InitBuildRequest, InitBuildResponse, SubstrateServiceInfo, BuildEventMessage,
+    bootstrap_service_server::BootstrapService, BuildEventMessage, CompleteBuildRequest,
+    CompleteBuildResponse, GetSubstrateInfoRequest, GetSubstrateInfoResponse, HealthCheckRequest,
+    HealthCheckResponse, InitBuildRequest, InitBuildResponse, RefreshBuildPlanShadowRequest,
+    RefreshBuildPlanShadowResponse, SubstrateServiceInfo,
 };
 use crate::SERVER_VERSION;
 
@@ -306,6 +307,69 @@ impl BootstrapService for BootstrapServiceImpl {
         }
 
         Ok(Response::new(CompleteBuildResponse { acknowledged: true }))
+    }
+
+    async fn refresh_build_plan_shadow(
+        &self,
+        request: Request<RefreshBuildPlanShadowRequest>,
+    ) -> Result<Response<RefreshBuildPlanShadowResponse>, Status> {
+        let req = request.into_inner();
+        if req.build_id.is_empty() {
+            return Err(Status::invalid_argument("build_id must not be empty"));
+        }
+
+        let Some(jvm_bridge) = self.jvm_bridge.as_ref() else {
+            return Ok(Response::new(RefreshBuildPlanShadowResponse {
+                build_id: req.build_id,
+                refreshed: false,
+                artifact_path: String::new(),
+                error_message: "JVM host bridge is not configured".to_string(),
+            }));
+        };
+        let Some(shadow_store) = self.build_plan_shadow_store.as_ref() else {
+            return Ok(Response::new(RefreshBuildPlanShadowResponse {
+                build_id: req.build_id,
+                refreshed: false,
+                artifact_path: String::new(),
+                error_message: "build plan shadow store is not configured".to_string(),
+            }));
+        };
+
+        match capture_and_persist_shadow_from_jvm(jvm_bridge, shadow_store, &req.build_id).await {
+            Ok(Some(path)) => {
+                let artifact_path = path.display().to_string();
+                tracing::info!(
+                    build_id = %req.build_id,
+                    artifact = %artifact_path,
+                    "Refreshed JVM->Rust build plan shadow artifact"
+                );
+                Ok(Response::new(RefreshBuildPlanShadowResponse {
+                    build_id: req.build_id,
+                    refreshed: true,
+                    artifact_path,
+                    error_message: String::new(),
+                }))
+            }
+            Ok(None) => Ok(Response::new(RefreshBuildPlanShadowResponse {
+                build_id: req.build_id,
+                refreshed: false,
+                artifact_path: String::new(),
+                error_message: "JVM build model unavailable".to_string(),
+            })),
+            Err(error) => {
+                tracing::warn!(
+                    build_id = %req.build_id,
+                    error = %error,
+                    "Failed refreshing JVM->Rust build plan shadow artifact"
+                );
+                Ok(Response::new(RefreshBuildPlanShadowResponse {
+                    build_id: req.build_id,
+                    refreshed: false,
+                    artifact_path: String::new(),
+                    error_message: error.to_string(),
+                }))
+            }
+        }
     }
 
     async fn health_check(

@@ -12,7 +12,7 @@ use gradle_substrate_daemon::proto::{
     BuildPlan, BuildPlanTask, EvaluateScriptRequest, EvaluateScriptResponse,
     GetBuildEnvironmentRequest, GetBuildEnvironmentResponse, GetBuildModelRequest,
     GetBuildModelResponse, GetBuildPlanRequest, GetBuildPlanResponse, InitBuildRequest,
-    ProjectModel, ResolveConfigRequest, ResolveConfigResponse,
+    ProjectModel, RefreshBuildPlanShadowRequest, ResolveConfigRequest, ResolveConfigResponse,
 };
 use gradle_substrate_daemon::server::bootstrap::BootstrapServiceImpl;
 use gradle_substrate_daemon::server::build_plan_ir::BUILD_PLAN_SCHEMA_VERSION;
@@ -603,6 +603,69 @@ async fn bootstrap_init_build_persists_per_build_shadow_artifact() {
         "expected no mismatches, got: {:?}",
         report.mismatches
     );
+}
+
+#[tokio::test]
+async fn bootstrap_refresh_build_plan_shadow_rewrites_selected_graph_artifact() {
+    let (socket_path, _tmp_server_dir, repo_root) = spawn_mock_server().await;
+    let client = JvmHostClient::connect(&socket_path).await.unwrap();
+
+    let bridge = Arc::new(JvmHostBridge::new());
+    bridge.set_client(client).await;
+
+    let cache_dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(BuildPlanShadowStore::new(PathBuf::from(cache_dir.path())));
+    let scope_registry = Arc::new(ScopeRegistry::new());
+    let bootstrap = BootstrapServiceImpl::with_scope_registry_and_shadow(
+        scope_registry,
+        Arc::clone(&bridge),
+        Arc::clone(&store),
+    );
+
+    let build_id = "build-refresh-shadow";
+    bootstrap
+        .init_build(Request::new(InitBuildRequest {
+            build_id: build_id.to_string(),
+            project_dir: repo_root.to_string_lossy().into_owned(),
+            start_time_ms: 1,
+            requested_parallelism: 1,
+            system_properties: HashMap::new(),
+            requested_features: Vec::new(),
+            session_id: "sess-refresh".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    let response = bootstrap
+        .refresh_build_plan_shadow(Request::new(RefreshBuildPlanShadowRequest {
+            build_id: build_id.to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(response.build_id, build_id);
+    assert!(response.refreshed, "{}", response.error_message);
+    assert!(!response.artifact_path.is_empty());
+
+    let artifact = store
+        .load_plan(build_id)
+        .unwrap()
+        .expect("expected refreshed shadow artifact");
+    assert_eq!(artifact.plan.build_id, build_id);
+    assert_eq!(
+        artifact
+            .plan
+            .metadata
+            .get("jvmHost.provider")
+            .map(String::as_str),
+        Some("mock-build-plan")
+    );
+    assert_eq!(
+        artifact.plan.metadata.get("taskSource").map(String::as_str),
+        Some("jvm-host-build-plan")
+    );
+    assert_eq!(artifact.plan.tasks.len(), mock_build_plan_tasks().len());
 }
 
 #[tokio::test]
