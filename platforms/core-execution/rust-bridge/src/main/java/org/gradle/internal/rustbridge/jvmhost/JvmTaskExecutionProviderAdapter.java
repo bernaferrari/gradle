@@ -22,25 +22,39 @@ import java.util.List;
 /**
  * Executes realized JVM task actions for the compatibility host.
  *
- * <p>This is intentionally narrower than Gradle's full task execution engine. The Rust daemon
- * owns DAG scheduling, while this adapter runs the already-realized public task actions in the
- * JVM when a task has no native Rust executor. Full Gradle execution semantics still require a
- * Gradle-owned {@code LocalTaskNode} and execution context, so this provider reports its
- * execution mode explicitly as {@code jvm_host_actions}.</p>
+ * <p>The Rust daemon owns DAG scheduling, while this adapter delegates a realized legacy task
+ * back into Gradle's JVM execution services when they are available. If those internal services
+ * are not visible from the compatibility host, it falls back to the narrower public-action path
+ * and reports that explicitly as {@code jvm_host_actions}.</p>
  */
 public class JvmTaskExecutionProviderAdapter implements JvmHostServiceImpl.TaskExecutionProvider {
     private static final Logger LOGGER = Logging.getLogger(JvmTaskExecutionProviderAdapter.class);
     private static final String PROJECT_STATE_REGISTRY_CLASS = "org.gradle.api.internal.project.ProjectStateRegistry";
+    private static final String TASK_INTERNAL_CLASS = "org.gradle.api.internal.TaskInternal";
+    private static final String PROJECT_INTERNAL_CLASS = "org.gradle.api.internal.project.ProjectInternal";
+    private static final String TASK_NODE_FACTORY_CLASS = "org.gradle.execution.plan.TaskNodeFactory";
+    private static final String PROJECT_EXECUTION_SERVICE_REGISTRY_CLASS = "org.gradle.execution.ProjectExecutionServiceRegistry";
+    private static final String DEFAULT_NODE_EXECUTOR_CLASS = "org.gradle.execution.plan.DefaultNodeExecutor";
+    private static final String NODE_CLASS = "org.gradle.execution.plan.Node";
+    private static final String NODE_EXECUTION_CONTEXT_CLASS = "org.gradle.api.internal.tasks.NodeExecutionContext";
+
+    @Nullable
+    private final ServiceRegistry services;
 
     @Nullable
     private final Object projectStateRegistry;
 
     public JvmTaskExecutionProviderAdapter(@Nullable Object projectStateRegistry) {
+        this(null, projectStateRegistry);
+    }
+
+    private JvmTaskExecutionProviderAdapter(@Nullable ServiceRegistry services, @Nullable Object projectStateRegistry) {
+        this.services = services;
         this.projectStateRegistry = projectStateRegistry;
     }
 
     public static JvmTaskExecutionProviderAdapter fromServiceRegistry(ServiceRegistry services) {
-        return new JvmTaskExecutionProviderAdapter(findProjectStateRegistry(services));
+        return new JvmTaskExecutionProviderAdapter(services, findProjectStateRegistry(services));
     }
 
     @Override
@@ -66,6 +80,11 @@ public class JvmTaskExecutionProviderAdapter implements JvmHostServiceImpl.TaskE
                 .build();
         }
 
+        ExecuteTaskResponse gradleEngineResponse = executeWithGradleTaskEngine(task, startedAt);
+        if (gradleEngineResponse != null) {
+            return gradleEngineResponse;
+        }
+
         if (!task.getEnabled()) {
             return ExecuteTaskResponse.newBuilder()
                 .setSuccess(true)
@@ -87,7 +106,7 @@ public class JvmTaskExecutionProviderAdapter implements JvmHostServiceImpl.TaskE
                     .build();
             }
         } catch (RuntimeException e) {
-            return failed(startedAt, e);
+            return failed(startedAt, e, "jvm_host_actions");
         }
 
         List<Action<? super Task>> actions = task.getActions();
@@ -131,7 +150,84 @@ public class JvmTaskExecutionProviderAdapter implements JvmHostServiceImpl.TaskE
                 .setDurationMs(elapsedSince(startedAt))
                 .build();
         } catch (RuntimeException e) {
-            return failed(startedAt, e);
+            return failed(startedAt, e, "jvm_host_actions");
+        }
+    }
+
+    @Nullable
+    private ExecuteTaskResponse executeWithGradleTaskEngine(Task task, long startedAt) {
+        if (services == null) {
+            return null;
+        }
+        Object executionServices = null;
+        try {
+            Class<?> taskInternalType = Class.forName(TASK_INTERNAL_CLASS);
+            if (!taskInternalType.isInstance(task)) {
+                return null;
+            }
+            Object taskNodeFactory = findService(TASK_NODE_FACTORY_CLASS);
+            if (taskNodeFactory == null) {
+                return null;
+            }
+
+            Object node = invoke(taskNodeFactory, "getOrCreateNode", new Class<?>[] {Task.class}, task);
+            executionServices = Class.forName(PROJECT_EXECUTION_SERVICE_REGISTRY_CLASS)
+                .getConstructor(ServiceRegistry.class)
+                .newInstance(services);
+            Object executionContext = invoke(
+                executionServices,
+                "forProject",
+                new Class<?>[] {Class.forName(PROJECT_INTERNAL_CLASS)},
+                task.getProject()
+            );
+            Object nodeExecutor = Class.forName(DEFAULT_NODE_EXECUTOR_CLASS).getConstructor().newInstance();
+            executePrepareNodeIfPresent(nodeExecutor, node, executionContext);
+            Object executed = invoke(
+                nodeExecutor,
+                "execute",
+                new Class<?>[] {Class.forName(NODE_CLASS), Class.forName(NODE_EXECUTION_CONTEXT_CLASS)},
+                node,
+                executionContext
+            );
+            if (!Boolean.TRUE.equals(executed)) {
+                return null;
+            }
+            TaskState state = task.getState();
+            return ExecuteTaskResponse.newBuilder()
+                .setSuccess(state.getFailure() == null)
+                .setOutcome(outcomeName(state))
+                .setExecutionMode("jvm_gradle_task_executer")
+                .setErrorMessage(failureMessage(state.getFailure()))
+                .setDurationMs(elapsedSince(startedAt))
+                .build();
+        } catch (ClassNotFoundException | NoSuchMethodException e) {
+            LOGGER.debug("[substrate-jvmhost] Gradle task engine is unavailable; falling back to public task actions", e);
+            return null;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return failed(startedAt, unwrapRuntimeFailure(e), "jvm_gradle_task_executer");
+        } finally {
+            closeQuietly(executionServices);
+        }
+    }
+
+    private static void executePrepareNodeIfPresent(Object nodeExecutor, Object node, Object executionContext) throws ReflectiveOperationException {
+        Object prepareNode = invoke(node, "getPrepareNode", new Class<?>[0]);
+        if (prepareNode == null) {
+            return;
+        }
+        invoke(
+            nodeExecutor,
+            "execute",
+            new Class<?>[] {Class.forName(NODE_CLASS), Class.forName(NODE_EXECUTION_CONTEXT_CLASS)},
+            prepareNode,
+            executionContext
+        );
+        Object prepareFailure = invoke(prepareNode, "getNodeFailure", new Class<?>[0]);
+        if (prepareFailure instanceof RuntimeException) {
+            throw (RuntimeException) prepareFailure;
+        }
+        if (prepareFailure instanceof Exception) {
+            throw new IllegalStateException("Task mutation resolution failed", (Exception) prepareFailure);
         }
     }
 
@@ -199,11 +295,11 @@ public class JvmTaskExecutionProviderAdapter implements JvmHostServiceImpl.TaskE
             .build();
     }
 
-    private static ExecuteTaskResponse failed(long startedAt, RuntimeException failure) {
+    private static ExecuteTaskResponse failed(long startedAt, RuntimeException failure, String executionMode) {
         return ExecuteTaskResponse.newBuilder()
             .setSuccess(false)
             .setOutcome("FAILED")
-            .setExecutionMode("jvm_host_actions")
+            .setExecutionMode(executionMode)
             .setErrorMessage(failureMessage(failure))
             .setDurationMs(elapsedSince(startedAt))
             .build();
@@ -251,6 +347,19 @@ public class JvmTaskExecutionProviderAdapter implements JvmHostServiceImpl.TaskE
         }
     }
 
+    @Nullable
+    private Object findService(String className) throws ClassNotFoundException {
+        if (services == null) {
+            return null;
+        }
+        try {
+            return services.find(Class.forName(className));
+        } catch (RuntimeException e) {
+            LOGGER.debug("[substrate-jvmhost] Gradle task engine service {} is unavailable", className, e);
+            return null;
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private static Collection<Object> getAllProjects(@Nullable Object projectStateRegistry) {
         if (projectStateRegistry == null) {
@@ -274,9 +383,14 @@ public class JvmTaskExecutionProviderAdapter implements JvmHostServiceImpl.TaskE
 
     @Nullable
     private static Object invoke(Object target, String methodName) {
+        return invoke(target, methodName, new Class<?>[0]);
+    }
+
+    @Nullable
+    private static Object invoke(Object target, String methodName, Class<?>[] parameterTypes, Object... args) {
         try {
-            Method method = target.getClass().getMethod(methodName);
-            return method.invoke(target);
+            Method method = target.getClass().getMethod(methodName, parameterTypes);
+            return method.invoke(target, args);
         } catch (NoSuchMethodException | IllegalAccessException e) {
             throw new IllegalStateException("Failed to invoke " + methodName + " on " + target.getClass().getName(), e);
         } catch (InvocationTargetException e) {
@@ -285,6 +399,24 @@ public class JvmTaskExecutionProviderAdapter implements JvmHostServiceImpl.TaskE
                 throw (RuntimeException) cause;
             }
             throw new IllegalStateException("Failed to invoke " + methodName + " on " + target.getClass().getName(), cause);
+        }
+    }
+
+    private static RuntimeException unwrapRuntimeFailure(Exception failure) {
+        if (failure instanceof RuntimeException) {
+            return (RuntimeException) failure;
+        }
+        return new IllegalStateException(failure);
+    }
+
+    private static void closeQuietly(@Nullable Object value) {
+        if (!(value instanceof AutoCloseable)) {
+            return;
+        }
+        try {
+            ((AutoCloseable) value).close();
+        } catch (Exception e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to close project execution services", e);
         }
     }
 }
