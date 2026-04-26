@@ -39,6 +39,7 @@ message ResolveExecutionPlanResponse {
   int32 ready_to_execute = 3;
   int64 critical_path_ms = 4;
   bool has_cycles = 5;
+  string plan_source = 6;
 }
 message TaskStartedRequest {
   string build_id = 3;

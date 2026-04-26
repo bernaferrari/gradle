@@ -472,9 +472,19 @@ impl TaskGraphService for TaskGraphServiceImpl {
 
         tracing::debug!(build_id = %req.build_id, "Resolving execution plan");
 
-        if !self.has_registered_tasks(&build_id) {
-            self.hydrate_from_shadow_plan(&build_id, &req.build_id);
-        }
+        let had_registered_tasks = self.has_registered_tasks(&build_id);
+        let hydrated_task_count = if had_registered_tasks {
+            0
+        } else {
+            self.hydrate_from_shadow_plan(&build_id, &req.build_id)
+        };
+        let plan_source = if had_registered_tasks {
+            "registered-tasks"
+        } else if hydrated_task_count > 0 {
+            "build-plan-shadow"
+        } else {
+            "empty"
+        };
 
         let (execution_order, critical_path_ms, has_cycles) = self.resolve_plan(&build_id);
 
@@ -498,6 +508,7 @@ impl TaskGraphService for TaskGraphServiceImpl {
                 ready_to_execute = ready,
                 critical_path_ms = critical_path_ms,
                 has_cycles = has_cycles,
+                plan_source = plan_source,
                 "Execution plan resolved with excluded tasks"
             );
         }
@@ -508,6 +519,7 @@ impl TaskGraphService for TaskGraphServiceImpl {
             ready_to_execute: ready,
             critical_path_ms,
             has_cycles,
+            plan_source: plan_source.to_string(),
         }))
     }
 
@@ -788,6 +800,7 @@ mod tests {
         assert_eq!(resp.execution_order[0].task_path, ":generateSources");
         assert_eq!(resp.execution_order[1].task_path, ":compileJava");
         assert_eq!(resp.execution_order[1].task_type, "JavaCompile");
+        assert_eq!(resp.plan_source, "build-plan-shadow");
     }
 
     #[tokio::test]
@@ -844,6 +857,7 @@ mod tests {
         assert_eq!(resp.execution_order[0].execution_order, 1);
         assert_eq!(resp.execution_order[1].execution_order, 2);
         assert_eq!(resp.execution_order[2].execution_order, 3);
+        assert_eq!(resp.plan_source, "registered-tasks");
     }
 
     #[tokio::test]
@@ -1266,6 +1280,7 @@ mod tests {
         assert_eq!(resp.total_tasks, 0);
         assert!(!resp.has_cycles);
         assert!(resp.execution_order.is_empty());
+        assert_eq!(resp.plan_source, "empty");
     }
 
     /// Concurrent builds with the same task paths must not interfere.

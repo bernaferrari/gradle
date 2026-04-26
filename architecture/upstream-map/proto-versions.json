@@ -24,12 +24,12 @@
     "substrate/proto/v1/publishing.proto": "af2342ec10366507d18dec6281789bc919e12d89aafd53d95c8fc98ffa875759",
     "substrate/proto/v1/reporting.proto": "39bcddc178407be3b79963dbc6bb18ae25390fe611f43759a916b5bf9c79f71d",
     "substrate/proto/v1/resources.proto": "6086354865578cca09d675fe7986cbe346c27344f389a886b39fc0927ee8dda6",
-    "substrate/proto/v1/taskgraph.proto": "5103ce197f3ad58fa3f8e847053effed95475be908791e59ca2f02147485a718",
+    "substrate/proto/v1/taskgraph.proto": "ee2aa5ab8e585d1965a2531bef83b38ed05b6f51e5a149355c370783b6836673",
     "substrate/proto/v1/testexec.proto": "55e1af5b3072c9df38e526980c168dc223822876c637ce1179892dcf54bf0588",
     "substrate/proto/v1/toolchain.proto": "c8971e9f07b229beafc3873ef1e06d2300db9027ecf401555c493d55d7cf78e7",
     "substrate/proto/v1/versioncatalog.proto": "f728acadfc98061950c12935d13d27165420b04f860a471007e823e73b5c3c31",
     "substrate/proto/v1/worker.proto": "8f12ef298925c58a16ec2927d9e62a8882fac4d07eae7945d581741366f5b491"
   },
-  "root_sha256": "3a75d186e97d9b26db97de00635ad5243ff4ac1ea3e050c3d56893ed882d94d7",
-  "timestamp": "2026-04-26T01:47:00.689816+00:00"
+  "root_sha256": "8dce305c6eb6597b3b4ee86768e9b5b4180795ce94d2921c07a15037b6003f4d",
+  "timestamp": "2026-04-26T02:10:23.474324+00:00"
 }
