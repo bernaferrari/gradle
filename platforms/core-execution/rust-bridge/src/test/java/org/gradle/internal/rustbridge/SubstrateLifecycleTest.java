@@ -5,6 +5,7 @@ import org.gradle.internal.buildoption.RustSubstrateOptions;
 import org.junit.Test;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -67,6 +68,21 @@ public class SubstrateLifecycleTest {
             assertTrue(e.getMessage().contains("daemon-binary-missing"));
         } finally {
             restoreProperty("org.gradle.rust.substrate.socket.path", previousSocketPath);
+        }
+    }
+
+    @Test
+    public void requestedJvmHostStartupFailureIsNotIgnored() throws Exception {
+        Path tempDir = Files.createTempDirectory("substrate-lifecycle-");
+        Files.createFile(tempDir.resolve("substrate.sock"));
+        Path blockedJvmHostSocket = Files.createDirectory(tempDir.resolve("jvm-host.sock"));
+        Files.createFile(blockedJvmHostSocket.resolve("child"));
+
+        try {
+            DaemonLauncher.withJvmHost(tempDir.resolve("daemon").toFile(), tempDir.toFile()).launchOrConnect();
+            fail("Expected JVM host startup failure to abort launch");
+        } catch (IOException e) {
+            assertTrue(e.getMessage().contains("JVM host was requested but failed to start"));
         }
     }
 
