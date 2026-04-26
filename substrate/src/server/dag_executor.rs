@@ -534,6 +534,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
         let total_tasks = start_resp.get_ref().total_tasks;
         let plan_source = start_resp.get_ref().plan_source.clone();
         let max_parallelism = req.max_parallelism.max(1) as usize;
+        let allow_jvm_forwarding = req.allow_jvm_forwarding;
         let task_contexts = req.task_contexts;
 
         // Channel for task results (spawned tasks send back, main loop processes).
@@ -747,6 +748,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 let registry = Arc::clone(&self.executor_registry);
                 let context_for_task = task_contexts.get(&task_path).cloned();
                 let tx = result_tx.clone();
+                let allow_jvm_forwarding_for_task = allow_jvm_forwarding;
                 let permit = semaphore.clone().acquire_owned().await.map_err(|_| {
                     Status::internal("Semaphore closed during build execution")
                 })?;
@@ -779,13 +781,23 @@ impl DagExecutorService for DagExecutorServiceImpl {
                                 "native".to_string(),
                                 result.error_message,
                             )
-                        } else {
-                            // No native executor — mark as JVM-forwarded.
+                        } else if allow_jvm_forwarding_for_task {
+                            // Compatibility mode only: task execution must be handled by the JVM side.
                             (
                                 true,
                                 "JVM_FORWARD".to_string(),
                                 "jvm_forward".to_string(),
                                 String::new(),
+                            )
+                        } else {
+                            (
+                                false,
+                                "FAILED".to_string(),
+                                "missing_executor".to_string(),
+                                format!(
+                                    "No native executor registered for task type {} and JVM forwarding is disabled",
+                                    task_type
+                                ),
                             )
                         };
 
@@ -2372,6 +2384,7 @@ mod tests {
                 max_parallelism: 2,
                 task_filter: vec![],
                 task_contexts: Default::default(),
+                allow_jvm_forwarding: true,
             }))
             .await
             .unwrap()
@@ -2389,6 +2402,31 @@ mod tests {
             assert_eq!(d.execution_mode, "jvm_forward");
             assert_eq!(d.outcome, "JVM_FORWARD");
         }
+    }
+
+    #[tokio::test]
+    async fn test_run_build_missing_executor_fails_without_jvm_forwarding() {
+        let svc = make_svc();
+        register_chain(&svc, "rb-no-fallback", &[(":legacy", "UnknownTask", &[])]).await;
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "rb-no-fallback".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: Default::default(),
+                allow_jvm_forwarding: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.final_status, "FAILED");
+        assert_eq!(resp.tasks_forwarded_to_jvm, 0);
+        assert_eq!(resp.tasks_failed, 1);
+        assert_eq!(resp.task_details.len(), 1);
+        assert_eq!(resp.task_details[0].execution_mode, "missing_executor");
+        assert!(resp.failure_message.contains("JVM forwarding is disabled"));
     }
 
     #[tokio::test]
@@ -2446,6 +2484,7 @@ mod tests {
                 max_parallelism: 1,
                 task_filter: vec![],
                 task_contexts: Default::default(),
+                allow_jvm_forwarding: true,
             }))
             .await
             .unwrap()
@@ -2489,6 +2528,7 @@ mod tests {
                 max_parallelism: 1,
                 task_filter: vec![],
                 task_contexts: contexts,
+                allow_jvm_forwarding: false,
             }))
             .await
             .unwrap()
@@ -2531,6 +2571,7 @@ mod tests {
                 max_parallelism: 1,
                 task_filter: vec![],
                 task_contexts: contexts,
+                allow_jvm_forwarding: false,
             }))
             .await
             .unwrap()
@@ -2567,6 +2608,7 @@ mod tests {
                 max_parallelism: 4,
                 task_filter: vec![],
                 task_contexts: Default::default(),
+                allow_jvm_forwarding: true,
             }))
             .await
             .unwrap()
@@ -2617,6 +2659,7 @@ mod tests {
                 max_parallelism: 4,
                 task_filter: vec![],
                 task_contexts: contexts,
+                allow_jvm_forwarding: true,
             }))
             .await
             .unwrap()
@@ -2668,6 +2711,7 @@ mod tests {
                 max_parallelism: 1,
                 task_filter: vec![],
                 task_contexts: contexts,
+                allow_jvm_forwarding: false,
             }))
             .await
             .unwrap()
@@ -2689,6 +2733,7 @@ mod tests {
                 max_parallelism: 1,
                 task_filter: vec![],
                 task_contexts: Default::default(),
+                allow_jvm_forwarding: false,
             }))
             .await
             .unwrap()
@@ -2732,6 +2777,7 @@ mod tests {
                 max_parallelism: 3,
                 task_filter: vec![],
                 task_contexts: contexts,
+                allow_jvm_forwarding: false,
             }))
             .await
             .unwrap()
@@ -2766,6 +2812,7 @@ mod tests {
                 max_parallelism: 1,
                 task_filter: vec![],
                 task_contexts: contexts,
+                allow_jvm_forwarding: true,
             }))
             .await
             .unwrap()
@@ -2818,6 +2865,7 @@ mod tests {
                 max_parallelism: 1,
                 task_filter: vec![],
                 task_contexts: contexts1,
+                allow_jvm_forwarding: false,
             }))
             .await
             .unwrap()
@@ -2859,6 +2907,7 @@ mod tests {
                 max_parallelism: 1,
                 task_filter: vec![],
                 task_contexts: contexts2,
+                allow_jvm_forwarding: false,
             }))
             .await
             .unwrap()
@@ -2915,6 +2964,7 @@ mod tests {
                 max_parallelism: 2,
                 task_filter: vec![],
                 task_contexts: contexts1,
+                allow_jvm_forwarding: false,
             }))
             .await
             .unwrap()
@@ -2958,6 +3008,7 @@ mod tests {
                 max_parallelism: 2,
                 task_filter: vec![],
                 task_contexts: contexts2,
+                allow_jvm_forwarding: false,
             }))
             .await
             .unwrap()
@@ -2987,6 +3038,7 @@ mod tests {
                 max_parallelism: 1,
                 task_filter: vec![],
                 task_contexts: Default::default(),
+                allow_jvm_forwarding: true,
             }))
             .await
             .unwrap()
@@ -3031,6 +3083,7 @@ mod tests {
                 max_parallelism: 1,
                 task_filter: vec![],
                 task_contexts: contexts1,
+                allow_jvm_forwarding: false,
             }))
             .await;
 
@@ -3061,6 +3114,7 @@ mod tests {
                 max_parallelism: 1,
                 task_filter: vec![],
                 task_contexts: contexts2,
+                allow_jvm_forwarding: false,
             }))
             .await
             .unwrap()
@@ -3105,6 +3159,7 @@ mod tests {
                 max_parallelism: 1,
                 task_filter: vec![],
                 task_contexts: contexts,
+                allow_jvm_forwarding: false,
             }))
             .await
             .unwrap()
@@ -3139,6 +3194,7 @@ mod tests {
                 max_parallelism: 1,
                 task_filter: vec![],
                 task_contexts: contexts2,
+                allow_jvm_forwarding: false,
             }))
             .await
             .unwrap()

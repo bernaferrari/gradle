@@ -10,7 +10,7 @@
     "substrate/proto/v1/control.proto": "014fd29164ccee700cfc8dbf80dee79a71e8106af793efb71aaa0afff5eeb2c9",
     "substrate/proto/v1/dependency.proto": "d31aea5fc14e770608443b4d3c84a3153556503512522d11c32ccd99e3668457",
     "substrate/proto/v1/exec.proto": "808ced8762bbde27a9a58693ff623dd168e8bcaaa73613f250c18a298d652918",
-    "substrate/proto/v1/execution.proto": "81b9764b894c3f8092e9ca74e54b127e37f3da22161d005c5d2b70d562210ba0",
+    "substrate/proto/v1/execution.proto": "ee30a9f4ad72e90b02c316fa7052cde5b23bb262a2038f4b75cad624bca5c9db",
     "substrate/proto/v1/filetree.proto": "4379c935133ba0e9341731b30c056bdf6f0cd0bc4b16b4427df5d7fb6b14e7df",
     "substrate/proto/v1/filewatch.proto": "71048f24ee8378d153d7f3ad048acfce6e5e95c409532d908e7f287602e3fb8d",
     "substrate/proto/v1/fingerprint.proto": "e0d29e836b804d6deacf82c18752ec3faba553dec01a630d1d173ea96ddd865e",
@@ -30,6 +30,6 @@
     "substrate/proto/v1/versioncatalog.proto": "f728acadfc98061950c12935d13d27165420b04f860a471007e823e73b5c3c31",
     "substrate/proto/v1/worker.proto": "8f12ef298925c58a16ec2927d9e62a8882fac4d07eae7945d581741366f5b491"
   },
-  "root_sha256": "d48ddc89700515060cba27cd08ad0900451c5a7a027d1c3b54f646b6d5a4e768",
-  "timestamp": "2026-04-26T02:48:55.033208+00:00"
+  "root_sha256": "d26fd3d9a703e58297361d13884b520d2489c4e80c598bfce3f3c383385e29d7",
+  "timestamp": "2026-04-26T02:53:01.970546+00:00"
 }
