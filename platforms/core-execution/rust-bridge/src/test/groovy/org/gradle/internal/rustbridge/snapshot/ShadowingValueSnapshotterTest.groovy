@@ -1,5 +1,6 @@
 package org.gradle.internal.rustbridge.snapshot
 
+import org.gradle.internal.rustbridge.SubstrateException
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter
 import spock.lang.Specification
 
@@ -77,32 +78,49 @@ class ShadowingValueSnapshotterTest extends Specification {
         0 * javaDelegate._
     }
 
-    def "falls back to Java in authoritative mode when Rust fails"() {
+    def "fails closed in authoritative mode when Rust returns an error"() {
         given:
         def snapshotter = new ShadowingValueSnapshotter(javaDelegate, rustClient, reporter, true)
         def properties = [key: "value"]
-        javaDelegate.snapshot(properties) >> "java-hash".bytes
         rustClient.snapshotValues(properties, "fp") >>
             RustValueSnapshotClient.SnapshotResult.error("connection refused")
 
         when:
-        def result = snapshotter.snapshot(properties, "fp")
+        snapshotter.snapshot(properties, "fp")
 
         then:
-        result == "java-hash".bytes
+        def failure = thrown(SubstrateException)
+        failure.message == "Authoritative Rust value snapshot failed: connection refused"
+        1 * reporter.reportRustError("value-snapshot", _ as SubstrateException)
+        0 * javaDelegate._
     }
 
-    def "skips Rust call in authoritative mode when properties are empty"() {
+    def "uses Rust in authoritative mode when properties are empty"() {
         given:
         def snapshotter = new ShadowingValueSnapshotter(javaDelegate, rustClient, reporter, true)
-        javaDelegate.snapshot([:]) >> "java-hash".bytes
+        rustClient.snapshotValues([:], "fp") >>
+            RustValueSnapshotClient.SnapshotResult.success("rust-empty-hash".bytes, [])
 
         when:
         def result = snapshotter.snapshot([:], "fp")
 
         then:
-        result == "java-hash".bytes
-        0 * rustClient._
+        result == "rust-empty-hash".bytes
+        0 * javaDelegate._
+    }
+
+    def "fails closed in authoritative mode when Rust client is unavailable"() {
+        given:
+        def snapshotter = new ShadowingValueSnapshotter(javaDelegate, null, reporter, true)
+
+        when:
+        snapshotter.snapshot([key: "value"], "fp")
+
+        then:
+        def failure = thrown(SubstrateException)
+        failure.message == "Authoritative Rust value snapshotting is unavailable"
+        1 * reporter.reportRustError("value-snapshot", _ as SubstrateException)
+        0 * javaDelegate._
     }
 
     def "works with null Rust client in non-authoritative mode"() {

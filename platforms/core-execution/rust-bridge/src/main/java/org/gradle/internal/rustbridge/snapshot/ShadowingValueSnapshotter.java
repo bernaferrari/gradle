@@ -2,6 +2,7 @@ package org.gradle.internal.rustbridge.snapshot;
 
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.hash.HashCode;
+import org.gradle.internal.rustbridge.SubstrateException;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
 import org.slf4j.Logger;
 
@@ -10,11 +11,11 @@ import java.util.Map;
 
 /**
  * A value snapshotter that runs both Java and Rust implementations in parallel,
- * compares composite hashes, and always returns the Java result for correctness.
+ * compares composite hashes, and returns the Java result in shadow mode.
  *
  * <p>In shadow mode, this validates the Rust ValueSnapshotService against the
- * Java DefaultValueSnapshotter. Once validated, this can be replaced with
- * a Rust-only implementation.</p>
+ * Java DefaultValueSnapshotter. In authoritative mode, Rust is the only source
+ * of truth and Rust errors fail closed instead of falling back to Java.</p>
  */
 public class ShadowingValueSnapshotter {
 
@@ -46,23 +47,14 @@ public class ShadowingValueSnapshotter {
      *
      * @param properties map of property name to Java value
      * @param implementationFingerprint fingerprint of the task implementation
-     * @return the Java-computed snapshot hash (authoritative)
+     * @return the effective snapshot hash
      */
     public byte[] snapshot(Map<String, Object> properties, String implementationFingerprint) {
-        // Authoritative mode: use Rust directly, fall back to Java on failure
-        if (authoritative && rustClient != null && !properties.isEmpty()) {
-            try {
-                RustValueSnapshotClient.SnapshotResult rustResult = rustClient.snapshotValues(properties, implementationFingerprint);
-                if (rustResult.isSuccess()) {
-                    LOGGER.debug("[substrate:snapshot] authoritative: using Rust hash");
-                    return rustResult.getCompositeHash();
-                }
-            } catch (Exception e) {
-                LOGGER.debug("[substrate:snapshot] authoritative Rust failed, falling back to Java", e);
-            }
+        if (authoritative) {
+            return snapshotAuthoritative(properties, implementationFingerprint);
         }
 
-        // Always use Java result for correctness
+        // Shadow mode keeps Java as the effective result for correctness.
         byte[] javaHash = javaDelegate.snapshot(properties);
 
         // Shadow: also snapshot via Rust and compare
@@ -73,6 +65,36 @@ public class ShadowingValueSnapshotter {
         }
 
         return javaHash;
+    }
+
+    private byte[] snapshotAuthoritative(Map<String, Object> properties, String implementationFingerprint) {
+        if (rustClient == null) {
+            SubstrateException failure = new SubstrateException("Authoritative Rust value snapshotting is unavailable");
+            mismatchReporter.reportRustError("value-snapshot", failure);
+            throw failure;
+        }
+
+        try {
+            RustValueSnapshotClient.SnapshotResult rustResult =
+                rustClient.snapshotValues(properties, implementationFingerprint);
+            if (rustResult.isSuccess() && rustResult.getCompositeHash() != null) {
+                LOGGER.debug("[substrate:snapshot] authoritative: using Rust hash");
+                return rustResult.getCompositeHash();
+            }
+
+            String message = rustResult.getErrorMessage() == null
+                ? "Rust value snapshot returned no composite hash"
+                : rustResult.getErrorMessage();
+            SubstrateException failure = new SubstrateException("Authoritative Rust value snapshot failed: " + message);
+            mismatchReporter.reportRustError("value-snapshot", failure);
+            throw failure;
+        } catch (SubstrateException e) {
+            throw e;
+        } catch (Exception e) {
+            SubstrateException failure = new SubstrateException("Authoritative Rust value snapshot failed", e);
+            mismatchReporter.reportRustError("value-snapshot", failure);
+            throw failure;
+        }
     }
 
     private void shadowSnapshot(
