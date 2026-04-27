@@ -75,19 +75,26 @@ corpus useful without network access.
 
 ## Corpus Structure
 
-A corpus should be a directory containing Gradle projects:
-
-```
-
 The repository includes a small offline corpus at `testing/corpus/manifest.json`
 covering Java library, Java application, and Java multi-project builds. The
 optional `testing/corpus/external-manifest.json` adds a pinned JUnit Platform
 sample for real non-empty test execution and requires network or a warm Gradle
 dependency cache.
 
+Reference-mode runs compare upstream Gradle and Rust substrate exit codes, task
+lists, and stable build output file inventories under `build/classes`,
+`build/resources`, `build/libs`, `build/distributions`, `build/install`, and
+`build/test-results`. The file inventory check is intentionally path-based;
+archive byte-for-byte parity is tracked separately because compression and
+metadata can differ while logical artifacts are still equivalent.
+
 Keep offline samples deterministic: prefer built-in Gradle plugins and local
 sources. Put external repositories or dependencies in the external manifest with
 pinned coordinates.
+
+A corpus should be a directory containing Gradle projects:
+
+```
 my-corpus/
   project-a/
     build.gradle
@@ -102,24 +109,24 @@ my-corpus/
 
 ## Output
 
-Results are written to `corpus_results.json` in the corpus directory:
+Results are written to `corpus_results.json` in the selected output directory:
 
 ```json
 {
-  "timestamp": "2024-01-15T12:00:00Z",
-  "projects": {
-    "project-a": {
-      "upstream": {"exit_code": 0, "duration_ms": 1234},
-      "substrate": {"exit_code": 0, "duration_ms": 1100},
-      "match": true,
-      "details": {...}
-    }
-  },
-  "summary": {
-    "total": 10,
-    "passed": 8,
-    "failed": 2,
-    "coverage_pct": 80
+  "project-a": {
+    "upstream": {
+      "exit_code": 0,
+      "tasks": [":compileJava", ":jar"],
+      "output_file_count": 2,
+      "output_files": ["build/classes/java/main/App.class", "build/libs/app.jar"]
+    },
+    "substrate": {
+      "exit_code": 0,
+      "tasks": [":compileJava", ":jar"],
+      "output_file_count": 2,
+      "output_files": ["build/classes/java/main/App.class", "build/libs/app.jar"]
+    },
+    "match": true
   }
 }
 ```

@@ -19,7 +19,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -28,6 +28,7 @@ class RunResult:
     exit_code: int
     output: str
     tasks: list[str]
+    output_files: list[str] = field(default_factory=list)
     substrate_noop: bool = False
     
     def to_dict(self):
@@ -36,8 +37,42 @@ class RunResult:
             "output_preview": self.output[:1000] if self.output else "",
             "tasks": self.tasks,
             "task_count": len(self.tasks),
+            "output_file_count": len(self.output_files),
+            "output_files": self.output_files,
             "substrate_noop": self.substrate_noop,
         }
+
+
+STABLE_BUILD_OUTPUT_ROOTS = {
+    "classes",
+    "resources",
+    "libs",
+    "distributions",
+    "install",
+    "test-results",
+}
+
+
+def snapshot_build_outputs(project_dir: str) -> list[str]:
+    """Return stable build output paths for upstream/substrate comparison.
+
+    This intentionally compares file inventory, not bytes. Archive byte parity is
+    tracked separately because native ZIP/TAR writers may differ in compression
+    while still producing the same logical artifacts.
+    """
+    root = Path(project_dir)
+    outputs: list[str] = []
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        parts = path.relative_to(root).parts
+        if ".gradle" in parts:
+            continue
+        for idx, part in enumerate(parts):
+            if part == "build" and idx + 1 < len(parts) and parts[idx + 1] in STABLE_BUILD_OUTPUT_ROOTS:
+                outputs.append(str(path.relative_to(root)))
+                break
+    return sorted(outputs)
 
 
 def load_manifest(manifest_path: str) -> tuple[Path, list[dict]]:
@@ -220,6 +255,7 @@ def run_build(
             exit_code=result.returncode,
             output=output,
             tasks=tasks,
+            output_files=snapshot_build_outputs(project_dir) if result.returncode == 0 else [],
             substrate_noop=substrate and detect_substrate_noop(output),
         )
     except subprocess.TimeoutExpired:
@@ -322,6 +358,7 @@ def main():
             "match": (
                 substrate_usable
                 and upstream.tasks == substrate.tasks
+                and upstream.output_files == substrate.output_files
                 and upstream.exit_code == substrate.exit_code
             ),
         }
@@ -340,6 +377,13 @@ def main():
                     print(f"    Missing in substrate: {missing}")
                 if extra:
                     print(f"    Extra in substrate: {extra}")
+            if upstream.output_files != substrate.output_files:
+                missing_outputs = set(upstream.output_files) - set(substrate.output_files)
+                extra_outputs = set(substrate.output_files) - set(upstream.output_files)
+                if missing_outputs:
+                    print(f"    Missing output files in substrate: {sorted(missing_outputs)}")
+                if extra_outputs:
+                    print(f"    Extra output files in substrate: {sorted(extra_outputs)}")
     
     # Summary
     total = len(results)
