@@ -32,6 +32,21 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         )
         self.assertNotIn("-Dorg.gradle.rust.substrate.enable=true", command)
 
+    def test_runbuild_authoritative_adds_explicit_no_fallback_gate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            command = corpus_run.build_gradle_command(
+                tmp,
+                substrate=True,
+                tasks=["build"],
+                runbuild_authoritative=True,
+            )
+
+        self.assertIn(
+            "-Dorg.gradle.rust.substrate.runbuild.authoritative=true",
+            command,
+        )
+        self.assertNotIn("-Dorg.gradle.rust.substrate.runbuild.enabled=true", command)
+
     def test_prefers_project_wrapper_when_present(self):
         with tempfile.TemporaryDirectory() as tmp:
             Path(tmp, "gradlew").touch()

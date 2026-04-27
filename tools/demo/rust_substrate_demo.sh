@@ -97,6 +97,8 @@ if [[ "$RUN_SAMPLE_BUILDS" -eq 1 ]]; then
     ./gradlew -q -p testing/corpus/java-library-kotlin-dsl clean build
   run_step "Build corpus Java application sample" \
     ./gradlew -q -p testing/corpus/java-application-groovy-dsl clean build
+  run_step "Build corpus Java library with authoritative Rust RunBuild gate" \
+    bash -c 'cargo build -q -p gradle-substrate-daemon && ./gradlew -q -p testing/corpus/java-library-kotlin-dsl clean build --no-daemon --console=plain -Dorg.gradle.rust.substrate.enabled=true -Dorg.gradle.rust.substrate.runbuild.authoritative=true -Dorg.gradle.rust.substrate.daemon.path="$PWD/target/debug/gradle-substrate-daemon"'
 fi
 
 if [[ "$RUN_GRPC_E2E" -eq 1 ]]; then
@@ -113,6 +115,7 @@ What this proves:
   - Build-plan IR v2 fingerprints and shadow artifacts are stable.
   - The checked-in Java library/application corpus has deterministic build-plan contracts.
   - A captured JVM-host Java lifecycle build-plan shadow can execute JavaCompile, ProcessResources, classes, and Jar through Rust with JVM fallback disabled.
+  - When sample builds are enabled, the Java library corpus build exercises the explicit no-fallback RunBuild gate from a real Gradle invocation.
   - Rust daemon gRPC behavior is exercised when --skip-grpc-e2e is not used.
 
 What this does not claim:

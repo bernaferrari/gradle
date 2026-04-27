@@ -145,6 +145,7 @@ def build_gradle_command(
     tasks: list[str] | None = None,
     substrate_mode: str = "shadow",
     daemon_binary: str | None = None,
+    runbuild_authoritative: bool = False,
 ) -> list[str]:
     """Build the Gradle invocation used by corpus runs."""
     cmd = ["./gradlew"] if os.path.exists(os.path.join(project_dir, "gradlew")) else ["gradle"]
@@ -159,6 +160,8 @@ def build_gradle_command(
         ])
         if daemon_binary:
             cmd.append(f"-Dorg.gradle.rust.substrate.daemon.path={daemon_binary}")
+        if runbuild_authoritative:
+            cmd.append("-Dorg.gradle.rust.substrate.runbuild.authoritative=true")
 
     return cmd
 
@@ -181,6 +184,7 @@ def run_build(
     tasks: list[str] | None = None,
     substrate_mode: str = "shadow",
     daemon_binary: str | None = None,
+    runbuild_authoritative: bool = False,
 ) -> RunResult:
     """Run gradle on a project directory."""
     cmd = build_gradle_command(
@@ -189,6 +193,7 @@ def run_build(
         tasks=tasks,
         substrate_mode=substrate_mode,
         daemon_binary=daemon_binary,
+        runbuild_authoritative=runbuild_authoritative,
     )
     
     try:
@@ -244,6 +249,8 @@ def main():
                        help="Path to gradle-substrate-daemon for the substrate run")
     parser.add_argument("--allow-noop-substrate", action="store_true",
                        help="Do not fail if the substrate candidate falls back to no-op mode")
+    parser.add_argument("--runbuild-authoritative", action="store_true",
+                       help="Enable the explicit no-fallback Rust RunBuild gate for the substrate candidate")
     parser.add_argument("--timeout", type=int, default=300, help="Timeout per project in seconds")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
     parser.add_argument("--output-dir", default=None, help="Directory for results")
@@ -302,6 +309,7 @@ def main():
             tasks=args.tasks,
             substrate_mode=args.substrate_mode,
             daemon_binary=args.daemon_binary,
+            runbuild_authoritative=args.runbuild_authoritative,
         )
         substrate_usable = args.allow_noop_substrate or not substrate.substrate_noop
         

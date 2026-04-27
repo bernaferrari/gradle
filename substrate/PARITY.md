@@ -18,12 +18,15 @@
   `org.gradle.rust.substrate.runbuild.authoritative=true` executes the selected
   build-plan shadow through Rust `RunBuild` and skips Gradle's JVM task executor
   only when Rust reports exactly the scheduled task count with zero JVM forwards.
+- The checked-in `java-library-kotlin-dsl` corpus build completes through that
+  explicit gate with `target/debug/gradle-substrate-daemon`.
 
 ## Gaps
 
 - Full dependency resolution semantics are not yet parity-complete.
 - Real Gradle invocation does not use Rust as the default executor yet; the
-  authoritative build-work gate is intentionally opt-in and fail-closed.
+  authoritative build-work gate is intentionally opt-in, fail-closed, and only
+  proven against the narrow Java library corpus path so far.
 - Kotlin/Groovy DSL evaluation and legacy plugin execution remain JVM-host
   compatibility islands.
 - More task types need native-ready contract capture before broad no-fallback
@@ -35,14 +38,15 @@
 - `cargo test -p gradle-substrate-daemon --test hash_compatibility_test`
 - `cargo test -p gradle-substrate-daemon --test build_plan_shadow_test refreshed_native_ready_shadow_plan_runs_java_lifecycle_without_jvm_fallback -- --exact`
 - `./gradlew :core:test --tests org.gradle.execution.RustAuthoritativeBuildExecutionActionTest -x :distributions-core:generateLicenseFile`
+- `./gradlew -q -p testing/corpus/java-library-kotlin-dsl clean build --no-daemon --console=plain -Dorg.gradle.rust.substrate.enabled=true -Dorg.gradle.rust.substrate.runbuild.authoritative=true -Dorg.gradle.rust.substrate.daemon.path=$PWD/target/debug/gradle-substrate-daemon`
 - `./tools/stabilization/run_strict_stabilization.sh quick`
 - `./tools/demo/rust_substrate_demo.sh --quick`
 
 ## Next Sync Actions
 
 1. Expand differential corpus coverage for dependency and task-graph semantics.
-2. Prove the opt-in authoritative build-work gate against a real generated Java
-   corpus build instead of only unit and daemon shadow contracts.
+2. Extend the opt-in authoritative build-work gate from the Java library corpus
+   path to the application corpus and richer multi-project corpus builds.
 3. Add native-ready contracts for richer `Copy`/`Sync` specs and `Test` enough
    to complete broader Java library/application lifecycles.
 4. Reduce bridge source exclusions as APIs are stabilized.
