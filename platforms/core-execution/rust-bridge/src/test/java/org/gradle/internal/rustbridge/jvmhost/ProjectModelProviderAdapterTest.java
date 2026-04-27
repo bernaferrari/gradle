@@ -9,7 +9,6 @@ import org.gradle.api.Task;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.tasks.TaskDependency;
 import org.junit.Rule;
-import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
@@ -31,7 +30,7 @@ public class ProjectModelProviderAdapterTest {
     @Rule
     public final TemporaryFolder temporaryFolder = new TemporaryFolder();
 
-    @Test
+    @org.junit.Test
     public void capturesNativeReadyJavaCompileContractFromTaskModel() throws IOException {
         File sourceDir = temporaryFolder.newFolder("src", "main", "java");
         File sourceFile = new File(sourceDir, "App.java");
@@ -63,7 +62,7 @@ public class ProjectModelProviderAdapterTest {
             .anyMatch(path -> path.equals(outputDir.getAbsolutePath())));
     }
 
-    @Test
+    @org.junit.Test
     public void capturesNativeReadyJarContractFromTaskModel() throws IOException {
         File classesDir = temporaryFolder.newFolder("build/classes/java/main");
         File classFile = new File(classesDir, "App.class");
@@ -95,7 +94,35 @@ public class ProjectModelProviderAdapterTest {
             .anyMatch(path -> path.equals(archiveFile.getAbsolutePath())));
     }
 
-    @Test
+    @org.junit.Test
+    public void capturesNativeReadyTestExecContractFromTaskModel() throws IOException {
+        File testClassesDir = temporaryFolder.newFolder("build/classes/java/test");
+        File runtimeJar = temporaryFolder.newFile("junit-platform-console-standalone.jar");
+        File reportsDir = temporaryFolder.newFolder("build/test-results/test");
+        File workingDir = temporaryFolder.newFolder("work");
+        FileCollection classpath = fileCollection(testClassesDir, runtimeJar);
+
+        Task test = testTask(testClassesDir, runtimeJar, reportsDir, workingDir);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(test, Test.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals(":test", task.getPath());
+        assertEquals("test", task.getActionKind());
+        assertEquals("process", task.getWorkerIsolation());
+        assertEquals("Test", inputs.get("taskType"));
+        assertEquals(fileCollectionPathStringForTest(classpath), inputs.get("classpath"));
+        assertEquals(testClassesDir.getAbsolutePath(), inputs.get("test_classes_dirs"));
+        assertEquals(workingDir.getAbsolutePath(), inputs.get("working_dir"));
+        assertEquals("-ea -Dcustom=true", inputs.get("jvm_args"));
+        assertEquals("env=test", inputs.get("system_properties"));
+        assertEquals(reportsDir.getAbsolutePath(), inputs.get("xml_report_dir"));
+        assertEquals("true", inputs.get("scan_classpath"));
+    }
+
+    @org.junit.Test
     public void capturesProcessResourcesAsNativeFileTransform() throws IOException {
         File resourceFile = temporaryFolder.newFile("application.properties");
         File outputDir = temporaryFolder.newFolder("build/resources/main");
@@ -113,7 +140,7 @@ public class ProjectModelProviderAdapterTest {
             .anyMatch(path -> path.equals(outputDir.getAbsolutePath())));
     }
 
-    @Test
+    @org.junit.Test
     public void capturesNoActionDefaultTaskAsLifecycleNoop() {
         Task classes = basicTask(":classes", "classes", fileCollection(), fileCollection(), true);
 
@@ -188,6 +215,69 @@ public class ProjectModelProviderAdapterTest {
         FileCollection inputs = fileCollection(classesDir);
         FileCollection outputs = fileCollection(archiveFile);
         return basicJarTask(inputs, outputs, archiveDir, archiveFile);
+    }
+
+    private static Task testTask(File testClassesDir, File runtimeJar, File reportsDir, File workingDir) {
+        FileCollection testClasses = fileCollection(testClassesDir);
+        FileCollection classpath = fileCollection(testClassesDir, runtimeJar);
+        FileCollection outputs = fileCollection(reportsDir);
+        Project project = proxy(Project.class, (proxy, method, args) -> {
+            if (method.getName().equals("getPath")) {
+                return ":";
+            }
+            return defaultValue(method.getReturnType());
+        });
+        TaskDependency noDependencies = proxy(TaskDependency.class, (proxy, method, args) -> {
+            if (method.getName().equals("getDependencies")) {
+                return Collections.emptySet();
+            }
+            return defaultValue(method.getReturnType());
+        });
+        return proxy(new Class<?>[] {Task.class, TestContract.class}, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "getPath":
+                    return ":test";
+                case "getProject":
+                    return project;
+                case "getName":
+                    return "test";
+                case "getEnabled":
+                    return true;
+                case "getGroup":
+                case "getDescription":
+                    return "";
+                case "getTaskDependencies":
+                case "getShouldRunAfter":
+                case "getMustRunAfter":
+                case "getFinalizedBy":
+                    return noDependencies;
+                case "getInputs":
+                    return filesOwner(method.getReturnType(), classpath);
+                case "getOutputs":
+                    return filesOwner(method.getReturnType(), outputs);
+                case "getLocalState":
+                case "getDestroyables":
+                    return registeredFilesOwner(method.getReturnType());
+                case "getClasspath":
+                    return classpath;
+                case "getTestClassesDirs":
+                    return testClasses;
+                case "getWorkingDir":
+                    return workingDir;
+                case "getMaxHeapSize":
+                    return "768m";
+                case "getJvmArgs":
+                    return Arrays.asList("-ea", "-Dcustom=true");
+                case "getSystemProperties":
+                    return Collections.singletonMap("env", "test");
+                case "getReports":
+                    return new TestReports(reportsDir);
+                case "compareTo":
+                    return 0;
+                default:
+                    return defaultValue(method.getReturnType());
+            }
+        });
     }
 
     private static Task basicJarTask(FileCollection inputs, FileCollection outputs, File archiveDir, File archiveFile) {
@@ -336,6 +426,12 @@ public class ProjectModelProviderAdapterTest {
         });
     }
 
+    private static String fileCollectionPathStringForTest(FileCollection files) {
+        return files.getFiles().stream()
+            .map(File::getAbsolutePath)
+            .collect(Collectors.joining(File.pathSeparator));
+    }
+
     @SuppressWarnings("unchecked")
     private static <T> T proxy(Class<T> type, InvocationHandler handler) {
         return (T) proxy(new Class<?>[] {type}, handler);
@@ -399,6 +495,16 @@ public class ProjectModelProviderAdapterTest {
         FileProvider getArchiveFile();
     }
 
+    public interface TestContract {
+        FileCollection getClasspath();
+        FileCollection getTestClassesDirs();
+        File getWorkingDir();
+        String getMaxHeapSize();
+        Iterable<String> getJvmArgs();
+        Map<String, String> getSystemProperties();
+        TestReports getReports();
+    }
+
     public static class CompileOptionsContract {
         public ReleaseProvider getRelease() {
             return new ReleaseProvider();
@@ -455,10 +561,37 @@ public class ProjectModelProviderAdapterTest {
         }
     }
 
+    public static class TestReports {
+        private final File reportDir;
+
+        TestReports(File reportDir) {
+            this.reportDir = reportDir;
+        }
+
+        public JunitXmlReport getJunitXml() {
+            return new JunitXmlReport(reportDir);
+        }
+    }
+
+    public static class JunitXmlReport {
+        private final File reportDir;
+
+        JunitXmlReport(File reportDir) {
+            this.reportDir = reportDir;
+        }
+
+        public FileProvider getOutputLocation() {
+            return new FileProvider(reportDir);
+        }
+    }
+
     public static class JavaCompile {
     }
 
     public static class Jar {
+    }
+
+    public static class Test {
     }
 
     public static class ProcessResources {

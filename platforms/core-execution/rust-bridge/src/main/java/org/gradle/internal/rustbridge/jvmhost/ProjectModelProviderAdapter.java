@@ -264,6 +264,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if ("Jar".equals(shortTaskTypeName)) {
             captureJarInputs(task, inputs);
         }
+        if ("Test".equals(shortTaskTypeName)) {
+            captureTestInputs(task, inputs);
+        }
 
         BuildPlanTask.Builder builder = BuildPlanTask.newBuilder()
             .setPath(task.getPath())
@@ -326,6 +329,18 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "archive_file", providerFilePath(invokeOptional(task, "getArchiveFile")));
     }
 
+    private static void captureTestInputs(Task task, Map<String, String> inputs) {
+        putIfPresent(inputs, "java_home", System.getProperty("java.home"));
+        putIfPresent(inputs, "classpath", fileCollectionPathString(invokeOptional(task, "getClasspath")));
+        putIfPresent(inputs, "test_classes_dirs", fileCollectionPathString(invokeOptional(task, "getTestClassesDirs")));
+        putIfPresent(inputs, "working_dir", filePath(invokeOptional(task, "getWorkingDir")));
+        putIfPresent(inputs, "max_heap_size", stringOrEmpty(invokeOptional(task, "getMaxHeapSize")));
+        putIfPresent(inputs, "jvm_args", stringList(invokeOptional(task, "getJvmArgs")));
+        putIfPresent(inputs, "system_properties", stringMap(invokeOptional(task, "getSystemProperties")));
+        putIfPresent(inputs, "xml_report_dir", testXmlReportDirectory(task));
+        inputs.put("scan_classpath", "true");
+    }
+
     private static void putIfPresent(Map<String, String> inputs, String key, String value) {
         if (value != null && !value.isEmpty()) {
             inputs.put(key, value);
@@ -368,6 +383,44 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             return "";
         }
         return String.join(File.pathSeparator, fileCollectionPaths((FileCollection) files));
+    }
+
+    private static String filePath(@Nullable Object value) {
+        return value instanceof File ? ((File) value).getAbsolutePath() : "";
+    }
+
+    private static String stringList(@Nullable Object value) {
+        if (!(value instanceof Iterable)) {
+            return "";
+        }
+        List<String> values = new ArrayList<>();
+        for (Object item : (Iterable<?>) value) {
+            if (item != null) {
+                values.add(item.toString());
+            }
+        }
+        return String.join(" ", values);
+    }
+
+    private static String stringMap(@Nullable Object value) {
+        if (!(value instanceof Map)) {
+            return "";
+        }
+        List<String> entries = new ArrayList<>();
+        for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+            if (entry.getKey() != null && entry.getValue() != null) {
+                entries.add(entry.getKey() + "=" + entry.getValue());
+            }
+        }
+        Collections.sort(entries);
+        return String.join(",", entries);
+    }
+
+    private static String testXmlReportDirectory(Task task) {
+        Object reports = invokeOptional(task, "getReports");
+        Object junitXml = reports == null ? null : invokeOptional(reports, "getJunitXml");
+        Object outputLocation = junitXml == null ? null : invokeOptional(junitXml, "getOutputLocation");
+        return providerFilePath(outputLocation);
     }
 
     private static List<BuildPlanTaskInputSpec> inputSpecs(

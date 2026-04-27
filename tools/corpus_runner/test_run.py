@@ -83,6 +83,20 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         }
         self.assertEqual({}, failures)
 
+    def test_external_corpus_manifest_contracts_pass(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        manifest = repo_root / "testing" / "corpus" / "external-manifest.json"
+
+        results = corpus_run.run_manifest_contracts(str(manifest))
+
+        self.assertIn("java-junit-kotlin-dsl", results)
+        failures = {
+            name: result["mismatches"]
+            for name, result in results.items()
+            if not result["match"]
+        }
+        self.assertEqual({}, failures)
+
     def test_contract_comparison_reports_mismatch(self):
         mismatches = corpus_run.compare_contract(
             {"plugins": ["java"], "source_file_count": 1},
