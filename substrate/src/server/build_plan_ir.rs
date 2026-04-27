@@ -5,10 +5,11 @@ use sha2::{Digest, Sha256};
 
 use crate::proto::{
     BuildPlan, BuildPlanDependency, BuildPlanEnvelope, BuildPlanProject, BuildPlanTask,
+    BuildPlanTaskDiagnostic, BuildPlanTaskInputSpec, BuildPlanTaskOutputSpec,
     BuildPlanToolchainRequest,
 };
 
-pub const BUILD_PLAN_SCHEMA_VERSION: u32 = 1;
+pub const BUILD_PLAN_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CanonicalBuildPlan {
@@ -49,6 +50,42 @@ pub struct CanonicalBuildPlanTask {
     pub local_state: Vec<String>,
     #[serde(default)]
     pub destroyables: Vec<String>,
+    #[serde(default)]
+    pub action_kind: String,
+    #[serde(default)]
+    pub input_specs: Vec<CanonicalBuildPlanTaskInputSpec>,
+    #[serde(default)]
+    pub output_specs: Vec<CanonicalBuildPlanTaskOutputSpec>,
+    #[serde(default)]
+    pub environment_inputs: Vec<String>,
+    #[serde(default)]
+    pub system_property_inputs: Vec<String>,
+    #[serde(default)]
+    pub diagnostics: Vec<CanonicalBuildPlanTaskDiagnostic>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CanonicalBuildPlanTaskInputSpec {
+    pub name: String,
+    pub kind: String,
+    pub value: String,
+    pub normalization: String,
+    pub optional: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CanonicalBuildPlanTaskOutputSpec {
+    pub name: String,
+    pub kind: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CanonicalBuildPlanTaskDiagnostic {
+    pub severity: String,
+    pub code: String,
+    pub message: String,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,6 +124,28 @@ impl CanonicalBuildPlan {
             task.finalized_by.sort_unstable();
             task.local_state.sort_unstable();
             task.destroyables.sort_unstable();
+            task.input_specs.sort_unstable_by(|a, b| {
+                (&a.name, &a.kind, &a.value, &a.normalization, a.optional).cmp(&(
+                    &b.name,
+                    &b.kind,
+                    &b.value,
+                    &b.normalization,
+                    b.optional,
+                ))
+            });
+            task.output_specs.sort_unstable_by(|a, b| {
+                (&a.name, &a.kind, &a.path).cmp(&(&b.name, &b.kind, &b.path))
+            });
+            task.environment_inputs.sort_unstable();
+            task.system_property_inputs.sort_unstable();
+            task.diagnostics.sort_unstable_by(|a, b| {
+                (&a.severity, &a.code, &a.source, &a.message).cmp(&(
+                    &b.severity,
+                    &b.code,
+                    &b.source,
+                    &b.message,
+                ))
+            });
         }
         self.tasks.sort_unstable_by(|a, b| {
             (&a.path, &a.project_path, &a.implementation_id).cmp(&(
@@ -175,6 +234,39 @@ pub fn to_proto(plan: &CanonicalBuildPlan) -> BuildPlan {
                 cacheability: t.cacheability,
                 local_state: t.local_state,
                 destroyables: t.destroyables,
+                action_kind: t.action_kind,
+                input_specs: t
+                    .input_specs
+                    .into_iter()
+                    .map(|input| BuildPlanTaskInputSpec {
+                        name: input.name,
+                        kind: input.kind,
+                        value: input.value,
+                        normalization: input.normalization,
+                        optional_input: input.optional,
+                    })
+                    .collect(),
+                output_specs: t
+                    .output_specs
+                    .into_iter()
+                    .map(|output| BuildPlanTaskOutputSpec {
+                        name: output.name,
+                        kind: output.kind,
+                        path: output.path,
+                    })
+                    .collect(),
+                environment_inputs: t.environment_inputs,
+                system_property_inputs: t.system_property_inputs,
+                diagnostics: t
+                    .diagnostics
+                    .into_iter()
+                    .map(|diagnostic| BuildPlanTaskDiagnostic {
+                        severity: diagnostic.severity,
+                        code: diagnostic.code,
+                        message: diagnostic.message,
+                        source: diagnostic.source,
+                    })
+                    .collect(),
             })
             .collect(),
         dependencies: normalized
@@ -230,6 +322,39 @@ pub fn from_proto(plan: &BuildPlan) -> CanonicalBuildPlan {
                 cacheability: t.cacheability.clone(),
                 local_state: t.local_state.clone(),
                 destroyables: t.destroyables.clone(),
+                action_kind: t.action_kind.clone(),
+                input_specs: t
+                    .input_specs
+                    .iter()
+                    .map(|input| CanonicalBuildPlanTaskInputSpec {
+                        name: input.name.clone(),
+                        kind: input.kind.clone(),
+                        value: input.value.clone(),
+                        normalization: input.normalization.clone(),
+                        optional: input.optional_input,
+                    })
+                    .collect(),
+                output_specs: t
+                    .output_specs
+                    .iter()
+                    .map(|output| CanonicalBuildPlanTaskOutputSpec {
+                        name: output.name.clone(),
+                        kind: output.kind.clone(),
+                        path: output.path.clone(),
+                    })
+                    .collect(),
+                environment_inputs: t.environment_inputs.clone(),
+                system_property_inputs: t.system_property_inputs.clone(),
+                diagnostics: t
+                    .diagnostics
+                    .iter()
+                    .map(|diagnostic| CanonicalBuildPlanTaskDiagnostic {
+                        severity: diagnostic.severity.clone(),
+                        code: diagnostic.code.clone(),
+                        message: diagnostic.message.clone(),
+                        source: diagnostic.source.clone(),
+                    })
+                    .collect(),
             })
             .collect(),
         dependencies: plan
@@ -315,6 +440,43 @@ mod tests {
                 cacheability: "cacheable".to_string(),
                 local_state: Vec::new(),
                 destroyables: Vec::new(),
+                action_kind: "test".to_string(),
+                input_specs: vec![
+                    CanonicalBuildPlanTaskInputSpec {
+                        name: "forkEvery".to_string(),
+                        kind: "value".to_string(),
+                        value: "0".to_string(),
+                        normalization: "scalar".to_string(),
+                        optional: false,
+                    },
+                    CanonicalBuildPlanTaskInputSpec {
+                        name: "testFramework".to_string(),
+                        kind: "value".to_string(),
+                        value: "junit".to_string(),
+                        normalization: "scalar".to_string(),
+                        optional: false,
+                    },
+                ],
+                output_specs: vec![
+                    CanonicalBuildPlanTaskOutputSpec {
+                        name: "output0".to_string(),
+                        kind: "directory".to_string(),
+                        path: "/repo/app/build/test-results".to_string(),
+                    },
+                    CanonicalBuildPlanTaskOutputSpec {
+                        name: "output1".to_string(),
+                        kind: "directory".to_string(),
+                        path: "/repo/app/build/reports/tests".to_string(),
+                    },
+                ],
+                environment_inputs: vec!["TEST_ENV".to_string()],
+                system_property_inputs: vec!["junit.platform.output.capture.stdout".to_string()],
+                diagnostics: vec![CanonicalBuildPlanTaskDiagnostic {
+                    severity: "info".to_string(),
+                    code: "sample".to_string(),
+                    message: "sample execution contract".to_string(),
+                    source: "unit-test".to_string(),
+                }],
             }],
             dependencies: vec![CanonicalBuildPlanDependency {
                 project_path: ":app".to_string(),

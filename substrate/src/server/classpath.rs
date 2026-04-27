@@ -12,8 +12,8 @@ use tonic::{Request, Response, Status};
 
 use crate::proto::{
     classpath_service_server::ClasspathService, ClasspathDifference, ClasspathEntry,
-    ClasspathEntryHash, CompareClasspathsRequest, CompareClasspathsResponse,
-    HashClasspathRequest, HashClasspathResponse,
+    ClasspathEntryHash, CompareClasspathsRequest, CompareClasspathsResponse, HashClasspathRequest,
+    HashClasspathResponse,
 };
 
 #[derive(Default)]
@@ -54,13 +54,21 @@ impl HashAlgo {
                 // Fallback for mixed-case
                 if other.eq_ignore_ascii_case(b"MD5") {
                     Self::Md5
-                } else if other.eq_ignore_ascii_case(b"SHA-1") || other.eq_ignore_ascii_case(b"SHA1") {
+                } else if other.eq_ignore_ascii_case(b"SHA-1")
+                    || other.eq_ignore_ascii_case(b"SHA1")
+                {
                     Self::Sha1
-                } else if other.eq_ignore_ascii_case(b"SHA-256") || other.eq_ignore_ascii_case(b"SHA256") {
+                } else if other.eq_ignore_ascii_case(b"SHA-256")
+                    || other.eq_ignore_ascii_case(b"SHA256")
+                {
                     Self::Sha256
-                } else if other.eq_ignore_ascii_case(b"SHA3-256") || other.eq_ignore_ascii_case(b"SHA3_256") {
+                } else if other.eq_ignore_ascii_case(b"SHA3-256")
+                    || other.eq_ignore_ascii_case(b"SHA3_256")
+                {
                     Self::Sha3_256
-                } else if other.eq_ignore_ascii_case(b"SHA3-512") || other.eq_ignore_ascii_case(b"SHA3_512") {
+                } else if other.eq_ignore_ascii_case(b"SHA3-512")
+                    || other.eq_ignore_ascii_case(b"SHA3_512")
+                {
                     Self::Sha3_512
                 } else if other.eq_ignore_ascii_case(b"BLAKE3") {
                     Self::Blake3
@@ -116,7 +124,9 @@ fn hash_file_content(path: &Path, algo: HashAlgo) -> Option<Vec<u8>> {
             let mut hasher = Blake3Hasher::new();
             loop {
                 let n = reader.read(&mut buf).ok()?;
-                if n == 0 { break; }
+                if n == 0 {
+                    break;
+                }
                 hasher.update(&buf[..n]);
             }
             Some(hasher.finalize().as_bytes().to_vec())
@@ -129,7 +139,9 @@ fn stream_hash<D: Digest>(reader: &mut impl Read, buf: &mut [u8]) -> Option<Vec<
     let mut hasher = D::new();
     loop {
         let n = reader.read(buf).ok()?;
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         hasher.update(&buf[..n]);
     }
     Some(hasher.finalize().to_vec())
@@ -155,7 +167,10 @@ fn composite_hash(entry_hashes: &[(String, Vec<u8>)], algo: HashAlgo) -> Vec<u8>
     }
 
     // Pre-compute total size for a single allocation.
-    let estimated = entry_hashes.iter().map(|(p, h)| p.len() + 1 + h.len() + 1).sum::<usize>();
+    let estimated = entry_hashes
+        .iter()
+        .map(|(p, h)| p.len() + 1 + h.len() + 1)
+        .sum::<usize>();
     let mut buf = Vec::with_capacity(estimated);
     for (path, hash) in entry_hashes {
         buf.extend_from_slice(path.as_bytes());
@@ -169,10 +184,21 @@ fn composite_hash(entry_hashes: &[(String, Vec<u8>)], algo: HashAlgo) -> Vec<u8>
 /// Hash a single classpath entry (metadata or content-based).
 fn hash_entry(entry: &ClasspathEntry, algo: HashAlgo, ignore_timestamps: bool) -> Vec<u8> {
     if ignore_timestamps {
-        hash_file_content(Path::new(&entry.absolute_path), algo)
-            .unwrap_or_else(|| hash_metadata(&entry.absolute_path, entry.length, entry.last_modified, algo))
+        hash_file_content(Path::new(&entry.absolute_path), algo).unwrap_or_else(|| {
+            hash_metadata(
+                &entry.absolute_path,
+                entry.length,
+                entry.last_modified,
+                algo,
+            )
+        })
     } else {
-        hash_metadata(&entry.absolute_path, entry.length, entry.last_modified, algo)
+        hash_metadata(
+            &entry.absolute_path,
+            entry.length,
+            entry.last_modified,
+            algo,
+        )
     }
 }
 
@@ -419,12 +445,8 @@ mod tests {
             length: 11,
             last_modified: 9999,
         }];
-        let (hash_b, _) = ClasspathServiceImpl::hash_classpath_impl(
-            &entries2,
-            HashAlgo::Md5,
-            true,
-            false,
-        );
+        let (hash_b, _) =
+            ClasspathServiceImpl::hash_classpath_impl(&entries2, HashAlgo::Md5, true, false);
         assert_eq!(hash_a, hash_b);
     }
 

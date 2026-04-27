@@ -131,7 +131,11 @@ impl ExecutionHistoryServiceImpl {
 
         // Collect entries sorted by timestamp (oldest first)
         let mut timestamped: Vec<(i64, String)> = Vec::with_capacity(self.entries.len());
-        timestamped.extend(self.entries.iter().map(|entry| (entry.value().timestamp_ms, entry.key().clone())));
+        timestamped.extend(
+            self.entries
+                .iter()
+                .map(|entry| (entry.value().timestamp_ms, entry.key().clone())),
+        );
         timestamped.sort_unstable_by_key(|(ts, _)| *ts);
 
         for (_, key) in timestamped.into_iter().take(to_remove_count) {

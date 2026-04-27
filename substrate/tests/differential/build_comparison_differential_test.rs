@@ -10,7 +10,6 @@
 /// - Multi-project builds with mixed results
 /// - Duration ratio with zero-duration tasks
 /// - Deterministic sort order (worst regression first)
-
 use std::collections::HashMap;
 
 use gradle_substrate_daemon::proto::build_comparison_service_server::BuildComparisonService;
@@ -196,10 +195,7 @@ async fn tasks_only_in_baseline_detected() {
         ],
     );
 
-    let candidate = make_snapshot(
-        "candidate-only",
-        vec![(":compileJava", "SUCCESS", 1000)],
-    );
+    let candidate = make_snapshot("candidate-only", vec![(":compileJava", "SUCCESS", 1000)]);
 
     let cmp_id = record_and_compare(&svc, baseline, candidate).await;
 
@@ -220,10 +216,7 @@ async fn tasks_only_in_baseline_detected() {
 async fn tasks_only_in_candidate_detected() {
     let svc = BuildComparisonServiceImpl::new();
 
-    let baseline = make_snapshot(
-        "baseline-new",
-        vec![(":compileJava", "SUCCESS", 1000)],
-    );
+    let baseline = make_snapshot("baseline-new", vec![(":compileJava", "SUCCESS", 1000)]);
 
     let candidate = make_snapshot(
         "candidate-new",
@@ -252,10 +245,7 @@ async fn tasks_only_in_candidate_detected() {
 async fn outcome_change_detected() {
     let svc = BuildComparisonServiceImpl::new();
 
-    let baseline = make_snapshot(
-        "baseline-outcome",
-        vec![(":test", "SUCCESS", 5000)],
-    );
+    let baseline = make_snapshot("baseline-outcome", vec![(":test", "SUCCESS", 5000)]);
 
     let candidate = make_snapshot(
         "candidate-outcome",
@@ -303,12 +293,12 @@ async fn multi_project_mixed_results() {
     let candidate = make_snapshot(
         "candidate-multi",
         vec![
-            (":app:compileJava", "SUCCESS", 1800),     // 10% faster (not enough for improvement)
-            (":app:compileKotlin", "SUCCESS", 5000),   // 67% slower (regression)
-            (":lib:compileJava", "SUCCESS", 1000),     // same
-            (":app:test", "FAILED", 8000),             // outcome changed + faster
-            (":lib:test", "SUCCESS", 2000),            // 60% faster (improvement)
-            (":app:spotlessCheck", "SUCCESS", 500),    // new task
+            (":app:compileJava", "SUCCESS", 1800), // 10% faster (not enough for improvement)
+            (":app:compileKotlin", "SUCCESS", 5000), // 67% slower (regression)
+            (":lib:compileJava", "SUCCESS", 1000), // same
+            (":app:test", "FAILED", 8000),         // outcome changed + faster
+            (":lib:test", "SUCCESS", 2000),        // 60% faster (improvement)
+            (":app:spotlessCheck", "SUCCESS", 500), // new task
         ],
     );
 
@@ -325,7 +315,10 @@ async fn multi_project_mixed_results() {
     let summary = result.summary.unwrap();
     assert_eq!(summary.tasks_with_regression, 1, "compileKotlin regressed");
     assert_eq!(summary.tasks_with_improvement, 1, "lib:test improved");
-    assert_eq!(summary.tasks_with_changed_outcome, 2, "app:test + spotlessCheck outcome changed (new task has UNKNOWN vs SUCCESS)");
+    assert_eq!(
+        summary.tasks_with_changed_outcome, 2,
+        "app:test + spotlessCheck outcome changed (new task has UNKNOWN vs SUCCESS)"
+    );
     assert_eq!(summary.tasks_only_in_candidate, 1, "spotlessCheck is new");
     assert_eq!(summary.tasks_only_in_baseline, 0);
 }
@@ -337,7 +330,7 @@ async fn zero_duration_tasks_handled() {
     let baseline = make_snapshot(
         "baseline-zero",
         vec![
-            (":compileJava", "SUCCESS", 0),   // cached
+            (":compileJava", "SUCCESS", 0),      // cached
             (":processResources", "SUCCESS", 0), // cached
         ],
     );

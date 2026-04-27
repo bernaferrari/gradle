@@ -63,7 +63,8 @@ impl IncrementalCompilationServiceImpl {
         }
 
         // BFS from changed files through reverse dependencies
-        let mut affected: HashSet<String> = HashSet::with_capacity(changed_files.len() + units.len());
+        let mut affected: HashSet<String> =
+            HashSet::with_capacity(changed_files.len() + units.len());
         let mut queue: VecDeque<&str> = VecDeque::with_capacity(changed_files.len());
         queue.extend(changed_files.iter().map(|s| s.as_str()));
 
@@ -142,9 +143,9 @@ impl IncrementalCompilationServiceImpl {
                         .to_string();
 
                     // Check include patterns
-                    let included = include_globs.iter().any(|pat| {
-                        crate::server::file_tree::ant_match(&relative, pat)
-                    });
+                    let included = include_globs
+                        .iter()
+                        .any(|pat| crate::server::file_tree::ant_match(&relative, pat));
                     if !included {
                         continue;
                     }
@@ -518,7 +519,8 @@ impl IncrementalCompilationService for IncrementalCompilationServiceImpl {
         let req = request.into_inner();
 
         // Analyze class files in the processor classpath to find current processors
-        let mut current_processors: HashSet<String> = HashSet::with_capacity(req.annotation_processor_classpath.len());
+        let mut current_processors: HashSet<String> =
+            HashSet::with_capacity(req.annotation_processor_classpath.len());
         for cp_entry in &req.annotation_processor_classpath {
             let cp_path = Path::new(cp_entry);
             if !cp_path.is_dir() {
@@ -551,7 +553,8 @@ impl IncrementalCompilationService for IncrementalCompilationServiceImpl {
             }
         }
 
-        let mut previous: HashSet<String> = HashSet::with_capacity(req.previous_processor_classes.len());
+        let mut previous: HashSet<String> =
+            HashSet::with_capacity(req.previous_processor_classes.len());
         previous.extend(req.previous_processor_classes.iter().cloned());
 
         let mut changes = Vec::with_capacity(current_processors.len() + previous.len());

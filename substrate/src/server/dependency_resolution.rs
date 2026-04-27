@@ -9,10 +9,10 @@ use tonic::{Request, Response, Status};
 use crate::proto::{
     dependency_resolution_service_server::DependencyResolutionService, AddArtifactToCacheRequest,
     AddArtifactToCacheResponse, CheckArtifactCacheRequest, CheckArtifactCacheResponse,
-    ChecksumFailure, DependencyDescriptor, GetResolutionStatsRequest,
-    GetResolutionStatsResponse, RecordResolutionRequest, RecordResolutionResponse,
-    RepositoryDescriptor, ResolveDependenciesRequest, ResolveDependenciesResponse,
-    ResolvedDependency, VerifyDependencyChecksumsRequest, VerifyDependencyChecksumsResponse,
+    ChecksumFailure, DependencyDescriptor, GetResolutionStatsRequest, GetResolutionStatsResponse,
+    RecordResolutionRequest, RecordResolutionResponse, RepositoryDescriptor,
+    ResolveDependenciesRequest, ResolveDependenciesResponse, ResolvedDependency,
+    VerifyDependencyChecksumsRequest, VerifyDependencyChecksumsResponse,
 };
 
 // ---------------------------------------------------------------------------
@@ -33,15 +33,21 @@ impl DependencyScope {
     /// Parse a scope string (case-insensitive).
     pub fn from_str_loose(s: &str) -> Self {
         match s.as_bytes() {
-            b"compile" | b"compileonly" | b"api"
-            | b"Compile" | b"CompileOnly" | b"Api"
+            b"compile" | b"compileonly" | b"api" | b"Compile" | b"CompileOnly" | b"Api"
             | b"COMPILE" | b"COMPILEONLY" | b"API" => DependencyScope::Compile,
-            b"runtime" | b"implementation" | b"runtimeonly"
-            | b"Runtime" | b"Implementation" | b"RuntimeOnly"
-            | b"RUNTIME" | b"IMPLEMENTATION" | b"RUNTIMEONLY" => DependencyScope::Runtime,
-            b"test" | b"testimplementation" | b"testruntimeonly"
-            | b"Test" | b"TestImplementation" | b"TestRuntimeOnly"
-            | b"TEST" | b"TESTIMPLEMENTATION" | b"TESTRUNTIMEONLY" => DependencyScope::Test,
+            b"runtime" | b"implementation" | b"runtimeonly" | b"Runtime" | b"Implementation"
+            | b"RuntimeOnly" | b"RUNTIME" | b"IMPLEMENTATION" | b"RUNTIMEONLY" => {
+                DependencyScope::Runtime
+            }
+            b"test"
+            | b"testimplementation"
+            | b"testruntimeonly"
+            | b"Test"
+            | b"TestImplementation"
+            | b"TestRuntimeOnly"
+            | b"TEST"
+            | b"TESTIMPLEMENTATION"
+            | b"TESTRUNTIMEONLY" => DependencyScope::Test,
             b"provided" | b"Provided" | b"PROVIDED" => DependencyScope::Provided,
             b"system" | b"System" | b"SYSTEM" => DependencyScope::System,
             _ => DependencyScope::Compile,
@@ -53,9 +59,13 @@ impl DependencyScope {
     pub fn includes(&self, other: &DependencyScope) -> bool {
         match self {
             DependencyScope::Compile => true,
-            DependencyScope::Runtime => matches!(other, DependencyScope::Compile | DependencyScope::Runtime),
+            DependencyScope::Runtime => {
+                matches!(other, DependencyScope::Compile | DependencyScope::Runtime)
+            }
             DependencyScope::Test => true,
-            DependencyScope::Provided => matches!(other, DependencyScope::Compile | DependencyScope::Provided),
+            DependencyScope::Provided => {
+                matches!(other, DependencyScope::Compile | DependencyScope::Provided)
+            }
             DependencyScope::System => matches!(other, DependencyScope::System),
         }
     }
@@ -103,14 +113,16 @@ impl ResolutionStrategy {
     pub fn from_proto(config: &crate::proto::ResolutionStrategyConfig) -> Self {
         match config.strategy.as_str() {
             "force" => {
-                let mut map = std::collections::HashMap::with_capacity(config.forced_versions.len());
+                let mut map =
+                    std::collections::HashMap::with_capacity(config.forced_versions.len());
                 for entry in &config.forced_versions {
                     map.insert(entry.key.clone(), entry.value.clone());
                 }
                 ResolutionStrategy::Force(map)
             }
             "prefer" => {
-                let mut map = std::collections::HashMap::with_capacity(config.preferred_versions.len());
+                let mut map =
+                    std::collections::HashMap::with_capacity(config.preferred_versions.len());
                 for entry in &config.preferred_versions {
                     map.insert(entry.key.clone(), entry.value.clone());
                 }
@@ -507,7 +519,8 @@ impl DependencyResolutionServiceImpl {
     }
 
     fn artifact_cache_key(group: &str, name: &str, version: &str, classifier: &str) -> String {
-        let mut key = String::with_capacity(group.len() + name.len() + version.len() + classifier.len() + 3);
+        let mut key =
+            String::with_capacity(group.len() + name.len() + version.len() + classifier.len() + 3);
         key.push_str(group);
         key.push(':');
         key.push_str(name);
@@ -821,7 +834,8 @@ impl DependencyResolutionServiceImpl {
                 for (idx, dep) in deps.iter().enumerate() {
                     let key = (dep.group.clone(), dep.name.clone());
                     // Check if a forced version exists (key is "group:name" -> version)
-                    let mut forced_key = String::with_capacity(dep.group.len() + dep.name.len() + 1);
+                    let mut forced_key =
+                        String::with_capacity(dep.group.len() + dep.name.len() + 1);
                     forced_key.push_str(&dep.group);
                     forced_key.push(':');
                     forced_key.push_str(&dep.name);
@@ -871,10 +885,8 @@ impl DependencyResolutionServiceImpl {
                         .push(dep.selected_version.clone());
                 }
 
-                let conflicts: Vec<((String, String), Vec<String>)> = versions
-                    .into_iter()
-                    .filter(|(_, v)| v.len() > 1)
-                    .collect();
+                let conflicts: Vec<((String, String), Vec<String>)> =
+                    versions.into_iter().filter(|(_, v)| v.len() > 1).collect();
 
                 if !conflicts.is_empty() {
                     let conflict_str: Vec<String> = conflicts
@@ -886,7 +898,10 @@ impl DependencyResolutionServiceImpl {
                         "Version conflict detected (fail_on_conflict)"
                     );
                     // Still deduplicate using highest version for non-conflicting deps
-                    Self::resolve_conflicts_with_strategy(deps, &ResolutionStrategy::HighestVersion);
+                    Self::resolve_conflicts_with_strategy(
+                        deps,
+                        &ResolutionStrategy::HighestVersion,
+                    );
                 }
             }
             ResolutionStrategy::Prefer(preferred) => {
@@ -910,7 +925,9 @@ impl DependencyResolutionServiceImpl {
                         best.insert(key, idx);
                     } else if let Some(&prev_idx) = best.get(&key) {
                         // Check if previous was preferred — if so, keep it
-                        let mut prev_key = String::with_capacity(deps[prev_idx].group.len() + deps[prev_idx].name.len() + 1);
+                        let mut prev_key = String::with_capacity(
+                            deps[prev_idx].group.len() + deps[prev_idx].name.len() + 1,
+                        );
                         prev_key.push_str(&deps[prev_idx].group);
                         prev_key.push(':');
                         prev_key.push_str(&deps[prev_idx].name);
@@ -919,8 +936,10 @@ impl DependencyResolutionServiceImpl {
                             .map(|v| deps[prev_idx].selected_version == *v)
                             .unwrap_or(false);
                         if !prev_preferred
-                            && compare_versions(&dep.selected_version, &deps[prev_idx].selected_version)
-                                == std::cmp::Ordering::Greater
+                            && compare_versions(
+                                &dep.selected_version,
+                                &deps[prev_idx].selected_version,
+                            ) == std::cmp::Ordering::Greater
                         {
                             best.insert(key, idx);
                         }
@@ -974,7 +993,10 @@ impl DependencyResolutionServiceImpl {
     }
 
     /// Filter resolved dependencies by scope.
-    pub fn filter_by_scope(deps: Vec<ResolvedDependency>, target: &DependencyScope) -> Vec<ResolvedDependency> {
+    pub fn filter_by_scope(
+        deps: Vec<ResolvedDependency>,
+        target: &DependencyScope,
+    ) -> Vec<ResolvedDependency> {
         if matches!(target, DependencyScope::Compile) {
             return deps; // Compile includes everything
         }
@@ -1277,17 +1299,10 @@ impl DependencyResolutionServiceImpl {
                         }
                     }
                     // No snapshot info — try to find the latest timestamped version from versions list
-                    if let Some(ts_version) = meta
-                        .versioning
-                        .versions
-                        .iter()
-                        .rfind(|v| {
-                            !v.ends_with("-SNAPSHOT")
-                                && v.starts_with(
-                                    &raw_version[..raw_version.len() - "-SNAPSHOT".len()],
-                                )
-                        })
-                    {
+                    if let Some(ts_version) = meta.versioning.versions.iter().rfind(|v| {
+                        !v.ends_with("-SNAPSHOT")
+                            && v.starts_with(&raw_version[..raw_version.len() - "-SNAPSHOT".len()])
+                    }) {
                         tracing::debug!(
                             group = %group,
                             name = %name,
@@ -1479,7 +1494,11 @@ impl DependencyResolutionServiceImpl {
                 None => break,
             };
 
-            let parent_key = (parent.group_id.clone(), parent.artifact_id.clone(), parent.version.clone());
+            let parent_key = (
+                parent.group_id.clone(),
+                parent.artifact_id.clone(),
+                parent.version.clone(),
+            );
             if !visited_parents.insert(parent_key) {
                 tracing::debug!("Parent cycle detected, stopping inheritance chain");
                 break;
@@ -1488,7 +1507,10 @@ impl DependencyResolutionServiceImpl {
             // Fetch parent POM from repos
             let mut parent_content = None;
             for repo in repos {
-                match self.fetch_pom(&parent.group_id, &parent.artifact_id, &parent.version, repo).await {
+                match self
+                    .fetch_pom(&parent.group_id, &parent.artifact_id, &parent.version, repo)
+                    .await
+                {
                     Ok(content) => {
                         parent_content = Some(content);
                         break;
@@ -1551,9 +1573,8 @@ impl DependencyResolutionServiceImpl {
             match self.fetch_pom(group, name, version, repo).await {
                 Ok(pom_content) => {
                     // Resolve parent POM chain for inherited properties and managed deps
-                    let (properties, managed_versions) = self
-                        .resolve_parent_inheritance(&pom_content, repos)
-                        .await;
+                    let (properties, managed_versions) =
+                        self.resolve_parent_inheritance(&pom_content, repos).await;
                     let pom_deps = Self::parse_pom_dependencies(&pom_content);
 
                     // Collect exclusions from this POM's direct dependencies
@@ -1608,16 +1629,15 @@ impl DependencyResolutionServiceImpl {
                         // Resolve version via property interpolation + dependency management
                         let raw_dep_version =
                             Self::interpolate_properties(&pom_dep.version, &properties);
-                        let resolved_version = if raw_dep_version.is_empty()
-                            || raw_dep_version.starts_with("${")
-                        {
-                            managed_versions
-                                .get(&(pom_dep.group.clone(), pom_dep.name.clone()))
-                                .cloned()
-                                .unwrap_or(raw_dep_version)
-                        } else {
-                            raw_dep_version
-                        };
+                        let resolved_version =
+                            if raw_dep_version.is_empty() || raw_dep_version.starts_with("${") {
+                                managed_versions
+                                    .get(&(pom_dep.group.clone(), pom_dep.name.clone()))
+                                    .cloned()
+                                    .unwrap_or(raw_dep_version)
+                            } else {
+                                raw_dep_version
+                            };
 
                         if resolved_version.is_empty() {
                             continue;
@@ -1629,7 +1649,9 @@ impl DependencyResolutionServiceImpl {
                     // Merge BOM managed versions into our managed set
                     let mut merged_managed = managed_versions;
                     for (bom_group, bom_name, bom_version) in &bom_imports {
-                        if let Ok(bom_pom) = self.fetch_pom(bom_group, bom_name, bom_version, repo).await {
+                        if let Ok(bom_pom) =
+                            self.fetch_pom(bom_group, bom_name, bom_version, repo).await
+                        {
                             let bom_props = Self::parse_pom_properties(&bom_pom);
                             let bom_managed = Self::parse_dependency_management(&bom_pom);
                             for ((g, n), v) in bom_managed {
@@ -1651,8 +1673,8 @@ impl DependencyResolutionServiceImpl {
                     // Re-resolve versions with merged managed set
                     for (pom_dep, resolved_version) in &mut regular_deps {
                         if resolved_version.starts_with("${") || resolved_version.is_empty() {
-                            if let Some(managed) = merged_managed
-                                .get(&(pom_dep.group.clone(), pom_dep.name.clone()))
+                            if let Some(managed) =
+                                merged_managed.get(&(pom_dep.group.clone(), pom_dep.name.clone()))
                             {
                                 *resolved_version = managed.clone();
                             }
@@ -1682,13 +1704,9 @@ impl DependencyResolutionServiceImpl {
                             optional: false,
                             ivy_conf: String::new(),
                         };
-                        let resolved = Box::pin(self.resolve_recursive(
-                            &child_dep,
-                            repos,
-                            visited,
-                            depth + 1,
-                        ))
-                        .await;
+                        let resolved =
+                            Box::pin(self.resolve_recursive(&child_dep, repos, visited, depth + 1))
+                                .await;
                         transitive_deps.push(resolved);
                     }
 
@@ -4410,7 +4428,8 @@ mod tests {
         // Parent doesn't contribute managed deps that child already has (child has none)
         // but does fill in missing properties
         let parent_props = DependencyResolutionServiceImpl::parse_pom_properties(parent_pom);
-        let parent_managed = DependencyResolutionServiceImpl::parse_dependency_management(parent_pom);
+        let parent_managed =
+            DependencyResolutionServiceImpl::parse_dependency_management(parent_pom);
 
         for (k, v) in parent_props {
             properties.entry(k).or_insert(v);
@@ -4427,7 +4446,9 @@ mod tests {
         assert_eq!(properties.get("parent.only.prop").unwrap(), "parent-value");
         // Parent managed dep should be inherited
         assert_eq!(
-            managed.get(&("org.slf4j".to_string(), "slf4j-api".to_string())).unwrap(),
+            managed
+                .get(&("org.slf4j".to_string(), "slf4j-api".to_string()))
+                .unwrap(),
             "2.0.9"
         );
     }
@@ -4471,9 +4492,10 @@ mod tests {
         assert_eq!(child_deps.len(), 1);
         assert!(child_deps[0].version.is_empty()); // No version specified in child
 
-        let parent_managed = DependencyResolutionServiceImpl::parse_dependency_management(parent_pom);
-        let managed_version = parent_managed
-            .get(&("org.slf4j".to_string(), "slf4j-api".to_string()));
+        let parent_managed =
+            DependencyResolutionServiceImpl::parse_dependency_management(parent_pom);
+        let managed_version =
+            parent_managed.get(&("org.slf4j".to_string(), "slf4j-api".to_string()));
         assert!(managed_version.is_some());
         assert_eq!(managed_version.unwrap(), "2.0.9");
     }
@@ -4584,9 +4606,7 @@ mod tests {
             .versioning
             .versions
             .iter()
-            .rfind(|v| {
-                !v.ends_with("-SNAPSHOT") && v.starts_with(base)
-            })
+            .rfind(|v| !v.ends_with("-SNAPSHOT") && v.starts_with(base))
             .unwrap();
         assert_eq!(ts_version, "1.0-20240215.090000-2");
     }

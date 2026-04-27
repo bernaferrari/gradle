@@ -199,7 +199,6 @@ fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
         hasher.update([0]); // null separator
     }
 
-
     // Include public/protected fields (sorted)
     public_field_abi.sort_unstable();
     hasher.update(b"fields=");
@@ -226,8 +225,6 @@ fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
     }
     hasher.update([0]); // null separator
 
-
-
     // Include reference-type counts from the constant pool — these reflect
     // the external API surface (field/method references, string constants, etc.)
     // and ensure ABI changes involving added/removed references are detected.
@@ -237,7 +234,10 @@ fn class_file_abi_hash(data: &[u8]) -> Option<Vec<u8>> {
     hasher.update(b",");
     hasher.update(write_int_to_buf(&mut num_buf, cp_stats.method_ref));
     hasher.update(b",");
-    hasher.update(write_int_to_buf(&mut num_buf, cp_stats.interface_method_ref));
+    hasher.update(write_int_to_buf(
+        &mut num_buf,
+        cp_stats.interface_method_ref,
+    ));
     hasher.update(b",");
     hasher.update(write_int_to_buf(&mut num_buf, cp_stats.string));
     hasher.update(b",");
@@ -813,8 +813,10 @@ impl FileFingerprintServiceImpl {
         path: &Path,
         strategy: NormalizationStrategy,
     ) -> Result<(Vec<u8>, i64, i64), SubstrateError> {
-        let metadata = std::fs::metadata(path)
-            .map_err(|e| SubstrateError::Fingerprint { path: path.to_path_buf(), reason: e.to_string() })?;
+        let metadata = std::fs::metadata(path).map_err(|e| SubstrateError::Fingerprint {
+            path: path.to_path_buf(),
+            reason: e.to_string(),
+        })?;
         let size = metadata.len() as i64;
         let modified = metadata
             .modified()
@@ -827,8 +829,10 @@ impl FileFingerprintServiceImpl {
         if strategy == NormalizationStrategy::ClassAbi {
             if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                 if ext == "class" {
-                    let data = std::fs::read(path)
-                        .map_err(|e| SubstrateError::Fingerprint { path: path.to_path_buf(), reason: e.to_string() })?;
+                    let data = std::fs::read(path).map_err(|e| SubstrateError::Fingerprint {
+                        path: path.to_path_buf(),
+                        reason: e.to_string(),
+                    })?;
                     if let Some(hash) = class_file_abi_hash(&data) {
                         return Ok((hash, size, modified));
                     }
@@ -839,13 +843,19 @@ impl FileFingerprintServiceImpl {
 
         // Compute MD5 hash of file content (matching Java's DefaultStreamHasher)
         let mut hasher = Md5::new();
-        let file = std::fs::File::open(path)
-            .map_err(|e| SubstrateError::Fingerprint { path: path.to_path_buf(), reason: e.to_string() })?;
+        let file = std::fs::File::open(path).map_err(|e| SubstrateError::Fingerprint {
+            path: path.to_path_buf(),
+            reason: e.to_string(),
+        })?;
         let mut reader = std::io::BufReader::new(file);
         let mut buffer = [0u8; 8192];
         loop {
-            let n = std::io::Read::read(&mut reader, &mut buffer)
-                .map_err(|e| SubstrateError::Fingerprint { path: path.to_path_buf(), reason: e.to_string() })?;
+            let n = std::io::Read::read(&mut reader, &mut buffer).map_err(|e| {
+                SubstrateError::Fingerprint {
+                    path: path.to_path_buf(),
+                    reason: e.to_string(),
+                }
+            })?;
             if n == 0 {
                 break;
             }
@@ -898,7 +908,9 @@ impl FileFingerprintServiceImpl {
             if path_bytes.len() > pattern.len() {
                 let needle_len = pattern.len() + 1;
                 for i in 0..=path_bytes.len() - needle_len {
-                    if path_bytes[i] == b'/' && &path_bytes[i + 1..i + needle_len] == pattern.as_bytes() {
+                    if path_bytes[i] == b'/'
+                        && &path_bytes[i + 1..i + needle_len] == pattern.as_bytes()
+                    {
                         return true;
                     }
                 }
@@ -915,8 +927,10 @@ impl FileFingerprintServiceImpl {
         ignore_patterns: &[String],
         strategy: NormalizationStrategy,
     ) -> Result<(), SubstrateError> {
-        let dir_entries = std::fs::read_dir(current)
-            .map_err(|e| SubstrateError::Fingerprint { path: current.to_path_buf(), reason: e.to_string() })?;
+        let dir_entries = std::fs::read_dir(current).map_err(|e| SubstrateError::Fingerprint {
+            path: current.to_path_buf(),
+            reason: e.to_string(),
+        })?;
 
         let mut dir_entries: Vec<_> = dir_entries.filter_map(|e| e.ok()).collect();
         dir_entries.sort_unstable_by_key(|e| e.file_name());

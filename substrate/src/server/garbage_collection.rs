@@ -145,7 +145,8 @@ impl GarbageCollectionServiceImpl {
             }
         }
 
-        let remaining = entries.len() as i32 - removed;        Ok((removed, bytes_recovered, remaining))
+        let remaining = entries.len() as i32 - removed;
+        Ok((removed, bytes_recovered, remaining))
     }
 
     async fn dir_total_bytes(&self, dir: &Path, extension: &str) -> Result<i64, Status> {

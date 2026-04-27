@@ -3,8 +3,8 @@
 //! Populated from JVM via JvmHostService during bootstrap.
 //! Invalidated on file watch events (build script changes).
 
-use std::sync::Arc;
 use dashmap::DashMap;
+use std::sync::Arc;
 
 /// A cached project model entry.
 #[derive(Debug, Clone)]
@@ -60,7 +60,9 @@ impl BuildModelCache {
 
     /// Get dependencies for a project.
     pub fn get_dependencies(&self, project_path: &str) -> Option<Vec<CachedDependency>> {
-        self.dependencies.get(project_path).map(|r| r.value().clone())
+        self.dependencies
+            .get(project_path)
+            .map(|r| r.value().clone())
     }
 
     /// Invalidate cache entries for a project (called on build script changes).

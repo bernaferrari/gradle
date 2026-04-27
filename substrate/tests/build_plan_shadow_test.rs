@@ -9,7 +9,8 @@ use gradle_substrate_daemon::proto::jvm_host_service_server::{
     JvmHostService, JvmHostServiceServer,
 };
 use gradle_substrate_daemon::proto::{
-    BuildPlan, BuildPlanTask, EvaluateScriptRequest, EvaluateScriptResponse, ExecuteTaskRequest,
+    BuildPlan, BuildPlanTask, BuildPlanTaskDiagnostic, BuildPlanTaskInputSpec,
+    BuildPlanTaskOutputSpec, EvaluateScriptRequest, EvaluateScriptResponse, ExecuteTaskRequest,
     ExecuteTaskResponse, GetBuildEnvironmentRequest, GetBuildEnvironmentResponse,
     GetBuildModelRequest, GetBuildModelResponse, GetBuildPlanRequest, GetBuildPlanResponse,
     InitBuildRequest, ProjectModel, RefreshBuildPlanShadowRequest, ResolveConfigRequest,
@@ -27,6 +28,33 @@ use tonic::{Request, Response, Status};
 
 struct MockJvmHostService {
     repo_root: PathBuf,
+}
+
+fn input_spec(name: &str, value: &str) -> BuildPlanTaskInputSpec {
+    BuildPlanTaskInputSpec {
+        name: name.to_string(),
+        kind: "value".to_string(),
+        value: value.to_string(),
+        normalization: "scalar".to_string(),
+        optional_input: false,
+    }
+}
+
+fn output_spec(name: &str, path: &str) -> BuildPlanTaskOutputSpec {
+    BuildPlanTaskOutputSpec {
+        name: name.to_string(),
+        kind: "path".to_string(),
+        path: path.to_string(),
+    }
+}
+
+fn diagnostic(code: &str) -> BuildPlanTaskDiagnostic {
+    BuildPlanTaskDiagnostic {
+        severity: "info".to_string(),
+        code: code.to_string(),
+        message: "mock execution contract".to_string(),
+        source: "mock-jvm-task-model".to_string(),
+    }
 }
 
 fn mock_build_plan_tasks() -> Vec<BuildPlanTask> {
@@ -51,6 +79,12 @@ fn mock_build_plan_tasks() -> Vec<BuildPlanTask> {
             cacheability: "unknown".to_string(),
             local_state: Vec::new(),
             destroyables: Vec::new(),
+            action_kind: "jvm-task".to_string(),
+            input_specs: vec![input_spec("source", "mock-jvm-task-model")],
+            output_specs: Vec::new(),
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: vec![diagnostic("mock-task-contract")],
         },
         BuildPlanTask {
             path: ":app:compileJava".to_string(),
@@ -75,6 +109,15 @@ fn mock_build_plan_tasks() -> Vec<BuildPlanTask> {
             cacheability: "declared-outputs".to_string(),
             local_state: Vec::new(),
             destroyables: Vec::new(),
+            action_kind: "compile".to_string(),
+            input_specs: vec![
+                input_spec("source", "mock-jvm-task-model"),
+                input_spec("taskType", "JavaCompile"),
+            ],
+            output_specs: vec![output_spec("classes", "classes/java/main")],
+            environment_inputs: vec!["JAVA_HOME".to_string()],
+            system_property_inputs: vec!["java.version".to_string()],
+            diagnostics: vec![diagnostic("mock-compile-contract")],
         },
         BuildPlanTask {
             path: ":app:integrationTest".to_string(),
@@ -103,6 +146,15 @@ fn mock_build_plan_tasks() -> Vec<BuildPlanTask> {
             cacheability: "declared-outputs".to_string(),
             local_state: Vec::new(),
             destroyables: Vec::new(),
+            action_kind: "test".to_string(),
+            input_specs: vec![
+                input_spec("source", "mock-jvm-task-model"),
+                input_spec("taskType", "Test"),
+            ],
+            output_specs: vec![output_spec("results", "build/test-results/integrationTest")],
+            environment_inputs: Vec::new(),
+            system_property_inputs: vec!["junit.platform.output.capture.stdout".to_string()],
+            diagnostics: vec![diagnostic("mock-test-contract")],
         },
     ]
 }
@@ -466,6 +518,30 @@ async fn capture_and_persist_shadow_build_plan_artifact() {
             .map(String::as_str),
         Some("2")
     );
+    assert_eq!(
+        loaded
+            .plan
+            .metadata
+            .get("taskInputSpecCount")
+            .map(String::as_str),
+        Some("5")
+    );
+    assert_eq!(
+        loaded
+            .plan
+            .metadata
+            .get("taskOutputSpecCount")
+            .map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(
+        loaded
+            .plan
+            .metadata
+            .get("taskDiagnosticCount")
+            .map(String::as_str),
+        Some("3")
+    );
 
     let lint_task = loaded
         .plan
@@ -556,6 +632,20 @@ async fn capture_and_persist_shadow_build_plan_artifact() {
         Some("true")
     );
     assert_eq!(compile_java.outputs, vec!["classes/java/main".to_string()]);
+    assert_eq!(compile_java.action_kind, "compile");
+    assert_eq!(
+        compile_java.environment_inputs,
+        vec!["JAVA_HOME".to_string()]
+    );
+    assert_eq!(
+        compile_java.system_property_inputs,
+        vec!["java.version".to_string()]
+    );
+    assert_eq!(compile_java.output_specs.len(), 1);
+    assert!(compile_java
+        .input_specs
+        .iter()
+        .any(|input| input.name == "taskType" && input.value == "JavaCompile"));
 
     let report = verify_shadow_against_jvm(&bridge, &store, "build-it")
         .await

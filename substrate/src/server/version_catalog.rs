@@ -260,7 +260,9 @@ impl VersionCatalogServiceImpl {
                                 (None, Some(v.clone()))
                             }
                         }
-                        Some(TomlVersionRef::Rich { require, ref_alias, .. }) => {
+                        Some(TomlVersionRef::Rich {
+                            require, ref_alias, ..
+                        }) => {
                             if let Some(alias) = ref_alias {
                                 (Some(alias.clone()), None)
                             } else {
@@ -310,7 +312,9 @@ impl VersionCatalogServiceImpl {
                                 (None, Some(v.clone()))
                             }
                         }
-                        Some(TomlVersionRef::Rich { require, ref_alias, .. }) => {
+                        Some(TomlVersionRef::Rich {
+                            require, ref_alias, ..
+                        }) => {
                             if let Some(alias) = ref_alias {
                                 (Some(alias.clone()), None)
                             } else {
@@ -421,7 +425,11 @@ spring-boot = "org.springframework.boot"
         let catalog = VersionCatalogServiceImpl::parse_catalog(SAMPLE_CATALOG).unwrap();
         assert_eq!(catalog.versions.len(), 3);
 
-        let junit = catalog.versions.iter().find(|v| v.alias == "junit").unwrap();
+        let junit = catalog
+            .versions
+            .iter()
+            .find(|v| v.alias == "junit")
+            .unwrap();
         assert_eq!(junit.version, "4.13");
         assert!(junit.strictly.is_none());
 
@@ -454,10 +462,7 @@ spring-boot = "org.springframework.boot"
             .unwrap();
         assert_eq!(guava.group, "com.google.guava");
         assert_eq!(guava.artifact, "guava");
-        assert_eq!(
-            guava.version_literal.as_deref(),
-            Some("32.1.2-jre")
-        );
+        assert_eq!(guava.version_literal.as_deref(), Some("32.1.2-jre"));
 
         let commons = catalog
             .libraries

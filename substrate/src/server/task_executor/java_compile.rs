@@ -161,9 +161,12 @@ impl JavaCompileExecutor {
 
         for line in output.lines() {
             // Case-insensitive search without allocating a lowercase copy
-            let has_error = line.contains("error:") || line.contains("Error:") || line.contains("ERROR:");
-            let has_warning = line.contains("warning:") || line.contains("Warning:") || line.contains("WARNING:");
-            let has_note = line.contains("note:") || line.contains("Note:") || line.contains("NOTE:");
+            let has_error =
+                line.contains("error:") || line.contains("Error:") || line.contains("ERROR:");
+            let has_warning =
+                line.contains("warning:") || line.contains("Warning:") || line.contains("WARNING:");
+            let has_note =
+                line.contains("note:") || line.contains("Note:") || line.contains("NOTE:");
 
             if has_error {
                 errors.push(line.to_string());

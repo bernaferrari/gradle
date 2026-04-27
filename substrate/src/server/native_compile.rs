@@ -52,8 +52,9 @@ impl NativeCompileService for NativeCompileServiceImpl {
             }));
         }
 
-        let content = std::fs::read_to_string(&json_path)
-            .map_err(|e| Status::internal(format!("Failed to read {}: {}", json_path.display(), e)))?;
+        let content = std::fs::read_to_string(&json_path).map_err(|e| {
+            Status::internal(format!("Failed to read {}: {}", json_path.display(), e))
+        })?;
 
         let entries: Vec<serde_json::Value> = serde_json::from_str(&content)
             .map_err(|e| Status::internal(format!("Failed to parse JSON: {}", e)))?;
@@ -139,10 +140,7 @@ struct CompilerVersionInfo {
 
 /// Get compiler version by running it with the given args.
 fn get_compiler_version(name: &str, args: &[&str]) -> Option<CompilerVersionInfo> {
-    let output = std::process::Command::new(name)
-        .args(args)
-        .output()
-        .ok()?;
+    let output = std::process::Command::new(name).args(args).output().ok()?;
 
     if !output.status.success() {
         return None;

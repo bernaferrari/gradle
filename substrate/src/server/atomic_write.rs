@@ -132,7 +132,8 @@ impl AtomicCacheStore {
             )));
         }
 
-        let metadata = fs::metadata(&source).map_err(|e| AtomicWriteError::IoError(e.to_string()))?;
+        let metadata =
+            fs::metadata(&source).map_err(|e| AtomicWriteError::IoError(e.to_string()))?;
         let original_size = metadata.len();
 
         let quarantine_subdir = self.quarantine_dir.join(key);
@@ -186,8 +187,8 @@ impl AtomicCacheStore {
                 continue;
             }
 
-            let meta_content =
-                fs::read_to_string(&meta_path).map_err(|e| AtomicWriteError::IoError(e.to_string()))?;
+            let meta_content = fs::read_to_string(&meta_path)
+                .map_err(|e| AtomicWriteError::IoError(e.to_string()))?;
 
             let mut original_path = String::new();
             let mut reason = String::new();

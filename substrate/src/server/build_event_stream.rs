@@ -102,7 +102,8 @@ impl BuildEventStreamServiceImpl {
 
     /// Get or create a broadcast sender for a build.
     fn get_or_create_channel(&self, build_id: BuildId) -> broadcast::Sender<BuildEventMessage> {
-        self.inner.build_channels
+        self.inner
+            .build_channels
             .entry(build_id)
             .or_insert_with(|| {
                 let (tx, _) = broadcast::channel(BROADCAST_CAPACITY);
@@ -159,12 +160,14 @@ impl BuildEventStreamServiceImpl {
             if buf.len() >= MAX_EVENTS_PER_BUILD {
                 let evict_count = buf.len() / 2;
                 buf.drain(..evict_count);
-                self.inner.events_evicted
+                self.inner
+                    .events_evicted
                     .fetch_add(evict_count as i64, Ordering::Relaxed);
             }
             buf.push(event.clone());
         } else {
-            self.inner.event_buffers
+            self.inner
+                .event_buffers
                 .entry(build_id.clone())
                 .or_default()
                 .push(event.clone());

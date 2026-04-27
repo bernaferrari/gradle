@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "build_id": "sample-build-1",
   "projects": [
     {
@@ -30,7 +30,39 @@
         "/repo/app/build/reports/tests/test",
         "/repo/app/build/test-results/test"
       ],
-      "worker_isolation": "process"
+      "worker_isolation": "process",
+      "action_kind": "test",
+      "input_specs": [
+        {
+          "optional": false,
+          "normalization": "scalar",
+          "value": "junit",
+          "kind": "value",
+          "name": "testFramework"
+        }
+      ],
+      "output_specs": [
+        {
+          "path": "/repo/app/build/reports/tests/test",
+          "kind": "directory",
+          "name": "reports"
+        },
+        {
+          "path": "/repo/app/build/test-results/test",
+          "kind": "directory",
+          "name": "results"
+        }
+      ],
+      "environment_inputs": [],
+      "system_property_inputs": [],
+      "diagnostics": [
+        {
+          "source": "golden-test",
+          "message": "test task carries execution contract",
+          "code": "golden-contract",
+          "severity": "info"
+        }
+      ]
     },
     {
       "path": ":app:compileJava",
@@ -48,7 +80,45 @@
       "outputs": [
         "/repo/app/build/classes/java/main"
       ],
-      "worker_isolation": "process"
+      "worker_isolation": "process",
+      "action_kind": "compile",
+      "input_specs": [
+        {
+          "optional": false,
+          "normalization": "scalar",
+          "value": "21",
+          "kind": "value",
+          "name": "targetCompatibility"
+        },
+        {
+          "optional": false,
+          "normalization": "scalar",
+          "value": "21",
+          "kind": "value",
+          "name": "sourceCompatibility"
+        }
+      ],
+      "output_specs": [
+        {
+          "path": "/repo/app/build/classes/java/main",
+          "kind": "directory",
+          "name": "classes"
+        }
+      ],
+      "environment_inputs": [
+        "JAVA_HOME"
+      ],
+      "system_property_inputs": [
+        "java.version"
+      ],
+      "diagnostics": [
+        {
+          "source": "golden-test",
+          "message": "compile task carries execution contract",
+          "code": "golden-contract",
+          "severity": "info"
+        }
+      ]
     }
   ],
   "dependencies": [

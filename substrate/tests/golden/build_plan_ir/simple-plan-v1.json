@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "build_id": "sample-build-1",
   "projects": [
     {
@@ -30,7 +30,45 @@
       "outputs": [
         "/repo/app/build/classes/java/main"
       ],
-      "worker_isolation": "process"
+      "worker_isolation": "process",
+      "action_kind": "compile",
+      "input_specs": [
+        {
+          "name": "sourceCompatibility",
+          "kind": "value",
+          "value": "21",
+          "normalization": "scalar",
+          "optional": false
+        },
+        {
+          "name": "targetCompatibility",
+          "kind": "value",
+          "value": "21",
+          "normalization": "scalar",
+          "optional": false
+        }
+      ],
+      "output_specs": [
+        {
+          "name": "classes",
+          "kind": "directory",
+          "path": "/repo/app/build/classes/java/main"
+        }
+      ],
+      "environment_inputs": [
+        "JAVA_HOME"
+      ],
+      "system_property_inputs": [
+        "java.version"
+      ],
+      "diagnostics": [
+        {
+          "severity": "info",
+          "code": "golden-contract",
+          "message": "compile task carries execution contract",
+          "source": "golden-test"
+        }
+      ]
     },
     {
       "path": ":app:test",
@@ -48,7 +86,39 @@
         "/repo/app/build/test-results/test",
         "/repo/app/build/reports/tests/test"
       ],
-      "worker_isolation": "process"
+      "worker_isolation": "process",
+      "action_kind": "test",
+      "input_specs": [
+        {
+          "name": "testFramework",
+          "kind": "value",
+          "value": "junit",
+          "normalization": "scalar",
+          "optional": false
+        }
+      ],
+      "output_specs": [
+        {
+          "name": "results",
+          "kind": "directory",
+          "path": "/repo/app/build/test-results/test"
+        },
+        {
+          "name": "reports",
+          "kind": "directory",
+          "path": "/repo/app/build/reports/tests/test"
+        }
+      ],
+      "environment_inputs": [],
+      "system_property_inputs": [],
+      "diagnostics": [
+        {
+          "severity": "info",
+          "code": "golden-contract",
+          "message": "test task carries execution contract",
+          "source": "golden-test"
+        }
+      ]
     }
   ],
   "dependencies": [

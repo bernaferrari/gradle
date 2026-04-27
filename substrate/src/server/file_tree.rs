@@ -185,7 +185,11 @@ impl FileTreeServiceImpl {
             );
         }
 
-        let include_files = if req.include_files { req.include_files } else { true };
+        let include_files = if req.include_files {
+            req.include_files
+        } else {
+            true
+        };
         let include_dirs = req.include_dirs;
         let follow_symlinks = req.follow_symlinks;
         let max_depth = if req.max_depth > 0 {
@@ -246,7 +250,9 @@ impl FileTreeServiceImpl {
         }
 
         let canonical = if follow_symlinks {
-            current.canonicalize().unwrap_or_else(|_| current.to_path_buf())
+            current
+                .canonicalize()
+                .unwrap_or_else(|_| current.to_path_buf())
         } else {
             current.to_path_buf()
         };
@@ -292,7 +298,8 @@ impl FileTreeServiceImpl {
 
             // Check exclude patterns
             if (apply_default && matches_default_exclude(&relative_normalized))
-                || (!exclude_patterns.is_empty() && matches_any_pattern(&relative_normalized, exclude_patterns))
+                || (!exclude_patterns.is_empty()
+                    && matches_any_pattern(&relative_normalized, exclude_patterns))
             {
                 continue;
             }
@@ -315,7 +322,11 @@ impl FileTreeServiceImpl {
                         last_modified_ms: if include_metadata {
                             metadata
                                 .modified()
-                                .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64)
+                                .map(|t| {
+                                    t.duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_millis() as i64
+                                })
                                 .unwrap_or(0)
                         } else {
                             0
@@ -385,8 +396,8 @@ impl FileTreeServiceImpl {
                 // Included if: passes include filter AND passes exclude filter
                 let passes_include = include_patterns.is_empty()
                     || matches_any_pattern(&normalized, include_patterns);
-                let passes_exclude =
-                    exclude_patterns.is_empty() || !matches_any_pattern(&normalized, exclude_patterns);
+                let passes_exclude = exclude_patterns.is_empty()
+                    || !matches_any_pattern(&normalized, exclude_patterns);
                 PatternMatchResult {
                     path: path.clone(),
                     included: passes_include && passes_exclude,
@@ -426,7 +437,8 @@ impl FileTreeService for FileTreeServiceImpl {
         request: Request<MatchPatternsRequest>,
     ) -> Result<Response<MatchPatternsResponse>, Status> {
         let req = request.into_inner();
-        let results = Self::match_patterns_impl(&req.paths, &req.include_patterns, &req.exclude_patterns);
+        let results =
+            Self::match_patterns_impl(&req.paths, &req.include_patterns, &req.exclude_patterns);
         Ok(Response::new(MatchPatternsResponse { results }))
     }
 }
@@ -489,9 +501,15 @@ mod tests {
 
     #[test]
     fn test_ant_match_double_star_deep() {
-        assert!(ant_match("src/test/java/com/example/Test.java", "**/test/**/*.java"));
+        assert!(ant_match(
+            "src/test/java/com/example/Test.java",
+            "**/test/**/*.java"
+        ));
         assert!(ant_match("test/Foo.java", "**/test/**/*.java"));
-        assert!(!ant_match("src/main/java/com/example/Test.java", "**/test/**/*.java"));
+        assert!(!ant_match(
+            "src/main/java/com/example/Test.java",
+            "**/test/**/*.java"
+        ));
     }
 
     #[test]
@@ -515,10 +533,16 @@ mod tests {
     fn test_traverse_with_java_pattern() {
         let tmp = TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join("src/main/java/com/example")).unwrap();
-        fs::write(tmp.path().join("src/main/java/com/example/Foo.java"), "class Foo {}")
-            .unwrap();
-        fs::write(tmp.path().join("src/main/java/com/example/Bar.kt"), "class Bar")
-            .unwrap();
+        fs::write(
+            tmp.path().join("src/main/java/com/example/Foo.java"),
+            "class Foo {}",
+        )
+        .unwrap();
+        fs::write(
+            tmp.path().join("src/main/java/com/example/Bar.kt"),
+            "class Bar",
+        )
+        .unwrap();
 
         let mut req = make_traverse_request(tmp.path().to_str().unwrap());
         req.include_patterns = vec!["**/*.java".to_string()];
@@ -629,11 +653,8 @@ mod tests {
             "src/main/java/Bar.kt".to_string(),
             "build.gradle".to_string(),
         ];
-        let results = FileTreeServiceImpl::match_patterns_impl(
-            &paths,
-            &["**/*.java".to_string()],
-            &[],
-        );
+        let results =
+            FileTreeServiceImpl::match_patterns_impl(&paths, &["**/*.java".to_string()], &[]);
         assert_eq!(results.len(), 3);
         assert!(results[0].included);
         assert!(!results[1].included);

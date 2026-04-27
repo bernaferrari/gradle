@@ -95,7 +95,10 @@ fn find_end_tag(bytes: &[u8], open_pos: usize, tag: &[u8]) -> Option<usize> {
             if abs + needle_len > bytes.len() {
                 break;
             }
-            if bytes[abs + 1] == b'/' && &bytes[abs + 2..abs + needle_len] == tag && bytes[abs + needle_len] == b'>' {
+            if bytes[abs + 1] == b'/'
+                && &bytes[abs + 2..abs + needle_len] == tag
+                && bytes[abs + needle_len] == b'>'
+            {
                 return Some(abs + needle_len + 1);
             }
             pos = abs + 1;
@@ -112,13 +115,22 @@ fn extract_tag(bytes: &[u8], from: usize, to: usize, tag: &[u8]) -> String {
     let open_len = 2 + tag.len(); // <tag>
     let mut pos = from;
     while pos + open_len <= to {
-        if bytes[pos] == b'<' && &bytes[pos + 1..pos + 1 + tag.len()] == tag && bytes[pos + 1 + tag.len()] == b'>' {
+        if bytes[pos] == b'<'
+            && &bytes[pos + 1..pos + 1 + tag.len()] == tag
+            && bytes[pos + 1 + tag.len()] == b'>'
+        {
             let content_start = pos + open_len;
             let close_len = 3 + tag.len(); // </tag>
             let mut cpos = content_start;
             while cpos + close_len <= to {
-                if bytes[cpos] == b'<' && bytes[cpos + 1] == b'/' && &bytes[cpos + 2..cpos + 2 + tag.len()] == tag && bytes[cpos + 2 + tag.len()] == b'>' {
-                    return String::from_utf8_lossy(&bytes[content_start..cpos]).trim().to_owned();
+                if bytes[cpos] == b'<'
+                    && bytes[cpos + 1] == b'/'
+                    && &bytes[cpos + 2..cpos + 2 + tag.len()] == tag
+                    && bytes[cpos + 2 + tag.len()] == b'>'
+                {
+                    return String::from_utf8_lossy(&bytes[content_start..cpos])
+                        .trim()
+                        .to_owned();
                 }
                 cpos += 1;
             }
@@ -135,7 +147,10 @@ fn extract_attr(bytes: &[u8], from: usize, to: usize, attr: &[u8]) -> Option<Str
     let needle_len = attr.len() + 2; // attr="
     let mut pos = from;
     while pos + needle_len <= to {
-        if &bytes[pos..pos + attr.len()] == attr && bytes[pos + attr.len()] == b'=' && bytes[pos + attr.len() + 1] == b'"' {
+        if &bytes[pos..pos + attr.len()] == attr
+            && bytes[pos + attr.len()] == b'='
+            && bytes[pos + attr.len() + 1] == b'"'
+        {
             let val_start = pos + needle_len;
             if let Some(end) = bytes[val_start..to].iter().position(|&b| b == b'"') {
                 let val = String::from_utf8_lossy(&bytes[val_start..val_start + end]).into_owned();
@@ -233,8 +248,8 @@ fn parse_info(bytes: &[u8]) -> Option<(String, String, String, String)> {
 
     let org = extract_attr(bytes, pos, end, b"organisation")
         .or_else(|| extract_attr(bytes, pos, end, b"org"));
-    let module = extract_attr(bytes, pos, end, b"name")
-        .or_else(|| extract_attr(bytes, pos, end, b"module"));
+    let module =
+        extract_attr(bytes, pos, end, b"name").or_else(|| extract_attr(bytes, pos, end, b"module"));
     let revision = extract_attr(bytes, pos, end, b"revision")
         .or_else(|| extract_attr(bytes, pos, end, b"rev"));
     let status = extract_attr(bytes, pos, end, b"status");
@@ -268,7 +283,8 @@ fn parse_configurations(bytes: &[u8]) -> Vec<IvyConfiguration> {
         let conf_end = tag_end(bytes, conf_pos);
 
         let name = extract_attr(bytes, conf_pos, conf_end, b"name").unwrap_or_default();
-        let description = extract_attr(bytes, conf_pos, conf_end, b"description").unwrap_or_default();
+        let description =
+            extract_attr(bytes, conf_pos, conf_end, b"description").unwrap_or_default();
         let extends_str = extract_attr(bytes, conf_pos, conf_end, b"extends").unwrap_or_default();
         let visibility = extract_attr(bytes, conf_pos, conf_end, b"visibility").unwrap_or_default();
 
@@ -279,7 +295,10 @@ fn parse_configurations(bytes: &[u8]) -> Vec<IvyConfiguration> {
                 extends: if extends_str.is_empty() {
                     Vec::new()
                 } else {
-                    extends_str.split(',').map(|s| s.trim().to_string()).collect()
+                    extends_str
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .collect()
                 },
                 visibility: if visibility.is_empty() {
                     "public".to_string()
@@ -324,9 +343,12 @@ fn parse_dependencies(bytes: &[u8]) -> Vec<IvyDependency> {
             .unwrap_or_default();
         let conf = extract_attr(bytes, dep_pos, dep_tag_end, b"conf")
             .unwrap_or_else(|| "default->default".to_string());
-        let changing = extract_attr(bytes, dep_pos, dep_tag_end, b"changing").as_deref() == Some("true");
-        let transitive = extract_attr(bytes, dep_pos, dep_tag_end, b"transitive").as_deref() != Some("false");
-        let optional = extract_attr(bytes, dep_pos, dep_tag_end, b"optional").as_deref() == Some("true");
+        let changing =
+            extract_attr(bytes, dep_pos, dep_tag_end, b"changing").as_deref() == Some("true");
+        let transitive =
+            extract_attr(bytes, dep_pos, dep_tag_end, b"transitive").as_deref() != Some("false");
+        let optional =
+            extract_attr(bytes, dep_pos, dep_tag_end, b"optional").as_deref() == Some("true");
 
         // Parse <exclude> children
         let mut exclusions = Vec::with_capacity(16);
@@ -372,9 +394,21 @@ fn parse_dependencies(bytes: &[u8]) -> Vec<IvyDependency> {
             if !art_name.is_empty() {
                 artifacts.push(IvyArtifact {
                     name: art_name,
-                    r#type: if art_type.is_empty() { "jar".to_string() } else { art_type },
-                    ext: if art_ext.is_empty() { "jar".to_string() } else { art_ext },
-                    conf: if art_conf.is_empty() { "*".to_string() } else { art_conf },
+                    r#type: if art_type.is_empty() {
+                        "jar".to_string()
+                    } else {
+                        art_type
+                    },
+                    ext: if art_ext.is_empty() {
+                        "jar".to_string()
+                    } else {
+                        art_ext
+                    },
+                    conf: if art_conf.is_empty() {
+                        "*".to_string()
+                    } else {
+                        art_conf
+                    },
                     url: art_url,
                 });
             }
@@ -430,9 +464,21 @@ fn parse_publications(bytes: &[u8]) -> Vec<IvyArtifact> {
         if !name.is_empty() {
             pubs.push(IvyArtifact {
                 name,
-                r#type: if art_type.is_empty() { "jar".to_string() } else { art_type },
-                ext: if ext.is_empty() { "jar".to_string() } else { ext },
-                conf: if conf.is_empty() { "*".to_string() } else { conf },
+                r#type: if art_type.is_empty() {
+                    "jar".to_string()
+                } else {
+                    art_type
+                },
+                ext: if ext.is_empty() {
+                    "jar".to_string()
+                } else {
+                    ext
+                },
+                conf: if conf.is_empty() {
+                    "*".to_string()
+                } else {
+                    conf
+                },
                 url,
             });
         }
@@ -550,7 +596,10 @@ mod tests {
         let desc = parse_ivy(xml).unwrap();
         assert_eq!(desc.dependencies.len(), 1);
         assert_eq!(desc.dependencies[0].exclusions.len(), 1);
-        assert_eq!(desc.dependencies[0].exclusions[0], ("commons-logging".to_string(), "commons-logging".to_string()));
+        assert_eq!(
+            desc.dependencies[0].exclusions[0],
+            ("commons-logging".to_string(), "commons-logging".to_string())
+        );
     }
 
     #[test]

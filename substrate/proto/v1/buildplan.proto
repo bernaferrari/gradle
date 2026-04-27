@@ -38,6 +38,33 @@ message BuildPlanTask {
   string cacheability = 11;
   repeated string local_state = 12;
   repeated string destroyables = 13;
+  string action_kind = 14;
+  repeated BuildPlanTaskInputSpec input_specs = 15;
+  repeated BuildPlanTaskOutputSpec output_specs = 16;
+  repeated string environment_inputs = 17;
+  repeated string system_property_inputs = 18;
+  repeated BuildPlanTaskDiagnostic diagnostics = 19;
+}
+
+message BuildPlanTaskInputSpec {
+  string name = 1;
+  string kind = 2;
+  string value = 3;
+  string normalization = 4;
+  bool optional_input = 5;
+}
+
+message BuildPlanTaskOutputSpec {
+  string name = 1;
+  string kind = 2;
+  string path = 3;
+}
+
+message BuildPlanTaskDiagnostic {
+  string severity = 1;
+  string code = 2;
+  string message = 3;
+  string source = 4;
 }
 
 message BuildPlanDependency {

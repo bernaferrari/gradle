@@ -355,7 +355,10 @@ impl CapabilityRegistry {
 
     /// Return a snapshot of the audit log.
     pub fn audit_log(&self) -> Vec<CapabilityAuditEntry> {
-        self.audit_log.lock().expect("audit log mutex should not be poisoned").clone()
+        self.audit_log
+            .lock()
+            .expect("audit log mutex should not be poisoned")
+            .clone()
     }
 
     /// Record an access attempt in the audit log.
@@ -377,7 +380,10 @@ impl CapabilityRegistry {
         granted: bool,
         scope_label: &str,
     ) -> Result<(), CapabilityError> {
-        let mut log = self.audit_log.lock().expect("audit log mutex should not be poisoned");
+        let mut log = self
+            .audit_log
+            .lock()
+            .expect("audit log mutex should not be poisoned");
         // Cap audit log at 100_000 entries to prevent unbounded growth
         if log.len() >= 100_000 {
             return Err(CapabilityError::AuditLogFull);
@@ -905,7 +911,7 @@ fn glob_match_recursive(pattern: &str, text: &str) -> bool {
             // For pattern "src/**/*.java" with text "src/com/example/App.java":
             // before="src/", after="*.java" (trimmed)
             // Try: "*.java" vs "com/example/App.java", "example/App.java", "App.java", ""
-            
+
             if after_trimmed.is_empty() {
                 // Pattern ends with ** after consuming some prefix -> matches everything remaining
                 return true;

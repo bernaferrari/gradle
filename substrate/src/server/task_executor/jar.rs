@@ -177,18 +177,14 @@ impl JarTaskExecutor {
                 break;
             }
 
-            let compression = u16::from_le_bytes(
-                buf[pos + 8..pos + 10].try_into().unwrap_or([0, 0]),
-            );
-            let compressed_size = u32::from_le_bytes(
-                buf[pos + 18..pos + 22].try_into().unwrap_or([0, 0, 0, 0]),
-            );
-            let name_len = u16::from_le_bytes(
-                buf[pos + 26..pos + 28].try_into().unwrap_or([0, 0]),
-            ) as usize;
-            let extra_len = u16::from_le_bytes(
-                buf[pos + 28..pos + 30].try_into().unwrap_or([0, 0]),
-            ) as usize;
+            let compression =
+                u16::from_le_bytes(buf[pos + 8..pos + 10].try_into().unwrap_or([0, 0]));
+            let compressed_size =
+                u32::from_le_bytes(buf[pos + 18..pos + 22].try_into().unwrap_or([0, 0, 0, 0]));
+            let name_len =
+                u16::from_le_bytes(buf[pos + 26..pos + 28].try_into().unwrap_or([0, 0])) as usize;
+            let extra_len =
+                u16::from_le_bytes(buf[pos + 28..pos + 30].try_into().unwrap_or([0, 0])) as usize;
 
             if pos + 30 + name_len > buf.len() {
                 break;
@@ -275,10 +271,7 @@ impl JarTaskExecutor {
     }
 
     /// Write entries as a valid ZIP file using STORED compression for speed.
-    fn write_zip(
-        out: &mut dyn Write,
-        entries: &[(String, Vec<u8>)],
-    ) -> std::io::Result<()> {
+    fn write_zip(out: &mut dyn Write, entries: &[(String, Vec<u8>)]) -> std::io::Result<()> {
         let (mod_time, mod_date) = Self::dos_time_now();
 
         // Track per-entry metadata for central directory
@@ -320,14 +313,19 @@ impl JarTaskExecutor {
         for (i, meta) in metas.iter().enumerate() {
             let name_bytes = entries[i].0.as_bytes();
             Self::write_central_dir_entry(
-                out, name_bytes, 0, // STORED
-                mod_time, mod_date, meta.crc32, meta.size, meta.size, meta.local_offset,
+                out,
+                name_bytes,
+                0, // STORED
+                mod_time,
+                mod_date,
+                meta.crc32,
+                meta.size,
+                meta.size,
+                meta.local_offset,
             )?;
         }
 
-        let central_dir_size: u32 = metas.iter()
-            .map(|m| 46 + m.name_len)
-            .sum();
+        let central_dir_size: u32 = metas.iter().map(|m| 46 + m.name_len).sum();
 
         // Write EOCD
         Self::write_eocd(
@@ -356,9 +354,17 @@ impl TaskExecutor for JarTaskExecutor {
         let start = std::time::Instant::now();
         let mut result = TaskResult::default();
 
-        let action = input.options.get("action").map(|s| s.as_str()).unwrap_or("create");
+        let action = input
+            .options
+            .get("action")
+            .map(|s| s.as_str())
+            .unwrap_or("create");
         let jar_path = input.target_dir.join(
-            input.options.get("jarName").map(|s| s.as_str()).unwrap_or("output.jar"),
+            input
+                .options
+                .get("jarName")
+                .map(|s| s.as_str())
+                .unwrap_or("output.jar"),
         );
 
         // Ensure target directory exists
@@ -515,17 +521,26 @@ mod tests {
         let mut input = TaskInput::new("Jar");
         input.source_files.push(src_dir);
         input.target_dir = out_dir;
-        input.options.insert("jarName".to_string(), "test.jar".to_string());
+        input
+            .options
+            .insert("jarName".to_string(), "test.jar".to_string());
 
         let result = executor.execute(&input).await;
 
-        assert!(result.success, "JAR creation failed: {}", result.error_message);
+        assert!(
+            result.success,
+            "JAR creation failed: {}",
+            result.error_message
+        );
         assert!(result.output_files.iter().any(|p| p.ends_with("test.jar")));
 
         // Verify the JAR is a valid ZIP
         let jar_path = result.output_files.first().unwrap();
         let jar_data = fs::read(jar_path).unwrap();
-        assert!(jar_data.starts_with(b"PK\x03\x04"), "JAR must start with ZIP local file header");
+        assert!(
+            jar_data.starts_with(b"PK\x03\x04"),
+            "JAR must start with ZIP local file header"
+        );
     }
 
     #[tokio::test]
@@ -541,12 +556,20 @@ mod tests {
         let mut input = TaskInput::new("Jar");
         input.source_files.push(src_dir);
         input.target_dir = out_dir;
-        input.options.insert("jarName".to_string(), "app.jar".to_string());
-        input.options.insert("mainClass".to_string(), "com.example.Main".to_string());
+        input
+            .options
+            .insert("jarName".to_string(), "app.jar".to_string());
+        input
+            .options
+            .insert("mainClass".to_string(), "com.example.Main".to_string());
 
         let result = executor.execute(&input).await;
 
-        assert!(result.success, "JAR creation failed: {}", result.error_message);
+        assert!(
+            result.success,
+            "JAR creation failed: {}",
+            result.error_message
+        );
 
         let jar_path = result.output_files.first().unwrap();
         let jar_data = fs::read(jar_path).unwrap();
@@ -565,17 +588,24 @@ mod tests {
         fs::write(
             src_dir.join("com/example/Service.class"),
             b"class Service {}",
-        ).unwrap();
+        )
+        .unwrap();
 
         let executor = JarTaskExecutor::new();
         let mut input = TaskInput::new("Jar");
         input.source_files.push(src_dir);
         input.target_dir = out_dir;
-        input.options.insert("jarName".to_string(), "nested.jar".to_string());
+        input
+            .options
+            .insert("jarName".to_string(), "nested.jar".to_string());
 
         let result = executor.execute(&input).await;
 
-        assert!(result.success, "JAR creation failed: {}", result.error_message);
+        assert!(
+            result.success,
+            "JAR creation failed: {}",
+            result.error_message
+        );
 
         let jar_path = result.output_files.first().unwrap();
         let jar_data = fs::read(jar_path).unwrap();
@@ -598,7 +628,9 @@ mod tests {
         let mut input = TaskInput::new("Jar");
         input.source_files.push(src_dir.clone());
         input.target_dir = out_dir.clone();
-        input.options.insert("jarName".to_string(), "update.jar".to_string());
+        input
+            .options
+            .insert("jarName".to_string(), "update.jar".to_string());
 
         let result = executor.execute(&input).await;
         assert!(result.success);
@@ -608,11 +640,19 @@ mod tests {
         let mut update_input = TaskInput::new("Jar");
         update_input.source_files.push(src_dir);
         update_input.target_dir = out_dir.clone();
-        update_input.options.insert("jarName".to_string(), "update.jar".to_string());
-        update_input.options.insert("action".to_string(), "update".to_string());
+        update_input
+            .options
+            .insert("jarName".to_string(), "update.jar".to_string());
+        update_input
+            .options
+            .insert("action".to_string(), "update".to_string());
 
         let result = executor.execute(&update_input).await;
-        assert!(result.success, "JAR update failed: {}", result.error_message);
+        assert!(
+            result.success,
+            "JAR update failed: {}",
+            result.error_message
+        );
 
         // Both files should be in the updated JAR
         let jar_path = result.output_files.first().unwrap();
@@ -627,8 +667,12 @@ mod tests {
         let executor = JarTaskExecutor::new();
         let mut input = TaskInput::new("Jar");
         input.target_dir = std::path::PathBuf::from("/tmp");
-        input.options.insert("action".to_string(), "sign".to_string());
-        input.options.insert("jarName".to_string(), "test.jar".to_string());
+        input
+            .options
+            .insert("action".to_string(), "sign".to_string());
+        input
+            .options
+            .insert("jarName".to_string(), "test.jar".to_string());
 
         let result = executor.execute(&input).await;
 
@@ -654,7 +698,9 @@ mod tests {
             let mut input = TaskInput::new("Jar");
             input.source_files.push(src_dir.clone());
             input.target_dir = out_dir.clone();
-            input.options.insert("jarName".to_string(), "det.jar".to_string());
+            input
+                .options
+                .insert("jarName".to_string(), "det.jar".to_string());
 
             let result = executor.execute(&input).await;
             assert!(result.success);
@@ -674,15 +720,24 @@ mod tests {
         let executor = JarTaskExecutor::new();
         let mut input = TaskInput::new("Jar");
         input.target_dir = out_dir.clone();
-        input.options.insert("jarName".to_string(), "empty.jar".to_string());
+        input
+            .options
+            .insert("jarName".to_string(), "empty.jar".to_string());
 
         let result = executor.execute(&input).await;
 
-        assert!(result.success, "Empty JAR creation failed: {}", result.error_message);
+        assert!(
+            result.success,
+            "Empty JAR creation failed: {}",
+            result.error_message
+        );
         assert!(out_dir.join("empty.jar").exists());
 
         // Empty JAR should still be a valid ZIP with just EOCD
         let jar_data = fs::read(out_dir.join("empty.jar")).unwrap();
-        assert!(jar_data.starts_with(b"PK\x05\x06"), "Empty JAR must start with EOCD signature");
+        assert!(
+            jar_data.starts_with(b"PK\x05\x06"),
+            "Empty JAR must start with EOCD signature"
+        );
     }
 }

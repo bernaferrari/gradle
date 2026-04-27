@@ -13,7 +13,10 @@ impl FuzzRng {
         Self { state: seed }
     }
     fn next(&mut self) -> u64 {
-        self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.state = self
+            .state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         self.state
     }
     fn next_char(&mut self) -> char {
@@ -86,7 +89,9 @@ fn fuzz_unicode_no_panic() {
 fn fuzz_extremely_long_lines_no_panic() {
     let long_dep = format!(
         "dependencies {{ implementation '{}' }}",
-        (0..10000).map(|i| (b'a' + (i % 26) as u8) as char).collect::<String>()
+        (0..10000)
+            .map(|i| (b'a' + (i % 26) as u8) as char)
+            .collect::<String>()
     );
     let result = parse_build_script(&long_dep, "build.gradle");
     let _ = result.dependencies.len();
@@ -94,7 +99,9 @@ fn fuzz_extremely_long_lines_no_panic() {
 
 #[test]
 fn fuzz_special_characters_no_panic() {
-    let special_chars: Vec<String> = (0..128).map(|c| char::from_u32(c).unwrap().to_string()).collect();
+    let special_chars: Vec<String> = (0..128)
+        .map(|c| char::from_u32(c).unwrap().to_string())
+        .collect();
     for ch in &special_chars {
         let input = format!("plugins {{ id 'java{}' }}", ch);
         let result = parse_build_script(&input, "build.gradle");

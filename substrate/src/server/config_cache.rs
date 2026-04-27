@@ -392,10 +392,7 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
 
                 return Ok(Response::new(ValidateConfigResponse {
                     valid: false,
-                    reason: format!(
-                        "Invalidation triggers changed: {}",
-                        changed.join(", ")
-                    ),
+                    reason: format!("Invalidation triggers changed: {}", changed.join(", ")),
                     invalidated_triggers: changed,
                 }));
             }
@@ -451,10 +448,7 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
                 .unwrap_or_default()
         } else {
             // All keys
-            self.cache
-                .iter()
-                .map(|entry| entry.key().clone())
-                .collect()
+            self.cache.iter().map(|entry| entry.key().clone()).collect()
         };
 
         for key in &target_keys {
@@ -462,10 +456,8 @@ impl ConfigurationCacheService for ConfigurationCacheServiceImpl {
                 // Build-scoped: remove all entries for this build
                 true
             } else if let Some(entry) = self.cache.get(key) {
-                let too_old =
-                    req.max_age_ms > 0 && now - entry.timestamp_ms > req.max_age_ms;
-                let too_many =
-                    req.max_entries > 0 && current_len > req.max_entries;
+                let too_old = req.max_age_ms > 0 && now - entry.timestamp_ms > req.max_age_ms;
+                let too_many = req.max_entries > 0 && current_len > req.max_entries;
                 too_old || too_many
             } else {
                 false
@@ -1232,7 +1224,10 @@ mod tests {
             .unwrap()
             .into_inner();
 
-        assert!(resp.valid, "old entries without triggers should still validate via input_hashes");
+        assert!(
+            resp.valid,
+            "old entries without triggers should still validate via input_hashes"
+        );
     }
 
     #[tokio::test]
@@ -1394,6 +1389,9 @@ mod tests {
             .unwrap()
             .into_inner();
 
-        assert!(resp.valid, "phase graph triggers should survive disk persistence");
+        assert!(
+            resp.valid,
+            "phase graph triggers should survive disk persistence"
+        );
     }
 }

@@ -123,7 +123,7 @@ public class JvmHostServiceImpl {
      */
     public BuildPlan getBuildPlan(String buildId) {
         BuildPlan.Builder plan = BuildPlan.newBuilder()
-            .setSchemaVersion(1)
+            .setSchemaVersion(2)
             .setBuildId(buildId)
             .putMetadata("source", "jvm-host");
 

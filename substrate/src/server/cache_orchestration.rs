@@ -137,8 +137,7 @@ impl BuildCacheOrchestrationServiceImpl {
         for (key, hash) in sorted_props {
             gradle_put_string(&mut hasher, key);
             // The hash value is itself an MD5 hex string; decode to raw bytes
-            let hash_bytes = hex::decode(hash)
-                .unwrap_or_else(|| hash.as_bytes().to_vec());
+            let hash_bytes = hex::decode(hash).unwrap_or_else(|| hash.as_bytes().to_vec());
             gradle_put_hash(&mut hasher, &hash_bytes);
         }
 
@@ -148,8 +147,7 @@ impl BuildCacheOrchestrationServiceImpl {
         sorted_files.sort_unstable_by_key(|(k, _)| *k);
         for (key, hash) in sorted_files {
             gradle_put_string(&mut hasher, key);
-            let hash_bytes = hex::decode(hash)
-                .unwrap_or_else(|| hash.as_bytes().to_vec());
+            let hash_bytes = hex::decode(hash).unwrap_or_else(|| hash.as_bytes().to_vec());
             gradle_put_hash(&mut hasher, &hash_bytes);
         }
 
@@ -702,7 +700,10 @@ mod tests {
             &files,
             &outputs,
         );
-        assert_ne!(key1, key2, "Different property values should produce different keys");
+        assert_ne!(
+            key1, key2,
+            "Different property values should produce different keys"
+        );
     }
 
     #[test]
@@ -736,7 +737,10 @@ mod tests {
             &files,
             &outputs,
         );
-        assert_eq!(key1, key2, "Property insertion order must not affect cache key");
+        assert_eq!(
+            key1, key2,
+            "Property insertion order must not affect cache key"
+        );
     }
 
     #[test]
@@ -751,7 +755,10 @@ mod tests {
             &[],
         );
         // The key should NOT contain pipe characters (old format used |impl|, |props|, etc.)
-        assert!(!key.contains('|'), "Cache key should use Gradle varint format, not pipe-delimited");
+        assert!(
+            !key.contains('|'),
+            "Cache key should use Gradle varint format, not pipe-delimited"
+        );
         // The key should be a valid hex string (MD5 = 32 hex chars)
         assert_eq!(key.len(), 32, "MD5 hash should produce 32 hex characters");
         assert!(key.chars().all(|c| c.is_ascii_hexdigit()));

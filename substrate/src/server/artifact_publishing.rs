@@ -284,7 +284,8 @@ impl ArtifactPublishingService for ArtifactPublishingServiceImpl {
             if req.success {
                 if let Some(creds) = self.repos.get(repo_id.as_str()) {
                     let mut head_req = self.http_client.head(&target_url);
-                    let mut buf = Vec::with_capacity(creds.username.len() + creds.password.len() + 1);
+                    let mut buf =
+                        Vec::with_capacity(creds.username.len() + creds.password.len() + 1);
                     use std::io::Write;
                     let _ = write!(buf, "{}:{}", creds.username, creds.password); // write! to Vec<u8> is infallible
                     let auth = base64_encode(&buf);
