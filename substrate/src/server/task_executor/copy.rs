@@ -42,20 +42,61 @@ impl CopyTaskExecutor {
         })
     }
 
-    async fn copy_file(src: &Path, dest: &Path, result: &mut TaskResult) -> Result<(), String> {
+    async fn copy_file(
+        src: &Path,
+        dest: &Path,
+        result: &mut TaskResult,
+        expand_properties: &[(String, String)],
+    ) -> Result<(), String> {
         if let Some(parent) = dest.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
                 .map_err(|e| format!("Failed to create directory {}: {}", parent.display(), e))?;
         }
-        let bytes = tokio::fs::copy(src, dest)
-            .await
-            .map_err(|e| format!("Failed to copy {}: {}", src.display(), e))?;
+        let bytes = if expand_properties.is_empty() {
+            tokio::fs::copy(src, dest)
+                .await
+                .map_err(|e| format!("Failed to copy {}: {}", src.display(), e))?
+        } else {
+            let data = tokio::fs::read(src)
+                .await
+                .map_err(|e| format!("Failed to read {}: {}", src.display(), e))?;
+            let expanded = expand_bytes(data, expand_properties);
+            tokio::fs::write(dest, &expanded)
+                .await
+                .map_err(|e| format!("Failed to write {}: {}", dest.display(), e))?;
+            expanded.len() as u64
+        };
         result.files_processed += 1;
         result.bytes_processed += bytes;
         result.output_files.push(dest.to_path_buf());
         Ok(())
     }
+}
+
+fn parse_expand_properties(value: Option<&String>) -> Vec<(String, String)> {
+    value
+        .map(|properties| {
+            properties
+                .split(',')
+                .filter_map(|entry| entry.split_once('='))
+                .map(|(key, value)| (key.trim().to_string(), value.trim().to_string()))
+                .filter(|(key, _)| !key.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn expand_bytes(data: Vec<u8>, properties: &[(String, String)]) -> Vec<u8> {
+    let mut text = match String::from_utf8(data) {
+        Ok(text) => text,
+        Err(err) => return err.into_bytes(),
+    };
+    for (key, value) in properties {
+        text = text.replace(&format!("${{{}}}", key), value);
+        text = text.replace(&format!("${}", key), value);
+    }
+    text.into_bytes()
 }
 
 #[tonic::async_trait]
@@ -76,6 +117,8 @@ impl TaskExecutor for CopyTaskExecutor {
             }
         }
 
+        let expand_properties = parse_expand_properties(input.options.get("expand_properties"));
+
         for source in &input.source_files {
             if !source.exists() {
                 result.success = false;
@@ -95,7 +138,9 @@ impl TaskExecutor for CopyTaskExecutor {
                 for file in files {
                     let relative = file.strip_prefix(source).unwrap_or(&file);
                     let dest = input.target_dir.join(relative);
-                    if let Err(e) = Self::copy_file(&file, &dest, &mut result).await {
+                    if let Err(e) =
+                        Self::copy_file(&file, &dest, &mut result, &expand_properties).await
+                    {
                         result.success = false;
                         result.error_message = e;
                         return result;
@@ -105,7 +150,9 @@ impl TaskExecutor for CopyTaskExecutor {
                 let dest = input
                     .target_dir
                     .join(source.file_name().unwrap_or_default());
-                if let Err(e) = Self::copy_file(source, &dest, &mut result).await {
+                if let Err(e) =
+                    Self::copy_file(source, &dest, &mut result, &expand_properties).await
+                {
                     result.success = false;
                     result.error_message = e;
                     return result;
@@ -239,6 +286,38 @@ mod tests {
                 .await
                 .unwrap(),
             b"child"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_copy_expands_declared_properties() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let dest_dir = tmp.path().join("dest");
+        tokio::fs::create_dir_all(&src_dir).await.unwrap();
+        tokio::fs::write(
+            src_dir.join("application.properties"),
+            b"name=$appName\nversion=${appVersion}\n",
+        )
+        .await
+        .unwrap();
+
+        let executor = CopyTaskExecutor::new();
+        let mut input = TaskInput::new("Copy");
+        input.source_files.push(src_dir);
+        input.target_dir = dest_dir.clone();
+        input.options.insert(
+            "expand_properties".to_string(),
+            "appName=corpus,appVersion=1.0".to_string(),
+        );
+
+        let result = executor.execute(&input).await;
+        assert!(result.success, "{}", result.error_message);
+        assert_eq!(
+            tokio::fs::read_to_string(dest_dir.join("application.properties"))
+                .await
+                .unwrap(),
+            "name=corpus\nversion=1.0\n"
         );
     }
 }

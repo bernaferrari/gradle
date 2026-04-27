@@ -17,6 +17,7 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
@@ -171,13 +172,27 @@ public class ProjectModelProviderAdapterTest {
     public void capturesProcessResourcesAsNativeFileTransform() throws IOException {
         File resourceFile = temporaryFolder.newFile("application.properties");
         File outputDir = temporaryFolder.newFolder("build/resources/main");
+        Map<String, String> properties = new LinkedHashMap<>();
+        properties.put("appName", "corpus");
+        properties.put("appVersion", "1.0");
 
-        Task processResources = basicTask(":processResources", "processResources", fileCollection(resourceFile), fileCollection(outputDir), false);
+        Task processResources = basicFileTransformTask(
+            ":processResources",
+            "processResources",
+            fileCollection(resourceFile),
+            fileCollection(outputDir),
+            properties,
+            true
+        );
 
         BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(processResources, ProcessResources.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
 
         assertEquals("file-transform", task.getActionKind());
         assertEquals("in-process", task.getWorkerIsolation());
+        assertEquals("appName=corpus,appVersion=1.0", inputs.get("expand_properties"));
         assertTrue(task.getInputSpecsList().stream()
             .anyMatch(input -> input.getKind().equals("path") && input.getValue().equals(resourceFile.getAbsolutePath())));
         assertTrue(task.getOutputSpecsList().stream()
@@ -407,7 +422,7 @@ public class ProjectModelProviderAdapterTest {
             }
             return defaultValue(method.getReturnType());
         });
-        return proxy(Task.class, (proxy, method, args) -> {
+        return proxy(new Class<?>[] {Task.class, FileTransformTaskContract.class}, (proxy, method, args) -> {
             switch (method.getName()) {
                 case "getPath":
                     return path;
@@ -442,15 +457,94 @@ public class ProjectModelProviderAdapterTest {
         });
     }
 
+    private static Task basicFileTransformTask(
+        String path,
+        String name,
+        FileCollection inputs,
+        FileCollection outputs,
+        Map<String, String> inputProperties,
+        boolean customActions
+    ) {
+        Project project = proxy(Project.class, (proxy, method, args) -> {
+            if (method.getName().equals("getPath")) {
+                return ":";
+            }
+            return defaultValue(method.getReturnType());
+        });
+        TaskDependency noDependencies = proxy(TaskDependency.class, (proxy, method, args) -> {
+            if (method.getName().equals("getDependencies")) {
+                return Collections.emptySet();
+            }
+            return defaultValue(method.getReturnType());
+        });
+        return proxy(Task.class, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "getPath":
+                    return path;
+                case "getProject":
+                    return project;
+                case "getName":
+                    return name;
+                case "getEnabled":
+                    return true;
+                case "getGroup":
+                case "getDescription":
+                    return "";
+                case "getTaskDependencies":
+                case "getShouldRunAfter":
+                case "getMustRunAfter":
+                case "getFinalizedBy":
+                    return noDependencies;
+                case "getInputs":
+                    return filesOwner(method.getReturnType(), inputs, inputProperties);
+                case "getOutputs":
+                    return filesOwner(method.getReturnType(), outputs);
+                case "getLocalState":
+                case "getDestroyables":
+                    return registeredFilesOwner(method.getReturnType());
+                case "getRootSpec":
+                    return copySpec(customActions);
+                case "getActions":
+                    return customActions ? Collections.singletonList(new Object()) : Collections.emptyList();
+                case "compareTo":
+                    return 0;
+                default:
+                    return defaultValue(method.getReturnType());
+            }
+        });
+    }
+
     private static Object filesOwner(Class<?> type, FileCollection files) {
+        return filesOwner(type, files, Collections.emptyMap());
+    }
+
+    private static Object filesOwner(Class<?> type, FileCollection files, Map<String, String> properties) {
         return proxy(type, (proxy, method, args) -> {
             if (method.getName().equals("getFiles")) {
                 return files;
+            }
+            if (method.getName().equals("getProperties")) {
+                return properties;
             }
             if (method.getName().equals("getHasOutput")) {
                 return true;
             }
             return defaultValue(method.getReturnType());
+        });
+    }
+
+    private static Object copySpec(boolean customActions) {
+        return proxy(CopySpecContract.class, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "hasCustomActions":
+                    return customActions;
+                case "getDuplicatesStrategy":
+                    return "INCLUDE";
+                case "getFilteringCharset":
+                    return "UTF-8";
+                default:
+                    return defaultValue(method.getReturnType());
+            }
         });
     }
 
@@ -551,6 +645,16 @@ public class ProjectModelProviderAdapterTest {
         Iterable<String> getJvmArgs();
         Map<String, String> getSystemProperties();
         TestReports getReports();
+    }
+
+    public interface CopySpecContract {
+        boolean hasCustomActions();
+        Object getDuplicatesStrategy();
+        String getFilteringCharset();
+    }
+
+    public interface FileTransformTaskContract {
+        Object getRootSpec();
     }
 
     public static class CompileOptionsContract {
