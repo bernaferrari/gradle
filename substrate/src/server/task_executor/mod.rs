@@ -6,6 +6,7 @@ mod lifecycle;
 mod mkdir_op;
 mod symlink;
 mod sync;
+mod tar;
 mod test_exec;
 
 pub use copy::CopyTaskExecutor;
@@ -16,6 +17,7 @@ pub use lifecycle::LifecycleTaskExecutor;
 pub use mkdir_op::MkdirTaskExecutor;
 pub use symlink::SymlinkTaskExecutor;
 pub use sync::SyncTaskExecutor;
+pub use tar::TarTaskExecutor;
 pub use test_exec::TestExecExecutor;
 
 use std::collections::HashMap;
@@ -82,6 +84,7 @@ impl TaskInput {
                 | "Zip"
                 | "War"
                 | "Ear"
+                | "Tar"
                 | "Lifecycle"
         )
     }
@@ -138,6 +141,9 @@ impl TaskExecutorRegistry {
         executors.insert("Zip".to_string(), Box::new(JarTaskExecutor::new()));
         executors.insert("War".to_string(), Box::new(JarTaskExecutor::new()));
         executors.insert("Ear".to_string(), Box::new(JarTaskExecutor::new()));
+
+        let tar_executor = TarTaskExecutor::new();
+        executors.insert(tar_executor.task_type().to_string(), Box::new(tar_executor));
 
         let lifecycle_executor = LifecycleTaskExecutor::new();
         executors.insert(
@@ -202,6 +208,7 @@ mod tests {
         assert!(types.contains(&"Zip"));
         assert!(types.contains(&"War"));
         assert!(types.contains(&"Ear"));
+        assert!(types.contains(&"Tar"));
         assert!(types.contains(&"Lifecycle"));
     }
 
@@ -233,6 +240,7 @@ mod tests {
         assert!(TaskInput::is_native_supported("Zip"));
         assert!(TaskInput::is_native_supported("War"));
         assert!(TaskInput::is_native_supported("Ear"));
+        assert!(TaskInput::is_native_supported("Tar"));
         assert!(TaskInput::is_native_supported("Lifecycle"));
         assert!(!TaskInput::is_native_supported("Test"));
     }

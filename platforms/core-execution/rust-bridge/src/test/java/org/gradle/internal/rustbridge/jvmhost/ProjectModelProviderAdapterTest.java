@@ -117,6 +117,29 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
+    public void capturesNativeReadyTarContractFromTaskModel() throws IOException {
+        File inputDir = temporaryFolder.newFolder("build/install/app");
+        File archiveDir = temporaryFolder.newFolder("build/distributions");
+        File archiveFile = new File(archiveDir, "app.tar");
+
+        Task tar = basicJarTask(fileCollection(inputDir), fileCollection(archiveFile), archiveDir, archiveFile);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(tar, Tar.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals(":jar", task.getPath());
+        assertEquals("archive", task.getActionKind());
+        assertEquals("in-process", task.getWorkerIsolation());
+        assertEquals("Tar", inputs.get("taskType"));
+        assertEquals("sample-1.0.jar", inputs.get("archive_file_name"));
+        assertEquals("GZIP", inputs.get("archive_compression"));
+        assertEquals(archiveDir.getAbsolutePath(), inputs.get("archive_destination_directory"));
+        assertEquals(archiveFile.getAbsolutePath(), inputs.get("archive_file"));
+    }
+
+    @org.junit.Test
     public void capturesNativeReadyTestExecContractFromTaskModel() throws IOException {
         File testClassesDir = temporaryFolder.newFolder("build/classes/java/test");
         File runtimeJar = temporaryFolder.newFile("junit-platform-console-standalone.jar");
@@ -355,6 +378,8 @@ public class ProjectModelProviderAdapterTest {
                     return new FileProvider(archiveDir);
                 case "getArchiveFile":
                     return new FileProvider(archiveFile);
+                case "getCompression":
+                    return "GZIP";
                 case "compareTo":
                     return 0;
                 default:
@@ -515,6 +540,7 @@ public class ProjectModelProviderAdapterTest {
         ValueProvider getArchiveExtension();
         FileProvider getDestinationDirectory();
         FileProvider getArchiveFile();
+        Object getCompression();
     }
 
     public interface TestContract {
@@ -614,6 +640,9 @@ public class ProjectModelProviderAdapterTest {
     }
 
     public static class Zip {
+    }
+
+    public static class Tar {
     }
 
     public static class Test {
