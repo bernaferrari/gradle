@@ -405,10 +405,11 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
         .unwrap_or(task.implementation_id.as_str());
     match (task.action_kind.as_str(), simple) {
         ("mkdir", _) | ("create-directory", _) | (_, "Mkdir") => "Mkdir".to_string(),
-        ("compile", "JavaCompile") | (_, "JavaCompile")
-            if !java_source_paths(task).is_empty() && has_outputs(task) =>
-        {
+        ("compile", "JavaCompile") | (_, "JavaCompile") if java_compile_contract_complete(task) => {
             "JavaCompile".to_string()
+        }
+        ("compile", "JavaCompile") | (_, "JavaCompile") => {
+            compat_task_type(task, "org.gradle.api.tasks.compile.JavaCompile")
         }
         ("archive", "Jar") | (_, "Jar") if has_input_paths(task) && has_outputs(task) => {
             "Jar".to_string()
@@ -439,7 +440,7 @@ fn execution_context_json(task: &CanonicalBuildPlanTask, task_type: &str) -> Str
             .unwrap_or_default(),
         _ => output_paths.first().cloned().unwrap_or_default(),
     };
-    let mut options = serde_json::Map::new();
+    let mut options = task_options(task, task_type);
     if task_type == "Jar" {
         if let Some(path) = output_paths.first() {
             if let Some(name) = std::path::Path::new(path).file_name() {
@@ -457,6 +458,73 @@ fn execution_context_json(task: &CanonicalBuildPlanTask, task_type: &str) -> Str
         "options": options,
     })
     .to_string()
+}
+
+fn java_compile_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
+    !java_source_paths(task).is_empty() && has_outputs(task)
+}
+
+fn compat_task_type(task: &CanonicalBuildPlanTask, fallback: &str) -> String {
+    if task.implementation_id.contains('.') {
+        task.implementation_id.clone()
+    } else {
+        fallback.to_string()
+    }
+}
+
+fn task_options(
+    task: &CanonicalBuildPlanTask,
+    task_type: &str,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut options = serde_json::Map::new();
+    if task_type == "JavaCompile" {
+        insert_input_option(task, &mut options, "java_home", "java_home");
+        insert_input_option(task, &mut options, "classpath", "classpath");
+        insert_input_option(task, &mut options, "processor_path", "processor_path");
+        insert_input_option(task, &mut options, "encoding", "encoding");
+        insert_input_option(task, &mut options, "parameters", "parameters");
+        insert_input_option(task, &mut options, "release", "release");
+        if !options.contains_key("release") {
+            insert_input_option(task, &mut options, "source_version", "source_version");
+            insert_input_option(task, &mut options, "sourceCompatibility", "source_version");
+            insert_input_option(task, &mut options, "target_version", "target_version");
+            insert_input_option(task, &mut options, "targetCompatibility", "target_version");
+        }
+    }
+    options
+}
+
+fn insert_input_option(
+    task: &CanonicalBuildPlanTask,
+    options: &mut serde_json::Map<String, serde_json::Value>,
+    input_name: &str,
+    option_name: &str,
+) {
+    if let Some(value) = task
+        .input_specs
+        .iter()
+        .find(|input| input.kind == "value" && input.name == input_name)
+        .map(|input| input.value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        options.insert(
+            option_name.to_string(),
+            serde_json::Value::String(normalize_java_option(value)),
+        );
+    }
+}
+
+fn normalize_java_option(value: &str) -> String {
+    let normalized = value
+        .trim()
+        .trim_start_matches("JavaVersion.")
+        .trim_start_matches("VERSION_")
+        .to_string();
+    if normalized.starts_with("1_") {
+        normalized.replace('_', ".")
+    } else {
+        normalized
+    }
 }
 
 fn has_input_paths(task: &CanonicalBuildPlanTask) -> bool {
@@ -933,8 +1001,74 @@ mod tests {
         assert_eq!(resp.execution_order.len(), 2);
         assert_eq!(resp.execution_order[0].task_path, ":generateSources");
         assert_eq!(resp.execution_order[1].task_path, ":compileJava");
-        assert_eq!(resp.execution_order[1].task_type, "JavaCompile");
+        assert_eq!(
+            resp.execution_order[1].task_type,
+            "org.gradle.api.tasks.compile.JavaCompile"
+        );
         assert_eq!(resp.plan_source, "build-plan-shadow");
+    }
+
+    #[test]
+    fn test_java_compile_contract_lowers_to_native_with_context_options() {
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":compileJava".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.api.tasks.compile.JavaCompile".to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "unknown".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "compile".to_string(),
+            input_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "source0".to_string(),
+                    kind: "source".to_string(),
+                    value: "/repo/src/main/java/App.java".to_string(),
+                    normalization: "absolute-path".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "release".to_string(),
+                    kind: "value".to_string(),
+                    value: "VERSION_17".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "sourceCompatibility".to_string(),
+                    kind: "value".to_string(),
+                    value: "VERSION_1_8".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+            ],
+            output_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                    name: "classes".to_string(),
+                    kind: "directory".to_string(),
+                    path: "/repo/build/classes/java/main".to_string(),
+                },
+            ],
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        let task_type = executable_task_type(&task);
+        let context: serde_json::Value =
+            serde_json::from_str(&execution_context_json(&task, &task_type)).unwrap();
+
+        assert_eq!(task_type, "JavaCompile");
+        assert_eq!(context["source_files"][0], "/repo/src/main/java/App.java");
+        assert_eq!(context["target_dir"], "/repo/build/classes/java/main");
+        assert_eq!(context["options"]["release"], "17");
+        assert!(context["options"].get("source_version").is_none());
     }
 
     #[tokio::test]
