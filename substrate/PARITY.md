@@ -18,9 +18,9 @@
   `org.gradle.rust.substrate.runbuild.authoritative=true` executes the selected
   build-plan shadow through Rust `RunBuild` and skips Gradle's JVM task executor
   only when Rust reports exactly the scheduled task count with zero JVM forwards.
-- The checked-in Java library, Java application, Java multi-project, and
-  resource-expansion corpus builds complete through that explicit gate with
-  `target/debug/gradle-substrate-daemon`.
+- The checked-in Java library, Java application, Java multi-project,
+  resource-expansion, and standalone Sync corpus builds complete through that
+  explicit gate with `target/debug/gradle-substrate-daemon`.
 - A separate networked JUnit corpus build proves native `TestExec` lowering for
   a non-empty JUnit Platform test task when the test runtime contains the JUnit
   Platform ConsoleLauncher.
@@ -32,7 +32,7 @@
   multi-source `Sync` orphan deletion using the union of all source roots.
 - Native `ProcessResources`/`Copy`/`Sync` execution can expand declared scalar
   task input properties in Gradle-style `$name` and `${name}` templates,
-  validated by content-hash corpus comparison for resource processing.
+  validated by content-hash corpus comparison for resource processing and Sync.
 - Native `Copy` and `Sync` honor basic duplicate destination strategies:
   `INCLUDE`/default overwrites, `EXCLUDE` keeps the first file, and `FAIL`
   reports an error.
