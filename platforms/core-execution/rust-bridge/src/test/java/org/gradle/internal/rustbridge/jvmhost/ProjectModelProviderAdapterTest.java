@@ -63,6 +63,38 @@ public class ProjectModelProviderAdapterTest {
             .anyMatch(path -> path.equals(outputDir.getAbsolutePath())));
     }
 
+    @Test
+    public void capturesNativeReadyJarContractFromTaskModel() throws IOException {
+        File classesDir = temporaryFolder.newFolder("build/classes/java/main");
+        File classFile = new File(classesDir, "App.class");
+        assertTrue(classFile.createNewFile());
+        File archiveDir = temporaryFolder.newFolder("build/libs");
+        File archiveFile = new File(archiveDir, "sample-1.0.jar");
+
+        Task jar = jarTask(classesDir, archiveDir, archiveFile);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(jar, Jar.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals(":jar", task.getPath());
+        assertEquals("archive", task.getActionKind());
+        assertEquals("in-process", task.getWorkerIsolation());
+        assertEquals("Jar", inputs.get("taskType"));
+        assertEquals("sample-1.0.jar", inputs.get("archive_file_name"));
+        assertEquals("sample", inputs.get("archive_base_name"));
+        assertEquals("1.0", inputs.get("archive_version"));
+        assertEquals("jar", inputs.get("archive_extension"));
+        assertEquals(archiveDir.getAbsolutePath(), inputs.get("archive_destination_directory"));
+        assertEquals(archiveFile.getAbsolutePath(), inputs.get("archive_file"));
+        assertTrue(task.getInputSpecsList().stream()
+            .anyMatch(input -> input.getKind().equals("path") && input.getValue().equals(classesDir.getAbsolutePath())));
+        assertTrue(task.getOutputSpecsList().stream()
+            .map(BuildPlanTaskOutputSpec::getPath)
+            .anyMatch(path -> path.equals(archiveFile.getAbsolutePath())));
+    }
+
     private static Task javaCompileTask(File sourceFile, File outputDir, File classpathEntry) {
         FileCollection source = fileCollection(sourceFile);
         FileCollection classpath = fileCollection(classpathEntry);
@@ -113,6 +145,69 @@ public class ProjectModelProviderAdapterTest {
                     return source;
                 case "getOptions":
                     return new CompileOptionsContract();
+                case "compareTo":
+                    return 0;
+                default:
+                    return defaultValue(method.getReturnType());
+            }
+        });
+    }
+
+    private static Task jarTask(File classesDir, File archiveDir, File archiveFile) {
+        FileCollection inputs = fileCollection(classesDir);
+        FileCollection outputs = fileCollection(archiveFile);
+        Project project = proxy(Project.class, (proxy, method, args) -> {
+            if (method.getName().equals("getPath")) {
+                return ":";
+            }
+            return defaultValue(method.getReturnType());
+        });
+        TaskDependency noDependencies = proxy(TaskDependency.class, (proxy, method, args) -> {
+            if (method.getName().equals("getDependencies")) {
+                return Collections.emptySet();
+            }
+            return defaultValue(method.getReturnType());
+        });
+        return proxy(new Class<?>[] {Task.class, JarContract.class}, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "getPath":
+                    return ":jar";
+                case "getProject":
+                    return project;
+                case "getName":
+                    return "jar";
+                case "getEnabled":
+                    return true;
+                case "getGroup":
+                case "getDescription":
+                    return "";
+                case "getTaskDependencies":
+                case "getShouldRunAfter":
+                case "getMustRunAfter":
+                case "getFinalizedBy":
+                    return noDependencies;
+                case "getInputs":
+                    return filesOwner(method.getReturnType(), inputs);
+                case "getOutputs":
+                    return filesOwner(method.getReturnType(), outputs);
+                case "getLocalState":
+                case "getDestroyables":
+                    return registeredFilesOwner(method.getReturnType());
+                case "getArchiveFileName":
+                    return new ValueProvider("sample-1.0.jar");
+                case "getArchiveBaseName":
+                    return new ValueProvider("sample");
+                case "getArchiveAppendix":
+                case "getArchiveClassifier":
+                    return new ValueProvider("");
+                case "getArchiveVersion":
+                    return new ValueProvider("1.0");
+                case "getArchiveExtension":
+                    return new ValueProvider("jar");
+                case "getDestinationDirectory":
+                    return new FileProvider(archiveDir);
+                case "getArchiveFile":
+                    return new FileProvider(archiveFile);
                 case "compareTo":
                     return 0;
                 default:
@@ -204,6 +299,17 @@ public class ProjectModelProviderAdapterTest {
         CompileOptionsContract getOptions();
     }
 
+    public interface JarContract {
+        ValueProvider getArchiveFileName();
+        ValueProvider getArchiveBaseName();
+        ValueProvider getArchiveAppendix();
+        ValueProvider getArchiveVersion();
+        ValueProvider getArchiveClassifier();
+        ValueProvider getArchiveExtension();
+        FileProvider getDestinationDirectory();
+        FileProvider getArchiveFile();
+    }
+
     public static class CompileOptionsContract {
         public ReleaseProvider getRelease() {
             return new ReleaseProvider();
@@ -224,6 +330,45 @@ public class ProjectModelProviderAdapterTest {
         }
     }
 
+    public static class ValueProvider {
+        private final String value;
+
+        ValueProvider(String value) {
+            this.value = value;
+        }
+
+        public String getOrNull() {
+            return value;
+        }
+    }
+
+    public static class FileProvider {
+        private final File file;
+
+        FileProvider(File file) {
+            this.file = file;
+        }
+
+        public RegularFile getOrNull() {
+            return new RegularFile(file);
+        }
+    }
+
+    public static class RegularFile {
+        private final File file;
+
+        RegularFile(File file) {
+            this.file = file;
+        }
+
+        public File getAsFile() {
+            return file;
+        }
+    }
+
     public static class JavaCompile {
+    }
+
+    public static class Jar {
     }
 }

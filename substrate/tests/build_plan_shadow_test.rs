@@ -20,7 +20,7 @@ use gradle_substrate_daemon::proto::{
 use gradle_substrate_daemon::server::bootstrap::BootstrapServiceImpl;
 use gradle_substrate_daemon::server::build_plan_ir::BUILD_PLAN_SCHEMA_VERSION;
 use gradle_substrate_daemon::server::build_plan_shadow::{
-    BuildPlanShadowStore, capture_and_persist_shadow_from_jvm, verify_shadow_against_jvm,
+    capture_and_persist_shadow_from_jvm, verify_shadow_against_jvm, BuildPlanShadowStore,
 };
 use gradle_substrate_daemon::server::dag_executor::DagExecutorServiceImpl;
 use gradle_substrate_daemon::server::execution_history::ExecutionHistoryServiceImpl;
@@ -35,6 +35,7 @@ use tonic::{Request, Response, Status};
 struct MockJvmHostService {
     repo_root: PathBuf,
     native_ready_compile: bool,
+    native_ready_jar: bool,
     java_home: String,
 }
 
@@ -229,6 +230,81 @@ fn native_ready_compile_task(repo_root: &std::path::Path, java_home: &str) -> Bu
     }
 }
 
+fn native_ready_jar_task(repo_root: &std::path::Path) -> BuildPlanTask {
+    let classes_dir = repo_root
+        .join("app")
+        .join("build")
+        .join("classes")
+        .join("java")
+        .join("main");
+    let archive_dir = repo_root.join("app").join("build").join("libs");
+    let archive_file = archive_dir.join("app-1.0.jar");
+    BuildPlanTask {
+        path: ":app:jar".to_string(),
+        project_path: ":app".to_string(),
+        implementation_id: "org.gradle.jvm.tasks.Jar".to_string(),
+        depends_on: vec![":app:compileJava".to_string()],
+        inputs: HashMap::from([
+            ("source".to_string(), "mock-jvm-task-model".to_string()),
+            ("taskType".to_string(), "Jar".to_string()),
+            ("nativeCandidate".to_string(), "true".to_string()),
+            ("archive_file_name".to_string(), "app-1.0.jar".to_string()),
+            (
+                "archive_destination_directory".to_string(),
+                archive_dir.to_string_lossy().into_owned(),
+            ),
+            (
+                "archive_file".to_string(),
+                archive_file.to_string_lossy().into_owned(),
+            ),
+        ]),
+        outputs: vec![archive_file.to_string_lossy().into_owned()],
+        worker_isolation: "in-process".to_string(),
+        should_run_after: Vec::new(),
+        must_run_after: Vec::new(),
+        finalized_by: Vec::new(),
+        cacheability: "declared-outputs".to_string(),
+        local_state: Vec::new(),
+        destroyables: Vec::new(),
+        action_kind: "archive".to_string(),
+        input_specs: vec![
+            input_spec("source", "mock-jvm-task-model"),
+            input_spec("taskType", "Jar"),
+            input_spec("nativeCandidate", "true"),
+            input_spec("archive_file_name", "app-1.0.jar"),
+            BuildPlanTaskInputSpec {
+                name: "archive_destination_directory".to_string(),
+                kind: "value".to_string(),
+                value: archive_dir.to_string_lossy().into_owned(),
+                normalization: "scalar".to_string(),
+                optional_input: false,
+            },
+            BuildPlanTaskInputSpec {
+                name: "archive_file".to_string(),
+                kind: "value".to_string(),
+                value: archive_file.to_string_lossy().into_owned(),
+                normalization: "scalar".to_string(),
+                optional_input: false,
+            },
+            BuildPlanTaskInputSpec {
+                name: "input0".to_string(),
+                kind: "path".to_string(),
+                value: classes_dir.to_string_lossy().into_owned(),
+                normalization: "absolute-path".to_string(),
+                optional_input: false,
+            },
+        ],
+        output_specs: vec![BuildPlanTaskOutputSpec {
+            name: "archive".to_string(),
+            kind: "file".to_string(),
+            path: archive_file.to_string_lossy().into_owned(),
+        }],
+        environment_inputs: Vec::new(),
+        system_property_inputs: Vec::new(),
+        diagnostics: vec![diagnostic("native-ready-jar-contract")],
+    }
+}
+
 #[tonic::async_trait]
 impl JvmHostService for MockJvmHostService {
     async fn evaluate_script(
@@ -285,7 +361,12 @@ impl JvmHostService for MockJvmHostService {
                 schema_version: BUILD_PLAN_SCHEMA_VERSION,
                 build_id: request.into_inner().build_id,
                 projects: Vec::new(),
-                tasks: if self.native_ready_compile {
+                tasks: if self.native_ready_compile && self.native_ready_jar {
+                    vec![
+                        native_ready_compile_task(&self.repo_root, &self.java_home),
+                        native_ready_jar_task(&self.repo_root),
+                    ]
+                } else if self.native_ready_compile {
                     vec![native_ready_compile_task(&self.repo_root, &self.java_home)]
                 } else {
                     mock_build_plan_tasks()
@@ -444,11 +525,25 @@ fn create_mock_repo(root: &std::path::Path) {
 }
 
 async fn spawn_mock_server() -> (String, tempfile::TempDir, PathBuf) {
-    spawn_mock_server_with_native_ready_compile(false, String::new()).await
+    spawn_mock_server_with_native_ready(false, false, String::new()).await
 }
 
 async fn spawn_mock_server_with_native_ready_compile(
     native_ready_compile: bool,
+    java_home: String,
+) -> (String, tempfile::TempDir, PathBuf) {
+    spawn_mock_server_with_native_ready(native_ready_compile, false, java_home).await
+}
+
+async fn spawn_mock_server_with_native_ready_java_lifecycle(
+    java_home: String,
+) -> (String, tempfile::TempDir, PathBuf) {
+    spawn_mock_server_with_native_ready(true, true, java_home).await
+}
+
+async fn spawn_mock_server_with_native_ready(
+    native_ready_compile: bool,
+    native_ready_jar: bool,
     java_home: String,
 ) -> (String, tempfile::TempDir, PathBuf) {
     let temp_dir = tempfile::tempdir().unwrap();
@@ -461,6 +556,7 @@ async fn spawn_mock_server_with_native_ready_compile(
     let service = MockJvmHostService {
         repo_root: repo_root.clone(),
         native_ready_compile,
+        native_ready_jar,
         java_home,
     };
 
@@ -748,12 +844,10 @@ async fn capture_and_persist_shadow_build_plan_artifact() {
         vec!["java.version".to_string()]
     );
     assert_eq!(compile_java.output_specs.len(), 1);
-    assert!(
-        compile_java
-            .input_specs
-            .iter()
-            .any(|input| input.name == "taskType" && input.value == "JavaCompile")
-    );
+    assert!(compile_java
+        .input_specs
+        .iter()
+        .any(|input| input.name == "taskType" && input.value == "JavaCompile"));
 
     let report = verify_shadow_against_jvm(&bridge, &store, "build-it")
         .await
@@ -976,6 +1070,113 @@ async fn refreshed_native_ready_shadow_plan_runs_compile_java_without_jvm_fallba
             .join("HelloCaptured.class")
             .exists(),
         "captured JVM-host JavaCompile contract should produce class output through Rust"
+    );
+}
+
+#[tokio::test]
+async fn refreshed_native_ready_shadow_plan_runs_compile_and_jar_without_jvm_fallback() {
+    let java_home = match std::env::var("JAVA_HOME") {
+        Ok(value) => value,
+        Err(_) => return,
+    };
+    let (socket_path, _tmp_server_dir, repo_root) =
+        spawn_mock_server_with_native_ready_java_lifecycle(java_home).await;
+    let client = JvmHostClient::connect(&socket_path).await.unwrap();
+
+    let bridge = Arc::new(JvmHostBridge::new());
+    bridge.set_client(client).await;
+
+    let cache_dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(BuildPlanShadowStore::new(PathBuf::from(cache_dir.path())));
+    let scope_registry = Arc::new(ScopeRegistry::new());
+    let bootstrap = BootstrapServiceImpl::with_scope_registry_and_shadow(
+        scope_registry,
+        Arc::clone(&bridge),
+        Arc::clone(&store),
+    );
+
+    let build_id = "build-native-shadow-java-lifecycle";
+    bootstrap
+        .init_build(Request::new(InitBuildRequest {
+            build_id: build_id.to_string(),
+            project_dir: repo_root.to_string_lossy().into_owned(),
+            start_time_ms: 1,
+            requested_parallelism: 1,
+            system_properties: HashMap::new(),
+            requested_features: Vec::new(),
+            session_id: "sess-native-shadow-lifecycle".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    let refreshed = bootstrap
+        .refresh_build_plan_shadow(Request::new(RefreshBuildPlanShadowRequest {
+            build_id: build_id.to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(refreshed.refreshed, "{}", refreshed.error_message);
+
+    let history = Arc::new(ExecutionHistoryServiceImpl::new(
+        cache_dir.path().join("history"),
+    ));
+    let task_graph = Arc::new(TaskGraphServiceImpl::with_history_and_shadow(
+        history,
+        Arc::clone(&store),
+    ));
+    let dag = DagExecutorServiceImpl::new(
+        Arc::new(WorkerScheduler::new(1)),
+        task_graph,
+        Arc::new(ExecutionPlanServiceImpl::default()),
+        Vec::new(),
+    );
+
+    let response = dag
+        .run_build(Request::new(RunBuildRequest {
+            build_id: build_id.to_string(),
+            max_parallelism: 1,
+            task_filter: Vec::new(),
+            task_contexts: HashMap::new(),
+            allow_jvm_forwarding: false,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(response.final_status, "COMPLETED");
+    assert_eq!(response.plan_source, "build-plan-shadow");
+    assert_eq!(response.total_tasks, 2);
+    assert_eq!(response.tasks_succeeded, 2);
+    assert_eq!(response.tasks_forwarded_to_jvm, 0);
+    assert!(
+        response.task_details.iter().any(|task| {
+            task.task_path == ":app:compileJava"
+                && task.task_type == "JavaCompile"
+                && task.execution_mode == "native"
+        }),
+        "compileJava should execute natively"
+    );
+    assert!(
+        response.task_details.iter().any(|task| {
+            task.task_path == ":app:jar"
+                && task.task_type == "Jar"
+                && task.execution_mode == "native"
+        }),
+        "jar should execute natively"
+    );
+
+    let jar_path = repo_root
+        .join("app")
+        .join("build")
+        .join("libs")
+        .join("app-1.0.jar");
+    assert!(jar_path.exists(), "Rust Jar executor should create archive");
+    let jar_data = std::fs::read(jar_path).unwrap();
+    let jar_text = String::from_utf8_lossy(&jar_data);
+    assert!(
+        jar_text.contains("org/gradle/substrate/corpus/HelloCaptured.class"),
+        "Rust Jar executor should package compiled class output"
     );
 }
 

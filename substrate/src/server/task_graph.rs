@@ -1,15 +1,16 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
-    ClearBuildTasksRequest, ClearBuildTasksResponse, ExecutionNode, GetProgressRequest,
-    GetProgressResponse, RegisterTaskRequest, RegisterTaskResponse, ResolveExecutionPlanRequest,
-    ResolveExecutionPlanResponse, TaskFinishedRequest, TaskFinishedResponse, TaskProgress,
-    TaskStartedRequest, TaskStartedResponse, task_graph_service_server::TaskGraphService,
+    task_graph_service_server::TaskGraphService, ClearBuildTasksRequest, ClearBuildTasksResponse,
+    ExecutionNode, GetProgressRequest, GetProgressResponse, RegisterTaskRequest,
+    RegisterTaskResponse, ResolveExecutionPlanRequest, ResolveExecutionPlanResponse,
+    TaskFinishedRequest, TaskFinishedResponse, TaskProgress, TaskStartedRequest,
+    TaskStartedResponse,
 };
 
 use super::build_plan_ir::CanonicalBuildPlanTask;
@@ -443,11 +444,13 @@ fn execution_context_json(task: &CanonicalBuildPlanTask, task_type: &str) -> Str
     let mut options = task_options(task, task_type);
     if task_type == "Jar" {
         if let Some(path) = output_paths.first() {
-            if let Some(name) = std::path::Path::new(path).file_name() {
-                options.insert(
-                    "jarName".to_string(),
-                    serde_json::Value::String(name.to_string_lossy().into_owned()),
-                );
+            if !options.contains_key("jarName") {
+                if let Some(name) = std::path::Path::new(path).file_name() {
+                    options.insert(
+                        "jarName".to_string(),
+                        serde_json::Value::String(name.to_string_lossy().into_owned()),
+                    );
+                }
             }
         }
     }
@@ -490,6 +493,9 @@ fn task_options(
             insert_input_option(task, &mut options, "target_version", "target_version");
             insert_input_option(task, &mut options, "targetCompatibility", "target_version");
         }
+    } else if task_type == "Jar" {
+        insert_input_option(task, &mut options, "archive_file_name", "jarName");
+        insert_input_option(task, &mut options, "main_class", "mainClass");
     }
     options
 }

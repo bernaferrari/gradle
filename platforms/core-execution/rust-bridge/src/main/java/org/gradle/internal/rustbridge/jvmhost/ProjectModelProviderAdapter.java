@@ -260,6 +260,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if ("JavaCompile".equals(shortTaskTypeName)) {
             captureJavaCompileInputs(task, inputs);
         }
+        if ("Jar".equals(shortTaskTypeName)) {
+            captureJarInputs(task, inputs);
+        }
 
         BuildPlanTask.Builder builder = BuildPlanTask.newBuilder()
             .setPath(task.getPath())
@@ -311,6 +314,17 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         }
     }
 
+    private static void captureJarInputs(Task task, Map<String, String> inputs) {
+        putIfPresent(inputs, "archive_file_name", providerValue(invokeOptional(task, "getArchiveFileName")));
+        putIfPresent(inputs, "archive_base_name", providerValue(invokeOptional(task, "getArchiveBaseName")));
+        putIfPresent(inputs, "archive_appendix", providerValue(invokeOptional(task, "getArchiveAppendix")));
+        putIfPresent(inputs, "archive_version", providerValue(invokeOptional(task, "getArchiveVersion")));
+        putIfPresent(inputs, "archive_classifier", providerValue(invokeOptional(task, "getArchiveClassifier")));
+        putIfPresent(inputs, "archive_extension", providerValue(invokeOptional(task, "getArchiveExtension")));
+        putIfPresent(inputs, "archive_destination_directory", providerFilePath(invokeOptional(task, "getDestinationDirectory")));
+        putIfPresent(inputs, "archive_file", providerFilePath(invokeOptional(task, "getArchiveFile")));
+    }
+
     private static void putIfPresent(Map<String, String> inputs, String key, String value) {
         if (value != null && !value.isEmpty()) {
             inputs.put(key, value);
@@ -327,6 +341,21 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         }
         Object providerValue = invokeOptional(value, "getOrNull");
         return providerValue == null ? "" : providerValue.toString();
+    }
+
+    private static String providerFilePath(@Nullable Object value) {
+        if (value == null) {
+            return "";
+        }
+        Object providerValue = invokeOptional(value, "getOrNull");
+        if (providerValue instanceof File) {
+            return ((File) providerValue).getAbsolutePath();
+        }
+        Object file = invokeOptional(providerValue, "getAsFile");
+        if (file instanceof File) {
+            return ((File) file).getAbsolutePath();
+        }
+        return "";
     }
 
     private static String stringOrEmpty(@Nullable Object value) {
