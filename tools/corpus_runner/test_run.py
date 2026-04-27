@@ -75,6 +75,7 @@ class CorpusRunnerCommandTest(unittest.TestCase):
 
         self.assertIn("java-library-kotlin-dsl", results)
         self.assertIn("java-application-groovy-dsl", results)
+        self.assertIn("java-multiproject-kotlin-dsl", results)
         failures = {
             name: result["mismatches"]
             for name, result in results.items()

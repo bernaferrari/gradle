@@ -97,8 +97,19 @@ if [[ "$RUN_SAMPLE_BUILDS" -eq 1 ]]; then
     ./gradlew -q -p testing/corpus/java-library-kotlin-dsl clean build
   run_step "Build corpus Java application sample" \
     ./gradlew -q -p testing/corpus/java-application-groovy-dsl clean build
-  run_step "Build corpus Java library with authoritative Rust RunBuild gate" \
-    bash -c 'cargo build -q -p gradle-substrate-daemon && ./gradlew -q -p testing/corpus/java-library-kotlin-dsl clean build --no-daemon --console=plain -Dorg.gradle.rust.substrate.enabled=true -Dorg.gradle.rust.substrate.runbuild.authoritative=true -Dorg.gradle.rust.substrate.daemon.path="$PWD/target/debug/gradle-substrate-daemon"'
+  run_step "Build corpus Java multi-project sample" \
+    ./gradlew -q -p testing/corpus/java-multiproject-kotlin-dsl clean build
+  run_step "Build Rust substrate daemon" \
+    cargo build -q -p gradle-substrate-daemon
+  run_step "Build checked-in corpus with authoritative Rust RunBuild gate" \
+    python3 ./tools/corpus_runner/run.py \
+      --manifest testing/corpus/manifest.json \
+      --daemon-binary target/debug/gradle-substrate-daemon \
+      --runbuild-authoritative \
+      --tasks clean build \
+      --timeout 300 \
+      --verbose \
+      --output-dir "$OUTPUT_DIR"
 fi
 
 if [[ "$RUN_GRPC_E2E" -eq 1 ]]; then
@@ -113,9 +124,9 @@ What this proves:
   - Rust/JVM proto drift checks pass.
   - Hardened bridge clients fail closed instead of returning hidden defaults.
   - Build-plan IR v2 fingerprints and shadow artifacts are stable.
-  - The checked-in Java library/application corpus has deterministic build-plan contracts.
+  - The checked-in Java library/application/multi-project corpus has deterministic build-plan contracts.
   - A captured JVM-host Java lifecycle build-plan shadow can execute JavaCompile, ProcessResources, classes, and Jar through Rust with JVM fallback disabled.
-  - When sample builds are enabled, the Java library corpus build exercises the explicit no-fallback RunBuild gate from a real Gradle invocation.
+  - When sample builds are enabled, the checked-in Java corpus exercises the explicit no-fallback RunBuild gate from real Gradle invocations.
   - Rust daemon gRPC behavior is exercised when --skip-grpc-e2e is not used.
 
 What this does not claim:

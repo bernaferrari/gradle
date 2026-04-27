@@ -22,9 +22,9 @@ python3 tools/corpus_runner/run.py \
   --substrate-mode shadow \
   --daemon-binary /path/to/gradle-substrate-daemon
 
-# Run the explicit no-fallback RunBuild gate against a project
+# Run the explicit no-fallback RunBuild gate against the checked-in corpus
 python3 tools/corpus_runner/run.py \
-  --project testing/corpus/java-library-kotlin-dsl \
+  --manifest testing/corpus/manifest.json \
   --daemon-binary target/debug/gradle-substrate-daemon \
   --runbuild-authoritative
 
@@ -58,9 +58,9 @@ scheduled task count.
 
 `--contract-only` does not invoke Gradle. It scans checked-in sample projects
 and validates deterministic build-plan signals such as plugins, declared tasks,
-declared outputs, source files, dependencies, and Java toolchain declarations.
-This is suitable for quick CI gates and keeps the corpus useful without network
-access.
+declared outputs, source files, external dependencies, project dependencies, and
+Java toolchain declarations. This is suitable for quick CI gates and keeps the
+corpus useful without network access.
 
 ## Corpus Structure
 
@@ -69,7 +69,8 @@ A corpus should be a directory containing Gradle projects:
 ```
 
 The repository includes a small offline corpus at `testing/corpus/` with a
-manifest. Keep samples deterministic: prefer built-in Gradle plugins and local
+manifest. It covers Java library, Java application, and Java multi-project
+builds. Keep samples deterministic: prefer built-in Gradle plugins and local
 sources; avoid external repositories or dependencies unless the manifest and
 runner are extended to pin/cache them explicitly.
 my-corpus/
