@@ -91,7 +91,7 @@ High-signal commands:
 ```bash
 cargo test -p gradle-substrate-daemon --test hash_compatibility_test
 cargo test -p gradle-substrate-daemon --test build_plan_ir_golden_test
-cargo test -p gradle-substrate-daemon --test build_plan_shadow_test refreshed_native_ready_shadow_plan_runs_compile_java_without_jvm_fallback -- --exact
+cargo test -p gradle-substrate-daemon --test build_plan_shadow_test refreshed_native_ready_shadow_plan_runs_compile_and_jar_without_jvm_fallback -- --exact
 ./tools/stabilization/run_strict_stabilization.sh quick
 ./tools/demo/rust_substrate_demo.sh --quick
 ```

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
@@ -11,16 +11,15 @@ use super::work::WorkerScheduler;
 
 use crate::client::jvm_host_bridge::SharedJvmHostBridge;
 use crate::proto::{
-    AwaitBuildCompletionRequest, AwaitBuildCompletionResponse, BuildEventMessage,
-    CancelBuildRequest, CancelBuildResponse, GetBuildStatusRequest, GetBuildStatusResponse,
-    GetNextTaskRequest, GetNextTaskResponse, NotifyTaskFinishedRequest, NotifyTaskFinishedResponse,
-    NotifyTaskStartedRequest, NotifyTaskStartedResponse, PredictedOutcome, RecordOutcomeRequest,
-    ResolveExecutionPlanRequest, ResolvePlanRequest, RunBuildRequest, RunBuildResponse,
-    StartBuildRequest, StartBuildResponse, TaskExecutionDetail, TaskFinishedRequest,
-    TaskStartedRequest, TaskStatusEntry, WorkMetadata,
     dag_executor_service_server::DagExecutorService,
     execution_plan_service_server::ExecutionPlanService,
-    task_graph_service_server::TaskGraphService,
+    task_graph_service_server::TaskGraphService, AwaitBuildCompletionRequest,
+    AwaitBuildCompletionResponse, BuildEventMessage, CancelBuildRequest, CancelBuildResponse,
+    GetBuildStatusRequest, GetBuildStatusResponse, GetNextTaskRequest, GetNextTaskResponse,
+    NotifyTaskFinishedRequest, NotifyTaskFinishedResponse, NotifyTaskStartedRequest,
+    NotifyTaskStartedResponse, PredictedOutcome, RecordOutcomeRequest, ResolveExecutionPlanRequest,
+    ResolvePlanRequest, RunBuildRequest, RunBuildResponse, StartBuildRequest, StartBuildResponse,
+    TaskExecutionDetail, TaskFinishedRequest, TaskStartedRequest, TaskStatusEntry, WorkMetadata,
 };
 use crate::server::task_executor::{TaskExecutorRegistry, TaskInput};
 
@@ -1484,8 +1483,8 @@ mod tests {
     use super::*;
     use crate::client::jvm_host::JvmHostClient;
     use crate::client::jvm_host_bridge::JvmHostBridge;
-    use crate::proto::RegisterTaskRequest;
     use crate::proto::jvm_host_service_server::{JvmHostService, JvmHostServiceServer};
+    use crate::proto::RegisterTaskRequest;
     use tokio::net::UnixListener;
     use tonic::transport::Server;
 

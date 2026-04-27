@@ -15,7 +15,7 @@ Usage: tools/demo/rust_substrate_demo.sh [--quick|--full] [--skip-sample-builds]
 Runs an honest Rust substrate demo:
   - strict stabilization gate
   - checked-in corpus contract validation
-  - captured build-plan shadow JavaCompile execution with JVM fallback disabled
+  - captured build-plan shadow JavaCompile -> Jar execution with JVM fallback disabled
   - optional sample Gradle builds from testing/corpus
   - optional Rust daemon gRPC e2e test suite
 
@@ -85,10 +85,10 @@ run_step "Offline corpus contract validation" \
     --output-dir "$OUTPUT_DIR"
 
 if [[ "$RUN_NATIVE_SHADOW" -eq 1 ]]; then
-  run_step "No-fallback captured JavaCompile via Rust" \
+  run_step "No-fallback captured JavaCompile and Jar via Rust" \
     cargo test -p gradle-substrate-daemon \
       --test build_plan_shadow_test \
-      refreshed_native_ready_shadow_plan_runs_compile_java_without_jvm_fallback \
+      refreshed_native_ready_shadow_plan_runs_compile_and_jar_without_jvm_fallback \
       -- --exact
 fi
 
@@ -112,7 +112,7 @@ What this proves:
   - Hardened bridge clients fail closed instead of returning hidden defaults.
   - Build-plan IR v2 fingerprints and shadow artifacts are stable.
   - The checked-in Java library/application corpus has deterministic build-plan contracts.
-  - A captured JVM-host JavaCompile build-plan shadow can be executed by Rust with JVM fallback disabled.
+  - A captured JVM-host JavaCompile -> Jar build-plan shadow can be executed by Rust with JVM fallback disabled.
   - Rust daemon gRPC behavior is exercised when --skip-grpc-e2e is not used.
 
 What this does not claim:
