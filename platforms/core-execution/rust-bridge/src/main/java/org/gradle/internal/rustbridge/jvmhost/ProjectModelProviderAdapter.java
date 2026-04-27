@@ -249,6 +249,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         inputs.put("enabled", Boolean.toString(task.getEnabled()));
         inputs.put("taskName", task.getName());
         inputs.put("taskType", shortTaskTypeName.isEmpty() ? taskTypeName : shortTaskTypeName);
+        inputs.put("action_count", Integer.toString(taskActionCount(task)));
         String group = task.getGroup();
         if (group != null && !group.isEmpty()) {
             inputs.put("group", group);
@@ -270,7 +271,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             .setImplementationId(taskTypeName)
             .setWorkerIsolation(workerIsolation(taskType))
             .setCacheability(cacheability(task, taskType))
-            .setActionKind(actionKind(taskType))
+            .setActionKind(actionKind(task, taskType))
             .putAllInputs(inputs);
 
         List<String> inputPaths = fileCollectionPaths(safeInputFiles(task));
@@ -497,7 +498,16 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         return "unknown";
     }
 
-    private static String actionKind(Class<?> taskType) {
+    private static int taskActionCount(Task task) {
+        try {
+            return task.getActions().size();
+        } catch (RuntimeException e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to inspect task actions for {}", task.getPath(), e);
+            return -1;
+        }
+    }
+
+    private static String actionKind(Task task, Class<?> taskType) {
         String simpleName = taskType.getSimpleName();
         if ("JavaCompile".equals(simpleName)
             || "GroovyCompile".equals(simpleName)
@@ -508,7 +518,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if ("Test".equals(simpleName)) {
             return "test";
         }
-        if ("Copy".equals(simpleName) || "Sync".equals(simpleName)) {
+        if ("Copy".equals(simpleName) || "Sync".equals(simpleName) || "ProcessResources".equals(simpleName)) {
             return "file-transform";
         }
         if ("Delete".equals(simpleName)) {
@@ -523,6 +533,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         }
         if ("Exec".equals(simpleName) || "JavaExec".equals(simpleName)) {
             return "external-process";
+        }
+        if (("DefaultTask".equals(simpleName) || "Task".equals(simpleName)) && taskActionCount(task) == 0) {
+            return "lifecycle";
         }
         return "jvm-task";
     }
@@ -543,6 +556,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         }
         if ("Copy".equals(simpleName)
             || "Sync".equals(simpleName)
+            || "ProcessResources".equals(simpleName)
             || "Delete".equals(simpleName)
             || "Jar".equals(simpleName)
             || "War".equals(simpleName)

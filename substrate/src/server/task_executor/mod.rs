@@ -2,6 +2,7 @@ mod copy;
 mod delete;
 mod jar;
 mod java_compile;
+mod lifecycle;
 mod mkdir_op;
 mod symlink;
 mod sync;
@@ -11,6 +12,7 @@ pub use copy::CopyTaskExecutor;
 pub use delete::DeleteTaskExecutor;
 pub use jar::JarTaskExecutor;
 pub use java_compile::JavaCompileExecutor;
+pub use lifecycle::LifecycleTaskExecutor;
 pub use mkdir_op::MkdirTaskExecutor;
 pub use symlink::SymlinkTaskExecutor;
 pub use sync::SyncTaskExecutor;
@@ -69,7 +71,15 @@ impl TaskInput {
     pub fn is_native_supported(task_type: &str) -> bool {
         matches!(
             task_type,
-            "Copy" | "Delete" | "Sync" | "Mkdir" | "Symlink" | "JavaCompile" | "TestExec" | "Jar"
+            "Copy"
+                | "Delete"
+                | "Sync"
+                | "Mkdir"
+                | "Symlink"
+                | "JavaCompile"
+                | "TestExec"
+                | "Jar"
+                | "Lifecycle"
         )
     }
 }
@@ -122,6 +132,12 @@ impl TaskExecutorRegistry {
 
         let jar_executor = JarTaskExecutor::new();
         executors.insert(jar_executor.task_type().to_string(), Box::new(jar_executor));
+
+        let lifecycle_executor = LifecycleTaskExecutor::new();
+        executors.insert(
+            lifecycle_executor.task_type().to_string(),
+            Box::new(lifecycle_executor),
+        );
 
         Self { executors }
     }
@@ -177,6 +193,7 @@ mod tests {
         assert!(types.contains(&"JavaCompile"));
         assert!(types.contains(&"TestExec"));
         assert!(types.contains(&"Jar"));
+        assert!(types.contains(&"Lifecycle"));
     }
 
     #[test]
@@ -204,6 +221,7 @@ mod tests {
         assert!(TaskInput::is_native_supported("Symlink"));
         assert!(TaskInput::is_native_supported("JavaCompile"));
         assert!(TaskInput::is_native_supported("TestExec"));
+        assert!(TaskInput::is_native_supported("Lifecycle"));
         assert!(!TaskInput::is_native_supported("Test"));
     }
 }
