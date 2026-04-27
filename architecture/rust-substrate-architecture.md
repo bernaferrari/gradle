@@ -106,7 +106,7 @@ Used for: build model queries, classloader information, Groovy/Kotlin evaluation
 
 ## Proto Contract
 
-Canonical source: `substrate/proto/v1/` (27 files).
+Canonical source: `substrate/proto/v1/` (29 files).
 
 Sync to Java: `./gradlew :rust-bridge:syncProtos`
 
