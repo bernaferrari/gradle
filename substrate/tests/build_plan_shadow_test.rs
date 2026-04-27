@@ -5,6 +5,7 @@ use std::sync::Arc;
 use gradle_substrate_daemon::client::jvm_host::JvmHostClient;
 use gradle_substrate_daemon::client::jvm_host_bridge::JvmHostBridge;
 use gradle_substrate_daemon::proto::bootstrap_service_server::BootstrapService;
+use gradle_substrate_daemon::proto::dag_executor_service_server::DagExecutorService;
 use gradle_substrate_daemon::proto::jvm_host_service_server::{
     JvmHostService, JvmHostServiceServer,
 };
@@ -14,20 +15,27 @@ use gradle_substrate_daemon::proto::{
     ExecuteTaskResponse, GetBuildEnvironmentRequest, GetBuildEnvironmentResponse,
     GetBuildModelRequest, GetBuildModelResponse, GetBuildPlanRequest, GetBuildPlanResponse,
     InitBuildRequest, ProjectModel, RefreshBuildPlanShadowRequest, ResolveConfigRequest,
-    ResolveConfigResponse,
+    ResolveConfigResponse, RunBuildRequest,
 };
 use gradle_substrate_daemon::server::bootstrap::BootstrapServiceImpl;
 use gradle_substrate_daemon::server::build_plan_ir::BUILD_PLAN_SCHEMA_VERSION;
 use gradle_substrate_daemon::server::build_plan_shadow::{
-    capture_and_persist_shadow_from_jvm, verify_shadow_against_jvm, BuildPlanShadowStore,
+    BuildPlanShadowStore, capture_and_persist_shadow_from_jvm, verify_shadow_against_jvm,
 };
+use gradle_substrate_daemon::server::dag_executor::DagExecutorServiceImpl;
+use gradle_substrate_daemon::server::execution_history::ExecutionHistoryServiceImpl;
+use gradle_substrate_daemon::server::execution_plan::ExecutionPlanServiceImpl;
 use gradle_substrate_daemon::server::scopes::ScopeRegistry;
+use gradle_substrate_daemon::server::task_graph::TaskGraphServiceImpl;
+use gradle_substrate_daemon::server::work::WorkerScheduler;
 use tokio::net::UnixListener;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
 struct MockJvmHostService {
     repo_root: PathBuf,
+    native_ready_compile: bool,
+    java_home: String,
 }
 
 fn input_spec(name: &str, value: &str) -> BuildPlanTaskInputSpec {
@@ -159,6 +167,68 @@ fn mock_build_plan_tasks() -> Vec<BuildPlanTask> {
     ]
 }
 
+fn native_ready_compile_task(repo_root: &std::path::Path, java_home: &str) -> BuildPlanTask {
+    let source_file = repo_root
+        .join("app")
+        .join("src")
+        .join("main")
+        .join("java")
+        .join("org")
+        .join("gradle")
+        .join("substrate")
+        .join("corpus")
+        .join("HelloCaptured.java");
+    let output_dir = repo_root
+        .join("app")
+        .join("build")
+        .join("classes")
+        .join("java")
+        .join("main");
+    BuildPlanTask {
+        path: ":app:compileJava".to_string(),
+        project_path: ":app".to_string(),
+        implementation_id: "org.gradle.api.tasks.compile.JavaCompile".to_string(),
+        depends_on: Vec::new(),
+        inputs: HashMap::from([
+            ("source".to_string(), "mock-jvm-task-model".to_string()),
+            ("taskType".to_string(), "JavaCompile".to_string()),
+            ("nativeCandidate".to_string(), "true".to_string()),
+            ("java_home".to_string(), java_home.to_string()),
+        ]),
+        outputs: vec![output_dir.to_string_lossy().into_owned()],
+        worker_isolation: "process".to_string(),
+        should_run_after: Vec::new(),
+        must_run_after: Vec::new(),
+        finalized_by: Vec::new(),
+        cacheability: "declared-outputs".to_string(),
+        local_state: Vec::new(),
+        destroyables: Vec::new(),
+        action_kind: "compile".to_string(),
+        input_specs: vec![
+            input_spec("source", "mock-jvm-task-model"),
+            input_spec("taskType", "JavaCompile"),
+            input_spec("nativeCandidate", "true"),
+            input_spec("java_home", java_home),
+            input_spec("release", "17"),
+            BuildPlanTaskInputSpec {
+                name: "source0".to_string(),
+                kind: "source".to_string(),
+                value: source_file.to_string_lossy().into_owned(),
+                normalization: "absolute-path".to_string(),
+                optional_input: false,
+            },
+        ],
+        output_specs: vec![BuildPlanTaskOutputSpec {
+            name: "classes".to_string(),
+            kind: "directory".to_string(),
+            path: output_dir.to_string_lossy().into_owned(),
+        }],
+        environment_inputs: vec!["JAVA_HOME".to_string()],
+        system_property_inputs: vec!["java.version".to_string()],
+        diagnostics: vec![diagnostic("native-ready-compile-contract")],
+    }
+}
+
 #[tonic::async_trait]
 impl JvmHostService for MockJvmHostService {
     async fn evaluate_script(
@@ -215,7 +285,11 @@ impl JvmHostService for MockJvmHostService {
                 schema_version: BUILD_PLAN_SCHEMA_VERSION,
                 build_id: request.into_inner().build_id,
                 projects: Vec::new(),
-                tasks: mock_build_plan_tasks(),
+                tasks: if self.native_ready_compile {
+                    vec![native_ready_compile_task(&self.repo_root, &self.java_home)]
+                } else {
+                    mock_build_plan_tasks()
+                },
                 dependencies: Vec::new(),
                 toolchains: Vec::new(),
                 metadata: HashMap::from([("provider".to_string(), "mock-build-plan".to_string())]),
@@ -295,6 +369,29 @@ impl JvmHostService for MockJvmHostService {
 
 fn create_mock_repo(root: &std::path::Path) {
     std::fs::create_dir_all(root.join("app")).unwrap();
+    let java_dir = root
+        .join("app")
+        .join("src")
+        .join("main")
+        .join("java")
+        .join("org")
+        .join("gradle")
+        .join("substrate")
+        .join("corpus");
+    std::fs::create_dir_all(&java_dir).unwrap();
+    std::fs::write(
+        java_dir.join("HelloCaptured.java"),
+        r#"
+            package org.gradle.substrate.corpus;
+
+            public class HelloCaptured {
+                public String message() {
+                    return "native-from-shadow";
+                }
+            }
+        "#,
+    )
+    .unwrap();
     std::fs::write(
         root.join("build.gradle.kts"),
         r#"
@@ -347,6 +444,13 @@ fn create_mock_repo(root: &std::path::Path) {
 }
 
 async fn spawn_mock_server() -> (String, tempfile::TempDir, PathBuf) {
+    spawn_mock_server_with_native_ready_compile(false, String::new()).await
+}
+
+async fn spawn_mock_server_with_native_ready_compile(
+    native_ready_compile: bool,
+    java_home: String,
+) -> (String, tempfile::TempDir, PathBuf) {
     let temp_dir = tempfile::tempdir().unwrap();
     let repo_root = temp_dir.path().join("repo");
     create_mock_repo(&repo_root);
@@ -356,6 +460,8 @@ async fn spawn_mock_server() -> (String, tempfile::TempDir, PathBuf) {
     let stream = tokio_stream::wrappers::UnixListenerStream::new(uds);
     let service = MockJvmHostService {
         repo_root: repo_root.clone(),
+        native_ready_compile,
+        java_home,
     };
 
     tokio::spawn(async move {
@@ -642,10 +748,12 @@ async fn capture_and_persist_shadow_build_plan_artifact() {
         vec!["java.version".to_string()]
     );
     assert_eq!(compile_java.output_specs.len(), 1);
-    assert!(compile_java
-        .input_specs
-        .iter()
-        .any(|input| input.name == "taskType" && input.value == "JavaCompile"));
+    assert!(
+        compile_java
+            .input_specs
+            .iter()
+            .any(|input| input.name == "taskType" && input.value == "JavaCompile")
+    );
 
     let report = verify_shadow_against_jvm(&bridge, &store, "build-it")
         .await
@@ -773,6 +881,102 @@ async fn bootstrap_refresh_build_plan_shadow_rewrites_selected_graph_artifact() 
         Some("jvm-host-build-plan")
     );
     assert_eq!(artifact.plan.tasks.len(), mock_build_plan_tasks().len());
+}
+
+#[tokio::test]
+async fn refreshed_native_ready_shadow_plan_runs_compile_java_without_jvm_fallback() {
+    let java_home = match std::env::var("JAVA_HOME") {
+        Ok(value) => value,
+        Err(_) => return,
+    };
+    let (socket_path, _tmp_server_dir, repo_root) =
+        spawn_mock_server_with_native_ready_compile(true, java_home).await;
+    let client = JvmHostClient::connect(&socket_path).await.unwrap();
+
+    let bridge = Arc::new(JvmHostBridge::new());
+    bridge.set_client(client).await;
+
+    let cache_dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(BuildPlanShadowStore::new(PathBuf::from(cache_dir.path())));
+    let scope_registry = Arc::new(ScopeRegistry::new());
+    let bootstrap = BootstrapServiceImpl::with_scope_registry_and_shadow(
+        scope_registry,
+        Arc::clone(&bridge),
+        Arc::clone(&store),
+    );
+
+    let build_id = "build-native-shadow-java";
+    bootstrap
+        .init_build(Request::new(InitBuildRequest {
+            build_id: build_id.to_string(),
+            project_dir: repo_root.to_string_lossy().into_owned(),
+            start_time_ms: 1,
+            requested_parallelism: 1,
+            system_properties: HashMap::new(),
+            requested_features: Vec::new(),
+            session_id: "sess-native-shadow".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    let refreshed = bootstrap
+        .refresh_build_plan_shadow(Request::new(RefreshBuildPlanShadowRequest {
+            build_id: build_id.to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(refreshed.refreshed, "{}", refreshed.error_message);
+
+    let history = Arc::new(ExecutionHistoryServiceImpl::new(
+        cache_dir.path().join("history"),
+    ));
+    let task_graph = Arc::new(TaskGraphServiceImpl::with_history_and_shadow(
+        history,
+        Arc::clone(&store),
+    ));
+    let dag = DagExecutorServiceImpl::new(
+        Arc::new(WorkerScheduler::new(1)),
+        task_graph,
+        Arc::new(ExecutionPlanServiceImpl::default()),
+        Vec::new(),
+    );
+
+    let response = dag
+        .run_build(Request::new(RunBuildRequest {
+            build_id: build_id.to_string(),
+            max_parallelism: 1,
+            task_filter: Vec::new(),
+            task_contexts: HashMap::new(),
+            allow_jvm_forwarding: false,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(response.final_status, "COMPLETED");
+    assert_eq!(response.plan_source, "build-plan-shadow");
+    assert_eq!(response.total_tasks, 1);
+    assert_eq!(response.tasks_succeeded, 1);
+    assert_eq!(response.tasks_forwarded_to_jvm, 0);
+    assert_eq!(response.task_details[0].task_path, ":app:compileJava");
+    assert_eq!(response.task_details[0].task_type, "JavaCompile");
+    assert_eq!(response.task_details[0].execution_mode, "native");
+    assert!(
+        repo_root
+            .join("app")
+            .join("build")
+            .join("classes")
+            .join("java")
+            .join("main")
+            .join("org")
+            .join("gradle")
+            .join("substrate")
+            .join("corpus")
+            .join("HelloCaptured.class")
+            .exists(),
+        "captured JVM-host JavaCompile contract should produce class output through Rust"
+    );
 }
 
 #[tokio::test]
