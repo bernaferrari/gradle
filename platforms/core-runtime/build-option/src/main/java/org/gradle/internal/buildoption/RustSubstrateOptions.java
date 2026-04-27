@@ -366,6 +366,22 @@ public class RustSubstrateOptions {
         InternalOptions.ofBoolean("org.gradle.rust.substrate.taskgraph.authoritative", false);
 
     /**
+     * Enable Rust authoritative build execution from the selected build-plan shadow.
+     * Property: org.gradle.rust.substrate.runbuild.enabled
+     * Default: false
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_RUN_BUILD =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.runbuild.enabled", false);
+
+    /**
+     * Fail closed when Rust authoritative build execution fails.
+     * Property: org.gradle.rust.substrate.runbuild.authoritative
+     * Default: false
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_AUTHORITATIVE_RUN_BUILD =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.runbuild.authoritative", false);
+
+    /**
      * Enable authoritative mode for Rust-backed execution plan advisory subsystem.
      * Property: org.gradle.rust.substrate.executionplan.authoritative
      * Default: false

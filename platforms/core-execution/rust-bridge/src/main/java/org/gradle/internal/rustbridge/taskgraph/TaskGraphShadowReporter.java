@@ -2,6 +2,7 @@ package org.gradle.internal.rustbridge.taskgraph;
 
 import org.gradle.api.logging.Logging;
 import org.gradle.api.execution.TaskExecutionGraph;
+import org.gradle.internal.rustbridge.SubstrateException;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
 import org.slf4j.Logger;
 
@@ -25,8 +26,11 @@ public class TaskGraphShadowReporter {
     private static final Logger LOGGER = Logging.getLogger(TaskGraphShadowReporter.class);
 
     private final RustTaskGraphClient rustClient;
+    private final RustBuildExecutionClient buildExecutionClient;
     private final HashMismatchReporter mismatchReporter;
     private final boolean authoritative;
+    private final boolean runBuildEnabled;
+    private final boolean runBuildAuthoritative;
 
     public TaskGraphShadowReporter(
         RustTaskGraphClient rustClient,
@@ -40,13 +44,35 @@ public class TaskGraphShadowReporter {
         HashMismatchReporter mismatchReporter,
         boolean authoritative
     ) {
+        this(rustClient, null, mismatchReporter, authoritative, false, false);
+    }
+
+    public TaskGraphShadowReporter(
+        RustTaskGraphClient rustClient,
+        RustBuildExecutionClient buildExecutionClient,
+        HashMismatchReporter mismatchReporter,
+        boolean authoritative,
+        boolean runBuildEnabled,
+        boolean runBuildAuthoritative
+    ) {
         this.rustClient = rustClient;
+        this.buildExecutionClient = buildExecutionClient;
         this.mismatchReporter = mismatchReporter;
         this.authoritative = authoritative;
+        this.runBuildEnabled = runBuildEnabled;
+        this.runBuildAuthoritative = runBuildAuthoritative;
     }
 
     public boolean isAuthoritative() {
         return authoritative;
+    }
+
+    public boolean isRunBuildEnabled() {
+        return runBuildEnabled;
+    }
+
+    public boolean isRunBuildAuthoritative() {
+        return runBuildAuthoritative;
     }
 
     /**
@@ -87,6 +113,58 @@ public class TaskGraphShadowReporter {
         String buildId
     ) {
         resolveExecutionGraphOrFallback(taskPaths, taskDependencies, buildId);
+        runBuildFromShadowIfEnabled(taskPaths, buildId);
+    }
+
+    public RustBuildExecutionClient.RunBuildResult runBuildFromShadowIfEnabled(
+        List<String> taskPaths,
+        String buildId
+    ) {
+        if (!runBuildEnabled || taskPaths.isEmpty()) {
+            return RustBuildExecutionClient.RunBuildResult.success("disabled", 0, 0);
+        }
+        if (buildExecutionClient == null) {
+            RustBuildExecutionClient.RunBuildResult result =
+                RustBuildExecutionClient.RunBuildResult.error("Rust build execution client is unavailable");
+            handleRunBuildFailure(buildId, result);
+            return result;
+        }
+
+        RustBuildExecutionClient.RunBuildResult result = buildExecutionClient.runBuild(
+            buildId,
+            Runtime.getRuntime().availableProcessors(),
+            false
+        );
+        if (result.isSuccess() && result.getTasksForwardedToJvm() == 0) {
+            mismatchReporter.reportMatch();
+            LOGGER.info(
+                "[substrate:run-build] Rust executed {} tasks from {} with JVM forwarding disabled",
+                result.getTotalTasks(),
+                result.getPlanSource()
+            );
+            return result;
+        }
+
+        handleRunBuildFailure(buildId, result);
+        return result;
+    }
+
+    private void handleRunBuildFailure(String buildId, RustBuildExecutionClient.RunBuildResult result) {
+        String reason = result.getErrorMessage();
+        if (reason == null || reason.isEmpty()) {
+            reason = result.getFailureMessage();
+        }
+        if (reason == null || reason.isEmpty()) {
+            reason = "status=" + result.getFinalStatus()
+                + ", failed=" + result.getTasksFailed()
+                + ", jvmForwarded=" + result.getTasksForwardedToJvm();
+        }
+        RuntimeException failure = new RuntimeException(reason);
+        mismatchReporter.reportRustError("run-build:" + buildId, failure);
+        LOGGER.warn("[substrate:run-build] Rust run-build failed for {}: {}", buildId, reason);
+        if (runBuildAuthoritative) {
+            throw new SubstrateException("Rust authoritative run-build failed for " + buildId + ": " + reason, failure);
+        }
     }
 
     /**
