@@ -6,6 +6,8 @@ import org.gradle.api.artifacts.result.ResolutionResult;
 import org.gradle.api.artifacts.result.UnresolvedDependencyResult;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 import org.slf4j.Logger;
 
 import java.util.concurrent.ConcurrentHashMap;
@@ -16,6 +18,7 @@ import java.util.Map;
  * to the Rust substrate. Tracks resolution timing, resolved artifact counts, and
  * compares resolution success between Java and Rust.
  */
+@ServiceScope(Scope.Build.class)
 public class DependencyResolutionShadowListener implements DependencyResolutionListener {
 
     private static final Logger LOGGER = Logging.getLogger(DependencyResolutionShadowListener.class);

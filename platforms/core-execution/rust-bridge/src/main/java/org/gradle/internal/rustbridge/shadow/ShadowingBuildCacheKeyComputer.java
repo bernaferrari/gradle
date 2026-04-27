@@ -3,6 +3,8 @@ package org.gradle.internal.rustbridge.shadow;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.hash.HashCode;
 import org.gradle.internal.rustbridge.cache.BuildCacheOrchestrationClient;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 import org.slf4j.Logger;
 
 import java.util.List;
@@ -13,6 +15,7 @@ import java.util.Map;
  * In shadow mode, Java remains authoritative. In authoritative mode, Rust key is used
  * when available and Java is the fallback.
  */
+@ServiceScope(Scope.Build.class)
 public class ShadowingBuildCacheKeyComputer {
 
     private static final Logger LOGGER = Logging.getLogger(ShadowingBuildCacheKeyComputer.class);

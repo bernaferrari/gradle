@@ -225,14 +225,25 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     }
 
     public static BuildPlanTask toBuildPlanTask(Task task) {
-        return toBuildPlanTask(task, null);
+        return toBuildPlanTask(task, (List<String>) null);
     }
 
     private static BuildPlanTask toBuildPlanTask(Task task, @Nullable List<String> selectedDependencyPaths) {
         Class<?> taskType = GeneratedSubclasses.unpackType(task);
+        return toBuildPlanTask(task, selectedDependencyPaths, taskType);
+    }
+
+    static BuildPlanTask toBuildPlanTask(Task task, Class<?> taskType) {
+        return toBuildPlanTask(task, null, taskType);
+    }
+
+    private static BuildPlanTask toBuildPlanTask(
+            Task task,
+            @Nullable List<String> selectedDependencyPaths,
+            Class<?> taskType
+    ) {
         String taskTypeName = taskType.getName();
         String shortTaskTypeName = taskType.getSimpleName();
-
         Map<String, String> inputs = new LinkedHashMap<>();
         inputs.put("source", "jvm-task-model");
         inputs.put("enabled", Boolean.toString(task.getEnabled()));

@@ -2,6 +2,8 @@ package org.gradle.internal.rustbridge.metrics;
 
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
@@ -13,6 +15,7 @@ import java.util.Map;
  * Client for the Rust build metrics service.
  * Records and retrieves build performance metrics via gRPC.
  */
+@ServiceScope(Scope.Build.class)
 public class RustBuildMetricsClient {
 
     private static final Logger LOGGER = Logging.getLogger(RustBuildMetricsClient.class);

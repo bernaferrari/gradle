@@ -4,6 +4,8 @@ import io.grpc.ManagedChannel;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
 import io.grpc.netty.shaded.io.netty.channel.unix.DomainSocketAddress;
 import gradle.substrate.v1.*;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -18,6 +20,7 @@ import java.util.concurrent.TimeUnit;
  * When the substrate is disabled (noop mode), all stub getters
  * throw {@link SubstrateException}.</p>
  */
+@ServiceScope(Scope.UserHome.class)
 public class SubstrateClient implements Closeable {
 
     private static final String CLIENT_PROTOCOL_VERSION = "1.0.0";

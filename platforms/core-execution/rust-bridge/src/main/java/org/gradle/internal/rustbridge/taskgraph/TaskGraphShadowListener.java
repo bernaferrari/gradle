@@ -6,6 +6,8 @@ import org.gradle.api.execution.TaskExecutionGraphListener;
 import org.gradle.internal.rustbridge.bootstrap.RustBootstrapClient;
 import org.gradle.internal.rustbridge.eventstream.BuildIdHolder;
 import org.gradle.internal.rustbridge.jvmhost.BuildPlanTaskSelectionSnapshot;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -22,6 +24,7 @@ import java.util.stream.Collectors;
  * <p>Extracts task paths and dependency information from the populated graph and
  * delegates to {@link TaskGraphShadowReporter} for the actual comparison.</p>
  */
+@ServiceScope(Scope.Build.class)
 public class TaskGraphShadowListener implements TaskExecutionGraphListener {
 
     private final TaskGraphShadowReporter reporter;

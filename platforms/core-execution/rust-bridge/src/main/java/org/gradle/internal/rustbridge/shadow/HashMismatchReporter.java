@@ -2,6 +2,8 @@ package org.gradle.internal.rustbridge.shadow;
 
 import org.gradle.internal.logging.text.StyledTextOutput;
 import org.gradle.internal.logging.text.StyledTextOutputFactory;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,6 +19,7 @@ import static org.gradle.internal.logging.text.StyledTextOutput.Style.*;
  * Reports hash mismatches between Java and Rust sides of the bridge.
  * Tracks per-subsystem statistics and enforces mismatch rate thresholds.
  */
+@ServiceScope(Scope.BuildSession.class)
 public class HashMismatchReporter {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(HashMismatchReporter.class);

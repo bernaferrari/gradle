@@ -18,6 +18,8 @@ import gradle.substrate.v1.ResolveDependenciesResponse;
 import gradle.substrate.v1.ResolvedDependency;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
@@ -27,6 +29,7 @@ import java.util.List;
  * Client for the Rust dependency resolution service.
  * Resolves dependency graphs, checks artifact caches, and downloads artifacts via gRPC.
  */
+@ServiceScope(Scope.Build.class)
 public class RustDependencyResolutionClient {
 
     private static final Logger LOGGER = Logging.getLogger(RustDependencyResolutionClient.class);
