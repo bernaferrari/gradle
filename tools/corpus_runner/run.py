@@ -93,6 +93,9 @@ def snapshot_build_output_hashes(project_dir: str, output_files: list[str]) -> d
     hashes: dict[str, str] = {}
     for relative_path in output_files:
         path = root / relative_path
+        parts = Path(relative_path).parts
+        if "test-results" in parts:
+            continue
         lower_name = path.name.lower()
         if any(lower_name.endswith(suffix) for suffix in ARCHIVE_SUFFIXES):
             continue

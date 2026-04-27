@@ -532,6 +532,15 @@ fn task_options(
     } else if task_type == "Tar" {
         insert_input_option(task, &mut options, "archive_file_name", "tarName");
         insert_input_option(task, &mut options, "archive_compression", "compression");
+    } else if matches!(task_type, "Copy" | "Sync") {
+        insert_input_option(task, &mut options, "expand_properties", "expand_properties");
+        insert_input_option(
+            task,
+            &mut options,
+            "duplicates_strategy",
+            "duplicates_strategy",
+        );
+        insert_input_option(task, &mut options, "filtering_charset", "filtering_charset");
     } else if task_type == "TestExec" {
         insert_input_option(task, &mut options, "java_home", "java_home");
         insert_input_option(task, &mut options, "classpath", "classpath");

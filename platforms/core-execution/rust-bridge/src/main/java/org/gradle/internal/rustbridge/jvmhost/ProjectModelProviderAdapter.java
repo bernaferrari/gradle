@@ -264,6 +264,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if (isArchiveTask(shortTaskTypeName)) {
             captureJarInputs(task, inputs);
         }
+        if (isFileTransformTask(shortTaskTypeName)) {
+            captureFileTransformInputs(task, inputs);
+        }
         if ("Test".equals(shortTaskTypeName)) {
             captureTestInputs(task, inputs);
         }
@@ -336,6 +339,18 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             || "Ear".equals(simpleName)
             || "Zip".equals(simpleName)
             || "Tar".equals(simpleName);
+    }
+
+    private static boolean isFileTransformTask(String simpleName) {
+        return "Copy".equals(simpleName) || "Sync".equals(simpleName) || "ProcessResources".equals(simpleName);
+    }
+
+    private static void captureFileTransformInputs(Task task, Map<String, String> inputs) {
+        putIfPresent(inputs, "expand_properties", stringMap(safeInputProperties(task)));
+        Object rootSpec = invokeOptional(task, "getRootSpec");
+        putIfPresent(inputs, "copy_has_custom_actions", booleanString(invokeOptional(rootSpec, "hasCustomActions")));
+        putIfPresent(inputs, "duplicates_strategy", stringOrEmpty(invokeOptional(rootSpec, "getDuplicatesStrategy")));
+        putIfPresent(inputs, "filtering_charset", stringOrEmpty(invokeOptional(rootSpec, "getFilteringCharset")));
     }
 
     private static void captureTestInputs(Task task, Map<String, String> inputs) {
@@ -500,6 +515,17 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             return task.getInputs().getFiles();
         } catch (RuntimeException e) {
             LOGGER.debug("[substrate-jvmhost] Failed to resolve task inputs for {}", task.getPath(), e);
+            return null;
+        }
+    }
+
+    @Nullable
+    private static Map<?, ?> safeInputProperties(Task task) {
+        try {
+            Object properties = invoke(task.getInputs(), "getProperties");
+            return properties instanceof Map ? (Map<?, ?>) properties : null;
+        } catch (RuntimeException e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to resolve task input properties for {}", task.getPath(), e);
             return null;
         }
     }

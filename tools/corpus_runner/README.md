@@ -85,8 +85,9 @@ Reference-mode runs compare upstream Gradle and Rust substrate exit codes, task
 lists, and stable build output file inventories under `build/classes`,
 `build/resources`, `build/libs`, `build/distributions`, `build/install`, and
 `build/test-results`. Non-archive outputs are also compared by SHA-256 hash.
-Archive byte-for-byte parity is tracked separately because compression and
-metadata can differ while logical artifacts are still equivalent.
+Archive byte-for-byte parity and test-result content parity are tracked
+separately because compression, metadata, timings, and binary result stores can
+differ while logical artifacts are still equivalent.
 
 Keep offline samples deterministic: prefer built-in Gradle plugins and local
 sources. Put external repositories or dependencies in the external manifest with
