@@ -1,16 +1,15 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
-    task_graph_service_server::TaskGraphService, ClearBuildTasksRequest, ClearBuildTasksResponse,
-    ExecutionNode, GetProgressRequest, GetProgressResponse, RegisterTaskRequest,
-    RegisterTaskResponse, ResolveExecutionPlanRequest, ResolveExecutionPlanResponse,
-    TaskFinishedRequest, TaskFinishedResponse, TaskProgress, TaskStartedRequest,
-    TaskStartedResponse,
+    ClearBuildTasksRequest, ClearBuildTasksResponse, ExecutionNode, GetProgressRequest,
+    GetProgressResponse, RegisterTaskRequest, RegisterTaskResponse, ResolveExecutionPlanRequest,
+    ResolveExecutionPlanResponse, TaskFinishedRequest, TaskFinishedResponse, TaskProgress,
+    TaskStartedRequest, TaskStartedResponse, task_graph_service_server::TaskGraphService,
 };
 
 use super::build_plan_ir::CanonicalBuildPlanTask;
@@ -529,9 +528,21 @@ fn task_options(
     } else if is_zip_archive_executor(task_type) {
         insert_input_option(task, &mut options, "archive_file_name", "jarName");
         insert_input_option(task, &mut options, "main_class", "mainClass");
+        insert_input_option(
+            task,
+            &mut options,
+            "duplicates_strategy",
+            "duplicates_strategy",
+        );
     } else if task_type == "Tar" {
         insert_input_option(task, &mut options, "archive_file_name", "tarName");
         insert_input_option(task, &mut options, "archive_compression", "compression");
+        insert_input_option(
+            task,
+            &mut options,
+            "duplicates_strategy",
+            "duplicates_strategy",
+        );
     } else if matches!(task_type, "Copy" | "Sync") {
         insert_input_option(task, &mut options, "expand_properties", "expand_properties");
         insert_input_option(
@@ -541,6 +552,9 @@ fn task_options(
             "duplicates_strategy",
         );
         insert_input_option(task, &mut options, "filtering_charset", "filtering_charset");
+        insert_input_option(task, &mut options, "include_patterns", "include_patterns");
+        insert_input_option(task, &mut options, "exclude_patterns", "exclude_patterns");
+        insert_input_option(task, &mut options, "case_sensitive", "case_sensitive");
     } else if task_type == "TestExec" {
         insert_input_option(task, &mut options, "java_home", "java_home");
         insert_input_option(task, &mut options, "classpath", "classpath");

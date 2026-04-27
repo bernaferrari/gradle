@@ -331,6 +331,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "archive_destination_directory", providerFilePath(invokeOptional(task, "getDestinationDirectory")));
         putIfPresent(inputs, "archive_file", providerFilePath(invokeOptional(task, "getArchiveFile")));
         putIfPresent(inputs, "archive_compression", stringOrEmpty(invokeOptional(task, "getCompression")));
+        Object rootSpec = invokeOptional(task, "getRootSpec");
+        putIfPresent(inputs, "duplicates_strategy", stringOrEmpty(invokeOptional(rootSpec, "getDuplicatesStrategy")));
     }
 
     private static boolean isArchiveTask(String simpleName) {
@@ -351,6 +353,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "copy_has_custom_actions", booleanString(invokeOptional(rootSpec, "hasCustomActions")));
         putIfPresent(inputs, "duplicates_strategy", stringOrEmpty(invokeOptional(rootSpec, "getDuplicatesStrategy")));
         putIfPresent(inputs, "filtering_charset", stringOrEmpty(invokeOptional(rootSpec, "getFilteringCharset")));
+        putIfPresent(inputs, "include_patterns", stringCollection(invokeOptional(rootSpec, "getIncludes")));
+        putIfPresent(inputs, "exclude_patterns", stringCollection(invokeOptional(rootSpec, "getExcludes")));
+        putIfPresent(inputs, "case_sensitive", booleanString(invokeOptional(rootSpec, "isCaseSensitive")));
     }
 
     private static void captureTestInputs(Task task, Map<String, String> inputs) {
@@ -424,6 +429,20 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             }
         }
         return String.join(" ", values);
+    }
+
+    private static String stringCollection(@Nullable Object value) {
+        if (!(value instanceof Iterable)) {
+            return "";
+        }
+        List<String> values = new ArrayList<>();
+        for (Object item : (Iterable<?>) value) {
+            if (item != null) {
+                values.add(item.toString());
+            }
+        }
+        Collections.sort(values);
+        return String.join(",", values);
     }
 
     private static String stringMap(@Nullable Object value) {

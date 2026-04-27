@@ -76,11 +76,11 @@ corpus useful without network access.
 ## Corpus Structure
 
 The repository includes a small offline corpus at `testing/corpus/manifest.json`
-covering Java library, Java application, Java multi-project, and Java resource
-expansion builds, plus a standalone Sync resource transform. The optional
-`testing/corpus/external-manifest.json` adds a pinned JUnit Platform sample for
-real non-empty test execution and requires network or a warm Gradle dependency
-cache.
+covering Java library, Java application, Java multi-project, Java resource
+expansion, standalone Sync resource transform, and CopySpec include/exclude
+pattern builds. The optional `testing/corpus/external-manifest.json` adds a
+pinned JUnit Platform sample for real non-empty test execution and requires
+network or a warm Gradle dependency cache.
 
 Reference-mode runs compare upstream Gradle and Rust substrate exit codes, task
 lists, and stable build output file inventories under `build/classes`,
