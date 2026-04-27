@@ -92,9 +92,16 @@ High-signal commands:
 cargo test -p gradle-substrate-daemon --test hash_compatibility_test
 cargo test -p gradle-substrate-daemon --test build_plan_ir_golden_test
 cargo test -p gradle-substrate-daemon --test build_plan_shadow_test refreshed_native_ready_shadow_plan_runs_java_lifecycle_without_jvm_fallback -- --exact
+./gradlew :core:test --tests org.gradle.execution.RustAuthoritativeBuildExecutionActionTest -x :distributions-core:generateLicenseFile
 ./tools/stabilization/run_strict_stabilization.sh quick
 ./tools/demo/rust_substrate_demo.sh --quick
 ```
+
+The real Gradle build-work path now has an opt-in no-fallback gate:
+`-Dorg.gradle.rust.substrate.runbuild.authoritative=true`. In that mode Gradle
+skips its JVM task executor only after Rust `RunBuild` completes exactly the
+scheduled task count with `allow_jvm_forwarding=false`; otherwise the build
+fails closed.
 
 **Note:** some symlink-oriented tests are intentionally ignored in sandboxed macOS
 environments because `/var` and `/private/var` can produce ELOOP behavior that does not
