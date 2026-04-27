@@ -351,9 +351,7 @@ impl WorkerProcessServiceImpl {
             .workers
             .iter()
             .filter(|e| {
-                e.state == "busy"
-                    && e.lease_expires_at_ms > 0
-                    && now > e.lease_expires_at_ms
+                e.state == "busy" && e.lease_expires_at_ms > 0 && now > e.lease_expires_at_ms
             })
             .map(|e| e.worker_id.clone())
             .collect();
@@ -1834,7 +1832,10 @@ mod tests {
                 .await
                 .unwrap()
                 .into_inner();
-            assert!(resp.worker.is_some(), "should allow up to max_per_key workers");
+            assert!(
+                resp.worker.is_some(),
+                "should allow up to max_per_key workers"
+            );
         }
 
         // 3rd should be rejected due to per-key limit

@@ -58,7 +58,10 @@ fn contains_ci(haystack: &[u8], needle: &[u8]) -> bool {
     let mut pos = 0;
     while pos + needle.len() <= haystack.len() {
         let window = &haystack[pos..];
-        let idx = match (memchr::memchr(first, window), memchr::memchr(first_upper, window)) {
+        let idx = match (
+            memchr::memchr(first, window),
+            memchr::memchr(first_upper, window),
+        ) {
             (Some(a), Some(b)) => a.min(b),
             (Some(a), None) => a,
             (None, Some(b)) => b,
@@ -68,7 +71,11 @@ fn contains_ci(haystack: &[u8], needle: &[u8]) -> bool {
             return false;
         }
         let candidate = &window[idx..idx + needle.len()];
-        if candidate.iter().zip(needle.iter()).all(|(h, n)| h.to_ascii_lowercase() == *n) {
+        if candidate
+            .iter()
+            .zip(needle.iter())
+            .all(|(h, n)| h.to_ascii_lowercase() == *n)
+        {
             return true;
         }
         pos += idx + 1;

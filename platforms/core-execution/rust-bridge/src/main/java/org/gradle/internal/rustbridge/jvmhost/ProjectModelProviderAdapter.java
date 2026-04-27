@@ -1,6 +1,9 @@
 package org.gradle.internal.rustbridge.jvmhost;
 
 import gradle.substrate.v1.BuildPlanTask;
+import gradle.substrate.v1.BuildPlanTaskDiagnostic;
+import gradle.substrate.v1.BuildPlanTaskInputSpec;
+import gradle.substrate.v1.BuildPlanTaskOutputSpec;
 
 import org.gradle.api.Project;
 import org.gradle.api.Task;
@@ -250,19 +253,55 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             .setImplementationId(taskTypeName)
             .setWorkerIsolation(workerIsolation(taskType))
             .setCacheability(cacheability(task, taskType))
+            .setActionKind(actionKind(taskType))
             .putAllInputs(inputs);
 
+        List<String> outputPaths = fileCollectionPaths(safeOutputFiles(task));
         builder.addAllDependsOn(selectedDependencyPaths == null
             ? taskDependencyPaths(task, task.getTaskDependencies())
             : selectedDependencyPaths);
         builder.addAllShouldRunAfter(taskDependencyPaths(task, task.getShouldRunAfter()));
         builder.addAllMustRunAfter(taskDependencyPaths(task, task.getMustRunAfter()));
         builder.addAllFinalizedBy(taskDependencyPaths(task, task.getFinalizedBy()));
-        builder.addAllOutputs(fileCollectionPaths(safeOutputFiles(task)));
+        builder.addAllOutputs(outputPaths);
         builder.addAllLocalState(fileCollectionPaths(registeredFiles(task.getLocalState())));
         builder.addAllDestroyables(fileCollectionPaths(registeredFiles(task.getDestroyables())));
+        builder.addAllInputSpecs(inputSpecs(inputs));
+        builder.addAllOutputSpecs(outputSpecs(outputPaths));
+        builder.addDiagnostics(BuildPlanTaskDiagnostic.newBuilder()
+            .setSeverity("info")
+            .setCode("jvm-host-task-contract")
+            .setMessage("Task contract captured from Gradle JVM task model")
+            .setSource("jvm-host")
+            .build());
 
         return builder.build();
+    }
+
+    private static List<BuildPlanTaskInputSpec> inputSpecs(Map<String, String> inputs) {
+        List<BuildPlanTaskInputSpec> specs = new ArrayList<>();
+        inputs.entrySet().stream()
+            .sorted(Map.Entry.comparingByKey())
+            .forEach(entry -> specs.add(BuildPlanTaskInputSpec.newBuilder()
+                .setName(entry.getKey())
+                .setKind("value")
+                .setValue(entry.getValue())
+                .setNormalization("scalar")
+                .setOptionalInput(false)
+                .build()));
+        return specs;
+    }
+
+    private static List<BuildPlanTaskOutputSpec> outputSpecs(List<String> outputs) {
+        List<BuildPlanTaskOutputSpec> specs = new ArrayList<>();
+        for (int index = 0; index < outputs.size(); index++) {
+            specs.add(BuildPlanTaskOutputSpec.newBuilder()
+                .setName("output" + index)
+                .setKind("path")
+                .setPath(outputs.get(index))
+                .build());
+        }
+        return specs;
     }
 
     private static List<String> taskDependencyPaths(Task task, org.gradle.api.tasks.TaskDependency dependency) {
@@ -327,6 +366,36 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             LOGGER.debug("[substrate-jvmhost] Failed to inspect cacheability for {}", task.getPath(), e);
         }
         return "unknown";
+    }
+
+    private static String actionKind(Class<?> taskType) {
+        String simpleName = taskType.getSimpleName();
+        if ("JavaCompile".equals(simpleName)
+            || "GroovyCompile".equals(simpleName)
+            || "ScalaCompile".equals(simpleName)
+            || "KotlinCompile".equals(simpleName)) {
+            return "compile";
+        }
+        if ("Test".equals(simpleName)) {
+            return "test";
+        }
+        if ("Copy".equals(simpleName) || "Sync".equals(simpleName)) {
+            return "file-transform";
+        }
+        if ("Delete".equals(simpleName)) {
+            return "delete";
+        }
+        if ("Jar".equals(simpleName)
+            || "War".equals(simpleName)
+            || "Ear".equals(simpleName)
+            || "Zip".equals(simpleName)
+            || "Tar".equals(simpleName)) {
+            return "archive";
+        }
+        if ("Exec".equals(simpleName) || "JavaExec".equals(simpleName)) {
+            return "external-process";
+        }
+        return "jvm-task";
     }
 
     private static String workerIsolation(Class<?> taskType) {

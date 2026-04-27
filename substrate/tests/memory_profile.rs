@@ -63,7 +63,11 @@ fn test_memory_hash_stability() {
     }
 
     let end_rss = get_rss_mb();
-    println!("\n  Final RSS: {:.1} MB (delta: +{:.1} MB)", end_rss.unwrap_or(0.0), (end_rss.unwrap_or(0.0) - start_rss.unwrap_or(0.0)));
+    println!(
+        "\n  Final RSS: {:.1} MB (delta: +{:.1} MB)",
+        end_rss.unwrap_or(0.0),
+        (end_rss.unwrap_or(0.0) - start_rss.unwrap_or(0.0))
+    );
     println!("  ✓ Memory stable after 50 iterations of 10K files each");
 }
 
@@ -91,7 +95,11 @@ fn test_memory_hash_determinism() {
     for iteration in 0..100 {
         let results = hash_batch_parallel(&files, HashAlgorithm::Sha256);
         for (j, r) in results.into_iter().enumerate() {
-            assert_eq!(r.unwrap(), baseline[j], "Hash mismatch at iteration {iteration}, file {j}");
+            assert_eq!(
+                r.unwrap(),
+                baseline[j],
+                "Hash mismatch at iteration {iteration}, file {j}"
+            );
         }
     }
     println!("  ✓ 100 iterations of 100 file hashes all identical");
@@ -103,7 +111,11 @@ fn test_memory_rss_baseline() {
     if let Some(rss) = get_rss_mb() {
         println!("  Current process RSS: {:.1} MB", rss);
         // RSS should be reasonable for a test process (< 500 MB for simple tests)
-        assert!(rss < 500.0, "RSS {} MB exceeds 500 MB threshold for simple test process", rss);
+        assert!(
+            rss < 500.0,
+            "RSS {} MB exceeds 500 MB threshold for simple test process",
+            rss
+        );
         println!("  ✓ Memory measurement working on this platform");
     } else {
         println!("  ⚠ RSS measurement not supported on this platform");

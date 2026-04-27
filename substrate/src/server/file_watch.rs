@@ -220,9 +220,9 @@ impl FileWatchServiceImpl {
     fn matches_patterns(path: &str, include: &[String], exclude: &[String]) -> bool {
         // If no include patterns, accept everything
         if !include.is_empty() {
-            let matched = include.iter().any(|pattern| {
-                crate::server::file_tree::ant_match(path, pattern)
-            });
+            let matched = include
+                .iter()
+                .any(|pattern| crate::server::file_tree::ant_match(path, pattern));
             if !matched {
                 return false;
             }
@@ -286,8 +286,7 @@ impl FileWatchService for FileWatchServiceImpl {
         let polling_mode = is_network;
 
         let watcher_result = if !polling_mode {
-            let config = notify::Config::default()
-                .with_poll_interval(Duration::from_millis(100));
+            let config = notify::Config::default().with_poll_interval(Duration::from_millis(100));
             RecommendedWatcher::new(
                 move |res: Result<Event, notify::Error>| {
                     if let Ok(event) = res {
@@ -298,7 +297,8 @@ impl FileWatchService for FileWatchServiceImpl {
                             .collect();
 
                         for path in paths {
-                            if !Self::matches_patterns(&path, &include_patterns, &exclude_patterns) {
+                            if !Self::matches_patterns(&path, &include_patterns, &exclude_patterns)
+                            {
                                 continue;
                             }
 
@@ -415,8 +415,7 @@ impl FileWatchService for FileWatchServiceImpl {
             let follow_symlinks = session.follow_symlinks;
 
             // Create a dedicated watcher for this polling stream
-            let config = notify::Config::default()
-                .with_poll_interval(Duration::from_millis(100));
+            let config = notify::Config::default().with_poll_interval(Duration::from_millis(100));
             let mut stream_watcher = RecommendedWatcher::new(
                 move |res: Result<Event, notify::Error>| {
                     if let Ok(event) = res {
@@ -913,7 +912,10 @@ mod tests {
 
         let resp = result.unwrap().into_inner();
         assert!(resp.watching, "should succeed in polling mode");
-        assert!(resp.polling_mode, "should use polling fallback for nonexistent dir");
+        assert!(
+            resp.polling_mode,
+            "should use polling fallback for nonexistent dir"
+        );
         assert_eq!(resp.files_watched, 0, "no files in nonexistent dir");
     }
 
@@ -1412,11 +1414,7 @@ mod tests {
             std::fs::write(path.join("f.txt"), b"x").unwrap();
         }
 
-        let count = FileWatchServiceImpl::count_files_inner(
-            &dir.path().to_string_lossy(),
-            0,
-            0,
-        );
+        let count = FileWatchServiceImpl::count_files_inner(&dir.path().to_string_lossy(), 0, 0);
 
         // Should be capped by MAX_TREE_DEPTH — 60 levels but limit is 50
         // Each level has 1 dir + 1 file = 2 entries, so max ~102

@@ -5,11 +5,10 @@ use tonic::{Request, Response, Status};
 use crate::proto::{
     plugin_service_server::PluginService, ApplyPluginRequest, ApplyPluginResponse,
     CheckPluginCompatibilityRequest, CheckPluginCompatibilityResponse, ExtensionInfo,
-    GetAppliedPluginsRequest, GetAppliedPluginsResponse, GetExtensionRequest,
-    GetExtensionResponse, GetExtensionsRequest, GetExtensionsResponse, HasPluginRequest,
-    HasPluginResponse, PluginInfo, RegisterConventionRequest, RegisterConventionResponse,
-    RegisterPluginRequest, RegisterPluginResponse, ResolveConventionRequest,
-    ResolveConventionResponse,
+    GetAppliedPluginsRequest, GetAppliedPluginsResponse, GetExtensionRequest, GetExtensionResponse,
+    GetExtensionsRequest, GetExtensionsResponse, HasPluginRequest, HasPluginResponse, PluginInfo,
+    RegisterConventionRequest, RegisterConventionResponse, RegisterPluginRequest,
+    RegisterPluginResponse, ResolveConventionRequest, ResolveConventionResponse,
 };
 
 /// Registered plugin metadata.
@@ -507,7 +506,9 @@ impl PluginService for PluginServiceImpl {
             );
         }
 
-        Ok(Response::new(RegisterConventionResponse { registered: true }))
+        Ok(Response::new(RegisterConventionResponse {
+            registered: true,
+        }))
     }
 
     async fn resolve_convention(
@@ -1025,14 +1026,8 @@ mod tests {
         let svc = PluginServiceImpl::new();
 
         let mut props = std::collections::HashMap::new();
-        props.insert(
-            "compileSdkVersion".to_string(),
-            "34".to_string(),
-        );
-        props.insert(
-            "minSdkVersion".to_string(),
-            "24".to_string(),
-        );
+        props.insert("compileSdkVersion".to_string(), "34".to_string());
+        props.insert("minSdkVersion".to_string(), "24".to_string());
 
         svc.extensions.insert(
             (":app".to_string(), "android".to_string()),
@@ -1205,6 +1200,9 @@ mod tests {
         // Kotlin convention was registered last, so it wins (last-write-wins in DashMap)
         // But if the source doesn't match preferred, it returns not found
         // In our case kotlin IS the preferred source, so it should be found
-        assert!(resp.found, "kotlin convention should be found with preferred source kotlin");
+        assert!(
+            resp.found,
+            "kotlin convention should be found with preferred source kotlin"
+        );
     }
 }

@@ -221,11 +221,14 @@ impl Parser {
                 _ => {}
             }
 
-            if depth_paren == 0 && depth_brace == 0 && depth_bracket == 0
-                && matches!(self.cur().kind, TokenKind::Semicolon | TokenKind::Eof) {
-                    self.eat(TokenKind::Semicolon);
-                    break;
-                }
+            if depth_paren == 0
+                && depth_brace == 0
+                && depth_bracket == 0
+                && matches!(self.cur().kind, TokenKind::Semicolon | TokenKind::Eof)
+            {
+                self.eat(TokenKind::Semicolon);
+                break;
+            }
 
             self.advance();
         }
@@ -2045,7 +2048,11 @@ mod tests {
         let source = "foo(] bar 42";
         let result = parse(source);
         // Should recover and parse at least the 'bar 42' statement (bar(42) in Groovy DSL)
-        assert!(result.script.statements.len() >= 1, "expected at least 1 statement, got {}", result.script.statements.len());
+        assert!(
+            result.script.statements.len() >= 1,
+            "expected at least 1 statement, got {}",
+            result.script.statements.len()
+        );
         assert!(!result.errors.is_empty(), "expected parse errors");
     }
 

@@ -340,12 +340,11 @@ fn find_top_level_block(content: &str, keyword: &str) -> Option<(usize, String)>
     let kw_bytes = keyword.as_bytes();
     let kw_len = kw_bytes.len();
 
-    let pos = (0..bytes.len().saturating_sub(kw_len))
-        .find(|&i| {
-            &bytes[i..i + kw_len] == kw_bytes
-                && i + kw_len < bytes.len()
-                && (bytes[i + kw_len] == b' ' || bytes[i + kw_len] == b'{')
-        })?;
+    let pos = (0..bytes.len().saturating_sub(kw_len)).find(|&i| {
+        &bytes[i..i + kw_len] == kw_bytes
+            && i + kw_len < bytes.len()
+            && (bytes[i + kw_len] == b' ' || bytes[i + kw_len] == b'{')
+    })?;
 
     let after_keyword = &content[pos + kw_len..];
     let brace_pos = after_keyword.find('{')?;
@@ -372,7 +371,11 @@ fn parse_plugins_block(content: &str, result: &mut BuildScriptParseResult) {
                         .unwrap_or(block.len());
                     let statement = &block[i..statement_end];
                     let apply = !statement.contains("apply false");
-                    result.plugins.push(ParsedPlugin { id, apply, ..Default::default() });
+                    result.plugins.push(ParsedPlugin {
+                        id,
+                        apply,
+                        ..Default::default()
+                    });
                 }
             }
         }
@@ -413,7 +416,11 @@ fn parse_plugins_block(content: &str, result: &mut BuildScriptParseResult) {
             if let Some(eq_pos) = args.find('=') {
                 let value = args[eq_pos + 1..].trim();
                 if let Some(id) = extract_string_literal(value) {
-                    result.plugins.push(ParsedPlugin { id, apply: true, ..Default::default() });
+                    result.plugins.push(ParsedPlugin {
+                        id,
+                        apply: true,
+                        ..Default::default()
+                    });
                 }
             }
         }
@@ -545,9 +552,7 @@ fn parse_version_catalog_refs(content: &str, result: &mut BuildScriptParseResult
                     // Check if this is a catalog reference (contains "libs.")
                     if args.contains("libs.") {
                         // Extract the alias — strip platform(...) wrapper if present
-                        let alias = if args.starts_with("platform(")
-                            && args.ends_with(')')
-                        {
+                        let alias = if args.starts_with("platform(") && args.ends_with(')') {
                             &args[9..args.len() - 1]
                         } else {
                             args
@@ -657,18 +662,16 @@ fn parse_buildscript_block(content: &str, result: &mut BuildScriptParseResult) {
                     if let Some(close) = find_matching_paren(&block[args_start..]) {
                         let args = block[args_start..args_start + close].trim();
                         if let Some(notation) = extract_string_literal(args) {
-                            result.buildscript_deps.push(ParsedBuildScriptDep {
-                                notation,
-                            });
+                            result
+                                .buildscript_deps
+                                .push(ParsedBuildScriptDep { notation });
                         }
                     }
                 } else {
                     // Groovy no-paren form: classpath '...'
                     // Pattern consumed the opening quote, so args starts with the notation
                     let rest = &block[args_start..];
-                    let line_end = rest
-                        .find('\n')
-                        .unwrap_or(rest.len());
+                    let line_end = rest.find('\n').unwrap_or(rest.len());
                     let args = rest[..line_end].trim();
                     // The opening quote was consumed by the pattern; strip trailing quote
                     let notation = args
@@ -711,7 +714,11 @@ fn parse_plugin_management(content: &str, result: &mut BuildScriptParseResult) {
 
             // Standard shorthand repos
             let standard_repos = [
-                ("gradlePluginPortal()", "gradlePluginPortal", "gradlePluginPortal"),
+                (
+                    "gradlePluginPortal()",
+                    "gradlePluginPortal",
+                    "gradlePluginPortal",
+                ),
                 ("mavenCentral()", "mavenCentral", "maven"),
                 ("google()", "google", "maven"),
                 ("mavenLocal()", "mavenLocal", "maven-local"),
@@ -847,7 +854,11 @@ fn parse_dependency_resolution_management(content: &str, result: &mut BuildScrip
                 ("mavenCentral()", "mavenCentral", "maven"),
                 ("google()", "google", "maven"),
                 ("mavenLocal()", "mavenLocal", "maven-local"),
-                ("gradlePluginPortal()", "gradlePluginPortal", "gradlePluginPortal"),
+                (
+                    "gradlePluginPortal()",
+                    "gradlePluginPortal",
+                    "gradlePluginPortal",
+                ),
             ];
 
             for (pattern, name, repo_type) in &standard_repos {
@@ -879,7 +890,11 @@ fn parse_groovy_plugins(content: &str, result: &mut BuildScriptParseResult) {
                 // Check if "apply false" appears on the SAME line as this id
                 let rest_of_line = &block[i..args_start + line_end];
                 let apply = !rest_of_line.contains("apply false");
-                result.plugins.push(ParsedPlugin { id, apply, ..Default::default() });
+                result.plugins.push(ParsedPlugin {
+                    id,
+                    apply,
+                    ..Default::default()
+                });
             }
         }
     }
@@ -893,7 +908,11 @@ fn parse_groovy_plugins(content: &str, result: &mut BuildScriptParseResult) {
             .unwrap_or(content.len() - args_start);
         let args = content[args_start..args_start + line_end].trim();
         if let Some(id) = extract_string_literal(args) {
-            result.plugins.push(ParsedPlugin { id, apply: true, ..Default::default() });
+            result.plugins.push(ParsedPlugin {
+                id,
+                apply: true,
+                ..Default::default()
+            });
         }
     }
 }
@@ -1316,7 +1335,9 @@ fn collect_call_string_literals(content: &str, method_name: &str) -> Vec<String>
         let Some(close_paren) = find_matching_delimiter(content, open_paren, b'(', b')') else {
             continue;
         };
-        values.extend(extract_string_literals(&content[open_paren + 1..close_paren]));
+        values.extend(extract_string_literals(
+            &content[open_paren + 1..close_paren],
+        ));
     }
 
     dedup_preserve_order(values)
@@ -1426,12 +1447,7 @@ fn skip_ascii_whitespace(content: &str, cursor: &mut usize) {
     }
 }
 
-fn find_matching_delimiter(
-    content: &str,
-    open_index: usize,
-    open: u8,
-    close: u8,
-) -> Option<usize> {
+fn find_matching_delimiter(content: &str, open_index: usize, open: u8, close: u8) -> Option<usize> {
     let bytes = content.as_bytes();
     if bytes.get(open_index) != Some(&open) {
         return None;
@@ -1794,9 +1810,15 @@ tasks.register<JavaCompile>("compileJava") {
         let result = parse_build_script(content, "build.gradle.kts");
         assert_eq!(result.task_configs.len(), 1);
         assert_eq!(result.task_configs[0].task_name, "compileJava");
-        assert_eq!(result.task_configs[0].task_type.as_deref(), Some("JavaCompile"));
+        assert_eq!(
+            result.task_configs[0].task_type.as_deref(),
+            Some("JavaCompile")
+        );
         assert_eq!(result.task_configs[0].depends_on, vec!["generateSources"]);
-        assert_eq!(result.task_configs[0].must_run_after, vec!["processResources"]);
+        assert_eq!(
+            result.task_configs[0].must_run_after,
+            vec!["processResources"]
+        );
         assert_eq!(result.task_configs[0].finalized_by, vec!["check"]);
         assert_eq!(
             result.task_configs[0].declared_outputs,
@@ -2306,10 +2328,7 @@ dependencyResolutionManagement {
 "#;
         let result = parse_build_script(content, "settings.gradle");
         let drm = result.dependency_resolution_management.as_ref().unwrap();
-        assert_eq!(
-            drm.repositories_mode.as_deref(),
-            Some("PREFER_SETTINGS")
-        );
+        assert_eq!(drm.repositories_mode.as_deref(), Some("PREFER_SETTINGS"));
         assert_eq!(drm.repositories.len(), 1);
     }
 
@@ -2349,7 +2368,10 @@ include(":lib")
         assert_eq!(pm.repositories.len(), 2);
 
         let drm = result.dependency_resolution_management.as_ref().unwrap();
-        assert_eq!(drm.repositories_mode.as_deref(), Some("FAIL_ON_PROJECT_REPOS"));
+        assert_eq!(
+            drm.repositories_mode.as_deref(),
+            Some("FAIL_ON_PROJECT_REPOS")
+        );
         assert_eq!(drm.repositories.len(), 1);
 
         assert_eq!(result.subprojects.len(), 2);

@@ -11,8 +11,8 @@ use crate::proto::{
     ParseBuildScriptSourceSetsResponse, ParseBuildScriptTasksRequest,
     ParseBuildScriptTasksResponse, ParseBuildScriptTypedRequest, ParseBuildScriptTypedResponse,
     ParseGroovyRequest, ParseGroovyResponse, PluginEntry, RepositoryEntry, TaskEntry,
-    TypedBuildScriptDep, TypedDependency, TypedDependencyResolutionManagement,
-    TypedPlugin, TypedPluginManagement, TypedRepository, TypedSubproject, TypedTaskConfig,
+    TypedBuildScriptDep, TypedDependency, TypedDependencyResolutionManagement, TypedPlugin,
+    TypedPluginManagement, TypedRepository, TypedSubproject, TypedTaskConfig,
     TypedVersionCatalogRef,
 };
 use crate::server::build_script_parser;
@@ -178,7 +178,12 @@ impl ParserService for ParserServiceImpl {
         let file_path = req.get_ref().file_path.clone();
 
         let result = parse_script(&content, &file_path);
-        let mut elements = Vec::with_capacity(result.plugins.len() + result.dependencies.len() + result.repositories.len() + result.subprojects.len());
+        let mut elements = Vec::with_capacity(
+            result.plugins.len()
+                + result.dependencies.len()
+                + result.repositories.len()
+                + result.subprojects.len(),
+        );
 
         // Plugins
         for plugin in &result.plugins {
@@ -484,7 +489,9 @@ impl ParserService for ParserServiceImpl {
         let buildscript_deps: Vec<TypedBuildScriptDep> = result
             .buildscript_deps
             .into_iter()
-            .map(|d| TypedBuildScriptDep { notation: d.notation })
+            .map(|d| TypedBuildScriptDep {
+                notation: d.notation,
+            })
             .collect();
 
         let task_configs: Vec<TypedTaskConfig> = result
@@ -529,20 +536,19 @@ impl ParserService for ParserServiceImpl {
                 .collect(),
         });
 
-        let dependency_resolution_management =
-            result
-                .dependency_resolution_management
-                .map(|drm| TypedDependencyResolutionManagement {
-                    repositories_mode: drm.repositories_mode.unwrap_or_default(),
-                    repositories: drm
-                        .repositories
-                        .into_iter()
-                        .map(|r| TypedRepository {
-                            name: r.name,
-                            repo_type: r.repo_type,
-                        })
-                        .collect(),
-                });
+        let dependency_resolution_management = result.dependency_resolution_management.map(|drm| {
+            TypedDependencyResolutionManagement {
+                repositories_mode: drm.repositories_mode.unwrap_or_default(),
+                repositories: drm
+                    .repositories
+                    .into_iter()
+                    .map(|r| TypedRepository {
+                        name: r.name,
+                        repo_type: r.repo_type,
+                    })
+                    .collect(),
+            }
+        });
 
         Ok(Response::new(ParseBuildScriptTypedResponse {
             script_type: script_type as i32,

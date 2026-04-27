@@ -9,7 +9,9 @@ use crate::proto::{GetBuildEnvironmentResponse, GetBuildModelResponse};
 
 use super::build_plan_ir::{
     fingerprint_normalized, from_proto, validate_schema_version, CanonicalBuildPlan,
-    CanonicalBuildPlanDependency, CanonicalBuildPlanProject, CanonicalBuildPlanToolchainRequest,
+    CanonicalBuildPlanDependency, CanonicalBuildPlanProject, CanonicalBuildPlanTask,
+    CanonicalBuildPlanTaskDiagnostic, CanonicalBuildPlanTaskInputSpec,
+    CanonicalBuildPlanTaskOutputSpec, CanonicalBuildPlanToolchainRequest,
     BUILD_PLAN_SCHEMA_VERSION,
 };
 use super::build_script_parser::parse_build_script_file;
@@ -47,6 +49,7 @@ pub struct BuildPlanShadowDiffReport {
 
 #[derive(Debug, Clone)]
 struct ParsedProjectBuildScript {
+    project_path: String,
     parsed: BuildScriptParseResult,
 }
 
@@ -233,7 +236,17 @@ fn canonical_plan_from_jvm(
         });
     }
 
-    let tasks = host_tasks.unwrap_or_default();
+    let mut tasks = host_tasks.unwrap_or_default();
+    let task_source = if !tasks.is_empty() {
+        "jvm-host-build-plan"
+    } else {
+        tasks = collect_script_declared_tasks(parsed_scripts);
+        if tasks.is_empty() {
+            "no-task-contracts"
+        } else {
+            "parsed-build-scripts"
+        }
+    };
     let task_dependency_edge_count = parsed_scripts
         .iter()
         .map(|script| {
@@ -343,6 +356,18 @@ fn canonical_plan_from_jvm(
                 .sum::<usize>()
         })
         .sum::<usize>();
+    let task_input_spec_count = tasks
+        .iter()
+        .map(|task| task.input_specs.len())
+        .sum::<usize>();
+    let task_output_spec_count = tasks
+        .iter()
+        .map(|task| task.output_specs.len())
+        .sum::<usize>();
+    let task_diagnostic_count = tasks
+        .iter()
+        .map(|task| task.diagnostics.len())
+        .sum::<usize>();
 
     let mut metadata = std::collections::BTreeMap::new();
     metadata.insert("source".to_string(), "jvm-host-shadow".to_string());
@@ -350,13 +375,8 @@ fn canonical_plan_from_jvm(
         for (key, value) in &plan.metadata {
             metadata.insert(format!("jvmHost.{key}"), value.clone());
         }
-        metadata.insert("taskSource".to_string(), "jvm-host-build-plan".to_string());
-    } else {
-        metadata.insert(
-            "taskSource".to_string(),
-            "no-jvm-host-build-plan".to_string(),
-        );
     }
+    metadata.insert("taskSource".to_string(), task_source.to_string());
     metadata.insert("projectCount".to_string(), model.projects.len().to_string());
     metadata.insert(
         "dependencyCount".to_string(),
@@ -456,6 +476,18 @@ fn canonical_plan_from_jvm(
         "declaredTaskOutputCount".to_string(),
         declared_task_output_count.to_string(),
     );
+    metadata.insert(
+        "taskInputSpecCount".to_string(),
+        task_input_spec_count.to_string(),
+    );
+    metadata.insert(
+        "taskOutputSpecCount".to_string(),
+        task_output_spec_count.to_string(),
+    );
+    metadata.insert(
+        "taskDiagnosticCount".to_string(),
+        task_diagnostic_count.to_string(),
+    );
     if let Some(env) = env {
         if !env.gradle_version.is_empty() {
             metadata.insert("gradleVersion".to_string(), env.gradle_version.clone());
@@ -547,9 +579,198 @@ fn collect_parsed_build_scripts(model: &GetBuildModelResponse) -> Vec<ParsedProj
             }
             let path = Path::new(&project.build_file);
             let parsed = parse_build_script_file(path).ok()?;
-            Some(ParsedProjectBuildScript { parsed })
+            Some(ParsedProjectBuildScript {
+                project_path: project.path.clone(),
+                parsed,
+            })
         })
         .collect()
+}
+
+fn collect_script_declared_tasks(
+    parsed_scripts: &[ParsedProjectBuildScript],
+) -> Vec<CanonicalBuildPlanTask> {
+    parsed_scripts
+        .iter()
+        .flat_map(|script| {
+            script
+                .parsed
+                .task_configs
+                .iter()
+                .map(|task| {
+                    let path = qualify_task_path(&script.project_path, &task.task_name);
+                    let implementation_id = task
+                        .task_type
+                        .as_deref()
+                        .map(implementation_id_for_task_type)
+                        .unwrap_or_else(|| "org.gradle.api.DefaultTask".to_string());
+                    let outputs = task.declared_outputs.clone();
+                    let inputs = declared_task_inputs(script, task);
+                    CanonicalBuildPlanTask {
+                        path,
+                        project_path: script.project_path.clone(),
+                        implementation_id,
+                        depends_on: task
+                            .depends_on
+                            .iter()
+                            .map(|dependency| qualify_task_path(&script.project_path, dependency))
+                            .collect(),
+                        input_specs: input_specs_from_map(&inputs),
+                        output_specs: output_specs_from_paths(&outputs),
+                        inputs,
+                        outputs,
+                        worker_isolation: worker_isolation_for_task_type(task.task_type.as_deref())
+                            .to_string(),
+                        should_run_after: task
+                            .should_run_after
+                            .iter()
+                            .map(|dependency| qualify_task_path(&script.project_path, dependency))
+                            .collect(),
+                        must_run_after: task
+                            .must_run_after
+                            .iter()
+                            .map(|dependency| qualify_task_path(&script.project_path, dependency))
+                            .collect(),
+                        finalized_by: task
+                            .finalized_by
+                            .iter()
+                            .map(|dependency| qualify_task_path(&script.project_path, dependency))
+                            .collect(),
+                        cacheability: if task.declared_outputs.is_empty() {
+                            "unknown".to_string()
+                        } else {
+                            "declared-outputs".to_string()
+                        },
+                        local_state: Vec::new(),
+                        destroyables: Vec::new(),
+                        action_kind: action_kind_for_task_type(task.task_type.as_deref())
+                            .to_string(),
+                        environment_inputs: Vec::new(),
+                        system_property_inputs: Vec::new(),
+                        diagnostics: vec![CanonicalBuildPlanTaskDiagnostic {
+                            severity: "info".to_string(),
+                            code: "declared-task-contract".to_string(),
+                            message:
+                                "Task contract was derived from build-script declarations only"
+                                    .to_string(),
+                            source: "build-script-parser".to_string(),
+                        }],
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn declared_task_inputs(
+    script: &ParsedProjectBuildScript,
+    task: &super::build_script_types::ParsedTaskConfig,
+) -> std::collections::BTreeMap<String, String> {
+    let mut inputs = std::collections::BTreeMap::new();
+    inputs.insert("source".to_string(), "build-script-parser".to_string());
+    inputs.insert("enabled".to_string(), task.enabled.to_string());
+    if let Some(task_type) = task.task_type.as_deref() {
+        inputs.insert("taskType".to_string(), task_type.to_string());
+    }
+    if let Some(line) = task.line {
+        inputs.insert("declarationLine".to_string(), line.to_string());
+    }
+    if let Some(group) = script.parsed.group.as_deref() {
+        inputs.insert("projectGroup".to_string(), group.to_string());
+    }
+    if let Some(version) = script.parsed.version.as_deref() {
+        inputs.insert("projectVersion".to_string(), version.to_string());
+    }
+    if let Some(source) = script.parsed.source_compatibility.as_deref() {
+        inputs.insert(
+            "sourceCompatibility".to_string(),
+            normalize_java_version(source),
+        );
+    }
+    if let Some(target) = script.parsed.target_compatibility.as_deref() {
+        inputs.insert(
+            "targetCompatibility".to_string(),
+            normalize_java_version(target),
+        );
+    }
+    inputs
+}
+
+fn input_specs_from_map(
+    inputs: &std::collections::BTreeMap<String, String>,
+) -> Vec<CanonicalBuildPlanTaskInputSpec> {
+    inputs
+        .iter()
+        .map(|(name, value)| CanonicalBuildPlanTaskInputSpec {
+            name: name.clone(),
+            kind: "value".to_string(),
+            value: value.clone(),
+            normalization: "scalar".to_string(),
+            optional: false,
+        })
+        .collect()
+}
+
+fn output_specs_from_paths(paths: &[String]) -> Vec<CanonicalBuildPlanTaskOutputSpec> {
+    paths
+        .iter()
+        .enumerate()
+        .map(|(index, path)| CanonicalBuildPlanTaskOutputSpec {
+            name: format!("output{index}"),
+            kind: "path".to_string(),
+            path: path.clone(),
+        })
+        .collect()
+}
+
+fn qualify_task_path(project_path: &str, task_ref: &str) -> String {
+    let trimmed = task_ref.trim();
+    if trimmed.starts_with(':') {
+        return trimmed.to_string();
+    }
+    if project_path == ":" || project_path.is_empty() {
+        format!(":{trimmed}")
+    } else {
+        format!("{project_path}:{trimmed}")
+    }
+}
+
+fn implementation_id_for_task_type(task_type: &str) -> String {
+    match task_type {
+        "JavaCompile" => "org.gradle.api.tasks.compile.JavaCompile",
+        "Test" => "org.gradle.api.tasks.testing.Test",
+        "Copy" => "org.gradle.api.tasks.Copy",
+        "Sync" => "org.gradle.api.tasks.Sync",
+        "Delete" => "org.gradle.api.tasks.Delete",
+        "Jar" => "org.gradle.jvm.tasks.Jar",
+        "Zip" => "org.gradle.api.tasks.bundling.Zip",
+        "Tar" => "org.gradle.api.tasks.bundling.Tar",
+        other if other.contains('.') => other,
+        other => other,
+    }
+    .to_string()
+}
+
+fn worker_isolation_for_task_type(task_type: Option<&str>) -> &'static str {
+    match task_type.unwrap_or_default() {
+        "JavaCompile" | "GroovyCompile" | "ScalaCompile" | "KotlinCompile" | "Test" | "Exec"
+        | "JavaExec" | "Javadoc" | "Groovydoc" | "Scaladoc" => "process",
+        "Copy" | "Sync" | "Delete" | "Jar" | "War" | "Ear" | "Zip" | "Tar" => "in-process",
+        _ => "compat-jvm",
+    }
+}
+
+fn action_kind_for_task_type(task_type: Option<&str>) -> &'static str {
+    match task_type.unwrap_or_default() {
+        "JavaCompile" | "GroovyCompile" | "ScalaCompile" | "KotlinCompile" => "compile",
+        "Test" => "test",
+        "Copy" | "Sync" => "file-transform",
+        "Delete" => "delete",
+        "Jar" | "War" | "Ear" | "Zip" | "Tar" => "archive",
+        "Exec" | "JavaExec" => "external-process",
+        "" => "default-task",
+        _ => "jvm-task",
+    }
 }
 
 fn collect_shadow_toolchains(
@@ -1038,11 +1259,11 @@ mod tests {
         );
         assert_eq!(
             plan.metadata.get("taskSource").map(String::as_str),
-            Some("no-jvm-host-build-plan")
+            Some("parsed-build-scripts")
         );
         assert_eq!(
             plan.metadata.get("taskCount").map(String::as_str),
-            Some("0")
+            Some("3")
         );
         assert_eq!(
             plan.metadata
@@ -1090,7 +1311,27 @@ mod tests {
         );
         assert_eq!(plan.toolchains.len(), 1);
         assert_eq!(plan.toolchains[0].version, "17");
-        assert!(plan.tasks.is_empty());
+        let compile_java = plan
+            .tasks
+            .iter()
+            .find(|task| task.path == ":app:compileJava")
+            .expect("expected script-declared compileJava task");
+        assert_eq!(
+            compile_java.implementation_id,
+            "org.gradle.api.tasks.compile.JavaCompile"
+        );
+        assert_eq!(compile_java.action_kind, "compile");
+        assert_eq!(compile_java.worker_isolation, "process");
+        assert_eq!(compile_java.depends_on, vec![":app:generateSources"]);
+        assert_eq!(compile_java.must_run_after, vec![":app:processResources"]);
+        assert_eq!(compile_java.finalized_by, vec![":app:check"]);
+        assert_eq!(compile_java.outputs, vec!["classes/java/main"]);
+        assert!(compile_java
+            .input_specs
+            .iter()
+            .any(|input| input.name == "taskType" && input.value == "JavaCompile"));
+        assert_eq!(compile_java.output_specs.len(), 1);
+        assert_eq!(compile_java.diagnostics.len(), 1);
     }
 
     #[test]

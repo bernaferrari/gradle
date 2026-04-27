@@ -43,6 +43,12 @@ fn mock_build_plan_tasks() -> Vec<BuildPlanTask> {
             cacheability: "unknown".to_string(),
             local_state: Vec::new(),
             destroyables: Vec::new(),
+            action_kind: "jvm-task".to_string(),
+            input_specs: Vec::new(),
+            output_specs: Vec::new(),
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
         },
         BuildPlanTask {
             path: ":app:classes".to_string(),
@@ -58,6 +64,12 @@ fn mock_build_plan_tasks() -> Vec<BuildPlanTask> {
             cacheability: "unknown".to_string(),
             local_state: Vec::new(),
             destroyables: Vec::new(),
+            action_kind: "jvm-task".to_string(),
+            input_specs: Vec::new(),
+            output_specs: Vec::new(),
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
         },
     ]
 }

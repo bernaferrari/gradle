@@ -46,13 +46,21 @@ impl HashAlgorithm {
                 // Fallback for mixed-case: byte-by-byte comparison
                 if Self::eq_ignore_case(other, b"MD5") {
                     Some(HashAlgorithm::Md5)
-                } else if Self::eq_ignore_case(other, b"SHA-1") || Self::eq_ignore_case(other, b"SHA1") {
+                } else if Self::eq_ignore_case(other, b"SHA-1")
+                    || Self::eq_ignore_case(other, b"SHA1")
+                {
                     Some(HashAlgorithm::Sha1)
-                } else if Self::eq_ignore_case(other, b"SHA-256") || Self::eq_ignore_case(other, b"SHA256") {
+                } else if Self::eq_ignore_case(other, b"SHA-256")
+                    || Self::eq_ignore_case(other, b"SHA256")
+                {
                     Some(HashAlgorithm::Sha256)
-                } else if Self::eq_ignore_case(other, b"SHA3-256") || Self::eq_ignore_case(other, b"SHA3_256") {
+                } else if Self::eq_ignore_case(other, b"SHA3-256")
+                    || Self::eq_ignore_case(other, b"SHA3_256")
+                {
                     Some(HashAlgorithm::Sha3_256)
-                } else if Self::eq_ignore_case(other, b"SHA3-512") || Self::eq_ignore_case(other, b"SHA3_512") {
+                } else if Self::eq_ignore_case(other, b"SHA3-512")
+                    || Self::eq_ignore_case(other, b"SHA3_512")
+                {
                     Some(HashAlgorithm::Sha3_512)
                 } else if Self::eq_ignore_case(other, b"BLAKE3") {
                     Some(HashAlgorithm::Blake3)

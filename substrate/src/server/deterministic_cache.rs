@@ -564,8 +564,11 @@ mod tests {
         // The exact form (with or without double-slash) is platform-dependent
         // due to backslash conversion and drive letter handling.
         let result = normalize_path("/usr/local/bin");
-        assert!(result.ends_with("usr/local/bin"), "Should preserve path segments");
-        
+        assert!(
+            result.ends_with("usr/local/bin"),
+            "Should preserve path segments"
+        );
+
         let result = normalize_path("/usr/./local/../local/bin");
         assert!(result.ends_with("usr/local/bin"), "Should resolve . and ..");
     }
@@ -577,13 +580,22 @@ mod tests {
         #[cfg(unix)]
         {
             let result = normalize_path("/Users/test");
-            assert!(result.ends_with("Users/test"), "Should preserve Unix path segments");
+            assert!(
+                result.ends_with("Users/test"),
+                "Should preserve Unix path segments"
+            );
         }
         #[cfg(windows)]
         {
             let result = normalize_path("C:\\Users\\test");
-            assert!(result.starts_with("c:/"), "Drive letter should be lowercased");
-            assert!(result.ends_with("Users/test"), "Should preserve path segments");
+            assert!(
+                result.starts_with("c:/"),
+                "Drive letter should be lowercased"
+            );
+            assert!(
+                result.ends_with("Users/test"),
+                "Should preserve path segments"
+            );
         }
     }
 

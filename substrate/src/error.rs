@@ -37,10 +37,7 @@ pub enum SubstrateError {
     Hash(String),
 
     #[error("Fingerprint error for {path}: {reason}")]
-    Fingerprint {
-        path: PathBuf,
-        reason: String,
-    },
+    Fingerprint { path: PathBuf, reason: String },
 
     // --- Cache errors ---
     #[error("Cache error: {0}")]
@@ -50,26 +47,17 @@ pub enum SubstrateError {
     CacheMiss { key: String },
 
     #[error("Cache corruption at {path}: {reason}")]
-    CacheCorruption {
-        path: PathBuf,
-        reason: String,
-    },
+    CacheCorruption { path: PathBuf, reason: String },
 
     // --- Process/worker errors ---
     #[error("Process error: {0}")]
     Process(String),
 
     #[error("Worker {worker_id} crashed: {reason}")]
-    WorkerCrash {
-        worker_id: String,
-        reason: String,
-    },
+    WorkerCrash { worker_id: String, reason: String },
 
     #[error("Worker {worker_id} timed out after {timeout_ms}ms")]
-    WorkerTimeout {
-        worker_id: String,
-        timeout_ms: i64,
-    },
+    WorkerTimeout { worker_id: String, timeout_ms: i64 },
 
     #[error("Worker pool exhausted: {reason}")]
     PoolExhausted { reason: String },
@@ -98,33 +86,21 @@ pub enum SubstrateError {
     DependencyNotFound { notation: String },
 
     #[error("Version conflict for {coordinate}: {reason}")]
-    VersionConflict {
-        coordinate: String,
-        reason: String,
-    },
+    VersionConflict { coordinate: String, reason: String },
 
     // --- Toolchain errors ---
     #[error("Toolchain not found: {language} {version}")]
-    ToolchainNotFound {
-        language: String,
-        version: String,
-    },
+    ToolchainNotFound { language: String, version: String },
 
     #[error("Invalid toolchain configuration: {reason}")]
     ToolchainConfig { reason: String },
 
     // --- Execution errors ---
     #[error("Task execution failed for {task_path}: {reason}")]
-    TaskExecution {
-        task_path: String,
-        reason: String,
-    },
+    TaskExecution { task_path: String, reason: String },
 
     #[error("Execution timeout: {operation} exceeded {timeout_ms}ms")]
-    ExecutionTimeout {
-        operation: String,
-        timeout_ms: i64,
-    },
+    ExecutionTimeout { operation: String, timeout_ms: i64 },
 
     #[error("Out of memory: {reason}")]
     OutOfMemory { reason: String },
@@ -137,17 +113,11 @@ pub enum SubstrateError {
     ConfigCacheInvalid { reason: String },
 
     #[error("Invalid setting: {key} = {value}")]
-    InvalidSetting {
-        key: String,
-        value: String,
-    },
+    InvalidSetting { key: String, value: String },
 
     // --- Plugin errors ---
     #[error("Plugin error: {plugin_id}: {reason}")]
-    Plugin {
-        plugin_id: String,
-        reason: String,
-    },
+    Plugin { plugin_id: String, reason: String },
 
     #[error("Plugin not found: {plugin_id}")]
     PluginNotFound { plugin_id: String },
@@ -184,10 +154,7 @@ pub enum SubstrateError {
     BuildNotFound { build_id: String },
 
     #[error("Build {build_id} already in state {state}")]
-    BuildStateConflict {
-        build_id: String,
-        state: String,
-    },
+    BuildStateConflict { build_id: String, state: String },
 
     // --- Scope errors ---
     #[error("Scope error: {0}")]
@@ -203,7 +170,11 @@ pub enum SubstrateError {
 
 impl SubstrateError {
     /// Create a parse error with file and line context.
-    pub fn parse_with_context(message: impl Into<String>, file: impl Into<PathBuf>, line: u32) -> Self {
+    pub fn parse_with_context(
+        message: impl Into<String>,
+        file: impl Into<PathBuf>,
+        line: u32,
+    ) -> Self {
         SubstrateError::Parse {
             message: message.into(),
             file: Some(file.into()),
@@ -248,8 +219,9 @@ impl SubstrateError {
             SubstrateError::DependencyResolution { .. }
             | SubstrateError::DependencyNotFound { .. }
             | SubstrateError::VersionConflict { .. } => "dependency",
-            SubstrateError::ToolchainNotFound { .. }
-            | SubstrateError::ToolchainConfig { .. } => "toolchain",
+            SubstrateError::ToolchainNotFound { .. } | SubstrateError::ToolchainConfig { .. } => {
+                "toolchain"
+            }
             SubstrateError::TaskExecution { .. }
             | SubstrateError::ExecutionTimeout { .. }
             | SubstrateError::OutOfMemory { .. } => "execution",
@@ -292,8 +264,9 @@ impl From<SubstrateError> for tonic::Status {
             SubstrateError::ExecutionTimeout { .. }
             | SubstrateError::WorkerTimeout { .. }
             | SubstrateError::LeaseExpired { .. } => tonic::Code::DeadlineExceeded,
-            SubstrateError::ConfigCacheInvalid { .. }
-            | SubstrateError::CacheCorruption { .. } => tonic::Code::DataLoss,
+            SubstrateError::ConfigCacheInvalid { .. } | SubstrateError::CacheCorruption { .. } => {
+                tonic::Code::DataLoss
+            }
             SubstrateError::OutOfMemory { .. } => tonic::Code::ResourceExhausted,
             _ => tonic::Code::Internal,
         };
@@ -314,38 +287,80 @@ mod tests {
 
     #[test]
     fn test_error_categories() {
-        assert_eq!(SubstrateError::Io(std::io::Error::new(
-            std::io::ErrorKind::NotFound, "not found"
-        )).category(), "infrastructure");
+        assert_eq!(
+            SubstrateError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "not found"
+            ))
+            .category(),
+            "infrastructure"
+        );
 
-        assert_eq!(SubstrateError::Hash("bad hash".to_string()).category(), "hashing");
-        assert_eq!(SubstrateError::Cache("full".to_string()).category(), "cache");
-        assert_eq!(SubstrateError::Process("crash".to_string()).category(), "worker");
-        assert_eq!(SubstrateError::CompilationFailed {
-            message: "error".to_string()
-        }.category(), "compilation");
-        assert_eq!(SubstrateError::DependencyResolution {
-            configuration: "compileClasspath".to_string(),
-            reason: "not found".to_string()
-        }.category(), "dependency");
-        assert_eq!(SubstrateError::ToolchainNotFound {
-            language: "java".to_string(),
-            version: "17".to_string()
-        }.category(), "toolchain");
-        assert_eq!(SubstrateError::TaskExecution {
-            task_path: ":compileJava".to_string(),
-            reason: "fail".to_string()
-        }.category(), "execution");
-        assert_eq!(SubstrateError::Plugin {
-            plugin_id: "java".to_string(),
-            reason: "missing".to_string()
-        }.category(), "plugin");
-        assert_eq!(SubstrateError::BuildNotFound {
-            build_id: "x".to_string()
-        }.category(), "lifecycle");
-        assert_eq!(SubstrateError::TestExecution {
-            reason: "fail".to_string()
-        }.category(), "testing");
+        assert_eq!(
+            SubstrateError::Hash("bad hash".to_string()).category(),
+            "hashing"
+        );
+        assert_eq!(
+            SubstrateError::Cache("full".to_string()).category(),
+            "cache"
+        );
+        assert_eq!(
+            SubstrateError::Process("crash".to_string()).category(),
+            "worker"
+        );
+        assert_eq!(
+            SubstrateError::CompilationFailed {
+                message: "error".to_string()
+            }
+            .category(),
+            "compilation"
+        );
+        assert_eq!(
+            SubstrateError::DependencyResolution {
+                configuration: "compileClasspath".to_string(),
+                reason: "not found".to_string()
+            }
+            .category(),
+            "dependency"
+        );
+        assert_eq!(
+            SubstrateError::ToolchainNotFound {
+                language: "java".to_string(),
+                version: "17".to_string()
+            }
+            .category(),
+            "toolchain"
+        );
+        assert_eq!(
+            SubstrateError::TaskExecution {
+                task_path: ":compileJava".to_string(),
+                reason: "fail".to_string()
+            }
+            .category(),
+            "execution"
+        );
+        assert_eq!(
+            SubstrateError::Plugin {
+                plugin_id: "java".to_string(),
+                reason: "missing".to_string()
+            }
+            .category(),
+            "plugin"
+        );
+        assert_eq!(
+            SubstrateError::BuildNotFound {
+                build_id: "x".to_string()
+            }
+            .category(),
+            "lifecycle"
+        );
+        assert_eq!(
+            SubstrateError::TestExecution {
+                reason: "fail".to_string()
+            }
+            .category(),
+            "testing"
+        );
     }
 
     #[test]

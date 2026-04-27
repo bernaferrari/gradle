@@ -23,9 +23,7 @@ const DEPENDENCY_CONFIGS: &[&str] = &[
 
 /// Strip surrounding quotes from a string value.
 fn strip_quotes(s: &str) -> String {
-    if (s.starts_with('"') && s.ends_with('"'))
-        || (s.starts_with('\'') && s.ends_with('\''))
-    {
+    if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
         s[1..s.len() - 1].to_string()
     } else {
         s.to_string()
@@ -104,37 +102,37 @@ impl AstExtractor {
         if no_receiver {
             if let Some(closure) = closure {
                 match mc.name.as_str() {
-                "plugins" => {
-                    self.handle_plugins_block(closure);
-                    return;
+                    "plugins" => {
+                        self.handle_plugins_block(closure);
+                        return;
+                    }
+                    "dependencies" => {
+                        self.handle_dependencies_block(closure);
+                        return;
+                    }
+                    "repositories" => {
+                        self.handle_repositories_block(closure);
+                        return;
+                    }
+                    "buildscript" => {
+                        self.handle_buildscript_block(closure);
+                        return;
+                    }
+                    "pluginManagement" => {
+                        self.handle_plugin_management_block(closure);
+                        return;
+                    }
+                    "dependencyResolutionManagement" => {
+                        self.handle_dep_resolution_mgmt_block(closure);
+                        return;
+                    }
+                    "java" => {
+                        self.handle_java_block(closure);
+                        return;
+                    }
+                    _ => {}
                 }
-                "dependencies" => {
-                    self.handle_dependencies_block(closure);
-                    return;
-                }
-                "repositories" => {
-                    self.handle_repositories_block(closure);
-                    return;
-                }
-                "buildscript" => {
-                    self.handle_buildscript_block(closure);
-                    return;
-                }
-                "pluginManagement" => {
-                    self.handle_plugin_management_block(closure);
-                    return;
-                }
-                "dependencyResolutionManagement" => {
-                    self.handle_dep_resolution_mgmt_block(closure);
-                    return;
-                }
-                "java" => {
-                    self.handle_java_block(closure);
-                    return;
-                }
-                _ => {}
-            }
-        } // closure
+            } // closure
         } // no_receiver
 
         // tasks.register("foo") { ... }
@@ -223,11 +221,7 @@ impl AstExtractor {
 
     /// Scan MethodCall args for nested `id(...)` calls consumed by the
     /// parser's no-paren argument greediness.
-    fn scan_nested_id_plugins(
-        &mut self,
-        mc: &MethodCall,
-        current: &mut Option<ParsedPlugin>,
-    ) {
+    fn scan_nested_id_plugins(&mut self, mc: &MethodCall, current: &mut Option<ParsedPlugin>) {
         for arg in mc.arguments.iter().skip(1) {
             if let Arg::Positional { expr } = arg {
                 if let Expr::MethodCall(inner_mc) = expr.as_ref() {
@@ -254,17 +248,14 @@ impl AstExtractor {
                     if mc.receiver.is_none() && DEPENDENCY_CONFIGS.contains(&mc.name.as_str()) {
                         // Check for version catalog ref first
                         if let Some(Arg::Positional { expr }) = mc.arguments.first() {
-                            if let Some(catalog_ref) =
-                                self.try_extract_catalog_ref(&mc.name, expr)
+                            if let Some(catalog_ref) = self.try_extract_catalog_ref(&mc.name, expr)
                             {
                                 self.result.catalog_refs.push(catalog_ref);
                                 continue;
                             }
                         }
                         // Regular dependency
-                        if let Some(dep) =
-                            self.try_extract_dependency(&mc.name, mc)
-                        {
+                        if let Some(dep) = self.try_extract_dependency(&mc.name, mc) {
                             self.result.dependencies.push(dep);
                         }
 
@@ -326,7 +317,10 @@ impl AstExtractor {
                 if matches!(&args[i], Arg::Positional { expr } if matches!(expr.as_ref(), Expr::Identifier(_)))
                     && i + 1 < args.len()
                 {
-                    if let Arg::Positional { expr: notation_expr } = &args[i + 1] {
+                    if let Arg::Positional {
+                        expr: notation_expr,
+                    } = &args[i + 1]
+                    {
                         if let Some(notation) = self.expr_to_string(notation_expr) {
                             self.result.dependencies.push(ParsedDependency {
                                 configuration: config,
@@ -368,9 +362,9 @@ impl AstExtractor {
                                                 .first()
                                                 .and_then(|a| self.arg_to_string(a))
                                             {
-                                                self.result.buildscript_deps.push(
-                                                    ParsedBuildScriptDep { notation },
-                                                );
+                                                self.result
+                                                    .buildscript_deps
+                                                    .push(ParsedBuildScriptDep { notation });
                                             }
                                         }
                                     }
@@ -425,10 +419,8 @@ impl AstExtractor {
                             _ => false,
                         };
                         if is_repos_mode {
-                            if let Some(mode) = mc
-                                .arguments
-                                .first()
-                                .and_then(|a| self.arg_to_string(a))
+                            if let Some(mode) =
+                                mc.arguments.first().and_then(|a| self.arg_to_string(a))
                             {
                                 mgmt.repositories_mode = Some(mode);
                             }
@@ -549,35 +541,37 @@ impl AstExtractor {
             while i < mc.arguments.len() {
                 if let Arg::Positional { expr } = &mc.arguments[i] {
                     match expr.as_ref() {
-                        Expr::Identifier(id) => {
-                            match id.name.as_str() {
-                                "version" => {
-                                    if i + 1 < mc.arguments.len() {
-                                        if let Some(ver) = self.arg_to_string(&mc.arguments[i + 1]) {
-                                            plugin.version = Some(ver);
-                                        }
-                                        i += 2;
-                                        continue;
+                        Expr::Identifier(id) => match id.name.as_str() {
+                            "version" => {
+                                if i + 1 < mc.arguments.len() {
+                                    if let Some(ver) = self.arg_to_string(&mc.arguments[i + 1]) {
+                                        plugin.version = Some(ver);
                                     }
+                                    i += 2;
+                                    continue;
                                 }
-                                "apply" => {
-                                    if i + 1 < mc.arguments.len() {
-                                        if let Arg::Positional { expr } = &mc.arguments[i + 1] {
-                                            if let Expr::Boolean(b) = expr.as_ref() {
-                                                plugin.apply = b.value;
-                                            }
-                                        }
-                                        i += 2;
-                                        continue;
-                                    }
-                                }
-                                _ => {}
                             }
-                        }
+                            "apply" => {
+                                if i + 1 < mc.arguments.len() {
+                                    if let Arg::Positional { expr } = &mc.arguments[i + 1] {
+                                        if let Expr::Boolean(b) = expr.as_ref() {
+                                            plugin.apply = b.value;
+                                        }
+                                    }
+                                    i += 2;
+                                    continue;
+                                }
+                            }
+                            _ => {}
+                        },
                         Expr::MethodCall(inner_mc) => {
                             match inner_mc.name.as_str() {
                                 "version" => {
-                                    if let Some(ver) = inner_mc.arguments.first().and_then(|a| self.arg_to_string(a)) {
+                                    if let Some(ver) = inner_mc
+                                        .arguments
+                                        .first()
+                                        .and_then(|a| self.arg_to_string(a))
+                                    {
                                         plugin.version = Some(ver);
                                     }
                                     // Check for apply(false) inside version call
@@ -585,10 +579,16 @@ impl AstExtractor {
                                         if let Arg::Positional { expr } = inner_arg {
                                             if let Expr::MethodCall(mc3) = expr.as_ref() {
                                                 if mc3.name == "apply" {
-                                                    if let Some(Expr::Boolean(b)) = mc3.arguments.first().and_then(|a| match a {
-                                                        Arg::Positional { expr } => Some(expr.as_ref()),
-                                                        _ => None,
-                                                    }) {
+                                                    if let Some(Expr::Boolean(b)) = mc3
+                                                        .arguments
+                                                        .first()
+                                                        .and_then(|a| match a {
+                                                            Arg::Positional { expr } => {
+                                                                Some(expr.as_ref())
+                                                            }
+                                                            _ => None,
+                                                        })
+                                                    {
                                                         plugin.apply = b.value;
                                                     }
                                                 }
@@ -597,10 +597,12 @@ impl AstExtractor {
                                     }
                                 }
                                 "apply" => {
-                                    if let Some(Expr::Boolean(b)) = inner_mc.arguments.first().and_then(|a| match a {
-                                        Arg::Positional { expr } => Some(expr.as_ref()),
-                                        _ => None,
-                                    }) {
+                                    if let Some(Expr::Boolean(b)) =
+                                        inner_mc.arguments.first().and_then(|a| match a {
+                                            Arg::Positional { expr } => Some(expr.as_ref()),
+                                            _ => None,
+                                        })
+                                    {
                                         plugin.apply = b.value;
                                     }
                                 }
@@ -651,10 +653,12 @@ impl AstExtractor {
                             });
                         } else if let Some(ref mut plugin) = nested_plugin {
                             // apply after nested id() applies to the nested plugin
-                            if let Some(Expr::Boolean(b)) = inner_mc.arguments.first().and_then(|a| match a {
-                                Arg::Positional { expr } => Some(expr.as_ref()),
-                                _ => None,
-                            }) {
+                            if let Some(Expr::Boolean(b)) =
+                                inner_mc.arguments.first().and_then(|a| match a {
+                                    Arg::Positional { expr } => Some(expr.as_ref()),
+                                    _ => None,
+                                })
+                            {
                                 plugin.apply = b.value;
                             }
                         }
@@ -663,7 +667,11 @@ impl AstExtractor {
                         if found_nested_id {
                             // version after nested id() applies to the nested plugin
                             if let Some(ref mut plugin) = nested_plugin {
-                                if let Some(ver) = inner_mc.arguments.first().and_then(|a| self.arg_to_string(a)) {
+                                if let Some(ver) = inner_mc
+                                    .arguments
+                                    .first()
+                                    .and_then(|a| self.arg_to_string(a))
+                                {
                                     plugin.version = Some(ver);
                                 }
                                 // Check for nested apply(false) inside this version call
@@ -671,10 +679,14 @@ impl AstExtractor {
                                     if let Arg::Positional { expr } = inner_arg {
                                         if let Expr::MethodCall(mc3) = expr.as_ref() {
                                             if mc3.name == "apply" {
-                                                if let Some(Expr::Boolean(b)) = mc3.arguments.first().and_then(|a| match a {
-                                                    Arg::Positional { expr } => Some(expr.as_ref()),
-                                                    _ => None,
-                                                }) {
+                                                if let Some(Expr::Boolean(b)) =
+                                                    mc3.arguments.first().and_then(|a| match a {
+                                                        Arg::Positional { expr } => {
+                                                            Some(expr.as_ref())
+                                                        }
+                                                        _ => None,
+                                                    })
+                                                {
                                                     plugin.apply = b.value;
                                                 }
                                             }
@@ -692,7 +704,11 @@ impl AstExtractor {
                             version: None,
                             line: Some(inner_mc.span.line),
                         };
-                        if let Some(id) = inner_mc.arguments.first().and_then(|a| self.arg_to_string(a)) {
+                        if let Some(id) = inner_mc
+                            .arguments
+                            .first()
+                            .and_then(|a| self.arg_to_string(a))
+                        {
                             plugin.id = id;
                         }
                         nested_plugin = Some(plugin);
@@ -705,11 +721,7 @@ impl AstExtractor {
         Some((key, value, extra_apply, nested_plugin))
     }
 
-    fn try_extract_dependency(
-        &self,
-        config: &str,
-        mc: &MethodCall,
-    ) -> Option<ParsedDependency> {
+    fn try_extract_dependency(&self, config: &str, mc: &MethodCall) -> Option<ParsedDependency> {
         let notation = mc.arguments.first().and_then(|a| match a {
             Arg::Positional { expr } => {
                 // MethodCall args (e.g. project(":core")) need quotes preserved
@@ -831,10 +843,8 @@ impl AstExtractor {
                             // Also handle no-paren: url "https://..."
                             if let Expr::MethodCall(url_mc) = &*expr_stmt.expr {
                                 if url_mc.name == "url" && url_mc.receiver.is_none() {
-                                    if let Some(url) = url_mc
-                                        .arguments
-                                        .first()
-                                        .and_then(|a| self.arg_to_string(a))
+                                    if let Some(url) =
+                                        url_mc.arguments.first().and_then(|a| self.arg_to_string(a))
                                     {
                                         return Some(ParsedRepository {
                                             name: url,
@@ -1069,9 +1079,8 @@ mod tests {
 
     #[test]
     fn test_kotlin_plugin_with_version() {
-        let result = extract_kotlin(
-            r#"plugins { id("org.springframework.boot") version "3.2.0" }"#,
-        );
+        let result =
+            extract_kotlin(r#"plugins { id("org.springframework.boot") version "3.2.0" }"#);
         assert_eq!(result.plugins.len(), 1);
         assert_eq!(result.plugins[0].id, "org.springframework.boot");
         assert_eq!(result.plugins[0].version.as_deref(), Some("3.2.0"));
@@ -1084,10 +1093,7 @@ mod tests {
         );
         assert_eq!(result.plugins.len(), 1);
         assert!(!result.plugins[0].apply);
-        assert_eq!(
-            result.plugins[0].version.as_deref(),
-            Some("1.1.4")
-        );
+        assert_eq!(result.plugins[0].version.as_deref(), Some("1.1.4"));
     }
 
     #[test]
@@ -1115,9 +1121,8 @@ mod tests {
 
     #[test]
     fn test_groovy_plugin_with_version_and_apply() {
-        let result = extract(
-            r#"plugins { id "org.springframework.boot" version "3.2.0" apply false }"#,
-        );
+        let result =
+            extract(r#"plugins { id "org.springframework.boot" version "3.2.0" apply false }"#);
         assert_eq!(result.plugins.len(), 1);
         assert_eq!(result.plugins[0].id, "org.springframework.boot");
         assert_eq!(result.plugins[0].version.as_deref(), Some("3.2.0"));
@@ -1146,9 +1151,8 @@ mod tests {
 
     #[test]
     fn test_repositories() {
-        let result = extract_kotlin(
-            r#"repositories { mavenCentral(); google(); gradlePluginPortal() }"#,
-        );
+        let result =
+            extract_kotlin(r#"repositories { mavenCentral(); google(); gradlePluginPortal() }"#);
         assert_eq!(result.repositories.len(), 3);
         assert_eq!(result.repositories[0].repo_type, "maven");
         assert_eq!(result.repositories[1].repo_type, "maven");
@@ -1157,9 +1161,7 @@ mod tests {
 
     #[test]
     fn test_tasks_register() {
-        let result = extract_kotlin(
-            r#"tasks.register("integrationTest") { dependsOn("test") }"#,
-        );
+        let result = extract_kotlin(r#"tasks.register("integrationTest") { dependsOn("test") }"#);
         assert_eq!(result.task_configs.len(), 1);
         assert_eq!(result.task_configs[0].task_name, "integrationTest");
         assert_eq!(result.task_configs[0].depends_on, vec!["test"]);
@@ -1181,9 +1183,8 @@ mod tests {
 
     #[test]
     fn test_java_block() {
-        let result = extract_kotlin(
-            r#"java { sourceCompatibility = "17"; targetCompatibility = "17" }"#,
-        );
+        let result =
+            extract_kotlin(r#"java { sourceCompatibility = "17"; targetCompatibility = "17" }"#);
         assert_eq!(result.source_compatibility.as_deref(), Some("17"));
         assert_eq!(result.target_compatibility.as_deref(), Some("17"));
     }
@@ -1202,14 +1203,15 @@ mod tests {
             r#"buildscript { dependencies { classpath("com.example:plugin:1.0") } }"#,
         );
         assert_eq!(result.buildscript_deps.len(), 1);
-        assert_eq!(result.buildscript_deps[0].notation, "com.example:plugin:1.0");
+        assert_eq!(
+            result.buildscript_deps[0].notation,
+            "com.example:plugin:1.0"
+        );
     }
 
     #[test]
     fn test_version_catalog_ref() {
-        let result = extract_kotlin(
-            r#"dependencies { implementation(libs.commons.lang3) }"#,
-        );
+        let result = extract_kotlin(r#"dependencies { implementation(libs.commons.lang3) }"#);
         assert_eq!(result.catalog_refs.len(), 1);
         assert_eq!(result.catalog_refs[0].alias, "libs.commons.lang3");
         assert_eq!(result.catalog_refs[0].configuration, "implementation");
@@ -1220,7 +1222,11 @@ mod tests {
         let parsed = parse(
             r#"plugins { id("java") }; dependencies { implementation("com.example:lib:1.0") }; repositories { mavenCentral() }; group = "com.example"; version = "1.0""#,
         );
-        assert!(parsed.errors.is_empty(), "parse errors: {:?}", parsed.errors);
+        assert!(
+            parsed.errors.is_empty(),
+            "parse errors: {:?}",
+            parsed.errors
+        );
         let result = extract_from_ast(&parsed.script, ScriptType::KotlinDsl);
         assert_eq!(result.plugins.len(), 1);
         assert_eq!(result.dependencies.len(), 1);

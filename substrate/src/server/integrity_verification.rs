@@ -33,8 +33,16 @@ pub enum IntegrityError {
 impl std::fmt::Display for IntegrityError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            IntegrityError::ChecksumMismatch { url, algorithm, expected, actual } => {
-                write!(f, "Checksum mismatch for {url} ({algorithm}): expected {expected}, got {actual}")
+            IntegrityError::ChecksumMismatch {
+                url,
+                algorithm,
+                expected,
+                actual,
+            } => {
+                write!(
+                    f,
+                    "Checksum mismatch for {url} ({algorithm}): expected {expected}, got {actual}"
+                )
             }
             IntegrityError::MissingChecksum { url } => {
                 write!(f, "No checksum available for {url}")
@@ -157,9 +165,8 @@ impl IntegrityMetadata {
         }
 
         for (algorithm, expected) in &self.checksums {
-            let algo = ChecksumAlgorithm::from_str(algorithm).ok_or_else(|| {
-                IntegrityError::UnsupportedAlgorithm(algorithm.clone())
-            })?;
+            let algo = ChecksumAlgorithm::from_str(algorithm)
+                .ok_or_else(|| IntegrityError::UnsupportedAlgorithm(algorithm.clone()))?;
             let actual = algo.compute(data);
             if actual.to_lowercase() != expected.to_lowercase() {
                 return Err(IntegrityError::ChecksumMismatch {
@@ -175,15 +182,15 @@ impl IntegrityMetadata {
     }
 
     pub fn verify_single(&self, data: &[u8], algorithm: &str) -> Result<(), IntegrityError> {
-        let expected = self.checksums.get(algorithm).ok_or_else(|| {
-            IntegrityError::MissingChecksum {
-                url: self.url.clone(),
-            }
-        })?;
+        let expected =
+            self.checksums
+                .get(algorithm)
+                .ok_or_else(|| IntegrityError::MissingChecksum {
+                    url: self.url.clone(),
+                })?;
 
-        let algo = ChecksumAlgorithm::from_str(algorithm).ok_or_else(|| {
-            IntegrityError::UnsupportedAlgorithm(algorithm.to_string())
-        })?;
+        let algo = ChecksumAlgorithm::from_str(algorithm)
+            .ok_or_else(|| IntegrityError::UnsupportedAlgorithm(algorithm.to_string()))?;
         let actual = algo.compute(data);
         if actual.to_lowercase() != expected.to_lowercase() {
             return Err(IntegrityError::ChecksumMismatch {
@@ -221,7 +228,7 @@ pub struct TufTarget {
 pub struct TufSignature {
     pub key_id: String,
     pub signature: String, // hex
-    pub method: String, // "ed25519", "rsa-sha256", etc.
+    pub method: String,    // "ed25519", "rsa-sha256", etc.
 }
 
 impl TufMetadata {
@@ -351,11 +358,11 @@ impl TufMetadata {
     }
 
     pub fn verify_target(&self, name: &str, data: &[u8]) -> Result<(), IntegrityError> {
-        let target = self.find_target(name).ok_or_else(|| {
-            IntegrityError::MissingChecksum {
+        let target = self
+            .find_target(name)
+            .ok_or_else(|| IntegrityError::MissingChecksum {
                 url: name.to_string(),
-            }
-        })?;
+            })?;
 
         // Check size
         if data.len() as u64 != target.length {
@@ -369,9 +376,8 @@ impl TufMetadata {
 
         // Check all hashes
         for (algorithm, expected) in &target.hashes {
-            let algo = ChecksumAlgorithm::from_str(algorithm).ok_or_else(|| {
-                IntegrityError::UnsupportedAlgorithm(algorithm.clone())
-            })?;
+            let algo = ChecksumAlgorithm::from_str(algorithm)
+                .ok_or_else(|| IntegrityError::UnsupportedAlgorithm(algorithm.clone()))?;
             let actual = algo.compute(data);
             if actual.to_lowercase() != expected.to_lowercase() {
                 return Err(IntegrityError::ChecksumMismatch {
@@ -539,11 +545,12 @@ impl IntegrityVerifier {
         url: &str,
         target_name: &str,
     ) -> Result<VerifiedDownload, IntegrityError> {
-        let metadata = self.tuf_metadata.as_ref().ok_or_else(|| {
-            IntegrityError::MissingChecksum {
-                url: url.to_string(),
-            }
-        })?;
+        let metadata =
+            self.tuf_metadata
+                .as_ref()
+                .ok_or_else(|| IntegrityError::MissingChecksum {
+                    url: url.to_string(),
+                })?;
 
         if metadata.is_expired() {
             return Err(IntegrityError::MetadataExpired {
@@ -552,11 +559,12 @@ impl IntegrityVerifier {
             });
         }
 
-        let target = metadata.find_target(target_name).ok_or_else(|| {
-            IntegrityError::MissingChecksum {
-                url: target_name.to_string(),
-            }
-        })?;
+        let target =
+            metadata
+                .find_target(target_name)
+                .ok_or_else(|| IntegrityError::MissingChecksum {
+                    url: target_name.to_string(),
+                })?;
 
         let response = self
             .http_client
@@ -609,9 +617,8 @@ impl IntegrityVerifier {
 
         let mut verified = Vec::new();
         for (algorithm, expected_hash) in &expected.checksums {
-            let algo = ChecksumAlgorithm::from_str(algorithm).ok_or_else(|| {
-                IntegrityError::UnsupportedAlgorithm(algorithm.clone())
-            })?;
+            let algo = ChecksumAlgorithm::from_str(algorithm)
+                .ok_or_else(|| IntegrityError::UnsupportedAlgorithm(algorithm.clone()))?;
             let actual = algo.compute(data);
             if actual.to_lowercase() == expected_hash.to_lowercase() {
                 verified.push(algorithm.clone());
@@ -665,11 +672,12 @@ impl WrapperIntegrity {
     }
 
     pub fn verify_wrapper_jar(&self, data: &[u8]) -> Result<(), IntegrityError> {
-        let expected = self.wrapper_jar_sha256.as_ref().ok_or_else(|| {
-            IntegrityError::MissingChecksum {
-                url: "wrapper-jar".to_string(),
-            }
-        })?;
+        let expected =
+            self.wrapper_jar_sha256
+                .as_ref()
+                .ok_or_else(|| IntegrityError::MissingChecksum {
+                    url: "wrapper-jar".to_string(),
+                })?;
 
         let mut hasher = Sha256::new();
         hasher.update(data);
@@ -689,8 +697,10 @@ impl WrapperIntegrity {
 
     pub fn default_wrapper_integrity() -> Self {
         WrapperIntegrity {
-            distribution_url: "https://services.gradle.org/distributions/gradle-8.10-bin.zip".to_string(),
-            distribution_sha256: "a1c78765791422271e5606407e5f55b04e3b3e7f8c9d0e1f2a3b4c5d6e7f8a9b".to_string(),
+            distribution_url: "https://services.gradle.org/distributions/gradle-8.10-bin.zip"
+                .to_string(),
+            distribution_sha256: "a1c78765791422271e5606407e5f55b04e3b3e7f8c9d0e1f2a3b4c5d6e7f8a9b"
+                .to_string(),
             wrapper_jar_sha256: None,
         }
     }
@@ -1211,8 +1221,7 @@ mod tests {
             distribution_url: "https://example.com/gradle.zip".to_string(),
             distribution_sha256: "ignored".to_string(),
             wrapper_jar_sha256: Some(
-                "0000000000000000000000000000000000000000000000000000000000000000"
-                    .to_string(),
+                "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
             ),
         };
 

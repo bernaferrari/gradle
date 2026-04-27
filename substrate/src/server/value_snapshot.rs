@@ -55,8 +55,8 @@ impl ValueSnapshotServiceImpl {
             .collect();
         paths.sort_unstable();
         paths.dedup();
-        let estimated_len = paths.iter().map(|p| p.len()).sum::<usize>()
-            + paths.len().saturating_sub(1);
+        let estimated_len =
+            paths.iter().map(|p| p.len()).sum::<usize>() + paths.len().saturating_sub(1);
         let mut out = String::with_capacity(estimated_len);
         for (i, p) in paths.iter().enumerate() {
             if i > 0 {
@@ -80,8 +80,8 @@ impl ValueSnapshotServiceImpl {
             .collect();
         values.sort_unstable();
         values.dedup();
-        let estimated_len = values.iter().map(|v| v.len()).sum::<usize>()
-            + values.len().saturating_sub(1);
+        let estimated_len =
+            values.iter().map(|v| v.len()).sum::<usize>() + values.len().saturating_sub(1);
         let mut out = String::with_capacity(estimated_len);
         for (i, v) in values.iter().enumerate() {
             if i > 0 {
@@ -109,7 +109,10 @@ impl ValueSnapshotServiceImpl {
             .collect();
         entries.sort_unstable_by_key(|(k, _)| *k);
         // Build output string directly, avoiding intermediate Vec<String>
-        let estimated_len = entries.iter().map(|(k, v)| k.len() + v.len() + 2).sum::<usize>()
+        let estimated_len = entries
+            .iter()
+            .map(|(k, v)| k.len() + v.len() + 2)
+            .sum::<usize>()
             + entries.len().saturating_sub(1);
         let mut out = String::with_capacity(estimated_len);
         for (i, (k, v)) in entries.iter().enumerate() {

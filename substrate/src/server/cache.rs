@@ -667,10 +667,7 @@ mod tests {
         assert_eq!(stats.entry_count, 1);
 
         // total_bytes accurately reflects only the current entry (not double-counted)
-        assert_eq!(
-            stats.total_bytes,
-            "second_value_replaces".len() as u64
-        );
+        assert_eq!(stats.total_bytes, "second_value_replaces".len() as u64);
     }
 
     #[tokio::test]
