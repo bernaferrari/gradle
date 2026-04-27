@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
@@ -99,6 +100,14 @@ fn expand_bytes(data: Vec<u8>, properties: &[(String, String)]) -> Vec<u8> {
     text.into_bytes()
 }
 
+fn duplicate_strategy(input: &TaskInput) -> String {
+    input
+        .options
+        .get("duplicates_strategy")
+        .map(|strategy| strategy.to_ascii_uppercase())
+        .unwrap_or_else(|| "INCLUDE".to_string())
+}
+
 #[tonic::async_trait]
 impl TaskExecutor for CopyTaskExecutor {
     fn task_type(&self) -> &str {
@@ -118,6 +127,8 @@ impl TaskExecutor for CopyTaskExecutor {
         }
 
         let expand_properties = parse_expand_properties(input.options.get("expand_properties"));
+        let duplicate_strategy = duplicate_strategy(input);
+        let mut seen_destinations = HashSet::new();
 
         for source in &input.source_files {
             if !source.exists() {
@@ -138,6 +149,18 @@ impl TaskExecutor for CopyTaskExecutor {
                 for file in files {
                     let relative = file.strip_prefix(source).unwrap_or(&file);
                     let dest = input.target_dir.join(relative);
+                    if !seen_destinations.insert(dest.clone()) {
+                        match duplicate_strategy.as_str() {
+                            "EXCLUDE" => continue,
+                            "FAIL" => {
+                                result.success = false;
+                                result.error_message =
+                                    format!("Duplicate copy destination: {}", dest.display());
+                                return result;
+                            }
+                            _ => {}
+                        }
+                    }
                     if let Err(e) =
                         Self::copy_file(&file, &dest, &mut result, &expand_properties).await
                     {
@@ -150,6 +173,18 @@ impl TaskExecutor for CopyTaskExecutor {
                 let dest = input
                     .target_dir
                     .join(source.file_name().unwrap_or_default());
+                if !seen_destinations.insert(dest.clone()) {
+                    match duplicate_strategy.as_str() {
+                        "EXCLUDE" => continue,
+                        "FAIL" => {
+                            result.success = false;
+                            result.error_message =
+                                format!("Duplicate copy destination: {}", dest.display());
+                            return result;
+                        }
+                        _ => {}
+                    }
+                }
                 if let Err(e) =
                     Self::copy_file(source, &dest, &mut result, &expand_properties).await
                 {
@@ -319,5 +354,66 @@ mod tests {
                 .unwrap(),
             "name=corpus\nversion=1.0\n"
         );
+    }
+
+    #[tokio::test]
+    async fn test_copy_duplicate_strategy_exclude_keeps_first_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_a = tmp.path().join("src-a");
+        let src_b = tmp.path().join("src-b");
+        let dest_dir = tmp.path().join("dest");
+        tokio::fs::create_dir_all(&src_a).await.unwrap();
+        tokio::fs::create_dir_all(&src_b).await.unwrap();
+        tokio::fs::write(src_a.join("same.txt"), b"first")
+            .await
+            .unwrap();
+        tokio::fs::write(src_b.join("same.txt"), b"second")
+            .await
+            .unwrap();
+
+        let executor = CopyTaskExecutor::new();
+        let mut input = TaskInput::new("Copy");
+        input.source_files.push(src_a);
+        input.source_files.push(src_b);
+        input.target_dir = dest_dir.clone();
+        input
+            .options
+            .insert("duplicates_strategy".to_string(), "EXCLUDE".to_string());
+
+        let result = executor.execute(&input).await;
+        assert!(result.success, "{}", result.error_message);
+        assert_eq!(
+            tokio::fs::read(dest_dir.join("same.txt")).await.unwrap(),
+            b"first"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_copy_duplicate_strategy_fail_reports_duplicate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_a = tmp.path().join("src-a");
+        let src_b = tmp.path().join("src-b");
+        let dest_dir = tmp.path().join("dest");
+        tokio::fs::create_dir_all(&src_a).await.unwrap();
+        tokio::fs::create_dir_all(&src_b).await.unwrap();
+        tokio::fs::write(src_a.join("same.txt"), b"first")
+            .await
+            .unwrap();
+        tokio::fs::write(src_b.join("same.txt"), b"second")
+            .await
+            .unwrap();
+
+        let executor = CopyTaskExecutor::new();
+        let mut input = TaskInput::new("Copy");
+        input.source_files.push(src_a);
+        input.source_files.push(src_b);
+        input.target_dir = dest_dir;
+        input
+            .options
+            .insert("duplicates_strategy".to_string(), "FAIL".to_string());
+
+        let result = executor.execute(&input).await;
+        assert!(!result.success);
+        assert!(result.error_message.contains("Duplicate copy destination"));
     }
 }
