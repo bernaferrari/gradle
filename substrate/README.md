@@ -93,6 +93,7 @@ cargo test -p gradle-substrate-daemon --test hash_compatibility_test
 cargo test -p gradle-substrate-daemon --test build_plan_ir_golden_test
 cargo test -p gradle-substrate-daemon --test build_plan_shadow_test refreshed_native_ready_shadow_plan_runs_java_lifecycle_without_jvm_fallback -- --exact
 ./gradlew :core:test --tests org.gradle.execution.RustAuthoritativeBuildExecutionActionTest -x :distributions-core:generateLicenseFile
+./gradlew -q -p testing/corpus/java-library-kotlin-dsl clean build --no-daemon --console=plain -Dorg.gradle.rust.substrate.enabled=true -Dorg.gradle.rust.substrate.runbuild.authoritative=true -Dorg.gradle.rust.substrate.daemon.path=$PWD/target/debug/gradle-substrate-daemon
 ./tools/stabilization/run_strict_stabilization.sh quick
 ./tools/demo/rust_substrate_demo.sh --quick
 ```

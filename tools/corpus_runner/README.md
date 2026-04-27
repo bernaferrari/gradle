@@ -22,6 +22,12 @@ python3 tools/corpus_runner/run.py \
   --substrate-mode shadow \
   --daemon-binary /path/to/gradle-substrate-daemon
 
+# Run the explicit no-fallback RunBuild gate against a project
+python3 tools/corpus_runner/run.py \
+  --project testing/corpus/java-library-kotlin-dsl \
+  --daemon-binary target/debug/gradle-substrate-daemon \
+  --runbuild-authoritative
+
 # Run with verbose output
 python3 tools/corpus_runner/run.py --project /path/to/project --verbose
 ```
@@ -43,6 +49,12 @@ It then compares:
 The substrate candidate is considered invalid if Gradle reports that it used
 no-op fallback mode. Use `--allow-noop-substrate` only when explicitly testing
 fallback behavior rather than Rust parity.
+
+`--runbuild-authoritative` adds
+`-Dorg.gradle.rust.substrate.runbuild.authoritative=true`. This is stricter
+than umbrella authoritative mode: Gradle skips its JVM task executor only when
+Rust `RunBuild` completes the selected plan with zero JVM forwards and the exact
+scheduled task count.
 
 `--contract-only` does not invoke Gradle. It scans checked-in sample projects
 and validates deterministic build-plan signals such as plugins, declared tasks,
