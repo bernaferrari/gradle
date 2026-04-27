@@ -79,6 +79,9 @@ impl TaskInput {
                 | "JavaCompile"
                 | "TestExec"
                 | "Jar"
+                | "Zip"
+                | "War"
+                | "Ear"
                 | "Lifecycle"
         )
     }
@@ -132,6 +135,9 @@ impl TaskExecutorRegistry {
 
         let jar_executor = JarTaskExecutor::new();
         executors.insert(jar_executor.task_type().to_string(), Box::new(jar_executor));
+        executors.insert("Zip".to_string(), Box::new(JarTaskExecutor::new()));
+        executors.insert("War".to_string(), Box::new(JarTaskExecutor::new()));
+        executors.insert("Ear".to_string(), Box::new(JarTaskExecutor::new()));
 
         let lifecycle_executor = LifecycleTaskExecutor::new();
         executors.insert(
@@ -193,6 +199,9 @@ mod tests {
         assert!(types.contains(&"JavaCompile"));
         assert!(types.contains(&"TestExec"));
         assert!(types.contains(&"Jar"));
+        assert!(types.contains(&"Zip"));
+        assert!(types.contains(&"War"));
+        assert!(types.contains(&"Ear"));
         assert!(types.contains(&"Lifecycle"));
     }
 
@@ -221,6 +230,9 @@ mod tests {
         assert!(TaskInput::is_native_supported("Symlink"));
         assert!(TaskInput::is_native_supported("JavaCompile"));
         assert!(TaskInput::is_native_supported("TestExec"));
+        assert!(TaskInput::is_native_supported("Zip"));
+        assert!(TaskInput::is_native_supported("War"));
+        assert!(TaskInput::is_native_supported("Ear"));
         assert!(TaskInput::is_native_supported("Lifecycle"));
         assert!(!TaskInput::is_native_supported("Test"));
     }

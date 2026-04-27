@@ -24,6 +24,9 @@
 - A separate networked JUnit corpus build proves native `TestExec` lowering for
   a non-empty JUnit Platform test task when the test runtime contains the JUnit
   Platform ConsoleLauncher.
+- ZIP-compatible archive tasks (`Jar`, `Zip`, `War`, `Ear`) can lower to native
+  Rust archive execution when the task model provides input paths and an output
+  archive path. `Tar` remains a separate gap because it is not ZIP format.
 
 ## Gaps
 
@@ -34,8 +37,8 @@
 - Kotlin/Groovy DSL evaluation and legacy plugin execution remain JVM-host
   compatibility islands.
 - More task types need native-ready contract capture before broad no-fallback
-  execution is realistic, especially richer `Copy`/`Sync` specs and broader
-  archive/distribution semantics.
+  execution is realistic, especially richer `Copy`/`Sync` specs and non-ZIP
+  archive/distribution semantics such as `Tar`.
 
 ## Validation
 
@@ -52,8 +55,8 @@
 
 1. Expand differential corpus coverage for external dependency and richer
    task-graph semantics.
-2. Add authoritative coverage for resource filtering, richer archive specs, and
-   copy/sync edge cases.
+2. Add authoritative coverage for resource filtering, richer archive specs,
+   `Tar`, and copy/sync edge cases.
 3. Add native-ready contracts for richer `Copy`/`Sync` specs and `Test` enough
    to complete broader Java library/application lifecycles.
 4. Reduce bridge source exclusions as APIs are stabilized.

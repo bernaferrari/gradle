@@ -261,7 +261,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if ("JavaCompile".equals(shortTaskTypeName)) {
             captureJavaCompileInputs(task, inputs);
         }
-        if ("Jar".equals(shortTaskTypeName)) {
+        if (isArchiveTask(shortTaskTypeName)) {
             captureJarInputs(task, inputs);
         }
         if ("Test".equals(shortTaskTypeName)) {
@@ -327,6 +327,14 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "archive_extension", providerValue(invokeOptional(task, "getArchiveExtension")));
         putIfPresent(inputs, "archive_destination_directory", providerFilePath(invokeOptional(task, "getDestinationDirectory")));
         putIfPresent(inputs, "archive_file", providerFilePath(invokeOptional(task, "getArchiveFile")));
+    }
+
+    private static boolean isArchiveTask(String simpleName) {
+        return "Jar".equals(simpleName)
+            || "War".equals(simpleName)
+            || "Ear".equals(simpleName)
+            || "Zip".equals(simpleName)
+            || "Tar".equals(simpleName);
     }
 
     private static void captureTestInputs(Task task, Map<String, String> inputs) {

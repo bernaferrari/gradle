@@ -95,6 +95,28 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
+    public void capturesNativeReadyZipContractFromTaskModel() throws IOException {
+        File inputDir = temporaryFolder.newFolder("build/install/app");
+        File archiveDir = temporaryFolder.newFolder("build/distributions");
+        File archiveFile = new File(archiveDir, "app.zip");
+
+        Task zip = basicJarTask(fileCollection(inputDir), fileCollection(archiveFile), archiveDir, archiveFile);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(zip, Zip.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals(":jar", task.getPath());
+        assertEquals("archive", task.getActionKind());
+        assertEquals("in-process", task.getWorkerIsolation());
+        assertEquals("Zip", inputs.get("taskType"));
+        assertEquals("sample-1.0.jar", inputs.get("archive_file_name"));
+        assertEquals(archiveDir.getAbsolutePath(), inputs.get("archive_destination_directory"));
+        assertEquals(archiveFile.getAbsolutePath(), inputs.get("archive_file"));
+    }
+
+    @org.junit.Test
     public void capturesNativeReadyTestExecContractFromTaskModel() throws IOException {
         File testClassesDir = temporaryFolder.newFolder("build/classes/java/test");
         File runtimeJar = temporaryFolder.newFile("junit-platform-console-standalone.jar");
@@ -589,6 +611,9 @@ public class ProjectModelProviderAdapterTest {
     }
 
     public static class Jar {
+    }
+
+    public static class Zip {
     }
 
     public static class Test {
