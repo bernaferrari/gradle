@@ -66,12 +66,13 @@ def scan_project_contract(project_dir: str) -> dict:
         path for path in root.rglob("build.gradle*") if ".gradle" in path.name
     )
     settings_files = sorted(root.glob("settings.gradle*"))
-    source_files = sorted(root.glob("src/**/*.java")) + sorted(root.glob("src/**/*.kt"))
+    source_files = sorted(root.rglob("src/**/*.java")) + sorted(root.rglob("src/**/*.kt"))
 
     plugins: set[str] = set()
     tasks: set[str] = set()
     outputs: set[str] = set()
     dependencies: set[str] = set()
+    project_dependencies: set[str] = set()
     toolchains: set[str] = set()
 
     for build_file in build_files + settings_files:
@@ -90,6 +91,7 @@ def scan_project_contract(project_dir: str) -> dict:
         tasks.update(re.findall(r"^\s*task\s+([A-Za-z_][A-Za-z0-9_]*)\b", text, re.MULTILINE))
         outputs.update(re.findall(r"outputs\.(?:dir|file)\([\"']([^\"']+)[\"']\)", text))
         dependencies.update(re.findall(r"[\"']([A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[^\"']+)[\"']", text))
+        project_dependencies.update(re.findall(r"project\([\"']:([^\"']+)[\"']\)", text))
         toolchains.update(re.findall(r"JavaVersion\.VERSION_([0-9]+)", text))
         toolchains.update(re.findall(r"languageVersion\.set\(JavaLanguageVersion\.of\(([0-9]+)\)\)", text))
 
@@ -101,6 +103,7 @@ def scan_project_contract(project_dir: str) -> dict:
         "tasks": sorted(tasks),
         "outputs": sorted(outputs),
         "dependencies": sorted(dependencies),
+        "project_dependencies": sorted(project_dependencies),
         "toolchains": sorted(toolchains),
     }
 

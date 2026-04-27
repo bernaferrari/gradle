@@ -13,6 +13,7 @@
         "tasks": ["contractReport", "generateSources"],
         "outputs": ["build/generated/contract", "build/reports/contract"],
         "dependencies": [],
+        "project_dependencies": [],
         "toolchains": ["17"]
       }
     },
@@ -28,6 +29,23 @@
         "tasks": ["contractReport", "prepareRuntime"],
         "outputs": ["build/runtime", "build/reports/contract"],
         "dependencies": [],
+        "project_dependencies": [],
+        "toolchains": ["17"]
+      }
+    },
+    {
+      "name": "java-multiproject-kotlin-dsl",
+      "path": "java-multiproject-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 2,
+        "settings_file_count": 1,
+        "source_file_count": 2,
+        "plugins": ["application", "java-library"],
+        "tasks": ["contractReport"],
+        "outputs": ["build/reports/contract"],
+        "dependencies": [],
+        "project_dependencies": ["lib"],
         "toolchains": ["17"]
       }
     }
