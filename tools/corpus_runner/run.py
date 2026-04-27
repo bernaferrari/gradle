@@ -12,6 +12,7 @@ the Rust substrate behaves identically to upstream Gradle on real builds.
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -29,6 +30,7 @@ class RunResult:
     output: str
     tasks: list[str]
     output_files: list[str] = field(default_factory=list)
+    output_hashes: dict[str, str] = field(default_factory=dict)
     substrate_noop: bool = False
     
     def to_dict(self):
@@ -39,6 +41,7 @@ class RunResult:
             "task_count": len(self.tasks),
             "output_file_count": len(self.output_files),
             "output_files": self.output_files,
+            "output_hashes": self.output_hashes,
             "substrate_noop": self.substrate_noop,
         }
 
@@ -50,6 +53,15 @@ STABLE_BUILD_OUTPUT_ROOTS = {
     "distributions",
     "install",
     "test-results",
+}
+
+ARCHIVE_SUFFIXES = {
+    ".ear",
+    ".jar",
+    ".tar",
+    ".tgz",
+    ".war",
+    ".zip",
 }
 
 
@@ -73,6 +85,23 @@ def snapshot_build_outputs(project_dir: str) -> list[str]:
                 outputs.append(str(path.relative_to(root)))
                 break
     return sorted(outputs)
+
+
+def snapshot_build_output_hashes(project_dir: str, output_files: list[str]) -> dict[str, str]:
+    """Return SHA-256 hashes for non-archive stable outputs."""
+    root = Path(project_dir)
+    hashes: dict[str, str] = {}
+    for relative_path in output_files:
+        path = root / relative_path
+        lower_name = path.name.lower()
+        if any(lower_name.endswith(suffix) for suffix in ARCHIVE_SUFFIXES):
+            continue
+        hasher = hashlib.sha256()
+        with path.open("rb") as file:
+            for chunk in iter(lambda: file.read(1024 * 1024), b""):
+                hasher.update(chunk)
+        hashes[relative_path] = hasher.hexdigest()
+    return hashes
 
 
 def load_manifest(manifest_path: str) -> tuple[Path, list[dict]]:
@@ -251,11 +280,15 @@ def run_build(
                 task_name = line.split('> Task')[1].strip().split(' ')[0]
                 tasks.append(task_name)
         
+        output_files = snapshot_build_outputs(project_dir) if result.returncode == 0 else []
+        output_hashes = snapshot_build_output_hashes(project_dir, output_files) if output_files else {}
+
         return RunResult(
             exit_code=result.returncode,
             output=output,
             tasks=tasks,
-            output_files=snapshot_build_outputs(project_dir) if result.returncode == 0 else [],
+            output_files=output_files,
+            output_hashes=output_hashes,
             substrate_noop=substrate and detect_substrate_noop(output),
         )
     except subprocess.TimeoutExpired:
@@ -359,6 +392,7 @@ def main():
                 substrate_usable
                 and upstream.tasks == substrate.tasks
                 and upstream.output_files == substrate.output_files
+                and upstream.output_hashes == substrate.output_hashes
                 and upstream.exit_code == substrate.exit_code
             ),
         }
@@ -384,6 +418,14 @@ def main():
                     print(f"    Missing output files in substrate: {sorted(missing_outputs)}")
                 if extra_outputs:
                     print(f"    Extra output files in substrate: {sorted(extra_outputs)}")
+            if upstream.output_hashes != substrate.output_hashes:
+                differing_hashes = sorted(
+                    path
+                    for path in set(upstream.output_hashes) | set(substrate.output_hashes)
+                    if upstream.output_hashes.get(path) != substrate.output_hashes.get(path)
+                )
+                if differing_hashes:
+                    print(f"    Output content differs: {differing_hashes}")
     
     # Summary
     total = len(results)

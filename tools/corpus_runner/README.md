@@ -84,8 +84,8 @@ dependency cache.
 Reference-mode runs compare upstream Gradle and Rust substrate exit codes, task
 lists, and stable build output file inventories under `build/classes`,
 `build/resources`, `build/libs`, `build/distributions`, `build/install`, and
-`build/test-results`. The file inventory check is intentionally path-based;
-archive byte-for-byte parity is tracked separately because compression and
+`build/test-results`. Non-archive outputs are also compared by SHA-256 hash.
+Archive byte-for-byte parity is tracked separately because compression and
 metadata can differ while logical artifacts are still equivalent.
 
 Keep offline samples deterministic: prefer built-in Gradle plugins and local
@@ -118,13 +118,15 @@ Results are written to `corpus_results.json` in the selected output directory:
       "exit_code": 0,
       "tasks": [":compileJava", ":jar"],
       "output_file_count": 2,
-      "output_files": ["build/classes/java/main/App.class", "build/libs/app.jar"]
+      "output_files": ["build/classes/java/main/App.class", "build/libs/app.jar"],
+      "output_hashes": {"build/classes/java/main/App.class": "..."}
     },
     "substrate": {
       "exit_code": 0,
       "tasks": [":compileJava", ":jar"],
       "output_file_count": 2,
-      "output_files": ["build/classes/java/main/App.class", "build/libs/app.jar"]
+      "output_files": ["build/classes/java/main/App.class", "build/libs/app.jar"],
+      "output_hashes": {"build/classes/java/main/App.class": "..."}
     },
     "match": true
   }
