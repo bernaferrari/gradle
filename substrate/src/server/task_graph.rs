@@ -424,6 +424,9 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
         ("archive", "Ear") | (_, "Ear") if has_input_paths(task) && has_outputs(task) => {
             "Ear".to_string()
         }
+        ("archive", "Tar") | (_, "Tar") if has_input_paths(task) && has_outputs(task) => {
+            "Tar".to_string()
+        }
         ("test", "Test") | (_, "Test") if test_exec_contract_complete(task) => {
             "TestExec".to_string()
         }
@@ -455,7 +458,7 @@ fn execution_context_json(task: &CanonicalBuildPlanTask, task_type: &str) -> Str
     let output_paths = output_paths(task);
     let target_dir = match task_type {
         "Mkdir" => String::new(),
-        "Jar" | "Zip" | "War" | "Ear" => output_paths
+        "Jar" | "Zip" | "War" | "Ear" | "Tar" => output_paths
             .first()
             .and_then(|path| std::path::Path::new(path).parent())
             .map(|path| path.to_string_lossy().into_owned())
@@ -463,12 +466,17 @@ fn execution_context_json(task: &CanonicalBuildPlanTask, task_type: &str) -> Str
         _ => output_paths.first().cloned().unwrap_or_default(),
     };
     let mut options = task_options(task, task_type);
-    if is_zip_archive_executor(task_type) {
+    if is_archive_executor(task_type) {
         if let Some(path) = output_paths.first() {
-            if !options.contains_key("jarName") {
+            let option_name = if task_type == "Tar" {
+                "tarName"
+            } else {
+                "jarName"
+            };
+            if !options.contains_key(option_name) {
                 if let Some(name) = std::path::Path::new(path).file_name() {
                     options.insert(
-                        "jarName".to_string(),
+                        option_name.to_string(),
                         serde_json::Value::String(name.to_string_lossy().into_owned()),
                     );
                 }
@@ -521,6 +529,9 @@ fn task_options(
     } else if is_zip_archive_executor(task_type) {
         insert_input_option(task, &mut options, "archive_file_name", "jarName");
         insert_input_option(task, &mut options, "main_class", "mainClass");
+    } else if task_type == "Tar" {
+        insert_input_option(task, &mut options, "archive_file_name", "tarName");
+        insert_input_option(task, &mut options, "archive_compression", "compression");
     } else if task_type == "TestExec" {
         insert_input_option(task, &mut options, "java_home", "java_home");
         insert_input_option(task, &mut options, "classpath", "classpath");
@@ -536,6 +547,10 @@ fn task_options(
 
 fn is_zip_archive_executor(task_type: &str) -> bool {
     matches!(task_type, "Jar" | "Zip" | "War" | "Ear")
+}
+
+fn is_archive_executor(task_type: &str) -> bool {
+    is_zip_archive_executor(task_type) || task_type == "Tar"
 }
 
 fn has_input_value(task: &CanonicalBuildPlanTask, input_name: &str) -> bool {
@@ -1303,6 +1318,69 @@ mod tests {
         assert_eq!(context["source_files"][0], "/repo/build/install/app");
         assert_eq!(context["target_dir"], "/repo/build/distributions");
         assert_eq!(context["options"]["jarName"], "app.zip");
+    }
+
+    #[test]
+    fn test_tar_archive_contract_lowers_to_native_tar_executor() {
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":distTar".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.api.tasks.bundling.Tar".to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "in-process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "declared-outputs".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "archive".to_string(),
+            input_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "input0".to_string(),
+                    kind: "path".to_string(),
+                    value: "/repo/build/install/app".to_string(),
+                    normalization: "absolute-path".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "archive_file_name".to_string(),
+                    kind: "value".to_string(),
+                    value: "app.tar".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "archive_compression".to_string(),
+                    kind: "value".to_string(),
+                    value: "gzip".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: true,
+                },
+            ],
+            output_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                    name: "archive".to_string(),
+                    kind: "file".to_string(),
+                    path: "/repo/build/distributions/app.tar".to_string(),
+                },
+            ],
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        let task_type = executable_task_type(&task);
+        let context: serde_json::Value =
+            serde_json::from_str(&execution_context_json(&task, &task_type)).unwrap();
+
+        assert_eq!(task_type, "Tar");
+        assert_eq!(context["source_files"][0], "/repo/build/install/app");
+        assert_eq!(context["target_dir"], "/repo/build/distributions");
+        assert_eq!(context["options"]["tarName"], "app.tar");
+        assert_eq!(context["options"]["compression"], "gzip");
     }
 
     #[tokio::test]

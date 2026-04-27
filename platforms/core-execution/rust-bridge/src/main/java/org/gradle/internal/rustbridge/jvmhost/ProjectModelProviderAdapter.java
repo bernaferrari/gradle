@@ -327,6 +327,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "archive_extension", providerValue(invokeOptional(task, "getArchiveExtension")));
         putIfPresent(inputs, "archive_destination_directory", providerFilePath(invokeOptional(task, "getDestinationDirectory")));
         putIfPresent(inputs, "archive_file", providerFilePath(invokeOptional(task, "getArchiveFile")));
+        putIfPresent(inputs, "archive_compression", stringOrEmpty(invokeOptional(task, "getCompression")));
     }
 
     private static boolean isArchiveTask(String simpleName) {
