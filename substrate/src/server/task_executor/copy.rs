@@ -75,7 +75,7 @@ impl CopyTaskExecutor {
     }
 }
 
-fn parse_expand_properties(value: Option<&String>) -> Vec<(String, String)> {
+pub(super) fn parse_expand_properties(value: Option<&String>) -> Vec<(String, String)> {
     value
         .map(|properties| {
             properties
@@ -88,7 +88,7 @@ fn parse_expand_properties(value: Option<&String>) -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
-fn expand_bytes(data: Vec<u8>, properties: &[(String, String)]) -> Vec<u8> {
+pub(super) fn expand_bytes(data: Vec<u8>, properties: &[(String, String)]) -> Vec<u8> {
     let mut text = match String::from_utf8(data) {
         Ok(text) => text,
         Err(err) => return err.into_bytes(),
@@ -100,7 +100,7 @@ fn expand_bytes(data: Vec<u8>, properties: &[(String, String)]) -> Vec<u8> {
     text.into_bytes()
 }
 
-fn duplicate_strategy(input: &TaskInput) -> String {
+pub(super) fn duplicate_strategy(input: &TaskInput) -> String {
     input
         .options
         .get("duplicates_strategy")

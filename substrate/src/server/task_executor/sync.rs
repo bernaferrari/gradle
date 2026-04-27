@@ -2,6 +2,9 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::pin::Pin;
 
+use crate::server::task_executor::copy::{
+    duplicate_strategy, expand_bytes, parse_expand_properties,
+};
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
 /// Synchronizes directories (rsync-like behavior).
@@ -38,6 +41,39 @@ impl SyncTaskExecutor {
             files
         })
     }
+
+    async fn copy_file(
+        src_file: &std::path::Path,
+        dest_file: &std::path::Path,
+        result: &mut TaskResult,
+        expand_properties: &[(String, String)],
+    ) -> Result<(), String> {
+        if let Some(parent) = dest_file.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| format!("Failed to create directory: {}", e))?;
+        }
+
+        let bytes = if expand_properties.is_empty() {
+            tokio::fs::copy(src_file, dest_file)
+                .await
+                .map_err(|e| format!("Failed to copy {}: {}", src_file.display(), e))?
+        } else {
+            let data = tokio::fs::read(src_file)
+                .await
+                .map_err(|e| format!("Failed to read {}: {}", src_file.display(), e))?;
+            let expanded = expand_bytes(data, expand_properties);
+            tokio::fs::write(dest_file, &expanded)
+                .await
+                .map_err(|e| format!("Failed to write {}: {}", dest_file.display(), e))?;
+            expanded.len() as u64
+        };
+
+        result.files_processed += 1;
+        result.bytes_processed += bytes;
+        result.output_files.push(dest_file.to_path_buf());
+        Ok(())
+    }
 }
 
 #[tonic::async_trait]
@@ -70,7 +106,10 @@ impl TaskExecutor for SyncTaskExecutor {
             .map(|v| v == "true")
             .unwrap_or(false);
 
+        let expand_properties = parse_expand_properties(input.options.get("expand_properties"));
+        let duplicate_strategy = duplicate_strategy(input);
         let mut expected_files = HashSet::new();
+        let mut seen_destinations = HashSet::new();
 
         for source_dir in &input.source_files {
             if !source_dir.is_dir() {
@@ -89,17 +128,22 @@ impl TaskExecutor for SyncTaskExecutor {
                 expected_files.insert(relative.to_path_buf());
                 let dest_file = input.target_dir.join(relative);
 
-                // Create parent directories
-                if let Some(parent) = dest_file.parent() {
-                    if let Err(e) = tokio::fs::create_dir_all(parent).await {
-                        result.success = false;
-                        result.error_message = format!("Failed to create directory: {}", e);
-                        return result;
+                if !seen_destinations.insert(dest_file.clone()) {
+                    match duplicate_strategy.as_str() {
+                        "EXCLUDE" => continue,
+                        "FAIL" => {
+                            result.success = false;
+                            result.error_message =
+                                format!("Duplicate sync destination: {}", dest_file.display());
+                            return result;
+                        }
+                        _ => {}
                     }
                 }
 
-                // Check if file needs updating
-                let needs_copy = if !dest_file.exists() {
+                let needs_copy = if !expand_properties.is_empty() {
+                    true
+                } else if !dest_file.exists() {
                     true
                 } else {
                     // Compare modification times and sizes
@@ -126,18 +170,12 @@ impl TaskExecutor for SyncTaskExecutor {
                 };
 
                 if needs_copy {
-                    match tokio::fs::copy(src_file, &dest_file).await {
-                        Ok(bytes) => {
-                            result.files_processed += 1;
-                            result.bytes_processed += bytes;
-                            result.output_files.push(dest_file);
-                        }
-                        Err(e) => {
-                            result.success = false;
-                            result.error_message =
-                                format!("Failed to copy {}: {}", src_file.display(), e);
-                            return result;
-                        }
+                    if let Err(e) =
+                        Self::copy_file(src_file, &dest_file, &mut result, &expand_properties).await
+                    {
+                        result.success = false;
+                        result.error_message = e;
+                        return result;
                     }
                 }
             }
@@ -291,6 +329,101 @@ mod tests {
         assert!(dest_dir.join("b.txt").exists());
         assert!(!dest_dir.join("orphan.txt").exists());
         assert_eq!(result.removed_files.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_sync_expands_declared_properties() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let dest_dir = tmp.path().join("dest");
+
+        tokio::fs::create_dir_all(&src_dir).await.unwrap();
+        tokio::fs::write(src_dir.join("application.properties"), b"name=$appName\n")
+            .await
+            .unwrap();
+
+        let executor = SyncTaskExecutor::new();
+        let mut input = TaskInput::new("Sync");
+        input.source_files.push(src_dir);
+        input.target_dir = dest_dir.clone();
+        input
+            .options
+            .insert("expand_properties".to_string(), "appName=sync".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert_eq!(
+            tokio::fs::read_to_string(dest_dir.join("application.properties"))
+                .await
+                .unwrap(),
+            "name=sync\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sync_duplicate_strategy_exclude_keeps_first_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_a = tmp.path().join("src-a");
+        let src_b = tmp.path().join("src-b");
+        let dest_dir = tmp.path().join("dest");
+
+        tokio::fs::create_dir_all(&src_a).await.unwrap();
+        tokio::fs::create_dir_all(&src_b).await.unwrap();
+        tokio::fs::write(src_a.join("same.txt"), b"first")
+            .await
+            .unwrap();
+        tokio::fs::write(src_b.join("same.txt"), b"second")
+            .await
+            .unwrap();
+
+        let executor = SyncTaskExecutor::new();
+        let mut input = TaskInput::new("Sync");
+        input.source_files.push(src_a);
+        input.source_files.push(src_b);
+        input.target_dir = dest_dir.clone();
+        input
+            .options
+            .insert("duplicates_strategy".to_string(), "EXCLUDE".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert_eq!(
+            tokio::fs::read(dest_dir.join("same.txt")).await.unwrap(),
+            b"first"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sync_duplicate_strategy_fail_reports_duplicate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_a = tmp.path().join("src-a");
+        let src_b = tmp.path().join("src-b");
+        let dest_dir = tmp.path().join("dest");
+
+        tokio::fs::create_dir_all(&src_a).await.unwrap();
+        tokio::fs::create_dir_all(&src_b).await.unwrap();
+        tokio::fs::write(src_a.join("same.txt"), b"first")
+            .await
+            .unwrap();
+        tokio::fs::write(src_b.join("same.txt"), b"second")
+            .await
+            .unwrap();
+
+        let executor = SyncTaskExecutor::new();
+        let mut input = TaskInput::new("Sync");
+        input.source_files.push(src_a);
+        input.source_files.push(src_b);
+        input.target_dir = dest_dir;
+        input
+            .options
+            .insert("duplicates_strategy".to_string(), "FAIL".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(!result.success);
+        assert!(result.error_message.contains("Duplicate sync destination"));
     }
 
     #[tokio::test]

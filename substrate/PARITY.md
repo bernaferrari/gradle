@@ -30,11 +30,12 @@
   native POSIX tar streams and supports gzip-compressed output.
 - Native file operations cover recursive `Copy` directory sources and
   multi-source `Sync` orphan deletion using the union of all source roots.
-- Native `ProcessResources`/`Copy` execution can expand declared scalar task
-  input properties in Gradle-style `$name` and `${name}` templates, validated by
-  content-hash corpus comparison.
-- Native `Copy` honors basic duplicate destination strategies: `INCLUDE`/default
-  overwrites, `EXCLUDE` keeps the first file, and `FAIL` reports an error.
+- Native `ProcessResources`/`Copy`/`Sync` execution can expand declared scalar
+  task input properties in Gradle-style `$name` and `${name}` templates,
+  validated by content-hash corpus comparison for resource processing.
+- Native `Copy` and `Sync` honor basic duplicate destination strategies:
+  `INCLUDE`/default overwrites, `EXCLUDE` keeps the first file, and `FAIL`
+  reports an error.
 
 ## Gaps
 
@@ -47,7 +48,7 @@
 - More task types need native-ready contract capture before broad no-fallback
   execution is realistic, especially arbitrary copy filters/actions, Gradle
   archive metadata edge cases, nested copy specs, permission preservation,
-  symlinks, and non-gzip tar compression variants.
+  symlink copy semantics, and non-gzip tar compression variants.
 
 ## Validation
 
