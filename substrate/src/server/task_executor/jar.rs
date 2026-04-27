@@ -24,60 +24,11 @@ impl JarTaskExecutor {
         Self
     }
 
-    /// Get current time as DOS format (time, date) for ZIP entries.
-    fn dos_time_now() -> (u16, u16) {
-        let secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-
-        let total_days = (secs / 86400) as i64;
-        let time_of_day = (secs % 86400) as u32;
-
-        // DOS date epoch is 1980-01-01 = Unix day 3652
-        let dos_day = total_days - 3652;
-        if dos_day < 0 {
-            return (0, 0);
-        }
-
-        let mut year = 1980u16 + (dos_day / 366) as u16;
-        let mut remaining = dos_day as u32;
-        loop {
-            let days_in_year: u32 = if is_leap_year(year) { 366 } else { 365 };
-            if remaining < days_in_year {
-                break;
-            }
-            remaining -= days_in_year;
-            year += 1;
-        }
-
-        let month_days = if is_leap_year(year) {
-            [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-        } else {
-            [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-        };
-
-        let mut month = 0u16;
-        for (i, &days) in month_days.iter().enumerate() {
-            if remaining < days {
-                month = i as u16 + 1;
-                break;
-            }
-            remaining -= days;
-        }
-        if month == 0 {
-            month = 12;
-        }
-        let day = remaining + 1;
-
-        let hour = (time_of_day / 3600) as u16;
-        let minute = ((time_of_day % 3600) / 60) as u16;
-        let second = ((time_of_day % 60) / 2) as u16;
-
-        let dos_time = (second << 10) | (minute << 5) | hour;
-        let dos_date = (day as u16) | (month << 5) | ((year - 1980) << 9);
-
-        (dos_time, dos_date)
+    /// Fixed DOS timestamp for reproducible ZIP-compatible archives.
+    fn reproducible_dos_timestamp() -> (u16, u16) {
+        const DOS_TIME_MIDNIGHT: u16 = 0;
+        const DOS_DATE_1980_01_01: u16 = 1 | (1 << 5);
+        (DOS_TIME_MIDNIGHT, DOS_DATE_1980_01_01)
     }
 
     /// Write a ZIP local file header (30 bytes) + name.
@@ -272,7 +223,7 @@ impl JarTaskExecutor {
 
     /// Write entries as a valid ZIP file using STORED compression for speed.
     fn write_zip(out: &mut dyn Write, entries: &[(String, Vec<u8>)]) -> std::io::Result<()> {
-        let (mod_time, mod_date) = Self::dos_time_now();
+        let (mod_time, mod_date) = Self::reproducible_dos_timestamp();
 
         // Track per-entry metadata for central directory
         struct EntryMeta {
@@ -338,10 +289,6 @@ impl JarTaskExecutor {
 
         Ok(())
     }
-}
-
-fn is_leap_year(year: u16) -> bool {
-    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
 }
 
 #[tonic::async_trait]
@@ -709,6 +656,32 @@ mod tests {
         let jar1 = fs::read(out1.join("det.jar")).unwrap();
         let jar2 = fs::read(out2.join("det.jar")).unwrap();
         assert_eq!(jar1, jar2, "JARs with same content must be byte-identical");
+    }
+
+    #[tokio::test]
+    async fn test_jar_uses_reproducible_zip_timestamp() {
+        let tmp = TempDir::new().unwrap();
+        let src_dir = tmp.path().join("src");
+        let out_dir = tmp.path().join("out");
+
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::write(src_dir.join("A.class"), b"a").unwrap();
+
+        let executor = JarTaskExecutor::new();
+        let mut input = TaskInput::new("Jar");
+        input.source_files.push(src_dir);
+        input.target_dir = out_dir;
+        input
+            .options
+            .insert("jarName".to_string(), "timestamp.jar".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        let jar = fs::read(result.output_files.first().unwrap()).unwrap();
+        assert_eq!(&jar[0..4], b"PK\x03\x04");
+        assert_eq!(u16::from_le_bytes([jar[10], jar[11]]), 0);
+        assert_eq!(u16::from_le_bytes([jar[12], jar[13]]), 33);
     }
 
     #[tokio::test]
