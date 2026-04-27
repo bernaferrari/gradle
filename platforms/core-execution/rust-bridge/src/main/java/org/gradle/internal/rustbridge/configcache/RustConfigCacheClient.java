@@ -11,6 +11,8 @@ import gradle.substrate.v1.ValidateConfigRequest;
 import gradle.substrate.v1.ValidateConfigResponse;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 import org.slf4j.Logger;
 
 import java.util.List;
@@ -19,6 +21,7 @@ import java.util.List;
  * Client for the Rust configuration cache service.
  * Stores, loads, validates, and cleans configuration cache entries via gRPC.
  */
+@ServiceScope(Scope.Build.class)
 public class RustConfigCacheClient {
 
     private static final Logger LOGGER = Logging.getLogger(RustConfigCacheClient.class);

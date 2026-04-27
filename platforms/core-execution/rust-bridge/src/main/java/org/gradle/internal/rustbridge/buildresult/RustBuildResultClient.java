@@ -13,6 +13,8 @@ import gradle.substrate.v1.TaskResult;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
 import org.gradle.internal.rustbridge.SubstrateException;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 import org.slf4j.Logger;
 
 import java.util.List;
@@ -21,6 +23,7 @@ import java.util.List;
  * Client for the Rust build result service.
  * Records and queries task/build results via gRPC.
  */
+@ServiceScope(Scope.Build.class)
 public class RustBuildResultClient {
 
     private static final Logger LOGGER = Logging.getLogger(RustBuildResultClient.class);

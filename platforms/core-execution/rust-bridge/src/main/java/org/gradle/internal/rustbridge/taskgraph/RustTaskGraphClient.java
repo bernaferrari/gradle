@@ -8,6 +8,8 @@ import gradle.substrate.v1.ResolveExecutionPlanRequest;
 import gradle.substrate.v1.ResolveExecutionPlanResponse;
 import gradle.substrate.v1.TaskGraphServiceGrpc;
 import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 
 import java.util.List;
 import java.util.Map;
@@ -16,6 +18,7 @@ import java.util.Map;
  * Client for the Rust task graph service.
  * Registers tasks and resolves execution plans (topological ordering).
  */
+@ServiceScope(Scope.Build.class)
 public class RustTaskGraphClient {
 
     private final SubstrateClient client;

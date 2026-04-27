@@ -235,21 +235,23 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
 
         @Provides
         @PrivateService
-        void wireProjectModelProvider(
+        JvmHostBridgeWiring createJvmHostBridgeWiring(
             DaemonLauncher daemonLauncher,
             BuildPlanTaskSelectionSnapshot taskSelectionSnapshot,
             ServiceRegistry services,
             InternalOptions options
         ) {
             if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
-                return;
+                return JvmHostBridgeWiring.INSTANCE;
             }
             JvmHostServiceImpl serviceImpl = daemonLauncher.getJvmHostServiceImpl();
             if (serviceImpl != null) {
                 serviceImpl.setProjectModelProvider(ProjectModelProviderAdapter.fromServiceRegistry(services));
                 serviceImpl.setTaskSelectionSnapshot(taskSelectionSnapshot);
                 serviceImpl.setTaskExecutionProvider(JvmTaskExecutionProviderAdapter.fromServiceRegistry(services));
+                return JvmHostBridgeWiring.INSTANCE;
             }
+            return JvmHostBridgeWiring.INSTANCE;
         }
 
         @Provides
@@ -357,6 +359,14 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
             );
             RootBuildLifecycleBridge.register(listenerManager, listener);
             return listener;
+        }
+    }
+
+    @org.gradle.internal.service.scopes.ServiceScope(org.gradle.internal.service.scopes.Scope.Build.class)
+    private static final class JvmHostBridgeWiring {
+        private static final JvmHostBridgeWiring INSTANCE = new JvmHostBridgeWiring();
+
+        private JvmHostBridgeWiring() {
         }
     }
 }

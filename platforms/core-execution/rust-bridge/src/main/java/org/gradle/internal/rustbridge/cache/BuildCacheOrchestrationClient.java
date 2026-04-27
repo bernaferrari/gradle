@@ -8,6 +8,8 @@ import gradle.substrate.v1.StoreOutputsRequest;
 import gradle.substrate.v1.StoreOutputsResponse;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 import org.slf4j.Logger;
 
 import java.util.List;
@@ -17,6 +19,7 @@ import java.util.Map;
  * Client for the Rust build cache orchestration service.
  * Computes cache keys, probes cache availability, and marks outputs as stored.
  */
+@ServiceScope(Scope.Build.class)
 public class BuildCacheOrchestrationClient {
 
     private static final Logger LOGGER = Logging.getLogger(BuildCacheOrchestrationClient.class);

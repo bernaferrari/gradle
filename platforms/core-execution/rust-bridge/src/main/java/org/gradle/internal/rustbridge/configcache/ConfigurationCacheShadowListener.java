@@ -3,6 +3,8 @@ package org.gradle.internal.rustbridge.configcache;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.hash.HashCode;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 import org.slf4j.Logger;
 
 import java.util.Arrays;
@@ -17,6 +19,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p>Since Gradle's ConfigurationCache does not expose a simple listener interface,
  * this is a utility class that gets called at key store/load/validate points.</p>
  */
+@ServiceScope(Scope.Build.class)
 public class ConfigurationCacheShadowListener {
 
     private static final Logger LOGGER = Logging.getLogger(ConfigurationCacheShadowListener.class);

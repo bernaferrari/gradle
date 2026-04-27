@@ -1,5 +1,8 @@
 package org.gradle.internal.rustbridge.jvmhost;
 
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -9,6 +12,7 @@ import java.util.Map;
 /**
  * Thread-safe handoff from Gradle's populated execution graph to the JVM-host build-plan endpoint.
  */
+@ServiceScope(Scope.Build.class)
 public class BuildPlanTaskSelectionSnapshot {
 
     private volatile Snapshot snapshot = Snapshot.notPopulated();

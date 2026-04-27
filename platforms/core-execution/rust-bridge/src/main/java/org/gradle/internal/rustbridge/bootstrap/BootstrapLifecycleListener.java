@@ -3,6 +3,8 @@ package org.gradle.internal.rustbridge.bootstrap;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.RootBuildLifecycleBridge;
 import org.gradle.internal.rustbridge.eventstream.BuildIdHolder;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
@@ -15,6 +17,7 @@ import java.util.UUID;
  * Build lifecycle listener that notifies the Rust substrate daemon
  * when a build starts and completes.
  */
+@ServiceScope(Scope.Build.class)
 public class BootstrapLifecycleListener implements RootBuildLifecycleBridge.Callbacks {
 
     private static final Logger LOGGER = Logging.getLogger(BootstrapLifecycleListener.class);

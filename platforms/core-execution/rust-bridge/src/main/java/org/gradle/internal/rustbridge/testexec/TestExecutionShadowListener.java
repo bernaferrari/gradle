@@ -9,6 +9,8 @@ import gradle.substrate.v1.TestResultEntry;
 import gradle.substrate.v1.TestSuiteDescriptor;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 import org.slf4j.Logger;
 
 import java.lang.reflect.InvocationHandler;
@@ -27,6 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * listener handles event payloads reflectively and can expose a dynamic proxy when the
  * runtime test API is present.</p>
  */
+@ServiceScope(Scope.Build.class)
 public class TestExecutionShadowListener {
 
     private static final Logger LOGGER = Logging.getLogger(TestExecutionShadowListener.class);

@@ -10,6 +10,8 @@ import gradle.substrate.v1.StoreHistoryRequest;
 import gradle.substrate.v1.StoreHistoryResponse;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 import org.slf4j.Logger;
 
 /**
@@ -19,6 +21,7 @@ import org.slf4j.Logger;
  * <p>The Rust implementation uses bincode serialization with disk persistence,
  * which is significantly faster than Java's IndexedCache for large histories.</p>
  */
+@ServiceScope(Scope.Build.class)
 public class RustExecutionHistoryClient {
 
     private static final Logger LOGGER = Logging.getLogger(RustExecutionHistoryClient.class);
