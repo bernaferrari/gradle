@@ -2793,6 +2793,120 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_run_build_executes_shadow_java_compile_natively() {
+        let java_home = match std::env::var("JAVA_HOME") {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        let temp = tempfile::tempdir().unwrap();
+        let source_dir = temp.path().join("src/main/java");
+        let source_file = source_dir.join("HelloFromShadow.java");
+        let output_dir = temp.path().join("build/classes/java/main");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::write(
+            &source_file,
+            "public class HelloFromShadow { public String value() { return \"native\"; } }",
+        )
+        .unwrap();
+
+        let store = Arc::new(super::super::build_plan_shadow::BuildPlanShadowStore::new(
+            temp.path().join("shadow-store"),
+        ));
+        let history = Arc::new(
+            super::super::execution_history::ExecutionHistoryServiceImpl::new(
+                temp.path().join("history"),
+            ),
+        );
+        let task_graph = Arc::new(
+            super::super::task_graph::TaskGraphServiceImpl::with_history_and_shadow(
+                history,
+                Arc::clone(&store),
+            ),
+        );
+        let svc = make_svc_with_task_graph(Arc::clone(&task_graph));
+        let build_id = "rb-shadow-java-compile";
+
+        store
+            .persist_plan(
+                &super::super::build_plan_ir::CanonicalBuildPlan {
+                    schema_version: super::super::build_plan_ir::BUILD_PLAN_SCHEMA_VERSION,
+                    build_id: build_id.to_string(),
+                    projects: Vec::new(),
+                    tasks: vec![super::super::build_plan_ir::CanonicalBuildPlanTask {
+                        path: ":compileJava".to_string(),
+                        project_path: ":".to_string(),
+                        implementation_id: "org.gradle.api.tasks.compile.JavaCompile".to_string(),
+                        depends_on: Vec::new(),
+                        inputs: Default::default(),
+                        outputs: Vec::new(),
+                        worker_isolation: "process".to_string(),
+                        should_run_after: Vec::new(),
+                        must_run_after: Vec::new(),
+                        finalized_by: Vec::new(),
+                        cacheability: "unknown".to_string(),
+                        local_state: Vec::new(),
+                        destroyables: Vec::new(),
+                        action_kind: "compile".to_string(),
+                        input_specs: vec![
+                            super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                                name: "source0".to_string(),
+                                kind: "source".to_string(),
+                                value: source_file.to_string_lossy().into_owned(),
+                                normalization: "absolute-path".to_string(),
+                                optional: false,
+                            },
+                            super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                                name: "java_home".to_string(),
+                                kind: "value".to_string(),
+                                value: java_home,
+                                normalization: "scalar".to_string(),
+                                optional: false,
+                            },
+                        ],
+                        output_specs: vec![
+                            super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                                name: "classes".to_string(),
+                                kind: "directory".to_string(),
+                                path: output_dir.to_string_lossy().into_owned(),
+                            },
+                        ],
+                        environment_inputs: Vec::new(),
+                        system_property_inputs: Vec::new(),
+                        diagnostics: Vec::new(),
+                    }],
+                    dependencies: Vec::new(),
+                    toolchains: Vec::new(),
+                    metadata: Default::default(),
+                },
+                "test-shadow",
+            )
+            .unwrap();
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: build_id.to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: HashMap::new(),
+                allow_jvm_forwarding: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.final_status, "COMPLETED");
+        assert_eq!(resp.plan_source, "build-plan-shadow");
+        assert_eq!(resp.tasks_succeeded, 1);
+        assert_eq!(resp.tasks_forwarded_to_jvm, 0);
+        assert_eq!(resp.task_details[0].task_type, "JavaCompile");
+        assert_eq!(resp.task_details[0].execution_mode, "native");
+        assert!(
+            output_dir.join("HelloFromShadow.class").exists(),
+            "shadow JavaCompile should produce a class file through Rust javac execution"
+        );
+    }
+
+    #[tokio::test]
     async fn test_run_build_native_mkdir() {
         let svc = make_svc();
         let dir = tempfile::tempdir().unwrap();

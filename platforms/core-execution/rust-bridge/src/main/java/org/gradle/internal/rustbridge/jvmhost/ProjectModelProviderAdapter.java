@@ -246,6 +246,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if (description != null && !description.isEmpty()) {
             inputs.put("description", description);
         }
+        if ("JavaCompile".equals(shortTaskTypeName)) {
+            captureJavaCompileInputs(task, inputs);
+        }
 
         BuildPlanTask.Builder builder = BuildPlanTask.newBuilder()
             .setPath(task.getPath())
@@ -257,6 +260,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             .putAllInputs(inputs);
 
         List<String> inputPaths = fileCollectionPaths(safeInputFiles(task));
+        List<String> sourcePaths = "JavaCompile".equals(shortTaskTypeName)
+            ? fileCollectionPaths(safeJavaCompileSource(task))
+            : new ArrayList<>();
         List<String> outputPaths = fileCollectionPaths(safeOutputFiles(task));
         builder.addAllDependsOn(selectedDependencyPaths == null
             ? taskDependencyPaths(task, task.getTaskDependencies())
@@ -267,7 +273,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         builder.addAllOutputs(outputPaths);
         builder.addAllLocalState(fileCollectionPaths(registeredFiles(task.getLocalState())));
         builder.addAllDestroyables(fileCollectionPaths(registeredFiles(task.getDestroyables())));
-        builder.addAllInputSpecs(inputSpecs(inputs, inputPaths));
+        builder.addAllInputSpecs(inputSpecs(inputs, inputPaths, sourcePaths));
         builder.addAllOutputSpecs(outputSpecs(outputPaths));
         builder.addDiagnostics(BuildPlanTaskDiagnostic.newBuilder()
             .setSeverity("info")
@@ -279,7 +285,55 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         return builder.build();
     }
 
-    private static List<BuildPlanTaskInputSpec> inputSpecs(Map<String, String> inputs, List<String> inputPaths) {
+    private static void captureJavaCompileInputs(Task task, Map<String, String> inputs) {
+        putIfPresent(inputs, "java_home", System.getProperty("java.home"));
+        putIfPresent(inputs, "source_version", stringOrEmpty(invokeOptional(task, "getSourceCompatibility")));
+        putIfPresent(inputs, "target_version", stringOrEmpty(invokeOptional(task, "getTargetCompatibility")));
+        putIfPresent(inputs, "classpath", fileCollectionPathString(invokeOptional(task, "getClasspath")));
+
+        Object options = invokeOptional(task, "getOptions");
+        if (options != null) {
+            putIfPresent(inputs, "release", providerValue(invokeOptional(options, "getRelease")));
+            putIfPresent(inputs, "encoding", stringOrEmpty(invokeOptional(options, "getEncoding")));
+            putIfPresent(inputs, "parameters", booleanString(invokeOptional(options, "isParameters")));
+            putIfPresent(inputs, "processor_path", fileCollectionPathString(invokeOptional(options, "getAnnotationProcessorPath")));
+        }
+    }
+
+    private static void putIfPresent(Map<String, String> inputs, String key, String value) {
+        if (value != null && !value.isEmpty()) {
+            inputs.put(key, value);
+        }
+    }
+
+    private static String booleanString(@Nullable Object value) {
+        return value instanceof Boolean ? value.toString() : "";
+    }
+
+    private static String providerValue(@Nullable Object value) {
+        if (value == null) {
+            return "";
+        }
+        Object providerValue = invokeOptional(value, "getOrNull");
+        return providerValue == null ? "" : providerValue.toString();
+    }
+
+    private static String stringOrEmpty(@Nullable Object value) {
+        return value == null ? "" : value.toString();
+    }
+
+    private static String fileCollectionPathString(@Nullable Object files) {
+        if (!(files instanceof FileCollection)) {
+            return "";
+        }
+        return String.join(File.pathSeparator, fileCollectionPaths((FileCollection) files));
+    }
+
+    private static List<BuildPlanTaskInputSpec> inputSpecs(
+            Map<String, String> inputs,
+            List<String> inputPaths,
+            List<String> sourcePaths
+    ) {
         List<BuildPlanTaskInputSpec> specs = new ArrayList<>();
         inputs.entrySet().stream()
             .sorted(Map.Entry.comparingByKey())
@@ -295,6 +349,15 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
                 .setName("input" + index)
                 .setKind("path")
                 .setValue(inputPaths.get(index))
+                .setNormalization("absolute-path")
+                .setOptionalInput(false)
+                .build());
+        }
+        for (int index = 0; index < sourcePaths.size(); index++) {
+            specs.add(BuildPlanTaskInputSpec.newBuilder()
+                .setName("source" + index)
+                .setKind("source")
+                .setValue(sourcePaths.get(index))
                 .setNormalization("absolute-path")
                 .setOptionalInput(false)
                 .build());
@@ -346,6 +409,12 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             LOGGER.debug("[substrate-jvmhost] Failed to resolve task outputs for {}", task.getPath(), e);
             return null;
         }
+    }
+
+    @Nullable
+    private static FileCollection safeJavaCompileSource(Task task) {
+        Object source = invokeOptional(task, "getSource");
+        return source instanceof FileCollection ? (FileCollection) source : null;
     }
 
     @Nullable
@@ -495,6 +564,20 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             throw new IllegalStateException("Invocation failed for " + target.getClass().getName() + "." + methodName, cause != null ? cause : e);
         } catch (NoSuchMethodException e) {
             throw new IllegalStateException("Missing method " + target.getClass().getName() + "." + methodName, e);
+        }
+    }
+
+    @Nullable
+    private static Object invokeOptional(@Nullable Object target, String methodName) {
+        if (target == null) {
+            return null;
+        }
+        try {
+            Method method = target.getClass().getMethod(methodName);
+            return method.invoke(target);
+        } catch (IllegalAccessException | InvocationTargetException | NoSuchMethodException | RuntimeException e) {
+            LOGGER.debug("[substrate-jvmhost] Optional method unavailable: {}.{}", target.getClass().getName(), methodName, e);
+            return null;
         }
     }
 
