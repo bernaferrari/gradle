@@ -415,6 +415,12 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
         ("archive", "Jar") | (_, "Jar") if has_input_paths(task) && has_outputs(task) => {
             "Jar".to_string()
         }
+        ("test", "Test") | (_, "Test") if test_exec_contract_complete(task) => {
+            "TestExec".to_string()
+        }
+        ("test", "Test") | (_, "Test") => {
+            compat_task_type(task, "org.gradle.api.tasks.testing.Test")
+        }
         ("file-transform", "ProcessResources") | (_, "ProcessResources")
             if has_input_paths(task) && has_outputs(task) =>
         {
@@ -432,10 +438,10 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
 }
 
 fn execution_context_json(task: &CanonicalBuildPlanTask, task_type: &str) -> String {
-    let source_files = if task_type == "JavaCompile" {
-        java_source_paths(task)
-    } else {
-        input_paths(task)
+    let source_files = match task_type {
+        "JavaCompile" => java_source_paths(task),
+        "TestExec" => test_class_dir_paths(task),
+        _ => input_paths(task),
     };
     let output_paths = output_paths(task);
     let target_dir = match task_type {
@@ -473,6 +479,10 @@ fn java_compile_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
     !java_source_paths(task).is_empty() && has_outputs(task)
 }
 
+fn test_exec_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
+    has_input_value(task, "classpath") && has_input_value(task, "test_classes_dirs")
+}
+
 fn compat_task_type(task: &CanonicalBuildPlanTask, fallback: &str) -> String {
     if task.implementation_id.contains('.') {
         task.implementation_id.clone()
@@ -502,8 +512,54 @@ fn task_options(
     } else if task_type == "Jar" {
         insert_input_option(task, &mut options, "archive_file_name", "jarName");
         insert_input_option(task, &mut options, "main_class", "mainClass");
+    } else if task_type == "TestExec" {
+        insert_input_option(task, &mut options, "java_home", "java_home");
+        insert_input_option(task, &mut options, "classpath", "classpath");
+        insert_input_option(task, &mut options, "working_dir", "working_dir");
+        insert_input_option(task, &mut options, "xml_report_dir", "xml_report_dir");
+        insert_input_option(task, &mut options, "jvm_args", "jvm_args");
+        insert_input_option(task, &mut options, "system_properties", "system_properties");
+        insert_input_option(task, &mut options, "scan_classpath", "scan_classpath");
+        insert_max_heap_option(task, &mut options);
     }
     options
+}
+
+fn has_input_value(task: &CanonicalBuildPlanTask, input_name: &str) -> bool {
+    task.input_specs.iter().any(|input| {
+        input.kind == "value" && input.name == input_name && !input.value.trim().is_empty()
+    })
+}
+
+fn insert_max_heap_option(
+    task: &CanonicalBuildPlanTask,
+    options: &mut serde_json::Map<String, serde_json::Value>,
+) {
+    if let Some(value) = task
+        .input_specs
+        .iter()
+        .find(|input| input.kind == "value" && input.name == "max_heap_size")
+        .map(|input| input.value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        options.insert(
+            "max_heap_mb".to_string(),
+            serde_json::Value::String(normalize_heap_megabytes(value)),
+        );
+    }
+}
+
+fn normalize_heap_megabytes(value: &str) -> String {
+    let trimmed = value.trim().to_ascii_lowercase();
+    if let Some(mb) = trimmed.strip_suffix('m') {
+        mb.to_string()
+    } else if let Some(gb) = trimmed.strip_suffix('g') {
+        gb.parse::<u64>()
+            .map(|n| (n * 1024).to_string())
+            .unwrap_or_else(|_| value.to_string())
+    } else {
+        value.to_string()
+    }
 }
 
 fn insert_input_option(
@@ -576,6 +632,19 @@ fn java_source_paths(task: &CanonicalBuildPlanTask) -> Vec<String> {
         .into_iter()
         .filter(|path| path.ends_with(".java"))
         .collect()
+}
+
+fn test_class_dir_paths(task: &CanonicalBuildPlanTask) -> Vec<String> {
+    task.input_specs
+        .iter()
+        .find(|input| input.kind == "value" && input.name == "test_classes_dirs")
+        .map(|input| {
+            std::env::split_paths(&input.value)
+                .map(|path| path.to_string_lossy().into_owned())
+                .filter(|path| !path.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn output_paths(task: &CanonicalBuildPlanTask) -> Vec<String> {
@@ -1091,6 +1160,81 @@ mod tests {
         assert_eq!(context["target_dir"], "/repo/build/classes/java/main");
         assert_eq!(context["options"]["release"], "17");
         assert!(context["options"].get("source_version").is_none());
+    }
+
+    #[test]
+    fn test_test_contract_lowers_to_native_test_exec_with_context_options() {
+        let separator = if cfg!(windows) { ";" } else { ":" };
+        let classpath = format!(
+            "/repo/build/classes/java/test{separator}/repo/libs/junit-platform-console-standalone.jar"
+        );
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":test".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.api.tasks.testing.Test".to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "declared-outputs".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "test".to_string(),
+            input_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "classpath".to_string(),
+                    kind: "value".to_string(),
+                    value: classpath.clone(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "test_classes_dirs".to_string(),
+                    kind: "value".to_string(),
+                    value: "/repo/build/classes/java/test".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "max_heap_size".to_string(),
+                    kind: "value".to_string(),
+                    value: "1g".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "scan_classpath".to_string(),
+                    kind: "value".to_string(),
+                    value: "true".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+            ],
+            output_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                    name: "results".to_string(),
+                    kind: "directory".to_string(),
+                    path: "/repo/build/test-results/test".to_string(),
+                },
+            ],
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        let task_type = executable_task_type(&task);
+        let context: serde_json::Value =
+            serde_json::from_str(&execution_context_json(&task, &task_type)).unwrap();
+
+        assert_eq!(task_type, "TestExec");
+        assert_eq!(context["source_files"][0], "/repo/build/classes/java/test");
+        assert_eq!(context["target_dir"], "/repo/build/test-results/test");
+        assert_eq!(context["options"]["classpath"], classpath);
+        assert_eq!(context["options"]["max_heap_mb"], "1024");
+        assert_eq!(context["options"]["scan_classpath"], "true");
     }
 
     #[tokio::test]

@@ -185,10 +185,18 @@ impl TestExecExecutor {
                     cmd.arg("--select-class").arg(class);
                 }
             }
+        } else if input
+            .options
+            .get("scan_classpath")
+            .is_some_and(|value| value == "true")
+        {
+            cmd.arg("--scan-classpath");
         }
 
         // Source files as test class candidates (if no explicit test_classes)
-        if !input.options.contains_key("test_classes") {
+        if !input.options.contains_key("test_classes")
+            && !input.options.contains_key("scan_classpath")
+        {
             for source in &input.source_files {
                 // Convert .java paths to class names: src/test/java/com/example/FooTest.java -> com.example.FooTest
                 if let Some(class_name) = Self::java_file_to_class(source) {
@@ -988,6 +996,30 @@ mod tests {
             .collect();
         assert!(args.iter().any(|a| a.contains("com.example.FooTest")));
         assert!(args.iter().any(|a| a.contains("com.example.BarSpec")));
+    }
+
+    #[test]
+    fn test_build_command_scan_classpath_does_not_require_explicit_classes() {
+        let executor = TestExecExecutor::new();
+        let mut input = TaskInput::new("TestExec");
+        input
+            .options
+            .insert("classpath".to_string(), "/tmp/classes".to_string());
+        input
+            .options
+            .insert("scan_classpath".to_string(), "true".to_string());
+        input.target_dir = PathBuf::from("/tmp/output");
+
+        let java = PathBuf::from("/usr/lib/jvm/java-17/bin/java");
+        let cmd = executor.build_command(&java, &input);
+
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
+        assert!(args.iter().any(|a| a == "--scan-classpath"));
+        assert!(!args.iter().any(|a| a == "--select-class"));
     }
 
     #[tokio::test]

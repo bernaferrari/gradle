@@ -16,6 +16,11 @@ python3 tools/corpus_runner/run.py \
   --manifest testing/corpus/manifest.json \
   --contract-only
 
+# Validate the optional networked corpus contracts
+python3 tools/corpus_runner/run.py \
+  --manifest testing/corpus/external-manifest.json \
+  --contract-only
+
 # Run in shadow mode with an explicit substrate daemon binary
 python3 tools/corpus_runner/run.py \
   --project /path/to/project \
@@ -25,6 +30,12 @@ python3 tools/corpus_runner/run.py \
 # Run the explicit no-fallback RunBuild gate against the checked-in corpus
 python3 tools/corpus_runner/run.py \
   --manifest testing/corpus/manifest.json \
+  --daemon-binary target/debug/gradle-substrate-daemon \
+  --runbuild-authoritative
+
+# Run the explicit no-fallback RunBuild gate against the networked JUnit corpus
+python3 tools/corpus_runner/run.py \
+  --manifest testing/corpus/external-manifest.json \
   --daemon-binary target/debug/gradle-substrate-daemon \
   --runbuild-authoritative
 
@@ -68,11 +79,15 @@ A corpus should be a directory containing Gradle projects:
 
 ```
 
-The repository includes a small offline corpus at `testing/corpus/` with a
-manifest. It covers Java library, Java application, and Java multi-project
-builds. Keep samples deterministic: prefer built-in Gradle plugins and local
-sources; avoid external repositories or dependencies unless the manifest and
-runner are extended to pin/cache them explicitly.
+The repository includes a small offline corpus at `testing/corpus/manifest.json`
+covering Java library, Java application, and Java multi-project builds. The
+optional `testing/corpus/external-manifest.json` adds a pinned JUnit Platform
+sample for real non-empty test execution and requires network or a warm Gradle
+dependency cache.
+
+Keep offline samples deterministic: prefer built-in Gradle plugins and local
+sources. Put external repositories or dependencies in the external manifest with
+pinned coordinates.
 my-corpus/
   project-a/
     build.gradle

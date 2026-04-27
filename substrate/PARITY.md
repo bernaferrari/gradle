@@ -21,6 +21,9 @@
 - The checked-in Java library, Java application, and Java multi-project corpus
   builds complete through that explicit gate with
   `target/debug/gradle-substrate-daemon`.
+- A separate networked JUnit corpus build proves native `TestExec` lowering for
+  a non-empty JUnit Platform test task when the test runtime contains the JUnit
+  Platform ConsoleLauncher.
 
 ## Gaps
 
@@ -31,7 +34,8 @@
 - Kotlin/Groovy DSL evaluation and legacy plugin execution remain JVM-host
   compatibility islands.
 - More task types need native-ready contract capture before broad no-fallback
-  execution is realistic, especially richer `Copy`/`Sync` specs and `Test`.
+  execution is realistic, especially richer `Copy`/`Sync` specs and broader
+  archive/distribution semantics.
 
 ## Validation
 
@@ -40,6 +44,7 @@
 - `cargo test -p gradle-substrate-daemon --test build_plan_shadow_test refreshed_native_ready_shadow_plan_runs_java_lifecycle_without_jvm_fallback -- --exact`
 - `./gradlew :core:test --tests org.gradle.execution.RustAuthoritativeBuildExecutionActionTest -x :distributions-core:generateLicenseFile`
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --verbose`
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --verbose`
 - `./tools/stabilization/run_strict_stabilization.sh quick`
 - `./tools/demo/rust_substrate_demo.sh --quick`
 
@@ -47,8 +52,8 @@
 
 1. Expand differential corpus coverage for external dependency and richer
    task-graph semantics.
-2. Add authoritative coverage for test execution, resource filtering, richer
-   archive specs, and copy/sync edge cases.
+2. Add authoritative coverage for resource filtering, richer archive specs, and
+   copy/sync edge cases.
 3. Add native-ready contracts for richer `Copy`/`Sync` specs and `Test` enough
    to complete broader Java library/application lifecycles.
 4. Reduce bridge source exclusions as APIs are stabilized.
