@@ -1,0 +1,24 @@
+plugins {
+    id 'application'
+}
+
+group = 'org.gradle.substrate.corpus'
+version = '1.0.0'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+application {
+    mainClass = 'org.gradle.substrate.corpus.App'
+}
+
+task prepareRuntime {
+    outputs.dir('build/runtime')
+}
+
+task contractReport {
+    dependsOn prepareRuntime
+    outputs.dir('build/reports/contract')
+}

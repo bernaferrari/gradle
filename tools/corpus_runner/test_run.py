@@ -52,6 +52,30 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         )
         self.assertFalse(corpus_run.detect_substrate_noop("BUILD SUCCESSFUL"))
 
+    def test_checked_in_corpus_manifest_contracts_pass(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        manifest = repo_root / "testing" / "corpus" / "manifest.json"
+
+        results = corpus_run.run_manifest_contracts(str(manifest))
+
+        self.assertIn("java-library-kotlin-dsl", results)
+        self.assertIn("java-application-groovy-dsl", results)
+        failures = {
+            name: result["mismatches"]
+            for name, result in results.items()
+            if not result["match"]
+        }
+        self.assertEqual({}, failures)
+
+    def test_contract_comparison_reports_mismatch(self):
+        mismatches = corpus_run.compare_contract(
+            {"plugins": ["java"], "source_file_count": 1},
+            {"plugins": ["java-library"], "source_file_count": 2},
+        )
+
+        self.assertEqual(2, len(mismatches))
+        self.assertTrue(any("plugins" in mismatch for mismatch in mismatches))
+
 
 if __name__ == "__main__":
     unittest.main()

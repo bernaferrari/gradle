@@ -14,6 +14,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -37,6 +38,105 @@ class RunResult:
             "task_count": len(self.tasks),
             "substrate_noop": self.substrate_noop,
         }
+
+
+def load_manifest(manifest_path: str) -> tuple[Path, list[dict]]:
+    """Load a checked-in corpus manifest and resolve project paths."""
+    path = Path(manifest_path).resolve()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    root = Path(data.get("root", "."))
+    if not root.is_absolute():
+        root = path.parent / root
+
+    projects = []
+    for entry in data.get("projects", []):
+        resolved = dict(entry)
+        project_path = Path(entry["path"])
+        if not project_path.is_absolute():
+            project_path = root / project_path
+        resolved["resolved_path"] = str(project_path)
+        projects.append(resolved)
+    return root, projects
+
+
+def scan_project_contract(project_dir: str) -> dict:
+    """Extract deterministic build-plan contract signals from a corpus project."""
+    root = Path(project_dir)
+    build_files = sorted(
+        path for path in root.rglob("build.gradle*") if ".gradle" in path.name
+    )
+    settings_files = sorted(root.glob("settings.gradle*"))
+    source_files = sorted(root.glob("src/**/*.java")) + sorted(root.glob("src/**/*.kt"))
+
+    plugins: set[str] = set()
+    tasks: set[str] = set()
+    outputs: set[str] = set()
+    dependencies: set[str] = set()
+    toolchains: set[str] = set()
+
+    for build_file in build_files + settings_files:
+        text = build_file.read_text(encoding="utf-8")
+        plugins.update(re.findall(r"id\([\"']([^\"']+)[\"']\)", text))
+        plugins.update(re.findall(r"id\s+[\"']([^\"']+)[\"']", text))
+        plugins.update(re.findall(r"`([^`]+)`", text))
+        if re.search(r"^\s*java-library\s*$", text, re.MULTILINE):
+            plugins.add("java-library")
+        if re.search(r"^\s*java\s*$", text, re.MULTILINE):
+            plugins.add("java")
+        if re.search(r"^\s*application\s*$", text, re.MULTILINE):
+            plugins.add("application")
+
+        tasks.update(re.findall(r"tasks\.register(?:<[^>]+>)?\([\"']([^\"']+)[\"']", text))
+        tasks.update(re.findall(r"^\s*task\s+([A-Za-z_][A-Za-z0-9_]*)\b", text, re.MULTILINE))
+        outputs.update(re.findall(r"outputs\.(?:dir|file)\([\"']([^\"']+)[\"']\)", text))
+        dependencies.update(re.findall(r"[\"']([A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[^\"']+)[\"']", text))
+        toolchains.update(re.findall(r"JavaVersion\.VERSION_([0-9]+)", text))
+        toolchains.update(re.findall(r"languageVersion\.set\(JavaLanguageVersion\.of\(([0-9]+)\)\)", text))
+
+    return {
+        "build_file_count": len(build_files),
+        "settings_file_count": len(settings_files),
+        "source_file_count": len(source_files),
+        "plugins": sorted(plugins),
+        "tasks": sorted(tasks),
+        "outputs": sorted(outputs),
+        "dependencies": sorted(dependencies),
+        "toolchains": sorted(toolchains),
+    }
+
+
+def compare_contract(actual: dict, expected: dict) -> list[str]:
+    """Compare scanned corpus contract signals against manifest expectations."""
+    mismatches: list[str] = []
+    for key, expected_value in expected.items():
+        actual_value = actual.get(key)
+        if isinstance(expected_value, list):
+            expected_sorted = sorted(expected_value)
+            actual_sorted = sorted(actual_value or [])
+            if actual_sorted != expected_sorted:
+                mismatches.append(f"{key}: expected {expected_sorted}, got {actual_sorted}")
+        elif actual_value != expected_value:
+            mismatches.append(f"{key}: expected {expected_value!r}, got {actual_value!r}")
+    return mismatches
+
+
+def run_manifest_contracts(manifest_path: str) -> dict:
+    """Validate corpus projects without invoking Gradle or requiring network."""
+    _root, projects = load_manifest(manifest_path)
+    results = {}
+    for project in projects:
+        name = project["name"]
+        actual = scan_project_contract(project["resolved_path"])
+        expected = project.get("expected_contract", {})
+        mismatches = compare_contract(actual, expected)
+        results[name] = {
+            "path": project["resolved_path"],
+            "actual_contract": actual,
+            "expected_contract": expected,
+            "match": not mismatches,
+            "mismatches": mismatches,
+        }
+    return results
 
 
 def build_gradle_command(
@@ -131,6 +231,9 @@ def main():
     parser = argparse.ArgumentParser(description="Run Gradle corpus validation")
     parser.add_argument("--project", help="Single project to run")
     parser.add_argument("--projects", nargs="+", help="Multiple projects to run")
+    parser.add_argument("--manifest", help="Corpus manifest with project paths and expected contracts")
+    parser.add_argument("--contract-only", action="store_true",
+                       help="Validate manifest build-plan contracts without invoking Gradle")
     parser.add_argument("--mode", choices=["reference", "shadow"], default="reference",
                        help="Run mode: reference (compare upstream vs substrate) or shadow")
     parser.add_argument("--tasks", nargs="+", default=["clean", "build"],
@@ -147,11 +250,28 @@ def main():
     
     args = parser.parse_args()
     
+    if args.manifest and args.contract_only:
+        results = run_manifest_contracts(args.manifest)
+        failed = [name for name, result in results.items() if not result["match"]]
+        for name, result in results.items():
+            status = "PASS" if result["match"] else "FAIL"
+            print(f"{status} {name}: {result['path']}")
+            for mismatch in result["mismatches"]:
+                print(f"  - {mismatch}")
+        output_dir = args.output_dir or "."
+        os.makedirs(output_dir, exist_ok=True)
+        with open(os.path.join(output_dir, "corpus_contract_results.json"), "w") as f:
+            json.dump(results, f, indent=2)
+        sys.exit(1 if failed else 0)
+
     projects = []
     if args.project:
         projects.append(args.project)
     elif args.projects:
         projects.extend(args.projects)
+    elif args.manifest:
+        _root, manifest_projects = load_manifest(args.manifest)
+        projects.extend(project["resolved_path"] for project in manifest_projects)
     
     if not projects:
         print("No projects specified. Use --project or --projects.")
