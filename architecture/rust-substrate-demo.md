@@ -10,8 +10,8 @@ tools/demo/rust_substrate_demo.sh --quick
 ```
 
 This runs the strict quick gate, validates the checked-in offline corpus,
-builds the Java library/application samples, and runs the Rust daemon gRPC e2e
-tests.
+builds the checked-in Java corpus samples, runs the no-fallback authoritative
+RunBuild corpus gate, and runs the Rust daemon gRPC e2e tests.
 
 ## Public Demo Gate
 
@@ -30,18 +30,26 @@ release smoke coverage from `substrate/scripts/e2e-smoke-test.sh`.
 - `tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --contract-only`
   proves the checked-in corpus contracts are deterministic without network
   access.
-- `testing/corpus/` gives two small real builds: a Kotlin DSL Java library and
-  a Groovy DSL Java application.
+- `testing/corpus/` gives four small real builds: a Kotlin DSL Java library, a
+  Groovy DSL Java application, a Kotlin DSL multi-project application, and a
+  Java resource-expansion sample.
+- `tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative`
+  proves the checked-in corpus can run through the explicit no-fallback
+  RunBuild gate and compare stable output inventories plus non-archive content
+  hashes.
+- `cargo test -p gradle-substrate-daemon --test build_plan_shadow_test refreshed_native_ready_shadow_plan_runs_java_lifecycle_without_jvm_fallback -- --exact`
+  proves a captured Java lifecycle plan can run with JVM fallback disabled.
 - `cargo test -p gradle-substrate-daemon --test e2e_grpc_test` exercises daemon
   gRPC behavior directly.
 
 ## Current Limits
 
-- The demo does not claim full no-fallback Gradle execution.
+- The demo does not claim full no-fallback Gradle execution beyond the covered
+  Java lifecycle, file operation, archive, test, and resource-expansion gates.
 - DSL evaluation and legacy plugin semantics remain JVM compatibility work.
-- The corpus contract gate validates build-plan signals; full upstream-vs-Rust
-  output parity still depends on running the corpus with a real substrate daemon
-  binary and non-noop bridge mode.
+- Archive byte-for-byte parity, arbitrary CopySpec actions, and broad
+  dependency-resolution semantics remain outside the demo claim.
 - The Rust-owned path is strongest today around protocol stability, hashing,
-  cache/config-cache support, build-plan shadowing, fail-closed bridge clients,
-  and daemon/service behavior covered by the strict gate.
+  cache/config-cache support, build-plan shadowing, file transforms, Java
+  lifecycle execution, archive packaging, test execution, fail-closed bridge
+  clients, and daemon/service behavior covered by the strict gate.

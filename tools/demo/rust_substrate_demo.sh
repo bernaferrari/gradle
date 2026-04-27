@@ -14,9 +14,10 @@ Usage: tools/demo/rust_substrate_demo.sh [--quick|--full] [--skip-sample-builds]
 
 Runs an honest Rust substrate demo:
   - strict stabilization gate
-  - checked-in corpus contract validation
+  - checked-in four-project corpus contract validation
   - captured build-plan shadow Java lifecycle execution with JVM fallback disabled
   - optional sample Gradle builds from testing/corpus
+  - optional no-fallback authoritative RunBuild gate with output inventory/hash parity
   - optional Rust daemon gRPC e2e test suite
 
 Use --full when preparing a public demo; it runs the full stabilization mode,
@@ -99,6 +100,8 @@ if [[ "$RUN_SAMPLE_BUILDS" -eq 1 ]]; then
     ./gradlew -q -p testing/corpus/java-application-groovy-dsl clean build
   run_step "Build corpus Java multi-project sample" \
     ./gradlew -q -p testing/corpus/java-multiproject-kotlin-dsl clean build
+  run_step "Build corpus Java resource expansion sample" \
+    ./gradlew -q -p testing/corpus/java-resources-expand-kotlin-dsl clean build
   run_step "Build Rust substrate daemon" \
     cargo build -q -p gradle-substrate-daemon
   run_step "Build checked-in corpus with authoritative Rust RunBuild gate" \
@@ -124,9 +127,10 @@ What this proves:
   - Rust/JVM proto drift checks pass.
   - Hardened bridge clients fail closed instead of returning hidden defaults.
   - Build-plan IR v2 fingerprints and shadow artifacts are stable.
-  - The checked-in Java library/application/multi-project corpus has deterministic build-plan contracts.
+  - The checked-in Java library/application/multi-project/resource-expansion corpus has deterministic build-plan contracts.
   - A captured JVM-host Java lifecycle build-plan shadow can execute JavaCompile, ProcessResources, classes, and Jar through Rust with JVM fallback disabled.
-  - When sample builds are enabled, the checked-in Java corpus exercises the explicit no-fallback RunBuild gate from real Gradle invocations.
+  - Native Copy/ProcessResources coverage includes recursive directory sources, declared token expansion, and basic duplicate destination strategies.
+  - When sample builds are enabled, the checked-in Java corpus exercises the explicit no-fallback RunBuild gate from real Gradle invocations and compares stable output inventories plus non-archive SHA-256 hashes.
   - Rust daemon gRPC behavior is exercised when --skip-grpc-e2e is not used.
 
 What this does not claim:
