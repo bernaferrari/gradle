@@ -33,6 +33,8 @@
 - Native `ProcessResources`/`Copy` execution can expand declared scalar task
   input properties in Gradle-style `$name` and `${name}` templates, validated by
   content-hash corpus comparison.
+- Native `Copy` honors basic duplicate destination strategies: `INCLUDE`/default
+  overwrites, `EXCLUDE` keeps the first file, and `FAIL` reports an error.
 
 ## Gaps
 
@@ -44,8 +46,8 @@
   compatibility islands.
 - More task types need native-ready contract capture before broad no-fallback
   execution is realistic, especially arbitrary copy filters/actions, Gradle
-  archive metadata edge cases, nested copy specs, duplicate handling,
-  permissions, symlinks, and non-gzip tar compression variants.
+  archive metadata edge cases, nested copy specs, permission preservation,
+  symlinks, and non-gzip tar compression variants.
 
 ## Validation
 
