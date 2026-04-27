@@ -896,6 +896,7 @@ async fn test_dag_executor_full_build_completion() {
                 execution_order: (i + 1) as i64,
                 estimated_duration_ms: 0,
                 task_type: String::new(),
+                execution_context_json: String::new(),
             })
             .collect::<Vec<_>>(),
     );
