@@ -1,18 +1,18 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
-    task_graph_service_server::TaskGraphService, ClearBuildTasksRequest, ClearBuildTasksResponse,
-    ExecutionNode, GetProgressRequest, GetProgressResponse, RegisterTaskRequest,
-    RegisterTaskResponse, ResolveExecutionPlanRequest, ResolveExecutionPlanResponse,
-    TaskFinishedRequest, TaskFinishedResponse, TaskProgress, TaskStartedRequest,
-    TaskStartedResponse,
+    ClearBuildTasksRequest, ClearBuildTasksResponse, ExecutionNode, GetProgressRequest,
+    GetProgressResponse, RegisterTaskRequest, RegisterTaskResponse, ResolveExecutionPlanRequest,
+    ResolveExecutionPlanResponse, TaskFinishedRequest, TaskFinishedResponse, TaskProgress,
+    TaskStartedRequest, TaskStartedResponse, task_graph_service_server::TaskGraphService,
 };
 
+use super::build_plan_ir::CanonicalBuildPlanTask;
 use super::build_plan_shadow::BuildPlanShadowStore;
 use super::execution_history::ExecutionHistoryServiceImpl;
 use super::scopes::BuildId;
@@ -24,6 +24,7 @@ struct TaskNode {
     depends_on: Vec<String>,
     should_execute: bool,
     task_type: String,
+    execution_context_json: String,
     estimated_duration_ms: i64,
     status: String,
     start_time_ms: i64,
@@ -175,13 +176,16 @@ impl TaskGraphServiceImpl {
         let mut loaded = 0usize;
         for task in artifact.plan.tasks {
             let estimated = self.lookup_historical_duration(&task.path);
+            let task_type = executable_task_type(&task);
+            let execution_context_json = execution_context_json(&task, &task_type);
             self.tasks.insert(
                 (build_id.clone(), task.path.clone()),
                 TaskNode {
                     task_path: task.path,
                     depends_on: task.depends_on,
                     should_execute: true,
-                    task_type: task.implementation_id,
+                    task_type,
+                    execution_context_json,
                     estimated_duration_ms: estimated,
                     status: "PENDING".to_string(),
                     start_time_ms: 0,
@@ -290,6 +294,7 @@ impl TaskGraphServiceImpl {
                         execution_order: order,
                         estimated_duration_ms: estimated,
                         task_type: entry.task_type.clone(),
+                        execution_context_json: entry.execution_context_json.clone(),
                     });
                 }
             }
@@ -392,6 +397,109 @@ impl TaskGraphServiceImpl {
     }
 }
 
+fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
+    let simple = task
+        .implementation_id
+        .rsplit('.')
+        .next()
+        .unwrap_or(task.implementation_id.as_str());
+    match (task.action_kind.as_str(), simple) {
+        ("mkdir", _) | ("create-directory", _) | (_, "Mkdir") => "Mkdir".to_string(),
+        ("compile", "JavaCompile") | (_, "JavaCompile")
+            if !java_source_paths(task).is_empty() && has_outputs(task) =>
+        {
+            "JavaCompile".to_string()
+        }
+        ("archive", "Jar") | (_, "Jar") if has_input_paths(task) && has_outputs(task) => {
+            "Jar".to_string()
+        }
+        ("file-transform", "Copy") | (_, "Copy") if has_input_paths(task) && has_outputs(task) => {
+            "Copy".to_string()
+        }
+        ("file-transform", "Sync") | (_, "Sync") if has_input_paths(task) && has_outputs(task) => {
+            "Sync".to_string()
+        }
+        _ => task.implementation_id.clone(),
+    }
+}
+
+fn execution_context_json(task: &CanonicalBuildPlanTask, task_type: &str) -> String {
+    let source_files = if task_type == "JavaCompile" {
+        java_source_paths(task)
+    } else {
+        input_paths(task)
+    };
+    let output_paths = output_paths(task);
+    let target_dir = match task_type {
+        "Mkdir" => String::new(),
+        "Jar" => output_paths
+            .first()
+            .and_then(|path| std::path::Path::new(path).parent())
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        _ => output_paths.first().cloned().unwrap_or_default(),
+    };
+    let mut options = serde_json::Map::new();
+    if task_type == "Jar" {
+        if let Some(path) = output_paths.first() {
+            if let Some(name) = std::path::Path::new(path).file_name() {
+                options.insert(
+                    "jarName".to_string(),
+                    serde_json::Value::String(name.to_string_lossy().into_owned()),
+                );
+            }
+        }
+    }
+
+    serde_json::json!({
+        "source_files": if task_type == "Mkdir" { output_paths } else { source_files },
+        "target_dir": target_dir,
+        "options": options,
+    })
+    .to_string()
+}
+
+fn has_input_paths(task: &CanonicalBuildPlanTask) -> bool {
+    !input_paths(task).is_empty()
+}
+
+fn has_outputs(task: &CanonicalBuildPlanTask) -> bool {
+    !output_paths(task).is_empty()
+}
+
+fn input_paths(task: &CanonicalBuildPlanTask) -> Vec<String> {
+    task.input_specs
+        .iter()
+        .filter(|input| {
+            matches!(
+                input.kind.as_str(),
+                "file" | "directory" | "path" | "source"
+            )
+        })
+        .map(|input| input.value.clone())
+        .filter(|path| !path.is_empty())
+        .collect()
+}
+
+fn java_source_paths(task: &CanonicalBuildPlanTask) -> Vec<String> {
+    input_paths(task)
+        .into_iter()
+        .filter(|path| path.ends_with(".java"))
+        .collect()
+}
+
+fn output_paths(task: &CanonicalBuildPlanTask) -> Vec<String> {
+    if task.output_specs.is_empty() {
+        task.outputs.clone()
+    } else {
+        task.output_specs
+            .iter()
+            .map(|output| output.path.clone())
+            .filter(|path| !path.is_empty())
+            .collect()
+    }
+}
+
 #[tonic::async_trait]
 impl TaskGraphService for TaskGraphServiceImpl {
     async fn register_task(
@@ -431,6 +539,7 @@ impl TaskGraphService for TaskGraphServiceImpl {
                 depends_on: req.depends_on,
                 should_execute: req.should_execute,
                 task_type: req.task_type,
+                execution_context_json: String::new(),
                 estimated_duration_ms: estimated,
                 status: "PENDING".to_string(),
                 start_time_ms: 0,

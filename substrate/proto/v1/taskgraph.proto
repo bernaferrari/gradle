@@ -35,6 +35,7 @@ message ExecutionNode {
   int64 execution_order = 3;
   int64 estimated_duration_ms = 4;
   string task_type = 5;
+  string execution_context_json = 6;
 }
 message ResolveExecutionPlanResponse {
   repeated ExecutionNode execution_order = 1;

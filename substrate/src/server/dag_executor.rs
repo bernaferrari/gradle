@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
@@ -11,15 +11,16 @@ use super::work::WorkerScheduler;
 
 use crate::client::jvm_host_bridge::SharedJvmHostBridge;
 use crate::proto::{
+    AwaitBuildCompletionRequest, AwaitBuildCompletionResponse, BuildEventMessage,
+    CancelBuildRequest, CancelBuildResponse, GetBuildStatusRequest, GetBuildStatusResponse,
+    GetNextTaskRequest, GetNextTaskResponse, NotifyTaskFinishedRequest, NotifyTaskFinishedResponse,
+    NotifyTaskStartedRequest, NotifyTaskStartedResponse, PredictedOutcome, RecordOutcomeRequest,
+    ResolveExecutionPlanRequest, ResolvePlanRequest, RunBuildRequest, RunBuildResponse,
+    StartBuildRequest, StartBuildResponse, TaskExecutionDetail, TaskFinishedRequest,
+    TaskStartedRequest, TaskStatusEntry, WorkMetadata,
     dag_executor_service_server::DagExecutorService,
     execution_plan_service_server::ExecutionPlanService,
-    task_graph_service_server::TaskGraphService, AwaitBuildCompletionRequest,
-    AwaitBuildCompletionResponse, BuildEventMessage, CancelBuildRequest, CancelBuildResponse,
-    GetBuildStatusRequest, GetBuildStatusResponse, GetNextTaskRequest, GetNextTaskResponse,
-    NotifyTaskFinishedRequest, NotifyTaskFinishedResponse, NotifyTaskStartedRequest,
-    NotifyTaskStartedResponse, PredictedOutcome, RecordOutcomeRequest, ResolveExecutionPlanRequest,
-    ResolvePlanRequest, RunBuildRequest, RunBuildResponse, StartBuildRequest, StartBuildResponse,
-    TaskExecutionDetail, TaskFinishedRequest, TaskStartedRequest, TaskStatusEntry, WorkMetadata,
+    task_graph_service_server::TaskGraphService,
 };
 use crate::server::task_executor::{TaskExecutorRegistry, TaskInput};
 
@@ -38,6 +39,7 @@ struct TaskSlot {
     work_metadata: Option<WorkMetadata>,
     predicted_outcome: i32,
     input_fingerprint: String,
+    execution_context_json: String,
 }
 
 /// Runtime state for an active build execution.
@@ -362,6 +364,18 @@ impl DagExecutorServiceImpl {
         }
         result
     }
+
+    fn task_execution_context(&self, build_id: &str, task_path: &str) -> Option<String> {
+        self.builds
+            .get(&BuildId::from(build_id.to_string()))
+            .and_then(|execution| {
+                execution
+                    .tasks
+                    .get(task_path)
+                    .map(|slot| slot.execution_context_json.clone())
+            })
+            .filter(|context| !context.is_empty())
+    }
 }
 
 #[tonic::async_trait]
@@ -440,6 +454,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                     work_metadata: None,
                     predicted_outcome: PredictedOutcome::PredictedUnknown as i32,
                     input_fingerprint: String::new(),
+                    execution_context_json: node.execution_context_json.clone(),
                 },
             );
 
@@ -597,7 +612,10 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 let task_type = next.task_type.clone();
 
                 // Phase 2a: Check execution plan for UP-TO-DATE / FROM_CACHE.
-                let context_json = task_contexts.get(&task_path).cloned();
+                let context_json = task_contexts
+                    .get(&task_path)
+                    .cloned()
+                    .or_else(|| self.task_execution_context(&build_id_str, &task_path));
                 let work_meta = context_json.as_ref().and_then(|json| {
                     serde_json::from_str::<serde_json::Value>(json)
                         .ok()
@@ -775,7 +793,10 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 }
 
                 let registry = Arc::clone(&self.executor_registry);
-                let context_for_task = task_contexts.get(&task_path).cloned();
+                let context_for_task = task_contexts
+                    .get(&task_path)
+                    .cloned()
+                    .or_else(|| self.task_execution_context(&build_id_str, &task_path));
                 let tx = result_tx.clone();
                 let allow_jvm_forwarding_for_task = allow_jvm_forwarding;
                 let jvm_host_bridge = self.jvm_host_bridge.clone();
@@ -870,14 +891,14 @@ impl DagExecutorService for DagExecutorServiceImpl {
                         }
                     } else {
                         (
-                                false,
-                                "FAILED".to_string(),
-                                "missing_executor".to_string(),
-                                format!(
-                                    "No native executor registered for task type {} and JVM forwarding is disabled",
-                                    task_type
-                                ),
-                            )
+                            false,
+                            "FAILED".to_string(),
+                            "missing_executor".to_string(),
+                            format!(
+                                "No native executor registered for task type {} and JVM forwarding is disabled",
+                                task_type
+                            ),
+                        )
                     };
 
                     drop(permit);
@@ -1463,8 +1484,8 @@ mod tests {
     use super::*;
     use crate::client::jvm_host::JvmHostClient;
     use crate::client::jvm_host_bridge::JvmHostBridge;
-    use crate::proto::jvm_host_service_server::{JvmHostService, JvmHostServiceServer};
     use crate::proto::RegisterTaskRequest;
+    use crate::proto::jvm_host_service_server::{JvmHostService, JvmHostServiceServer};
     use tokio::net::UnixListener;
     use tonic::transport::Server;
 
@@ -2724,9 +2745,15 @@ mod tests {
                         cacheability: "unknown".to_string(),
                         local_state: Vec::new(),
                         destroyables: Vec::new(),
-                        action_kind: "file-transform".to_string(),
+                        action_kind: "mkdir".to_string(),
                         input_specs: Vec::new(),
-                        output_specs: Vec::new(),
+                        output_specs: vec![
+                            super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                                name: "directory".to_string(),
+                                kind: "directory".to_string(),
+                                path: output_dir.to_string_lossy().into_owned(),
+                            },
+                        ],
                         environment_inputs: Vec::new(),
                         system_property_inputs: Vec::new(),
                         diagnostics: Vec::new(),
@@ -2744,14 +2771,7 @@ mod tests {
                 build_id: build_id.to_string(),
                 max_parallelism: 1,
                 task_filter: vec![],
-                task_contexts: HashMap::from([(
-                    ":fromShadow".to_string(),
-                    serde_json::json!({
-                        "source_files": [output_dir.to_string_lossy()],
-                        "target_dir": ""
-                    })
-                    .to_string(),
-                )]),
+                task_contexts: HashMap::new(),
                 allow_jvm_forwarding: false,
             }))
             .await
@@ -2766,6 +2786,10 @@ mod tests {
         assert_eq!(resp.task_details.len(), 1);
         assert_eq!(resp.task_details[0].task_path, ":fromShadow");
         assert_eq!(resp.task_details[0].task_type, "Mkdir");
+        assert!(
+            output_dir.exists(),
+            "shadow IR context should create the directory"
+        );
     }
 
     #[tokio::test]

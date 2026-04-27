@@ -256,6 +256,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             .setActionKind(actionKind(taskType))
             .putAllInputs(inputs);
 
+        List<String> inputPaths = fileCollectionPaths(safeInputFiles(task));
         List<String> outputPaths = fileCollectionPaths(safeOutputFiles(task));
         builder.addAllDependsOn(selectedDependencyPaths == null
             ? taskDependencyPaths(task, task.getTaskDependencies())
@@ -266,7 +267,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         builder.addAllOutputs(outputPaths);
         builder.addAllLocalState(fileCollectionPaths(registeredFiles(task.getLocalState())));
         builder.addAllDestroyables(fileCollectionPaths(registeredFiles(task.getDestroyables())));
-        builder.addAllInputSpecs(inputSpecs(inputs));
+        builder.addAllInputSpecs(inputSpecs(inputs, inputPaths));
         builder.addAllOutputSpecs(outputSpecs(outputPaths));
         builder.addDiagnostics(BuildPlanTaskDiagnostic.newBuilder()
             .setSeverity("info")
@@ -278,7 +279,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         return builder.build();
     }
 
-    private static List<BuildPlanTaskInputSpec> inputSpecs(Map<String, String> inputs) {
+    private static List<BuildPlanTaskInputSpec> inputSpecs(Map<String, String> inputs, List<String> inputPaths) {
         List<BuildPlanTaskInputSpec> specs = new ArrayList<>();
         inputs.entrySet().stream()
             .sorted(Map.Entry.comparingByKey())
@@ -289,6 +290,15 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
                 .setNormalization("scalar")
                 .setOptionalInput(false)
                 .build()));
+        for (int index = 0; index < inputPaths.size(); index++) {
+            specs.add(BuildPlanTaskInputSpec.newBuilder()
+                .setName("input" + index)
+                .setKind("path")
+                .setValue(inputPaths.get(index))
+                .setNormalization("absolute-path")
+                .setOptionalInput(false)
+                .build());
+        }
         return specs;
     }
 
@@ -315,6 +325,16 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         } catch (RuntimeException e) {
             LOGGER.debug("[substrate-jvmhost] Failed to resolve task dependency paths for {}", task.getPath(), e);
             return new ArrayList<>();
+        }
+    }
+
+    @Nullable
+    private static FileCollection safeInputFiles(Task task) {
+        try {
+            return task.getInputs().getFiles();
+        } catch (RuntimeException e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to resolve task inputs for {}", task.getPath(), e);
+            return null;
         }
     }
 
