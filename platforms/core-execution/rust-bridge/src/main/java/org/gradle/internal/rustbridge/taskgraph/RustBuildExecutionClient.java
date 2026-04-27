@@ -104,6 +104,27 @@ public class RustBuildExecutionClient {
             );
         }
 
+        public static RunBuildResult completed(
+            String planSource,
+            int totalTasks,
+            int tasksSucceeded,
+            int tasksFailed,
+            int tasksForwardedToJvm
+        ) {
+            return new RunBuildResult(
+                tasksFailed == 0,
+                "COMPLETED",
+                totalTasks,
+                tasksSucceeded,
+                tasksFailed,
+                tasksForwardedToJvm,
+                planSource,
+                "",
+                "",
+                Collections.emptyList()
+            );
+        }
+
         public static RunBuildResult error(String errorMessage) {
             return new RunBuildResult(
                 false,

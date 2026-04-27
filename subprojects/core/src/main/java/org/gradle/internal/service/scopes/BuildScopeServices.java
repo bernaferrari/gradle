@@ -128,6 +128,7 @@ import org.gradle.execution.BuildWorkExecutor;
 import org.gradle.execution.DefaultTasksBuildTaskScheduler;
 import org.gradle.execution.DryRunBuildExecutionAction;
 import org.gradle.execution.ProjectConfigurer;
+import org.gradle.execution.RustAuthoritativeBuildExecutionAction;
 import org.gradle.execution.SelectedTaskExecutionAction;
 import org.gradle.execution.TaskNameResolvingBuildTaskScheduler;
 import org.gradle.execution.commandline.CommandLineTaskConfigurer;
@@ -200,6 +201,8 @@ import org.gradle.internal.build.DefaultPublicBuildPath;
 import org.gradle.internal.build.PublicBuildPath;
 import org.gradle.internal.buildevents.BuildStartedTime;
 import org.gradle.internal.buildoption.FeatureFlags;
+import org.gradle.internal.buildoption.InternalOptions;
+import org.gradle.internal.buildoption.RustSubstrateOptions;
 import org.gradle.internal.buildtree.BuildInclusionCoordinator;
 import org.gradle.internal.buildtree.BuildModelParameters;
 import org.gradle.internal.buildtree.IntermediateBuildActionRunner;
@@ -242,6 +245,7 @@ import org.gradle.internal.resource.DefaultTextFileResourceLoader;
 import org.gradle.internal.resource.TextFileResourceLoader;
 import org.gradle.internal.resources.ResourceLockCoordinationService;
 import org.gradle.internal.resources.SharedResourceLeaseRegistry;
+import org.gradle.internal.rustbridge.taskgraph.RustBuildExecutionClient;
 import org.gradle.internal.scan.UsedByScanPlugin;
 import org.gradle.internal.scripts.ScriptExecutionListener;
 import org.gradle.internal.service.CachingServiceLocator;
@@ -262,6 +266,7 @@ import org.gradle.tooling.provider.model.internal.DefaultToolingModelBuilderRegi
 import org.gradle.tooling.provider.model.internal.IntermediateToolingModelProvider;
 import org.gradle.tooling.provider.model.internal.ToolingModelParameterCarrier;
 import org.gradle.tooling.provider.model.internal.ToolingModelProjectDependencyListener;
+import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 
@@ -851,7 +856,9 @@ public class BuildScopeServices implements ServiceRegistrationProvider {
         GradleInternal gradle,
         StyledTextOutputFactory textOutputFactory,
         BuildOperationRunner buildOperationRunner,
-        ConfigurationTimeBarrier configurationTimeBarrier
+        ConfigurationTimeBarrier configurationTimeBarrier,
+        InternalOptions options,
+        @Nullable RustBuildExecutionClient rustBuildExecutionClient
     ) {
         BuildWorkExecutor delegate = new SelectedTaskExecutionAction();
         BuildWorkExecutor executor;
@@ -861,6 +868,12 @@ public class BuildScopeServices implements ServiceRegistrationProvider {
             executor = new TaskGraphBuildExecutionAction(delegate, textOutputFactory, configurationTimeBarrier);
         } else {
             executor = delegate;
+        }
+        if (!gradle.getStartParameter().isDryRun()
+            && !gradle.getStartParameter().isTaskGraph()
+            && rustBuildExecutionClient != null
+            && options.getBoolean(RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_RUN_BUILD)) {
+            executor = new RustAuthoritativeBuildExecutionAction(executor, rustBuildExecutionClient, true);
         }
         return new BuildOperationFiringBuildWorkerExecutor(executor, buildOperationRunner);
     }
