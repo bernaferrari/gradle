@@ -193,6 +193,10 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("file-transform", task.getActionKind());
         assertEquals("in-process", task.getWorkerIsolation());
         assertEquals("appName=corpus,appVersion=1.0", inputs.get("expand_properties"));
+        assertEquals("INCLUDE", inputs.get("duplicates_strategy"));
+        assertEquals("**/*.properties", inputs.get("include_patterns"));
+        assertEquals("**/secret.*", inputs.get("exclude_patterns"));
+        assertEquals("false", inputs.get("case_sensitive"));
         assertTrue(task.getInputSpecsList().stream()
             .anyMatch(input -> input.getKind().equals("path") && input.getValue().equals(resourceFile.getAbsolutePath())));
         assertTrue(task.getOutputSpecsList().stream()
@@ -477,7 +481,7 @@ public class ProjectModelProviderAdapterTest {
             }
             return defaultValue(method.getReturnType());
         });
-        return proxy(Task.class, (proxy, method, args) -> {
+        return proxy(new Class<?>[] {Task.class, FileTransformTaskContract.class}, (proxy, method, args) -> {
             switch (method.getName()) {
                 case "getPath":
                     return path;
@@ -542,6 +546,12 @@ public class ProjectModelProviderAdapterTest {
                     return "INCLUDE";
                 case "getFilteringCharset":
                     return "UTF-8";
+                case "getIncludes":
+                    return Collections.singleton("**/*.properties");
+                case "getExcludes":
+                    return Collections.singleton("**/secret.*");
+                case "isCaseSensitive":
+                    return false;
                 default:
                     return defaultValue(method.getReturnType());
             }
@@ -651,6 +661,9 @@ public class ProjectModelProviderAdapterTest {
         boolean hasCustomActions();
         Object getDuplicatesStrategy();
         String getFilteringCharset();
+        Set<String> getIncludes();
+        Set<String> getExcludes();
+        boolean isCaseSensitive();
     }
 
     public interface FileTransformTaskContract {

@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use std::pin::Pin;
 
 use crate::server::task_executor::copy::{
-    duplicate_strategy, expand_bytes, parse_expand_properties,
+    case_sensitive, duplicate_strategy, expand_bytes, parse_expand_properties, parse_patterns,
+    path_included,
 };
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
@@ -108,6 +109,9 @@ impl TaskExecutor for SyncTaskExecutor {
 
         let expand_properties = parse_expand_properties(input.options.get("expand_properties"));
         let duplicate_strategy = duplicate_strategy(input);
+        let include_patterns = parse_patterns(input.options.get("include_patterns"));
+        let exclude_patterns = parse_patterns(input.options.get("exclude_patterns"));
+        let case_sensitive = case_sensitive(input);
         let mut expected_files = HashSet::new();
         let mut seen_destinations = HashSet::new();
 
@@ -125,6 +129,14 @@ impl TaskExecutor for SyncTaskExecutor {
             // Copy/update files
             for src_file in &source_files {
                 let relative = src_file.strip_prefix(source_dir).unwrap_or(src_file);
+                if !path_included(
+                    relative,
+                    &include_patterns,
+                    &exclude_patterns,
+                    case_sensitive,
+                ) {
+                    continue;
+                }
                 expected_files.insert(relative.to_path_buf());
                 let dest_file = input.target_dir.join(relative);
 
@@ -359,6 +371,48 @@ mod tests {
                 .unwrap(),
             "name=sync\n"
         );
+    }
+
+    #[tokio::test]
+    async fn test_sync_honors_include_and_exclude_patterns() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let dest_dir = tmp.path().join("dest");
+
+        tokio::fs::create_dir_all(src_dir.join("keep"))
+            .await
+            .unwrap();
+        tokio::fs::create_dir_all(src_dir.join("skip"))
+            .await
+            .unwrap();
+        tokio::fs::write(src_dir.join("keep/app.properties"), b"app")
+            .await
+            .unwrap();
+        tokio::fs::write(src_dir.join("keep/app.txt"), b"text")
+            .await
+            .unwrap();
+        tokio::fs::write(src_dir.join("skip/secret.properties"), b"secret")
+            .await
+            .unwrap();
+
+        let executor = SyncTaskExecutor::new();
+        let mut input = TaskInput::new("Sync");
+        input.source_files.push(src_dir);
+        input.target_dir = dest_dir.clone();
+        input.options.insert(
+            "include_patterns".to_string(),
+            "**/*.properties".to_string(),
+        );
+        input
+            .options
+            .insert("exclude_patterns".to_string(), "skip/**".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert!(dest_dir.join("keep/app.properties").exists());
+        assert!(!dest_dir.join("keep/app.txt").exists());
+        assert!(!dest_dir.join("skip/secret.properties").exists());
     }
 
     #[tokio::test]

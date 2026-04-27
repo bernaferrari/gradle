@@ -30,9 +30,10 @@ release smoke coverage from `substrate/scripts/e2e-smoke-test.sh`.
 - `tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --contract-only`
   proves the checked-in corpus contracts are deterministic without network
   access.
-- `testing/corpus/` gives five small real builds: a Kotlin DSL Java library, a
+- `testing/corpus/` gives six small real builds: a Kotlin DSL Java library, a
   Groovy DSL Java application, a Kotlin DSL multi-project application, and a
-  Java resource-expansion sample, plus a standalone Sync resource transform.
+  Java resource-expansion sample, plus standalone Sync and CopySpec resource
+  transforms.
 - `tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative`
   proves the checked-in corpus can run through the explicit no-fallback
   RunBuild gate and compare stable output inventories plus non-archive content

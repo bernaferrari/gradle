@@ -108,6 +108,114 @@ pub(super) fn duplicate_strategy(input: &TaskInput) -> String {
         .unwrap_or_else(|| "INCLUDE".to_string())
 }
 
+pub(super) fn parse_patterns(value: Option<&String>) -> Vec<String> {
+    value
+        .map(|patterns| {
+            patterns
+                .split(',')
+                .map(str::trim)
+                .filter(|pattern| !pattern.is_empty())
+                .map(|pattern| pattern.replace('\\', "/"))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub(super) fn case_sensitive(input: &TaskInput) -> bool {
+    input
+        .options
+        .get("case_sensitive")
+        .map(|value| value != "false")
+        .unwrap_or(true)
+}
+
+pub(super) fn path_included(
+    relative_path: &Path,
+    include_patterns: &[String],
+    exclude_patterns: &[String],
+    case_sensitive: bool,
+) -> bool {
+    let normalized = relative_path.to_string_lossy().replace('\\', "/");
+    let included = include_patterns.is_empty()
+        || include_patterns
+            .iter()
+            .any(|pattern| glob_matches(pattern, &normalized, case_sensitive));
+    included
+        && !exclude_patterns
+            .iter()
+            .any(|pattern| glob_matches(pattern, &normalized, case_sensitive))
+}
+
+fn glob_matches(pattern: &str, path: &str, case_sensitive: bool) -> bool {
+    let pattern = if case_sensitive {
+        pattern.to_string()
+    } else {
+        pattern.to_ascii_lowercase()
+    };
+    let path = if case_sensitive {
+        path.to_string()
+    } else {
+        path.to_ascii_lowercase()
+    };
+
+    if !pattern.contains('/') {
+        let basename = path.rsplit('/').next().unwrap_or(&path);
+        return segment_matches(&pattern, basename);
+    }
+
+    let pattern_parts: Vec<&str> = pattern.split('/').filter(|part| !part.is_empty()).collect();
+    let path_parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
+    path_parts_match(&pattern_parts, &path_parts)
+}
+
+fn path_parts_match(pattern_parts: &[&str], path_parts: &[&str]) -> bool {
+    match (pattern_parts.split_first(), path_parts.split_first()) {
+        (None, None) => true,
+        (None, Some(_)) => false,
+        (Some((pattern, rest)), _) if *pattern == "**" => {
+            path_parts_match(rest, path_parts)
+                || path_parts
+                    .split_first()
+                    .map(|(_, remaining)| path_parts_match(pattern_parts, remaining))
+                    .unwrap_or(false)
+        }
+        (Some((pattern, rest_patterns)), Some((path, rest_paths))) => {
+            segment_matches(pattern, path) && path_parts_match(rest_patterns, rest_paths)
+        }
+        (Some(_), None) => false,
+    }
+}
+
+fn segment_matches(pattern: &str, text: &str) -> bool {
+    let pattern = pattern.as_bytes();
+    let text = text.as_bytes();
+    let (mut p, mut t) = (0usize, 0usize);
+    let mut star = None;
+    let mut match_after_star = 0usize;
+
+    while t < text.len() {
+        if p < pattern.len() && (pattern[p] == b'?' || pattern[p] == text[t]) {
+            p += 1;
+            t += 1;
+        } else if p < pattern.len() && pattern[p] == b'*' {
+            star = Some(p);
+            match_after_star = t;
+            p += 1;
+        } else if let Some(star_pos) = star {
+            p = star_pos + 1;
+            match_after_star += 1;
+            t = match_after_star;
+        } else {
+            return false;
+        }
+    }
+
+    while p < pattern.len() && pattern[p] == b'*' {
+        p += 1;
+    }
+    p == pattern.len()
+}
+
 #[tonic::async_trait]
 impl TaskExecutor for CopyTaskExecutor {
     fn task_type(&self) -> &str {
@@ -128,6 +236,9 @@ impl TaskExecutor for CopyTaskExecutor {
 
         let expand_properties = parse_expand_properties(input.options.get("expand_properties"));
         let duplicate_strategy = duplicate_strategy(input);
+        let include_patterns = parse_patterns(input.options.get("include_patterns"));
+        let exclude_patterns = parse_patterns(input.options.get("exclude_patterns"));
+        let case_sensitive = case_sensitive(input);
         let mut seen_destinations = HashSet::new();
 
         for source in &input.source_files {
@@ -148,6 +259,14 @@ impl TaskExecutor for CopyTaskExecutor {
                 };
                 for file in files {
                     let relative = file.strip_prefix(source).unwrap_or(&file);
+                    if !path_included(
+                        relative,
+                        &include_patterns,
+                        &exclude_patterns,
+                        case_sensitive,
+                    ) {
+                        continue;
+                    }
                     let dest = input.target_dir.join(relative);
                     if !seen_destinations.insert(dest.clone()) {
                         match duplicate_strategy.as_str() {
@@ -170,9 +289,16 @@ impl TaskExecutor for CopyTaskExecutor {
                     }
                 }
             } else {
-                let dest = input
-                    .target_dir
-                    .join(source.file_name().unwrap_or_default());
+                let relative = Path::new(source.file_name().unwrap_or_default());
+                if !path_included(
+                    relative,
+                    &include_patterns,
+                    &exclude_patterns,
+                    case_sensitive,
+                ) {
+                    continue;
+                }
+                let dest = input.target_dir.join(relative);
                 if !seen_destinations.insert(dest.clone()) {
                     match duplicate_strategy.as_str() {
                         "EXCLUDE" => continue,
@@ -354,6 +480,62 @@ mod tests {
                 .unwrap(),
             "name=corpus\nversion=1.0\n"
         );
+    }
+
+    #[tokio::test]
+    async fn test_copy_honors_include_and_exclude_patterns() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let dest_dir = tmp.path().join("dest");
+        tokio::fs::create_dir_all(src_dir.join("config"))
+            .await
+            .unwrap();
+        tokio::fs::create_dir_all(src_dir.join("tmp"))
+            .await
+            .unwrap();
+        tokio::fs::write(src_dir.join("config/app.properties"), b"app")
+            .await
+            .unwrap();
+        tokio::fs::write(src_dir.join("config/app.txt"), b"text")
+            .await
+            .unwrap();
+        tokio::fs::write(src_dir.join("tmp/skip.properties"), b"skip")
+            .await
+            .unwrap();
+
+        let executor = CopyTaskExecutor::new();
+        let mut input = TaskInput::new("Copy");
+        input.source_files.push(src_dir);
+        input.target_dir = dest_dir.clone();
+        input.options.insert(
+            "include_patterns".to_string(),
+            "**/*.properties".to_string(),
+        );
+        input
+            .options
+            .insert("exclude_patterns".to_string(), "tmp/**".to_string());
+
+        let result = executor.execute(&input).await;
+        assert!(result.success, "{}", result.error_message);
+        assert!(dest_dir.join("config/app.properties").exists());
+        assert!(!dest_dir.join("config/app.txt").exists());
+        assert!(!dest_dir.join("tmp/skip.properties").exists());
+    }
+
+    #[test]
+    fn test_copy_pattern_matching_case_insensitive_basename() {
+        assert!(path_included(
+            Path::new("nested/APP.PROPERTIES"),
+            &["*.properties".to_string()],
+            &[],
+            false
+        ));
+        assert!(!path_included(
+            Path::new("nested/APP.PROPERTIES"),
+            &["*.properties".to_string()],
+            &[],
+            true
+        ));
     }
 
     #[tokio::test]

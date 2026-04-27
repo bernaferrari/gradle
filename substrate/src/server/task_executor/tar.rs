@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 
@@ -40,7 +41,14 @@ impl TaskExecutor for TarTaskExecutor {
             }
         }
 
-        let entries = match collect_entries(&input.source_files) {
+        let entries = match collect_entries(
+            &input.source_files,
+            input
+                .options
+                .get("duplicates_strategy")
+                .map(|strategy| strategy.as_str())
+                .unwrap_or("INCLUDE"),
+        ) {
             Ok(entries) => entries,
             Err(e) => {
                 result.success = false;
@@ -100,7 +108,10 @@ fn gzip_enabled(input: &TaskInput, archive_path: &Path) -> bool {
     name.ends_with(".tar.gz") || name.ends_with(".tgz")
 }
 
-fn collect_entries(source_files: &[PathBuf]) -> Result<Vec<TarEntry>, String> {
+fn collect_entries(
+    source_files: &[PathBuf],
+    duplicate_strategy: &str,
+) -> Result<Vec<TarEntry>, String> {
     let mut entries = Vec::new();
     for source in source_files {
         if !source.exists() {
@@ -121,9 +132,34 @@ fn collect_entries(source_files: &[PathBuf]) -> Result<Vec<TarEntry>, String> {
             });
         }
     }
+    entries = resolve_duplicate_entries(entries, duplicate_strategy)?;
     entries.sort_unstable_by(|left, right| left.name.cmp(&right.name));
-    entries.dedup_by(|left, right| left.name == right.name);
     Ok(entries)
+}
+
+fn resolve_duplicate_entries(
+    entries: Vec<TarEntry>,
+    duplicate_strategy: &str,
+) -> Result<Vec<TarEntry>, String> {
+    let strategy = duplicate_strategy.to_ascii_uppercase();
+    if strategy == "INCLUDE" {
+        return Ok(entries);
+    }
+
+    let mut seen = HashSet::new();
+    let mut resolved = Vec::with_capacity(entries.len());
+    for entry in entries {
+        if !seen.insert(entry.name.clone()) {
+            if strategy == "FAIL" {
+                return Err(format!("Duplicate tar entry: {}", entry.name));
+            }
+            if strategy == "EXCLUDE" {
+                continue;
+            }
+        }
+        resolved.push(entry);
+    }
+    Ok(resolved)
 }
 
 fn collect_dir(root: &Path, dir: &Path, entries: &mut Vec<TarEntry>) -> Result<(), String> {
@@ -337,6 +373,36 @@ mod tests {
         let mut entries = archive.entries().unwrap();
         let entry = entries.next().unwrap().unwrap();
         assert_eq!(entry.path().unwrap().to_string_lossy(), "readme.txt");
+    }
+
+    #[tokio::test]
+    async fn test_tar_duplicate_strategy_fail_reports_duplicate_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_a = tmp.path().join("src-a");
+        let src_b = tmp.path().join("src-b");
+        let out_dir = tmp.path().join("out");
+
+        fs::create_dir_all(&src_a).unwrap();
+        fs::create_dir_all(&src_b).unwrap();
+        fs::write(src_a.join("same.txt"), b"first").unwrap();
+        fs::write(src_b.join("same.txt"), b"second").unwrap();
+
+        let executor = TarTaskExecutor::new();
+        let mut input = TaskInput::new("Tar");
+        input.source_files.push(src_a);
+        input.source_files.push(src_b);
+        input.target_dir = out_dir;
+        input
+            .options
+            .insert("tarName".to_string(), "dups.tar".to_string());
+        input
+            .options
+            .insert("duplicates_strategy".to_string(), "FAIL".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(!result.success);
+        assert!(result.error_message.contains("Duplicate tar entry"));
     }
 
     #[tokio::test]

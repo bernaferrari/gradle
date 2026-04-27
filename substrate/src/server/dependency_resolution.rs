@@ -7,12 +7,12 @@ use sha2::{Digest, Sha256};
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
-    dependency_resolution_service_server::DependencyResolutionService, AddArtifactToCacheRequest,
-    AddArtifactToCacheResponse, CheckArtifactCacheRequest, CheckArtifactCacheResponse,
-    ChecksumFailure, DependencyDescriptor, GetResolutionStatsRequest, GetResolutionStatsResponse,
-    RecordResolutionRequest, RecordResolutionResponse, RepositoryDescriptor,
-    ResolveDependenciesRequest, ResolveDependenciesResponse, ResolvedDependency,
-    VerifyDependencyChecksumsRequest, VerifyDependencyChecksumsResponse,
+    AddArtifactToCacheRequest, AddArtifactToCacheResponse, CheckArtifactCacheRequest,
+    CheckArtifactCacheResponse, ChecksumFailure, DependencyDescriptor, GetResolutionStatsRequest,
+    GetResolutionStatsResponse, RecordResolutionRequest, RecordResolutionResponse,
+    RepositoryDescriptor, ResolveDependenciesRequest, ResolveDependenciesResponse,
+    ResolvedDependency, VerifyDependencyChecksumsRequest, VerifyDependencyChecksumsResponse,
+    dependency_resolution_service_server::DependencyResolutionService,
 };
 
 // ---------------------------------------------------------------------------
@@ -1022,6 +1022,12 @@ impl DependencyResolutionServiceImpl {
         group_matches && name_matches
     }
 
+    fn is_dependency_excluded(dep: &PomDependency, exclusions: &[(String, String)]) -> bool {
+        exclusions.iter().any(|(excl_group, excl_name)| {
+            Self::matches_exclusion(&dep.group, &dep.name, excl_group, excl_name)
+        })
+    }
+
     /// Parse the <parent> section from a POM file.
     /// Returns None if no parent section exists.
     fn parse_parent_pom(pom_content: &str) -> Option<ParentPom> {
@@ -1343,7 +1349,8 @@ impl DependencyResolutionServiceImpl {
         repos: &[RepositoryDescriptor],
     ) -> ResolvedDependency {
         let mut visited = std::collections::HashSet::with_capacity(64);
-        self.resolve_recursive(dep, repos, &mut visited, 0).await
+        self.resolve_recursive(dep, repos, &mut visited, 0, &[])
+            .await
     }
 
     /// Recursively resolve a dependency and its transitive dependencies.
@@ -1357,6 +1364,7 @@ impl DependencyResolutionServiceImpl {
         repos: &[RepositoryDescriptor],
         visited: &mut std::collections::HashSet<(String, String)>,
         depth: u32,
+        inherited_exclusions: &[(String, String)],
     ) -> ResolvedDependency {
         const MAX_DEPTH: u32 = 50;
 
@@ -1432,6 +1440,7 @@ impl DependencyResolutionServiceImpl {
                 repos,
                 visited,
                 depth,
+                inherited_exclusions,
             )
             .await
         } else {
@@ -1568,6 +1577,7 @@ impl DependencyResolutionServiceImpl {
         repos: &[RepositoryDescriptor],
         visited: &mut std::collections::HashSet<(String, String)>,
         depth: u32,
+        inherited_exclusions: &[(String, String)],
     ) -> Vec<ResolvedDependency> {
         for repo in repos {
             match self.fetch_pom(group, name, version, repo).await {
@@ -1576,10 +1586,6 @@ impl DependencyResolutionServiceImpl {
                     let (properties, managed_versions) =
                         self.resolve_parent_inheritance(&pom_content, repos).await;
                     let pom_deps = Self::parse_pom_dependencies(&pom_content);
-
-                    // Collect exclusions from this POM's direct dependencies
-                    let all_exclusions: Vec<&(String, String)> =
-                        pom_deps.iter().flat_map(|d| d.exclusions.iter()).collect();
 
                     // Separate BOM imports from regular dependencies
                     let mut bom_imports = Vec::new();
@@ -1608,15 +1614,11 @@ impl DependencyResolutionServiceImpl {
                             continue;
                         }
 
-                        // Check exclusions
-                        let is_excluded = all_exclusions.iter().any(|(excl_group, excl_name)| {
-                            Self::matches_exclusion(
-                                &pom_dep.group,
-                                &pom_dep.name,
-                                excl_group,
-                                excl_name,
-                            )
-                        });
+                        // Exclusions declared on the edge from the parent apply to this
+                        // artifact's direct dependencies. A sibling dependency's own
+                        // exclusions must not remove other siblings.
+                        let is_excluded =
+                            Self::is_dependency_excluded(pom_dep, inherited_exclusions);
                         if is_excluded {
                             tracing::debug!(
                                 group = %pom_dep.group,
@@ -1704,9 +1706,14 @@ impl DependencyResolutionServiceImpl {
                             optional: false,
                             ivy_conf: String::new(),
                         };
-                        let resolved =
-                            Box::pin(self.resolve_recursive(&child_dep, repos, visited, depth + 1))
-                                .await;
+                        let resolved = Box::pin(self.resolve_recursive(
+                            &child_dep,
+                            repos,
+                            visited,
+                            depth + 1,
+                            &pom_dep.exclusions,
+                        ))
+                        .await;
                         transitive_deps.push(resolved);
                     }
 
@@ -3860,6 +3867,40 @@ mod tests {
     fn test_matches_exclusion_wildcard_both() {
         assert!(DependencyResolutionServiceImpl::matches_exclusion(
             "anything", "anything", "*", "*"
+        ));
+    }
+
+    #[test]
+    fn test_inherited_exclusions_apply_only_to_current_edge() {
+        let excluded_child = PomDependency {
+            group: "org.unwanted".to_string(),
+            name: "child".to_string(),
+            version: "1.0".to_string(),
+            scope: String::new(),
+            optional: false,
+            classifier: String::new(),
+            type_field: String::new(),
+            exclusions: Vec::new(),
+        };
+        let sibling = PomDependency {
+            group: "org.unwanted".to_string(),
+            name: "sibling".to_string(),
+            version: "1.0".to_string(),
+            scope: String::new(),
+            optional: false,
+            classifier: String::new(),
+            type_field: String::new(),
+            exclusions: vec![("org.unwanted".to_string(), "child".to_string())],
+        };
+        let inherited = vec![("org.unwanted".to_string(), "child".to_string())];
+
+        assert!(DependencyResolutionServiceImpl::is_dependency_excluded(
+            &excluded_child,
+            &inherited
+        ));
+        assert!(!DependencyResolutionServiceImpl::is_dependency_excluded(
+            &sibling,
+            &[]
         ));
     }
 

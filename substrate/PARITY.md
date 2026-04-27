@@ -19,11 +19,13 @@
   build-plan shadow through Rust `RunBuild` and skips Gradle's JVM task executor
   only when Rust reports exactly the scheduled task count with zero JVM forwards.
 - The checked-in Java library, Java application, Java multi-project,
-  resource-expansion, and standalone Sync corpus builds complete through that
-  explicit gate with `target/debug/gradle-substrate-daemon`.
+  resource-expansion, standalone Sync, and CopySpec pattern corpus builds
+  complete through that explicit gate with `target/debug/gradle-substrate-daemon`.
 - A separate networked JUnit corpus build proves native `TestExec` lowering for
   a non-empty JUnit Platform test task when the test runtime contains the JUnit
   Platform ConsoleLauncher.
+- Native dependency resolution handles inherited Maven exclusions per dependency
+  edge, so one dependency's exclusions no longer remove sibling dependencies.
 - Archive tasks (`Jar`, `Zip`, `War`, `Ear`, `Tar`) can lower to native Rust
   archive execution when the task model provides input paths and an output
   archive path. ZIP-compatible tasks emit ZIP-compatible archives; `Tar` emits
@@ -35,9 +37,13 @@
 - Native `ProcessResources`/`Copy`/`Sync` execution can expand declared scalar
   task input properties in Gradle-style `$name` and `${name}` templates,
   validated by content-hash corpus comparison for resource processing and Sync.
+- Native `Copy` and `Sync` honor captured CopySpec include/exclude patterns,
+  including `**`, `*`, `?`, and case-sensitivity flags for relative paths.
 - Native `Copy` and `Sync` honor basic duplicate destination strategies:
   `INCLUDE`/default overwrites, `EXCLUDE` keeps the first file, and `FAIL`
   reports an error.
+- Native ZIP-compatible and TAR archive tasks honor captured duplicate
+  destination strategies for `INCLUDE`, `EXCLUDE`, and `FAIL`.
 
 ## Gaps
 
@@ -48,8 +54,8 @@
 - Kotlin/Groovy DSL evaluation and legacy plugin execution remain JVM-host
   compatibility islands.
 - More task types need native-ready contract capture before broad no-fallback
-  execution is realistic, especially arbitrary copy filters/actions, Gradle
-  archive metadata edge cases, nested copy specs, permission preservation,
+  execution is realistic, especially arbitrary copy filters/actions, nested
+  CopySpec trees, Gradle archive metadata edge cases, permission preservation,
   symlink copy semantics, and non-gzip tar compression variants.
 
 ## Validation

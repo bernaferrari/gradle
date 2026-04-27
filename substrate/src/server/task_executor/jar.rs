@@ -1,6 +1,8 @@
 use std::io::{Read as StdRead, Write};
 use std::path::Path;
 
+use std::collections::HashSet;
+
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
 /// Native Rust JAR packaging executor.
@@ -291,6 +293,37 @@ impl JarTaskExecutor {
     }
 }
 
+fn archive_duplicate_strategy(options: &std::collections::HashMap<String, String>) -> String {
+    options
+        .get("duplicates_strategy")
+        .map(|strategy| strategy.to_ascii_uppercase())
+        .unwrap_or_else(|| "INCLUDE".to_string())
+}
+
+fn resolve_duplicate_entries(
+    entries: Vec<(String, Vec<u8>)>,
+    strategy: &str,
+) -> Result<Vec<(String, Vec<u8>)>, String> {
+    if strategy == "INCLUDE" {
+        return Ok(entries);
+    }
+
+    let mut seen = HashSet::new();
+    let mut resolved = Vec::with_capacity(entries.len());
+    for (name, data) in entries {
+        if !seen.insert(name.clone()) {
+            if strategy == "FAIL" {
+                return Err(format!("Duplicate archive entry: {}", name));
+            }
+            if strategy == "EXCLUDE" {
+                continue;
+            }
+        }
+        resolved.push((name, data));
+    }
+    Ok(resolved)
+}
+
 #[tonic::async_trait]
 impl TaskExecutor for JarTaskExecutor {
     fn task_type(&self) -> &str {
@@ -383,6 +416,7 @@ impl JarTaskExecutor {
             entries.push(("META-INF/MANIFEST.MF".to_string(), manifest));
         }
 
+        entries = resolve_duplicate_entries(entries, &archive_duplicate_strategy(options))?;
         entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
         let mut out = std::fs::File::create(jar_path)
@@ -438,6 +472,7 @@ impl JarTaskExecutor {
             entries.push(("META-INF/MANIFEST.MF".to_string(), manifest));
         }
 
+        entries = resolve_duplicate_entries(entries, &archive_duplicate_strategy(options))?;
         entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
         let mut out = std::fs::File::create(jar_path)
@@ -682,6 +717,36 @@ mod tests {
         assert_eq!(&jar[0..4], b"PK\x03\x04");
         assert_eq!(u16::from_le_bytes([jar[10], jar[11]]), 0);
         assert_eq!(u16::from_le_bytes([jar[12], jar[13]]), 33);
+    }
+
+    #[tokio::test]
+    async fn test_jar_duplicate_strategy_fail_reports_duplicate_entry() {
+        let tmp = TempDir::new().unwrap();
+        let src_a = tmp.path().join("src-a");
+        let src_b = tmp.path().join("src-b");
+        let out_dir = tmp.path().join("out");
+
+        fs::create_dir_all(&src_a).unwrap();
+        fs::create_dir_all(&src_b).unwrap();
+        fs::write(src_a.join("same.txt"), b"first").unwrap();
+        fs::write(src_b.join("same.txt"), b"second").unwrap();
+
+        let executor = JarTaskExecutor::new();
+        let mut input = TaskInput::new("Jar");
+        input.source_files.push(src_a);
+        input.source_files.push(src_b);
+        input.target_dir = out_dir;
+        input
+            .options
+            .insert("jarName".to_string(), "dups.jar".to_string());
+        input
+            .options
+            .insert("duplicates_strategy".to_string(), "FAIL".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(!result.success);
+        assert!(result.error_message.contains("Duplicate archive entry"));
     }
 
     #[tokio::test]
