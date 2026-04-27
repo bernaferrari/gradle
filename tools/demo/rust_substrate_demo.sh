@@ -14,7 +14,7 @@ Usage: tools/demo/rust_substrate_demo.sh [--quick|--full] [--skip-sample-builds]
 
 Runs an honest Rust substrate demo:
   - strict stabilization gate
-  - checked-in four-project corpus contract validation
+  - checked-in five-project corpus contract validation
   - captured build-plan shadow Java lifecycle execution with JVM fallback disabled
   - optional sample Gradle builds from testing/corpus
   - optional no-fallback authoritative RunBuild gate with output inventory/hash parity
@@ -102,6 +102,8 @@ if [[ "$RUN_SAMPLE_BUILDS" -eq 1 ]]; then
     ./gradlew -q -p testing/corpus/java-multiproject-kotlin-dsl clean build
   run_step "Build corpus Java resource expansion sample" \
     ./gradlew -q -p testing/corpus/java-resources-expand-kotlin-dsl clean build
+  run_step "Build corpus Sync resource sample" \
+    ./gradlew -q -p testing/corpus/sync-resources-kotlin-dsl clean build
   run_step "Build Rust substrate daemon" \
     cargo build -q -p gradle-substrate-daemon
   run_step "Build checked-in corpus with authoritative Rust RunBuild gate" \
@@ -127,7 +129,7 @@ What this proves:
   - Rust/JVM proto drift checks pass.
   - Hardened bridge clients fail closed instead of returning hidden defaults.
   - Build-plan IR v2 fingerprints and shadow artifacts are stable.
-  - The checked-in Java library/application/multi-project/resource-expansion corpus has deterministic build-plan contracts.
+  - The checked-in Java library/application/multi-project/resource-expansion/Sync corpus has deterministic build-plan contracts.
   - A captured JVM-host Java lifecycle build-plan shadow can execute JavaCompile, ProcessResources, classes, and Jar through Rust with JVM fallback disabled.
   - Native Copy/ProcessResources coverage includes recursive directory sources, declared token expansion, and basic duplicate destination strategies.
   - When sample builds are enabled, the checked-in Java corpus exercises the explicit no-fallback RunBuild gate from real Gradle invocations and compares stable output inventories plus non-archive SHA-256 hashes.

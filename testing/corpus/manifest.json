@@ -64,6 +64,22 @@
         "project_dependencies": [],
         "toolchains": ["17"]
       }
+    },
+    {
+      "name": "sync-resources-kotlin-dsl",
+      "path": "sync-resources-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 0,
+        "plugins": ["base"],
+        "tasks": ["syncResources"],
+        "outputs": ["build/synced"],
+        "dependencies": [],
+        "project_dependencies": [],
+        "toolchains": []
+      }
     }
   ]
 }
