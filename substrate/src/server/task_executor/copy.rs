@@ -1,3 +1,6 @@
+use std::path::{Path, PathBuf};
+use std::pin::Pin;
+
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
 /// Copies files from source paths to a target directory.
@@ -12,6 +15,46 @@ impl Default for CopyTaskExecutor {
 impl CopyTaskExecutor {
     pub fn new() -> Self {
         Self
+    }
+
+    fn list_files(
+        dir: &Path,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<PathBuf>, String>> + Send + '_>> {
+        Box::pin(async move {
+            let mut files = Vec::new();
+            let mut entries = tokio::fs::read_dir(dir)
+                .await
+                .map_err(|e| format!("Failed to read directory {}: {}", dir.display(), e))?;
+            while let Some(entry) = entries
+                .next_entry()
+                .await
+                .map_err(|e| format!("Failed to read directory {}: {}", dir.display(), e))?
+            {
+                let path = entry.path();
+                if path.is_dir() {
+                    files.extend(Self::list_files(&path).await?);
+                } else if path.is_file() {
+                    files.push(path);
+                }
+            }
+            files.sort_unstable();
+            Ok(files)
+        })
+    }
+
+    async fn copy_file(src: &Path, dest: &Path, result: &mut TaskResult) -> Result<(), String> {
+        if let Some(parent) = dest.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| format!("Failed to create directory {}: {}", parent.display(), e))?;
+        }
+        let bytes = tokio::fs::copy(src, dest)
+            .await
+            .map_err(|e| format!("Failed to copy {}: {}", src.display(), e))?;
+        result.files_processed += 1;
+        result.bytes_processed += bytes;
+        result.output_files.push(dest.to_path_buf());
+        Ok(())
     }
 }
 
@@ -40,19 +83,31 @@ impl TaskExecutor for CopyTaskExecutor {
                 return result;
             }
 
-            let dest = input
-                .target_dir
-                .join(source.file_name().unwrap_or_default());
-
-            match tokio::fs::copy(source, &dest).await {
-                Ok(bytes) => {
-                    result.files_processed += 1;
-                    result.bytes_processed += bytes;
-                    result.output_files.push(dest);
+            if source.is_dir() {
+                let files = match Self::list_files(source).await {
+                    Ok(files) => files,
+                    Err(e) => {
+                        result.success = false;
+                        result.error_message = e;
+                        return result;
+                    }
+                };
+                for file in files {
+                    let relative = file.strip_prefix(source).unwrap_or(&file);
+                    let dest = input.target_dir.join(relative);
+                    if let Err(e) = Self::copy_file(&file, &dest, &mut result).await {
+                        result.success = false;
+                        result.error_message = e;
+                        return result;
+                    }
                 }
-                Err(e) => {
+            } else {
+                let dest = input
+                    .target_dir
+                    .join(source.file_name().unwrap_or_default());
+                if let Err(e) = Self::copy_file(source, &dest, &mut result).await {
                     result.success = false;
-                    result.error_message = format!("Failed to copy {}: {}", source.display(), e);
+                    result.error_message = e;
                     return result;
                 }
             }
@@ -150,5 +205,40 @@ mod tests {
         let result = executor.execute(&input).await;
         assert!(result.success);
         assert!(dest_dir.exists());
+    }
+
+    #[tokio::test]
+    async fn test_copy_directory_recursively() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let dest_dir = tmp.path().join("dest");
+        tokio::fs::create_dir_all(src_dir.join("nested"))
+            .await
+            .unwrap();
+        tokio::fs::write(src_dir.join("root.txt"), b"root")
+            .await
+            .unwrap();
+        tokio::fs::write(src_dir.join("nested/child.txt"), b"child")
+            .await
+            .unwrap();
+
+        let executor = CopyTaskExecutor::new();
+        let mut input = TaskInput::new("Copy");
+        input.source_files.push(src_dir);
+        input.target_dir = dest_dir.clone();
+
+        let result = executor.execute(&input).await;
+        assert!(result.success, "{}", result.error_message);
+        assert_eq!(result.files_processed, 2);
+        assert_eq!(
+            tokio::fs::read(dest_dir.join("root.txt")).await.unwrap(),
+            b"root"
+        );
+        assert_eq!(
+            tokio::fs::read(dest_dir.join("nested/child.txt"))
+                .await
+                .unwrap(),
+            b"child"
+        );
     }
 }

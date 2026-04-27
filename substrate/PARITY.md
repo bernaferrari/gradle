@@ -28,6 +28,8 @@
   archive execution when the task model provides input paths and an output
   archive path. ZIP-compatible tasks emit ZIP-compatible archives; `Tar` emits
   native POSIX tar streams and supports gzip-compressed output.
+- Native file operations cover recursive `Copy` directory sources and
+  multi-source `Sync` orphan deletion using the union of all source roots.
 
 ## Gaps
 
@@ -38,9 +40,9 @@
 - Kotlin/Groovy DSL evaluation and legacy plugin execution remain JVM-host
   compatibility islands.
 - More task types need native-ready contract capture before broad no-fallback
-  execution is realistic, especially richer `Copy`/`Sync` specs, Gradle archive
-  metadata edge cases, nested copy specs, duplicate handling, permissions,
-  symlinks, and non-gzip tar compression variants.
+  execution is realistic, especially resource filtering/expansion, Gradle
+  archive metadata edge cases, nested copy specs, duplicate handling,
+  permissions, symlinks, and non-gzip tar compression variants.
 
 ## Validation
 
