@@ -237,13 +237,18 @@ fn native_ready_jar_task(repo_root: &std::path::Path) -> BuildPlanTask {
         .join("classes")
         .join("java")
         .join("main");
+    let resources_dir = repo_root
+        .join("app")
+        .join("build")
+        .join("resources")
+        .join("main");
     let archive_dir = repo_root.join("app").join("build").join("libs");
     let archive_file = archive_dir.join("app-1.0.jar");
     BuildPlanTask {
         path: ":app:jar".to_string(),
         project_path: ":app".to_string(),
         implementation_id: "org.gradle.jvm.tasks.Jar".to_string(),
-        depends_on: vec![":app:compileJava".to_string()],
+        depends_on: vec![":app:classes".to_string()],
         inputs: HashMap::from([
             ("source".to_string(), "mock-jvm-task-model".to_string()),
             ("taskType".to_string(), "Jar".to_string()),
@@ -293,6 +298,13 @@ fn native_ready_jar_task(repo_root: &std::path::Path) -> BuildPlanTask {
                 normalization: "absolute-path".to_string(),
                 optional_input: false,
             },
+            BuildPlanTaskInputSpec {
+                name: "input1".to_string(),
+                kind: "path".to_string(),
+                value: resources_dir.to_string_lossy().into_owned(),
+                normalization: "absolute-path".to_string(),
+                optional_input: false,
+            },
         ],
         output_specs: vec![BuildPlanTaskOutputSpec {
             name: "archive".to_string(),
@@ -302,6 +314,97 @@ fn native_ready_jar_task(repo_root: &std::path::Path) -> BuildPlanTask {
         environment_inputs: Vec::new(),
         system_property_inputs: Vec::new(),
         diagnostics: vec![diagnostic("native-ready-jar-contract")],
+    }
+}
+
+fn native_ready_process_resources_task(repo_root: &std::path::Path) -> BuildPlanTask {
+    let resource_file = repo_root
+        .join("app")
+        .join("src")
+        .join("main")
+        .join("resources")
+        .join("application.properties");
+    let output_dir = repo_root
+        .join("app")
+        .join("build")
+        .join("resources")
+        .join("main");
+    BuildPlanTask {
+        path: ":app:processResources".to_string(),
+        project_path: ":app".to_string(),
+        implementation_id: "org.gradle.language.jvm.tasks.ProcessResources".to_string(),
+        depends_on: Vec::new(),
+        inputs: HashMap::from([
+            ("source".to_string(), "mock-jvm-task-model".to_string()),
+            ("taskType".to_string(), "ProcessResources".to_string()),
+            ("nativeCandidate".to_string(), "true".to_string()),
+        ]),
+        outputs: vec![output_dir.to_string_lossy().into_owned()],
+        worker_isolation: "in-process".to_string(),
+        should_run_after: Vec::new(),
+        must_run_after: Vec::new(),
+        finalized_by: Vec::new(),
+        cacheability: "declared-outputs".to_string(),
+        local_state: Vec::new(),
+        destroyables: Vec::new(),
+        action_kind: "file-transform".to_string(),
+        input_specs: vec![
+            input_spec("source", "mock-jvm-task-model"),
+            input_spec("taskType", "ProcessResources"),
+            input_spec("nativeCandidate", "true"),
+            BuildPlanTaskInputSpec {
+                name: "input0".to_string(),
+                kind: "path".to_string(),
+                value: resource_file.to_string_lossy().into_owned(),
+                normalization: "absolute-path".to_string(),
+                optional_input: false,
+            },
+        ],
+        output_specs: vec![BuildPlanTaskOutputSpec {
+            name: "resources".to_string(),
+            kind: "directory".to_string(),
+            path: output_dir.to_string_lossy().into_owned(),
+        }],
+        environment_inputs: Vec::new(),
+        system_property_inputs: Vec::new(),
+        diagnostics: vec![diagnostic("native-ready-process-resources-contract")],
+    }
+}
+
+fn native_ready_classes_task() -> BuildPlanTask {
+    BuildPlanTask {
+        path: ":app:classes".to_string(),
+        project_path: ":app".to_string(),
+        implementation_id: "org.gradle.api.DefaultTask".to_string(),
+        depends_on: vec![
+            ":app:compileJava".to_string(),
+            ":app:processResources".to_string(),
+        ],
+        inputs: HashMap::from([
+            ("source".to_string(), "mock-jvm-task-model".to_string()),
+            ("taskType".to_string(), "DefaultTask".to_string()),
+            ("action_count".to_string(), "0".to_string()),
+            ("nativeCandidate".to_string(), "true".to_string()),
+        ]),
+        outputs: Vec::new(),
+        worker_isolation: "in-process".to_string(),
+        should_run_after: Vec::new(),
+        must_run_after: Vec::new(),
+        finalized_by: Vec::new(),
+        cacheability: "unknown".to_string(),
+        local_state: Vec::new(),
+        destroyables: Vec::new(),
+        action_kind: "lifecycle".to_string(),
+        input_specs: vec![
+            input_spec("source", "mock-jvm-task-model"),
+            input_spec("taskType", "DefaultTask"),
+            input_spec("action_count", "0"),
+            input_spec("nativeCandidate", "true"),
+        ],
+        output_specs: Vec::new(),
+        environment_inputs: Vec::new(),
+        system_property_inputs: Vec::new(),
+        diagnostics: vec![diagnostic("native-ready-lifecycle-contract")],
     }
 }
 
@@ -364,6 +467,8 @@ impl JvmHostService for MockJvmHostService {
                 tasks: if self.native_ready_compile && self.native_ready_jar {
                     vec![
                         native_ready_compile_task(&self.repo_root, &self.java_home),
+                        native_ready_process_resources_task(&self.repo_root),
+                        native_ready_classes_task(),
                         native_ready_jar_task(&self.repo_root),
                     ]
                 } else if self.native_ready_compile {
@@ -471,6 +576,13 @@ fn create_mock_repo(root: &std::path::Path) {
                 }
             }
         "#,
+    )
+    .unwrap();
+    let resources_dir = root.join("app").join("src").join("main").join("resources");
+    std::fs::create_dir_all(&resources_dir).unwrap();
+    std::fs::write(
+        resources_dir.join("application.properties"),
+        "message=native-from-resources\n",
     )
     .unwrap();
     std::fs::write(
@@ -1074,7 +1186,7 @@ async fn refreshed_native_ready_shadow_plan_runs_compile_java_without_jvm_fallba
 }
 
 #[tokio::test]
-async fn refreshed_native_ready_shadow_plan_runs_compile_and_jar_without_jvm_fallback() {
+async fn refreshed_native_ready_shadow_plan_runs_java_lifecycle_without_jvm_fallback() {
     let java_home = match std::env::var("JAVA_HOME") {
         Ok(value) => value,
         Err(_) => return,
@@ -1146,8 +1258,8 @@ async fn refreshed_native_ready_shadow_plan_runs_compile_and_jar_without_jvm_fal
 
     assert_eq!(response.final_status, "COMPLETED");
     assert_eq!(response.plan_source, "build-plan-shadow");
-    assert_eq!(response.total_tasks, 2);
-    assert_eq!(response.tasks_succeeded, 2);
+    assert_eq!(response.total_tasks, 4);
+    assert_eq!(response.tasks_succeeded, 4);
     assert_eq!(response.tasks_forwarded_to_jvm, 0);
     assert!(
         response.task_details.iter().any(|task| {
@@ -1156,6 +1268,22 @@ async fn refreshed_native_ready_shadow_plan_runs_compile_and_jar_without_jvm_fal
                 && task.execution_mode == "native"
         }),
         "compileJava should execute natively"
+    );
+    assert!(
+        response.task_details.iter().any(|task| {
+            task.task_path == ":app:processResources"
+                && task.task_type == "Copy"
+                && task.execution_mode == "native"
+        }),
+        "processResources should execute through native Copy"
+    );
+    assert!(
+        response.task_details.iter().any(|task| {
+            task.task_path == ":app:classes"
+                && task.task_type == "Lifecycle"
+                && task.execution_mode == "native"
+        }),
+        "classes should execute as native lifecycle noop"
     );
     assert!(
         response.task_details.iter().any(|task| {
@@ -1177,6 +1305,10 @@ async fn refreshed_native_ready_shadow_plan_runs_compile_and_jar_without_jvm_fal
     assert!(
         jar_text.contains("org/gradle/substrate/corpus/HelloCaptured.class"),
         "Rust Jar executor should package compiled class output"
+    );
+    assert!(
+        jar_text.contains("application.properties"),
+        "Rust Jar executor should package processed resources"
     );
 }
 

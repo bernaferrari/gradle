@@ -95,6 +95,37 @@ public class ProjectModelProviderAdapterTest {
             .anyMatch(path -> path.equals(archiveFile.getAbsolutePath())));
     }
 
+    @Test
+    public void capturesProcessResourcesAsNativeFileTransform() throws IOException {
+        File resourceFile = temporaryFolder.newFile("application.properties");
+        File outputDir = temporaryFolder.newFolder("build/resources/main");
+
+        Task processResources = basicTask(":processResources", "processResources", fileCollection(resourceFile), fileCollection(outputDir), false);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(processResources, ProcessResources.class);
+
+        assertEquals("file-transform", task.getActionKind());
+        assertEquals("in-process", task.getWorkerIsolation());
+        assertTrue(task.getInputSpecsList().stream()
+            .anyMatch(input -> input.getKind().equals("path") && input.getValue().equals(resourceFile.getAbsolutePath())));
+        assertTrue(task.getOutputSpecsList().stream()
+            .map(BuildPlanTaskOutputSpec::getPath)
+            .anyMatch(path -> path.equals(outputDir.getAbsolutePath())));
+    }
+
+    @Test
+    public void capturesNoActionDefaultTaskAsLifecycleNoop() {
+        Task classes = basicTask(":classes", "classes", fileCollection(), fileCollection(), true);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(classes, DefaultTask.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("lifecycle", task.getActionKind());
+        assertEquals("0", inputs.get("action_count"));
+    }
+
     private static Task javaCompileTask(File sourceFile, File outputDir, File classpathEntry) {
         FileCollection source = fileCollection(sourceFile);
         FileCollection classpath = fileCollection(classpathEntry);
@@ -156,6 +187,10 @@ public class ProjectModelProviderAdapterTest {
     private static Task jarTask(File classesDir, File archiveDir, File archiveFile) {
         FileCollection inputs = fileCollection(classesDir);
         FileCollection outputs = fileCollection(archiveFile);
+        return basicJarTask(inputs, outputs, archiveDir, archiveFile);
+    }
+
+    private static Task basicJarTask(FileCollection inputs, FileCollection outputs, File archiveDir, File archiveFile) {
         Project project = proxy(Project.class, (proxy, method, args) -> {
             if (method.getName().equals("getPath")) {
                 return ":";
@@ -208,6 +243,60 @@ public class ProjectModelProviderAdapterTest {
                     return new FileProvider(archiveDir);
                 case "getArchiveFile":
                     return new FileProvider(archiveFile);
+                case "compareTo":
+                    return 0;
+                default:
+                    return defaultValue(method.getReturnType());
+            }
+        });
+    }
+
+    private static Task basicTask(
+        String path,
+        String name,
+        FileCollection inputs,
+        FileCollection outputs,
+        boolean noActions
+    ) {
+        Project project = proxy(Project.class, (proxy, method, args) -> {
+            if (method.getName().equals("getPath")) {
+                return ":";
+            }
+            return defaultValue(method.getReturnType());
+        });
+        TaskDependency noDependencies = proxy(TaskDependency.class, (proxy, method, args) -> {
+            if (method.getName().equals("getDependencies")) {
+                return Collections.emptySet();
+            }
+            return defaultValue(method.getReturnType());
+        });
+        return proxy(Task.class, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "getPath":
+                    return path;
+                case "getProject":
+                    return project;
+                case "getName":
+                    return name;
+                case "getEnabled":
+                    return true;
+                case "getGroup":
+                case "getDescription":
+                    return "";
+                case "getTaskDependencies":
+                case "getShouldRunAfter":
+                case "getMustRunAfter":
+                case "getFinalizedBy":
+                    return noDependencies;
+                case "getInputs":
+                    return filesOwner(method.getReturnType(), inputs);
+                case "getOutputs":
+                    return filesOwner(method.getReturnType(), outputs);
+                case "getLocalState":
+                case "getDestroyables":
+                    return registeredFilesOwner(method.getReturnType());
+                case "getActions":
+                    return noActions ? Collections.emptyList() : Collections.singletonList(new Object());
                 case "compareTo":
                     return 0;
                 default:
@@ -370,5 +459,11 @@ public class ProjectModelProviderAdapterTest {
     }
 
     public static class Jar {
+    }
+
+    public static class ProcessResources {
+    }
+
+    public static class DefaultTask {
     }
 }

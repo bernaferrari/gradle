@@ -415,12 +415,18 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
         ("archive", "Jar") | (_, "Jar") if has_input_paths(task) && has_outputs(task) => {
             "Jar".to_string()
         }
+        ("file-transform", "ProcessResources") | (_, "ProcessResources")
+            if has_input_paths(task) && has_outputs(task) =>
+        {
+            "Copy".to_string()
+        }
         ("file-transform", "Copy") | (_, "Copy") if has_input_paths(task) && has_outputs(task) => {
             "Copy".to_string()
         }
         ("file-transform", "Sync") | (_, "Sync") if has_input_paths(task) && has_outputs(task) => {
             "Sync".to_string()
         }
+        ("lifecycle", _) | (_, "Lifecycle") if no_task_actions(task) => "Lifecycle".to_string(),
         _ => task.implementation_id.clone(),
     }
 }
@@ -539,6 +545,16 @@ fn has_input_paths(task: &CanonicalBuildPlanTask) -> bool {
 
 fn has_outputs(task: &CanonicalBuildPlanTask) -> bool {
     !output_paths(task).is_empty()
+}
+
+fn no_task_actions(task: &CanonicalBuildPlanTask) -> bool {
+    task.inputs
+        .get("action_count")
+        .map(|value| value == "0")
+        .unwrap_or(false)
+        || task.input_specs.iter().any(|input| {
+            input.kind == "value" && input.name == "action_count" && input.value == "0"
+        })
 }
 
 fn input_paths(task: &CanonicalBuildPlanTask) -> Vec<String> {
