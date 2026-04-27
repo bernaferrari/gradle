@@ -42,6 +42,8 @@ public class SubstrateClient implements Closeable {
     private final WorkServiceGrpc.WorkServiceBlockingStub workStub;
     // Phase 5-6: Execution planning
     private final ExecutionPlanServiceGrpc.ExecutionPlanServiceBlockingStub executionPlanStub;
+    // Phase 6: DAG execution
+    private final DagExecutorServiceGrpc.DagExecutorServiceBlockingStub dagExecutorStub;
     // Phase 7: Execution history
     private final ExecutionHistoryServiceGrpc.ExecutionHistoryServiceBlockingStub executionHistoryStub;
     // Phase 8: Build cache orchestration
@@ -120,6 +122,7 @@ public class SubstrateClient implements Closeable {
             this.execStub = null;
             this.workStub = null;
             this.executionPlanStub = null;
+            this.dagExecutorStub = null;
             this.executionHistoryStub = null;
             this.cacheOrchestrationStub = null;
             this.fileFingerprintStub = null;
@@ -159,6 +162,7 @@ public class SubstrateClient implements Closeable {
             this.execStub = ExecServiceGrpc.newBlockingStub(channel);
             this.workStub = WorkServiceGrpc.newBlockingStub(channel);
             this.executionPlanStub = ExecutionPlanServiceGrpc.newBlockingStub(channel);
+            this.dagExecutorStub = DagExecutorServiceGrpc.newBlockingStub(channel);
             this.executionHistoryStub = ExecutionHistoryServiceGrpc.newBlockingStub(channel);
             this.cacheOrchestrationStub = BuildCacheOrchestrationServiceGrpc.newBlockingStub(channel);
             this.fileFingerprintStub = FileFingerprintServiceGrpc.newBlockingStub(channel);
@@ -281,6 +285,11 @@ public class SubstrateClient implements Closeable {
     public ExecutionPlanServiceGrpc.ExecutionPlanServiceBlockingStub getExecutionPlanStub() {
         throwIfNoop();
         return executionPlanStub;
+    }
+
+    public DagExecutorServiceGrpc.DagExecutorServiceBlockingStub getDagExecutorStub() {
+        throwIfNoop();
+        return dagExecutorStub;
     }
 
     public ExecutionHistoryServiceGrpc.ExecutionHistoryServiceBlockingStub getExecutionHistoryStub() {

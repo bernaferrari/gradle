@@ -1,5 +1,6 @@
 package org.gradle.internal.rustbridge.taskgraph
 
+import org.gradle.internal.rustbridge.SubstrateException
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter
 import spock.lang.Specification
 
@@ -29,6 +30,20 @@ class TaskGraphShadowReporterTest extends Specification {
 
         then:
         reporter.isAuthoritative()
+    }
+
+    def "run-build constructor stores execution flags"() {
+        given:
+        def rustClient = Mock(RustTaskGraphClient)
+        def buildExecutionClient = Mock(RustBuildExecutionClient)
+        def mismatchReporter = Mock(HashMismatchReporter)
+
+        when:
+        def reporter = new TaskGraphShadowReporter(rustClient, buildExecutionClient, mismatchReporter, false, true, true)
+
+        then:
+        reporter.runBuildEnabled
+        reporter.runBuildAuthoritative
     }
 
     def "compareExecutionGraph with empty taskPaths returns immediately"() {
@@ -267,5 +282,58 @@ class TaskGraphShadowReporterTest extends Specification {
         result.source == "rust-error"
         result.executionOrder == []
         1 * mismatchReporter.reportRustError("task-graph:build-123", _ as RuntimeException)
+    }
+
+    def "runBuildFromShadowIfEnabled invokes Rust without JVM forwarding"() {
+        given:
+        def rustClient = Mock(RustTaskGraphClient)
+        def buildExecutionClient = Mock(RustBuildExecutionClient)
+        def mismatchReporter = Mock(HashMismatchReporter)
+        def reporter = new TaskGraphShadowReporter(rustClient, buildExecutionClient, mismatchReporter, false, true, false)
+
+        when:
+        def result = reporter.runBuildFromShadowIfEnabled([":app:compileJava", ":app:jar"], "build-123")
+
+        then:
+        1 * buildExecutionClient.runBuild("build-123", _ as Integer, false) >>
+            RustBuildExecutionClient.RunBuildResult.success("build-plan-shadow", 2, 2)
+        result.success
+        result.tasksForwardedToJvm == 0
+        1 * mismatchReporter.reportMatch()
+    }
+
+    def "runBuildFromShadowIfEnabled reports Rust error in shadow mode"() {
+        given:
+        def rustClient = Mock(RustTaskGraphClient)
+        def buildExecutionClient = Mock(RustBuildExecutionClient)
+        def mismatchReporter = Mock(HashMismatchReporter)
+        def reporter = new TaskGraphShadowReporter(rustClient, buildExecutionClient, mismatchReporter, false, true, false)
+
+        when:
+        def result = reporter.runBuildFromShadowIfEnabled([":app:compileJava"], "build-123")
+
+        then:
+        1 * buildExecutionClient.runBuild("build-123", _ as Integer, false) >>
+            RustBuildExecutionClient.RunBuildResult.error("missing native executor")
+        !result.success
+        1 * mismatchReporter.reportRustError("run-build:build-123", _ as RuntimeException)
+        noExceptionThrown()
+    }
+
+    def "runBuildFromShadowIfEnabled fails closed in authoritative mode"() {
+        given:
+        def rustClient = Mock(RustTaskGraphClient)
+        def buildExecutionClient = Mock(RustBuildExecutionClient)
+        def mismatchReporter = Mock(HashMismatchReporter)
+        def reporter = new TaskGraphShadowReporter(rustClient, buildExecutionClient, mismatchReporter, false, true, true)
+
+        when:
+        reporter.runBuildFromShadowIfEnabled([":app:compileJava"], "build-123")
+
+        then:
+        1 * buildExecutionClient.runBuild("build-123", _ as Integer, false) >>
+            RustBuildExecutionClient.RunBuildResult.error("missing native executor")
+        1 * mismatchReporter.reportRustError("run-build:build-123", _ as RuntimeException)
+        thrown(SubstrateException)
     }
 }

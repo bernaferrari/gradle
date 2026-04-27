@@ -22,6 +22,7 @@ import org.gradle.internal.rustbridge.metrics.RustBuildMetricsClient;
 import org.gradle.internal.rustbridge.shadow.BuildFinishMismatchLogger;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
 import org.gradle.internal.rustbridge.shadow.ShadowingBuildCacheKeyComputer;
+import org.gradle.internal.rustbridge.taskgraph.RustBuildExecutionClient;
 import org.gradle.internal.rustbridge.taskgraph.RustTaskGraphClient;
 import org.gradle.internal.rustbridge.taskgraph.TaskGraphShadowListener;
 import org.gradle.internal.rustbridge.taskgraph.TaskGraphShadowReporter;
@@ -177,6 +178,11 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
         }
 
         @Provides
+        RustBuildExecutionClient createRustBuildExecutionClient(SubstrateClient client) {
+            return new RustBuildExecutionClient(client);
+        }
+
+        @Provides
         @PrivateService
         BuildPlanTaskSelectionSnapshot createBuildPlanTaskSelectionSnapshot() {
             return new BuildPlanTaskSelectionSnapshot();
@@ -258,6 +264,7 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
         @Nullable
         TaskGraphShadowListener createTaskGraphShadowListener(
             RustTaskGraphClient rustTaskGraphClient,
+            RustBuildExecutionClient rustBuildExecutionClient,
             RustBootstrapClient bootstrapClient,
             BuildPlanTaskSelectionSnapshot taskSelectionSnapshot,
             HashMismatchReporter mismatchReporter,
@@ -275,10 +282,21 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
                 options,
                 RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_TASK_GRAPH
             );
+            boolean runBuildEnabled = RustSubstrateOptions.isSubsystemEnabled(
+                options,
+                RustSubstrateOptions.ENABLE_RUST_RUN_BUILD
+            );
+            boolean runBuildAuthoritative = RustSubstrateOptions.isSubsystemAuthoritative(
+                options,
+                RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_RUN_BUILD
+            );
             TaskGraphShadowReporter reporter = new TaskGraphShadowReporter(
                 activeClient,
+                runBuildEnabled ? rustBuildExecutionClient : null,
                 mismatchReporter,
-                authoritative
+                authoritative,
+                runBuildEnabled,
+                runBuildAuthoritative
             );
             TaskGraphShadowListener listener = new TaskGraphShadowListener(
                 reporter,
