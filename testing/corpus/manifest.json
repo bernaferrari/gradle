@@ -1,0 +1,35 @@
+{
+  "root": ".",
+  "projects": [
+    {
+      "name": "java-library-kotlin-dsl",
+      "path": "java-library-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 1,
+        "plugins": ["java-library"],
+        "tasks": ["contractReport", "generateSources"],
+        "outputs": ["build/generated/contract", "build/reports/contract"],
+        "dependencies": [],
+        "toolchains": ["17"]
+      }
+    },
+    {
+      "name": "java-application-groovy-dsl",
+      "path": "java-application-groovy-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 1,
+        "plugins": ["application"],
+        "tasks": ["contractReport", "prepareRuntime"],
+        "outputs": ["build/runtime", "build/reports/contract"],
+        "dependencies": [],
+        "toolchains": ["17"]
+      }
+    }
+  ]
+}

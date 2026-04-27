@@ -11,6 +11,11 @@ python3 tools/corpus_runner/run.py --projects /path/to/corpus
 # Run on a single project
 python3 tools/corpus_runner/run.py --project /path/to/single/project
 
+# Validate the checked-in offline corpus contracts
+python3 tools/corpus_runner/run.py \
+  --manifest testing/corpus/manifest.json \
+  --contract-only
+
 # Run in shadow mode with an explicit substrate daemon binary
 python3 tools/corpus_runner/run.py \
   --project /path/to/project \
@@ -39,11 +44,22 @@ The substrate candidate is considered invalid if Gradle reports that it used
 no-op fallback mode. Use `--allow-noop-substrate` only when explicitly testing
 fallback behavior rather than Rust parity.
 
+`--contract-only` does not invoke Gradle. It scans checked-in sample projects
+and validates deterministic build-plan signals such as plugins, declared tasks,
+declared outputs, source files, dependencies, and Java toolchain declarations.
+This is suitable for quick CI gates and keeps the corpus useful without network
+access.
+
 ## Corpus Structure
 
 A corpus should be a directory containing Gradle projects:
 
 ```
+
+The repository includes a small offline corpus at `testing/corpus/` with a
+manifest. Keep samples deterministic: prefer built-in Gradle plugins and local
+sources; avoid external repositories or dependencies unless the manifest and
+runner are extended to pin/cache them explicitly.
 my-corpus/
   project-a/
     build.gradle
