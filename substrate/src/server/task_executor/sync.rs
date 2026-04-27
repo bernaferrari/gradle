@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::pin::Pin;
 
@@ -69,6 +70,8 @@ impl TaskExecutor for SyncTaskExecutor {
             .map(|v| v == "true")
             .unwrap_or(false);
 
+        let mut expected_files = HashSet::new();
+
         for source_dir in &input.source_files {
             if !source_dir.is_dir() {
                 result.success = false;
@@ -83,6 +86,7 @@ impl TaskExecutor for SyncTaskExecutor {
             // Copy/update files
             for src_file in &source_files {
                 let relative = src_file.strip_prefix(source_dir).unwrap_or(src_file);
+                expected_files.insert(relative.to_path_buf());
                 let dest_file = input.target_dir.join(relative);
 
                 // Create parent directories
@@ -137,25 +141,24 @@ impl TaskExecutor for SyncTaskExecutor {
                     }
                 }
             }
+        }
 
-            // Delete orphan files in target
-            if delete_orphans && input.target_dir.exists() {
-                let dest_files = Self::list_files(&input.target_dir).await;
-                for dest_file in &dest_files {
-                    let relative = dest_file
-                        .strip_prefix(&input.target_dir)
-                        .unwrap_or(dest_file);
-                    let expected_src = source_dir.join(relative);
+        // Delete orphan files after all source roots have contributed.
+        if delete_orphans && input.target_dir.exists() {
+            let dest_files = Self::list_files(&input.target_dir).await;
+            for dest_file in &dest_files {
+                let relative = dest_file
+                    .strip_prefix(&input.target_dir)
+                    .unwrap_or(dest_file);
 
-                    if !expected_src.exists() {
-                        if let Err(e) = tokio::fs::remove_file(dest_file).await {
-                            result.success = false;
-                            result.error_message =
-                                format!("Failed to remove orphan {}: {}", dest_file.display(), e);
-                            return result;
-                        }
-                        result.removed_files.push(dest_file.clone());
+                if !expected_files.contains(relative) {
+                    if let Err(e) = tokio::fs::remove_file(dest_file).await {
+                        result.success = false;
+                        result.error_message =
+                            format!("Failed to remove orphan {}: {}", dest_file.display(), e);
+                        return result;
                     }
+                    result.removed_files.push(dest_file.clone());
                 }
             }
         }
@@ -257,6 +260,37 @@ mod tests {
         assert!(result.success);
         assert!(dest_dir.join("new.txt").exists());
         assert!(dest_dir.join("orphan.txt").exists()); // Should NOT be deleted
+    }
+
+    #[tokio::test]
+    async fn test_sync_multiple_source_dirs_delete_orphans_after_union() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_a = tmp.path().join("src-a");
+        let src_b = tmp.path().join("src-b");
+        let dest_dir = tmp.path().join("dest");
+
+        tokio::fs::create_dir_all(&src_a).await.unwrap();
+        tokio::fs::create_dir_all(&src_b).await.unwrap();
+        tokio::fs::create_dir_all(&dest_dir).await.unwrap();
+        tokio::fs::write(src_a.join("a.txt"), b"a").await.unwrap();
+        tokio::fs::write(src_b.join("b.txt"), b"b").await.unwrap();
+        tokio::fs::write(dest_dir.join("orphan.txt"), b"orphan")
+            .await
+            .unwrap();
+
+        let executor = SyncTaskExecutor::new();
+        let mut input = TaskInput::new("Sync");
+        input.source_files.push(src_a);
+        input.source_files.push(src_b);
+        input.target_dir = dest_dir.clone();
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert!(dest_dir.join("a.txt").exists());
+        assert!(dest_dir.join("b.txt").exists());
+        assert!(!dest_dir.join("orphan.txt").exists());
+        assert_eq!(result.removed_files.len(), 1);
     }
 
     #[tokio::test]
