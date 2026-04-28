@@ -75,8 +75,8 @@
   compatibility islands.
 - More task types need native-ready contract capture before broad no-fallback
   execution is realistic, especially arbitrary copy filters/actions beyond
-  direct expand, nested CopySpec trees, Gradle archive metadata edge cases,
-  symlink copy semantics, and remaining tar compression variants such as XZ.
+  direct expand, nested CopySpec trees, Gradle archive metadata edge cases, and
+  symlink copy semantics.
 
 ## Validation
 
