@@ -3019,6 +3019,49 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_run_build_native_exec() {
+        let svc = make_svc();
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("generated.txt");
+
+        register_chain(&svc, "rb-exec", &[(":generateFile", "Exec", &[])]).await;
+
+        let ctx = serde_json::json!({
+            "source_files": [],
+            "target_dir": "",
+            "options": {
+                "executable": "/usr/bin/touch",
+                "args": target.to_string_lossy(),
+                "ignore_exit_value": "false"
+            }
+        })
+        .to_string();
+
+        let mut contexts = HashMap::new();
+        contexts.insert(":generateFile".to_string(), ctx);
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "rb-exec".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts,
+                allow_jvm_forwarding: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.final_status, "COMPLETED");
+        assert_eq!(resp.tasks_succeeded, 1);
+        assert!(
+            target.exists(),
+            "Exec should run through the native task executor"
+        );
+    }
+
     #[tokio::test]
     async fn test_run_build_diamond_jvm_forward() {
         let (svc, _jvm_host_dir) = make_svc_with_mock_jvm_host().await;

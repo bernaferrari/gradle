@@ -160,6 +160,22 @@
         "project_dependencies": [],
         "toolchains": []
       }
+    },
+    {
+      "name": "exec-java-kotlin-dsl",
+      "path": "exec-java-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 0,
+        "plugins": ["java"],
+        "tasks": ["probeJava"],
+        "outputs": [],
+        "dependencies": [],
+        "project_dependencies": [],
+        "toolchains": ["17"]
+      }
     }
   ]
 }

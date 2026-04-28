@@ -79,7 +79,8 @@ corpus useful without network access.
 The repository includes a small offline corpus at `testing/corpus/manifest.json`
 covering Java library, Java application, Java multi-project, Java resource
 expansion, JavaCompile options, standalone Copy/Sync resource transforms,
-CopySpec duplicate handling, and Zip/Tar archive builds. The optional
+CopySpec duplicate handling, Zip/Tar archive builds, and a simple Java launcher
+Exec task. The optional
 `testing/corpus/external-manifest.json` adds a pinned JUnit Platform sample for
 real non-empty test execution and requires network or a warm Gradle dependency
 cache.

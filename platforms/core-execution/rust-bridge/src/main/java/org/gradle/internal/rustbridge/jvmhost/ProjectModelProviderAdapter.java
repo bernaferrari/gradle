@@ -270,6 +270,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if ("Test".equals(shortTaskTypeName)) {
             captureTestInputs(task, inputs);
         }
+        if ("Exec".equals(shortTaskTypeName)) {
+            captureExecInputs(task, inputs);
+        }
 
         BuildPlanTask.Builder builder = BuildPlanTask.newBuilder()
             .setPath(task.getPath())
@@ -397,6 +400,13 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "system_properties", stringMap(invokeOptional(task, "getSystemProperties")));
         putIfPresent(inputs, "xml_report_dir", testXmlReportDirectory(task));
         inputs.put("scan_classpath", "true");
+    }
+
+    private static void captureExecInputs(Task task, Map<String, String> inputs) {
+        putIfPresent(inputs, "executable", stringOrEmpty(invokeOptional(task, "getExecutable")));
+        putIfPresent(inputs, "args", stringList(invokeOptional(task, "getArgs")));
+        putIfPresent(inputs, "working_dir", filePath(invokeOptional(task, "getWorkingDir")));
+        putIfPresent(inputs, "ignore_exit_value", booleanString(invokeOptional(task, "isIgnoreExitValue")));
     }
 
     private static void putIfPresent(Map<String, String> inputs, String key, String value) {
