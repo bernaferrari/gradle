@@ -356,6 +356,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "include_patterns", stringCollection(invokeOptional(rootSpec, "getIncludes")));
         putIfPresent(inputs, "exclude_patterns", stringCollection(invokeOptional(rootSpec, "getExcludes")));
         putIfPresent(inputs, "case_sensitive", booleanString(invokeOptional(rootSpec, "isCaseSensitive")));
+        putIfPresent(inputs, "include_empty_dirs", booleanString(invokeOptional(rootSpec, "isIncludeEmptyDirs")));
     }
 
     private static void captureTestInputs(Task task, Map<String, String> inputs) {
