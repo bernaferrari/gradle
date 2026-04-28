@@ -20,8 +20,8 @@
   only when Rust reports exactly the scheduled task count with zero JVM forwards.
 - The checked-in offline corpus covers Java library, Java application,
   Java multi-project, resource expansion, JavaCompile options, standalone
-  Copy/Sync transforms, CopySpec duplicates, Zip/Tar archive tasks, and a
-  simple Exec task through that explicit gate with
+  Copy/Sync transforms, CopySpec duplicates, Zip/Tar/War/Ear archive tasks,
+  and a simple Exec task through that explicit gate with
   `target/debug/gradle-substrate-daemon`.
 - A separate networked JUnit corpus build proves native `TestExec` lowering for
   a non-empty JUnit Platform test task, including include/exclude tag capture,

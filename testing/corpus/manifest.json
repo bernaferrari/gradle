@@ -162,6 +162,38 @@
       }
     },
     {
+      "name": "war-basic-kotlin-dsl",
+      "path": "war-basic-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 1,
+        "plugins": ["war"],
+        "tasks": [],
+        "outputs": [],
+        "dependencies": [],
+        "project_dependencies": [],
+        "toolchains": ["17"]
+      }
+    },
+    {
+      "name": "ear-basic-kotlin-dsl",
+      "path": "ear-basic-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 0,
+        "plugins": ["ear"],
+        "tasks": [],
+        "outputs": [],
+        "dependencies": [],
+        "project_dependencies": [],
+        "toolchains": []
+      }
+    },
+    {
       "name": "exec-java-kotlin-dsl",
       "path": "exec-java-kotlin-dsl",
       "tasks": ["clean", "build"],
