@@ -573,6 +573,8 @@ fn task_options(
             "include_empty_dirs",
             "include_empty_dirs",
         );
+        insert_input_option(task, &mut options, "file_permissions", "file_permissions");
+        insert_input_option(task, &mut options, "dir_permissions", "dir_permissions");
     } else if task_type == "TestExec" {
         insert_input_option(task, &mut options, "java_home", "java_home");
         insert_input_option(task, &mut options, "classpath", "classpath");
@@ -1304,6 +1306,67 @@ mod tests {
         assert_eq!(context["options"]["classpath"], classpath);
         assert_eq!(context["options"]["max_heap_mb"], "1024");
         assert_eq!(context["options"]["scan_classpath"], "true");
+    }
+
+    #[test]
+    fn test_copy_contract_lowers_permissions_to_native_options() {
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":copyAssets".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.api.tasks.Copy".to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "in-process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "declared-outputs".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "file-transform".to_string(),
+            input_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "input0".to_string(),
+                    kind: "path".to_string(),
+                    value: "/repo/src/assets".to_string(),
+                    normalization: "absolute-path".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "file_permissions".to_string(),
+                    kind: "value".to_string(),
+                    value: "493".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "dir_permissions".to_string(),
+                    kind: "value".to_string(),
+                    value: "448".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+            ],
+            output_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                    name: "destination".to_string(),
+                    kind: "directory".to_string(),
+                    path: "/repo/build/assets".to_string(),
+                },
+            ],
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        let task_type = executable_task_type(&task);
+        let context: serde_json::Value =
+            serde_json::from_str(&execution_context_json(&task, &task_type)).unwrap();
+
+        assert_eq!(task_type, "Copy");
+        assert_eq!(context["options"]["file_permissions"], "493");
+        assert_eq!(context["options"]["dir_permissions"], "448");
     }
 
     #[test]

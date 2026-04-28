@@ -358,6 +358,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "exclude_patterns", stringCollection(invokeOptional(rootSpec, "getExcludes")));
         putIfPresent(inputs, "case_sensitive", booleanString(invokeOptional(rootSpec, "isCaseSensitive")));
         putIfPresent(inputs, "include_empty_dirs", booleanString(invokeOptional(rootSpec, "isIncludeEmptyDirs")));
+        putIfPresent(inputs, "file_permissions", permissionUnixMode(invokeOptional(rootSpec, "getFilePermissions")));
+        putIfPresent(inputs, "dir_permissions", permissionUnixMode(invokeOptional(rootSpec, "getDirPermissions")));
     }
 
     private static void captureTestInputs(Task task, Map<String, String> inputs) {
@@ -388,6 +390,18 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         }
         Object providerValue = invokeOptional(value, "getOrNull");
         return providerValue == null ? "" : providerValue.toString();
+    }
+
+    private static String permissionUnixMode(@Nullable Object value) {
+        if (value == null) {
+            return "";
+        }
+        Object permissions = invokeOptional(value, "getOrNull");
+        if (permissions == null) {
+            permissions = value;
+        }
+        Object unixNumeric = invokeOptional(permissions, "toUnixNumeric");
+        return unixNumeric instanceof Number ? unixNumeric.toString() : "";
     }
 
     private static String providerFilePath(@Nullable Object value) {

@@ -48,6 +48,8 @@
   including `**`, `*`, `?`, and case-sensitivity flags for relative paths.
 - Native `Copy` and `Sync` honor captured CopySpec `includeEmptyDirs`
   behavior for creating empty directory trees.
+- Native `Copy` and `Sync` honor captured root CopySpec file and directory
+  permissions on Unix when Gradle exposes `filePermissions`/`dirPermissions`.
 - Native `Copy` and `Sync` honor basic duplicate destination strategies:
   `INCLUDE`/default overwrites, `EXCLUDE` keeps the first file, and `FAIL`
   reports an error.
@@ -66,8 +68,9 @@
   compatibility islands.
 - More task types need native-ready contract capture before broad no-fallback
   execution is realistic, especially arbitrary copy filters/actions, nested
-  CopySpec trees, Gradle archive metadata edge cases, permission preservation,
-  symlink copy semantics, and remaining tar compression variants such as XZ.
+  CopySpec trees, Gradle archive metadata edge cases, archive permission
+  preservation, symlink copy semantics, and remaining tar compression variants
+  such as XZ.
 
 ## Validation
 
