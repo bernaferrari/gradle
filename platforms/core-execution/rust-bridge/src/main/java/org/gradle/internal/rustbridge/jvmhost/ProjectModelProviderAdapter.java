@@ -434,7 +434,27 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "jvm_args", stringList(invokeOptional(task, "getJvmArgs")));
         putIfPresent(inputs, "system_properties", stringMap(invokeOptional(task, "getSystemProperties")));
         putIfPresent(inputs, "xml_report_dir", testXmlReportDirectory(task));
+        captureTestFilterInputs(task, inputs);
+        Object options = invokeOptional(task, "getOptions");
+        putIfPresent(inputs, "include_tags", stringCollection(invokeOptional(options, "getIncludeTags")));
+        putIfPresent(inputs, "exclude_tags", stringCollection(invokeOptional(options, "getExcludeTags")));
         inputs.put("scan_classpath", "true");
+    }
+
+    private static void captureTestFilterInputs(Task task, Map<String, String> inputs) {
+        Object filter = invokeOptional(task, "getFilter");
+        List<String> includes = stringValues(invokeOptional(filter, "getIncludePatterns"));
+        List<String> excludes = stringValues(invokeOptional(filter, "getExcludePatterns"));
+        if (includes.size() == 1 && excludes.isEmpty()) {
+            inputs.put("test_filter", includes.get(0));
+            inputs.put("test_unsupported_filters", "false");
+        } else if (includes.isEmpty() && excludes.isEmpty()) {
+            inputs.put("test_unsupported_filters", "false");
+        } else {
+            putIfPresent(inputs, "test_filter_includes", String.join(",", includes));
+            putIfPresent(inputs, "test_filter_excludes", String.join(",", excludes));
+            inputs.put("test_unsupported_filters", "true");
+        }
     }
 
     private static void captureExecInputs(Task task, Map<String, String> inputs) {
@@ -518,17 +538,22 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     }
 
     private static String stringCollection(@Nullable Object value) {
-        if (!(value instanceof Iterable)) {
-            return "";
-        }
+        List<String> values = stringValues(value);
+        return String.join(",", values);
+    }
+
+    private static List<String> stringValues(@Nullable Object value) {
         List<String> values = new ArrayList<>();
+        if (!(value instanceof Iterable)) {
+            return values;
+        }
         for (Object item : (Iterable<?>) value) {
             if (item != null) {
                 values.add(item.toString());
             }
         }
         Collections.sort(values);
-        return String.join(",", values);
+        return values;
     }
 
     private static String stringMap(@Nullable Object value) {

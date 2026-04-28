@@ -502,7 +502,9 @@ fn java_compile_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
 }
 
 fn test_exec_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
-    has_input_value(task, "classpath") && has_input_value(task, "test_classes_dirs")
+    has_input_value(task, "classpath")
+        && has_input_value(task, "test_classes_dirs")
+        && !has_input_value_equal(task, "test_unsupported_filters", "true")
 }
 
 fn copy_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
@@ -604,6 +606,9 @@ fn task_options(
         insert_input_option(task, &mut options, "jvm_args", "jvm_args");
         insert_input_option(task, &mut options, "system_properties", "system_properties");
         insert_input_option(task, &mut options, "scan_classpath", "scan_classpath");
+        insert_input_option(task, &mut options, "test_filter", "test_filter");
+        insert_input_option(task, &mut options, "include_tags", "include_tags");
+        insert_input_option(task, &mut options, "exclude_tags", "exclude_tags");
         insert_max_heap_option(task, &mut options);
     } else if task_type == "Exec" {
         insert_input_option(task, &mut options, "executable", "executable");
@@ -1346,6 +1351,27 @@ mod tests {
                     normalization: "scalar".to_string(),
                     optional: false,
                 },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "test_filter".to_string(),
+                    kind: "value".to_string(),
+                    value: "example.*Test".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "include_tags".to_string(),
+                    kind: "value".to_string(),
+                    value: "fast,integration".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "exclude_tags".to_string(),
+                    kind: "value".to_string(),
+                    value: "slow".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
             ],
             output_specs: vec![
                 super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
@@ -1369,6 +1395,67 @@ mod tests {
         assert_eq!(context["options"]["classpath"], classpath);
         assert_eq!(context["options"]["max_heap_mb"], "1024");
         assert_eq!(context["options"]["scan_classpath"], "true");
+        assert_eq!(context["options"]["test_filter"], "example.*Test");
+        assert_eq!(context["options"]["include_tags"], "fast,integration");
+        assert_eq!(context["options"]["exclude_tags"], "slow");
+    }
+
+    #[test]
+    fn test_test_contract_with_unsupported_filters_does_not_lower_to_native() {
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":test".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.api.tasks.testing.Test".to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "declared-outputs".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "test".to_string(),
+            input_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "classpath".to_string(),
+                    kind: "value".to_string(),
+                    value: "/repo/libs/junit-platform-console-standalone.jar".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "test_classes_dirs".to_string(),
+                    kind: "value".to_string(),
+                    value: "/repo/build/classes/java/test".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "test_unsupported_filters".to_string(),
+                    kind: "value".to_string(),
+                    value: "true".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+            ],
+            output_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                    name: "results".to_string(),
+                    kind: "directory".to_string(),
+                    path: "/repo/build/test-results/test".to_string(),
+                },
+            ],
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        assert_eq!(
+            executable_task_type(&task),
+            "org.gradle.api.tasks.testing.Test"
+        );
     }
 
     #[test]
