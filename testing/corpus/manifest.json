@@ -162,6 +162,22 @@
       }
     },
     {
+      "name": "tar-bzip2-archive-kotlin-dsl",
+      "path": "tar-bzip2-archive-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 0,
+        "plugins": ["base"],
+        "tasks": ["packageTar"],
+        "outputs": [],
+        "dependencies": [],
+        "project_dependencies": [],
+        "toolchains": []
+      }
+    },
+    {
       "name": "war-basic-kotlin-dsl",
       "path": "war-basic-kotlin-dsl",
       "tasks": ["clean", "build"],
