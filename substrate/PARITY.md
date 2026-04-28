@@ -26,6 +26,9 @@
   Platform ConsoleLauncher.
 - Native dependency resolution handles inherited Maven exclusions per dependency
   edge, so one dependency's exclusions no longer remove sibling dependencies.
+- Native dependency resolution preserves Maven dependency scopes on resolved
+  nodes and filters compile/runtime/test target scopes recursively instead of
+  only filtering top-level requested dependencies.
 - Archive tasks (`Jar`, `Zip`, `War`, `Ear`, `Tar`) can lower to native Rust
   archive execution when the task model provides input paths and an output
   archive path. ZIP-compatible tasks emit ZIP-compatible archives; `Tar` emits

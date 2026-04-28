@@ -55,10 +55,14 @@ impl DependencyScope {
     }
 
     /// Returns true if this scope includes the given dependency scope.
-    /// Compile includes everything. Runtime includes Compile. Test includes Runtime.
+    /// This follows Maven classpath semantics: runtime includes compile/runtime,
+    /// test includes everything, and compile excludes runtime/test-only entries.
     pub fn includes(&self, other: &DependencyScope) -> bool {
         match self {
-            DependencyScope::Compile => true,
+            DependencyScope::Compile => matches!(
+                other,
+                DependencyScope::Compile | DependencyScope::Provided | DependencyScope::System
+            ),
             DependencyScope::Runtime => {
                 matches!(other, DependencyScope::Compile | DependencyScope::Runtime)
             }
@@ -997,13 +1001,15 @@ impl DependencyResolutionServiceImpl {
         deps: Vec<ResolvedDependency>,
         target: &DependencyScope,
     ) -> Vec<ResolvedDependency> {
-        if matches!(target, DependencyScope::Compile) {
-            return deps; // Compile includes everything
-        }
         deps.into_iter()
-            .filter(|dep| {
+            .filter_map(|mut dep| {
                 let dep_scope = DependencyScope::from_str_loose(&dep.scope);
-                target.includes(&dep_scope)
+                if target.includes(&dep_scope) {
+                    dep.dependencies = Self::filter_by_scope(dep.dependencies, target);
+                    Some(dep)
+                } else {
+                    None
+                }
             })
             .collect()
     }
@@ -1371,6 +1377,11 @@ impl DependencyResolutionServiceImpl {
         let group = dep.group.clone();
         let name = dep.name.clone();
         let raw_version = dep.version.clone();
+        let scope = if dep.scope.is_empty() {
+            "compile".to_string()
+        } else {
+            dep.scope.clone()
+        };
 
         // Resolve version ranges, LATEST, RELEASE, and SNAPSHOT
         let selected_version = if raw_version.contains(',')
@@ -1427,7 +1438,7 @@ impl DependencyResolutionServiceImpl {
                 artifact_url,
                 artifact_size: 0,
                 artifact_sha256: String::new(),
-                scope: String::new(),
+                scope,
             };
         }
 
@@ -1476,7 +1487,7 @@ impl DependencyResolutionServiceImpl {
             artifact_url,
             artifact_size: 0,
             artifact_sha256: String::new(),
-            scope: String::new(),
+            scope,
         }
     }
 
@@ -1701,7 +1712,11 @@ impl DependencyResolutionServiceImpl {
                                 pom_dep.type_field.clone()
                             },
                             transitive: true,
-                            scope: String::new(),
+                            scope: if pom_dep.scope.is_empty() {
+                                "compile".to_string()
+                            } else {
+                                pom_dep.scope.clone()
+                            },
                             changing: false,
                             optional: false,
                             ivy_conf: String::new(),
@@ -2503,6 +2518,65 @@ mod tests {
             layout: String::new(),
             ivy_pattern: String::new(),
         }
+    }
+
+    fn resolved_dep(group: &str, name: &str, scope: &str) -> ResolvedDependency {
+        ResolvedDependency {
+            group: group.to_string(),
+            name: name.to_string(),
+            version: "1.0".to_string(),
+            selected_version: "1.0".to_string(),
+            dependencies: Vec::new(),
+            resolved: true,
+            failure_reason: String::new(),
+            artifact_url: String::new(),
+            artifact_size: 0,
+            artifact_sha256: String::new(),
+            scope: scope.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_filter_by_compile_scope_excludes_runtime_and_test_recursively() {
+        let mut compile = resolved_dep("org.example", "compile-lib", "compile");
+        compile.dependencies = vec![
+            resolved_dep("org.example", "runtime-child", "runtime"),
+            resolved_dep("org.example", "provided-child", "provided"),
+        ];
+        let deps = vec![
+            compile,
+            resolved_dep("org.example", "runtime-lib", "runtime"),
+            resolved_dep("org.example", "test-lib", "test"),
+        ];
+
+        let filtered =
+            DependencyResolutionServiceImpl::filter_by_scope(deps, &DependencyScope::Compile);
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "compile-lib");
+        assert_eq!(filtered[0].dependencies.len(), 1);
+        assert_eq!(filtered[0].dependencies[0].name, "provided-child");
+    }
+
+    #[test]
+    fn test_filter_by_runtime_scope_keeps_compile_and_runtime_only() {
+        let deps = vec![
+            resolved_dep("org.example", "compile-lib", "compile"),
+            resolved_dep("org.example", "runtime-lib", "runtime"),
+            resolved_dep("org.example", "provided-lib", "provided"),
+            resolved_dep("org.example", "test-lib", "test"),
+        ];
+
+        let filtered =
+            DependencyResolutionServiceImpl::filter_by_scope(deps, &DependencyScope::Runtime);
+
+        assert_eq!(
+            filtered
+                .iter()
+                .map(|dependency| dependency.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["compile-lib", "runtime-lib"]
+        );
     }
 
     #[tokio::test]
