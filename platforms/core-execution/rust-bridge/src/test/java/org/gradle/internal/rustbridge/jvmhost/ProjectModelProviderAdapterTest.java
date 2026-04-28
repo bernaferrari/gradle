@@ -92,6 +92,9 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("true", inputs.get("include_empty_dirs"));
         assertEquals("420", inputs.get("file_permissions"));
         assertEquals("493", inputs.get("dir_permissions"));
+        assertEquals("com.example.Main", inputs.get("main_class"));
+        assertEquals("com.example.Main", inputs.get("manifest.Main-Class"));
+        assertEquals("sample", inputs.get("manifest.Implementation-Title"));
         assertTrue(task.getInputSpecsList().stream()
             .anyMatch(input -> input.getKind().equals("path") && input.getValue().equals(classesDir.getAbsolutePath())));
         assertTrue(task.getOutputSpecsList().stream()
@@ -406,6 +409,8 @@ public class ProjectModelProviderAdapterTest {
                     return new FileProvider(archiveFile);
                 case "getCompression":
                     return "GZIP";
+                case "getManifest":
+                    return new ManifestSpec();
                 case "getRootSpec":
                     return copySpec(false);
                 case "compareTo":
@@ -660,6 +665,7 @@ public class ProjectModelProviderAdapterTest {
         FileProvider getDestinationDirectory();
         FileProvider getArchiveFile();
         Object getCompression();
+        Object getManifest();
         Object getRootSpec();
     }
 
@@ -742,6 +748,15 @@ public class ProjectModelProviderAdapterTest {
 
         public int toUnixNumeric() {
             return value;
+        }
+    }
+
+    public static class ManifestSpec {
+        public Map<String, String> getAttributes() {
+            Map<String, String> attributes = new LinkedHashMap<>();
+            attributes.put("Main-Class", "com.example.Main");
+            attributes.put("Implementation-Title", "sample");
+            return attributes;
         }
     }
 

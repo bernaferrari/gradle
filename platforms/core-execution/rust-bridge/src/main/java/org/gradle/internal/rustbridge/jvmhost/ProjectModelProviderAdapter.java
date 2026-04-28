@@ -331,11 +331,34 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "archive_destination_directory", providerFilePath(invokeOptional(task, "getDestinationDirectory")));
         putIfPresent(inputs, "archive_file", providerFilePath(invokeOptional(task, "getArchiveFile")));
         putIfPresent(inputs, "archive_compression", stringOrEmpty(invokeOptional(task, "getCompression")));
+        captureManifestInputs(task, inputs);
         Object rootSpec = invokeOptional(task, "getRootSpec");
         putIfPresent(inputs, "duplicates_strategy", stringOrEmpty(invokeOptional(rootSpec, "getDuplicatesStrategy")));
         putIfPresent(inputs, "include_empty_dirs", booleanString(invokeOptional(rootSpec, "isIncludeEmptyDirs")));
         putIfPresent(inputs, "file_permissions", permissionUnixMode(invokeOptional(rootSpec, "getFilePermissions")));
         putIfPresent(inputs, "dir_permissions", permissionUnixMode(invokeOptional(rootSpec, "getDirPermissions")));
+    }
+
+    private static void captureManifestInputs(Task task, Map<String, String> inputs) {
+        Object manifest = invokeOptional(task, "getManifest");
+        Object attributes = manifest == null ? null : invokeOptional(manifest, "getAttributes");
+        if (!(attributes instanceof Map)) {
+            return;
+        }
+        for (Map.Entry<?, ?> entry : ((Map<?, ?>) attributes).entrySet()) {
+            if (entry.getKey() == null || entry.getValue() == null) {
+                continue;
+            }
+            String name = entry.getKey().toString();
+            String value = entry.getValue().toString();
+            if (name.isEmpty() || value.isEmpty()) {
+                continue;
+            }
+            inputs.put("manifest." + name, value);
+            if ("Main-Class".equalsIgnoreCase(name)) {
+                inputs.put("main_class", value);
+            }
+        }
     }
 
     private static boolean isArchiveTask(String simpleName) {

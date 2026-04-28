@@ -2979,6 +2979,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_run_build_native_delete() {
+        let svc = make_svc();
+        let dir = tempfile::tempdir().unwrap();
+        let stale_dir = dir.path().join("build");
+        let stale_file = stale_dir.join("stale.txt");
+        std::fs::create_dir_all(&stale_dir).unwrap();
+        std::fs::write(&stale_file, "delete me").unwrap();
+
+        register_chain(&svc, "rb-delete", &[(":clean", "Delete", &[])]).await;
+
+        let ctx = serde_json::json!({
+            "source_files": [stale_dir.to_string_lossy()],
+            "target_dir": "",
+            "options": {}
+        })
+        .to_string();
+
+        let mut contexts = HashMap::new();
+        contexts.insert(":clean".to_string(), ctx);
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "rb-delete".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts,
+                allow_jvm_forwarding: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.final_status, "COMPLETED");
+        assert_eq!(resp.tasks_succeeded, 1);
+        assert!(
+            !stale_dir.exists(),
+            "Delete should remove destroyable paths"
+        );
+    }
+
+    #[tokio::test]
     async fn test_run_build_diamond_jvm_forward() {
         let (svc, _jvm_host_dir) = make_svc_with_mock_jvm_host().await;
         //    :root
