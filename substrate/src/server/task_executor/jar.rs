@@ -203,24 +203,28 @@ impl JarTaskExecutor {
 
     /// Create a Java manifest from options.
     fn create_manifest(options: &std::collections::HashMap<String, String>) -> Vec<u8> {
-        let mut manifest = String::from("Manifest-Version: 1.0\r\n");
+        let mut manifest = Vec::new();
+        append_manifest_attribute(&mut manifest, "Manifest-Version", "1.0");
 
         if let Some(main_class) = options.get("mainClass") {
-            manifest.push_str(&format!("Main-Class: {}\r\n", main_class));
+            append_manifest_attribute(&mut manifest, "Main-Class", main_class);
         }
 
         if let Some(classpath) = options.get("classpath") {
-            manifest.push_str(&format!("Class-Path: {}\r\n", classpath));
+            append_manifest_attribute(&mut manifest, "Class-Path", classpath);
         }
 
-        for (key, value) in options {
-            if let Some(attr_name) = key.strip_prefix("manifest.") {
-                manifest.push_str(&format!("{}: {}\r\n", attr_name, value));
-            }
+        let mut custom_attributes: Vec<_> = options
+            .iter()
+            .filter_map(|(key, value)| key.strip_prefix("manifest.").map(|name| (name, value)))
+            .collect();
+        custom_attributes.sort_unstable_by(|left, right| left.0.cmp(right.0));
+        for (attr_name, value) in custom_attributes {
+            append_manifest_attribute(&mut manifest, attr_name, value);
         }
 
-        manifest.push_str("\r\n");
-        manifest.into_bytes()
+        manifest.extend_from_slice(b"\r\n");
+        manifest
     }
 
     /// Write entries as a valid ZIP file using STORED compression for speed.
@@ -290,6 +294,32 @@ impl JarTaskExecutor {
         )?;
 
         Ok(())
+    }
+}
+
+fn append_manifest_attribute(out: &mut Vec<u8>, name: &str, value: &str) {
+    append_wrapped_manifest_line(out, &format!("{}: {}", name, value));
+}
+
+fn append_wrapped_manifest_line(out: &mut Vec<u8>, line: &str) {
+    const MAX_MANIFEST_LINE_BYTES: usize = 72;
+    let mut remaining = line.as_bytes();
+    let mut first = true;
+
+    while !remaining.is_empty() {
+        let available = if first {
+            MAX_MANIFEST_LINE_BYTES
+        } else {
+            MAX_MANIFEST_LINE_BYTES - 1
+        };
+        let take = remaining.len().min(available);
+        if !first {
+            out.push(b' ');
+        }
+        out.extend_from_slice(&remaining[..take]);
+        out.extend_from_slice(b"\r\n");
+        remaining = &remaining[take..];
+        first = false;
     }
 }
 
@@ -558,6 +588,45 @@ mod tests {
         let jar_str = String::from_utf8_lossy(&jar_data);
         assert!(jar_str.contains("Manifest-Version: 1.0"));
         assert!(jar_str.contains("Main-Class: com.example.Main"));
+    }
+
+    #[test]
+    fn test_manifest_attributes_are_sorted_and_wrapped() {
+        let mut options_a = std::collections::HashMap::new();
+        options_a.insert("manifest.Zed".to_string(), "last".to_string());
+        options_a.insert(
+            "manifest.Long-Value".to_string(),
+            "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
+                .to_string(),
+        );
+        options_a.insert("manifest.Alpha".to_string(), "first".to_string());
+
+        let mut options_b = std::collections::HashMap::new();
+        options_b.insert("manifest.Alpha".to_string(), "first".to_string());
+        options_b.insert("manifest.Zed".to_string(), "last".to_string());
+        options_b.insert(
+            "manifest.Long-Value".to_string(),
+            "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
+                .to_string(),
+        );
+
+        let manifest_a = JarTaskExecutor::create_manifest(&options_a);
+        let manifest_b = JarTaskExecutor::create_manifest(&options_b);
+        assert_eq!(manifest_a, manifest_b);
+
+        let text = String::from_utf8(manifest_a).unwrap();
+        assert!(
+            text.find("Alpha: first").unwrap() < text.find("Long-Value:").unwrap()
+                && text.find("Long-Value:").unwrap() < text.find("Zed: last").unwrap()
+        );
+        for line in text.split("\r\n").filter(|line| !line.is_empty()) {
+            assert!(
+                line.as_bytes().len() <= 72,
+                "manifest line too long: {}",
+                line
+            );
+        }
+        assert!(text.contains("\r\n "));
     }
 
     #[tokio::test]

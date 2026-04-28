@@ -35,6 +35,8 @@
   native POSIX tar streams and supports gzip-compressed output.
 - Native ZIP-compatible archive entries use a fixed DOS timestamp and stable
   entry ordering for reproducible Rust-side archive bytes.
+- Native JAR manifest generation emits sorted custom attributes and wraps long
+  manifest lines to JAR-compatible continuation lines.
 - Native file operations cover recursive `Copy` directory sources and
   multi-source `Sync` orphan deletion using the union of all source roots.
 - Native `ProcessResources`/`Copy`/`Sync` execution can expand declared scalar
