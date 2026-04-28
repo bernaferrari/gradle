@@ -3,6 +3,7 @@ use std::path::Path;
 
 use std::collections::HashSet;
 
+use crate::server::task_executor::copy::parse_unix_mode;
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
 /// Native Rust JAR packaging executor.
@@ -14,6 +15,35 @@ use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 /// - Setting manifest attributes (Main-Class, etc.)
 /// - Preserving existing entries when updating
 pub struct JarTaskExecutor;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ZipEntry {
+    name: String,
+    data: Vec<u8>,
+    mode: u32,
+}
+
+impl ZipEntry {
+    fn file(name: impl Into<String>, data: Vec<u8>, mode: u32) -> Self {
+        Self {
+            name: name.into(),
+            data,
+            mode,
+        }
+    }
+
+    fn dir(name: impl Into<String>, mode: u32) -> Self {
+        Self {
+            name: name.into(),
+            data: Vec::new(),
+            mode,
+        }
+    }
+
+    fn is_dir(&self) -> bool {
+        self.name.ends_with('/')
+    }
+}
 
 impl Default for JarTaskExecutor {
     fn default() -> Self {
@@ -116,7 +146,7 @@ impl JarTaskExecutor {
     }
 
     /// Read all entries from an existing ZIP/JAR file.
-    fn read_existing_entries(path: &Path) -> std::io::Result<Vec<(String, Vec<u8>)>> {
+    fn read_existing_entries(path: &Path) -> std::io::Result<Vec<ZipEntry>> {
         let buf = std::fs::read(path)?;
 
         if buf.len() < 22 {
@@ -167,7 +197,8 @@ impl JarTaskExecutor {
                 Vec::new()
             };
 
-            entries.push((name, data));
+            let mode = if name.ends_with('/') { 0o755 } else { 0o644 };
+            entries.push(ZipEntry::file(name, data, mode));
             pos = data_start + compressed_size as usize;
         }
 
@@ -178,8 +209,10 @@ impl JarTaskExecutor {
     fn collect_files(
         base: &Path,
         current: &Path,
-        entries: &mut Vec<(String, Vec<u8>)>,
+        entries: &mut Vec<ZipEntry>,
         include_empty_dirs: bool,
+        file_mode: u32,
+        dir_mode: u32,
     ) -> Result<(), String> {
         let dir_entries = std::fs::read_dir(current)
             .map_err(|e| format!("Cannot read directory {}: {}", current.display(), e))?;
@@ -194,13 +227,23 @@ impl JarTaskExecutor {
 
             if path.is_dir() {
                 if include_empty_dirs {
-                    entries.push((format!("{}/", name.trim_end_matches('/')), Vec::new()));
+                    entries.push(ZipEntry::dir(
+                        format!("{}/", name.trim_end_matches('/')),
+                        dir_mode,
+                    ));
                 }
-                Self::collect_files(base, &path, entries, include_empty_dirs)?;
+                Self::collect_files(
+                    base,
+                    &path,
+                    entries,
+                    include_empty_dirs,
+                    file_mode,
+                    dir_mode,
+                )?;
             } else {
                 let data = std::fs::read(&path)
                     .map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
-                entries.push((name, data));
+                entries.push(ZipEntry::file(name, data, file_mode));
             }
         }
         Ok(())
@@ -233,7 +276,7 @@ impl JarTaskExecutor {
     }
 
     /// Write entries as a valid ZIP file using STORED compression for speed.
-    fn write_zip(out: &mut dyn Write, entries: &[(String, Vec<u8>)]) -> std::io::Result<()> {
+    fn write_zip(out: &mut dyn Write, entries: &[ZipEntry]) -> std::io::Result<()> {
         let (mod_time, mod_date) = Self::reproducible_dos_timestamp();
 
         // Track per-entry metadata for central directory
@@ -248,17 +291,17 @@ impl JarTaskExecutor {
         let mut current_offset: u32 = 0;
 
         // Write local file headers + data
-        for (name, data) in entries {
-            let name_bytes = name.as_bytes();
-            let crc32_val = crc32fast::hash(data);
-            let size = data.len() as u32;
+        for entry in entries {
+            let name_bytes = entry.name.as_bytes();
+            let crc32_val = crc32fast::hash(&entry.data);
+            let size = entry.data.len() as u32;
             let local_offset = current_offset;
 
             Self::write_local_file_header(
                 out, name_bytes, 0, // STORED
                 mod_time, mod_date, crc32_val, size, size,
             )?;
-            out.write_all(data)?;
+            out.write_all(&entry.data)?;
 
             metas.push(EntryMeta {
                 crc32: crc32_val,
@@ -273,12 +316,13 @@ impl JarTaskExecutor {
         let central_dir_offset = current_offset;
 
         for (i, meta) in metas.iter().enumerate() {
-            let name_bytes = entries[i].0.as_bytes();
-            let is_dir = entries[i].0.ends_with('/');
+            let entry = &entries[i];
+            let name_bytes = entry.name.as_bytes();
+            let is_dir = entry.is_dir();
             let external_file_attributes = if is_dir {
-                ((0o040755u32) << 16) | 0x10
+                ((0o040000u32 | entry.mode) << 16) | 0x10
             } else {
-                (0o100644u32) << 16
+                (0o100000u32 | entry.mode) << 16
             };
             Self::write_central_dir_entry(
                 out,
@@ -349,26 +393,34 @@ fn archive_include_empty_dirs(options: &std::collections::HashMap<String, String
         .unwrap_or(true)
 }
 
+fn archive_file_mode(options: &std::collections::HashMap<String, String>) -> u32 {
+    parse_unix_mode(options.get("file_permissions")).unwrap_or(0o644)
+}
+
+fn archive_dir_mode(options: &std::collections::HashMap<String, String>) -> u32 {
+    parse_unix_mode(options.get("dir_permissions")).unwrap_or(0o755)
+}
+
 fn resolve_duplicate_entries(
-    entries: Vec<(String, Vec<u8>)>,
+    entries: Vec<ZipEntry>,
     strategy: &str,
-) -> Result<Vec<(String, Vec<u8>)>, String> {
+) -> Result<Vec<ZipEntry>, String> {
     if strategy == "INCLUDE" {
         return Ok(entries);
     }
 
     let mut seen = HashSet::new();
     let mut resolved = Vec::with_capacity(entries.len());
-    for (name, data) in entries {
-        if !seen.insert(name.clone()) {
+    for entry in entries {
+        if !seen.insert(entry.name.clone()) {
             if strategy == "FAIL" {
-                return Err(format!("Duplicate archive entry: {}", name));
+                return Err(format!("Duplicate archive entry: {}", entry.name));
             }
             if strategy == "EXCLUDE" {
                 continue;
             }
         }
-        resolved.push((name, data));
+        resolved.push(entry);
     }
     Ok(resolved)
 }
@@ -444,8 +496,10 @@ impl JarTaskExecutor {
         jar_path: &Path,
         options: &std::collections::HashMap<String, String>,
     ) -> Result<(), String> {
-        let mut entries: Vec<(String, Vec<u8>)> = Vec::with_capacity(source_files.len());
+        let mut entries: Vec<ZipEntry> = Vec::with_capacity(source_files.len());
         let include_empty_dirs = archive_include_empty_dirs(options);
+        let file_mode = archive_file_mode(options);
+        let dir_mode = archive_dir_mode(options);
 
         for source in source_files {
             if !source.is_dir() {
@@ -455,19 +509,26 @@ impl JarTaskExecutor {
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("unknown");
-                entries.push((name.to_string(), data));
+                entries.push(ZipEntry::file(name, data, file_mode));
                 continue;
             }
-            Self::collect_files(source, source, &mut entries, include_empty_dirs)?;
+            Self::collect_files(
+                source,
+                source,
+                &mut entries,
+                include_empty_dirs,
+                file_mode,
+                dir_mode,
+            )?;
         }
 
         if options.contains_key("manifest") || options.contains_key("mainClass") {
             let manifest = Self::create_manifest(options);
-            entries.push(("META-INF/MANIFEST.MF".to_string(), manifest));
+            entries.push(ZipEntry::file("META-INF/MANIFEST.MF", manifest, file_mode));
         }
 
         entries = resolve_duplicate_entries(entries, &archive_duplicate_strategy(options))?;
-        entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        entries.sort_unstable_by(|a, b| a.name.cmp(&b.name));
 
         let mut out = std::fs::File::create(jar_path)
             .map_err(|e| format!("Cannot create {}: {}", jar_path.display(), e))?;
@@ -475,7 +536,7 @@ impl JarTaskExecutor {
             .map_err(|e| format!("Cannot write {}: {}", jar_path.display(), e))?;
 
         // Track total bytes
-        let total_bytes: u64 = entries.iter().map(|(_, d)| d.len() as u64).sum();
+        let total_bytes: u64 = entries.iter().map(|entry| entry.data.len() as u64).sum();
         let _ = total_bytes; // bytes_processed tracked via result
 
         Ok(())
@@ -488,13 +549,15 @@ impl JarTaskExecutor {
         jar_path: &Path,
         options: &std::collections::HashMap<String, String>,
     ) -> Result<(), String> {
-        let mut entries: Vec<(String, Vec<u8>)> = if jar_path.exists() {
+        let mut entries: Vec<ZipEntry> = if jar_path.exists() {
             Self::read_existing_entries(jar_path)
                 .map_err(|e| format!("Cannot read {}: {}", jar_path.display(), e))?
         } else {
             Vec::new()
         };
         let include_empty_dirs = archive_include_empty_dirs(options);
+        let file_mode = archive_file_mode(options);
+        let dir_mode = archive_dir_mode(options);
 
         for source in source_files {
             if !source.is_dir() {
@@ -504,27 +567,34 @@ impl JarTaskExecutor {
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("unknown");
-                entries.retain(|(n, _)| n != name);
-                entries.push((name.to_string(), data));
+                entries.retain(|entry| entry.name != name);
+                entries.push(ZipEntry::file(name, data, file_mode));
                 continue;
             }
 
             let mut new_entries = Vec::new();
-            Self::collect_files(source, source, &mut new_entries, include_empty_dirs)?;
-            for (name, data) in new_entries {
-                entries.retain(|(n, _)| n != &name);
-                entries.push((name, data));
+            Self::collect_files(
+                source,
+                source,
+                &mut new_entries,
+                include_empty_dirs,
+                file_mode,
+                dir_mode,
+            )?;
+            for new_entry in new_entries {
+                entries.retain(|entry| entry.name != new_entry.name);
+                entries.push(new_entry);
             }
         }
 
         if options.contains_key("manifest") || options.contains_key("mainClass") {
             let manifest = Self::create_manifest(options);
-            entries.retain(|(n, _)| n != "META-INF/MANIFEST.MF");
-            entries.push(("META-INF/MANIFEST.MF".to_string(), manifest));
+            entries.retain(|entry| entry.name != "META-INF/MANIFEST.MF");
+            entries.push(ZipEntry::file("META-INF/MANIFEST.MF", manifest, file_mode));
         }
 
         entries = resolve_duplicate_entries(entries, &archive_duplicate_strategy(options))?;
-        entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        entries.sort_unstable_by(|a, b| a.name.cmp(&b.name));
 
         let mut out = std::fs::File::create(jar_path)
             .map_err(|e| format!("Cannot create {}: {}", jar_path.display(), e))?;
@@ -707,7 +777,7 @@ mod tests {
         let entries = JarTaskExecutor::read_existing_entries(result.output_files.first().unwrap())
             .unwrap()
             .into_iter()
-            .map(|(name, _)| name)
+            .map(|entry| entry.name)
             .collect::<Vec<_>>();
         assert!(entries.contains(&"empty/".to_string()));
         assert!(entries.contains(&"empty/nested/".to_string()));
@@ -742,9 +812,44 @@ mod tests {
         let entries = JarTaskExecutor::read_existing_entries(result.output_files.first().unwrap())
             .unwrap()
             .into_iter()
-            .map(|(name, _)| name)
+            .map(|entry| entry.name)
             .collect::<Vec<_>>();
         assert!(!entries.contains(&"empty/".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_jar_applies_declared_entry_permissions() {
+        let tmp = TempDir::new().unwrap();
+        let src_dir = tmp.path().join("src");
+        let out_dir = tmp.path().join("out");
+
+        fs::create_dir_all(src_dir.join("bin")).unwrap();
+        fs::write(src_dir.join("bin/app"), b"run").unwrap();
+
+        let executor = JarTaskExecutor::new();
+        let mut input = TaskInput::new("Jar");
+        input.source_files.push(src_dir);
+        input.target_dir = out_dir;
+        input
+            .options
+            .insert("jarName".to_string(), "modes.jar".to_string());
+        input
+            .options
+            .insert("file_permissions".to_string(), "493".to_string());
+        input
+            .options
+            .insert("dir_permissions".to_string(), "448".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        let jar_bytes = fs::read(result.output_files.first().unwrap()).unwrap();
+        let file_attrs = central_directory_external_attrs(&jar_bytes, "bin/app").unwrap();
+        let dir_attrs = central_directory_external_attrs(&jar_bytes, "bin/").unwrap();
+
+        assert_eq!((file_attrs >> 16) & 0o777, 0o755);
+        assert_eq!((dir_attrs >> 16) & 0o777, 0o700);
+        assert_eq!(dir_attrs & 0x10, 0x10);
     }
 
     fn central_directory_external_attrs(jar: &[u8], entry_name: &str) -> Option<u32> {

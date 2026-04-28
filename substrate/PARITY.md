@@ -57,6 +57,8 @@
   destination strategies for `INCLUDE`, `EXCLUDE`, and `FAIL`.
 - Native ZIP-compatible and TAR archive tasks honor captured CopySpec
   `includeEmptyDirs` behavior for explicit directory entries.
+- Native ZIP-compatible and TAR archive tasks honor captured root CopySpec file
+  and directory permissions in archive entry metadata.
 
 ## Gaps
 
@@ -68,9 +70,8 @@
   compatibility islands.
 - More task types need native-ready contract capture before broad no-fallback
   execution is realistic, especially arbitrary copy filters/actions, nested
-  CopySpec trees, Gradle archive metadata edge cases, archive permission
-  preservation, symlink copy semantics, and remaining tar compression variants
-  such as XZ.
+  CopySpec trees, Gradle archive metadata edge cases, symlink copy semantics,
+  and remaining tar compression variants such as XZ.
 
 ## Validation
 

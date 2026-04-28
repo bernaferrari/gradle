@@ -540,6 +540,8 @@ fn task_options(
             "include_empty_dirs",
             "include_empty_dirs",
         );
+        insert_input_option(task, &mut options, "file_permissions", "file_permissions");
+        insert_input_option(task, &mut options, "dir_permissions", "dir_permissions");
     } else if task_type == "Tar" {
         insert_input_option(task, &mut options, "archive_file_name", "tarName");
         insert_input_option(task, &mut options, "archive_compression", "compression");
@@ -555,6 +557,8 @@ fn task_options(
             "include_empty_dirs",
             "include_empty_dirs",
         );
+        insert_input_option(task, &mut options, "file_permissions", "file_permissions");
+        insert_input_option(task, &mut options, "dir_permissions", "dir_permissions");
     } else if matches!(task_type, "Copy" | "Sync") {
         insert_input_option(task, &mut options, "expand_properties", "expand_properties");
         insert_input_option(
@@ -1408,6 +1412,20 @@ mod tests {
                     normalization: "scalar".to_string(),
                     optional: false,
                 },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "file_permissions".to_string(),
+                    kind: "value".to_string(),
+                    value: "493".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "dir_permissions".to_string(),
+                    kind: "value".to_string(),
+                    value: "448".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
             ],
             output_specs: vec![
                 super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
@@ -1430,6 +1448,8 @@ mod tests {
         assert_eq!(context["target_dir"], "/repo/build/distributions");
         assert_eq!(context["options"]["jarName"], "app.zip");
         assert_eq!(context["options"]["include_empty_dirs"], "false");
+        assert_eq!(context["options"]["file_permissions"], "493");
+        assert_eq!(context["options"]["dir_permissions"], "448");
     }
 
     #[test]
@@ -1478,6 +1498,20 @@ mod tests {
                     normalization: "scalar".to_string(),
                     optional: false,
                 },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "file_permissions".to_string(),
+                    kind: "value".to_string(),
+                    value: "493".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "dir_permissions".to_string(),
+                    kind: "value".to_string(),
+                    value: "448".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
             ],
             output_specs: vec![
                 super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
@@ -1501,6 +1535,8 @@ mod tests {
         assert_eq!(context["options"]["tarName"], "app.tar");
         assert_eq!(context["options"]["compression"], "gzip");
         assert_eq!(context["options"]["include_empty_dirs"], "false");
+        assert_eq!(context["options"]["file_permissions"], "493");
+        assert_eq!(context["options"]["dir_permissions"], "448");
     }
 
     #[tokio::test]

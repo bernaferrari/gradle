@@ -334,6 +334,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         Object rootSpec = invokeOptional(task, "getRootSpec");
         putIfPresent(inputs, "duplicates_strategy", stringOrEmpty(invokeOptional(rootSpec, "getDuplicatesStrategy")));
         putIfPresent(inputs, "include_empty_dirs", booleanString(invokeOptional(rootSpec, "isIncludeEmptyDirs")));
+        putIfPresent(inputs, "file_permissions", permissionUnixMode(invokeOptional(rootSpec, "getFilePermissions")));
+        putIfPresent(inputs, "dir_permissions", permissionUnixMode(invokeOptional(rootSpec, "getDirPermissions")));
     }
 
     private static boolean isArchiveTask(String simpleName) {
