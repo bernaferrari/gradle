@@ -20,7 +20,10 @@ dependencies {
 }
 
 tasks.test {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        includeTags("fast")
+        excludeTags("slow")
+    }
 }
 
 tasks.register("contractReport") {
