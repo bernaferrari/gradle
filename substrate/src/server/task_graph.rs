@@ -1,15 +1,16 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
-    ClearBuildTasksRequest, ClearBuildTasksResponse, ExecutionNode, GetProgressRequest,
-    GetProgressResponse, RegisterTaskRequest, RegisterTaskResponse, ResolveExecutionPlanRequest,
-    ResolveExecutionPlanResponse, TaskFinishedRequest, TaskFinishedResponse, TaskProgress,
-    TaskStartedRequest, TaskStartedResponse, task_graph_service_server::TaskGraphService,
+    task_graph_service_server::TaskGraphService, ClearBuildTasksRequest, ClearBuildTasksResponse,
+    ExecutionNode, GetProgressRequest, GetProgressResponse, RegisterTaskRequest,
+    RegisterTaskResponse, ResolveExecutionPlanRequest, ResolveExecutionPlanResponse,
+    TaskFinishedRequest, TaskFinishedResponse, TaskProgress, TaskStartedRequest,
+    TaskStartedResponse,
 };
 
 use super::build_plan_ir::CanonicalBuildPlanTask;
@@ -443,6 +444,7 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
         ("file-transform", "Sync") | (_, "Sync") if has_input_paths(task) && has_outputs(task) => {
             "Sync".to_string()
         }
+        ("delete", "Delete") | (_, "Delete") if has_destroyables(task) => "Delete".to_string(),
         ("lifecycle", _) | (_, "Lifecycle") if no_task_actions(task) => "Lifecycle".to_string(),
         _ => task.implementation_id.clone(),
     }
@@ -452,11 +454,12 @@ fn execution_context_json(task: &CanonicalBuildPlanTask, task_type: &str) -> Str
     let source_files = match task_type {
         "JavaCompile" => java_source_paths(task),
         "TestExec" => test_class_dir_paths(task),
+        "Delete" => destroyable_paths(task),
         _ => input_paths(task),
     };
     let output_paths = output_paths(task);
     let target_dir = match task_type {
-        "Mkdir" => String::new(),
+        "Mkdir" | "Delete" => String::new(),
         "Jar" | "Zip" | "War" | "Ear" | "Tar" => output_paths
             .first()
             .and_then(|path| std::path::Path::new(path).parent())
@@ -528,6 +531,7 @@ fn task_options(
     } else if is_zip_archive_executor(task_type) {
         insert_input_option(task, &mut options, "archive_file_name", "jarName");
         insert_input_option(task, &mut options, "main_class", "mainClass");
+        insert_manifest_options(task, &mut options);
         insert_input_option(
             task,
             &mut options,
@@ -590,6 +594,23 @@ fn task_options(
         insert_max_heap_option(task, &mut options);
     }
     options
+}
+
+fn insert_manifest_options(
+    task: &CanonicalBuildPlanTask,
+    options: &mut serde_json::Map<String, serde_json::Value>,
+) {
+    for input in &task.input_specs {
+        if input.kind == "value"
+            && input.name.starts_with("manifest.")
+            && !input.value.trim().is_empty()
+        {
+            options.insert(
+                input.name.clone(),
+                serde_json::Value::String(input.value.trim().to_string()),
+            );
+        }
+    }
 }
 
 fn is_zip_archive_executor(task_type: &str) -> bool {
@@ -678,6 +699,10 @@ fn has_outputs(task: &CanonicalBuildPlanTask) -> bool {
     !output_paths(task).is_empty()
 }
 
+fn has_destroyables(task: &CanonicalBuildPlanTask) -> bool {
+    !destroyable_paths(task).is_empty()
+}
+
 fn no_task_actions(task: &CanonicalBuildPlanTask) -> bool {
     task.inputs
         .get("action_count")
@@ -686,6 +711,14 @@ fn no_task_actions(task: &CanonicalBuildPlanTask) -> bool {
         || task.input_specs.iter().any(|input| {
             input.kind == "value" && input.name == "action_count" && input.value == "0"
         })
+}
+
+fn destroyable_paths(task: &CanonicalBuildPlanTask) -> Vec<String> {
+    task.destroyables
+        .iter()
+        .filter(|path| !path.is_empty())
+        .cloned()
+        .collect()
 }
 
 fn input_paths(task: &CanonicalBuildPlanTask) -> Vec<String> {
@@ -1374,6 +1407,43 @@ mod tests {
     }
 
     #[test]
+    fn test_delete_contract_lowers_destroyables_to_native_context() {
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":clean".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.api.tasks.Delete".to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "in-process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "not-cacheable".to_string(),
+            local_state: Vec::new(),
+            destroyables: vec![
+                "/repo/build".to_string(),
+                "/repo/generated/stale.txt".to_string(),
+            ],
+            action_kind: "delete".to_string(),
+            input_specs: Vec::new(),
+            output_specs: Vec::new(),
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        let task_type = executable_task_type(&task);
+        let context: serde_json::Value =
+            serde_json::from_str(&execution_context_json(&task, &task_type)).unwrap();
+
+        assert_eq!(task_type, "Delete");
+        assert_eq!(context["source_files"][0], "/repo/build");
+        assert_eq!(context["source_files"][1], "/repo/generated/stale.txt");
+        assert_eq!(context["target_dir"], "");
+    }
+
+    #[test]
     fn test_zip_archive_contract_lowers_to_native_zip_executor() {
         let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
             path: ":distZip".to_string(),
@@ -1402,6 +1472,20 @@ mod tests {
                     name: "archive_file_name".to_string(),
                     kind: "value".to_string(),
                     value: "app.zip".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "main_class".to_string(),
+                    kind: "value".to_string(),
+                    value: "com.example.Main".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "manifest.Implementation-Title".to_string(),
+                    kind: "value".to_string(),
+                    value: "app".to_string(),
                     normalization: "scalar".to_string(),
                     optional: false,
                 },
@@ -1447,6 +1531,8 @@ mod tests {
         assert_eq!(context["source_files"][0], "/repo/build/install/app");
         assert_eq!(context["target_dir"], "/repo/build/distributions");
         assert_eq!(context["options"]["jarName"], "app.zip");
+        assert_eq!(context["options"]["mainClass"], "com.example.Main");
+        assert_eq!(context["options"]["manifest.Implementation-Title"], "app");
         assert_eq!(context["options"]["include_empty_dirs"], "false");
         assert_eq!(context["options"]["file_permissions"], "493");
         assert_eq!(context["options"]["dir_permissions"], "448");

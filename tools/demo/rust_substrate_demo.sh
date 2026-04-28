@@ -14,7 +14,7 @@ Usage: tools/demo/rust_substrate_demo.sh [--quick|--full] [--skip-sample-builds]
 
 Runs an honest Rust substrate demo:
   - strict stabilization gate
-  - checked-in six-project corpus contract validation
+  - checked-in offline corpus contract validation
   - captured build-plan shadow Java lifecycle execution with JVM fallback disabled
   - optional sample Gradle builds from testing/corpus
   - optional no-fallback authoritative RunBuild gate with output inventory/hash parity
@@ -117,6 +117,29 @@ if [[ "$RUN_SAMPLE_BUILDS" -eq 1 ]]; then
       --timeout 300 \
       --verbose \
       --output-dir "$OUTPUT_DIR"
+  if [[ -f "$OUTPUT_DIR/corpus_summary.json" ]]; then
+    run_step "Authoritative corpus evidence" \
+      python3 - "$OUTPUT_DIR/corpus_summary.json" <<'PY'
+import json
+import sys
+
+summary = json.load(open(sys.argv[1], encoding="utf-8"))
+total = summary["project_count"]
+print(f"projects matched: {summary['matched_project_count']}/{total}")
+print(f"successful upstream/substrate builds: {summary['successful_project_count']}/{total}")
+print(f"no-fallback projects: {summary['no_fallback_project_count']}/{total}")
+print(f"exit-code parity: {summary['exit_code_match_count']}/{total}")
+print(f"task-list parity: {summary['task_list_match_count']}/{total}")
+print(f"output inventory parity: {summary['output_file_inventory_match_count']}/{total}")
+print(f"non-archive output hash parity: {summary['output_hash_match_count']}/{total}")
+print(f"task totals: upstream={summary['upstream_task_total']}, substrate={summary['substrate_task_total']}")
+print(f"observed wall time: upstream={summary['upstream_duration_ms']}ms, substrate={summary['substrate_duration_ms']}ms")
+if summary["failed_projects"]:
+    print("failed projects: " + ", ".join(summary["failed_projects"]))
+if summary["fallback_projects"]:
+    print("fallback projects: " + ", ".join(summary["fallback_projects"]))
+PY
+  fi
 fi
 
 if [[ "$RUN_GRPC_E2E" -eq 1 ]]; then
@@ -131,11 +154,12 @@ What this proves:
   - Rust/JVM proto drift checks pass.
   - Hardened bridge clients fail closed instead of returning hidden defaults.
   - Build-plan IR v2 fingerprints and shadow artifacts are stable.
-  - The checked-in Java library/application/multi-project/resource-expansion/Sync/CopySpec corpus has deterministic build-plan contracts.
+  - The checked-in Java library/application/multi-project/resource-expansion/compile-options/Copy/Sync/archive corpus has deterministic build-plan contracts.
   - A captured JVM-host Java lifecycle build-plan shadow can execute JavaCompile, ProcessResources, classes, and Jar through Rust with JVM fallback disabled.
-  - Native Copy/ProcessResources/Sync coverage includes recursive directory sources, declared token expansion, CopySpec include/exclude patterns, and basic duplicate destination strategies.
-  - Native archive coverage includes reproducible ZIP timestamps and duplicate-entry strategy handling.
+  - Native Copy/ProcessResources/Sync coverage includes recursive directory sources, declared token expansion, CopySpec include/exclude patterns, duplicate destination strategies, empty-directory semantics, and copied file permissions.
+  - Native archive coverage includes reproducible ZIP timestamps, duplicate-entry strategy handling, empty-directory semantics, file permissions, and bzip2 TAR output.
   - When sample builds are enabled, the checked-in Java corpus exercises the explicit no-fallback RunBuild gate from real Gradle invocations and compares stable output inventories plus non-archive SHA-256 hashes.
+  - The authoritative corpus summary records matched projects, no-fallback counts, task parity, output parity, and observed upstream/substrate wall-clock timing.
   - Rust daemon gRPC behavior is exercised when --skip-grpc-e2e is not used.
 
 What this does not claim:

@@ -53,9 +53,10 @@ The corpus runner executes each build project twice:
 It then compares:
 - Task graph (task names and dependencies)
 - Exit codes
-- Build duration (informational only)
 - Output files
-- Diagnostics/warnings
+- Non-archive output hashes
+- No-fallback substrate execution
+- Build duration (informational only)
 
 The substrate candidate is considered invalid if Gradle reports that it used
 no-op fallback mode. Use `--allow-noop-substrate` only when explicitly testing
@@ -77,10 +78,11 @@ corpus useful without network access.
 
 The repository includes a small offline corpus at `testing/corpus/manifest.json`
 covering Java library, Java application, Java multi-project, Java resource
-expansion, standalone Sync resource transform, and CopySpec include/exclude
-pattern builds. The optional `testing/corpus/external-manifest.json` adds a
-pinned JUnit Platform sample for real non-empty test execution and requires
-network or a warm Gradle dependency cache.
+expansion, JavaCompile options, standalone Copy/Sync resource transforms,
+CopySpec duplicate handling, and Zip/Tar archive builds. The optional
+`testing/corpus/external-manifest.json` adds a pinned JUnit Platform sample for
+real non-empty test execution and requires network or a warm Gradle dependency
+cache.
 
 Reference-mode runs compare upstream Gradle and Rust substrate exit codes, task
 lists, and stable build output file inventories under `build/classes`,
@@ -121,19 +123,39 @@ Results are written to `corpus_results.json` in the selected output directory:
       "tasks": [":compileJava", ":jar"],
       "output_file_count": 2,
       "output_files": ["build/classes/java/main/App.class", "build/libs/app.jar"],
-      "output_hashes": {"build/classes/java/main/App.class": "..."}
+      "output_hashes": {"build/classes/java/main/App.class": "..."},
+      "substrate_noop": false,
+      "duration_ms": 1234
     },
     "substrate": {
       "exit_code": 0,
       "tasks": [":compileJava", ":jar"],
       "output_file_count": 2,
       "output_files": ["build/classes/java/main/App.class", "build/libs/app.jar"],
-      "output_hashes": {"build/classes/java/main/App.class": "..."}
+      "output_hashes": {"build/classes/java/main/App.class": "..."},
+      "substrate_noop": false,
+      "duration_ms": 980
+    },
+    "checks": {
+      "exit_code_match": true,
+      "task_list_match": true,
+      "output_files_match": true,
+      "output_hashes_match": true,
+      "successful": true,
+      "no_fallback": true,
+      "substrate_usable": true,
+      "match": true
     },
     "match": true
   }
 }
 ```
+
+The runner also writes `corpus_summary.json` with aggregate project counts,
+no-fallback counts, parity counts, task totals, elapsed wall-clock timings, and
+failed/fallback project names. The demo script prints this summary after the
+authoritative corpus gate so public runs can be judged without manually opening
+the JSON.
 
 ## Adding Projects to Corpus
 

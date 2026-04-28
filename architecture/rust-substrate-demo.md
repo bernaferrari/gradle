@@ -10,7 +10,7 @@ tools/demo/rust_substrate_demo.sh --quick
 ```
 
 This runs the strict quick gate, validates the checked-in offline corpus,
-builds the checked-in Java corpus samples, runs the no-fallback authoritative
+builds the checked-in offline corpus samples, runs the no-fallback authoritative
 RunBuild corpus gate, and runs the Rust daemon gRPC e2e tests.
 
 ## Public Demo Gate
@@ -30,10 +30,10 @@ release smoke coverage from `substrate/scripts/e2e-smoke-test.sh`.
 - `tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --contract-only`
   proves the checked-in corpus contracts are deterministic without network
   access.
-- `testing/corpus/` gives six small real builds: a Kotlin DSL Java library, a
-  Groovy DSL Java application, a Kotlin DSL multi-project application, and a
-  Java resource-expansion sample, plus standalone Sync and CopySpec resource
-  transforms.
+- `testing/corpus/` gives small real builds covering Kotlin/Groovy DSL Java
+  projects, a multi-project application, Java resource expansion, JavaCompile
+  options, standalone Copy/Sync transforms, CopySpec duplicate handling, and
+  Zip/Tar archive tasks.
 - `tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative`
   proves the checked-in corpus can run through the explicit no-fallback
   RunBuild gate and compare stable output inventories plus non-archive content

@@ -106,6 +106,96 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         self.assertEqual(2, len(mismatches))
         self.assertTrue(any("plugins" in mismatch for mismatch in mismatches))
 
+    def test_compare_run_pair_reports_explicit_checks(self):
+        upstream = corpus_run.RunResult(
+            exit_code=0,
+            output="",
+            tasks=[":compileJava", ":jar"],
+            output_files=["build/classes/java/main/App.class"],
+            output_hashes={"build/classes/java/main/App.class": "abc"},
+        )
+        substrate = corpus_run.RunResult(
+            exit_code=0,
+            output="",
+            tasks=[":compileJava", ":jar"],
+            output_files=["build/classes/java/main/App.class"],
+            output_hashes={"build/classes/java/main/App.class": "abc"},
+            substrate_noop=False,
+        )
+
+        checks = corpus_run.compare_run_pair(upstream, substrate)
+
+        self.assertTrue(checks["match"])
+        self.assertTrue(checks["successful"])
+        self.assertTrue(checks["no_fallback"])
+        self.assertTrue(checks["task_list_match"])
+        self.assertTrue(checks["output_hashes_match"])
+
+    def test_compare_run_pair_rejects_noop_substrate_by_default(self):
+        upstream = corpus_run.RunResult(exit_code=0, output="", tasks=[":build"])
+        substrate = corpus_run.RunResult(
+            exit_code=0,
+            output="no-op fallback mode",
+            tasks=[":build"],
+            substrate_noop=True,
+        )
+
+        checks = corpus_run.compare_run_pair(upstream, substrate)
+
+        self.assertFalse(checks["match"])
+        self.assertFalse(checks["no_fallback"])
+        self.assertFalse(checks["substrate_usable"])
+
+    def test_compare_run_pair_rejects_equal_failed_builds(self):
+        upstream = corpus_run.RunResult(exit_code=1, output="failed", tasks=[])
+        substrate = corpus_run.RunResult(exit_code=1, output="failed", tasks=[])
+
+        checks = corpus_run.compare_run_pair(upstream, substrate)
+
+        self.assertFalse(checks["match"])
+        self.assertFalse(checks["successful"])
+        self.assertTrue(checks["exit_code_match"])
+
+    def test_summarize_results_counts_parity_and_fallbacks(self):
+        results = {
+            "ok": {
+                "upstream": {"task_count": 2, "duration_ms": 100},
+                "substrate": {"task_count": 2, "duration_ms": 80},
+                "checks": {
+                    "successful": True,
+                    "exit_code_match": True,
+                    "task_list_match": True,
+                    "output_files_match": True,
+                    "output_hashes_match": True,
+                    "no_fallback": True,
+                },
+                "match": True,
+            },
+            "fallback": {
+                "upstream": {"task_count": 1, "duration_ms": 50},
+                "substrate": {"task_count": 1, "duration_ms": 40},
+                "checks": {
+                    "successful": False,
+                    "exit_code_match": True,
+                    "task_list_match": True,
+                    "output_files_match": True,
+                    "output_hashes_match": True,
+                    "no_fallback": False,
+                },
+                "match": False,
+            },
+        }
+
+        summary = corpus_run.summarize_results(results)
+
+        self.assertEqual(2, summary["project_count"])
+        self.assertEqual(1, summary["matched_project_count"])
+        self.assertEqual(1, summary["successful_project_count"])
+        self.assertEqual(1, summary["no_fallback_project_count"])
+        self.assertEqual(3, summary["upstream_task_total"])
+        self.assertEqual(["fallback"], summary["failed_projects"])
+        self.assertEqual(["fallback"], summary["fallback_projects"])
+
 
 if __name__ == "__main__":
     unittest.main()

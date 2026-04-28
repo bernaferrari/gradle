@@ -19,6 +19,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from dataclasses import dataclass, field
 
@@ -32,6 +33,7 @@ class RunResult:
     output_files: list[str] = field(default_factory=list)
     output_hashes: dict[str, str] = field(default_factory=dict)
     substrate_noop: bool = False
+    duration_ms: int = 0
     
     def to_dict(self):
         return {
@@ -43,6 +45,7 @@ class RunResult:
             "output_files": self.output_files,
             "output_hashes": self.output_hashes,
             "substrate_noop": self.substrate_noop,
+            "duration_ms": self.duration_ms,
         }
 
 
@@ -247,6 +250,102 @@ def detect_substrate_noop(output: str) -> bool:
     return any(marker in output for marker in markers)
 
 
+def compare_run_pair(upstream: RunResult, substrate: RunResult, allow_noop_substrate: bool = False) -> dict:
+    """Return explicit parity checks for one upstream/substrate project pair."""
+    substrate_usable = allow_noop_substrate or not substrate.substrate_noop
+    checks = {
+        "successful": upstream.exit_code == 0 and substrate.exit_code == 0,
+        "exit_code_match": upstream.exit_code == substrate.exit_code,
+        "task_list_match": upstream.tasks == substrate.tasks,
+        "output_files_match": upstream.output_files == substrate.output_files,
+        "output_hashes_match": upstream.output_hashes == substrate.output_hashes,
+        "no_fallback": not substrate.substrate_noop,
+        "substrate_usable": substrate_usable,
+    }
+    checks["match"] = (
+        checks["substrate_usable"]
+        and checks["successful"]
+        and checks["exit_code_match"]
+        and checks["task_list_match"]
+        and checks["output_files_match"]
+        and checks["output_hashes_match"]
+    )
+    return checks
+
+
+def summarize_results(results: dict) -> dict:
+    """Build a showable aggregate summary without changing corpus_results.json."""
+    project_results = {
+        name: result
+        for name, result in results.items()
+        if isinstance(result, dict) and "upstream" in result and "substrate" in result
+    }
+    total = len(project_results)
+    matched = sum(1 for result in project_results.values() if result.get("match"))
+    no_fallback = sum(1 for result in project_results.values() if result.get("checks", {}).get("no_fallback"))
+    task_list_matches = sum(1 for result in project_results.values() if result.get("checks", {}).get("task_list_match"))
+    output_file_matches = sum(1 for result in project_results.values() if result.get("checks", {}).get("output_files_match"))
+    output_hash_matches = sum(1 for result in project_results.values() if result.get("checks", {}).get("output_hashes_match"))
+    exit_code_matches = sum(1 for result in project_results.values() if result.get("checks", {}).get("exit_code_match"))
+    successful = sum(1 for result in project_results.values() if result.get("checks", {}).get("successful"))
+
+    upstream_task_total = sum(result["upstream"].get("task_count", 0) for result in project_results.values())
+    substrate_task_total = sum(result["substrate"].get("task_count", 0) for result in project_results.values())
+    upstream_duration_ms = sum(result["upstream"].get("duration_ms", 0) for result in project_results.values())
+    substrate_duration_ms = sum(result["substrate"].get("duration_ms", 0) for result in project_results.values())
+
+    failed_projects = sorted(name for name, result in project_results.items() if not result.get("match"))
+    fallback_projects = sorted(
+        name
+        for name, result in project_results.items()
+        if not result.get("checks", {}).get("no_fallback")
+    )
+
+    return {
+        "project_count": total,
+        "matched_project_count": matched,
+        "failed_project_count": total - matched,
+        "successful_project_count": successful,
+        "no_fallback_project_count": no_fallback,
+        "fallback_project_count": total - no_fallback,
+        "exit_code_match_count": exit_code_matches,
+        "task_list_match_count": task_list_matches,
+        "output_file_inventory_match_count": output_file_matches,
+        "output_hash_match_count": output_hash_matches,
+        "upstream_task_total": upstream_task_total,
+        "substrate_task_total": substrate_task_total,
+        "upstream_duration_ms": upstream_duration_ms,
+        "substrate_duration_ms": substrate_duration_ms,
+        "failed_projects": failed_projects,
+        "fallback_projects": fallback_projects,
+    }
+
+
+def print_summary(summary: dict) -> None:
+    """Print the aggregate parity evidence in a compact demo-friendly form."""
+    total = summary["project_count"]
+    print(f"Projects matched: {summary['matched_project_count']}/{total}")
+    print(f"Successful upstream/substrate builds: {summary['successful_project_count']}/{total}")
+    print(f"No-fallback substrate runs: {summary['no_fallback_project_count']}/{total}")
+    print(f"Exit-code parity: {summary['exit_code_match_count']}/{total}")
+    print(f"Task-list parity: {summary['task_list_match_count']}/{total}")
+    print(f"Output inventory parity: {summary['output_file_inventory_match_count']}/{total}")
+    print(f"Non-archive output hash parity: {summary['output_hash_match_count']}/{total}")
+    print(
+        "Task totals: "
+        f"upstream={summary['upstream_task_total']}, substrate={summary['substrate_task_total']}"
+    )
+    print(
+        "Observed wall time: "
+        f"upstream={summary['upstream_duration_ms']}ms, "
+        f"substrate={summary['substrate_duration_ms']}ms"
+    )
+    if summary["failed_projects"]:
+        print(f"Failed projects: {', '.join(summary['failed_projects'])}")
+    if summary["fallback_projects"]:
+        print(f"Fallback projects: {', '.join(summary['fallback_projects'])}")
+
+
 def run_build(
     project_dir: str,
     substrate: bool = False,
@@ -266,6 +365,7 @@ def run_build(
         runbuild_authoritative=runbuild_authoritative,
     )
     
+    start = time.monotonic()
     try:
         result = subprocess.run(
             cmd,
@@ -293,18 +393,21 @@ def run_build(
             output_files=output_files,
             output_hashes=output_hashes,
             substrate_noop=substrate and detect_substrate_noop(output),
+            duration_ms=int((time.monotonic() - start) * 1000),
         )
     except subprocess.TimeoutExpired:
         return RunResult(
             exit_code=-1,
             output="TIMEOUT",
             tasks=[],
+            duration_ms=int((time.monotonic() - start) * 1000),
         )
     except Exception as e:
         return RunResult(
             exit_code=-2,
             output=f"EXCEPTION: {str(e)}",
             tasks=[],
+            duration_ms=int((time.monotonic() - start) * 1000),
         )
 
 def main():
@@ -386,18 +489,13 @@ def main():
             daemon_binary=args.daemon_binary,
             runbuild_authoritative=args.runbuild_authoritative,
         )
-        substrate_usable = args.allow_noop_substrate or not substrate.substrate_noop
+        checks = compare_run_pair(upstream, substrate, allow_noop_substrate=args.allow_noop_substrate)
         
         results[os.path.basename(project)] = {
             "upstream": upstream.to_dict(),
             "substrate": substrate.to_dict(),
-            "match": (
-                substrate_usable
-                and upstream.tasks == substrate.tasks
-                and upstream.output_files == substrate.output_files
-                and upstream.output_hashes == substrate.output_hashes
-                and upstream.exit_code == substrate.exit_code
-            ),
+            "checks": checks,
+            "match": checks["match"],
         }
         if substrate.substrate_noop and not args.allow_noop_substrate:
             results[os.path.basename(project)]["error"] = "Substrate candidate used no-op fallback"
@@ -448,7 +546,13 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     with open(os.path.join(output_dir, "corpus_results.json"), "w") as f:
         json.dump(results, f, indent=2)
+    summary = summarize_results(results)
+    with open(os.path.join(output_dir, "corpus_summary.json"), "w") as f:
+        json.dump(summary, f, indent=2)
     print(f"\nResults written to {os.path.join(output_dir, 'corpus_results.json')}")
+    print(f"Summary written to {os.path.join(output_dir, 'corpus_summary.json')}")
+    print()
+    print_summary(summary)
     
     sys.exit(0 if failed == 0 else 1)
 
