@@ -176,6 +176,31 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
+    public void capturesSimpleExecContractFromTaskModel() throws IOException {
+        File outputDir = temporaryFolder.newFolder("build/exec");
+        File workingDir = temporaryFolder.newFolder("work-exec");
+
+        Task exec = execTask(outputDir, workingDir);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(exec, Exec.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals(":generateFile", task.getPath());
+        assertEquals("external-process", task.getActionKind());
+        assertEquals("process", task.getWorkerIsolation());
+        assertEquals("Exec", inputs.get("taskType"));
+        assertEquals("/usr/bin/touch", inputs.get("executable"));
+        assertEquals("generated.txt", inputs.get("args"));
+        assertEquals(workingDir.getAbsolutePath(), inputs.get("working_dir"));
+        assertEquals("false", inputs.get("ignore_exit_value"));
+        assertTrue(task.getOutputSpecsList().stream()
+            .map(BuildPlanTaskOutputSpec::getPath)
+            .anyMatch(path -> path.equals(outputDir.getAbsolutePath())));
+    }
+
+    @org.junit.Test
     public void capturesProcessResourcesAsNativeFileTransform() throws IOException {
         File resourceFile = temporaryFolder.newFile("application.properties");
         File outputDir = temporaryFolder.newFolder("build/resources/main");
@@ -346,6 +371,61 @@ public class ProjectModelProviderAdapterTest {
                     return Collections.singletonMap("env", "test");
                 case "getReports":
                     return new TestReports(reportsDir);
+                case "compareTo":
+                    return 0;
+                default:
+                    return defaultValue(method.getReturnType());
+            }
+        });
+    }
+
+    private static Task execTask(File outputDir, File workingDir) {
+        FileCollection outputs = fileCollection(outputDir);
+        Project project = proxy(Project.class, (proxy, method, args) -> {
+            if (method.getName().equals("getPath")) {
+                return ":";
+            }
+            return defaultValue(method.getReturnType());
+        });
+        TaskDependency noDependencies = proxy(TaskDependency.class, (proxy, method, args) -> {
+            if (method.getName().equals("getDependencies")) {
+                return Collections.emptySet();
+            }
+            return defaultValue(method.getReturnType());
+        });
+        return proxy(new Class<?>[] {Task.class, ExecContract.class}, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "getPath":
+                    return ":generateFile";
+                case "getProject":
+                    return project;
+                case "getName":
+                    return "generateFile";
+                case "getEnabled":
+                    return true;
+                case "getGroup":
+                case "getDescription":
+                    return "";
+                case "getTaskDependencies":
+                case "getShouldRunAfter":
+                case "getMustRunAfter":
+                case "getFinalizedBy":
+                    return noDependencies;
+                case "getInputs":
+                    return filesOwner(method.getReturnType(), fileCollection());
+                case "getOutputs":
+                    return filesOwner(method.getReturnType(), outputs);
+                case "getLocalState":
+                case "getDestroyables":
+                    return registeredFilesOwner(method.getReturnType());
+                case "getExecutable":
+                    return "/usr/bin/touch";
+                case "getArgs":
+                    return Collections.singletonList("generated.txt");
+                case "getWorkingDir":
+                    return workingDir;
+                case "isIgnoreExitValue":
+                    return false;
                 case "compareTo":
                     return 0;
                 default:
@@ -679,6 +759,13 @@ public class ProjectModelProviderAdapterTest {
         TestReports getReports();
     }
 
+    public interface ExecContract {
+        String getExecutable();
+        Iterable<String> getArgs();
+        File getWorkingDir();
+        boolean isIgnoreExitValue();
+    }
+
     public interface CopySpecContract {
         boolean hasCustomActions();
         Object getDuplicatesStrategy();
@@ -821,6 +908,9 @@ public class ProjectModelProviderAdapterTest {
     }
 
     public static class Test {
+    }
+
+    public static class Exec {
     }
 
     public static class ProcessResources {

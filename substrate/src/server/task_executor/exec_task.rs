@@ -1,0 +1,132 @@
+use tokio::process::Command;
+
+use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
+
+/// Executes a simple external process task.
+///
+/// This intentionally supports only a narrow, deterministic Exec contract:
+/// executable, whitespace-separated args, working directory, and ignore-exit-value.
+pub struct ExecTaskExecutor;
+
+impl Default for ExecTaskExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ExecTaskExecutor {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[tonic::async_trait]
+impl TaskExecutor for ExecTaskExecutor {
+    fn task_type(&self) -> &str {
+        "Exec"
+    }
+
+    async fn execute(&self, input: &TaskInput) -> TaskResult {
+        let start = std::time::Instant::now();
+        let mut result = TaskResult::default();
+
+        let executable = match input.options.get("executable").map(|value| value.trim()) {
+            Some(value) if !value.is_empty() => value,
+            _ => {
+                result.success = false;
+                result.error_message = "Exec task is missing executable".to_string();
+                return result;
+            }
+        };
+        let ignore_exit_value = input
+            .options
+            .get("ignore_exit_value")
+            .map(|value| value == "true")
+            .unwrap_or(false);
+
+        let mut command = Command::new(executable);
+        if let Some(args) = input.options.get("args") {
+            command.args(args.split_whitespace());
+        }
+        if let Some(working_dir) = input.options.get("working_dir") {
+            if !working_dir.trim().is_empty() {
+                command.current_dir(working_dir);
+            }
+        }
+
+        match command.output().await {
+            Ok(output) if output.status.success() || ignore_exit_value => {
+                result.files_processed = 1;
+                result.bytes_processed = (output.stdout.len() + output.stderr.len()) as u64;
+            }
+            Ok(output) => {
+                result.success = false;
+                result.error_message = format!(
+                    "Exec task '{}' failed with exit code {}",
+                    executable,
+                    output.status.code().unwrap_or(-1)
+                );
+            }
+            Err(error) => {
+                result.success = false;
+                result.error_message = format!("Failed to execute '{}': {}", executable, error);
+            }
+        }
+
+        result.duration_ms = start.elapsed().as_millis() as u64;
+        result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_exec_missing_executable_fails() {
+        let executor = ExecTaskExecutor::new();
+        let input = TaskInput::new("Exec");
+
+        let result = executor.execute(&input).await;
+
+        assert!(!result.success);
+        assert!(result.error_message.contains("missing executable"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_exec_touch_creates_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("created.txt");
+        let executor = ExecTaskExecutor::new();
+        let mut input = TaskInput::new("Exec");
+        input
+            .options
+            .insert("executable".to_string(), "/usr/bin/touch".to_string());
+        input
+            .options
+            .insert("args".to_string(), target.to_string_lossy().into_owned());
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert!(target.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_exec_honors_ignore_exit_value() {
+        let executor = ExecTaskExecutor::new();
+        let mut input = TaskInput::new("Exec");
+        input
+            .options
+            .insert("executable".to_string(), "/usr/bin/false".to_string());
+        input
+            .options
+            .insert("ignore_exit_value".to_string(), "true".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+    }
+}

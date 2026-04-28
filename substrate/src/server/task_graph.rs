@@ -445,6 +445,9 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
             "Sync".to_string()
         }
         ("delete", "Delete") | (_, "Delete") if has_destroyables(task) => "Delete".to_string(),
+        ("external-process", "Exec") | (_, "Exec") if exec_contract_complete(task) => {
+            "Exec".to_string()
+        }
         ("lifecycle", _) | (_, "Lifecycle") if no_task_actions(task) => "Lifecycle".to_string(),
         _ => task.implementation_id.clone(),
     }
@@ -500,6 +503,10 @@ fn java_compile_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
 
 fn test_exec_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
     has_input_value(task, "classpath") && has_input_value(task, "test_classes_dirs")
+}
+
+fn exec_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
+    has_input_value(task, "executable")
 }
 
 fn compat_task_type(task: &CanonicalBuildPlanTask, fallback: &str) -> String {
@@ -592,6 +599,11 @@ fn task_options(
         insert_input_option(task, &mut options, "system_properties", "system_properties");
         insert_input_option(task, &mut options, "scan_classpath", "scan_classpath");
         insert_max_heap_option(task, &mut options);
+    } else if task_type == "Exec" {
+        insert_input_option(task, &mut options, "executable", "executable");
+        insert_input_option(task, &mut options, "args", "args");
+        insert_input_option(task, &mut options, "working_dir", "working_dir");
+        insert_input_option(task, &mut options, "ignore_exit_value", "ignore_exit_value");
     }
     options
 }
@@ -1343,6 +1355,76 @@ mod tests {
         assert_eq!(context["options"]["classpath"], classpath);
         assert_eq!(context["options"]["max_heap_mb"], "1024");
         assert_eq!(context["options"]["scan_classpath"], "true");
+    }
+
+    #[test]
+    fn test_exec_contract_lowers_to_native_exec_with_context_options() {
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":generateFile".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.api.tasks.Exec".to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "not-cacheable".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "external-process".to_string(),
+            input_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "executable".to_string(),
+                    kind: "value".to_string(),
+                    value: "/usr/bin/touch".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "args".to_string(),
+                    kind: "value".to_string(),
+                    value: "generated.txt".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "working_dir".to_string(),
+                    kind: "value".to_string(),
+                    value: "/repo/build/exec".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "ignore_exit_value".to_string(),
+                    kind: "value".to_string(),
+                    value: "false".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+            ],
+            output_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                    name: "output".to_string(),
+                    kind: "directory".to_string(),
+                    path: "/repo/build/exec".to_string(),
+                },
+            ],
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        let task_type = executable_task_type(&task);
+        let context: serde_json::Value =
+            serde_json::from_str(&execution_context_json(&task, &task_type)).unwrap();
+
+        assert_eq!(task_type, "Exec");
+        assert_eq!(context["options"]["executable"], "/usr/bin/touch");
+        assert_eq!(context["options"]["args"], "generated.txt");
+        assert_eq!(context["options"]["working_dir"], "/repo/build/exec");
+        assert_eq!(context["options"]["ignore_exit_value"], "false");
     }
 
     #[test]

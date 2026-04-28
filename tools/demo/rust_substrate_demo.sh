@@ -154,7 +154,7 @@ What this proves:
   - Rust/JVM proto drift checks pass.
   - Hardened bridge clients fail closed instead of returning hidden defaults.
   - Build-plan IR v2 fingerprints and shadow artifacts are stable.
-  - The checked-in Java library/application/multi-project/resource-expansion/compile-options/Copy/Sync/archive corpus has deterministic build-plan contracts.
+  - The checked-in Java library/application/multi-project/resource-expansion/compile-options/Copy/Sync/archive/Exec corpus has deterministic build-plan contracts.
   - A captured JVM-host Java lifecycle build-plan shadow can execute JavaCompile, ProcessResources, classes, and Jar through Rust with JVM fallback disabled.
   - Native Copy/ProcessResources/Sync coverage includes recursive directory sources, declared token expansion, CopySpec include/exclude patterns, duplicate destination strategies, empty-directory semantics, and copied file permissions.
   - Native archive coverage includes reproducible ZIP timestamps, duplicate-entry strategy handling, empty-directory semantics, file permissions, and bzip2 TAR output.
