@@ -4,8 +4,8 @@ use std::pin::Pin;
 
 use crate::server::task_executor::copy::{
     apply_unix_mode, case_sensitive, dir_permission_mode, duplicate_strategy, expand_bytes,
-    file_permission_mode, include_empty_dirs, parse_expand_properties, parse_patterns,
-    path_included,
+    file_permission_mode, include_empty_dirs, parse_copy_file_mappings, parse_expand_properties,
+    parse_patterns, path_included,
 };
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
@@ -110,12 +110,6 @@ impl TaskExecutor for SyncTaskExecutor {
         let start = std::time::Instant::now();
         let mut result = TaskResult::default();
 
-        if input.source_files.is_empty() {
-            result.success = false;
-            result.error_message = "Sync requires at least one source directory".to_string();
-            return result;
-        }
-
         // Option: "delete_orphans" (default: true)
         let delete_orphans = input
             .options
@@ -134,6 +128,15 @@ impl TaskExecutor for SyncTaskExecutor {
         let mut expected_files = HashSet::new();
         let mut expected_dirs = HashSet::new();
         let mut seen_destinations = HashSet::new();
+        let mapped_entries = match parse_copy_file_mappings(input.options.get("copy_file_mappings"))
+        {
+            Ok(entries) => entries,
+            Err(e) => {
+                result.success = false;
+                result.error_message = e;
+                return result;
+            }
+        };
 
         if let Err(e) = tokio::fs::create_dir_all(&input.target_dir).await {
             result.success = false;
@@ -146,18 +149,115 @@ impl TaskExecutor for SyncTaskExecutor {
             return result;
         }
 
-        for source_dir in &input.source_files {
-            if !source_dir.is_dir() {
-                result.success = false;
-                result.error_message =
-                    format!("Source is not a directory: {}", source_dir.display());
-                return result;
+        if !mapped_entries.is_empty() {
+            for mapping in mapped_entries {
+                if !mapping.source.exists() {
+                    result.success = false;
+                    result.error_message =
+                        format!("Source file not found: {}", mapping.source.display());
+                    return result;
+                }
+                if !path_included(
+                    &mapping.relative_path,
+                    &include_patterns,
+                    &exclude_patterns,
+                    case_sensitive,
+                ) {
+                    continue;
+                }
+                let dest = input.target_dir.join(&mapping.relative_path);
+                if mapping.is_dir {
+                    expected_dirs.insert(mapping.relative_path);
+                    if include_empty_dirs {
+                        if let Err(e) = tokio::fs::create_dir_all(&dest).await {
+                            result.success = false;
+                            result.error_message =
+                                format!("Failed to create directory {}: {}", dest.display(), e);
+                            return result;
+                        }
+                        if let Err(e) = apply_unix_mode(&dest, dir_mode) {
+                            result.success = false;
+                            result.error_message = e;
+                            return result;
+                        }
+                    }
+                    continue;
+                }
+                expected_files.insert(mapping.relative_path.clone());
+                if !seen_destinations.insert(dest.clone()) {
+                    match duplicate_strategy.as_str() {
+                        "EXCLUDE" => continue,
+                        "FAIL" => {
+                            result.success = false;
+                            result.error_message =
+                                format!("Duplicate sync destination: {}", dest.display());
+                            return result;
+                        }
+                        _ => {}
+                    }
+                }
+                if let Err(e) = Self::copy_file(
+                    &mapping.source,
+                    &dest,
+                    &mut result,
+                    &expand_properties,
+                    file_mode,
+                    dir_mode,
+                )
+                .await
+                {
+                    result.success = false;
+                    result.error_message = e;
+                    return result;
+                }
             }
+        } else if input.source_files.is_empty() {
+            result.success = false;
+            result.error_message = "Sync requires at least one source directory".to_string();
+            return result;
+        } else {
+            for source_dir in &input.source_files {
+                if !source_dir.is_dir() {
+                    result.success = false;
+                    result.error_message =
+                        format!("Source is not a directory: {}", source_dir.display());
+                    return result;
+                }
 
-            if include_empty_dirs {
-                let source_dirs = Self::list_dirs(source_dir).await;
-                for src_dir in &source_dirs {
-                    let relative = src_dir.strip_prefix(source_dir).unwrap_or(src_dir);
+                if include_empty_dirs {
+                    let source_dirs = Self::list_dirs(source_dir).await;
+                    for src_dir in &source_dirs {
+                        let relative = src_dir.strip_prefix(source_dir).unwrap_or(src_dir);
+                        if !path_included(
+                            relative,
+                            &include_patterns,
+                            &exclude_patterns,
+                            case_sensitive,
+                        ) {
+                            continue;
+                        }
+                        expected_dirs.insert(relative.to_path_buf());
+                        let dest_dir = input.target_dir.join(relative);
+                        if let Err(e) = tokio::fs::create_dir_all(&dest_dir).await {
+                            result.success = false;
+                            result.error_message =
+                                format!("Failed to create directory {}: {}", dest_dir.display(), e);
+                            return result;
+                        }
+                        if let Err(e) = apply_unix_mode(&dest_dir, dir_mode) {
+                            result.success = false;
+                            result.error_message = e;
+                            return result;
+                        }
+                    }
+                }
+
+                // List all source files
+                let source_files = Self::list_files(source_dir).await;
+
+                // Copy/update files
+                for src_file in &source_files {
+                    let relative = src_file.strip_prefix(source_dir).unwrap_or(src_file);
                     if !path_included(
                         relative,
                         &include_patterns,
@@ -166,94 +266,65 @@ impl TaskExecutor for SyncTaskExecutor {
                     ) {
                         continue;
                     }
-                    expected_dirs.insert(relative.to_path_buf());
-                    let dest_dir = input.target_dir.join(relative);
-                    if let Err(e) = tokio::fs::create_dir_all(&dest_dir).await {
-                        result.success = false;
-                        result.error_message =
-                            format!("Failed to create directory {}: {}", dest_dir.display(), e);
-                        return result;
+                    expected_files.insert(relative.to_path_buf());
+                    let dest_file = input.target_dir.join(relative);
+
+                    if !seen_destinations.insert(dest_file.clone()) {
+                        match duplicate_strategy.as_str() {
+                            "EXCLUDE" => continue,
+                            "FAIL" => {
+                                result.success = false;
+                                result.error_message =
+                                    format!("Duplicate sync destination: {}", dest_file.display());
+                                return result;
+                            }
+                            _ => {}
+                        }
                     }
-                    if let Err(e) = apply_unix_mode(&dest_dir, dir_mode) {
-                        result.success = false;
-                        result.error_message = e;
-                        return result;
-                    }
-                }
-            }
 
-            // List all source files
-            let source_files = Self::list_files(source_dir).await;
+                    let needs_copy = if !expand_properties.is_empty() {
+                        true
+                    } else if !dest_file.exists() {
+                        true
+                    } else {
+                        // Compare modification times and sizes
+                        let src_meta = tokio::fs::metadata(src_file).await.ok();
+                        let dest_meta = tokio::fs::metadata(&dest_file).await.ok();
 
-            // Copy/update files
-            for src_file in &source_files {
-                let relative = src_file.strip_prefix(source_dir).unwrap_or(src_file);
-                if !path_included(
-                    relative,
-                    &include_patterns,
-                    &exclude_patterns,
-                    case_sensitive,
-                ) {
-                    continue;
-                }
-                expected_files.insert(relative.to_path_buf());
-                let dest_file = input.target_dir.join(relative);
+                        match (src_meta, dest_meta) {
+                            (Some(sm), Some(dm)) => {
+                                let src_modified = sm
+                                    .modified()
+                                    .ok()
+                                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                    .map(|d| d.as_millis() as u64);
+                                let dest_modified = dm
+                                    .modified()
+                                    .ok()
+                                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                    .map(|d| d.as_millis() as u64);
 
-                if !seen_destinations.insert(dest_file.clone()) {
-                    match duplicate_strategy.as_str() {
-                        "EXCLUDE" => continue,
-                        "FAIL" => {
+                                src_modified != dest_modified || sm.len() != dm.len()
+                            }
+                            _ => true,
+                        }
+                    };
+
+                    if needs_copy {
+                        if let Err(e) = Self::copy_file(
+                            src_file,
+                            &dest_file,
+                            &mut result,
+                            &expand_properties,
+                            file_mode,
+                            dir_mode,
+                        )
+                        .await
+                        {
                             result.success = false;
-                            result.error_message =
-                                format!("Duplicate sync destination: {}", dest_file.display());
+                            result.error_message = e;
                             return result;
                         }
-                        _ => {}
-                    }
-                }
-
-                let needs_copy = if !expand_properties.is_empty() {
-                    true
-                } else if !dest_file.exists() {
-                    true
-                } else {
-                    // Compare modification times and sizes
-                    let src_meta = tokio::fs::metadata(src_file).await.ok();
-                    let dest_meta = tokio::fs::metadata(&dest_file).await.ok();
-
-                    match (src_meta, dest_meta) {
-                        (Some(sm), Some(dm)) => {
-                            let src_modified = sm
-                                .modified()
-                                .ok()
-                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                                .map(|d| d.as_millis() as u64);
-                            let dest_modified = dm
-                                .modified()
-                                .ok()
-                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                                .map(|d| d.as_millis() as u64);
-
-                            src_modified != dest_modified || sm.len() != dm.len()
-                        }
-                        _ => true,
-                    }
-                };
-
-                if needs_copy {
-                    if let Err(e) = Self::copy_file(
-                        src_file,
-                        &dest_file,
-                        &mut result,
-                        &expand_properties,
-                        file_mode,
-                        dir_mode,
-                    )
-                    .await
-                    {
-                        result.success = false;
-                        result.error_message = e;
-                        return result;
                     }
                 }
             }
@@ -310,6 +381,7 @@ impl TaskExecutor for SyncTaskExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 
     #[tokio::test]
     async fn test_sync_creates_target() {
@@ -728,5 +800,42 @@ mod tests {
         // File may or may not be re-copied depending on mtime resolution.
         // Same content and size is the important invariant.
         assert!(dest_dir.join("file.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn test_sync_uses_explicit_copyspec_file_mappings_and_deletes_orphans() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let dest_dir = tmp.path().join("dest");
+        tokio::fs::create_dir_all(&src_dir).await.unwrap();
+        tokio::fs::create_dir_all(&dest_dir).await.unwrap();
+        let src_file = src_dir.join("app.txt");
+        tokio::fs::write(&src_file, b"mapped").await.unwrap();
+        tokio::fs::write(dest_dir.join("orphan.txt"), b"orphan")
+            .await
+            .unwrap();
+
+        let mapping = format!(
+            "{}>{}>F",
+            URL_SAFE_NO_PAD.encode(src_file.to_string_lossy().as_bytes()),
+            URL_SAFE_NO_PAD.encode("nested/app.txt")
+        );
+        let executor = SyncTaskExecutor::new();
+        let mut input = TaskInput::new("Sync");
+        input.target_dir = dest_dir.clone();
+        input
+            .options
+            .insert("copy_file_mappings".to_string(), mapping);
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert_eq!(
+            tokio::fs::read(dest_dir.join("nested/app.txt"))
+                .await
+                .unwrap(),
+            b"mapped"
+        );
+        assert!(!dest_dir.join("orphan.txt").exists());
     }
 }

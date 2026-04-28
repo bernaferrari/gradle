@@ -176,13 +176,15 @@ pub(super) fn dir_permission_mode(input: &TaskInput) -> Option<u32> {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-struct CopyFileMapping {
-    source: PathBuf,
-    relative_path: PathBuf,
-    is_dir: bool,
+pub(super) struct CopyFileMapping {
+    pub(super) source: PathBuf,
+    pub(super) relative_path: PathBuf,
+    pub(super) is_dir: bool,
 }
 
-fn parse_copy_file_mappings(value: Option<&String>) -> Result<Vec<CopyFileMapping>, String> {
+pub(super) fn parse_copy_file_mappings(
+    value: Option<&String>,
+) -> Result<Vec<CopyFileMapping>, String> {
     let Some(value) = value
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
