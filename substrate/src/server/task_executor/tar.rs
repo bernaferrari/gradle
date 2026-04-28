@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 
+use crate::server::task_executor::copy::include_empty_dirs;
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
 /// Native Rust TAR packaging executor.
@@ -48,6 +49,7 @@ impl TaskExecutor for TarTaskExecutor {
                 .get("duplicates_strategy")
                 .map(|strategy| strategy.as_str())
                 .unwrap_or("INCLUDE"),
+            include_empty_dirs(input),
         ) {
             Ok(entries) => entries,
             Err(e) => {
@@ -111,6 +113,7 @@ fn gzip_enabled(input: &TaskInput, archive_path: &Path) -> bool {
 fn collect_entries(
     source_files: &[PathBuf],
     duplicate_strategy: &str,
+    include_empty_dirs: bool,
 ) -> Result<Vec<TarEntry>, String> {
     let mut entries = Vec::new();
     for source in source_files {
@@ -118,7 +121,7 @@ fn collect_entries(
             return Err(format!("Source file not found: {}", source.display()));
         }
         if source.is_dir() {
-            collect_dir(source, source, &mut entries)?;
+            collect_dir(source, source, &mut entries, include_empty_dirs)?;
         } else {
             let name = source
                 .file_name()
@@ -162,7 +165,12 @@ fn resolve_duplicate_entries(
     Ok(resolved)
 }
 
-fn collect_dir(root: &Path, dir: &Path, entries: &mut Vec<TarEntry>) -> Result<(), String> {
+fn collect_dir(
+    root: &Path,
+    dir: &Path,
+    entries: &mut Vec<TarEntry>,
+    include_empty_dirs: bool,
+) -> Result<(), String> {
     let mut children = std::fs::read_dir(dir)
         .map_err(|e| format!("Cannot read directory {}: {}", dir.display(), e))?
         .collect::<Result<Vec<_>, _>>()
@@ -176,12 +184,14 @@ fn collect_dir(root: &Path, dir: &Path, entries: &mut Vec<TarEntry>) -> Result<(
             .map_err(|e| format!("Cannot relativize {}: {}", path.display(), e))?;
         let name = normalize_entry_path(relative);
         if path.is_dir() {
-            entries.push(TarEntry {
-                name,
-                data: Vec::new(),
-                is_dir: true,
-            });
-            collect_dir(root, &path, entries)?;
+            if include_empty_dirs {
+                entries.push(TarEntry {
+                    name,
+                    data: Vec::new(),
+                    is_dir: true,
+                });
+            }
+            collect_dir(root, &path, entries, include_empty_dirs)?;
         } else if path.is_file() {
             entries.push(TarEntry {
                 name,
@@ -300,6 +310,46 @@ mod tests {
         assert!(names.contains(&"application.properties".to_string()));
         assert!(names.contains(&"com/example".to_string()));
         assert!(names.contains(&"com/example/App.class".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_tar_can_skip_directory_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let out_dir = tmp.path().join("out");
+
+        fs::create_dir_all(src_dir.join("empty")).unwrap();
+
+        let executor = TarTaskExecutor::new();
+        let mut input = TaskInput::new("Tar");
+        input.source_files.push(src_dir);
+        input.target_dir = out_dir.clone();
+        input
+            .options
+            .insert("tarName".to_string(), "dirs.tar".to_string());
+        input
+            .options
+            .insert("include_empty_dirs".to_string(), "false".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        let file = fs::File::open(out_dir.join("dirs.tar")).unwrap();
+        let mut archive = ::tar::Archive::new(file);
+        let names = archive
+            .entries()
+            .unwrap()
+            .map(|entry| {
+                entry
+                    .unwrap()
+                    .path()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+
+        assert!(!names.contains(&"empty".to_string()));
     }
 
     #[tokio::test]

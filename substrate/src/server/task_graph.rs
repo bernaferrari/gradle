@@ -534,6 +534,12 @@ fn task_options(
             "duplicates_strategy",
             "duplicates_strategy",
         );
+        insert_input_option(
+            task,
+            &mut options,
+            "include_empty_dirs",
+            "include_empty_dirs",
+        );
     } else if task_type == "Tar" {
         insert_input_option(task, &mut options, "archive_file_name", "tarName");
         insert_input_option(task, &mut options, "archive_compression", "compression");
@@ -542,6 +548,12 @@ fn task_options(
             &mut options,
             "duplicates_strategy",
             "duplicates_strategy",
+        );
+        insert_input_option(
+            task,
+            &mut options,
+            "include_empty_dirs",
+            "include_empty_dirs",
         );
     } else if matches!(task_type, "Copy" | "Sync") {
         insert_input_option(task, &mut options, "expand_properties", "expand_properties");
@@ -1326,6 +1338,13 @@ mod tests {
                     normalization: "scalar".to_string(),
                     optional: false,
                 },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "include_empty_dirs".to_string(),
+                    kind: "value".to_string(),
+                    value: "false".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
             ],
             output_specs: vec![
                 super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
@@ -1347,6 +1366,7 @@ mod tests {
         assert_eq!(context["source_files"][0], "/repo/build/install/app");
         assert_eq!(context["target_dir"], "/repo/build/distributions");
         assert_eq!(context["options"]["jarName"], "app.zip");
+        assert_eq!(context["options"]["include_empty_dirs"], "false");
     }
 
     #[test]
@@ -1388,6 +1408,13 @@ mod tests {
                     normalization: "scalar".to_string(),
                     optional: true,
                 },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "include_empty_dirs".to_string(),
+                    kind: "value".to_string(),
+                    value: "false".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
             ],
             output_specs: vec![
                 super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
@@ -1410,6 +1437,7 @@ mod tests {
         assert_eq!(context["target_dir"], "/repo/build/distributions");
         assert_eq!(context["options"]["tarName"], "app.tar");
         assert_eq!(context["options"]["compression"], "gzip");
+        assert_eq!(context["options"]["include_empty_dirs"], "false");
     }
 
     #[tokio::test]

@@ -72,9 +72,10 @@ impl JarTaskExecutor {
         compressed_size: u32,
         uncompressed_size: u32,
         local_header_offset: u32,
+        external_file_attributes: u32,
     ) -> std::io::Result<()> {
         out.write_all(b"PK\x01\x02")?;
-        out.write_all(&0x14u16.to_le_bytes())?; // Version made by
+        out.write_all(&((3u16 << 8) | 20u16).to_le_bytes())?; // Version made by: Unix, ZIP 2.0
         out.write_all(&0x14u16.to_le_bytes())?; // Version needed
         out.write_all(&0u16.to_le_bytes())?; // General purpose bit flag
         out.write_all(&compression_method.to_le_bytes())?;
@@ -88,7 +89,7 @@ impl JarTaskExecutor {
         out.write_all(&0u16.to_le_bytes())?; // File comment length
         out.write_all(&0u16.to_le_bytes())?; // Disk number start
         out.write_all(&0u16.to_le_bytes())?; // Internal file attributes
-        out.write_all(&0u32.to_le_bytes())?; // External file attributes
+        out.write_all(&external_file_attributes.to_le_bytes())?;
         out.write_all(&local_header_offset.to_le_bytes())?;
         out.write_all(name)?;
         Ok(())
@@ -178,6 +179,7 @@ impl JarTaskExecutor {
         base: &Path,
         current: &Path,
         entries: &mut Vec<(String, Vec<u8>)>,
+        include_empty_dirs: bool,
     ) -> Result<(), String> {
         let dir_entries = std::fs::read_dir(current)
             .map_err(|e| format!("Cannot read directory {}: {}", current.display(), e))?;
@@ -191,7 +193,10 @@ impl JarTaskExecutor {
             let name = relative.to_string_lossy().replace('\\', "/");
 
             if path.is_dir() {
-                Self::collect_files(base, &path, entries)?;
+                if include_empty_dirs {
+                    entries.push((format!("{}/", name.trim_end_matches('/')), Vec::new()));
+                }
+                Self::collect_files(base, &path, entries, include_empty_dirs)?;
             } else {
                 let data = std::fs::read(&path)
                     .map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
@@ -269,6 +274,12 @@ impl JarTaskExecutor {
 
         for (i, meta) in metas.iter().enumerate() {
             let name_bytes = entries[i].0.as_bytes();
+            let is_dir = entries[i].0.ends_with('/');
+            let external_file_attributes = if is_dir {
+                ((0o040755u32) << 16) | 0x10
+            } else {
+                (0o100644u32) << 16
+            };
             Self::write_central_dir_entry(
                 out,
                 name_bytes,
@@ -279,6 +290,7 @@ impl JarTaskExecutor {
                 meta.size,
                 meta.size,
                 meta.local_offset,
+                external_file_attributes,
             )?;
         }
 
@@ -328,6 +340,13 @@ fn archive_duplicate_strategy(options: &std::collections::HashMap<String, String
         .get("duplicates_strategy")
         .map(|strategy| strategy.to_ascii_uppercase())
         .unwrap_or_else(|| "INCLUDE".to_string())
+}
+
+fn archive_include_empty_dirs(options: &std::collections::HashMap<String, String>) -> bool {
+    options
+        .get("include_empty_dirs")
+        .map(|value| value != "false")
+        .unwrap_or(true)
 }
 
 fn resolve_duplicate_entries(
@@ -426,6 +445,7 @@ impl JarTaskExecutor {
         options: &std::collections::HashMap<String, String>,
     ) -> Result<(), String> {
         let mut entries: Vec<(String, Vec<u8>)> = Vec::with_capacity(source_files.len());
+        let include_empty_dirs = archive_include_empty_dirs(options);
 
         for source in source_files {
             if !source.is_dir() {
@@ -438,7 +458,7 @@ impl JarTaskExecutor {
                 entries.push((name.to_string(), data));
                 continue;
             }
-            Self::collect_files(source, source, &mut entries)?;
+            Self::collect_files(source, source, &mut entries, include_empty_dirs)?;
         }
 
         if options.contains_key("manifest") || options.contains_key("mainClass") {
@@ -474,6 +494,7 @@ impl JarTaskExecutor {
         } else {
             Vec::new()
         };
+        let include_empty_dirs = archive_include_empty_dirs(options);
 
         for source in source_files {
             if !source.is_dir() {
@@ -489,7 +510,7 @@ impl JarTaskExecutor {
             }
 
             let mut new_entries = Vec::new();
-            Self::collect_files(source, source, &mut new_entries)?;
+            Self::collect_files(source, source, &mut new_entries, include_empty_dirs)?;
             for (name, data) in new_entries {
                 entries.retain(|(n, _)| n != &name);
                 entries.push((name, data));
@@ -662,6 +683,96 @@ mod tests {
         let jar_data = fs::read(jar_path).unwrap();
         let jar_str = String::from_utf8_lossy(&jar_data);
         assert!(jar_str.contains("com/example/Service.class"));
+    }
+
+    #[tokio::test]
+    async fn test_jar_includes_directory_entries_by_default() {
+        let tmp = TempDir::new().unwrap();
+        let src_dir = tmp.path().join("src");
+        let out_dir = tmp.path().join("out");
+
+        fs::create_dir_all(src_dir.join("empty/nested")).unwrap();
+
+        let executor = JarTaskExecutor::new();
+        let mut input = TaskInput::new("Jar");
+        input.source_files.push(src_dir);
+        input.target_dir = out_dir;
+        input
+            .options
+            .insert("jarName".to_string(), "dirs.jar".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        let entries = JarTaskExecutor::read_existing_entries(result.output_files.first().unwrap())
+            .unwrap()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>();
+        assert!(entries.contains(&"empty/".to_string()));
+        assert!(entries.contains(&"empty/nested/".to_string()));
+
+        let jar_bytes = fs::read(result.output_files.first().unwrap()).unwrap();
+        let external_attrs = central_directory_external_attrs(&jar_bytes, "empty/").unwrap();
+        assert_eq!(external_attrs & 0x10, 0x10);
+    }
+
+    #[tokio::test]
+    async fn test_jar_can_skip_directory_entries() {
+        let tmp = TempDir::new().unwrap();
+        let src_dir = tmp.path().join("src");
+        let out_dir = tmp.path().join("out");
+
+        fs::create_dir_all(src_dir.join("empty")).unwrap();
+
+        let executor = JarTaskExecutor::new();
+        let mut input = TaskInput::new("Jar");
+        input.source_files.push(src_dir);
+        input.target_dir = out_dir;
+        input
+            .options
+            .insert("jarName".to_string(), "dirs.jar".to_string());
+        input
+            .options
+            .insert("include_empty_dirs".to_string(), "false".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        let entries = JarTaskExecutor::read_existing_entries(result.output_files.first().unwrap())
+            .unwrap()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>();
+        assert!(!entries.contains(&"empty/".to_string()));
+    }
+
+    fn central_directory_external_attrs(jar: &[u8], entry_name: &str) -> Option<u32> {
+        let mut pos = 0;
+        while pos + 46 <= jar.len() {
+            if jar[pos..pos + 4] != *b"PK\x01\x02" {
+                pos += 1;
+                continue;
+            }
+            let name_len = u16::from_le_bytes([jar[pos + 28], jar[pos + 29]]) as usize;
+            let extra_len = u16::from_le_bytes([jar[pos + 30], jar[pos + 31]]) as usize;
+            let comment_len = u16::from_le_bytes([jar[pos + 32], jar[pos + 33]]) as usize;
+            let name_start = pos + 46;
+            let name_end = name_start + name_len;
+            if name_end > jar.len() {
+                return None;
+            }
+            if &jar[name_start..name_end] == entry_name.as_bytes() {
+                return Some(u32::from_le_bytes([
+                    jar[pos + 38],
+                    jar[pos + 39],
+                    jar[pos + 40],
+                    jar[pos + 41],
+                ]));
+            }
+            pos = name_end + extra_len + comment_len;
+        }
+        None
     }
 
     #[tokio::test]

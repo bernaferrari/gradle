@@ -88,6 +88,8 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("jar", inputs.get("archive_extension"));
         assertEquals(archiveDir.getAbsolutePath(), inputs.get("archive_destination_directory"));
         assertEquals(archiveFile.getAbsolutePath(), inputs.get("archive_file"));
+        assertEquals("INCLUDE", inputs.get("duplicates_strategy"));
+        assertEquals("true", inputs.get("include_empty_dirs"));
         assertTrue(task.getInputSpecsList().stream()
             .anyMatch(input -> input.getKind().equals("path") && input.getValue().equals(classesDir.getAbsolutePath())));
         assertTrue(task.getOutputSpecsList().stream()
@@ -400,6 +402,8 @@ public class ProjectModelProviderAdapterTest {
                     return new FileProvider(archiveFile);
                 case "getCompression":
                     return "GZIP";
+                case "getRootSpec":
+                    return copySpec(false);
                 case "compareTo":
                     return 0;
                 default:
@@ -648,6 +652,7 @@ public class ProjectModelProviderAdapterTest {
         FileProvider getDestinationDirectory();
         FileProvider getArchiveFile();
         Object getCompression();
+        Object getRootSpec();
     }
 
     public interface TestContract {
