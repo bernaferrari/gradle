@@ -18,12 +18,17 @@
   `org.gradle.rust.substrate.runbuild.authoritative=true` executes the selected
   build-plan shadow through Rust `RunBuild` and skips Gradle's JVM task executor
   only when Rust reports exactly the scheduled task count with zero JVM forwards.
-- The checked-in Java library, Java application, Java multi-project,
-  resource-expansion, standalone Sync, and CopySpec pattern corpus builds
-  complete through that explicit gate with `target/debug/gradle-substrate-daemon`.
+- The checked-in offline corpus covers Java library, Java application,
+  Java multi-project, resource expansion, JavaCompile options, standalone
+  Copy/Sync transforms, CopySpec duplicates, Zip/Tar archive tasks, and a
+  simple Exec task through that explicit gate with
+  `target/debug/gradle-substrate-daemon`.
 - A separate networked JUnit corpus build proves native `TestExec` lowering for
-  a non-empty JUnit Platform test task when the test runtime contains the JUnit
-  Platform ConsoleLauncher.
+  a non-empty JUnit Platform test task, including include/exclude tag capture,
+  when the test runtime contains the JUnit Platform ConsoleLauncher.
+- Native `TestExec` lowering captures a single Gradle include test filter and
+  JUnit Platform include/exclude tags, and fails closed for unsupported filter
+  shapes rather than approximating them.
 - Native dependency resolution handles inherited Maven exclusions per dependency
   edge, so one dependency's exclusions no longer remove sibling dependencies.
 - Native dependency resolution preserves Maven dependency scopes on resolved
@@ -69,9 +74,9 @@
 - Kotlin/Groovy DSL evaluation and legacy plugin execution remain JVM-host
   compatibility islands.
 - More task types need native-ready contract capture before broad no-fallback
-  execution is realistic, especially arbitrary copy filters/actions, nested
-  CopySpec trees, Gradle archive metadata edge cases, symlink copy semantics,
-  and remaining tar compression variants such as XZ.
+  execution is realistic, especially arbitrary copy filters/actions beyond
+  direct expand, nested CopySpec trees, Gradle archive metadata edge cases,
+  symlink copy semantics, and remaining tar compression variants such as XZ.
 
 ## Validation
 
