@@ -214,6 +214,7 @@ public class ProjectModelProviderAdapterTest {
             fileCollection(resourceFile),
             fileCollection(outputDir),
             properties,
+            true,
             true
         );
 
@@ -232,11 +233,39 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("true", inputs.get("include_empty_dirs"));
         assertEquals("420", inputs.get("file_permissions"));
         assertEquals("493", inputs.get("dir_permissions"));
+        assertEquals("true", inputs.get("copy_has_custom_actions"));
+        assertEquals("false", inputs.get("copy_unsupported_custom_actions"));
+        assertTrue(inputs.get("copy_custom_action_types").endsWith("MapBackedExpandAction"));
         assertTrue(task.getInputSpecsList().stream()
             .anyMatch(input -> input.getKind().equals("path") && input.getValue().equals(resourceFile.getAbsolutePath())));
         assertTrue(task.getOutputSpecsList().stream()
             .map(BuildPlanTaskOutputSpec::getPath)
             .anyMatch(path -> path.equals(outputDir.getAbsolutePath())));
+    }
+
+    @org.junit.Test
+    public void marksUnsupportedCopyActionsAsNotNativeReady() throws IOException {
+        File resourceFile = temporaryFolder.newFile("custom.txt");
+        File outputDir = temporaryFolder.newFolder("build/custom");
+
+        Task copy = basicFileTransformTask(
+            ":copyCustom",
+            "copyCustom",
+            fileCollection(resourceFile),
+            fileCollection(outputDir),
+            Collections.emptyMap(),
+            true,
+            false
+        );
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(copy, Copy.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("true", inputs.get("copy_has_custom_actions"));
+        assertEquals("true", inputs.get("copy_unsupported_custom_actions"));
+        assertTrue(inputs.get("copy_custom_action_types").endsWith("ArbitraryCopyAction"));
     }
 
     @org.junit.Test
@@ -561,7 +590,8 @@ public class ProjectModelProviderAdapterTest {
         FileCollection inputs,
         FileCollection outputs,
         Map<String, String> inputProperties,
-        boolean customActions
+        boolean customActions,
+        boolean supportedCustomActions
     ) {
         Project project = proxy(Project.class, (proxy, method, args) -> {
             if (method.getName().equals("getPath")) {
@@ -601,7 +631,7 @@ public class ProjectModelProviderAdapterTest {
                 case "getDestroyables":
                     return registeredFilesOwner(method.getReturnType());
                 case "getRootSpec":
-                    return copySpec(customActions);
+                    return copySpec(customActions, supportedCustomActions);
                 case "getActions":
                     return customActions ? Collections.singletonList(new Object()) : Collections.emptyList();
                 case "compareTo":
@@ -632,10 +662,17 @@ public class ProjectModelProviderAdapterTest {
     }
 
     private static Object copySpec(boolean customActions) {
+        return copySpec(customActions, true);
+    }
+
+    private static Object copySpec(boolean customActions, boolean supportedCustomActions) {
         return proxy(CopySpecContract.class, (proxy, method, args) -> {
             switch (method.getName()) {
                 case "hasCustomActions":
                     return customActions;
+                case "buildRootResolver":
+                    Object copyAction = supportedCustomActions ? new MapBackedExpandAction() : new ArbitraryCopyAction();
+                    return copySpecResolver(customActions ? Collections.singletonList(copyAction) : Collections.emptyList());
                 case "getDuplicatesStrategy":
                     return "INCLUDE";
                 case "getFilteringCharset":
@@ -655,6 +692,15 @@ public class ProjectModelProviderAdapterTest {
                 default:
                     return defaultValue(method.getReturnType());
             }
+        });
+    }
+
+    private static Object copySpecResolver(Iterable<Object> actions) {
+        return proxy(CopySpecResolverContract.class, (proxy, method, args) -> {
+            if (method.getName().equals("getAllCopyActions")) {
+                return actions;
+            }
+            return defaultValue(method.getReturnType());
         });
     }
 
@@ -768,6 +814,7 @@ public class ProjectModelProviderAdapterTest {
 
     public interface CopySpecContract {
         boolean hasCustomActions();
+        Object buildRootResolver();
         Object getDuplicatesStrategy();
         String getFilteringCharset();
         Set<String> getIncludes();
@@ -776,6 +823,10 @@ public class ProjectModelProviderAdapterTest {
         boolean isIncludeEmptyDirs();
         Object getFilePermissions();
         Object getDirPermissions();
+    }
+
+    public interface CopySpecResolverContract {
+        Iterable<Object> getAllCopyActions();
     }
 
     public interface FileTransformTaskContract {
@@ -847,6 +898,12 @@ public class ProjectModelProviderAdapterTest {
         }
     }
 
+    public static class MapBackedExpandAction {
+    }
+
+    public static class ArbitraryCopyAction {
+    }
+
     public static class FileProvider {
         private final File file;
 
@@ -911,6 +968,9 @@ public class ProjectModelProviderAdapterTest {
     }
 
     public static class Exec {
+    }
+
+    public static class Copy {
     }
 
     public static class ProcessResources {

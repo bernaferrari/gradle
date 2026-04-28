@@ -17,8 +17,7 @@ val resourceTokens = mapOf(
 )
 
 tasks.processResources {
+    include("**/*.properties")
     inputs.properties(resourceTokens)
-    filesMatching("application.properties") {
-        expand(resourceTokens)
-    }
+    expand(resourceTokens)
 }
