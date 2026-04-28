@@ -32,8 +32,8 @@ release smoke coverage from `substrate/scripts/e2e-smoke-test.sh`.
   access.
 - `testing/corpus/` gives small real builds covering Kotlin/Groovy DSL Java
   projects, a multi-project application, Java resource expansion, JavaCompile
-  options, standalone Copy/Sync transforms, CopySpec duplicate handling, and
-  Zip/Tar archive tasks, plus a simple Java launcher Exec task.
+  options, standalone Copy/Sync transforms, CopySpec duplicate handling,
+  Zip/Tar/War/Ear archive tasks, plus a simple Java launcher Exec task.
 - `tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative`
   proves the checked-in corpus can run through the explicit no-fallback
   RunBuild gate and compare stable output inventories plus non-archive content
