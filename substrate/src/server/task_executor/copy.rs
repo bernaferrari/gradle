@@ -72,11 +72,14 @@ impl CopyTaskExecutor {
         dest: &Path,
         result: &mut TaskResult,
         expand_properties: &[(String, String)],
+        file_mode: Option<u32>,
+        dir_mode: Option<u32>,
     ) -> Result<(), String> {
         if let Some(parent) = dest.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
                 .map_err(|e| format!("Failed to create directory {}: {}", parent.display(), e))?;
+            apply_unix_mode(parent, dir_mode)?;
         }
         let bytes = if expand_properties.is_empty() {
             tokio::fs::copy(src, dest)
@@ -92,6 +95,7 @@ impl CopyTaskExecutor {
                 .map_err(|e| format!("Failed to write {}: {}", dest.display(), e))?;
             expanded.len() as u64
         };
+        apply_unix_mode(dest, file_mode)?;
         result.files_processed += 1;
         result.bytes_processed += bytes;
         result.output_files.push(dest.to_path_buf());
@@ -159,6 +163,48 @@ pub(super) fn include_empty_dirs(input: &TaskInput) -> bool {
         .get("include_empty_dirs")
         .map(|value| value != "false")
         .unwrap_or(true)
+}
+
+pub(super) fn file_permission_mode(input: &TaskInput) -> Option<u32> {
+    parse_unix_mode(input.options.get("file_permissions"))
+}
+
+pub(super) fn dir_permission_mode(input: &TaskInput) -> Option<u32> {
+    parse_unix_mode(input.options.get("dir_permissions"))
+}
+
+pub(super) fn parse_unix_mode(value: Option<&String>) -> Option<u32> {
+    let value = value?.trim();
+    if value.is_empty() {
+        return None;
+    }
+    let parsed = if value.len() > 1 && value.starts_with('0') {
+        u32::from_str_radix(value, 8).ok()?
+    } else {
+        value.parse::<u32>().ok()?
+    };
+    (parsed <= 0o7777).then_some(parsed)
+}
+
+pub(super) fn apply_unix_mode(path: &Path, mode: Option<u32>) -> Result<(), String> {
+    let Some(mode) = mode else {
+        return Ok(());
+    };
+    apply_unix_mode_inner(path, mode)
+}
+
+#[cfg(unix)]
+fn apply_unix_mode_inner(path: &Path, mode: u32) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let permissions = std::fs::Permissions::from_mode(mode);
+    std::fs::set_permissions(path, permissions)
+        .map_err(|e| format!("Failed to set permissions on {}: {}", path.display(), e))
+}
+
+#[cfg(not(unix))]
+fn apply_unix_mode_inner(_path: &Path, _mode: u32) -> Result<(), String> {
+    Ok(())
 }
 
 pub(super) fn path_included(
@@ -257,6 +303,8 @@ impl TaskExecutor for CopyTaskExecutor {
     async fn execute(&self, input: &TaskInput) -> TaskResult {
         let start = std::time::Instant::now();
         let mut result = TaskResult::default();
+        let file_mode = file_permission_mode(input);
+        let dir_mode = dir_permission_mode(input);
 
         if !input.target_dir.exists() {
             if let Err(e) = tokio::fs::create_dir_all(&input.target_dir).await {
@@ -264,6 +312,11 @@ impl TaskExecutor for CopyTaskExecutor {
                 result.error_message = format!("Failed to create target directory: {}", e);
                 return result;
             }
+        }
+        if let Err(e) = apply_unix_mode(&input.target_dir, dir_mode) {
+            result.success = false;
+            result.error_message = e;
+            return result;
         }
 
         let expand_properties = parse_expand_properties(input.options.get("expand_properties"));
@@ -306,6 +359,11 @@ impl TaskExecutor for CopyTaskExecutor {
                                     format!("Failed to create directory {}: {}", dest.display(), e);
                                 return result;
                             }
+                            if let Err(e) = apply_unix_mode(&dest, dir_mode) {
+                                result.success = false;
+                                result.error_message = e;
+                                return result;
+                            }
                         }
                     }
                 }
@@ -340,8 +398,15 @@ impl TaskExecutor for CopyTaskExecutor {
                             _ => {}
                         }
                     }
-                    if let Err(e) =
-                        Self::copy_file(&file, &dest, &mut result, &expand_properties).await
+                    if let Err(e) = Self::copy_file(
+                        &file,
+                        &dest,
+                        &mut result,
+                        &expand_properties,
+                        file_mode,
+                        dir_mode,
+                    )
+                    .await
                     {
                         result.success = false;
                         result.error_message = e;
@@ -371,8 +436,15 @@ impl TaskExecutor for CopyTaskExecutor {
                         _ => {}
                     }
                 }
-                if let Err(e) =
-                    Self::copy_file(source, &dest, &mut result, &expand_properties).await
+                if let Err(e) = Self::copy_file(
+                    source,
+                    &dest,
+                    &mut result,
+                    &expand_properties,
+                    file_mode,
+                    dir_mode,
+                )
+                .await
                 {
                     result.success = false;
                     result.error_message = e;
@@ -623,6 +695,53 @@ mod tests {
 
         assert!(result.success, "{}", result.error_message);
         assert!(!dest_dir.join("empty").exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_copy_applies_declared_file_and_dir_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let dest_dir = tmp.path().join("dest");
+        tokio::fs::create_dir_all(src_dir.join("nested"))
+            .await
+            .unwrap();
+        tokio::fs::write(src_dir.join("nested/app.sh"), b"echo hi")
+            .await
+            .unwrap();
+
+        let executor = CopyTaskExecutor::new();
+        let mut input = TaskInput::new("Copy");
+        input.source_files.push(src_dir);
+        input.target_dir = dest_dir.clone();
+        input
+            .options
+            .insert("file_permissions".to_string(), "493".to_string());
+        input
+            .options
+            .insert("dir_permissions".to_string(), "448".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert_eq!(
+            std::fs::metadata(dest_dir.join("nested/app.sh"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
+        assert_eq!(
+            std::fs::metadata(dest_dir.join("nested"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
     }
 
     #[test]

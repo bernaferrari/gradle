@@ -200,6 +200,8 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("**/secret.*", inputs.get("exclude_patterns"));
         assertEquals("false", inputs.get("case_sensitive"));
         assertEquals("true", inputs.get("include_empty_dirs"));
+        assertEquals("420", inputs.get("file_permissions"));
+        assertEquals("493", inputs.get("dir_permissions"));
         assertTrue(task.getInputSpecsList().stream()
             .anyMatch(input -> input.getKind().equals("path") && input.getValue().equals(resourceFile.getAbsolutePath())));
         assertTrue(task.getOutputSpecsList().stream()
@@ -559,6 +561,10 @@ public class ProjectModelProviderAdapterTest {
                     return false;
                 case "isIncludeEmptyDirs":
                     return true;
+                case "getFilePermissions":
+                    return new PermissionProvider(0644);
+                case "getDirPermissions":
+                    return new PermissionProvider(0755);
                 default:
                     return defaultValue(method.getReturnType());
             }
@@ -673,6 +679,8 @@ public class ProjectModelProviderAdapterTest {
         Set<String> getExcludes();
         boolean isCaseSensitive();
         boolean isIncludeEmptyDirs();
+        Object getFilePermissions();
+        Object getDirPermissions();
     }
 
     public interface FileTransformTaskContract {
@@ -707,6 +715,30 @@ public class ProjectModelProviderAdapterTest {
         }
 
         public String getOrNull() {
+            return value;
+        }
+    }
+
+    public static class PermissionProvider {
+        private final int value;
+
+        PermissionProvider(int value) {
+            this.value = value;
+        }
+
+        public Permission getOrNull() {
+            return new Permission(value);
+        }
+    }
+
+    public static class Permission {
+        private final int value;
+
+        Permission(int value) {
+            this.value = value;
+        }
+
+        public int toUnixNumeric() {
             return value;
         }
     }

@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use std::pin::Pin;
 
 use crate::server::task_executor::copy::{
-    case_sensitive, duplicate_strategy, expand_bytes, include_empty_dirs, parse_expand_properties,
-    parse_patterns, path_included,
+    apply_unix_mode, case_sensitive, dir_permission_mode, duplicate_strategy, expand_bytes,
+    file_permission_mode, include_empty_dirs, parse_expand_properties, parse_patterns,
+    path_included,
 };
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
@@ -66,11 +67,14 @@ impl SyncTaskExecutor {
         dest_file: &std::path::Path,
         result: &mut TaskResult,
         expand_properties: &[(String, String)],
+        file_mode: Option<u32>,
+        dir_mode: Option<u32>,
     ) -> Result<(), String> {
         if let Some(parent) = dest_file.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
                 .map_err(|e| format!("Failed to create directory: {}", e))?;
+            apply_unix_mode(parent, dir_mode)?;
         }
 
         let bytes = if expand_properties.is_empty() {
@@ -87,6 +91,7 @@ impl SyncTaskExecutor {
                 .map_err(|e| format!("Failed to write {}: {}", dest_file.display(), e))?;
             expanded.len() as u64
         };
+        apply_unix_mode(dest_file, file_mode)?;
 
         result.files_processed += 1;
         result.bytes_processed += bytes;
@@ -118,22 +123,28 @@ impl TaskExecutor for SyncTaskExecutor {
             .map(|v| v != "false")
             .unwrap_or(true);
 
-        // Option: "preserve_permissions" (default: false for simplicity)
-        let _preserve_permissions = input
-            .options
-            .get("preserve_permissions")
-            .map(|v| v == "true")
-            .unwrap_or(false);
-
         let expand_properties = parse_expand_properties(input.options.get("expand_properties"));
         let duplicate_strategy = duplicate_strategy(input);
         let include_patterns = parse_patterns(input.options.get("include_patterns"));
         let exclude_patterns = parse_patterns(input.options.get("exclude_patterns"));
         let case_sensitive = case_sensitive(input);
         let include_empty_dirs = include_empty_dirs(input);
+        let file_mode = file_permission_mode(input);
+        let dir_mode = dir_permission_mode(input);
         let mut expected_files = HashSet::new();
         let mut expected_dirs = HashSet::new();
         let mut seen_destinations = HashSet::new();
+
+        if let Err(e) = tokio::fs::create_dir_all(&input.target_dir).await {
+            result.success = false;
+            result.error_message = format!("Failed to create target directory: {}", e);
+            return result;
+        }
+        if let Err(e) = apply_unix_mode(&input.target_dir, dir_mode) {
+            result.success = false;
+            result.error_message = e;
+            return result;
+        }
 
         for source_dir in &input.source_files {
             if !source_dir.is_dir() {
@@ -161,6 +172,11 @@ impl TaskExecutor for SyncTaskExecutor {
                         result.success = false;
                         result.error_message =
                             format!("Failed to create directory {}: {}", dest_dir.display(), e);
+                        return result;
+                    }
+                    if let Err(e) = apply_unix_mode(&dest_dir, dir_mode) {
+                        result.success = false;
+                        result.error_message = e;
                         return result;
                     }
                 }
@@ -225,8 +241,15 @@ impl TaskExecutor for SyncTaskExecutor {
                 };
 
                 if needs_copy {
-                    if let Err(e) =
-                        Self::copy_file(src_file, &dest_file, &mut result, &expand_properties).await
+                    if let Err(e) = Self::copy_file(
+                        src_file,
+                        &dest_file,
+                        &mut result,
+                        &expand_properties,
+                        file_mode,
+                        dir_mode,
+                    )
+                    .await
                     {
                         result.success = false;
                         result.error_message = e;
@@ -524,6 +547,54 @@ mod tests {
 
         assert!(result.success, "{}", result.error_message);
         assert!(!dest_dir.join("empty").exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_sync_applies_declared_file_and_dir_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let dest_dir = tmp.path().join("dest");
+
+        tokio::fs::create_dir_all(src_dir.join("nested"))
+            .await
+            .unwrap();
+        tokio::fs::write(src_dir.join("nested/app.sh"), b"echo hi")
+            .await
+            .unwrap();
+
+        let executor = SyncTaskExecutor::new();
+        let mut input = TaskInput::new("Sync");
+        input.source_files.push(src_dir);
+        input.target_dir = dest_dir.clone();
+        input
+            .options
+            .insert("file_permissions".to_string(), "493".to_string());
+        input
+            .options
+            .insert("dir_permissions".to_string(), "448".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert_eq!(
+            std::fs::metadata(dest_dir.join("nested/app.sh"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
+        assert_eq!(
+            std::fs::metadata(dest_dir.join("nested"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
     }
 
     #[tokio::test]
