@@ -58,6 +58,9 @@
 - Native `Copy` and `Sync` honor basic duplicate destination strategies:
   `INCLUDE`/default overwrites, `EXCLUDE` keeps the first file, and `FAIL`
   reports an error.
+- Native `Copy` can consume JVM-captured nested CopySpec file mappings for
+  child `into(...)` destinations instead of flattening every source at the
+  output root.
 - Native ZIP-compatible and TAR archive tasks honor captured duplicate
   destination strategies for `INCLUDE`, `EXCLUDE`, and `FAIL`.
 - Native ZIP-compatible and TAR archive tasks honor captured CopySpec
@@ -75,8 +78,8 @@
   compatibility islands.
 - More task types need native-ready contract capture before broad no-fallback
   execution is realistic, especially arbitrary copy filters/actions beyond
-  direct expand, nested CopySpec trees, Gradle archive metadata edge cases, and
-  symlink copy semantics.
+  direct expand, nested CopySpec behavior for Sync/archive tasks, Gradle
+  archive metadata edge cases, and symlink copy semantics.
 
 ## Validation
 

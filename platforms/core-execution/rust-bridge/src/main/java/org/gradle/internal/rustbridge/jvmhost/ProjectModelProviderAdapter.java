@@ -5,9 +5,12 @@ import gradle.substrate.v1.BuildPlanTaskDiagnostic;
 import gradle.substrate.v1.BuildPlanTaskInputSpec;
 import gradle.substrate.v1.BuildPlanTaskOutputSpec;
 
+import org.gradle.api.Action;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.file.FileCollection;
+import org.gradle.api.file.FileTree;
+import org.gradle.api.file.RelativePath;
 import org.gradle.api.internal.GeneratedSubclasses;
 import org.gradle.api.internal.tasks.TaskDependencyUtil;
 import org.gradle.api.logging.Logging;
@@ -20,7 +23,9 @@ import org.jspecify.annotations.Nullable;
 import java.io.File;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -342,6 +347,48 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "dir_permissions", permissionUnixMode(invokeOptional(rootSpec, "getDirPermissions")));
     }
 
+    private static String nestedCopyFileMappings(@Nullable Object rootSpec) {
+        Object resolver = rootSpec == null ? null : invokeOptional(rootSpec, "buildRootResolver");
+        if (resolver == null) {
+            return "";
+        }
+        List<String> mappings = new ArrayList<>();
+        boolean[] hasNestedDestination = new boolean[] { false };
+        Action<Object> visitor = specResolver -> {
+            Object destPathValue = invokeOptional(specResolver, "getDestPath");
+            Object sourceValue = invokeOptional(specResolver, "getSource");
+            if (!(destPathValue instanceof RelativePath) || !(sourceValue instanceof FileTree)) {
+                return;
+            }
+            RelativePath destPath = (RelativePath) destPathValue;
+            if (!destPath.getPathString().isEmpty()) {
+                hasNestedDestination[0] = true;
+            }
+            ((FileTree) sourceValue).visit(details -> {
+                RelativePath sourcePath = details.getRelativePath();
+                RelativePath outputPath = destPath.append(!details.isDirectory(), sourcePath.getSegments());
+                mappings.add(encodeMapping(details.getFile().getAbsolutePath())
+                    + ">"
+                    + encodeMapping(outputPath.getPathString())
+                    + ">"
+                    + (details.isDirectory() ? "D" : "F"));
+            });
+        };
+        try {
+            invoke(resolver, "walk", Action.class, visitor);
+        } catch (RuntimeException e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to capture nested CopySpec mappings", e);
+            return "";
+        }
+        return hasNestedDestination[0] ? String.join(",", mappings) : "";
+    }
+
+    private static String encodeMapping(String value) {
+        return Base64.getUrlEncoder()
+            .withoutPadding()
+            .encodeToString(value.getBytes(StandardCharsets.UTF_8));
+    }
+
     private static void captureManifestInputs(Task task, Map<String, String> inputs) {
         Object manifest = invokeOptional(task, "getManifest");
         Object attributes = manifest == null ? null : invokeOptional(manifest, "getAttributes");
@@ -392,6 +439,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "include_empty_dirs", booleanString(invokeOptional(rootSpec, "isIncludeEmptyDirs")));
         putIfPresent(inputs, "file_permissions", permissionUnixMode(invokeOptional(rootSpec, "getFilePermissions")));
         putIfPresent(inputs, "dir_permissions", permissionUnixMode(invokeOptional(rootSpec, "getDirPermissions")));
+        putIfPresent(inputs, "copy_file_mappings", nestedCopyFileMappings(rootSpec));
     }
 
     private static List<String> copyActionClassNames(@Nullable Object rootSpec) {
