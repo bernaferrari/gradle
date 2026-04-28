@@ -34,7 +34,7 @@
 - Archive tasks (`Jar`, `Zip`, `War`, `Ear`, `Tar`) can lower to native Rust
   archive execution when the task model provides input paths and an output
   archive path. ZIP-compatible tasks emit ZIP-compatible archives; `Tar` emits
-  native POSIX tar streams and supports gzip-compressed output.
+  native POSIX tar streams and supports gzip/bzip2-compressed output.
 - Native ZIP-compatible archive entries use a fixed DOS timestamp and stable
   entry ordering for reproducible Rust-side archive bytes.
 - Native JAR manifest generation emits sorted custom attributes and wraps long
@@ -67,7 +67,7 @@
 - More task types need native-ready contract capture before broad no-fallback
   execution is realistic, especially arbitrary copy filters/actions, nested
   CopySpec trees, Gradle archive metadata edge cases, permission preservation,
-  symlink copy semantics, and non-gzip tar compression variants.
+  symlink copy semantics, and remaining tar compression variants such as XZ.
 
 ## Validation
 

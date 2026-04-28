@@ -61,7 +61,16 @@ impl TaskExecutor for TarTaskExecutor {
         let files_processed = entries.iter().filter(|entry| !entry.is_dir).count() as u64;
         let bytes_processed = entries.iter().map(|entry| entry.data.len() as u64).sum();
 
-        if let Err(e) = write_archive(&tar_path, &entries, gzip_enabled(input, &tar_path)) {
+        let compression = match compression(input, &tar_path) {
+            Ok(compression) => compression,
+            Err(e) => {
+                result.success = false;
+                result.error_message = e;
+                return result;
+            }
+        };
+
+        if let Err(e) = write_archive(&tar_path, &entries, compression) {
             result.success = false;
             result.error_message = e;
             return result;
@@ -82,6 +91,13 @@ struct TarEntry {
     is_dir: bool,
 }
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+enum TarCompression {
+    None,
+    Gzip,
+    Bzip2,
+}
+
 fn archive_name(input: &TaskInput) -> &str {
     input
         .options
@@ -93,21 +109,30 @@ fn archive_name(input: &TaskInput) -> &str {
         .unwrap_or("output.tar")
 }
 
-fn gzip_enabled(input: &TaskInput, archive_path: &Path) -> bool {
+fn compression(input: &TaskInput, archive_path: &Path) -> Result<TarCompression, String> {
     let compression = input
         .options
         .get("compression")
         .or_else(|| input.options.get("archive_compression"))
         .map(|value| value.to_ascii_lowercase());
-    if matches!(compression.as_deref(), Some("gzip" | "gz")) {
-        return true;
+    match compression.as_deref() {
+        Some("gzip" | "gz") => return Ok(TarCompression::Gzip),
+        Some("bzip2" | "bzip" | "bz2") => return Ok(TarCompression::Bzip2),
+        Some("none" | "") | None => {}
+        Some(other) => return Err(format!("Unsupported tar compression: {}", other)),
     }
     let name = archive_path
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    name.ends_with(".tar.gz") || name.ends_with(".tgz")
+    if name.ends_with(".tar.gz") || name.ends_with(".tgz") {
+        Ok(TarCompression::Gzip)
+    } else if name.ends_with(".tar.bz2") || name.ends_with(".tbz2") || name.ends_with(".tbz") {
+        Ok(TarCompression::Bzip2)
+    } else {
+        Ok(TarCompression::None)
+    }
 }
 
 fn collect_entries(
@@ -212,23 +237,42 @@ fn normalize_entry_name(name: &str) -> String {
     name.replace(std::path::MAIN_SEPARATOR, "/")
 }
 
-fn write_archive(archive_path: &Path, entries: &[TarEntry], gzip: bool) -> Result<(), String> {
+fn write_archive(
+    archive_path: &Path,
+    entries: &[TarEntry],
+    compression: TarCompression,
+) -> Result<(), String> {
     let file = std::fs::File::create(archive_path)
         .map_err(|e| format!("Cannot create {}: {}", archive_path.display(), e))?;
-    if gzip {
-        let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
-        let encoder = write_tar(encoder, entries)?;
-        encoder.finish().map_err(|e| {
-            format!(
-                "Cannot finish gzip archive {}: {}",
-                archive_path.display(),
-                e
-            )
-        })?;
-        Ok(())
-    } else {
-        write_tar(file, entries)?;
-        Ok(())
+    match compression {
+        TarCompression::None => {
+            write_tar(file, entries)?;
+            Ok(())
+        }
+        TarCompression::Gzip => {
+            let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+            let encoder = write_tar(encoder, entries)?;
+            encoder.finish().map_err(|e| {
+                format!(
+                    "Cannot finish gzip archive {}: {}",
+                    archive_path.display(),
+                    e
+                )
+            })?;
+            Ok(())
+        }
+        TarCompression::Bzip2 => {
+            let encoder = bzip2::write::BzEncoder::new(file, bzip2::Compression::default());
+            let encoder = write_tar(encoder, entries)?;
+            encoder.finish().map_err(|e| {
+                format!(
+                    "Cannot finish bzip2 archive {}: {}",
+                    archive_path.display(),
+                    e
+                )
+            })?;
+            Ok(())
+        }
     }
 }
 
@@ -423,6 +467,69 @@ mod tests {
         let mut entries = archive.entries().unwrap();
         let entry = entries.next().unwrap().unwrap();
         assert_eq!(entry.path().unwrap().to_string_lossy(), "readme.txt");
+    }
+
+    #[tokio::test]
+    async fn test_tar_create_bzip2_from_extension() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let out_dir = tmp.path().join("out");
+
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::write(src_dir.join("App.class"), b"class App {}").unwrap();
+
+        let executor = TarTaskExecutor::new();
+        let mut input = TaskInput::new("Tar");
+        input.source_files.push(src_dir);
+        input.target_dir = out_dir.clone();
+        input
+            .options
+            .insert("tarName".to_string(), "app.tar.bz2".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        let file = fs::File::open(out_dir.join("app.tar.bz2")).unwrap();
+        let decoder = bzip2::read::BzDecoder::new(file);
+        let mut archive = ::tar::Archive::new(decoder);
+        let names = archive
+            .entries()
+            .unwrap()
+            .map(|entry| {
+                entry
+                    .unwrap()
+                    .path()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(names, vec!["App.class"]);
+    }
+
+    #[tokio::test]
+    async fn test_tar_unsupported_compression_fails_closed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_file = tmp.path().join("readme.txt");
+        let out_dir = tmp.path().join("out");
+        fs::write(&src_file, b"hello").unwrap();
+
+        let executor = TarTaskExecutor::new();
+        let mut input = TaskInput::new("Tar");
+        input.source_files.push(src_file);
+        input.target_dir = out_dir;
+        input
+            .options
+            .insert("tarName".to_string(), "readme.tar.xz".to_string());
+        input
+            .options
+            .insert("compression".to_string(), "xz".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(!result.success);
+        assert!(result.error_message.contains("Unsupported tar compression"));
     }
 
     #[tokio::test]
