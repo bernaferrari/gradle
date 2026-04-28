@@ -172,6 +172,10 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("-ea -Dcustom=true", inputs.get("jvm_args"));
         assertEquals("env=test", inputs.get("system_properties"));
         assertEquals(reportsDir.getAbsolutePath(), inputs.get("xml_report_dir"));
+        assertEquals("example.*Test", inputs.get("test_filter"));
+        assertEquals("fast,integration", inputs.get("include_tags"));
+        assertEquals("slow", inputs.get("exclude_tags"));
+        assertEquals("false", inputs.get("test_unsupported_filters"));
         assertEquals("true", inputs.get("scan_classpath"));
     }
 
@@ -400,6 +404,10 @@ public class ProjectModelProviderAdapterTest {
                     return Collections.singletonMap("env", "test");
                 case "getReports":
                     return new TestReports(reportsDir);
+                case "getFilter":
+                    return new TestFilterSpec();
+                case "getOptions":
+                    return new JUnitPlatformOptionsSpec();
                 case "compareTo":
                     return 0;
                 default:
@@ -803,6 +811,8 @@ public class ProjectModelProviderAdapterTest {
         Iterable<String> getJvmArgs();
         Map<String, String> getSystemProperties();
         TestReports getReports();
+        Object getFilter();
+        Object getOptions();
     }
 
     public interface ExecContract {
@@ -937,6 +947,29 @@ public class ProjectModelProviderAdapterTest {
 
         public JunitXmlReport getJunitXml() {
             return new JunitXmlReport(reportDir);
+        }
+    }
+
+    public static class TestFilterSpec {
+        public Set<String> getIncludePatterns() {
+            return Collections.singleton("example.*Test");
+        }
+
+        public Set<String> getExcludePatterns() {
+            return Collections.emptySet();
+        }
+    }
+
+    public static class JUnitPlatformOptionsSpec {
+        public Set<String> getIncludeTags() {
+            Set<String> tags = new LinkedHashSet<>();
+            tags.add("fast");
+            tags.add("integration");
+            return tags;
+        }
+
+        public Set<String> getExcludeTags() {
+            return Collections.singleton("slow");
         }
     }
 
