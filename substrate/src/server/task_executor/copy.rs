@@ -43,6 +43,30 @@ impl CopyTaskExecutor {
         })
     }
 
+    fn list_dirs(
+        dir: &Path,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<PathBuf>, String>> + Send + '_>> {
+        Box::pin(async move {
+            let mut dirs = Vec::new();
+            let mut entries = tokio::fs::read_dir(dir)
+                .await
+                .map_err(|e| format!("Failed to read directory {}: {}", dir.display(), e))?;
+            while let Some(entry) = entries
+                .next_entry()
+                .await
+                .map_err(|e| format!("Failed to read directory {}: {}", dir.display(), e))?
+            {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs.push(path.clone());
+                    dirs.extend(Self::list_dirs(&path).await?);
+                }
+            }
+            dirs.sort_unstable();
+            Ok(dirs)
+        })
+    }
+
     async fn copy_file(
         src: &Path,
         dest: &Path,
@@ -125,6 +149,14 @@ pub(super) fn case_sensitive(input: &TaskInput) -> bool {
     input
         .options
         .get("case_sensitive")
+        .map(|value| value != "false")
+        .unwrap_or(true)
+}
+
+pub(super) fn include_empty_dirs(input: &TaskInput) -> bool {
+    input
+        .options
+        .get("include_empty_dirs")
         .map(|value| value != "false")
         .unwrap_or(true)
 }
@@ -239,6 +271,7 @@ impl TaskExecutor for CopyTaskExecutor {
         let include_patterns = parse_patterns(input.options.get("include_patterns"));
         let exclude_patterns = parse_patterns(input.options.get("exclude_patterns"));
         let case_sensitive = case_sensitive(input);
+        let include_empty_dirs = include_empty_dirs(input);
         let mut seen_destinations = HashSet::new();
 
         for source in &input.source_files {
@@ -249,6 +282,33 @@ impl TaskExecutor for CopyTaskExecutor {
             }
 
             if source.is_dir() {
+                if include_empty_dirs {
+                    let dirs = match Self::list_dirs(source).await {
+                        Ok(dirs) => dirs,
+                        Err(e) => {
+                            result.success = false;
+                            result.error_message = e;
+                            return result;
+                        }
+                    };
+                    for dir in dirs {
+                        let relative = dir.strip_prefix(source).unwrap_or(&dir);
+                        if path_included(
+                            relative,
+                            &include_patterns,
+                            &exclude_patterns,
+                            case_sensitive,
+                        ) {
+                            let dest = input.target_dir.join(relative);
+                            if let Err(e) = tokio::fs::create_dir_all(&dest).await {
+                                result.success = false;
+                                result.error_message =
+                                    format!("Failed to create directory {}: {}", dest.display(), e);
+                                return result;
+                            }
+                        }
+                    }
+                }
                 let files = match Self::list_files(source).await {
                     Ok(files) => files,
                     Err(e) => {
@@ -520,6 +580,49 @@ mod tests {
         assert!(dest_dir.join("config/app.properties").exists());
         assert!(!dest_dir.join("config/app.txt").exists());
         assert!(!dest_dir.join("tmp/skip.properties").exists());
+    }
+
+    #[tokio::test]
+    async fn test_copy_includes_empty_dirs_by_default() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let dest_dir = tmp.path().join("dest");
+        tokio::fs::create_dir_all(src_dir.join("empty/nested"))
+            .await
+            .unwrap();
+
+        let executor = CopyTaskExecutor::new();
+        let mut input = TaskInput::new("Copy");
+        input.source_files.push(src_dir);
+        input.target_dir = dest_dir.clone();
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert!(dest_dir.join("empty/nested").is_dir());
+    }
+
+    #[tokio::test]
+    async fn test_copy_can_skip_empty_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let dest_dir = tmp.path().join("dest");
+        tokio::fs::create_dir_all(src_dir.join("empty"))
+            .await
+            .unwrap();
+
+        let executor = CopyTaskExecutor::new();
+        let mut input = TaskInput::new("Copy");
+        input.source_files.push(src_dir);
+        input.target_dir = dest_dir.clone();
+        input
+            .options
+            .insert("include_empty_dirs".to_string(), "false".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert!(!dest_dir.join("empty").exists());
     }
 
     #[test]

@@ -555,6 +555,12 @@ fn task_options(
         insert_input_option(task, &mut options, "include_patterns", "include_patterns");
         insert_input_option(task, &mut options, "exclude_patterns", "exclude_patterns");
         insert_input_option(task, &mut options, "case_sensitive", "case_sensitive");
+        insert_input_option(
+            task,
+            &mut options,
+            "include_empty_dirs",
+            "include_empty_dirs",
+        );
     } else if task_type == "TestExec" {
         insert_input_option(task, &mut options, "java_home", "java_home");
         insert_input_option(task, &mut options, "classpath", "classpath");

@@ -44,6 +44,8 @@
   validated by content-hash corpus comparison for resource processing and Sync.
 - Native `Copy` and `Sync` honor captured CopySpec include/exclude patterns,
   including `**`, `*`, `?`, and case-sensitivity flags for relative paths.
+- Native `Copy` and `Sync` honor captured CopySpec `includeEmptyDirs`
+  behavior for creating empty directory trees.
 - Native `Copy` and `Sync` honor basic duplicate destination strategies:
   `INCLUDE`/default overwrites, `EXCLUDE` keeps the first file, and `FAIL`
   reports an error.

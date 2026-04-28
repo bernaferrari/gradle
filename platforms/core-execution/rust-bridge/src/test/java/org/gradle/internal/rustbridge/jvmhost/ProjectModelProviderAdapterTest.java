@@ -197,6 +197,7 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("**/*.properties", inputs.get("include_patterns"));
         assertEquals("**/secret.*", inputs.get("exclude_patterns"));
         assertEquals("false", inputs.get("case_sensitive"));
+        assertEquals("true", inputs.get("include_empty_dirs"));
         assertTrue(task.getInputSpecsList().stream()
             .anyMatch(input -> input.getKind().equals("path") && input.getValue().equals(resourceFile.getAbsolutePath())));
         assertTrue(task.getOutputSpecsList().stream()
@@ -552,6 +553,8 @@ public class ProjectModelProviderAdapterTest {
                     return Collections.singleton("**/secret.*");
                 case "isCaseSensitive":
                     return false;
+                case "isIncludeEmptyDirs":
+                    return true;
                 default:
                     return defaultValue(method.getReturnType());
             }
@@ -664,6 +667,7 @@ public class ProjectModelProviderAdapterTest {
         Set<String> getIncludes();
         Set<String> getExcludes();
         boolean isCaseSensitive();
+        boolean isIncludeEmptyDirs();
     }
 
     public interface FileTransformTaskContract {

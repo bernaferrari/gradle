@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use std::pin::Pin;
 
 use crate::server::task_executor::copy::{
-    case_sensitive, duplicate_strategy, expand_bytes, parse_expand_properties, parse_patterns,
-    path_included,
+    case_sensitive, duplicate_strategy, expand_bytes, include_empty_dirs, parse_expand_properties,
+    parse_patterns, path_included,
 };
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
@@ -40,6 +40,24 @@ impl SyncTaskExecutor {
                 }
             }
             files
+        })
+    }
+
+    fn list_dirs(
+        dir: &std::path::Path,
+    ) -> Pin<Box<dyn std::future::Future<Output = Vec<PathBuf>> + Send + '_>> {
+        Box::pin(async move {
+            let mut dirs = Vec::new();
+            if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
+                while let Ok(Some(entry)) = entries.next_entry().await {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        dirs.push(path.clone());
+                        dirs.extend(Self::list_dirs(&path).await);
+                    }
+                }
+            }
+            dirs
         })
     }
 
@@ -112,7 +130,9 @@ impl TaskExecutor for SyncTaskExecutor {
         let include_patterns = parse_patterns(input.options.get("include_patterns"));
         let exclude_patterns = parse_patterns(input.options.get("exclude_patterns"));
         let case_sensitive = case_sensitive(input);
+        let include_empty_dirs = include_empty_dirs(input);
         let mut expected_files = HashSet::new();
+        let mut expected_dirs = HashSet::new();
         let mut seen_destinations = HashSet::new();
 
         for source_dir in &input.source_files {
@@ -121,6 +141,29 @@ impl TaskExecutor for SyncTaskExecutor {
                 result.error_message =
                     format!("Source is not a directory: {}", source_dir.display());
                 return result;
+            }
+
+            if include_empty_dirs {
+                let source_dirs = Self::list_dirs(source_dir).await;
+                for src_dir in &source_dirs {
+                    let relative = src_dir.strip_prefix(source_dir).unwrap_or(src_dir);
+                    if !path_included(
+                        relative,
+                        &include_patterns,
+                        &exclude_patterns,
+                        case_sensitive,
+                    ) {
+                        continue;
+                    }
+                    expected_dirs.insert(relative.to_path_buf());
+                    let dest_dir = input.target_dir.join(relative);
+                    if let Err(e) = tokio::fs::create_dir_all(&dest_dir).await {
+                        result.success = false;
+                        result.error_message =
+                            format!("Failed to create directory {}: {}", dest_dir.display(), e);
+                        return result;
+                    }
+                }
             }
 
             // List all source files
@@ -209,6 +252,29 @@ impl TaskExecutor for SyncTaskExecutor {
                         return result;
                     }
                     result.removed_files.push(dest_file.clone());
+                }
+            }
+            if include_empty_dirs {
+                let mut dest_dirs = Self::list_dirs(&input.target_dir).await;
+                dest_dirs.sort_by_key(|path| std::cmp::Reverse(path.components().count()));
+                for dest_dir in &dest_dirs {
+                    let relative = dest_dir.strip_prefix(&input.target_dir).unwrap_or(dest_dir);
+                    if !expected_dirs.contains(relative) {
+                        let is_empty = std::fs::read_dir(dest_dir)
+                            .map(|mut entries| entries.next().is_none())
+                            .unwrap_or(false);
+                        if is_empty {
+                            if let Err(e) = tokio::fs::remove_dir(dest_dir).await {
+                                result.success = false;
+                                result.error_message = format!(
+                                    "Failed to remove orphan dir {}: {}",
+                                    dest_dir.display(),
+                                    e
+                                );
+                                return result;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -413,6 +479,51 @@ mod tests {
         assert!(dest_dir.join("keep/app.properties").exists());
         assert!(!dest_dir.join("keep/app.txt").exists());
         assert!(!dest_dir.join("skip/secret.properties").exists());
+    }
+
+    #[tokio::test]
+    async fn test_sync_includes_empty_dirs_by_default() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let dest_dir = tmp.path().join("dest");
+
+        tokio::fs::create_dir_all(src_dir.join("empty/nested"))
+            .await
+            .unwrap();
+
+        let executor = SyncTaskExecutor::new();
+        let mut input = TaskInput::new("Sync");
+        input.source_files.push(src_dir);
+        input.target_dir = dest_dir.clone();
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert!(dest_dir.join("empty/nested").is_dir());
+    }
+
+    #[tokio::test]
+    async fn test_sync_can_skip_empty_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let dest_dir = tmp.path().join("dest");
+
+        tokio::fs::create_dir_all(src_dir.join("empty"))
+            .await
+            .unwrap();
+
+        let executor = SyncTaskExecutor::new();
+        let mut input = TaskInput::new("Sync");
+        input.source_files.push(src_dir);
+        input.target_dir = dest_dir.clone();
+        input
+            .options
+            .insert("include_empty_dirs".to_string(), "false".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert!(!dest_dir.join("empty").exists());
     }
 
     #[tokio::test]
