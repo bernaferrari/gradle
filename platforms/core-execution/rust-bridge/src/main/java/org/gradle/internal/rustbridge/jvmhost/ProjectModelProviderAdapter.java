@@ -333,6 +333,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "archive_compression", stringOrEmpty(invokeOptional(task, "getCompression")));
         Object rootSpec = invokeOptional(task, "getRootSpec");
         putIfPresent(inputs, "duplicates_strategy", stringOrEmpty(invokeOptional(rootSpec, "getDuplicatesStrategy")));
+        putIfPresent(inputs, "include_empty_dirs", booleanString(invokeOptional(rootSpec, "isIncludeEmptyDirs")));
     }
 
     private static boolean isArchiveTask(String simpleName) {

@@ -51,6 +51,8 @@
   reports an error.
 - Native ZIP-compatible and TAR archive tasks honor captured duplicate
   destination strategies for `INCLUDE`, `EXCLUDE`, and `FAIL`.
+- Native ZIP-compatible and TAR archive tasks honor captured CopySpec
+  `includeEmptyDirs` behavior for explicit directory entries.
 
 ## Gaps
 
