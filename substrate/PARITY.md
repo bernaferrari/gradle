@@ -29,6 +29,8 @@
 - Native dependency resolution preserves Maven dependency scopes on resolved
   nodes and filters compile/runtime/test target scopes recursively instead of
   only filtering top-level requested dependencies.
+- Native dependency resolution builds artifact URLs from classifier and
+  extension metadata instead of assuming every artifact is an unclassified JAR.
 - Archive tasks (`Jar`, `Zip`, `War`, `Ear`, `Tar`) can lower to native Rust
   archive execution when the task model provides input paths and an output
   archive path. ZIP-compatible tasks emit ZIP-compatible archives; `Tar` emits

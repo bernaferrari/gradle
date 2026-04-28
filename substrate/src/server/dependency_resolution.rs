@@ -565,6 +565,37 @@ impl DependencyResolutionServiceImpl {
         }
     }
 
+    fn artifact_url_for_descriptor(
+        repo_base: &str,
+        group: &str,
+        name: &str,
+        version: &str,
+        classifier: &str,
+        extension: &str,
+    ) -> String {
+        let extension = if extension.is_empty() {
+            "jar"
+        } else {
+            extension.trim_start_matches('.')
+        };
+        let classifier_suffix = if classifier.is_empty() {
+            String::new()
+        } else {
+            format!("-{}", classifier)
+        };
+        format!(
+            "{}/{}/{}/{}/{}-{}{}.{}",
+            repo_base.trim_end_matches('/'),
+            Self::group_to_path(group),
+            name,
+            version,
+            name,
+            version,
+            classifier_suffix,
+            extension
+        )
+    }
+
     /// Parse a POM file and extract dependencies using a byte-level scanner.
     /// Handles property interpolation, version ranges, and excludes false matches
     /// like `<dependencyManagement>`.
@@ -1416,16 +1447,15 @@ impl DependencyResolutionServiceImpl {
             );
             let repo_base = repos
                 .first()
-                .map(|r| r.url.trim_end_matches('/').to_string())
-                .unwrap_or_else(|| "https://repo.maven.apache.org/maven2".to_string());
-
-            let artifact_url = format!(
-                "{}/{}/{}/{}-{}.jar",
+                .map(|r| r.url.as_str())
+                .unwrap_or("https://repo.maven.apache.org/maven2");
+            let artifact_url = Self::artifact_url_for_descriptor(
                 repo_base,
-                Self::group_to_path(&group),
-                name,
-                name,
-                selected_version
+                &group,
+                &name,
+                &selected_version,
+                &dep.classifier,
+                &dep.extension,
             );
             return ResolvedDependency {
                 group,
@@ -1464,16 +1494,15 @@ impl DependencyResolutionServiceImpl {
         // Compute artifact URL
         let repo_base = repos
             .first()
-            .map(|r| r.url.trim_end_matches('/').to_string())
-            .unwrap_or_else(|| "https://repo.maven.apache.org/maven2".to_string());
-
-        let artifact_url = format!(
-            "{}/{}/{}/{}-{}.jar",
+            .map(|r| r.url.as_str())
+            .unwrap_or("https://repo.maven.apache.org/maven2");
+        let artifact_url = Self::artifact_url_for_descriptor(
             repo_base,
-            Self::group_to_path(&group),
-            name,
-            name,
-            selected_version
+            &group,
+            &name,
+            &selected_version,
+            &dep.classifier,
+            &dep.extension,
         );
 
         ResolvedDependency {
@@ -2534,6 +2563,52 @@ mod tests {
             artifact_sha256: String::new(),
             scope: scope.to_string(),
         }
+    }
+
+    #[test]
+    fn test_artifact_url_uses_classifier_and_extension() {
+        let url = DependencyResolutionServiceImpl::artifact_url_for_descriptor(
+            "https://repo.example.test/maven/",
+            "org.example",
+            "demo",
+            "1.2.3",
+            "sources",
+            "zip",
+        );
+
+        assert_eq!(
+            url,
+            "https://repo.example.test/maven/org/example/demo/1.2.3/demo-1.2.3-sources.zip"
+        );
+    }
+
+    #[test]
+    fn test_artifact_url_defaults_to_jar_and_trims_dot_extension() {
+        let default_url = DependencyResolutionServiceImpl::artifact_url_for_descriptor(
+            "https://repo.example.test/maven",
+            "org.example",
+            "demo",
+            "1.2.3",
+            "",
+            "",
+        );
+        let dotted_url = DependencyResolutionServiceImpl::artifact_url_for_descriptor(
+            "https://repo.example.test/maven",
+            "org.example",
+            "demo",
+            "1.2.3",
+            "javadoc",
+            ".jar",
+        );
+
+        assert_eq!(
+            default_url,
+            "https://repo.example.test/maven/org/example/demo/1.2.3/demo-1.2.3.jar"
+        );
+        assert_eq!(
+            dotted_url,
+            "https://repo.example.test/maven/org/example/demo/1.2.3/demo-1.2.3-javadoc.jar"
+        );
     }
 
     #[test]
