@@ -593,6 +593,12 @@ fn task_options(
         insert_input_option(
             task,
             &mut options,
+            "copy_file_mappings",
+            "copy_file_mappings",
+        );
+        insert_input_option(
+            task,
+            &mut options,
             "include_empty_dirs",
             "include_empty_dirs",
         );

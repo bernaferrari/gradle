@@ -2,6 +2,8 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
 /// Copies files from source paths to a target directory.
@@ -173,6 +175,54 @@ pub(super) fn dir_permission_mode(input: &TaskInput) -> Option<u32> {
     parse_unix_mode(input.options.get("dir_permissions"))
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct CopyFileMapping {
+    source: PathBuf,
+    relative_path: PathBuf,
+    is_dir: bool,
+}
+
+fn parse_copy_file_mappings(value: Option<&String>) -> Result<Vec<CopyFileMapping>, String> {
+    let Some(value) = value
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(Vec::new());
+    };
+    value
+        .split(',')
+        .map(|entry| {
+            let mut parts = entry.split('>');
+            let source = parts
+                .next()
+                .ok_or_else(|| "CopySpec mapping is missing source".to_string())
+                .and_then(decode_mapping)?;
+            let relative_path = parts
+                .next()
+                .ok_or_else(|| "CopySpec mapping is missing relative path".to_string())
+                .and_then(decode_mapping)?;
+            let kind = parts
+                .next()
+                .ok_or_else(|| "CopySpec mapping is missing entry kind".to_string())?;
+            if parts.next().is_some() {
+                return Err("CopySpec mapping has too many fields".to_string());
+            }
+            Ok(CopyFileMapping {
+                source: PathBuf::from(source),
+                relative_path: PathBuf::from(relative_path.replace('\\', "/")),
+                is_dir: kind == "D",
+            })
+        })
+        .collect()
+}
+
+fn decode_mapping(value: &str) -> Result<String, String> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|e| format!("Invalid CopySpec mapping encoding: {}", e))?;
+    String::from_utf8(bytes).map_err(|e| format!("Invalid CopySpec mapping UTF-8: {}", e))
+}
+
 pub(super) fn parse_unix_mode(value: Option<&String>) -> Option<u32> {
     let value = value?.trim();
     if value.is_empty() {
@@ -326,6 +376,79 @@ impl TaskExecutor for CopyTaskExecutor {
         let case_sensitive = case_sensitive(input);
         let include_empty_dirs = include_empty_dirs(input);
         let mut seen_destinations = HashSet::new();
+
+        let mapped_entries = match parse_copy_file_mappings(input.options.get("copy_file_mappings"))
+        {
+            Ok(entries) => entries,
+            Err(e) => {
+                result.success = false;
+                result.error_message = e;
+                return result;
+            }
+        };
+        if !mapped_entries.is_empty() {
+            for mapping in mapped_entries {
+                if !mapping.source.exists() {
+                    result.success = false;
+                    result.error_message =
+                        format!("Source file not found: {}", mapping.source.display());
+                    return result;
+                }
+                if !path_included(
+                    &mapping.relative_path,
+                    &include_patterns,
+                    &exclude_patterns,
+                    case_sensitive,
+                ) {
+                    continue;
+                }
+                let dest = input.target_dir.join(&mapping.relative_path);
+                if mapping.is_dir {
+                    if include_empty_dirs {
+                        if let Err(e) = tokio::fs::create_dir_all(&dest).await {
+                            result.success = false;
+                            result.error_message =
+                                format!("Failed to create directory {}: {}", dest.display(), e);
+                            return result;
+                        }
+                        if let Err(e) = apply_unix_mode(&dest, dir_mode) {
+                            result.success = false;
+                            result.error_message = e;
+                            return result;
+                        }
+                    }
+                    continue;
+                }
+                if !seen_destinations.insert(dest.clone()) {
+                    match duplicate_strategy.as_str() {
+                        "EXCLUDE" => continue,
+                        "FAIL" => {
+                            result.success = false;
+                            result.error_message =
+                                format!("Duplicate copy destination: {}", dest.display());
+                            return result;
+                        }
+                        _ => {}
+                    }
+                }
+                if let Err(e) = Self::copy_file(
+                    &mapping.source,
+                    &dest,
+                    &mut result,
+                    &expand_properties,
+                    file_mode,
+                    dir_mode,
+                )
+                .await
+                {
+                    result.success = false;
+                    result.error_message = e;
+                    return result;
+                }
+            }
+            result.duration_ms = start.elapsed().as_millis() as u64;
+            return result;
+        }
 
         for source in &input.source_files {
             if !source.exists() {
@@ -819,5 +942,37 @@ mod tests {
         let result = executor.execute(&input).await;
         assert!(!result.success);
         assert!(result.error_message.contains("Duplicate copy destination"));
+    }
+
+    #[tokio::test]
+    async fn test_copy_uses_explicit_copyspec_file_mappings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let dest_dir = tmp.path().join("dest");
+        tokio::fs::create_dir_all(&src_dir).await.unwrap();
+        let src_file = src_dir.join("app.txt");
+        tokio::fs::write(&src_file, b"mapped").await.unwrap();
+
+        let mapping = format!(
+            "{}>{}>F",
+            URL_SAFE_NO_PAD.encode(src_file.to_string_lossy().as_bytes()),
+            URL_SAFE_NO_PAD.encode("nested/app.txt")
+        );
+        let executor = CopyTaskExecutor::new();
+        let mut input = TaskInput::new("Copy");
+        input.target_dir = dest_dir.clone();
+        input
+            .options
+            .insert("copy_file_mappings".to_string(), mapping);
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert_eq!(
+            tokio::fs::read(dest_dir.join("nested/app.txt"))
+                .await
+                .unwrap(),
+            b"mapped"
+        );
     }
 }

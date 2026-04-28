@@ -130,6 +130,22 @@
       }
     },
     {
+      "name": "copy-nested-spec-kotlin-dsl",
+      "path": "copy-nested-spec-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 0,
+        "plugins": ["base"],
+        "tasks": ["stageNested"],
+        "outputs": [],
+        "dependencies": [],
+        "project_dependencies": [],
+        "toolchains": []
+      }
+    },
+    {
       "name": "zip-archive-kotlin-dsl",
       "path": "zip-archive-kotlin-dsl",
       "tasks": ["clean", "build"],
