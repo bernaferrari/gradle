@@ -90,6 +90,8 @@ public class ProjectModelProviderAdapterTest {
         assertEquals(archiveFile.getAbsolutePath(), inputs.get("archive_file"));
         assertEquals("INCLUDE", inputs.get("duplicates_strategy"));
         assertEquals("true", inputs.get("include_empty_dirs"));
+        assertEquals("420", inputs.get("file_permissions"));
+        assertEquals("493", inputs.get("dir_permissions"));
         assertTrue(task.getInputSpecsList().stream()
             .anyMatch(input -> input.getKind().equals("path") && input.getValue().equals(classesDir.getAbsolutePath())));
         assertTrue(task.getOutputSpecsList().stream()

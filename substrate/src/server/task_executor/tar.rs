@@ -2,7 +2,9 @@ use std::collections::HashSet;
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 
-use crate::server::task_executor::copy::include_empty_dirs;
+use crate::server::task_executor::copy::{
+    dir_permission_mode, file_permission_mode, include_empty_dirs,
+};
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
 /// Native Rust TAR packaging executor.
@@ -50,6 +52,8 @@ impl TaskExecutor for TarTaskExecutor {
                 .map(|strategy| strategy.as_str())
                 .unwrap_or("INCLUDE"),
             include_empty_dirs(input),
+            file_permission_mode(input).unwrap_or(0o644),
+            dir_permission_mode(input).unwrap_or(0o755),
         ) {
             Ok(entries) => entries,
             Err(e) => {
@@ -89,6 +93,7 @@ struct TarEntry {
     name: String,
     data: Vec<u8>,
     is_dir: bool,
+    mode: u32,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -139,6 +144,8 @@ fn collect_entries(
     source_files: &[PathBuf],
     duplicate_strategy: &str,
     include_empty_dirs: bool,
+    file_mode: u32,
+    dir_mode: u32,
 ) -> Result<Vec<TarEntry>, String> {
     let mut entries = Vec::new();
     for source in source_files {
@@ -146,7 +153,14 @@ fn collect_entries(
             return Err(format!("Source file not found: {}", source.display()));
         }
         if source.is_dir() {
-            collect_dir(source, source, &mut entries, include_empty_dirs)?;
+            collect_dir(
+                source,
+                source,
+                &mut entries,
+                include_empty_dirs,
+                file_mode,
+                dir_mode,
+            )?;
         } else {
             let name = source
                 .file_name()
@@ -157,6 +171,7 @@ fn collect_entries(
                 data: std::fs::read(source)
                     .map_err(|e| format!("Cannot read {}: {}", source.display(), e))?,
                 is_dir: false,
+                mode: file_mode,
             });
         }
     }
@@ -195,6 +210,8 @@ fn collect_dir(
     dir: &Path,
     entries: &mut Vec<TarEntry>,
     include_empty_dirs: bool,
+    file_mode: u32,
+    dir_mode: u32,
 ) -> Result<(), String> {
     let mut children = std::fs::read_dir(dir)
         .map_err(|e| format!("Cannot read directory {}: {}", dir.display(), e))?
@@ -214,15 +231,24 @@ fn collect_dir(
                     name,
                     data: Vec::new(),
                     is_dir: true,
+                    mode: dir_mode,
                 });
             }
-            collect_dir(root, &path, entries, include_empty_dirs)?;
+            collect_dir(
+                root,
+                &path,
+                entries,
+                include_empty_dirs,
+                file_mode,
+                dir_mode,
+            )?;
         } else if path.is_file() {
             entries.push(TarEntry {
                 name,
                 data: std::fs::read(&path)
                     .map_err(|e| format!("Cannot read {}: {}", path.display(), e))?,
                 is_dir: false,
+                mode: file_mode,
             });
         }
     }
@@ -286,7 +312,7 @@ fn write_tar<W: Write>(writer: W, entries: &[TarEntry]) -> Result<W, String> {
         header.set_mtime(0);
         header.set_uid(0);
         header.set_gid(0);
-        header.set_mode(if entry.is_dir { 0o755 } else { 0o644 });
+        header.set_mode(entry.mode);
         header.set_size(entry.data.len() as u64);
         header.set_entry_type(if entry.is_dir {
             ::tar::EntryType::Directory
@@ -394,6 +420,50 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(!names.contains(&"empty".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_tar_applies_declared_entry_permissions() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let out_dir = tmp.path().join("out");
+
+        fs::create_dir_all(src_dir.join("bin")).unwrap();
+        fs::write(src_dir.join("bin/app"), b"run").unwrap();
+
+        let executor = TarTaskExecutor::new();
+        let mut input = TaskInput::new("Tar");
+        input.source_files.push(src_dir);
+        input.target_dir = out_dir.clone();
+        input
+            .options
+            .insert("tarName".to_string(), "modes.tar".to_string());
+        input
+            .options
+            .insert("file_permissions".to_string(), "493".to_string());
+        input
+            .options
+            .insert("dir_permissions".to_string(), "448".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        let file = fs::File::open(out_dir.join("modes.tar")).unwrap();
+        let mut archive = ::tar::Archive::new(file);
+        let entries = archive
+            .entries()
+            .unwrap()
+            .map(|entry| {
+                let entry = entry.unwrap();
+                (
+                    entry.path().unwrap().to_string_lossy().into_owned(),
+                    entry.header().mode().unwrap(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(entries.contains(&("bin".to_string(), 0o700)));
+        assert!(entries.contains(&("bin/app".to_string(), 0o755)));
     }
 
     #[tokio::test]
