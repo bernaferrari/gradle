@@ -434,14 +434,14 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
             compat_task_type(task, "org.gradle.api.tasks.testing.Test")
         }
         ("file-transform", "ProcessResources") | (_, "ProcessResources")
-            if has_input_paths(task) && has_outputs(task) =>
+            if copy_contract_complete(task) =>
         {
             "Copy".to_string()
         }
-        ("file-transform", "Copy") | (_, "Copy") if has_input_paths(task) && has_outputs(task) => {
+        ("file-transform", "Copy") | (_, "Copy") if copy_contract_complete(task) => {
             "Copy".to_string()
         }
-        ("file-transform", "Sync") | (_, "Sync") if has_input_paths(task) && has_outputs(task) => {
+        ("file-transform", "Sync") | (_, "Sync") if copy_contract_complete(task) => {
             "Sync".to_string()
         }
         ("delete", "Delete") | (_, "Delete") if has_destroyables(task) => "Delete".to_string(),
@@ -503,6 +503,12 @@ fn java_compile_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
 
 fn test_exec_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
     has_input_value(task, "classpath") && has_input_value(task, "test_classes_dirs")
+}
+
+fn copy_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
+    has_input_paths(task)
+        && has_outputs(task)
+        && !has_input_value_equal(task, "copy_unsupported_custom_actions", "true")
 }
 
 fn exec_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
@@ -636,6 +642,14 @@ fn is_archive_executor(task_type: &str) -> bool {
 fn has_input_value(task: &CanonicalBuildPlanTask, input_name: &str) -> bool {
     task.input_specs.iter().any(|input| {
         input.kind == "value" && input.name == input_name && !input.value.trim().is_empty()
+    })
+}
+
+fn has_input_value_equal(task: &CanonicalBuildPlanTask, input_name: &str, expected: &str) -> bool {
+    task.input_specs.iter().any(|input| {
+        input.kind == "value"
+            && input.name == input_name
+            && input.value.trim().eq_ignore_ascii_case(expected)
     })
 }
 
@@ -1486,6 +1500,54 @@ mod tests {
         assert_eq!(task_type, "Copy");
         assert_eq!(context["options"]["file_permissions"], "493");
         assert_eq!(context["options"]["dir_permissions"], "448");
+    }
+
+    #[test]
+    fn test_copy_with_unsupported_custom_actions_does_not_lower_to_native() {
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":copyCustom".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.api.tasks.Copy".to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "in-process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "declared-outputs".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "file-transform".to_string(),
+            input_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "input0".to_string(),
+                    kind: "path".to_string(),
+                    value: "/repo/src/assets".to_string(),
+                    normalization: "absolute-path".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "copy_unsupported_custom_actions".to_string(),
+                    kind: "value".to_string(),
+                    value: "true".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+            ],
+            output_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                    name: "destination".to_string(),
+                    kind: "directory".to_string(),
+                    path: "/repo/build/assets".to_string(),
+                },
+            ],
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        assert_eq!(executable_task_type(&task), "org.gradle.api.tasks.Copy");
     }
 
     #[test]

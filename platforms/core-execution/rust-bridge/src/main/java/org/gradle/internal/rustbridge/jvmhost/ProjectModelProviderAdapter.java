@@ -379,7 +379,11 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     private static void captureFileTransformInputs(Task task, Map<String, String> inputs) {
         putIfPresent(inputs, "expand_properties", stringMap(safeInputProperties(task)));
         Object rootSpec = invokeOptional(task, "getRootSpec");
-        putIfPresent(inputs, "copy_has_custom_actions", booleanString(invokeOptional(rootSpec, "hasCustomActions")));
+        boolean hasCustomActions = Boolean.TRUE.equals(invokeOptional(rootSpec, "hasCustomActions"));
+        List<String> copyActionClasses = copyActionClassNames(rootSpec);
+        inputs.put("copy_has_custom_actions", Boolean.toString(hasCustomActions));
+        putIfPresent(inputs, "copy_custom_action_types", String.join(",", copyActionClasses));
+        inputs.put("copy_unsupported_custom_actions", Boolean.toString(hasUnsupportedCopyActions(hasCustomActions, copyActionClasses)));
         putIfPresent(inputs, "duplicates_strategy", stringOrEmpty(invokeOptional(rootSpec, "getDuplicatesStrategy")));
         putIfPresent(inputs, "filtering_charset", stringOrEmpty(invokeOptional(rootSpec, "getFilteringCharset")));
         putIfPresent(inputs, "include_patterns", stringCollection(invokeOptional(rootSpec, "getIncludes")));
@@ -388,6 +392,37 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "include_empty_dirs", booleanString(invokeOptional(rootSpec, "isIncludeEmptyDirs")));
         putIfPresent(inputs, "file_permissions", permissionUnixMode(invokeOptional(rootSpec, "getFilePermissions")));
         putIfPresent(inputs, "dir_permissions", permissionUnixMode(invokeOptional(rootSpec, "getDirPermissions")));
+    }
+
+    private static List<String> copyActionClassNames(@Nullable Object rootSpec) {
+        Object resolver = rootSpec == null ? null : invokeOptional(rootSpec, "buildRootResolver");
+        Object actions = resolver == null ? null : invokeOptional(resolver, "getAllCopyActions");
+        List<String> classes = new ArrayList<>();
+        if (!(actions instanceof Iterable)) {
+            return classes;
+        }
+        for (Object action : (Iterable<?>) actions) {
+            if (action != null) {
+                classes.add(action.getClass().getName());
+            }
+        }
+        Collections.sort(classes);
+        return classes;
+    }
+
+    private static boolean hasUnsupportedCopyActions(boolean hasCustomActions, List<String> copyActionClasses) {
+        if (!hasCustomActions) {
+            return false;
+        }
+        if (copyActionClasses.isEmpty()) {
+            return true;
+        }
+        for (String className : copyActionClasses) {
+            if (!className.endsWith("MapBackedExpandAction")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void captureTestInputs(Task task, Map<String, String> inputs) {

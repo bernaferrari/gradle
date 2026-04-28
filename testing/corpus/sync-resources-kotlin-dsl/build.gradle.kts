@@ -12,10 +12,8 @@ val syncResources = tasks.register<Sync>("syncResources") {
 
     inputs.properties(resourceTokens)
     outputs.dir("build/synced")
-
-    filesMatching("**/*.properties") {
-        expand(resourceTokens)
-    }
+    include("**/*.properties")
+    expand(resourceTokens)
 }
 
 tasks.named("build") {
