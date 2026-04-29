@@ -55,6 +55,7 @@ It then compares:
 - Exit codes
 - Output files
 - Non-archive output hashes
+- Archive entry inventories
 - No-fallback substrate execution
 - Build duration (informational only)
 
@@ -80,7 +81,8 @@ The repository includes a small offline corpus at `testing/corpus/manifest.json`
 covering Java library, Java application, Java multi-project, Java resource
 expansion, JavaCompile options, standalone Copy/Sync resource transforms,
 CopySpec duplicate handling, nested Copy/Sync CopySpec `into(...)` mappings,
-Zip/Tar gzip+bzip2/War/Ear archive builds, and a simple Java launcher Exec task. The optional
+Zip/Tar nested CopySpec mappings, Zip/Tar gzip+bzip2/War/Ear archive builds,
+and a simple Java launcher Exec task. The optional
 `testing/corpus/external-manifest.json` adds a pinned JUnit Platform sample for
 real non-empty test execution with include/exclude tag filtering and requires
 network or a warm Gradle dependency cache.
@@ -88,10 +90,11 @@ network or a warm Gradle dependency cache.
 Reference-mode runs compare upstream Gradle and Rust substrate exit codes, task
 lists, and stable build output file inventories under `build/classes`,
 `build/resources`, `build/libs`, `build/distributions`, `build/install`, and
-`build/test-results`. Non-archive outputs are also compared by SHA-256 hash.
-Archive byte-for-byte parity and test-result content parity are tracked
-separately because compression, metadata, timings, and binary result stores can
-differ while logical artifacts are still equivalent.
+`build/test-results`. Non-archive outputs are also compared by SHA-256 hash,
+and archive outputs are compared by logical entry inventory. Archive
+byte-for-byte parity and test-result content parity are tracked separately
+because compression, metadata, timings, and binary result stores can differ
+while logical artifacts are still equivalent.
 
 Keep offline samples deterministic: prefer built-in Gradle plugins and local
 sources. Put external repositories or dependencies in the external manifest with

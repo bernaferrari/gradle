@@ -178,8 +178,40 @@
       }
     },
     {
+      "name": "zip-nested-spec-kotlin-dsl",
+      "path": "zip-nested-spec-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 0,
+        "plugins": ["base"],
+        "tasks": ["packageZip"],
+        "outputs": [],
+        "dependencies": [],
+        "project_dependencies": [],
+        "toolchains": []
+      }
+    },
+    {
       "name": "tar-gzip-archive-kotlin-dsl",
       "path": "tar-gzip-archive-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 0,
+        "plugins": ["base"],
+        "tasks": ["packageTar"],
+        "outputs": [],
+        "dependencies": [],
+        "project_dependencies": [],
+        "toolchains": []
+      }
+    },
+    {
+      "name": "tar-nested-spec-kotlin-dsl",
+      "path": "tar-nested-spec-kotlin-dsl",
       "tasks": ["clean", "build"],
       "expected_contract": {
         "build_file_count": 1,

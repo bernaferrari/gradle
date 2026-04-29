@@ -20,8 +20,8 @@
   only when Rust reports exactly the scheduled task count with zero JVM forwards.
 - The checked-in offline corpus covers Java library, Java application,
   Java multi-project, resource expansion, JavaCompile options, standalone
-  Copy/Sync transforms, CopySpec duplicates, Zip/Tar/War/Ear archive tasks,
-  and a simple Exec task through that explicit gate with
+  Copy/Sync transforms, CopySpec duplicates, nested Copy/Sync and Zip/Tar
+  CopySpec mappings, Zip/Tar/War/Ear archive tasks, and a simple Exec task through that explicit gate with
   `target/debug/gradle-substrate-daemon`.
 - A separate networked JUnit corpus build proves native `TestExec` lowering for
   a non-empty JUnit Platform test task, including include/exclude tag capture,
@@ -67,6 +67,9 @@
   `includeEmptyDirs` behavior for explicit directory entries.
 - Native ZIP-compatible and TAR archive tasks honor captured root CopySpec file
   and directory permissions in archive entry metadata.
+- Native ZIP-compatible and TAR archive tasks can consume JVM-captured nested
+  CopySpec file mappings for child `into(...)` destinations; the corpus gate
+  now compares archive entry inventories, not just archive output filenames.
 
 ## Gaps
 
@@ -78,8 +81,8 @@
   compatibility islands.
 - More task types need native-ready contract capture before broad no-fallback
   execution is realistic, especially arbitrary copy filters/actions beyond
-  direct expand, nested CopySpec behavior for archive tasks, Gradle archive
-  metadata edge cases, and symlink copy semantics.
+  direct expand, Gradle archive metadata edge cases beyond entry inventory, and
+  symlink copy semantics.
 
 ## Validation
 

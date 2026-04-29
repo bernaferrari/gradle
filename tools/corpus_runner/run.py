@@ -18,8 +18,10 @@ import os
 import re
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
+import zipfile
 from pathlib import Path
 from dataclasses import dataclass, field
 
@@ -32,6 +34,7 @@ class RunResult:
     tasks: list[str]
     output_files: list[str] = field(default_factory=list)
     output_hashes: dict[str, str] = field(default_factory=dict)
+    archive_entries: dict[str, list[str]] = field(default_factory=dict)
     substrate_noop: bool = False
     duration_ms: int = 0
     
@@ -44,6 +47,7 @@ class RunResult:
             "output_file_count": len(self.output_files),
             "output_files": self.output_files,
             "output_hashes": self.output_hashes,
+            "archive_entries": self.archive_entries,
             "substrate_noop": self.substrate_noop,
             "duration_ms": self.duration_ms,
         }
@@ -62,6 +66,8 @@ ARCHIVE_SUFFIXES = {
     ".ear",
     ".jar",
     ".tar",
+    ".tar.bz2",
+    ".tar.gz",
     ".tgz",
     ".war",
     ".zip",
@@ -108,6 +114,27 @@ def snapshot_build_output_hashes(project_dir: str, output_files: list[str]) -> d
                 hasher.update(chunk)
         hashes[relative_path] = hasher.hexdigest()
     return hashes
+
+
+def snapshot_archive_entries(project_dir: str, output_files: list[str]) -> dict[str, list[str]]:
+    """Return logical archive entry inventories for stable archive outputs."""
+    root = Path(project_dir)
+    inventories: dict[str, list[str]] = {}
+    for relative_path in output_files:
+        path = root / relative_path
+        lower_name = path.name.lower()
+        if not any(lower_name.endswith(suffix) for suffix in ARCHIVE_SUFFIXES):
+            continue
+        try:
+            if lower_name.endswith((".jar", ".war", ".ear", ".zip")):
+                with zipfile.ZipFile(path) as archive:
+                    inventories[relative_path] = sorted(archive.namelist())
+            elif lower_name.endswith((".tar", ".tar.gz", ".tgz", ".tar.bz2")):
+                with tarfile.open(path, "r:*") as archive:
+                    inventories[relative_path] = sorted(archive.getnames())
+        except (OSError, tarfile.TarError, zipfile.BadZipFile) as exc:
+            inventories[relative_path] = [f"<unreadable:{exc}>"]
+    return inventories
 
 
 def load_manifest(manifest_path: str) -> tuple[Path, list[dict]]:
@@ -259,6 +286,7 @@ def compare_run_pair(upstream: RunResult, substrate: RunResult, allow_noop_subst
         "task_list_match": upstream.tasks == substrate.tasks,
         "output_files_match": upstream.output_files == substrate.output_files,
         "output_hashes_match": upstream.output_hashes == substrate.output_hashes,
+        "archive_entries_match": upstream.archive_entries == substrate.archive_entries,
         "no_fallback": not substrate.substrate_noop,
         "substrate_usable": substrate_usable,
     }
@@ -269,6 +297,7 @@ def compare_run_pair(upstream: RunResult, substrate: RunResult, allow_noop_subst
         and checks["task_list_match"]
         and checks["output_files_match"]
         and checks["output_hashes_match"]
+        and checks["archive_entries_match"]
     )
     return checks
 
@@ -286,6 +315,7 @@ def summarize_results(results: dict) -> dict:
     task_list_matches = sum(1 for result in project_results.values() if result.get("checks", {}).get("task_list_match"))
     output_file_matches = sum(1 for result in project_results.values() if result.get("checks", {}).get("output_files_match"))
     output_hash_matches = sum(1 for result in project_results.values() if result.get("checks", {}).get("output_hashes_match"))
+    archive_entry_matches = sum(1 for result in project_results.values() if result.get("checks", {}).get("archive_entries_match"))
     exit_code_matches = sum(1 for result in project_results.values() if result.get("checks", {}).get("exit_code_match"))
     successful = sum(1 for result in project_results.values() if result.get("checks", {}).get("successful"))
 
@@ -312,6 +342,7 @@ def summarize_results(results: dict) -> dict:
         "task_list_match_count": task_list_matches,
         "output_file_inventory_match_count": output_file_matches,
         "output_hash_match_count": output_hash_matches,
+        "archive_entry_inventory_match_count": archive_entry_matches,
         "upstream_task_total": upstream_task_total,
         "substrate_task_total": substrate_task_total,
         "upstream_duration_ms": upstream_duration_ms,
@@ -331,6 +362,7 @@ def print_summary(summary: dict) -> None:
     print(f"Task-list parity: {summary['task_list_match_count']}/{total}")
     print(f"Output inventory parity: {summary['output_file_inventory_match_count']}/{total}")
     print(f"Non-archive output hash parity: {summary['output_hash_match_count']}/{total}")
+    print(f"Archive entry inventory parity: {summary['archive_entry_inventory_match_count']}/{total}")
     print(
         "Task totals: "
         f"upstream={summary['upstream_task_total']}, substrate={summary['substrate_task_total']}"
@@ -385,6 +417,7 @@ def run_build(
         
         output_files = snapshot_build_outputs(project_dir) if result.returncode == 0 else []
         output_hashes = snapshot_build_output_hashes(project_dir, output_files) if output_files else {}
+        archive_entries = snapshot_archive_entries(project_dir, output_files) if output_files else {}
 
         return RunResult(
             exit_code=result.returncode,
@@ -392,6 +425,7 @@ def run_build(
             tasks=tasks,
             output_files=output_files,
             output_hashes=output_hashes,
+            archive_entries=archive_entries,
             substrate_noop=substrate and detect_substrate_noop(output),
             duration_ms=int((time.monotonic() - start) * 1000),
         )

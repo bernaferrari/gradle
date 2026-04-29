@@ -345,6 +345,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "include_empty_dirs", booleanString(invokeOptional(rootSpec, "isIncludeEmptyDirs")));
         putIfPresent(inputs, "file_permissions", permissionUnixMode(invokeOptional(rootSpec, "getFilePermissions")));
         putIfPresent(inputs, "dir_permissions", permissionUnixMode(invokeOptional(rootSpec, "getDirPermissions")));
+        putIfPresent(inputs, "copy_file_mappings", nestedCopyFileMappings(rootSpec));
     }
 
     private static String nestedCopyFileMappings(@Nullable Object rootSpec) {
