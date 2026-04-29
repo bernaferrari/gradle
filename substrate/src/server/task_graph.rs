@@ -412,21 +412,11 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
         ("compile", "JavaCompile") | (_, "JavaCompile") => {
             compat_task_type(task, "org.gradle.api.tasks.compile.JavaCompile")
         }
-        ("archive", "Jar") | (_, "Jar") if has_input_paths(task) && has_outputs(task) => {
-            "Jar".to_string()
-        }
-        ("archive", "Zip") | (_, "Zip") if has_input_paths(task) && has_outputs(task) => {
-            "Zip".to_string()
-        }
-        ("archive", "War") | (_, "War") if has_input_paths(task) && has_outputs(task) => {
-            "War".to_string()
-        }
-        ("archive", "Ear") | (_, "Ear") if has_input_paths(task) && has_outputs(task) => {
-            "Ear".to_string()
-        }
-        ("archive", "Tar") | (_, "Tar") if has_input_paths(task) && has_outputs(task) => {
-            "Tar".to_string()
-        }
+        ("archive", "Jar") | (_, "Jar") if archive_contract_complete(task) => "Jar".to_string(),
+        ("archive", "Zip") | (_, "Zip") if archive_contract_complete(task) => "Zip".to_string(),
+        ("archive", "War") | (_, "War") if archive_contract_complete(task) => "War".to_string(),
+        ("archive", "Ear") | (_, "Ear") if archive_contract_complete(task) => "Ear".to_string(),
+        ("archive", "Tar") | (_, "Tar") if archive_contract_complete(task) => "Tar".to_string(),
         ("test", "Test") | (_, "Test") if test_exec_contract_complete(task) => {
             "TestExec".to_string()
         }
@@ -507,10 +497,17 @@ fn test_exec_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
         && !has_input_value_equal(task, "test_unsupported_filters", "true")
 }
 
+fn archive_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
+    has_input_paths(task)
+        && has_outputs(task)
+        && !has_input_value_equal(task, "copy_contains_symlinks", "true")
+}
+
 fn copy_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
     has_input_paths(task)
         && has_outputs(task)
         && !has_input_value_equal(task, "copy_unsupported_custom_actions", "true")
+        && !has_input_value_equal(task, "copy_contains_symlinks", "true")
 }
 
 fn exec_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
@@ -1656,6 +1653,54 @@ mod tests {
     }
 
     #[test]
+    fn test_copy_with_symlink_inputs_does_not_lower_to_native() {
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":copySymlink".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.api.tasks.Copy".to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "in-process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "declared-outputs".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "file-transform".to_string(),
+            input_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "input0".to_string(),
+                    kind: "path".to_string(),
+                    value: "/repo/src/link.txt".to_string(),
+                    normalization: "absolute-path".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "copy_contains_symlinks".to_string(),
+                    kind: "value".to_string(),
+                    value: "true".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+            ],
+            output_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                    name: "destination".to_string(),
+                    kind: "directory".to_string(),
+                    path: "/repo/build/assets".to_string(),
+                },
+            ],
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        assert_eq!(executable_task_type(&task), "org.gradle.api.tasks.Copy");
+    }
+
+    #[test]
     fn test_delete_contract_lowers_destroyables_to_native_context() {
         let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
             path: ":clean".to_string(),
@@ -1785,6 +1830,57 @@ mod tests {
         assert_eq!(context["options"]["include_empty_dirs"], "false");
         assert_eq!(context["options"]["file_permissions"], "493");
         assert_eq!(context["options"]["dir_permissions"], "448");
+    }
+
+    #[test]
+    fn test_archive_with_symlink_inputs_does_not_lower_to_native() {
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":distZip".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.api.tasks.bundling.Zip".to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "in-process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "declared-outputs".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "archive".to_string(),
+            input_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "input0".to_string(),
+                    kind: "path".to_string(),
+                    value: "/repo/src/link.txt".to_string(),
+                    normalization: "absolute-path".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "copy_contains_symlinks".to_string(),
+                    kind: "value".to_string(),
+                    value: "true".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+            ],
+            output_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                    name: "archive".to_string(),
+                    kind: "file".to_string(),
+                    path: "/repo/build/distributions/app.zip".to_string(),
+                },
+            ],
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        assert_eq!(
+            executable_task_type(&task),
+            "org.gradle.api.tasks.bundling.Zip"
+        );
     }
 
     #[test]

@@ -52,6 +52,8 @@ release smoke coverage from `substrate/scripts/e2e-smoke-test.sh`.
 - DSL evaluation and legacy plugin semantics remain JVM compatibility work.
 - Archive byte-for-byte parity, arbitrary CopySpec actions, and broad
   dependency-resolution semantics remain outside the demo claim.
+- Copy/archive tasks with symbolic-link inputs intentionally fail closed instead
+  of using native execution until exact symlink semantics are modeled.
 - The Rust-owned path is strongest today around protocol stability, hashing,
   cache/config-cache support, build-plan shadowing, file transforms, Java
   lifecycle execution, archive packaging, test execution, fail-closed bridge

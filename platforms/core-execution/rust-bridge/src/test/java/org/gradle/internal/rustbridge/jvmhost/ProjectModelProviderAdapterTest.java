@@ -15,6 +15,7 @@ import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
+import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -26,6 +27,7 @@ import java.util.stream.Collectors;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeTrue;
 
 public class ProjectModelProviderAdapterTest {
     @Rule
@@ -237,6 +239,7 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("true", inputs.get("include_empty_dirs"));
         assertEquals("420", inputs.get("file_permissions"));
         assertEquals("493", inputs.get("dir_permissions"));
+        assertEquals("false", inputs.get("copy_contains_symlinks"));
         assertEquals("true", inputs.get("copy_has_custom_actions"));
         assertEquals("false", inputs.get("copy_unsupported_custom_actions"));
         assertTrue(inputs.get("copy_custom_action_types").endsWith("MapBackedExpandAction"));
@@ -270,6 +273,35 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("true", inputs.get("copy_has_custom_actions"));
         assertEquals("true", inputs.get("copy_unsupported_custom_actions"));
         assertTrue(inputs.get("copy_custom_action_types").endsWith("ArbitraryCopyAction"));
+    }
+
+    @org.junit.Test
+    public void marksFileTransformInputsContainingSymlinksAsNotNativeReady() throws IOException {
+        File target = temporaryFolder.newFile("target.txt");
+        File link = new File(temporaryFolder.getRoot(), "link.txt");
+        try {
+            Files.createSymbolicLink(link.toPath(), target.toPath());
+        } catch (UnsupportedOperationException | SecurityException | IOException e) {
+            assumeTrue("symlink creation unavailable: " + e, false);
+        }
+        File outputDir = temporaryFolder.newFolder("build/symlink-copy");
+
+        Task copy = basicFileTransformTask(
+            ":copySymlink",
+            "copySymlink",
+            fileCollection(link),
+            fileCollection(outputDir),
+            Collections.emptyMap(),
+            false,
+            true
+        );
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(copy, Copy.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("true", inputs.get("copy_contains_symlinks"));
     }
 
     @org.junit.Test

@@ -70,6 +70,9 @@
 - Native ZIP-compatible and TAR archive tasks can consume JVM-captured nested
   CopySpec file mappings for child `into(...)` destinations; the corpus gate
   now compares archive entry inventories, not just archive output filenames.
+- Native file-transform and archive lowering fails closed when the JVM bridge
+  detects symbolic links in task inputs. This avoids silently approximating
+  symlink traversal/copy semantics until they are modeled explicitly.
 
 ## Gaps
 
@@ -82,7 +85,7 @@
 - More task types need native-ready contract capture before broad no-fallback
   execution is realistic, especially arbitrary copy filters/actions beyond
   direct expand, Gradle archive metadata edge cases beyond entry inventory, and
-  symlink copy semantics.
+  native symlink copy/archive semantics.
 
 ## Validation
 
