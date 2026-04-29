@@ -559,6 +559,12 @@ fn task_options(
             "include_empty_dirs",
             "include_empty_dirs",
         );
+        insert_input_option(
+            task,
+            &mut options,
+            "copy_file_mappings",
+            "copy_file_mappings",
+        );
         insert_input_option(task, &mut options, "file_permissions", "file_permissions");
         insert_input_option(task, &mut options, "dir_permissions", "dir_permissions");
     } else if task_type == "Tar" {
@@ -575,6 +581,12 @@ fn task_options(
             &mut options,
             "include_empty_dirs",
             "include_empty_dirs",
+        );
+        insert_input_option(
+            task,
+            &mut options,
+            "copy_file_mappings",
+            "copy_file_mappings",
         );
         insert_input_option(task, &mut options, "file_permissions", "file_permissions");
         insert_input_option(task, &mut options, "dir_permissions", "dir_permissions");

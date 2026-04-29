@@ -34,11 +34,12 @@ release smoke coverage from `substrate/scripts/e2e-smoke-test.sh`.
   projects, a multi-project application, Java resource expansion, JavaCompile
   options, standalone Copy/Sync transforms, CopySpec duplicate handling,
   nested Copy/Sync CopySpec `into(...)` mappings, Zip/Tar gzip+bzip2/War/Ear
-  archive tasks, plus a simple Java launcher Exec task.
+  archive tasks, nested Zip/Tar CopySpec mappings, plus a simple Java launcher
+  Exec task.
 - `tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative`
   proves the checked-in corpus can run through the explicit no-fallback
-  RunBuild gate and compare stable output inventories plus non-archive content
-  hashes.
+  RunBuild gate and compare stable output inventories, non-archive content
+  hashes, and archive entry inventories.
 - `cargo test -p gradle-substrate-daemon --test build_plan_shadow_test refreshed_native_ready_shadow_plan_runs_java_lifecycle_without_jvm_fallback -- --exact`
   proves a captured Java lifecycle plan can run with JVM fallback disabled.
 - `cargo test -p gradle-substrate-daemon --test e2e_grpc_test` exercises daemon

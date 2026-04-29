@@ -3,7 +3,7 @@ use std::path::Path;
 
 use std::collections::HashSet;
 
-use crate::server::task_executor::copy::parse_unix_mode;
+use crate::server::task_executor::copy::{parse_copy_file_mappings, parse_unix_mode};
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
 /// Native Rust JAR packaging executor.
@@ -247,6 +247,41 @@ impl JarTaskExecutor {
             }
         }
         Ok(())
+    }
+
+    fn collect_mapped_entries(
+        options: &std::collections::HashMap<String, String>,
+        entries: &mut Vec<ZipEntry>,
+        include_empty_dirs: bool,
+        file_mode: u32,
+        dir_mode: u32,
+    ) -> Result<bool, String> {
+        let mappings = parse_copy_file_mappings(options.get("copy_file_mappings"))?;
+        if mappings.is_empty() {
+            return Ok(false);
+        }
+        for mapping in mappings {
+            if !mapping.source.exists() {
+                return Err(format!(
+                    "Source file not found: {}",
+                    mapping.source.display()
+                ));
+            }
+            let name = mapping.relative_path.to_string_lossy().replace('\\', "/");
+            if mapping.is_dir {
+                if include_empty_dirs {
+                    entries.push(ZipEntry::dir(
+                        format!("{}/", name.trim_end_matches('/')),
+                        dir_mode,
+                    ));
+                }
+                continue;
+            }
+            let data = std::fs::read(&mapping.source)
+                .map_err(|e| format!("Cannot read {}: {}", mapping.source.display(), e))?;
+            entries.push(ZipEntry::file(name, data, file_mode));
+        }
+        Ok(true)
     }
 
     /// Create a Java manifest from options.
@@ -501,25 +536,33 @@ impl JarTaskExecutor {
         let file_mode = archive_file_mode(options);
         let dir_mode = archive_dir_mode(options);
 
-        for source in source_files {
-            if !source.is_dir() {
-                let data = std::fs::read(source)
-                    .map_err(|e| format!("Cannot read {}: {}", source.display(), e))?;
-                let name = source
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unknown");
-                entries.push(ZipEntry::file(name, data, file_mode));
-                continue;
+        if !Self::collect_mapped_entries(
+            options,
+            &mut entries,
+            include_empty_dirs,
+            file_mode,
+            dir_mode,
+        )? {
+            for source in source_files {
+                if !source.is_dir() {
+                    let data = std::fs::read(source)
+                        .map_err(|e| format!("Cannot read {}: {}", source.display(), e))?;
+                    let name = source
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown");
+                    entries.push(ZipEntry::file(name, data, file_mode));
+                    continue;
+                }
+                Self::collect_files(
+                    source,
+                    source,
+                    &mut entries,
+                    include_empty_dirs,
+                    file_mode,
+                    dir_mode,
+                )?;
             }
-            Self::collect_files(
-                source,
-                source,
-                &mut entries,
-                include_empty_dirs,
-                file_mode,
-                dir_mode,
-            )?;
         }
 
         if options.contains_key("manifest") || options.contains_key("mainClass") {
@@ -559,31 +602,45 @@ impl JarTaskExecutor {
         let file_mode = archive_file_mode(options);
         let dir_mode = archive_dir_mode(options);
 
-        for source in source_files {
-            if !source.is_dir() {
-                let data = std::fs::read(source)
-                    .map_err(|e| format!("Cannot read {}: {}", source.display(), e))?;
-                let name = source
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unknown");
-                entries.retain(|entry| entry.name != name);
-                entries.push(ZipEntry::file(name, data, file_mode));
-                continue;
-            }
-
-            let mut new_entries = Vec::new();
-            Self::collect_files(
-                source,
-                source,
-                &mut new_entries,
-                include_empty_dirs,
-                file_mode,
-                dir_mode,
-            )?;
-            for new_entry in new_entries {
+        let mut mapped_entries = Vec::new();
+        if Self::collect_mapped_entries(
+            options,
+            &mut mapped_entries,
+            include_empty_dirs,
+            file_mode,
+            dir_mode,
+        )? {
+            for new_entry in mapped_entries {
                 entries.retain(|entry| entry.name != new_entry.name);
                 entries.push(new_entry);
+            }
+        } else {
+            for source in source_files {
+                if !source.is_dir() {
+                    let data = std::fs::read(source)
+                        .map_err(|e| format!("Cannot read {}: {}", source.display(), e))?;
+                    let name = source
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown");
+                    entries.retain(|entry| entry.name != name);
+                    entries.push(ZipEntry::file(name, data, file_mode));
+                    continue;
+                }
+
+                let mut new_entries = Vec::new();
+                Self::collect_files(
+                    source,
+                    source,
+                    &mut new_entries,
+                    include_empty_dirs,
+                    file_mode,
+                    dir_mode,
+                )?;
+                for new_entry in new_entries {
+                    entries.retain(|entry| entry.name != new_entry.name);
+                    entries.push(new_entry);
+                }
             }
         }
 
@@ -608,6 +665,7 @@ impl JarTaskExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     use std::fs;
     use tempfile::TempDir;
 
@@ -815,6 +873,42 @@ mod tests {
             .map(|entry| entry.name)
             .collect::<Vec<_>>();
         assert!(!entries.contains(&"empty/".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_jar_uses_explicit_copyspec_file_mappings() {
+        let tmp = TempDir::new().unwrap();
+        let src_dir = tmp.path().join("src");
+        let out_dir = tmp.path().join("out");
+        fs::create_dir_all(&src_dir).unwrap();
+        let src_file = src_dir.join("app.txt");
+        fs::write(&src_file, b"mapped").unwrap();
+
+        let mapping = format!(
+            "{}>{}>F",
+            URL_SAFE_NO_PAD.encode(src_file.to_string_lossy().as_bytes()),
+            URL_SAFE_NO_PAD.encode("nested/app.txt")
+        );
+        let executor = JarTaskExecutor::new();
+        let mut input = TaskInput::new("Jar");
+        input.target_dir = out_dir;
+        input
+            .options
+            .insert("jarName".to_string(), "mapped.jar".to_string());
+        input
+            .options
+            .insert("copy_file_mappings".to_string(), mapping);
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        let entries = JarTaskExecutor::read_existing_entries(result.output_files.first().unwrap())
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect::<Vec<_>>();
+        assert!(entries.contains(&"nested/app.txt".to_string()));
+        assert!(!entries.contains(&"app.txt".to_string()));
     }
 
     #[tokio::test]

@@ -3,7 +3,7 @@ use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 
 use crate::server::task_executor::copy::{
-    dir_permission_mode, file_permission_mode, include_empty_dirs,
+    dir_permission_mode, file_permission_mode, include_empty_dirs, parse_copy_file_mappings,
 };
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
@@ -46,6 +46,7 @@ impl TaskExecutor for TarTaskExecutor {
 
         let entries = match collect_entries(
             &input.source_files,
+            &input.options,
             input
                 .options
                 .get("duplicates_strategy")
@@ -142,37 +143,69 @@ fn compression(input: &TaskInput, archive_path: &Path) -> Result<TarCompression,
 
 fn collect_entries(
     source_files: &[PathBuf],
+    options: &std::collections::HashMap<String, String>,
     duplicate_strategy: &str,
     include_empty_dirs: bool,
     file_mode: u32,
     dir_mode: u32,
 ) -> Result<Vec<TarEntry>, String> {
     let mut entries = Vec::new();
-    for source in source_files {
-        if !source.exists() {
-            return Err(format!("Source file not found: {}", source.display()));
-        }
-        if source.is_dir() {
-            collect_dir(
-                source,
-                source,
-                &mut entries,
-                include_empty_dirs,
-                file_mode,
-                dir_mode,
-            )?;
-        } else {
-            let name = source
-                .file_name()
-                .and_then(|name| name.to_str())
-                .ok_or_else(|| format!("Invalid file name: {}", source.display()))?;
+    let mappings = parse_copy_file_mappings(options.get("copy_file_mappings"))?;
+    if !mappings.is_empty() {
+        for mapping in mappings {
+            if !mapping.source.exists() {
+                return Err(format!(
+                    "Source file not found: {}",
+                    mapping.source.display()
+                ));
+            }
+            let name = normalize_entry_path(&mapping.relative_path);
+            if mapping.is_dir {
+                if include_empty_dirs {
+                    entries.push(TarEntry {
+                        name,
+                        data: Vec::new(),
+                        is_dir: true,
+                        mode: dir_mode,
+                    });
+                }
+                continue;
+            }
             entries.push(TarEntry {
-                name: normalize_entry_name(name),
-                data: std::fs::read(source)
-                    .map_err(|e| format!("Cannot read {}: {}", source.display(), e))?,
+                name,
+                data: std::fs::read(&mapping.source)
+                    .map_err(|e| format!("Cannot read {}: {}", mapping.source.display(), e))?,
                 is_dir: false,
                 mode: file_mode,
             });
+        }
+    } else {
+        for source in source_files {
+            if !source.exists() {
+                return Err(format!("Source file not found: {}", source.display()));
+            }
+            if source.is_dir() {
+                collect_dir(
+                    source,
+                    source,
+                    &mut entries,
+                    include_empty_dirs,
+                    file_mode,
+                    dir_mode,
+                )?;
+            } else {
+                let name = source
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .ok_or_else(|| format!("Invalid file name: {}", source.display()))?;
+                entries.push(TarEntry {
+                    name: normalize_entry_name(name),
+                    data: std::fs::read(source)
+                        .map_err(|e| format!("Cannot read {}: {}", source.display(), e))?,
+                    is_dir: false,
+                    mode: file_mode,
+                });
+            }
         }
     }
     entries = resolve_duplicate_entries(entries, duplicate_strategy)?;
@@ -332,6 +365,7 @@ fn write_tar<W: Write>(writer: W, entries: &[TarEntry]) -> Result<W, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     use std::fs;
 
     #[tokio::test]
@@ -420,6 +454,51 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(!names.contains(&"empty".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_tar_uses_explicit_copyspec_file_mappings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let out_dir = tmp.path().join("out");
+        fs::create_dir_all(&src_dir).unwrap();
+        let src_file = src_dir.join("app.txt");
+        fs::write(&src_file, b"mapped").unwrap();
+
+        let mapping = format!(
+            "{}>{}>F",
+            URL_SAFE_NO_PAD.encode(src_file.to_string_lossy().as_bytes()),
+            URL_SAFE_NO_PAD.encode("nested/app.txt")
+        );
+        let executor = TarTaskExecutor::new();
+        let mut input = TaskInput::new("Tar");
+        input.target_dir = out_dir.clone();
+        input
+            .options
+            .insert("tarName".to_string(), "mapped.tar".to_string());
+        input
+            .options
+            .insert("copy_file_mappings".to_string(), mapping);
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        let file = fs::File::open(out_dir.join("mapped.tar")).unwrap();
+        let mut archive = ::tar::Archive::new(file);
+        let names = archive
+            .entries()
+            .unwrap()
+            .map(|entry| {
+                entry
+                    .unwrap()
+                    .path()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"nested/app.txt".to_string()));
+        assert!(!names.contains(&"app.txt".to_string()));
     }
 
     #[tokio::test]

@@ -3,6 +3,7 @@
 import importlib.util
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 
@@ -105,6 +106,25 @@ class CorpusRunnerCommandTest(unittest.TestCase):
 
         self.assertEqual(2, len(mismatches))
         self.assertTrue(any("plugins" in mismatch for mismatch in mismatches))
+
+    def test_archive_entry_snapshot_reads_zip_inventory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive_path = root / "build" / "libs" / "sample.zip"
+            archive_path.parent.mkdir(parents=True)
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("nested/app.txt", "app")
+                archive.writestr("readme.txt", "readme")
+
+            entries = corpus_run.snapshot_archive_entries(
+                tmp,
+                ["build/libs/sample.zip"],
+            )
+
+        self.assertEqual(
+            {"build/libs/sample.zip": ["nested/app.txt", "readme.txt"]},
+            entries,
+        )
 
     def test_compare_run_pair_reports_explicit_checks(self):
         upstream = corpus_run.RunResult(
