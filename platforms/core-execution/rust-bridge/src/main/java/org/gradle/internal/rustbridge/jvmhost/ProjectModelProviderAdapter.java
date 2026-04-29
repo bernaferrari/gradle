@@ -24,6 +24,7 @@ import java.io.File;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collection;
@@ -346,6 +347,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "file_permissions", permissionUnixMode(invokeOptional(rootSpec, "getFilePermissions")));
         putIfPresent(inputs, "dir_permissions", permissionUnixMode(invokeOptional(rootSpec, "getDirPermissions")));
         putIfPresent(inputs, "copy_file_mappings", nestedCopyFileMappings(rootSpec));
+        inputs.put("copy_contains_symlinks", Boolean.toString(containsSymbolicLinks(safeInputFiles(task))));
     }
 
     private static String nestedCopyFileMappings(@Nullable Object rootSpec) {
@@ -441,6 +443,23 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "file_permissions", permissionUnixMode(invokeOptional(rootSpec, "getFilePermissions")));
         putIfPresent(inputs, "dir_permissions", permissionUnixMode(invokeOptional(rootSpec, "getDirPermissions")));
         putIfPresent(inputs, "copy_file_mappings", nestedCopyFileMappings(rootSpec));
+        inputs.put("copy_contains_symlinks", Boolean.toString(containsSymbolicLinks(safeInputFiles(task))));
+    }
+
+    private static boolean containsSymbolicLinks(@Nullable FileCollection files) {
+        if (files == null) {
+            return false;
+        }
+        try {
+            for (File file : files.getFiles()) {
+                if (Files.isSymbolicLink(file.toPath())) {
+                    return true;
+                }
+            }
+        } catch (RuntimeException e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to inspect task inputs for symlinks", e);
+        }
+        return false;
     }
 
     private static List<String> copyActionClassNames(@Nullable Object rootSpec) {
