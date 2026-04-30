@@ -68,7 +68,8 @@
   consults the Rust artifact store after Gradle local access and before remote
   repository access for safe external module JAR coordinates. Unsupported
   artifact shapes and cache misses fall back to Gradle's normal remote
-  resolver.
+  resolver. The Java bridge read-through path is covered by a gated E2E test
+  against a real Rust daemon and artifact store.
 - Archive tasks (`Jar`, `Zip`, `War`, `Ear`, `Tar`) can lower to native Rust
   archive execution when the task model provides input paths and an output
   archive path. ZIP-compatible tasks emit ZIP-compatible archives; `Tar` emits
@@ -137,6 +138,7 @@
 - `cargo test -p gradle-substrate-daemon download_artifact -- --nocapture`
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.dependency.DependencyResolutionShadowListenerTest`
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.dependency.RustArtifactCacheReadThroughTest`
+- `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.e2e.SubstrateE2ETest.dependencyArtifactReadThroughReturnsArtifactFromRustStore -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon`
 - `./gradlew :dependency-management:test --tests org.gradle.api.internal.artifacts.ivyservice.ivyresolve.RepositoryChainArtifactResolverTest -x :distributions-core:generateLicenseFile`
 - `python3 tools/performance/rust_substrate_perf_report.py build/corpus-authoritative-21/corpus_summary.json --output build/corpus-authoritative-21/performance.md`
 - `./tools/stabilization/run_strict_stabilization.sh quick`
