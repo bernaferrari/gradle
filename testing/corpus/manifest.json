@@ -320,6 +320,22 @@
         "project_dependencies": [],
         "toolchains": ["17"]
       }
+    },
+    {
+      "name": "oss-style-java-library-kotlin-dsl",
+      "path": "oss-style-java-library-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 2,
+        "plugins": ["java-library"],
+        "tasks": ["apiContractReport"],
+        "outputs": ["build/reports/api-contract.txt"],
+        "dependencies": [],
+        "project_dependencies": [],
+        "toolchains": ["17"]
+      }
     }
   ]
 }

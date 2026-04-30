@@ -7,12 +7,12 @@ use sha2::{Digest, Sha256};
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
-    AddArtifactToCacheRequest, AddArtifactToCacheResponse, CheckArtifactCacheRequest,
-    CheckArtifactCacheResponse, ChecksumFailure, DependencyDescriptor, GetResolutionStatsRequest,
-    GetResolutionStatsResponse, RecordResolutionRequest, RecordResolutionResponse,
-    RepositoryDescriptor, ResolveDependenciesRequest, ResolveDependenciesResponse,
-    ResolvedDependency, VerifyDependencyChecksumsRequest, VerifyDependencyChecksumsResponse,
-    dependency_resolution_service_server::DependencyResolutionService,
+    dependency_resolution_service_server::DependencyResolutionService, AddArtifactToCacheRequest,
+    AddArtifactToCacheResponse, CheckArtifactCacheRequest, CheckArtifactCacheResponse,
+    ChecksumFailure, DependencyDescriptor, GetResolutionStatsRequest, GetResolutionStatsResponse,
+    RecordResolutionRequest, RecordResolutionResponse, RepositoryDescriptor,
+    ResolveDependenciesRequest, ResolveDependenciesResponse, ResolvedDependency,
+    VerifyDependencyChecksumsRequest, VerifyDependencyChecksumsResponse,
 };
 
 // ---------------------------------------------------------------------------
@@ -2189,7 +2189,23 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
     ) -> Result<Response<Self::DownloadArtifactStream>, Status> {
         let req = request.into_inner();
 
-        let url = req.url.clone();
+        let url = if req.url.is_empty() {
+            req.repositories
+                .first()
+                .map(|repo| {
+                    Self::artifact_url_for_descriptor(
+                        &repo.url,
+                        &req.group,
+                        &req.name,
+                        &req.version,
+                        &req.classifier,
+                        &req.extension,
+                    )
+                })
+                .unwrap_or_default()
+        } else {
+            req.url.clone()
+        };
         let client = self.http_client.clone();
 
         let stream = async_stream::stream! {
@@ -2609,6 +2625,57 @@ mod tests {
             dotted_url,
             "https://repo.example.test/maven/org/example/demo/1.2.3/demo-1.2.3-javadoc.jar"
         );
+    }
+
+    #[tokio::test]
+    async fn test_download_artifact_streams_bytes_from_http() {
+        use futures_util::StreamExt;
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body = b"rust dependency transport artifact".to_vec();
+        let expected = body.clone();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/java-archive\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.write_all(&body).unwrap();
+        });
+
+        let svc = make_svc();
+        let mut stream = svc
+            .download_artifact(Request::new(crate::proto::DownloadArtifactRequest {
+                group: "org.example".to_string(),
+                name: "demo".to_string(),
+                version: "1.0".to_string(),
+                classifier: String::new(),
+                extension: "jar".to_string(),
+                repositories: vec![make_repo("local", &format!("http://{}", addr))],
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let mut downloaded = Vec::new();
+        let mut saw_last = false;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.unwrap();
+            assert!(chunk.error_message.is_empty(), "{}", chunk.error_message);
+            downloaded.extend_from_slice(&chunk.data);
+            saw_last |= chunk.is_last;
+        }
+        server.join().unwrap();
+
+        assert_eq!(downloaded, expected);
+        assert!(saw_last);
     }
 
     #[test]
