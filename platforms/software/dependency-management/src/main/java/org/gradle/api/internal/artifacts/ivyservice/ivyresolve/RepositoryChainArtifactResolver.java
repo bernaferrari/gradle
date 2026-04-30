@@ -19,8 +19,12 @@ import org.gradle.api.internal.artifacts.DefaultResolvableArtifact;
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact.ResolvableArtifact;
 import org.gradle.api.internal.component.ArtifactType;
 import org.gradle.internal.Describables;
+import org.gradle.internal.buildoption.RustArtifactCacheReadThroughRegistry;
+import org.gradle.internal.component.external.model.ModuleComponentArtifactIdentifier;
+import org.gradle.internal.component.external.model.ModuleComponentArtifactMetadata;
 import org.gradle.internal.component.model.ComponentArtifactMetadata;
 import org.gradle.internal.component.model.ComponentArtifactResolveMetadata;
+import org.gradle.internal.component.model.IvyArtifactName;
 import org.gradle.internal.component.model.ModuleSources;
 import org.gradle.internal.model.CalculatedValue;
 import org.gradle.internal.model.CalculatedValueFactory;
@@ -72,9 +76,37 @@ class RepositoryChainArtifactResolver implements ArtifactResolver {
         BuildableArtifactFileResolveResult artifactFile = new DefaultBuildableArtifactFileResolveResult();
         sourceRepository.getLocalAccess().resolveArtifact(artifact, sources, artifactFile);
         if (!artifactFile.hasResult()) {
-            sourceRepository.getRemoteAccess().resolveArtifact(artifact, sources, artifactFile);
+            File readThroughArtifact = findReadThroughArtifact(artifact);
+            if (readThroughArtifact != null) {
+                artifactFile.resolved(readThroughArtifact);
+            } else {
+                sourceRepository.getRemoteAccess().resolveArtifact(artifact, sources, artifactFile);
+            }
         }
         return artifactFile.getResult();
+    }
+
+    private File findReadThroughArtifact(ComponentArtifactMetadata artifact) {
+        if (!(artifact instanceof ModuleComponentArtifactMetadata)) {
+            return null;
+        }
+        ModuleComponentArtifactIdentifier artifactId = ((ModuleComponentArtifactMetadata) artifact).getId();
+        IvyArtifactName artifactName = artifact.getName();
+        String extension = artifactName.getExtension();
+        if (!"jar".equals(extension)) {
+            return null;
+        }
+        if (!artifactId.getComponentIdentifier().getModule().equals(artifactName.getName())) {
+            return null;
+        }
+        String classifier = artifactName.getClassifier() == null ? "" : artifactName.getClassifier();
+        return RustArtifactCacheReadThroughRegistry.get().findCachedArtifact(
+            artifactId.getComponentIdentifier().getGroup(),
+            artifactId.getComponentIdentifier().getModule(),
+            artifactId.getComponentIdentifier().getVersion(),
+            classifier,
+            extension
+        );
     }
 
     private ModuleComponentRepository<?> findSourceRepository(ModuleSources sources) {

@@ -63,6 +63,12 @@
   registers those artifacts into the Rust artifact store. The mode is opt-in
   because querying artifacts from a resolution listener can force artifact
   downloads earlier than a graph-only resolution would.
+- Gradle artifact resolution has an explicit Rust read-through mode
+  (`org.gradle.rust.substrate.dependency.readthrough.artifacts=true`) that
+  consults the Rust artifact store after Gradle local access and before remote
+  repository access for safe external module JAR coordinates. Unsupported
+  artifact shapes and cache misses fall back to Gradle's normal remote
+  resolver.
 - Archive tasks (`Jar`, `Zip`, `War`, `Ear`, `Tar`) can lower to native Rust
   archive execution when the task model provides input paths and an output
   archive path. ZIP-compatible tasks emit ZIP-compatible archives; `Tar` emits
@@ -104,9 +110,10 @@
 ## Gaps
 
 - Full dependency resolution semantics are not yet parity-complete.
-- Rust does not yet short-circuit Gradle's artifact resolver from the Rust
-  artifact store; the current bridge integration mirrors real Gradle-resolved
-  artifacts into Rust so a later resolver replacement has trustworthy data.
+- Rust can now short-circuit Gradle remote artifact fetches from the Rust
+  artifact store for opt-in, Maven-layout external JAR coordinates, but it does
+  not yet replace metadata resolution, variant selection, conflict resolution,
+  or Ivy/non-JAR artifact resolution.
 - Real Gradle invocation does not use Rust as the unconditional default executor
   yet; the authoritative build-work gate is intentionally opt-in and fail-closed
   while the native-ready default gate delegates on incomplete plans.
@@ -129,6 +136,8 @@
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/unsupported-manifest.json --contract-only --output-dir build/corpus-contract-unsupported`
 - `cargo test -p gradle-substrate-daemon download_artifact -- --nocapture`
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.dependency.DependencyResolutionShadowListenerTest`
+- `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.dependency.RustArtifactCacheReadThroughTest`
+- `./gradlew :dependency-management:test --tests org.gradle.api.internal.artifacts.ivyservice.ivyresolve.RepositoryChainArtifactResolverTest -x :distributions-core:generateLicenseFile`
 - `python3 tools/performance/rust_substrate_perf_report.py build/corpus-authoritative-21/corpus_summary.json --output build/corpus-authoritative-21/performance.md`
 - `./tools/stabilization/run_strict_stabilization.sh quick`
 - `./tools/demo/rust_substrate_demo.sh --quick`

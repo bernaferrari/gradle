@@ -2,6 +2,7 @@ package org.gradle.internal.rustbridge;
 
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.buildoption.InternalOptions;
+import org.gradle.internal.buildoption.RustArtifactCacheReadThroughRegistry;
 import org.gradle.internal.buildoption.RustSubstrateOptions;
 import org.gradle.internal.event.ListenerManager;
 import org.gradle.internal.rustbridge.bootstrap.BootstrapLifecycleListener;
@@ -12,6 +13,7 @@ import org.gradle.internal.rustbridge.buildresult.RustBuildResultClient;
 import org.gradle.internal.rustbridge.configcache.ConfigurationCacheShadowListener;
 import org.gradle.internal.rustbridge.configcache.RustConfigCacheClient;
 import org.gradle.internal.rustbridge.dependency.DependencyResolutionShadowListener;
+import org.gradle.internal.rustbridge.dependency.RustArtifactCacheReadThrough;
 import org.gradle.internal.rustbridge.dependency.RustDependencyResolutionClient;
 import org.gradle.internal.rustbridge.history.RustExecutionHistoryClient;
 import org.gradle.internal.rustbridge.jvmhost.BuildPlanTaskSelectionSnapshot;
@@ -226,6 +228,7 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
             ListenerManager listenerManager,
             InternalOptions options
         ) {
+            configureArtifactCacheReadThrough(rustDependencyResolutionClient, options);
             if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_DEPENDENCY_RESOLUTION)) {
                 return null;
             }
@@ -238,6 +241,18 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
                 new DependencyResolutionShadowListener(rustDependencyResolutionClient, mismatchReporter, authoritative, mirrorArtifacts);
             listenerManager.addListener(listener);
             return listener;
+        }
+
+        private static void configureArtifactCacheReadThrough(
+            RustDependencyResolutionClient rustDependencyResolutionClient,
+            InternalOptions options
+        ) {
+            if (RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_DEPENDENCY_RESOLUTION)
+                && options.getBoolean(RustSubstrateOptions.ENABLE_RUST_DEPENDENCY_ARTIFACT_READ_THROUGH)) {
+                RustArtifactCacheReadThroughRegistry.set(new RustArtifactCacheReadThrough(rustDependencyResolutionClient));
+            } else {
+                RustArtifactCacheReadThroughRegistry.reset();
+            }
         }
 
         @Provides
