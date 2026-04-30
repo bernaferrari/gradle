@@ -6,13 +6,15 @@ MODE="quick"
 RUN_SAMPLE_BUILDS=1
 RUN_GRPC_E2E=1
 RUN_NATIVE_SHADOW=1
+RUN_FIRST60=1
 OUTPUT_DIR=""
 
 usage() {
   cat <<'USAGE'
-Usage: tools/demo/rust_substrate_demo.sh [--quick|--full] [--skip-sample-builds] [--skip-grpc-e2e] [--skip-native-shadow] [--output-dir DIR]
+Usage: tools/demo/rust_substrate_demo.sh [--quick|--full] [--skip-first60] [--skip-sample-builds] [--skip-grpc-e2e] [--skip-native-shadow] [--output-dir DIR]
 
 Runs an honest Rust substrate demo:
+  - first-60-second visible wins: daemon ready time, dependency transport smoke, file-watch latency
   - strict stabilization gate
   - checked-in offline corpus contract validation
   - external dependency and unsupported corpus contract validation
@@ -44,6 +46,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-native-shadow)
       RUN_NATIVE_SHADOW=0
+      ;;
+    --skip-first60)
+      RUN_FIRST60=0
       ;;
     --output-dir)
       shift
@@ -79,6 +84,12 @@ run_step() {
   "$@"
   echo
 }
+
+if [[ "$RUN_FIRST60" -eq 1 ]]; then
+  run_step "First-60-second visible Rust wins" \
+    python3 ./tools/demo/first_60_seconds.py \
+      --output "$OUTPUT_DIR/first60.json"
+fi
 
 run_step "Strict stabilization gate" ./tools/stabilization/run_strict_stabilization.sh "$MODE"
 
@@ -195,6 +206,7 @@ What this proves:
   - The native-ready-default gate is exercised separately and delegates when a selected plan is incomplete.
   - The authoritative corpus summary records matched projects, no-fallback counts, task parity, output parity, and observed upstream/substrate wall-clock timing.
   - Rust daemon gRPC behavior is exercised when --skip-grpc-e2e is not used.
+  - First-60-second metrics record daemon socket readiness, Rust dependency transport smoke timing, and native file-watch first-event latency.
 
 What this does not claim:
   - This is not a full Gradle replacement.
