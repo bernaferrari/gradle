@@ -61,6 +61,10 @@
 - Rust artifact cache identity includes classifier and normalized extension, so
   in-memory warm hits cannot collide different artifact shapes for the same
   Maven coordinate.
+- Rust dependency POM fetches are now repository-scoped cached metadata
+  lookups: warm cache first, persisted Maven-layout `.pom` metadata second,
+  network last. Successful network fetches commit atomically, write `.sha256`
+  sidecars, and populate the warm cache for parent/BOM/transitive POM reuse.
 - The Gradle dependency shadow listener has an explicit artifact mirror mode
   (`org.gradle.rust.substrate.dependency.mirror.artifacts=true`) that observes
   real resolved external module JARs, computes SHA-256 in the JVM bridge, and
@@ -141,6 +145,7 @@
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/unsupported-manifest.json --contract-only --output-dir build/corpus-contract-unsupported`
 - `cargo test -p gradle-substrate-daemon download_artifact -- --nocapture`
 - `cargo test -p gradle-substrate-daemon artifact_cache -- --nocapture`
+- `cargo test -p gradle-substrate-daemon fetch_pom -- --nocapture`
 - `cargo test -p gradle-substrate-daemon persistent_store_roundtrip -- --nocapture`
 - `cargo test -p gradle-substrate-daemon cold_path -- --nocapture`
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.dependency.DependencyResolutionShadowListenerTest`
