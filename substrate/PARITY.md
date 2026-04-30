@@ -149,9 +149,13 @@
   native symlink copy/archive semantics.
 - Rust build-session hashing can now shadow or authoritatively replace the
   local `DefaultFileHasher` delegate while preserving Gradle's global/user-home
-  VFS scopes. File-collection fingerprinting and value snapshotting are wired
-  as opt-in shadow-only adapters because their Gradle-facing return types are
-  still JVM snapshot objects.
+  VFS scopes. File-collection fingerprinting can now run authoritatively for
+  direct files, missing roots, directories, and PatternSet-backed file trees by
+  materializing Gradle-compatible regular-file, missing-file, and Merkle
+  directory snapshot objects from Rust hashes. It still fails closed for
+  symlinks, special files, and file-tree-backed archives. Value snapshotting is
+  still shadow-only because its Gradle-facing value snapshot objects are not yet
+  materialized from Rust results.
 - User-home/global VFS and file watching remain JVM-owned in installed
   distributions. Moving those scopes requires a separate design that does not
   request build-session-only Rust services from global providers.
@@ -182,8 +186,11 @@
 - `cargo test -q -p gradle-substrate-daemon server::file_fingerprint::tests -- --nocapture`
 - `./gradlew :rust-bridge:compileJava :core:compileJava --no-daemon --console=plain`
 - `./gradlew :rust-bridge:test --tests '*ShadowingFileHasherTest' --tests '*ShadowingFileCollectionSnapshotterTest' --tests '*ShadowingInputFingerprinterTest' --no-daemon --console=plain`
+- `./gradlew :rust-bridge:test --tests '*ShadowingFileCollectionSnapshotterTest' --no-daemon --console=plain`
 - `./gradlew :distributions-full:install -Pgradle_installPath=$PWD/build/gradle-under-test -Dorg.gradle.unsafe.isolated-projects=false -Dorg.gradle.configuration-cache=false --no-daemon --console=plain`
 - `build/gradle-under-test/bin/gradle -p testing/corpus/java-library-kotlin-dsl clean classes --no-daemon --console=plain -Dorg.gradle.rust.substrate.enabled=true -Dorg.gradle.rust.substrate.daemon.path=$PWD/target/debug/gradle-substrate-daemon -Dorg.gradle.rust.substrate.hashing.enabled=true -Dorg.gradle.rust.substrate.fingerprint.enabled=true -Dorg.gradle.rust.substrate.shadow.report-mismatches=true --info`
+- `build/gradle-under-test/bin/gradle -p testing/corpus/java-library-kotlin-dsl clean classes --no-daemon --console=plain -Dorg.gradle.rust.substrate.enabled=true -Dorg.gradle.rust.substrate.daemon.path=$PWD/target/debug/gradle-substrate-daemon -Dorg.gradle.rust.substrate.hashing.enabled=true -Dorg.gradle.rust.substrate.fingerprint.enabled=true -Dorg.gradle.rust.substrate.fingerprint.authoritative=true --info`
+- `build/gradle-under-test/bin/gradle -p testing/corpus/java-library-kotlin-dsl classes --no-daemon --console=plain -Dorg.gradle.rust.substrate.enabled=true -Dorg.gradle.rust.substrate.daemon.path=$PWD/target/debug/gradle-substrate-daemon -Dorg.gradle.rust.substrate.hashing.enabled=true -Dorg.gradle.rust.substrate.fingerprint.enabled=true -Dorg.gradle.rust.substrate.fingerprint.authoritative=true --info`
 - `python3 tools/performance/rust_substrate_perf_report.py build/corpus-authoritative-21/corpus_summary.json --output build/corpus-authoritative-21/performance.md`
 - `./tools/stabilization/run_strict_stabilization.sh quick`
 - `./tools/demo/rust_substrate_demo.sh --quick`
@@ -194,9 +201,9 @@
    task-graph semantics.
 2. Add native-ready contracts for richer `Copy`/`Sync` specs and the next common
    process task after `Javadoc`.
-3. Make Rust value snapshotting and file-collection fingerprinting truly
-   authoritative by returning or materializing Gradle-compatible snapshot
-   objects instead of using shadow-only comparison wrappers.
+3. Extend authoritative Rust file-collection snapshotting beyond direct
+   files/directories/file trees to symlink semantics, special files, and
+   file-tree-backed archives, or keep those cases explicitly unsupported.
 4. Design a global/user-home VFS bridge that does not leak build-session
    services into global scopes.
 5. Reduce bridge source exclusions as APIs are stabilized.
