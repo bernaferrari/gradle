@@ -4,6 +4,7 @@
 This is intentionally small and local:
   - daemon readiness is measured by Unix socket availability
   - dependency transport uses the checked-in local HTTP store/cache/checksum smoke test
+  - dependency read-through uses a focused Gradle resolver seam test proving remote fetch is skipped
   - file watching uses a native notify first-event latency test
 
 Build time is kept outside the headline timings so the numbers describe runtime
@@ -161,6 +162,31 @@ def measure_cargo_test(label: str, test_filter: str, timeout: int) -> dict[str, 
     }
 
 
+def measure_gradle_readthrough_test() -> dict[str, object]:
+    started = time.perf_counter()
+    completed = run(
+        [
+            "./gradlew",
+            ":dependency-management:test",
+            "--tests",
+            "org.gradle.api.internal.artifacts.ivyservice.ivyresolve.RepositoryChainArtifactResolverTest",
+            "-x",
+            ":distributions-core:generateLicenseFile",
+        ],
+        timeout=90,
+    )
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+    output = completed.stdout + completed.stderr
+    return {
+        "name": "dependency_artifact_readthrough",
+        "ok": completed.returncode == 0,
+        "elapsed_ms": elapsed_ms,
+        "threshold_ms": 60000,
+        "test_filter": "RepositoryChainArtifactResolverTest",
+        "tail": "\n".join(output.strip().splitlines()[-12:]),
+    }
+
+
 def write_report(path: Path, results: list[dict[str, object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"results": results}, indent=2) + "\n", encoding="utf-8")
@@ -181,6 +207,7 @@ def print_summary(results: list[dict[str, object]]) -> None:
     print("\nWhy these are visible:")
     print("- daemon_socket_ready is the time before Gradle can send work to the Rust sidecar")
     print("- dependency_transport_store_checksum is the bounded Rust path for Maven bytes, local store, cache hit, and checksum verification")
+    print("- dependency_artifact_readthrough proves Gradle can skip remote artifact access when Rust already has the JAR")
     print("- file_watch_first_event is the delay before source edits become observable")
 
 
@@ -198,6 +225,7 @@ def main() -> int:
             "test_download_artifact_populates_store_and_checksum_cache",
             timeout=60,
         ),
+        measure_gradle_readthrough_test(),
         measure_cargo_test(
             "file_watch_first_event",
             "file_watch_reports_first_change_quickly",

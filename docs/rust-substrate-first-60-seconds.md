@@ -5,6 +5,7 @@ inspect a profiler:
 
 - daemon readiness: how quickly the Rust sidecar can accept work
 - dependency transport: whether Maven artifact bytes stream through Rust fast and land in the Rust store with checksum evidence
+- dependency read-through: whether Gradle can skip remote artifact access when Rust already has the JAR
 - file watching: how quickly an edit becomes observable
 
 Run:
@@ -17,6 +18,7 @@ The script reports:
 
 - `daemon_socket_ready`: process launch until the Unix socket exists
 - `dependency_transport_store_checksum`: local HTTP artifact streaming through the Rust dependency service, persisted store write, cache hit, and checksum verification
+- `dependency_artifact_readthrough`: focused Gradle resolver test proving the Rust read-through hook resolves before remote access
 - `file_watch_first_event`: native file watcher latency from write to event
 
 These are not full Gradle replacement claims. Gradle DSL and unsupported plugin
