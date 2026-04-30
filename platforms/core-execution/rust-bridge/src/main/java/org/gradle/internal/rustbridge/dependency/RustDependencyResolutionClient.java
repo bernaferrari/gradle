@@ -84,6 +84,14 @@ public class RustDependencyResolutionClient {
             this.cachedSize = cachedSize;
         }
 
+        public static CacheCheckResult cached(String localPath, long cachedSize) {
+            return new CacheCheckResult(true, localPath, cachedSize);
+        }
+
+        public static CacheCheckResult notCached() {
+            return new CacheCheckResult(false, null, 0);
+        }
+
         public boolean isCached() { return cached; }
         public String getLocalPath() { return localPath; }
         public long getCachedSize() { return cachedSize; }
@@ -151,11 +159,19 @@ public class RustDependencyResolutionClient {
      */
     public CacheCheckResult checkArtifactCache(String group, String name, String version,
                                                    String classifier, String sha256) {
+        return checkArtifactCache(group, name, version, classifier, "jar", sha256);
+    }
+
+    /**
+     * Check if an artifact is in the local cache.
+     */
+    public CacheCheckResult checkArtifactCache(String group, String name, String version,
+                                                   String classifier, String extension, String sha256) {
         try {
-            return checkArtifactCacheStrict(group, name, version, classifier, sha256);
+            return checkArtifactCacheStrict(group, name, version, classifier, extension, sha256);
         } catch (Exception e) {
             LOGGER.debug("[substrate:dep-resolve] cache check failed", e);
-            return new CacheCheckResult(false, null, 0);
+            return CacheCheckResult.notCached();
         }
     }
 
@@ -171,6 +187,22 @@ public class RustDependencyResolutionClient {
         String classifier,
         String sha256
     ) {
+        return checkArtifactCacheStrict(group, name, version, classifier, "jar", sha256);
+    }
+
+    /**
+     * Check if an artifact is in the local cache.
+     *
+     * @throws RuntimeException when substrate is unavailable or the RPC fails.
+     */
+    public CacheCheckResult checkArtifactCacheStrict(
+        String group,
+        String name,
+        String version,
+        String classifier,
+        String extension,
+        String sha256
+    ) {
         if (client.isNoop()) {
             throw new IllegalStateException("Substrate not available");
         }
@@ -181,6 +213,7 @@ public class RustDependencyResolutionClient {
                 .setName(name)
                 .setVersion(version)
                 .setClassifier(classifier)
+                .setExtension(extension)
                 .setSha256(sha256)
                 .build());
 

@@ -17,6 +17,7 @@
 package org.gradle.api.internal.artifacts.ivyservice.ivyresolve
 
 import org.gradle.api.internal.artifacts.DefaultModuleVersionIdentifier
+import org.gradle.internal.buildoption.RustArtifactCacheReadThroughRegistry
 import org.gradle.internal.component.external.model.DefaultModuleComponentArtifactMetadata
 import org.gradle.internal.component.external.model.DefaultModuleComponentIdentifier
 import org.gradle.internal.component.model.ComponentArtifactResolveMetadata
@@ -61,6 +62,10 @@ class RepositoryChainArtifactResolverTest extends Specification {
     def setup() {
         resolver.add(repo1)
         resolver.add(repo2)
+    }
+
+    def cleanup() {
+        RustArtifactCacheReadThroughRegistry.reset()
     }
 
     def "locates artifact with local access in repository defined by module source"() {
@@ -122,5 +127,36 @@ class RepositoryChainArtifactResolverTest extends Specification {
         result.result.file == artifactFile
         and:
         0 * _._
+    }
+
+    def "uses read-through artifact cache between local and remote access"() {
+        given:
+        def rustCachedFile = new File("rust-cache-artifact.jar")
+        RustArtifactCacheReadThroughRegistry.set({ group, name, version, classifier, extension ->
+            assert group == "group"
+            assert name == "name"
+            assert version == "1.0"
+            assert classifier == ""
+            assert extension == "jar"
+            rustCachedFile
+        } as RustArtifactCacheReadThroughRegistry.ArtifactCacheReadThrough)
+
+        when:
+        resolver.resolveArtifact(component, artifact, result)
+
+        then:
+        result.hasResult()
+        cache.size() == 1
+        cache.values().contains(result.result)
+        and:
+        0 * _._
+
+        when:
+        result.result.file
+
+        then:
+        1 * localAccess2.resolveArtifact(artifact, moduleSources, _)
+        0 * remoteAccess2._
+        result.result.file == rustCachedFile
     }
 }

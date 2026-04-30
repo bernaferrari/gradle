@@ -190,6 +190,14 @@ public class RustSubstrateOptions {
         InternalOptions.ofBoolean("org.gradle.rust.substrate.dependency.mirror.artifacts", false);
 
     /**
+     * Read resolved external artifacts from the Rust artifact store before remote repository access.
+     * Property: org.gradle.rust.substrate.dependency.readthrough.artifacts
+     * Default: false
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_DEPENDENCY_ARTIFACT_READ_THROUGH =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.dependency.readthrough.artifacts", false);
+
+    /**
      * Enable Phase 19: Rust-native file system watching.
      * Property: org.gradle.rust.substrate.filewatch.enabled
      * Default: false
