@@ -233,8 +233,9 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
                 options,
                 RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_DEPENDENCY_RESOLUTION
             );
+            boolean mirrorArtifacts = options.getBoolean(RustSubstrateOptions.ENABLE_RUST_DEPENDENCY_ARTIFACT_MIRROR);
             DependencyResolutionShadowListener listener =
-                new DependencyResolutionShadowListener(rustDependencyResolutionClient, mismatchReporter, authoritative);
+                new DependencyResolutionShadowListener(rustDependencyResolutionClient, mismatchReporter, authoritative, mirrorArtifacts);
             listenerManager.addListener(listener);
             return listener;
         }

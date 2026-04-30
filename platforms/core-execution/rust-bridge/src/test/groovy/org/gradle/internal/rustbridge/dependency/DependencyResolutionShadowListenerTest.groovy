@@ -1,12 +1,20 @@
 package org.gradle.internal.rustbridge.dependency
 
+import org.gradle.api.artifacts.ArtifactCollection
 import org.gradle.api.artifacts.ResolvableDependencies
+import org.gradle.api.artifacts.component.ComponentArtifactIdentifier
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.result.ResolvedArtifactResult
 import org.gradle.api.artifacts.result.ResolvedComponentResult
 import org.gradle.api.artifacts.result.ResolutionResult
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter
+import org.junit.Rule
+import org.junit.rules.TemporaryFolder
 import spock.lang.Specification
 
 class DependencyResolutionShadowListenerTest extends Specification {
+    @Rule
+    TemporaryFolder temporaryFolder = new TemporaryFolder()
 
     def "constructor sets up client and mismatchReporter fields"() {
         given:
@@ -225,5 +233,112 @@ class DependencyResolutionShadowListenerTest extends Specification {
         }
         1 * reporter.reportRustError("dep-resolve:compileClasspath", _ as RuntimeException)
         0 * client.recordResolution("compileClasspath", _, 0, true, 0)
+    }
+
+    def "mirror mode copies resolved module artifacts into rust cache"() {
+        given:
+        def client = Mock(RustDependencyResolutionClient)
+        def reporter = Mock(HashMismatchReporter)
+        def listener = new DependencyResolutionShadowListener(client, reporter, false, true)
+        def jar = temporaryFolder.newFile("demo-1.2.3-sources.jar")
+        jar.text = "artifact bytes"
+
+        def moduleId = Mock(ModuleComponentIdentifier) {
+            getGroup() >> "org.example"
+            getModule() >> "demo"
+            getVersion() >> "1.2.3"
+        }
+        def artifactId = Mock(ComponentArtifactIdentifier) {
+            getComponentIdentifier() >> moduleId
+            getDisplayName() >> "demo sources"
+        }
+        def artifact = Mock(ResolvedArtifactResult) {
+            getId() >> artifactId
+            getFile() >> jar
+        }
+        def artifacts = Mock(ArtifactCollection) {
+            getArtifacts() >> ([artifact] as Set)
+        }
+        def resolutionResult = Mock(ResolutionResult) {
+            getAllComponents() >> ([] as Set)
+            getAllDependencies() >> ([] as Set)
+        }
+        def dependencies = Mock(ResolvableDependencies) {
+            getName() >> "runtimeClasspath"
+            getResolutionResult() >> resolutionResult
+            getArtifacts() >> artifacts
+        }
+        listener.beforeResolve(dependencies)
+
+        when:
+        listener.afterResolve(dependencies)
+
+        then:
+        listener.isMirrorArtifacts()
+        listener.mirroredArtifactCount == 1
+        1 * client.addArtifactToCache(
+            "org.example",
+            "demo",
+            "1.2.3",
+            "sources",
+            jar.absolutePath,
+            jar.length(),
+            DependencyResolutionShadowListener.sha256(jar)
+        ) >> true
+        1 * client.recordResolution("runtimeClasspath", _, 0, true, 0)
+        1 * reporter.reportMatch()
+        0 * reporter.reportRustError(_, _)
+    }
+
+    def "mirror mode ignores project and non-jar artifacts"() {
+        given:
+        def client = Mock(RustDependencyResolutionClient)
+        def reporter = Mock(HashMismatchReporter)
+        def listener = new DependencyResolutionShadowListener(client, reporter, false, true)
+        def txt = temporaryFolder.newFile("demo-1.2.3.txt")
+        txt.text = "not a jar"
+
+        def artifactId = Mock(ComponentArtifactIdentifier) {
+            getComponentIdentifier() >> Mock(org.gradle.api.artifacts.component.ProjectComponentIdentifier)
+            getDisplayName() >> "project artifact"
+        }
+        def artifact = Mock(ResolvedArtifactResult) {
+            getId() >> artifactId
+            getFile() >> txt
+        }
+        def artifacts = Mock(ArtifactCollection) {
+            getArtifacts() >> ([artifact] as Set)
+        }
+        def resolutionResult = Mock(ResolutionResult) {
+            getAllComponents() >> ([] as Set)
+            getAllDependencies() >> ([] as Set)
+        }
+        def dependencies = Mock(ResolvableDependencies) {
+            getName() >> "runtimeClasspath"
+            getResolutionResult() >> resolutionResult
+            getArtifacts() >> artifacts
+        }
+        listener.beforeResolve(dependencies)
+
+        when:
+        listener.afterResolve(dependencies)
+
+        then:
+        listener.mirroredArtifactCount == 0
+        0 * client.addArtifactToCache(_, _, _, _, _, _, _)
+        1 * client.recordResolution("runtimeClasspath", _, 0, true, 0)
+        1 * reporter.reportMatch()
+    }
+
+    def "classifier inference handles main and classified jars"() {
+        expect:
+        DependencyResolutionShadowListener.inferClassifier(fileName, "demo", "1.2.3") == classifier
+
+        where:
+        fileName                    | classifier
+        "demo-1.2.3.jar"            | ""
+        "demo-1.2.3-sources.jar"    | "sources"
+        "other-1.2.3.jar"           | ""
+        "demo-1.2.3.module"         | ""
     }
 }
