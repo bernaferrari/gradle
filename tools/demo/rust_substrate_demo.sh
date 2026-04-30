@@ -15,9 +15,12 @@ Usage: tools/demo/rust_substrate_demo.sh [--quick|--full] [--skip-sample-builds]
 Runs an honest Rust substrate demo:
   - strict stabilization gate
   - checked-in offline corpus contract validation
+  - external dependency and unsupported corpus contract validation
   - captured build-plan shadow Java lifecycle execution with JVM fallback disabled
   - optional sample Gradle builds from testing/corpus
   - optional no-fallback authoritative RunBuild gate with output inventory/hash parity
+  - optional native-ready-default RunBuild gate
+  - optional dependency transport smoke test
   - optional Rust daemon gRPC e2e test suite
 
 Use --full when preparing a public demo; it runs the full stabilization mode,
@@ -85,12 +88,27 @@ run_step "Offline corpus contract validation" \
     --contract-only \
     --output-dir "$OUTPUT_DIR"
 
+run_step "External dependency corpus contract validation" \
+  python3 ./tools/corpus_runner/run.py \
+    --manifest testing/corpus/external-manifest.json \
+    --contract-only \
+    --output-dir "$OUTPUT_DIR/external-contract"
+
+run_step "Unsupported corpus contract validation" \
+  python3 ./tools/corpus_runner/run.py \
+    --manifest testing/corpus/unsupported-manifest.json \
+    --contract-only \
+    --output-dir "$OUTPUT_DIR/unsupported-contract"
+
 if [[ "$RUN_NATIVE_SHADOW" -eq 1 ]]; then
   run_step "No-fallback captured Java lifecycle via Rust" \
     cargo test -p gradle-substrate-daemon \
       --test build_plan_shadow_test \
       refreshed_native_ready_shadow_plan_runs_java_lifecycle_without_jvm_fallback \
       -- --exact
+  run_step "Rust dependency transport smoke test" \
+    cargo test -p gradle-substrate-daemon \
+      download_artifact_streams
 fi
 
 if [[ "$RUN_SAMPLE_BUILDS" -eq 1 ]]; then
@@ -117,7 +135,18 @@ if [[ "$RUN_SAMPLE_BUILDS" -eq 1 ]]; then
       --timeout 300 \
       --verbose \
       --output-dir "$OUTPUT_DIR"
+  run_step "Build checked-in corpus with native-ready default gate" \
+    python3 ./tools/corpus_runner/run.py \
+      --manifest testing/corpus/manifest.json \
+      --daemon-binary target/debug/gradle-substrate-daemon \
+      --runbuild-native-ready-default \
+      --tasks clean build \
+      --timeout 300 \
+      --output-dir "$OUTPUT_DIR/native-ready-default"
   if [[ -f "$OUTPUT_DIR/corpus_summary.json" ]]; then
+    python3 ./tools/performance/rust_substrate_perf_report.py \
+      "$OUTPUT_DIR/corpus_summary.json" \
+      --output "$OUTPUT_DIR/performance.md"
     run_step "Authoritative corpus evidence" \
       python3 - "$OUTPUT_DIR/corpus_summary.json" <<'PY'
 import json
@@ -134,6 +163,7 @@ print(f"output inventory parity: {summary['output_file_inventory_match_count']}/
 print(f"non-archive output hash parity: {summary['output_hash_match_count']}/{total}")
 print(f"task totals: upstream={summary['upstream_task_total']}, substrate={summary['substrate_task_total']}")
 print(f"observed wall time: upstream={summary['upstream_duration_ms']}ms, substrate={summary['substrate_duration_ms']}ms")
+print("performance report: performance.md")
 if summary["failed_projects"]:
     print("failed projects: " + ", ".join(summary["failed_projects"]))
 if summary["fallback_projects"]:
@@ -155,10 +185,14 @@ What this proves:
   - Hardened bridge clients fail closed instead of returning hidden defaults.
   - Build-plan IR v2 fingerprints and shadow artifacts are stable.
   - The checked-in Java library/application/multi-project/resource-expansion/compile-options/Copy/Sync/archive/Exec corpus has deterministic build-plan contracts.
+  - The external dependency corpus has deterministic dependency/constraint contract coverage without requiring network in the demo contract step.
+  - Unsupported JVM/custom work is tracked separately so native execution does not silently claim unsupported parity.
   - A captured JVM-host Java lifecycle build-plan shadow can execute JavaCompile, ProcessResources, classes, and Jar through Rust with JVM fallback disabled.
+  - Rust dependency transport can stream artifact bytes over HTTP in the daemon service.
   - Native Copy/ProcessResources/Sync coverage includes recursive directory sources, declared token expansion, CopySpec include/exclude patterns, nested CopySpec into mappings for Copy and Sync, duplicate destination strategies, empty-directory semantics, and copied file permissions.
   - Native archive coverage includes Zip, Tar gzip+bzip2, War, and Ear tasks with reproducible ZIP timestamps, nested CopySpec into mappings for Zip and Tar, duplicate-entry strategy handling, empty-directory semantics, file permissions, and bzip2 TAR output.
   - When sample builds are enabled, the checked-in Java corpus exercises the explicit no-fallback RunBuild gate from real Gradle invocations and compares stable output inventories, non-archive SHA-256 hashes, and archive entry inventories.
+  - The native-ready-default gate is exercised separately and delegates when a selected plan is incomplete.
   - The authoritative corpus summary records matched projects, no-fallback counts, task parity, output parity, and observed upstream/substrate wall-clock timing.
   - Rust daemon gRPC behavior is exercised when --skip-grpc-e2e is not used.
 

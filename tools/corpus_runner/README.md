@@ -93,11 +93,13 @@ expansion, JavaCompile options, standalone Copy/Sync resource transforms,
 CopySpec duplicate handling, nested Copy/Sync CopySpec `into(...)` mappings,
 Zip/Tar nested CopySpec mappings, Zip/Tar gzip+bzip2/War/Ear archive builds,
 simple Java launcher Exec and JavaExec tasks, and native Javadoc. The optional
-`testing/corpus/external-manifest.json` adds a pinned JUnit Platform sample for
-real non-empty test execution with include/exclude tag filtering plus a richer
-dependency constraints/exclusion sample, and requires network or a warm Gradle
-dependency cache. `testing/corpus/unsupported-manifest.json` tracks work that
-must not be approximated natively until a complete contract exists.
+offline corpus also includes an OSS-style Java library slice with sources
+JAR/Javadoc/report outputs. The optional `testing/corpus/external-manifest.json`
+adds a pinned JUnit Platform sample for real non-empty test execution with
+include/exclude tag filtering plus a richer dependency constraints/exclusion
+sample, and requires network or a warm Gradle dependency cache.
+`testing/corpus/unsupported-manifest.json` tracks work that must not be
+approximated natively until a complete contract exists.
 
 Reference-mode runs compare upstream Gradle and Rust substrate exit codes, task
 lists, and stable build output file inventories under `build/classes`,

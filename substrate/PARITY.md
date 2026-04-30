@@ -22,7 +22,8 @@
   Java multi-project, resource expansion, JavaCompile options, standalone
   Copy/Sync transforms, CopySpec duplicates, nested Copy/Sync and Zip/Tar
   CopySpec mappings, Zip/Tar/War/Ear archive tasks, a simple Exec task, and a
-  JavaExec task, and a Javadoc task through that explicit gate with
+  JavaExec task, Javadoc task, and an OSS-style Java library slice with
+  sources JAR/Javadoc/report outputs through that explicit gate with
   `target/debug/gradle-substrate-daemon`.
 - A separate networked JUnit corpus build proves native `TestExec` lowering for
   a non-empty JUnit Platform test task, including include/exclude tag capture,
@@ -39,7 +40,7 @@
 - The native-ready default gate
   `org.gradle.rust.substrate.runbuild.native-ready-default=true` tries Rust
   RunBuild first and delegates back to JVM execution when the selected plan is
-  not fully native-ready.
+  not fully native-ready. The offline corpus passes through this gate at 21/21.
 - `testing/corpus/unsupported-manifest.json` tracks work that must remain
   outside approximate native execution until a complete contract exists.
 - Native dependency resolution handles inherited Maven exclusions per dependency
@@ -49,6 +50,9 @@
   only filtering top-level requested dependencies.
 - Native dependency resolution builds artifact URLs from classifier and
   extension metadata instead of assuming every artifact is an unclassified JAR.
+- Native dependency transport can stream artifact bytes over HTTP from a
+  repository-derived Maven artifact URL, with retry/error handling in the Rust
+  dependency-resolution service.
 - Archive tasks (`Jar`, `Zip`, `War`, `Ear`, `Tar`) can lower to native Rust
   archive execution when the task model provides input paths and an output
   archive path. ZIP-compatible tasks emit ZIP-compatible archives; `Tar` emits
@@ -107,9 +111,11 @@
 - `cargo test -p gradle-substrate-daemon --test build_plan_shadow_test refreshed_native_ready_shadow_plan_runs_java_lifecycle_without_jvm_fallback -- --exact`
 - `./gradlew :core:test --tests org.gradle.execution.RustAuthoritativeBuildExecutionActionTest -x :distributions-core:generateLicenseFile`
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --verbose`
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-native-ready-default --tasks clean build --timeout 300 --output-dir build/corpus-native-ready-default-21`
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --verbose`
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/unsupported-manifest.json --contract-only --output-dir build/corpus-contract-unsupported`
-- `python3 tools/performance/rust_substrate_perf_report.py build/corpus-authoritative-20/corpus_summary.json --output build/corpus-authoritative-20/performance.md`
+- `cargo test -p gradle-substrate-daemon download_artifact_streams`
+- `python3 tools/performance/rust_substrate_perf_report.py build/corpus-authoritative-21/corpus_summary.json --output build/corpus-authoritative-21/performance.md`
 - `./tools/stabilization/run_strict_stabilization.sh quick`
 - `./tools/demo/rust_substrate_demo.sh --quick`
 

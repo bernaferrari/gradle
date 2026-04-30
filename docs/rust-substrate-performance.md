@@ -9,11 +9,11 @@ python3 tools/corpus_runner/run.py \
   --runbuild-authoritative \
   --tasks clean build \
   --timeout 300 \
-  --output-dir build/rust-substrate-corpus
+  --output-dir build/corpus-authoritative-21
 
 python3 tools/performance/rust_substrate_perf_report.py \
-  build/rust-substrate-corpus/corpus_summary.json \
-  --output build/rust-substrate-corpus/performance.md
+  build/corpus-authoritative-21/corpus_summary.json \
+  --output build/corpus-authoritative-21/performance.md
 ```
 
 The generated report records matched projects, no-fallback projects, task-count
