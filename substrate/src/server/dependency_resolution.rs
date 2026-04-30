@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use dashmap::DashMap;
@@ -175,7 +176,7 @@ pub struct PomDependency {
 /// Rust-native dependency resolution service.
 /// Resolves dependency graphs, fetches POMs from Maven repos, and manages artifact caching.
 pub struct DependencyResolutionServiceImpl {
-    artifact_cache: DashMap<String, CachedArtifact>,
+    artifact_cache: Arc<DashMap<String, CachedArtifact>>,
     resolution_stats: ResolutionStats,
     http_client: reqwest::Client,
     artifact_store_dir: PathBuf,
@@ -236,7 +237,7 @@ impl DependencyResolutionServiceImpl {
     pub fn new(artifact_store_dir: PathBuf) -> Self {
         std::fs::create_dir_all(&artifact_store_dir).ok();
         Self {
-            artifact_cache: DashMap::new(),
+            artifact_cache: Arc::new(DashMap::new()),
             resolution_stats: ResolutionStats {
                 total_resolutions: AtomicI64::new(0),
                 cache_hits: AtomicI64::new(0),
@@ -2314,6 +2315,19 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
         };
         let client = self.http_client.clone();
         let extension = Self::normalize_extension(&req.extension);
+        let cache_key = Self::artifact_cache_key(
+            &req.group,
+            &req.name,
+            &req.version,
+            &req.classifier,
+            &extension,
+        );
+        let artifact_cache = Arc::clone(&self.artifact_cache);
+        let cache_group = req.group.clone();
+        let cache_name = req.name.clone();
+        let cache_version = req.version.clone();
+        let cache_classifier = req.classifier.clone();
+        let cache_extension = extension.clone();
         let store_path = if req.group.is_empty() || req.name.is_empty() || req.version.is_empty() {
             PathBuf::new()
         } else {
@@ -2458,6 +2472,17 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                                     if let Err(e) = Self::write_sha256_sidecar(&store_path, &sha256).await {
                                         tracing::warn!(path = %store_path.display(), error = %e, "Failed to write artifact checksum sidecar");
                                     }
+                                    artifact_cache.insert(cache_key.clone(), CachedArtifact {
+                                        group: cache_group.clone(),
+                                        name: cache_name.clone(),
+                                        version: cache_version.clone(),
+                                        classifier: cache_classifier.clone(),
+                                        extension: cache_extension.clone(),
+                                        sha256: sha256.clone(),
+                                        local_path: store_path.to_string_lossy().into_owned(),
+                                        size: offset as i64,
+                                        cached_at_ms: Self::now_ms(),
+                                    });
                                 }
 
                                 yield Ok(crate::proto::DownloadArtifactChunk {
@@ -2929,6 +2954,18 @@ mod tests {
             .split_whitespace()
             .next(),
             Some(expected_sha256.as_str())
+        );
+
+        let cache_key = DependencyResolutionServiceImpl::artifact_cache_key(
+            "org.example",
+            "demo",
+            "1.0",
+            "",
+            "jar",
+        );
+        assert!(
+            svc.artifact_cache.contains_key(&cache_key),
+            "download should populate the warm artifact cache immediately"
         );
 
         let cache_hit = svc

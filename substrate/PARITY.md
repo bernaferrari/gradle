@@ -55,8 +55,9 @@
   dependency-resolution service.
 - Native dependency transport now persists downloaded Maven artifacts into the
   Rust artifact store, writes `.sha256` sidecars, validates cold and warm cache
-  hits against requested SHA-256 values, and can verify checksums from persisted
-  artifacts.
+  hits against requested SHA-256 values, populates the warm artifact cache
+  immediately after a successful streamed download commit, and can verify
+  checksums from persisted artifacts.
 - Rust artifact cache identity includes classifier and normalized extension, so
   in-memory warm hits cannot collide different artifact shapes for the same
   Maven coordinate.
