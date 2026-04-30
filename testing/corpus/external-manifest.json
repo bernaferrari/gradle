@@ -19,6 +19,26 @@
         "project_dependencies": [],
         "toolchains": ["17"]
       }
+    },
+    {
+      "name": "dependency-constraints-kotlin-dsl",
+      "path": "dependency-constraints-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 1,
+        "plugins": ["java-library"],
+        "tasks": ["dependencyContractReport"],
+        "outputs": ["build/reports/dependency-contract.txt"],
+        "dependencies": [
+          "com.google.guava:guava:33.2.1-jre",
+          "org.apache.commons:commons-lang3:3.14.0",
+          "org.junit.jupiter:junit-jupiter:5.10.2"
+        ],
+        "project_dependencies": [],
+        "toolchains": ["17"]
+      }
     }
   ]
 }

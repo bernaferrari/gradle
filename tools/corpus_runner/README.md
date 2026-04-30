@@ -21,6 +21,11 @@ python3 tools/corpus_runner/run.py \
   --manifest testing/corpus/external-manifest.json \
   --contract-only
 
+# Validate explicitly unsupported corpus contracts
+python3 tools/corpus_runner/run.py \
+  --manifest testing/corpus/unsupported-manifest.json \
+  --contract-only
+
 # Run in shadow mode with an explicit substrate daemon binary
 python3 tools/corpus_runner/run.py \
   --project /path/to/project \
@@ -69,6 +74,11 @@ than umbrella authoritative mode: Gradle skips its JVM task executor only when
 Rust `RunBuild` completes the selected plan with zero JVM forwards and the exact
 scheduled task count.
 
+`--runbuild-native-ready-default` adds
+`-Dorg.gradle.rust.substrate.runbuild.native-ready-default=true`. It tries Rust
+RunBuild first and delegates back to the JVM executor when the selected plan is
+not fully native-ready.
+
 `--contract-only` does not invoke Gradle. It scans checked-in sample projects
 and validates deterministic build-plan signals such as plugins, declared tasks,
 declared outputs, source files, external dependencies, project dependencies, and
@@ -82,10 +92,12 @@ covering Java library, Java application, Java multi-project, Java resource
 expansion, JavaCompile options, standalone Copy/Sync resource transforms,
 CopySpec duplicate handling, nested Copy/Sync CopySpec `into(...)` mappings,
 Zip/Tar nested CopySpec mappings, Zip/Tar gzip+bzip2/War/Ear archive builds,
-and simple Java launcher Exec and JavaExec tasks. The optional
+simple Java launcher Exec and JavaExec tasks, and native Javadoc. The optional
 `testing/corpus/external-manifest.json` adds a pinned JUnit Platform sample for
-real non-empty test execution with include/exclude tag filtering and requires
-network or a warm Gradle dependency cache.
+real non-empty test execution with include/exclude tag filtering plus a richer
+dependency constraints/exclusion sample, and requires network or a warm Gradle
+dependency cache. `testing/corpus/unsupported-manifest.json` tracks work that
+must not be approximated natively until a complete contract exists.
 
 Reference-mode runs compare upstream Gradle and Rust substrate exit codes, task
 lists, and stable build output file inventories under `build/classes`,

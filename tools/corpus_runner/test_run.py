@@ -48,6 +48,20 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         )
         self.assertNotIn("-Dorg.gradle.rust.substrate.runbuild.enabled=true", command)
 
+    def test_runbuild_native_ready_default_adds_delegating_gate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            command = corpus_run.build_gradle_command(
+                tmp,
+                substrate=True,
+                tasks=["build"],
+                runbuild_native_ready_default=True,
+            )
+
+        self.assertIn(
+            "-Dorg.gradle.rust.substrate.runbuild.native-ready-default=true",
+            command,
+        )
+
     def test_prefers_project_wrapper_when_present(self):
         with tempfile.TemporaryDirectory() as tmp:
             Path(tmp, "gradlew").touch()
@@ -91,6 +105,20 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         results = corpus_run.run_manifest_contracts(str(manifest))
 
         self.assertIn("java-junit-kotlin-dsl", results)
+        failures = {
+            name: result["mismatches"]
+            for name, result in results.items()
+            if not result["match"]
+        }
+        self.assertEqual({}, failures)
+
+    def test_unsupported_corpus_manifest_contracts_pass(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        manifest = repo_root / "testing" / "corpus" / "unsupported-manifest.json"
+
+        results = corpus_run.run_manifest_contracts(str(manifest))
+
+        self.assertIn("custom-task-unsupported-kotlin-dsl", results)
         failures = {
             name: result["mismatches"]
             for name, result in results.items()
@@ -175,6 +203,21 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         self.assertFalse(checks["match"])
         self.assertFalse(checks["successful"])
         self.assertTrue(checks["exit_code_match"])
+
+    def test_compare_expected_fail_closed_accepts_substrate_failure(self):
+        upstream = corpus_run.RunResult(exit_code=0, output="BUILD SUCCESSFUL", tasks=[":build"])
+        substrate = corpus_run.RunResult(
+            exit_code=1,
+            output="Rust authoritative run-build did not complete: No executor for task type",
+            tasks=[],
+            substrate_noop=False,
+        )
+
+        checks = corpus_run.compare_expected_fail_closed(upstream, substrate)
+
+        self.assertTrue(checks["match"])
+        self.assertTrue(checks["successful"])
+        self.assertTrue(checks["no_fallback"])
 
     def test_summarize_results_counts_parity_and_fallbacks(self):
         results = {

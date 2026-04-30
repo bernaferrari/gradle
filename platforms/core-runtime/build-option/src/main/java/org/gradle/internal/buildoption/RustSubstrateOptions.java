@@ -382,6 +382,16 @@ public class RustSubstrateOptions {
         InternalOptions.ofBoolean("org.gradle.rust.substrate.runbuild.authoritative", false);
 
     /**
+     * Let Rust execute selected work by default only when the plan is fully native-ready.
+     * Falls back to the JVM executor when Rust cannot complete the selected plan without
+     * JVM forwarding.
+     * Property: org.gradle.rust.substrate.runbuild.native-ready-default
+     * Default: false
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_NATIVE_READY_DEFAULT_RUN_BUILD =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.runbuild.native-ready-default", false);
+
+    /**
      * Enable authoritative mode for Rust-backed execution plan advisory subsystem.
      * Property: org.gradle.rust.substrate.executionplan.authoritative
      * Default: false

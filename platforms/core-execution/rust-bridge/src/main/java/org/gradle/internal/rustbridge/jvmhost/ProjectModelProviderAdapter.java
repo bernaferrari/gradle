@@ -282,6 +282,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if ("JavaExec".equals(shortTaskTypeName)) {
             captureJavaExecInputs(task, inputs);
         }
+        if ("Javadoc".equals(shortTaskTypeName)) {
+            captureJavadocInputs(task, inputs);
+        }
 
         BuildPlanTask.Builder builder = BuildPlanTask.newBuilder()
             .setPath(task.getPath())
@@ -293,8 +296,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             .putAllInputs(inputs);
 
         List<String> inputPaths = fileCollectionPaths(safeInputFiles(task));
-        List<String> sourcePaths = "JavaCompile".equals(shortTaskTypeName)
-            ? fileCollectionPaths(safeJavaCompileSource(task))
+        List<String> sourcePaths = ("JavaCompile".equals(shortTaskTypeName) || "Javadoc".equals(shortTaskTypeName))
+            ? fileCollectionPaths(safeTaskSource(task))
             : new ArrayList<>();
         List<String> outputPaths = fileCollectionPaths(safeOutputFiles(task));
         builder.addAllDependsOn(selectedDependencyPaths == null
@@ -350,7 +353,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "file_permissions", permissionUnixMode(invokeOptional(rootSpec, "getFilePermissions")));
         putIfPresent(inputs, "dir_permissions", permissionUnixMode(invokeOptional(rootSpec, "getDirPermissions")));
         putIfPresent(inputs, "copy_file_mappings", nestedCopyFileMappings(rootSpec));
-        inputs.put("copy_contains_symlinks", Boolean.toString(containsSymbolicLinks(safeInputFiles(task))));
+        inputs.put("copy_contains_symlinks", Boolean.toString(containsSymbolicLinks(safeInputFiles(task)) || copySpecContainsSymbolicLinks(rootSpec)));
     }
 
     private static String nestedCopyFileMappings(@Nullable Object rootSpec) {
@@ -446,7 +449,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "file_permissions", permissionUnixMode(invokeOptional(rootSpec, "getFilePermissions")));
         putIfPresent(inputs, "dir_permissions", permissionUnixMode(invokeOptional(rootSpec, "getDirPermissions")));
         putIfPresent(inputs, "copy_file_mappings", nestedCopyFileMappings(rootSpec));
-        inputs.put("copy_contains_symlinks", Boolean.toString(containsSymbolicLinks(safeInputFiles(task))));
+        inputs.put("copy_contains_symlinks", Boolean.toString(containsSymbolicLinks(safeInputFiles(task)) || copySpecContainsSymbolicLinks(rootSpec)));
     }
 
     private static boolean containsSymbolicLinks(@Nullable FileCollection files) {
@@ -463,6 +466,34 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             LOGGER.debug("[substrate-jvmhost] Failed to inspect task inputs for symlinks", e);
         }
         return false;
+    }
+
+    private static boolean copySpecContainsSymbolicLinks(@Nullable Object rootSpec) {
+        Object resolver = rootSpec == null ? null : invokeOptional(rootSpec, "buildRootResolver");
+        if (resolver == null) {
+            return false;
+        }
+        boolean[] containsSymlink = new boolean[] { false };
+        Action<Object> visitor = specResolver -> {
+            if (containsSymlink[0]) {
+                return;
+            }
+            Object sourceValue = invokeOptional(specResolver, "getSource");
+            if (!(sourceValue instanceof FileTree)) {
+                return;
+            }
+            ((FileTree) sourceValue).visit(details -> {
+                if (!containsSymlink[0] && Files.isSymbolicLink(details.getFile().toPath())) {
+                    containsSymlink[0] = true;
+                }
+            });
+        };
+        try {
+            invoke(resolver, "walk", Action.class, visitor);
+        } catch (RuntimeException e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to inspect CopySpec inputs for symlinks", e);
+        }
+        return containsSymlink[0];
     }
 
     private static List<String> copyActionClassNames(@Nullable Object rootSpec) {
@@ -482,11 +513,11 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     }
 
     private static boolean hasUnsupportedCopyActions(boolean hasCustomActions, List<String> copyActionClasses) {
-        if (!hasCustomActions) {
+        if (!hasCustomActions && copyActionClasses.isEmpty()) {
             return false;
         }
         if (copyActionClasses.isEmpty()) {
-            return true;
+            return hasCustomActions;
         }
         for (String className : copyActionClasses) {
             if (!className.endsWith("MapBackedExpandAction")) {
@@ -543,6 +574,17 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "jvm_args", stringList(invokeOptional(task, "getJvmArgs")));
         putIfPresent(inputs, "working_dir", filePath(invokeOptional(task, "getWorkingDir")));
         putIfPresent(inputs, "ignore_exit_value", booleanString(invokeOptional(task, "isIgnoreExitValue")));
+    }
+
+    private static void captureJavadocInputs(Task task, Map<String, String> inputs) {
+        putIfPresent(inputs, "java_home", javaLauncherHome(task));
+        putIfPresent(inputs, "classpath", fileCollectionPathString(invokeOptional(task, "getClasspath")));
+        putIfPresent(inputs, "destination_dir", filePath(invokeOptional(task, "getDestinationDir")));
+        putIfPresent(inputs, "title", stringOrEmpty(invokeOptional(task, "getTitle")));
+        putIfPresent(inputs, "max_memory", stringOrEmpty(invokeOptional(task, "getMaxMemory")));
+        Object options = invokeOptional(task, "getOptions");
+        putIfPresent(inputs, "encoding", stringOrEmpty(invokeOptional(options, "getEncoding")));
+        putIfPresent(inputs, "no_timestamp", booleanString(invokeOptional(options, "isNoTimestamp")));
     }
 
     private static String javaExecMainClass(Task task) {
@@ -785,7 +827,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     }
 
     @Nullable
-    private static FileCollection safeJavaCompileSource(Task task) {
+    private static FileCollection safeTaskSource(Task task) {
         Object source = invokeOptional(task, "getSource");
         return source instanceof FileCollection ? (FileCollection) source : null;
     }
@@ -865,6 +907,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         }
         if ("Exec".equals(simpleName) || "JavaExec".equals(simpleName)) {
             return "external-process";
+        }
+        if ("Javadoc".equals(simpleName)) {
+            return "documentation";
         }
         if (("DefaultTask".equals(simpleName) || "Task".equals(simpleName)) && taskActionCount(task) == 0) {
             return "lifecycle";
