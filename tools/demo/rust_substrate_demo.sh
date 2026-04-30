@@ -14,7 +14,7 @@ usage() {
 Usage: tools/demo/rust_substrate_demo.sh [--quick|--full] [--skip-first60] [--skip-sample-builds] [--skip-grpc-e2e] [--skip-native-shadow] [--output-dir DIR]
 
 Runs an honest Rust substrate demo:
-  - first-60-second visible wins: daemon ready time, dependency transport smoke, file-watch latency
+  - first-60-second visible wins: daemon ready time, dependency transport/store/checksum smoke, file-watch latency
   - strict stabilization gate
   - checked-in offline corpus contract validation
   - external dependency and unsupported corpus contract validation
@@ -206,7 +206,7 @@ What this proves:
   - The native-ready-default gate is exercised separately and delegates when a selected plan is incomplete.
   - The authoritative corpus summary records matched projects, no-fallback counts, task parity, output parity, and observed upstream/substrate wall-clock timing.
   - Rust daemon gRPC behavior is exercised when --skip-grpc-e2e is not used.
-  - First-60-second metrics record daemon socket readiness, Rust dependency transport smoke timing, and native file-watch first-event latency.
+  - First-60-second metrics record daemon socket readiness, Rust dependency transport/store/checksum smoke timing, and native file-watch first-event latency.
 
 What this does not claim:
   - This is not a full Gradle replacement.

@@ -287,6 +287,60 @@ impl DependencyResolutionServiceImpl {
             .join(&filename)
     }
 
+    fn normalize_extension(extension: &str) -> String {
+        let extension = extension.trim_start_matches('.');
+        if extension.is_empty() {
+            "jar".to_string()
+        } else {
+            extension.to_string()
+        }
+    }
+
+    fn now_ms() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64
+    }
+
+    fn sha256_sidecar_path(path: &Path) -> PathBuf {
+        PathBuf::from(format!("{}.sha256", path.to_string_lossy()))
+    }
+
+    async fn compute_file_sha256(path: &Path) -> Result<String, String> {
+        use tokio::io::AsyncReadExt;
+
+        let mut file = tokio::fs::File::open(path)
+            .await
+            .map_err(|e| format!("Failed to open {}: {}", path.display(), e))?;
+        let mut hasher = Sha256::new();
+        let mut buf = vec![0u8; 64 * 1024];
+        loop {
+            let read = file
+                .read(&mut buf)
+                .await
+                .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buf[..read]);
+        }
+        Ok(format!("{:x}", hasher.finalize()))
+    }
+
+    async fn write_sha256_sidecar(path: &Path, sha256: &str) -> Result<(), String> {
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("artifact");
+        tokio::fs::write(
+            Self::sha256_sidecar_path(path),
+            format!("{}  {}\n", sha256, file_name),
+        )
+        .await
+        .map_err(|e| format!("Failed to write SHA-256 sidecar: {}", e))
+    }
+
     /// Compute SHA-256 hex digest of data.
     fn compute_sha256(data: &[u8]) -> String {
         let mut hasher = Sha256::new();
@@ -2079,15 +2133,34 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                 .cache_hits
                 .fetch_add(1, Ordering::Relaxed);
 
-            // Validate SHA-256 if the caller provided one
-            if !req.sha256.is_empty() && !cached.sha256.is_empty() && req.sha256 != cached.sha256 {
+            let cached_group = cached.group.clone();
+            let cached_name = cached.name.clone();
+            let cached_version = cached.version.clone();
+            let cached_classifier = cached.classifier.clone();
+            let cached_extension = cached.extension.clone();
+            let cached_sha256 = cached.sha256.clone();
+            let cached_local_path = cached.local_path.clone();
+            let cached_size = cached.size;
+            let cached_at_ms = cached.cached_at_ms;
+            drop(cached);
+
+            let actual_sha256 = if !req.sha256.is_empty() && cached_sha256.is_empty() {
+                Self::compute_file_sha256(Path::new(&cached_local_path))
+                    .await
+                    .unwrap_or_default()
+            } else {
+                cached_sha256.clone()
+            };
+
+            // Validate SHA-256 if the caller provided one.
+            if !req.sha256.is_empty() && actual_sha256 != req.sha256 {
                 tracing::warn!(
-                    group = %cached.group,
-                    name = %cached.name,
-                    version = %cached.version,
-                    classifier = %cached.classifier,
+                    group = %cached_group,
+                    name = %cached_name,
+                    version = %cached_version,
+                    classifier = %cached_classifier,
                     expected_sha256 = %req.sha256,
-                    cached_sha256 = %cached.sha256,
+                    cached_sha256 = %actual_sha256,
                     "Artifact cache SHA-256 mismatch"
                 );
                 return Ok(Response::new(CheckArtifactCacheResponse {
@@ -2101,26 +2174,26 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as i64
-                - cached.cached_at_ms;
+                - cached_at_ms;
 
             tracing::debug!(
-                group = %cached.group,
-                name = %cached.name,
-                version = %cached.version,
-                classifier = %cached.classifier,
-                extension = %cached.extension,
-                sha256 = %cached.sha256,
-                local_path = %cached.local_path,
-                size = cached.size,
-                cached_at_ms = cached.cached_at_ms,
+                group = %cached_group,
+                name = %cached_name,
+                version = %cached_version,
+                classifier = %cached_classifier,
+                extension = %cached_extension,
+                sha256 = %actual_sha256,
+                local_path = %cached_local_path,
+                size = cached_size,
+                cached_at_ms,
                 age_ms,
                 "Artifact cache hit"
             );
 
             return Ok(Response::new(CheckArtifactCacheResponse {
                 cached: true,
-                local_path: cached.local_path.clone(),
-                cached_size: cached.size,
+                local_path: cached_local_path,
+                cached_size,
             }));
         }
 
@@ -2135,6 +2208,24 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
         if path.exists() {
             let metadata = path.metadata().ok();
             let size = metadata.as_ref().map(|m| m.len() as i64).unwrap_or(0);
+            let actual_sha256 = Self::compute_file_sha256(&path).await.unwrap_or_default();
+
+            if !req.sha256.is_empty() && actual_sha256 != req.sha256 {
+                tracing::warn!(
+                    group = %req.group,
+                    name = %req.name,
+                    version = %req.version,
+                    classifier = %req.classifier,
+                    expected_sha256 = %req.sha256,
+                    actual_sha256 = %actual_sha256,
+                    "Artifact cache cold-path SHA-256 mismatch"
+                );
+                return Ok(Response::new(CheckArtifactCacheResponse {
+                    cached: false,
+                    local_path: String::new(),
+                    cached_size: 0,
+                }));
+            }
 
             let cached_artifact = CachedArtifact {
                 group: req.group.clone(),
@@ -2142,13 +2233,10 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                 version: req.version.clone(),
                 classifier: req.classifier.clone(),
                 extension: req.extension.clone(),
-                sha256: req.sha256.clone(),
+                sha256: actual_sha256.clone(),
                 local_path: path.to_string_lossy().into_owned(),
                 size,
-                cached_at_ms: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as i64,
+                cached_at_ms: Self::now_ms(),
             };
 
             // Insert into DashMap for future warm-path hits
@@ -2158,6 +2246,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                 group = %req.group,
                 name = %req.name,
                 version = %req.version,
+                sha256 = %actual_sha256,
                 "Artifact cache cold-path hit from filesystem"
             );
 
@@ -2207,6 +2296,18 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             req.url.clone()
         };
         let client = self.http_client.clone();
+        let extension = Self::normalize_extension(&req.extension);
+        let store_path = if req.group.is_empty() || req.name.is_empty() || req.version.is_empty() {
+            PathBuf::new()
+        } else {
+            self.artifact_path(
+                &req.group,
+                &req.name,
+                &req.version,
+                &req.classifier,
+                &extension,
+            )
+        };
 
         let stream = async_stream::stream! {
             if url.is_empty() {
@@ -2229,74 +2330,126 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                     Ok(resp) => {
                         match resp.status().as_u16() {
                             200..=299 => {
-                                // Stream the response body in chunks
-                                if let Some(total_size) = resp.content_length() {
-                                    use futures_util::StreamExt;
-                                    let mut offset = 0u64;
-                                    let mut stream = resp.bytes_stream();
+                                use futures_util::StreamExt;
+                                use tokio::io::AsyncWriteExt;
 
-                                    while let Some(chunk_result) = stream.next().await {
-                                        match chunk_result {
-                                            Ok(bytes) => {
-                                                let chunk_len = bytes.len() as u64;
-                                                yield Ok(crate::proto::DownloadArtifactChunk {
-                                                    data: bytes.to_vec(),
-                                                    offset: offset as i64,
-                                                    total_size: total_size as i64,
-                                                    is_last: false,
-                                                    error_message: String::new(),
-                                                });
-                                                offset += chunk_len;
-                                            }
-                                            Err(e) => {
-                                                yield Ok(crate::proto::DownloadArtifactChunk {
-                                                    data: Vec::new(),
-                                                    offset: offset as i64,
-                                                    total_size: total_size as i64,
-                                                    is_last: true,
-                                                    error_message: format!("Stream error: {}", e),
-                                                });
-                                                return;
-                                            }
+                                let total_size = resp.content_length().map(|size| size as i64).unwrap_or(-1);
+                                let mut offset = 0u64;
+                                let mut body = resp.bytes_stream();
+                                let mut hasher = Sha256::new();
+                                let mut file = None;
+                                let tmp_path = if store_path.as_os_str().is_empty() {
+                                    PathBuf::new()
+                                } else {
+                                    PathBuf::from(format!("{}.part", store_path.to_string_lossy()))
+                                };
+
+                                if !store_path.as_os_str().is_empty() {
+                                    if let Some(parent) = store_path.parent() {
+                                        if let Err(e) = tokio::fs::create_dir_all(parent).await {
+                                            yield Ok(crate::proto::DownloadArtifactChunk {
+                                                data: Vec::new(),
+                                                offset: 0,
+                                                total_size,
+                                                is_last: true,
+                                                error_message: format!("Failed to create artifact store directory: {}", e),
+                                            });
+                                            return;
                                         }
                                     }
-
-                                    // Final chunk
-                                    yield Ok(crate::proto::DownloadArtifactChunk {
-                                        data: Vec::new(),
-                                        offset: offset as i64,
-                                        total_size: total_size as i64,
-                                        is_last: true,
-                                        error_message: String::new(),
-                                    });
-                                } else {
-                                    // Unknown size — read all into memory
-                                    match resp.bytes().await {
-                                        Ok(bytes) => {
-                                            let total = bytes.len() as i64;
-                                            let chunk_size = 64 * 1024;
-                                            for (offset, chunk) in bytes.chunks(chunk_size).enumerate() {
-                                                let is_last = offset * chunk_size + chunk.len() >= bytes.len();
-                                                yield Ok(crate::proto::DownloadArtifactChunk {
-                                                    data: chunk.to_vec(),
-                                                    offset: (offset * chunk_size) as i64,
-                                                    total_size: total,
-                                                    is_last,
-                                                    error_message: String::new(),
-                                                });
-                                            }
-                                        }
+                                    match tokio::fs::File::create(&tmp_path).await {
+                                        Ok(created) => file = Some(created),
                                         Err(e) => {
                                             yield Ok(crate::proto::DownloadArtifactChunk {
                                                 data: Vec::new(),
                                                 offset: 0,
-                                                total_size: 0,
+                                                total_size,
                                                 is_last: true,
-                                                error_message: format!("Failed to read response: {}", e),
+                                                error_message: format!("Failed to create artifact cache file: {}", e),
                                             });
+                                            return;
                                         }
                                     }
                                 }
+
+                                while let Some(chunk_result) = body.next().await {
+                                    match chunk_result {
+                                        Ok(bytes) => {
+                                            if let Some(cache_file) = file.as_mut() {
+                                                if let Err(e) = cache_file.write_all(&bytes).await {
+                                                    let _ = tokio::fs::remove_file(&tmp_path).await;
+                                                    yield Ok(crate::proto::DownloadArtifactChunk {
+                                                        data: Vec::new(),
+                                                        offset: offset as i64,
+                                                        total_size,
+                                                        is_last: true,
+                                                        error_message: format!("Failed to write artifact cache file: {}", e),
+                                                    });
+                                                    return;
+                                                }
+                                            }
+                                            hasher.update(&bytes);
+                                            let chunk_len = bytes.len() as u64;
+                                            yield Ok(crate::proto::DownloadArtifactChunk {
+                                                data: bytes.to_vec(),
+                                                offset: offset as i64,
+                                                total_size,
+                                                is_last: false,
+                                                error_message: String::new(),
+                                            });
+                                            offset += chunk_len;
+                                        }
+                                        Err(e) => {
+                                            let _ = tokio::fs::remove_file(&tmp_path).await;
+                                            yield Ok(crate::proto::DownloadArtifactChunk {
+                                                data: Vec::new(),
+                                                offset: offset as i64,
+                                                total_size,
+                                                is_last: true,
+                                                error_message: format!("Stream error: {}", e),
+                                            });
+                                            return;
+                                        }
+                                    }
+                                }
+
+                                let sha256 = format!("{:x}", hasher.finalize());
+                                if let Some(mut cache_file) = file {
+                                    if let Err(e) = cache_file.flush().await {
+                                        let _ = tokio::fs::remove_file(&tmp_path).await;
+                                        yield Ok(crate::proto::DownloadArtifactChunk {
+                                            data: Vec::new(),
+                                            offset: offset as i64,
+                                            total_size,
+                                            is_last: true,
+                                            error_message: format!("Failed to flush artifact cache file: {}", e),
+                                        });
+                                        return;
+                                    }
+                                    drop(cache_file);
+                                    if let Err(e) = tokio::fs::rename(&tmp_path, &store_path).await {
+                                        let _ = tokio::fs::remove_file(&tmp_path).await;
+                                        yield Ok(crate::proto::DownloadArtifactChunk {
+                                            data: Vec::new(),
+                                            offset: offset as i64,
+                                            total_size,
+                                            is_last: true,
+                                            error_message: format!("Failed to commit artifact cache file: {}", e),
+                                        });
+                                        return;
+                                    }
+                                    if let Err(e) = Self::write_sha256_sidecar(&store_path, &sha256).await {
+                                        tracing::warn!(path = %store_path.display(), error = %e, "Failed to write artifact checksum sidecar");
+                                    }
+                                }
+
+                                yield Ok(crate::proto::DownloadArtifactChunk {
+                                    data: Vec::new(),
+                                    offset: offset as i64,
+                                    total_size,
+                                    is_last: true,
+                                    error_message: String::new(),
+                                });
                                 return;
                             }
                             404 => {
@@ -2415,16 +2568,13 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
         let name = req.name.clone();
         let version = req.version.clone();
         let classifier = req.classifier.clone();
-        let extension = if classifier.is_empty() {
-            "jar".to_string()
-        } else {
-            format!("{}.jar", classifier)
-        };
+        let extension = "jar".to_string();
 
         // Compute persistent store path
         let store_path = self.artifact_path(&group, &name, &version, &classifier, &extension);
 
         // If a local file was provided, copy it to the persistent store
+        let mut actual_sha256 = req.sha256.clone();
         let resolved_path = if !req.local_path.is_empty() {
             let src = Path::new(&req.local_path);
             if src.exists() {
@@ -2436,12 +2586,8 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                 // Write SHA-256 sidecar
                 if let Ok(data) = tokio::fs::read(&store_path).await {
                     let sha256 = Self::compute_sha256(&data);
-                    let sha_path = store_path.with_extension("sha256");
-                    let _ = tokio::fs::write(
-                        &sha_path,
-                        format!("{}  {}-{}.{}\n", sha256, name, version, extension),
-                    )
-                    .await;
+                    actual_sha256 = sha256.clone();
+                    let _ = Self::write_sha256_sidecar(&store_path, &sha256).await;
                 }
 
                 store_path.to_string_lossy().into_owned()
@@ -2458,7 +2604,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             version,
             classifier,
             extension,
-            sha256: req.sha256,
+            sha256: actual_sha256,
             local_path: resolved_path,
             size: req.size,
             cached_at_ms: std::time::SystemTime::now()
@@ -2497,25 +2643,52 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
 
             match self.artifact_cache.get(&cache_key) {
                 Some(cached) => {
-                    if cached.sha256 != entry.expected_sha256 {
+                    let cached_sha256 = cached.sha256.clone();
+                    let cached_local_path = cached.local_path.clone();
+                    drop(cached);
+
+                    let actual_sha256 = if cached_sha256.is_empty() && !cached_local_path.is_empty()
+                    {
+                        Self::compute_file_sha256(Path::new(&cached_local_path))
+                            .await
+                            .unwrap_or_default()
+                    } else {
+                        cached_sha256
+                    };
+
+                    if actual_sha256 != entry.expected_sha256 {
                         failures.push(ChecksumFailure {
                             group: entry.group.clone(),
                             name: entry.name.clone(),
                             version: entry.version.clone(),
                             expected_sha256: entry.expected_sha256.clone(),
-                            actual_sha256: cached.sha256.clone(),
+                            actual_sha256,
                         });
                     }
                 }
                 None => {
-                    // Artifact not in cache — report as mismatch
-                    failures.push(ChecksumFailure {
-                        group: entry.group.clone(),
-                        name: entry.name.clone(),
-                        version: entry.version.clone(),
-                        expected_sha256: entry.expected_sha256.clone(),
-                        actual_sha256: String::new(),
-                    });
+                    let path = self.artifact_path(
+                        &entry.group,
+                        &entry.name,
+                        &entry.version,
+                        &entry.classifier,
+                        "jar",
+                    );
+                    let actual_sha256 = if path.exists() {
+                        Self::compute_file_sha256(&path).await.unwrap_or_default()
+                    } else {
+                        String::new()
+                    };
+
+                    if actual_sha256 != entry.expected_sha256 {
+                        failures.push(ChecksumFailure {
+                            group: entry.group.clone(),
+                            name: entry.name.clone(),
+                            version: entry.version.clone(),
+                            expected_sha256: entry.expected_sha256.clone(),
+                            actual_sha256,
+                        });
+                    }
                 }
             }
         }
@@ -2676,6 +2849,118 @@ mod tests {
 
         assert_eq!(downloaded, expected);
         assert!(saw_last);
+    }
+
+    #[tokio::test]
+    async fn test_download_artifact_populates_store_and_checksum_cache() {
+        use futures_util::StreamExt;
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body = b"persisted rust dependency artifact".to_vec();
+        let expected_sha256 = DependencyResolutionServiceImpl::compute_sha256(&body);
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/java-archive\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.write_all(&body).unwrap();
+        });
+
+        let store = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let mut stream = svc
+            .download_artifact(Request::new(crate::proto::DownloadArtifactRequest {
+                group: "org.example".to_string(),
+                name: "demo".to_string(),
+                version: "1.0".to_string(),
+                classifier: String::new(),
+                extension: "jar".to_string(),
+                repositories: vec![make_repo("local", &format!("http://{}", addr))],
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.unwrap();
+            assert!(chunk.error_message.is_empty(), "{}", chunk.error_message);
+            if chunk.is_last {
+                break;
+            }
+        }
+        server.join().unwrap();
+
+        let stored = store.path().join("org/example/demo/1.0/demo-1.0.jar");
+        assert_eq!(
+            tokio::fs::read(&stored).await.unwrap(),
+            b"persisted rust dependency artifact"
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(DependencyResolutionServiceImpl::sha256_sidecar_path(
+                &stored
+            ))
+            .await
+            .unwrap()
+            .split_whitespace()
+            .next(),
+            Some(expected_sha256.as_str())
+        );
+
+        let cache_hit = svc
+            .check_artifact_cache(Request::new(CheckArtifactCacheRequest {
+                group: "org.example".to_string(),
+                name: "demo".to_string(),
+                version: "1.0".to_string(),
+                classifier: String::new(),
+                extension: "jar".to_string(),
+                sha256: expected_sha256.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(cache_hit.cached);
+        assert_eq!(cache_hit.local_path, stored.to_string_lossy().to_string());
+
+        let rejected = svc
+            .check_artifact_cache(Request::new(CheckArtifactCacheRequest {
+                group: "org.example".to_string(),
+                name: "demo".to_string(),
+                version: "1.0".to_string(),
+                classifier: String::new(),
+                extension: "jar".to_string(),
+                sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+                    .to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!rejected.cached);
+
+        let checksum = svc
+            .verify_dependency_checksums(Request::new(VerifyDependencyChecksumsRequest {
+                entries: vec![crate::proto::ChecksumEntry {
+                    group: "org.example".to_string(),
+                    name: "demo".to_string(),
+                    version: "1.0".to_string(),
+                    classifier: String::new(),
+                    expected_sha256,
+                    actual_sha256: String::new(),
+                }],
+                strict: true,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(checksum.all_matched);
+        assert!(checksum.failures.is_empty());
     }
 
     #[test]
