@@ -34,8 +34,8 @@ release smoke coverage from `substrate/scripts/e2e-smoke-test.sh`.
   projects, a multi-project application, Java resource expansion, JavaCompile
   options, standalone Copy/Sync transforms, CopySpec duplicate handling,
   nested Copy/Sync CopySpec `into(...)` mappings, Zip/Tar gzip+bzip2/War/Ear
-  archive tasks, nested Zip/Tar CopySpec mappings, plus a simple Java launcher
-  Exec task.
+  archive tasks, nested Zip/Tar CopySpec mappings, plus simple Exec and
+  JavaExec process tasks.
 - `tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative`
   proves the checked-in corpus can run through the explicit no-fallback
   RunBuild gate and compare stable output inventories, non-archive content
@@ -48,7 +48,8 @@ release smoke coverage from `substrate/scripts/e2e-smoke-test.sh`.
 ## Current Limits
 
 - The demo does not claim full no-fallback Gradle execution beyond the covered
-  Java lifecycle, file operation, archive, test, and resource-expansion gates.
+  Java lifecycle, file operation, archive, test, JavaExec, and
+  resource-expansion gates.
 - DSL evaluation and legacy plugin semantics remain JVM compatibility work.
 - Archive byte-for-byte parity, arbitrary CopySpec actions, and broad
   dependency-resolution semantics remain outside the demo claim.

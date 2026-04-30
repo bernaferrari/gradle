@@ -82,7 +82,7 @@ covering Java library, Java application, Java multi-project, Java resource
 expansion, JavaCompile options, standalone Copy/Sync resource transforms,
 CopySpec duplicate handling, nested Copy/Sync CopySpec `into(...)` mappings,
 Zip/Tar nested CopySpec mappings, Zip/Tar gzip+bzip2/War/Ear archive builds,
-and a simple Java launcher Exec task. The optional
+and simple Java launcher Exec and JavaExec tasks. The optional
 `testing/corpus/external-manifest.json` adds a pinned JUnit Platform sample for
 real non-empty test execution with include/exclude tag filtering and requires
 network or a warm Gradle dependency cache.

@@ -207,6 +207,37 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
+    public void capturesNativeReadyJavaExecContractFromTaskModel() throws IOException {
+        File classesDir = temporaryFolder.newFolder("build/classes/java/main");
+        File outputDir = temporaryFolder.newFolder("build/resources");
+        File outputFile = new File(outputDir, "javaexec-result.txt");
+        assertTrue(outputFile.createNewFile());
+        File workingDir = temporaryFolder.newFolder("work-javaexec");
+
+        Task javaExec = javaExecTask(classesDir, outputFile, workingDir);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(javaExec, JavaExec.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals(":runTool", task.getPath());
+        assertEquals("external-process", task.getActionKind());
+        assertEquals("process", task.getWorkerIsolation());
+        assertEquals("JavaExec", inputs.get("taskType"));
+        assertFalse(inputs.get("java_home").isEmpty());
+        assertEquals(classesDir.getAbsolutePath(), inputs.get("classpath"));
+        assertEquals("example.Tool", inputs.get("main_class"));
+        assertEquals(outputFile.getAbsolutePath() + " expected-token", inputs.get("args"));
+        assertEquals("-Dnative=true -Xmx128m", inputs.get("jvm_args"));
+        assertEquals(workingDir.getAbsolutePath(), inputs.get("working_dir"));
+        assertEquals("false", inputs.get("ignore_exit_value"));
+        assertTrue(task.getOutputSpecsList().stream()
+            .map(BuildPlanTaskOutputSpec::getPath)
+            .anyMatch(path -> path.equals(outputFile.getAbsolutePath())));
+    }
+
+    @org.junit.Test
     public void capturesProcessResourcesAsNativeFileTransform() throws IOException {
         File resourceFile = temporaryFolder.newFile("application.properties");
         File outputDir = temporaryFolder.newFolder("build/resources/main");
@@ -491,6 +522,66 @@ public class ProjectModelProviderAdapterTest {
                     return "/usr/bin/touch";
                 case "getArgs":
                     return Collections.singletonList("generated.txt");
+                case "getWorkingDir":
+                    return workingDir;
+                case "isIgnoreExitValue":
+                    return false;
+                case "compareTo":
+                    return 0;
+                default:
+                    return defaultValue(method.getReturnType());
+            }
+        });
+    }
+
+    private static Task javaExecTask(File classesDir, File outputFile, File workingDir) {
+        FileCollection classpath = fileCollection(classesDir);
+        FileCollection outputs = fileCollection(outputFile);
+        Project project = proxy(Project.class, (proxy, method, args) -> {
+            if (method.getName().equals("getPath")) {
+                return ":";
+            }
+            return defaultValue(method.getReturnType());
+        });
+        TaskDependency noDependencies = proxy(TaskDependency.class, (proxy, method, args) -> {
+            if (method.getName().equals("getDependencies")) {
+                return Collections.emptySet();
+            }
+            return defaultValue(method.getReturnType());
+        });
+        return proxy(new Class<?>[] {Task.class, JavaExecContract.class}, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "getPath":
+                    return ":runTool";
+                case "getProject":
+                    return project;
+                case "getName":
+                    return "runTool";
+                case "getEnabled":
+                    return true;
+                case "getGroup":
+                case "getDescription":
+                    return "";
+                case "getTaskDependencies":
+                case "getShouldRunAfter":
+                case "getMustRunAfter":
+                case "getFinalizedBy":
+                    return noDependencies;
+                case "getInputs":
+                    return filesOwner(method.getReturnType(), classpath);
+                case "getOutputs":
+                    return filesOwner(method.getReturnType(), outputs);
+                case "getLocalState":
+                case "getDestroyables":
+                    return registeredFilesOwner(method.getReturnType());
+                case "getClasspath":
+                    return classpath;
+                case "getMainClass":
+                    return new ValueProvider("example.Tool");
+                case "getArgs":
+                    return Arrays.asList(outputFile.getAbsolutePath(), "expected-token");
+                case "getJvmArgs":
+                    return Arrays.asList("-Dnative=true", "-Xmx128m");
                 case "getWorkingDir":
                     return workingDir;
                 case "isIgnoreExitValue":
@@ -854,6 +945,15 @@ public class ProjectModelProviderAdapterTest {
         boolean isIgnoreExitValue();
     }
 
+    public interface JavaExecContract {
+        FileCollection getClasspath();
+        ValueProvider getMainClass();
+        Iterable<String> getArgs();
+        Iterable<String> getJvmArgs();
+        File getWorkingDir();
+        boolean isIgnoreExitValue();
+    }
+
     public interface CopySpecContract {
         boolean hasCustomActions();
         Object buildRootResolver();
@@ -1033,6 +1133,9 @@ public class ProjectModelProviderAdapterTest {
     }
 
     public static class Exec {
+    }
+
+    public static class JavaExec {
     }
 
     public static class Copy {

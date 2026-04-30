@@ -21,14 +21,17 @@
 - The checked-in offline corpus covers Java library, Java application,
   Java multi-project, resource expansion, JavaCompile options, standalone
   Copy/Sync transforms, CopySpec duplicates, nested Copy/Sync and Zip/Tar
-  CopySpec mappings, Zip/Tar/War/Ear archive tasks, and a simple Exec task through that explicit gate with
-  `target/debug/gradle-substrate-daemon`.
+  CopySpec mappings, Zip/Tar/War/Ear archive tasks, a simple Exec task, and a
+  JavaExec task through that explicit gate with `target/debug/gradle-substrate-daemon`.
 - A separate networked JUnit corpus build proves native `TestExec` lowering for
   a non-empty JUnit Platform test task, including include/exclude tag capture,
   when the test runtime contains the JUnit Platform ConsoleLauncher.
 - Native `TestExec` lowering captures a single Gradle include test filter and
   JUnit Platform include/exclude tags, and fails closed for unsupported filter
   shapes rather than approximating them.
+- Native `JavaExec` lowering captures Java home, classpath, main class, JVM
+  args, application args, working directory, and ignore-exit-value from the JVM
+  task model, and fails closed unless classpath and main class are present.
 - Native dependency resolution handles inherited Maven exclusions per dependency
   edge, so one dependency's exclusions no longer remove sibling dependencies.
 - Native dependency resolution preserves Maven dependency scopes on resolved
@@ -84,8 +87,8 @@
   compatibility islands.
 - More task types need native-ready contract capture before broad no-fallback
   execution is realistic, especially arbitrary copy filters/actions beyond
-  direct expand, Gradle archive metadata edge cases beyond entry inventory, and
-  native symlink copy/archive semantics.
+  direct expand, Javadoc-style process tasks, Gradle archive metadata edge
+  cases beyond entry inventory, and native symlink copy/archive semantics.
 
 ## Validation
 
@@ -102,9 +105,9 @@
 
 1. Expand differential corpus coverage for external dependency and richer
    task-graph semantics.
-2. Add authoritative coverage for resource filtering, richer archive specs, and
-   copy/sync edge cases.
-3. Add native-ready contracts for richer `Copy`/`Sync` specs and `Test` enough
-   to complete broader Java library/application lifecycles.
+2. Add an explicit unsupported/fail-closed corpus for symlinks, arbitrary
+   CopySpec actions, unsupported copy filters, and unsupported test filters.
+3. Add native-ready contracts for richer `Copy`/`Sync` specs and another common
+   process task such as `Javadoc`.
 4. Reduce bridge source exclusions as APIs are stabilized.
 5. Track upstream commit synchronization in this file for each parity push.

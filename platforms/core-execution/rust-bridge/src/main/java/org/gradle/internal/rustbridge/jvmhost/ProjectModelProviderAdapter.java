@@ -279,6 +279,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if ("Exec".equals(shortTaskTypeName)) {
             captureExecInputs(task, inputs);
         }
+        if ("JavaExec".equals(shortTaskTypeName)) {
+            captureJavaExecInputs(task, inputs);
+        }
 
         BuildPlanTask.Builder builder = BuildPlanTask.newBuilder()
             .setPath(task.getPath())
@@ -532,6 +535,48 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "ignore_exit_value", booleanString(invokeOptional(task, "isIgnoreExitValue")));
     }
 
+    private static void captureJavaExecInputs(Task task, Map<String, String> inputs) {
+        putIfPresent(inputs, "java_home", javaLauncherHome(task));
+        putIfPresent(inputs, "classpath", fileCollectionPathString(invokeOptional(task, "getClasspath")));
+        putIfPresent(inputs, "main_class", javaExecMainClass(task));
+        putIfPresent(inputs, "args", stringList(invokeOptional(task, "getArgs")));
+        putIfPresent(inputs, "jvm_args", stringList(invokeOptional(task, "getJvmArgs")));
+        putIfPresent(inputs, "working_dir", filePath(invokeOptional(task, "getWorkingDir")));
+        putIfPresent(inputs, "ignore_exit_value", booleanString(invokeOptional(task, "isIgnoreExitValue")));
+    }
+
+    private static String javaExecMainClass(Task task) {
+        String mainClass = providerValue(invokeOptional(task, "getMainClass"));
+        if (!mainClass.isEmpty()) {
+            return mainClass;
+        }
+        mainClass = stringOrEmpty(invokeOptional(task, "getMain"));
+        if (!mainClass.isEmpty()) {
+            return mainClass;
+        }
+        return stringOrEmpty(invokeOptional(task, "getMainClassName"));
+    }
+
+    private static String javaLauncherHome(Task task) {
+        Object launcherProvider = invokeOptional(task, "getJavaLauncher");
+        Object launcher = invokeOptional(launcherProvider, "getOrNull");
+        Object metadata = invokeOptional(launcher, "getMetadata");
+        String installationPath = providerFilePath(invokeOptional(metadata, "getInstallationPath"));
+        if (!installationPath.isEmpty()) {
+            return installationPath;
+        }
+        String executablePath = providerFilePath(invokeOptional(launcher, "getExecutablePath"));
+        if (!executablePath.isEmpty()) {
+            File executable = new File(executablePath);
+            File binDir = executable.getParentFile();
+            File homeDir = binDir == null ? null : binDir.getParentFile();
+            if (homeDir != null) {
+                return homeDir.getAbsolutePath();
+            }
+        }
+        return System.getProperty("java.home");
+    }
+
     private static void putIfPresent(Map<String, String> inputs, String key, String value) {
         if (value != null && !value.isEmpty()) {
             inputs.put(key, value);
@@ -567,10 +612,11 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             return "";
         }
         Object providerValue = invokeOptional(value, "getOrNull");
-        if (providerValue instanceof File) {
-            return ((File) providerValue).getAbsolutePath();
+        Object candidate = providerValue == null ? value : providerValue;
+        if (candidate instanceof File) {
+            return ((File) candidate).getAbsolutePath();
         }
-        Object file = invokeOptional(providerValue, "getAsFile");
+        Object file = invokeOptional(candidate, "getAsFile");
         if (file instanceof File) {
             return ((File) file).getAbsolutePath();
         }

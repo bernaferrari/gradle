@@ -438,6 +438,12 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
         ("external-process", "Exec") | (_, "Exec") if exec_contract_complete(task) => {
             "Exec".to_string()
         }
+        ("external-process", "JavaExec") | (_, "JavaExec") if java_exec_contract_complete(task) => {
+            "JavaExec".to_string()
+        }
+        ("external-process", "JavaExec") | (_, "JavaExec") => {
+            compat_task_type(task, "org.gradle.api.tasks.JavaExec")
+        }
         ("lifecycle", _) | (_, "Lifecycle") if no_task_actions(task) => "Lifecycle".to_string(),
         _ => task.implementation_id.clone(),
     }
@@ -512,6 +518,10 @@ fn copy_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
 
 fn exec_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
     has_input_value(task, "executable")
+}
+
+fn java_exec_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
+    has_input_value(task, "classpath") && has_input_value(task, "main_class")
 }
 
 fn compat_task_type(task: &CanonicalBuildPlanTask, fallback: &str) -> String {
@@ -628,6 +638,14 @@ fn task_options(
     } else if task_type == "Exec" {
         insert_input_option(task, &mut options, "executable", "executable");
         insert_input_option(task, &mut options, "args", "args");
+        insert_input_option(task, &mut options, "working_dir", "working_dir");
+        insert_input_option(task, &mut options, "ignore_exit_value", "ignore_exit_value");
+    } else if task_type == "JavaExec" {
+        insert_input_option(task, &mut options, "java_home", "java_home");
+        insert_input_option(task, &mut options, "classpath", "classpath");
+        insert_input_option(task, &mut options, "main_class", "main_class");
+        insert_input_option(task, &mut options, "args", "args");
+        insert_input_option(task, &mut options, "jvm_args", "jvm_args");
         insert_input_option(task, &mut options, "working_dir", "working_dir");
         insert_input_option(task, &mut options, "ignore_exit_value", "ignore_exit_value");
     }
@@ -1541,6 +1559,141 @@ mod tests {
         assert_eq!(context["options"]["args"], "generated.txt");
         assert_eq!(context["options"]["working_dir"], "/repo/build/exec");
         assert_eq!(context["options"]["ignore_exit_value"], "false");
+    }
+
+    #[test]
+    fn test_java_exec_contract_lowers_to_native_java_exec_with_context_options() {
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":runTool".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.api.tasks.JavaExec".to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "not-cacheable".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "external-process".to_string(),
+            input_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "java_home".to_string(),
+                    kind: "value".to_string(),
+                    value: "/jdk".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "classpath".to_string(),
+                    kind: "value".to_string(),
+                    value: "/repo/build/classes/java/main".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "main_class".to_string(),
+                    kind: "value".to_string(),
+                    value: "example.Tool".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "args".to_string(),
+                    kind: "value".to_string(),
+                    value: "/repo/build/resources/javaexec-result.txt expected-token".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "jvm_args".to_string(),
+                    kind: "value".to_string(),
+                    value: "-Dnative=true -Xmx128m".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "working_dir".to_string(),
+                    kind: "value".to_string(),
+                    value: "/repo".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "ignore_exit_value".to_string(),
+                    kind: "value".to_string(),
+                    value: "false".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+            ],
+            output_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                    name: "output".to_string(),
+                    kind: "file".to_string(),
+                    path: "/repo/build/resources/javaexec-result.txt".to_string(),
+                },
+            ],
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        let task_type = executable_task_type(&task);
+        let context: serde_json::Value =
+            serde_json::from_str(&execution_context_json(&task, &task_type)).unwrap();
+
+        assert_eq!(task_type, "JavaExec");
+        assert_eq!(context["options"]["java_home"], "/jdk");
+        assert_eq!(
+            context["options"]["classpath"],
+            "/repo/build/classes/java/main"
+        );
+        assert_eq!(context["options"]["main_class"], "example.Tool");
+        assert_eq!(
+            context["options"]["args"],
+            "/repo/build/resources/javaexec-result.txt expected-token"
+        );
+        assert_eq!(context["options"]["jvm_args"], "-Dnative=true -Xmx128m");
+        assert_eq!(context["options"]["working_dir"], "/repo");
+        assert_eq!(context["options"]["ignore_exit_value"], "false");
+    }
+
+    #[test]
+    fn test_java_exec_without_main_class_does_not_lower_to_native() {
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":runTool".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.api.tasks.JavaExec".to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "not-cacheable".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "external-process".to_string(),
+            input_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "classpath".to_string(),
+                    kind: "value".to_string(),
+                    value: "/repo/build/classes/java/main".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+            ],
+            output_specs: Vec::new(),
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        assert_eq!(executable_task_type(&task), "org.gradle.api.tasks.JavaExec");
     }
 
     #[test]
