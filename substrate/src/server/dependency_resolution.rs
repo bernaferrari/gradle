@@ -600,6 +600,164 @@ impl DependencyResolutionServiceImpl {
         key
     }
 
+    fn repository_cache_id(repo: &RepositoryDescriptor) -> String {
+        let digest = Self::compute_sha256(repo.url.as_bytes());
+        digest[..16].to_string()
+    }
+
+    fn metadata_cache_key(
+        repo: &RepositoryDescriptor,
+        group: &str,
+        name: &str,
+        version: &str,
+        extension: &str,
+    ) -> String {
+        let extension = Self::normalize_extension(extension);
+        let repo_id = Self::repository_cache_id(repo);
+        let mut key = String::with_capacity(
+            "metadata:".len()
+                + repo_id.len()
+                + group.len()
+                + name.len()
+                + version.len()
+                + extension.len()
+                + 4,
+        );
+        key.push_str("metadata:");
+        key.push_str(&repo_id);
+        key.push(':');
+        key.push_str(group);
+        key.push(':');
+        key.push_str(name);
+        key.push(':');
+        key.push_str(version);
+        key.push(':');
+        key.push_str(&extension);
+        key
+    }
+
+    fn metadata_path(
+        &self,
+        repo: &RepositoryDescriptor,
+        group: &str,
+        name: &str,
+        version: &str,
+        extension: &str,
+    ) -> PathBuf {
+        let filename = format!(
+            "{}-{}.{}",
+            name,
+            version,
+            Self::normalize_extension(extension)
+        );
+        self.artifact_store_dir
+            .join("_metadata")
+            .join(Self::repository_cache_id(repo))
+            .join(Self::group_to_path(group))
+            .join(name)
+            .join(version)
+            .join(filename)
+    }
+
+    async fn read_cached_text_artifact(
+        &self,
+        key: &str,
+        path: &Path,
+        group: &str,
+        name: &str,
+        version: &str,
+        classifier: &str,
+        extension: &str,
+    ) -> Option<String> {
+        if let Some(cached) = self.artifact_cache.get(key) {
+            let cached_path = cached.local_path.clone();
+            drop(cached);
+            if !cached_path.is_empty() {
+                if let Ok(text) = tokio::fs::read_to_string(&cached_path).await {
+                    self.resolution_stats
+                        .cache_hits
+                        .fetch_add(1, Ordering::Relaxed);
+                    return Some(text);
+                }
+            }
+        }
+
+        if !path.exists() {
+            return None;
+        }
+
+        let text = tokio::fs::read_to_string(path).await.ok()?;
+        let size = text.len() as i64;
+        let sha256 = Self::compute_file_sha256(path).await.unwrap_or_default();
+        self.artifact_cache.insert(
+            key.to_string(),
+            CachedArtifact {
+                group: group.to_string(),
+                name: name.to_string(),
+                version: version.to_string(),
+                classifier: classifier.to_string(),
+                extension: extension.to_string(),
+                sha256,
+                local_path: path.to_string_lossy().into_owned(),
+                size,
+                cached_at_ms: Self::now_ms(),
+            },
+        );
+        self.resolution_stats
+            .cache_hits
+            .fetch_add(1, Ordering::Relaxed);
+        Some(text)
+    }
+
+    async fn persist_text_artifact(
+        &self,
+        key: &str,
+        path: &Path,
+        group: &str,
+        name: &str,
+        version: &str,
+        classifier: &str,
+        extension: &str,
+        content: &str,
+    ) -> Result<(), String> {
+        if path.as_os_str().is_empty() {
+            return Ok(());
+        }
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| format!("Failed to create metadata cache directory: {}", e))?;
+        }
+
+        let tmp_path = PathBuf::from(format!("{}.part", path.to_string_lossy()));
+        tokio::fs::write(&tmp_path, content)
+            .await
+            .map_err(|e| format!("Failed to write metadata cache file: {}", e))?;
+        tokio::fs::rename(&tmp_path, path)
+            .await
+            .map_err(|e| format!("Failed to commit metadata cache file: {}", e))?;
+
+        let sha256 = Self::compute_sha256(content.as_bytes());
+        if let Err(e) = Self::write_sha256_sidecar(path, &sha256).await {
+            tracing::warn!(path = %path.display(), error = %e, "Failed to write metadata checksum sidecar");
+        }
+        self.artifact_cache.insert(
+            key.to_string(),
+            CachedArtifact {
+                group: group.to_string(),
+                name: name.to_string(),
+                version: version.to_string(),
+                classifier: classifier.to_string(),
+                extension: extension.to_string(),
+                sha256,
+                local_path: path.to_string_lossy().into_owned(),
+                size: content.len() as i64,
+                cached_at_ms: Self::now_ms(),
+            },
+        );
+        Ok(())
+    }
+
     /// Fetch a POM file from a Maven repository and parse it.
     async fn fetch_pom(
         &self,
@@ -608,6 +766,25 @@ impl DependencyResolutionServiceImpl {
         version: &str,
         repo: &RepositoryDescriptor,
     ) -> Result<String, String> {
+        let extension = "pom";
+        let classifier = "";
+        let key = Self::metadata_cache_key(repo, group, name, version, extension);
+        let cache_path = self.metadata_path(repo, group, name, version, extension);
+        if let Some(cached) = self
+            .read_cached_text_artifact(
+                &key,
+                &cache_path,
+                group,
+                name,
+                version,
+                classifier,
+                extension,
+            )
+            .await
+        {
+            return Ok(cached);
+        }
+
         let group_path = Self::group_to_path(group);
         let path = format!(
             "{}/{}/{}/{}-{}.pom",
@@ -621,10 +798,24 @@ impl DependencyResolutionServiceImpl {
             .map_err(|e| format!("Failed to fetch POM: {}", e))?;
 
         match response.status().as_u16() {
-            200 => response
-                .text()
-                .await
-                .map_err(|e| format!("Failed to read POM response: {}", e)),
+            200 => {
+                let content = response
+                    .text()
+                    .await
+                    .map_err(|e| format!("Failed to read POM response: {}", e))?;
+                self.persist_text_artifact(
+                    &key,
+                    &cache_path,
+                    group,
+                    name,
+                    version,
+                    classifier,
+                    extension,
+                    &content,
+                )
+                .await?;
+                Ok(content)
+            }
             404 => Err(format!("POM not found: {}-{}.pom", name, version)),
             status => Err(format!("HTTP {} for POM", status)),
         }
@@ -3015,6 +3206,75 @@ mod tests {
             .into_inner();
         assert!(checksum.all_matched);
         assert!(checksum.failures.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_pom_populates_store_and_uses_warm_cache() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body = r#"<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.example</groupId>
+  <artifactId>demo</artifactId>
+  <version>1.0</version>
+</project>"#
+            .to_string();
+        let expected = body.clone();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/xml\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.write_all(body.as_bytes()).unwrap();
+        });
+
+        let store = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let repo = make_repo("local", &format!("http://{}", addr));
+
+        let first = svc
+            .fetch_pom("org.example", "demo", "1.0", &repo)
+            .await
+            .unwrap();
+        server.join().unwrap();
+        assert_eq!(first, expected);
+
+        let stored = svc.metadata_path(&repo, "org.example", "demo", "1.0", "pom");
+        assert!(
+            stored.starts_with(store.path().join("_metadata")),
+            "POM metadata cache should be repository-scoped"
+        );
+        assert_eq!(tokio::fs::read_to_string(&stored).await.unwrap(), expected);
+        assert!(
+            DependencyResolutionServiceImpl::sha256_sidecar_path(&stored).exists(),
+            "POM metadata cache should write a SHA-256 sidecar"
+        );
+
+        let cache_key = DependencyResolutionServiceImpl::metadata_cache_key(
+            &repo,
+            "org.example",
+            "demo",
+            "1.0",
+            "pom",
+        );
+        assert!(
+            svc.artifact_cache.contains_key(&cache_key),
+            "POM metadata should populate the warm artifact cache"
+        );
+
+        let second = svc
+            .fetch_pom("org.example", "demo", "1.0", &repo)
+            .await
+            .unwrap();
+        assert_eq!(second, first);
     }
 
     #[test]
