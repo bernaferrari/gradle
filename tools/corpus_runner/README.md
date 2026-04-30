@@ -79,6 +79,11 @@ contain the Rust bridge. For explicit RunBuild gates, the runner adds `--info`
 and rejects the substrate candidate if no `[substrate:run-build]` signal is
 observed.
 
+When `--daemon-binary` is relative, the runner converts it to an absolute path
+before invoking Gradle from each corpus project directory. This prevents
+project-local working directories from accidentally turning a real RunBuild gate
+into no-op fallback.
+
 `--runbuild-authoritative` adds
 `-Dorg.gradle.rust.substrate.runbuild.authoritative=true`. This is stricter
 than umbrella authoritative mode: Gradle skips its JVM task executor only when

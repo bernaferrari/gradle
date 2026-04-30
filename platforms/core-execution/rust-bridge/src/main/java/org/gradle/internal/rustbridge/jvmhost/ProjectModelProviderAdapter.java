@@ -234,7 +234,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         return toBuildPlanTask(task, (List<String>) null);
     }
 
-    private static BuildPlanTask toBuildPlanTask(Task task, @Nullable List<String> selectedDependencyPaths) {
+    public static BuildPlanTask toBuildPlanTask(Task task, @Nullable List<String> selectedDependencyPaths) {
         Class<?> taskType = GeneratedSubclasses.unpackType(task);
         return toBuildPlanTask(task, selectedDependencyPaths, taskType);
     }
@@ -300,6 +300,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             ? fileCollectionPaths(safeTaskSource(task))
             : new ArrayList<>();
         List<String> outputPaths = fileCollectionPaths(safeOutputFiles(task));
+        List<String> destroyablePaths = "Delete".equals(shortTaskTypeName)
+            ? deleteTargetPaths(task)
+            : fileCollectionPaths(registeredFiles(task.getDestroyables()));
         builder.addAllDependsOn(selectedDependencyPaths == null
             ? taskDependencyPaths(task, task.getTaskDependencies())
             : selectedDependencyPaths);
@@ -308,7 +311,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         builder.addAllFinalizedBy(taskDependencyPaths(task, task.getFinalizedBy()));
         builder.addAllOutputs(outputPaths);
         builder.addAllLocalState(fileCollectionPaths(registeredFiles(task.getLocalState())));
-        builder.addAllDestroyables(fileCollectionPaths(registeredFiles(task.getDestroyables())));
+        builder.addAllDestroyables(destroyablePaths);
         builder.addAllInputSpecs(inputSpecs(inputs, inputPaths, sourcePaths));
         builder.addAllOutputSpecs(outputSpecs(outputPaths));
         builder.addDiagnostics(BuildPlanTaskDiagnostic.newBuilder()
@@ -830,6 +833,14 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     private static FileCollection safeTaskSource(Task task) {
         Object source = invokeOptional(task, "getSource");
         return source instanceof FileCollection ? (FileCollection) source : null;
+    }
+
+    private static List<String> deleteTargetPaths(Task task) {
+        Object targetFiles = invokeOptional(task, "getTargetFiles");
+        if (targetFiles instanceof FileCollection) {
+            return fileCollectionPaths((FileCollection) targetFiles);
+        }
+        return fileCollectionPaths(registeredFiles(task.getDestroyables()));
     }
 
     @Nullable

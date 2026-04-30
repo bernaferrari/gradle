@@ -306,7 +306,10 @@ def build_gradle_command(
             f"-Dorg.gradle.rust.substrate.mode={substrate_mode}",
         ])
         if daemon_binary:
-            cmd.append(f"-Dorg.gradle.rust.substrate.daemon.path={daemon_binary}")
+            daemon_path = Path(daemon_binary).expanduser()
+            if not daemon_path.is_absolute():
+                daemon_path = Path.cwd() / daemon_path
+            cmd.append(f"-Dorg.gradle.rust.substrate.daemon.path={daemon_path}")
         if runbuild_authoritative:
             cmd.append("-Dorg.gradle.rust.substrate.runbuild.authoritative=true")
         if runbuild_native_ready_default:

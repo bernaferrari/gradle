@@ -46,16 +46,6 @@ import org.gradle.initialization.RootBuildLifecycleListener;
 import org.gradle.internal.build.BuildAddedListener;
 import org.gradle.internal.buildoption.InternalOption;
 import org.gradle.internal.buildoption.InternalOptions;
-import org.gradle.internal.buildoption.RustSubstrateOptions;
-import org.gradle.internal.rustbridge.SubstrateClient;
-import org.gradle.internal.rustbridge.fingerprint.RustFileFingerprintClient;
-import org.gradle.internal.rustbridge.fingerprint.ShadowingFileCollectionSnapshotter;
-import org.gradle.internal.rustbridge.hash.RustGrpcFileHasher;
-import org.gradle.internal.rustbridge.hash.ShadowingFileHasher;
-import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
-import org.gradle.internal.rustbridge.snapshot.ShadowingInputFingerprinter;
-import org.gradle.internal.rustbridge.snapshot.ShadowingValueSnapshotter;
-import org.gradle.internal.rustbridge.watch.RustFileWatchWiring;
 import org.gradle.internal.classloader.ClasspathHasher;
 import org.gradle.internal.event.ListenerManager;
 import org.gradle.internal.execution.FileCollectionFingerprinterRegistry;
@@ -178,43 +168,12 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
             FileSystem fileSystem,
             GradleUserHomeScopeFileTimeStampInspector fileTimeStampInspector,
             StreamHasher streamHasher,
-            StringInterner stringInterner,
-            InternalOptions options,
-            @Nullable SubstrateClient substrateClient
+            StringInterner stringInterner
         ) {
-            FileHasher delegate = createDelegate(streamHasher, options, substrateClient);
+            FileHasher delegate = new DefaultFileHasher(streamHasher);
             CachingFileHasher fileHasher = new CachingFileHasher(delegate, fileStore, stringInterner, fileTimeStampInspector, "fileHashes", fileSystem, FILE_HASHER_MEMORY_CACHE_SIZE, statisticsCollector);
             fileTimeStampInspector.attach(fileHasher);
             return fileHasher;
-        }
-
-        private static FileHasher createDelegate(StreamHasher streamHasher, InternalOptions options, @Nullable SubstrateClient substrateClient) {
-            if (!options.getBoolean(RustSubstrateOptions.ENABLE_RUST_HASHING)) {
-                return new DefaultFileHasher(streamHasher);
-            }
-            if (substrateClient == null || substrateClient.isNoop()) {
-                return new DefaultFileHasher(streamHasher);
-            }
-            FileHasher javaHasher = new DefaultFileHasher(streamHasher);
-            RustGrpcFileHasher rustHasher = new RustGrpcFileHasher(substrateClient);
-            boolean authoritative = options.getBoolean(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION);
-            if (options.getBoolean(RustSubstrateOptions.SHADOW_HASHING)) {
-                return new ShadowingFileHasher(
-                    javaHasher,
-                    rustHasher,
-                    new HashMismatchReporter(options.getBoolean(RustSubstrateOptions.REPORT_MISMATCHES)),
-                    authoritative
-                );
-            }
-            if (authoritative) {
-                return new ShadowingFileHasher(
-                    javaHasher,
-                    rustHasher,
-                    new HashMismatchReporter(options.getBoolean(RustSubstrateOptions.REPORT_MISMATCHES)),
-                    true
-                );
-            }
-            return rustHasher;
         }
 
         @Provides
@@ -250,9 +209,7 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
             FileChangeListeners fileChangeListeners,
             NativeServices.FileEventFunctionsProvider fileEvents,
             FileSystem fileSystem,
-            WatchableFileSystemDetector watchableFileSystemDetector,
-            InternalOptions options,
-            @Nullable SubstrateClient substrateClient
+            WatchableFileSystemDetector watchableFileSystemDetector
         ) {
             CaseSensitivity caseSensitivity = fileSystem.isCaseSensitive() ? CASE_SENSITIVE : CASE_INSENSITIVE;
             SnapshotHierarchy root = DefaultSnapshotHierarchy.empty(caseSensitivity);
@@ -262,8 +219,6 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
                 nativeCapabilities,
                 fileEvents,
                 fileWatchingFilter.getImmutableLocations()::contains);
-
-            maybeFactory = RustFileWatchWiring.wrapIfEnabled(maybeFactory, options, substrateClient);
 
             BuildLifecycleAwareVirtualFileSystem virtualFileSystem = maybeFactory
                 .<BuildLifecycleAwareVirtualFileSystem>map(watcherRegistryFactory -> new WatchingVirtualFileSystem(
@@ -382,36 +337,9 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
             FileSystem fileSystem,
             StreamHasher streamHasher,
             StringInterner stringInterner,
-            FileHasherStatistics.Collector statisticsCollector,
-            InternalOptions options,
-            @Nullable SubstrateClient substrateClient
+            FileHasherStatistics.Collector statisticsCollector
         ) {
-            FileHasher localDelegate;
-            if (!options.getBoolean(RustSubstrateOptions.ENABLE_RUST_HASHING)
-                || substrateClient == null || substrateClient.isNoop()) {
-                localDelegate = new DefaultFileHasher(streamHasher);
-            } else {
-                FileHasher javaHasher = new DefaultFileHasher(streamHasher);
-                RustGrpcFileHasher rustHasher = new RustGrpcFileHasher(substrateClient);
-                boolean authoritative = options.getBoolean(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION);
-                if (options.getBoolean(RustSubstrateOptions.SHADOW_HASHING)) {
-                    localDelegate = new ShadowingFileHasher(
-                        javaHasher,
-                        rustHasher,
-                        new HashMismatchReporter(options.getBoolean(RustSubstrateOptions.REPORT_MISMATCHES)),
-                        authoritative
-                    );
-                } else if (authoritative) {
-                    localDelegate = new ShadowingFileHasher(
-                        javaHasher,
-                        rustHasher,
-                        new HashMismatchReporter(options.getBoolean(RustSubstrateOptions.REPORT_MISMATCHES)),
-                        true
-                    );
-                } else {
-                    localDelegate = rustHasher;
-                }
-            }
+            FileHasher localDelegate = new DefaultFileHasher(streamHasher);
             CachingFileHasher localHasher = new CachingFileHasher(localDelegate, cacheAccess, stringInterner, fileTimeStampInspector, "fileHashes", fileSystem, FILE_HASHER_MEMORY_CACHE_SIZE, statisticsCollector);
             return new SplitFileHasher(globalHasher, localHasher, globalCacheLocations);
         }
@@ -445,20 +373,9 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
         @Provides
         FileCollectionSnapshotter createFileCollectionSnapshotter(
             FileSystemAccess fileSystemAccess,
-            Stat stat,
-            InternalOptions options,
-            @Nullable RustFileFingerprintClient rustFileFingerprintClient,
-            @Nullable HashMismatchReporter mismatchReporter
+            Stat stat
         ) {
-            FileCollectionSnapshotter javaSnapshotter = new DefaultFileCollectionSnapshotter(fileSystemAccess, stat);
-
-            if (options.getBoolean(RustSubstrateOptions.ENABLE_RUST_FINGERPRINTING)
-                && rustFileFingerprintClient != null && mismatchReporter != null) {
-                boolean authoritative = options.getBoolean(RustSubstrateOptions.ENABLE_AUTHORITATIVE_EXECUTION);
-                return new ShadowingFileCollectionSnapshotter(javaSnapshotter, rustFileFingerprintClient, mismatchReporter, authoritative);
-            }
-
-            return javaSnapshotter;
+            return new DefaultFileCollectionSnapshotter(fileSystemAccess, stat);
         }
 
         @Provides
@@ -489,17 +406,10 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
         InputFingerprinter createInputFingerprinter(
             FileCollectionSnapshotter snapshotter,
             FileCollectionFingerprinterRegistry fingerprinterRegistry,
-            ValueSnapshotter valueSnapshotter,
-            @Nullable ShadowingValueSnapshotter shadowingValueSnapshotter
+            ValueSnapshotter valueSnapshotter
         ) {
-            InputFingerprinter fingerprinter = new DefaultInputFingerprinter(
+            return new DefaultInputFingerprinter(
                 snapshotter, fingerprinterRegistry, valueSnapshotter);
-
-            if (shadowingValueSnapshotter != null) {
-                return new ShadowingInputFingerprinter(fingerprinter, shadowingValueSnapshotter);
-            }
-
-            return fingerprinter;
         }
 
         @Provides

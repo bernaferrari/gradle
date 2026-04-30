@@ -17,10 +17,17 @@ pub struct JvmHostClient {
 }
 
 impl JvmHostClient {
-    /// Connect to the JVM host gRPC server over a Unix domain socket.
-    pub async fn connect(socket_path: &str) -> Result<Self, tonic::transport::Error> {
-        let path = socket_path.to_string();
-        let channel = Endpoint::from_shared("http://localhost".to_string())?
+    /// Connect to the JVM host gRPC server over a Unix domain socket or loopback TCP endpoint.
+    pub async fn connect(endpoint: &str) -> Result<Self, tonic::transport::Error> {
+        let channel = if let Some(address) = endpoint.strip_prefix("tcp://") {
+            Endpoint::from_shared(format!("http://{address}"))?
+                .connect()
+                .await?
+        } else if endpoint.starts_with("http://") || endpoint.starts_with("https://") {
+            Endpoint::from_shared(endpoint.to_string())?.connect().await?
+        } else {
+            let path = endpoint.to_string();
+            Endpoint::from_shared("http://localhost".to_string())?
             .connect_with_connector(tower::service_fn(move |_: tonic::transport::Uri| {
                 let path = path.clone();
                 async move {
@@ -29,7 +36,8 @@ impl JvmHostClient {
                     Ok::<_, io::Error>(io)
                 }
             }))
-            .await?;
+            .await?
+        };
         Ok(Self {
             client: JvmHostServiceClient::new(channel),
         })

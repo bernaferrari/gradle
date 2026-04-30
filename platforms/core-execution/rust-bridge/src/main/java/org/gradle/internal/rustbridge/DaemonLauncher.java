@@ -9,6 +9,8 @@ import org.gradle.internal.rustbridge.jvmhost.JvmHostServiceImpl;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -19,7 +21,7 @@ import org.jspecify.annotations.Nullable;
  * Manages the lifecycle of the Rust substrate daemon process.
  * Optionally starts a JVM Compatibility Host server for reverse-direction RPC.
  */
-@ServiceScope(Scope.Global.class)
+@ServiceScope(Scope.BuildSession.class)
 public class DaemonLauncher {
 
     private static final Logger LOGGER = Logging.getLogger(DaemonLauncher.class);
@@ -140,11 +142,15 @@ public class DaemonLauncher {
         }
 
         Path socketFile = new File(socketDirectory, SOCKET_NAME).toPath();
+        int daemonTcpPort = reserveLoopbackPort();
+        String daemonTcpAddress = "127.0.0.1:" + daemonTcpPort;
+        String daemonEndpoint = "tcp://" + daemonTcpAddress;
+        boolean useUnixDomainSocket = Boolean.getBoolean("org.gradle.rust.substrate.unixSocket");
 
         String jvmHostSocketPath = null;
 
         // Check if daemon is already running by testing the socket.
-        if (Files.exists(socketFile)) {
+        if (useUnixDomainSocket && Files.exists(socketFile)) {
             LOGGER.info("[substrate] Connecting to existing daemon at {}", socketFile);
             jvmHostSocketPath = startJvmHostIfEnabled();
             try {
@@ -190,6 +196,7 @@ public class DaemonLauncher {
         ProcessBuilder pb = new ProcessBuilder(
             daemonBinary.getAbsolutePath(),
             "--socket-path", socketFile.toString(),
+            "--tcp-address", daemonTcpAddress,
             "--log-level", "info",
             "--cache-dir", cacheDir.getAbsolutePath(),
             "--history-dir", historyDir.getAbsolutePath(),
@@ -206,9 +213,17 @@ public class DaemonLauncher {
         // Consume stdout/stderr to prevent buffer deadlock
         consumeStream(daemonProcess);
 
-        // Wait briefly for the socket to appear
+        // Wait briefly for the daemon to accept connections.
         int attempts = 0;
-        while (!Files.exists(socketFile) && attempts < 50) {
+        IOException lastConnectFailure = null;
+        while (attempts < 50) {
+            try {
+                SubstrateClient client = SubstrateClient.connect(daemonEndpoint, jvmHostSocketPath);
+                LOGGER.info("[substrate] Daemon started successfully");
+                return client;
+            } catch (IOException e) {
+                lastConnectFailure = e;
+            }
             try {
                 Thread.sleep(100);
             } catch (InterruptedException e) {
@@ -218,12 +233,13 @@ public class DaemonLauncher {
             attempts++;
         }
 
-        if (!Files.exists(socketFile)) {
-            throw new SubstrateException("Daemon failed to start: socket not created after 5 seconds");
-        }
+        throw new SubstrateException("Daemon failed to start: TCP endpoint not reachable after 5 seconds", lastConnectFailure);
+    }
 
-        LOGGER.info("[substrate] Daemon started successfully");
-        return SubstrateClient.connect(socketFile.toString(), jvmHostSocketPath);
+    private static int reserveLoopbackPort() throws IOException {
+        try (ServerSocket socket = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            return socket.getLocalPort();
+        }
     }
 
     @Nullable
@@ -238,7 +254,7 @@ public class DaemonLauncher {
         try {
             jvmHostServer = new JvmHostServer(jvmHostSocketPath, new JvmHostServiceImpl());
             jvmHostServer.start();
-            return jvmHostSocketPath;
+            return jvmHostServer.getSocketPath();
         } catch (IOException e) {
             jvmHostServer = null;
             throw new IOException("JVM host was requested but failed to start at " + jvmHostSocketPath, e);
@@ -252,7 +268,6 @@ public class DaemonLauncher {
                 java.io.InputStream input = process.getInputStream();
                 int n;
                 while ((n = input.read(buffer)) != -1) {
-                    // Log daemon output at debug level
                     String output = new String(buffer, 0, n, StandardCharsets.UTF_8);
                     LOGGER.debug("[substrate] {}", output.trim());
                 }

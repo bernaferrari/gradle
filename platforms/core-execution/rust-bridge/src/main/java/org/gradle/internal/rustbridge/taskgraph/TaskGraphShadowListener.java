@@ -74,8 +74,8 @@ public class TaskGraphShadowListener implements TaskExecutionGraphListener {
 
         String activeBuildId = BuildIdHolder.getBuildId();
         String buildId = activeBuildId.isEmpty() ? "build" : activeBuildId;
-        if (bootstrapClient != null && !activeBuildId.isEmpty()) {
-            bootstrapClient.refreshBuildPlanShadow(activeBuildId);
+        if (bootstrapClient != null) {
+            bootstrapClient.refreshBuildPlanShadow(buildId);
         }
 
         reporter.compareExecutionGraph(taskPaths, taskDependencies, buildId);

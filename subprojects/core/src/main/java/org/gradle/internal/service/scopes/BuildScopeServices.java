@@ -245,6 +245,8 @@ import org.gradle.internal.resource.DefaultTextFileResourceLoader;
 import org.gradle.internal.resource.TextFileResourceLoader;
 import org.gradle.internal.resources.ResourceLockCoordinationService;
 import org.gradle.internal.resources.SharedResourceLeaseRegistry;
+import org.gradle.internal.rustbridge.bootstrap.RustBootstrapClient;
+import org.gradle.internal.rustbridge.jvmhost.BuildPlanTaskSelectionSnapshot;
 import org.gradle.internal.rustbridge.taskgraph.RustBuildExecutionClient;
 import org.gradle.internal.scan.UsedByScanPlugin;
 import org.gradle.internal.scripts.ScriptExecutionListener;
@@ -852,13 +854,20 @@ public class BuildScopeServices implements ServiceRegistrationProvider {
     }
 
     @Provides
+    BuildPlanTaskSelectionSnapshot createBuildPlanTaskSelectionSnapshot() {
+        return new BuildPlanTaskSelectionSnapshot();
+    }
+
+    @Provides
     BuildWorkExecutor createBuildExecuter(
         GradleInternal gradle,
         StyledTextOutputFactory textOutputFactory,
         BuildOperationRunner buildOperationRunner,
         ConfigurationTimeBarrier configurationTimeBarrier,
         InternalOptions options,
-        @Nullable RustBuildExecutionClient rustBuildExecutionClient
+        @Nullable RustBuildExecutionClient rustBuildExecutionClient,
+        @Nullable RustBootstrapClient rustBootstrapClient,
+        @Nullable BuildPlanTaskSelectionSnapshot buildPlanTaskSelectionSnapshot
     ) {
         BuildWorkExecutor delegate = new SelectedTaskExecutionAction();
         BuildWorkExecutor executor;
@@ -873,12 +882,24 @@ public class BuildScopeServices implements ServiceRegistrationProvider {
             && !gradle.getStartParameter().isTaskGraph()
             && rustBuildExecutionClient != null
             && options.getBoolean(RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_RUN_BUILD)) {
-            executor = new RustAuthoritativeBuildExecutionAction(executor, rustBuildExecutionClient, true);
+            executor = new RustAuthoritativeBuildExecutionAction(
+                executor,
+                rustBuildExecutionClient,
+                true,
+                rustBootstrapClient,
+                buildPlanTaskSelectionSnapshot
+            );
         } else if (!gradle.getStartParameter().isDryRun()
             && !gradle.getStartParameter().isTaskGraph()
             && rustBuildExecutionClient != null
             && options.getBoolean(RustSubstrateOptions.ENABLE_RUST_NATIVE_READY_DEFAULT_RUN_BUILD)) {
-            executor = new RustAuthoritativeBuildExecutionAction(executor, rustBuildExecutionClient, false);
+            executor = new RustAuthoritativeBuildExecutionAction(
+                executor,
+                rustBuildExecutionClient,
+                false,
+                rustBootstrapClient,
+                buildPlanTaskSelectionSnapshot
+            );
         }
         return new BuildOperationFiringBuildWorkerExecutor(executor, buildOperationRunner);
     }
