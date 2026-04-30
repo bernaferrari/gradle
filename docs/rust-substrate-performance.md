@@ -5,6 +5,7 @@ Use the corpus runner first, then render a compact report:
 ```bash
 python3 tools/corpus_runner/run.py \
   --manifest testing/corpus/manifest.json \
+  --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" \
   --daemon-binary target/debug/gradle-substrate-daemon \
   --runbuild-authoritative \
   --tasks clean build \
@@ -20,6 +21,9 @@ The generated report records matched projects, no-fallback projects, task-count
 parity, observed upstream wall time, observed Rust-substrate wall time, and the
 percentage delta. Treat whole-build wall time as trend evidence; use dedicated
 benchmarks for subsystem-level claims.
+RunBuild corpus claims require `GRADLE_UNDER_TEST` or `--gradle-command` to
+point at a local distribution built from this fork; the bootstrap wrapper alone
+is not evidence that Rust executed the build.
 
 For first-minute demo evidence, run:
 

@@ -14,7 +14,7 @@ usage() {
 Usage: tools/demo/rust_substrate_demo.sh [--quick|--full] [--skip-first60] [--skip-sample-builds] [--skip-grpc-e2e] [--skip-native-shadow] [--output-dir DIR]
 
 Runs an honest Rust substrate demo:
-  - first-60-second visible wins: daemon ready time, dependency transport/store/checksum smoke, file-watch latency
+  - first-60-second visible wins: daemon ready time, dependency transport/store/checksum smoke, artifact/POM read-through, file-watch latency
   - strict stabilization gate
   - checked-in offline corpus contract validation
   - external dependency and unsupported corpus contract validation
@@ -27,6 +27,8 @@ Runs an honest Rust substrate demo:
 
 Use --full when preparing a public demo; it runs the full stabilization mode,
 including release daemon build and release smoke coverage.
+Sample RunBuild corpus gates require GRADLE_UNDER_TEST_BIN, or GRADLE_UNDER_TEST
+pointing at a local distribution built from this fork.
 USAGE
 }
 
@@ -69,6 +71,11 @@ done
 
 if [[ -z "$OUTPUT_DIR" ]]; then
   OUTPUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gradle-rust-demo.XXXXXX")"
+fi
+
+GRADLE_UNDER_TEST_BIN="${GRADLE_UNDER_TEST_BIN:-}"
+if [[ -z "$GRADLE_UNDER_TEST_BIN" && -n "${GRADLE_UNDER_TEST:-}" ]]; then
+  GRADLE_UNDER_TEST_BIN="$GRADLE_UNDER_TEST/bin/gradle"
 fi
 
 cd "$ROOT_DIR"
@@ -123,6 +130,10 @@ if [[ "$RUN_NATIVE_SHADOW" -eq 1 ]]; then
 fi
 
 if [[ "$RUN_SAMPLE_BUILDS" -eq 1 ]]; then
+  if [[ -z "$GRADLE_UNDER_TEST_BIN" ]]; then
+    echo "RUN_SAMPLE_BUILDS requires GRADLE_UNDER_TEST_BIN, or GRADLE_UNDER_TEST pointing at a local distribution from this fork." >&2
+    exit 1
+  fi
   run_step "Build corpus Java library sample" \
     ./gradlew -q -p testing/corpus/java-library-kotlin-dsl clean build
   run_step "Build corpus Java application sample" \
@@ -140,6 +151,7 @@ if [[ "$RUN_SAMPLE_BUILDS" -eq 1 ]]; then
   run_step "Build checked-in corpus with authoritative Rust RunBuild gate" \
     python3 ./tools/corpus_runner/run.py \
       --manifest testing/corpus/manifest.json \
+      --gradle-command "$GRADLE_UNDER_TEST_BIN" \
       --daemon-binary target/debug/gradle-substrate-daemon \
       --runbuild-authoritative \
       --tasks clean build \
@@ -149,6 +161,7 @@ if [[ "$RUN_SAMPLE_BUILDS" -eq 1 ]]; then
   run_step "Build checked-in corpus with native-ready default gate" \
     python3 ./tools/corpus_runner/run.py \
       --manifest testing/corpus/manifest.json \
+      --gradle-command "$GRADLE_UNDER_TEST_BIN" \
       --daemon-binary target/debug/gradle-substrate-daemon \
       --runbuild-native-ready-default \
       --tasks clean build \

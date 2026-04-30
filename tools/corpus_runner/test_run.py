@@ -46,6 +46,7 @@ class CorpusRunnerCommandTest(unittest.TestCase):
             "-Dorg.gradle.rust.substrate.runbuild.authoritative=true",
             command,
         )
+        self.assertIn("--info", command)
         self.assertNotIn("-Dorg.gradle.rust.substrate.runbuild.enabled=true", command)
 
     def test_runbuild_native_ready_default_adds_delegating_gate(self):
@@ -61,6 +62,7 @@ class CorpusRunnerCommandTest(unittest.TestCase):
             "-Dorg.gradle.rust.substrate.runbuild.native-ready-default=true",
             command,
         )
+        self.assertIn("--info", command)
 
     def test_prefers_project_wrapper_when_present(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -73,6 +75,28 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         self.assertIn("--no-daemon", command)
         self.assertIn("--console=plain", command)
 
+    def test_uses_repo_wrapper_for_projects_without_wrapper(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            command = corpus_run.build_gradle_command(tmp, substrate=False, tasks=["help"])
+
+        self.assertEqual(str(corpus_run.REPO_ROOT / "gradlew"), command[0])
+        self.assertEqual(["-p", tmp], command[1:3])
+        self.assertIn("help", command)
+
+    def test_explicit_gradle_command_overrides_wrappers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "gradlew").touch()
+
+            command = corpus_run.build_gradle_command(
+                tmp,
+                substrate=False,
+                tasks=["help"],
+                gradle_command="/opt/gradle-under-test/bin/gradle",
+            )
+
+        self.assertEqual("/opt/gradle-under-test/bin/gradle", command[0])
+        self.assertEqual(["-p", tmp], command[1:3])
+
     def test_detects_noop_substrate_output(self):
         self.assertTrue(
             corpus_run.detect_substrate_noop(
@@ -80,7 +104,20 @@ class CorpusRunnerCommandTest(unittest.TestCase):
                 "daemon-binary-missing:/tmp/gradle-substrate-daemon"
             )
         )
+        self.assertTrue(
+            corpus_run.detect_substrate_noop(
+                "[substrate] substrate-inactive: run-build marker missing"
+            )
+        )
         self.assertFalse(corpus_run.detect_substrate_noop("BUILD SUCCESSFUL"))
+
+    def test_detects_missing_runbuild_marker(self):
+        self.assertTrue(corpus_run.runbuild_marker_missing("BUILD SUCCESSFUL"))
+        self.assertFalse(
+            corpus_run.runbuild_marker_missing(
+                "[substrate:run-build] Rust executed 3 tasks from build-plan-cache"
+            )
+        )
 
     def test_checked_in_corpus_manifest_contracts_pass(self):
         repo_root = Path(__file__).resolve().parents[2]
@@ -119,6 +156,11 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         results = corpus_run.run_manifest_contracts(str(manifest))
 
         self.assertIn("custom-task-unsupported-kotlin-dsl", results)
+        self.assertIn("copy-filter-unsupported-kotlin-dsl", results)
+        self.assertIn("copy-eachfile-unsupported-kotlin-dsl", results)
+        self.assertIn("copy-symlink-unsupported-kotlin-dsl", results)
+        self.assertIn("archive-symlink-unsupported-kotlin-dsl", results)
+        self.assertIn("test-filters-unsupported-kotlin-dsl", results)
         failures = {
             name: result["mismatches"]
             for name, result in results.items()
