@@ -53,6 +53,10 @@
 - Native dependency transport can stream artifact bytes over HTTP from a
   repository-derived Maven artifact URL, with retry/error handling in the Rust
   dependency-resolution service.
+- Native dependency transport now persists downloaded Maven artifacts into the
+  Rust artifact store, writes `.sha256` sidecars, validates cold and warm cache
+  hits against requested SHA-256 values, and can verify checksums from persisted
+  artifacts.
 - Archive tasks (`Jar`, `Zip`, `War`, `Ear`, `Tar`) can lower to native Rust
   archive execution when the task model provides input paths and an output
   archive path. ZIP-compatible tasks emit ZIP-compatible archives; `Tar` emits
@@ -114,7 +118,7 @@
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-native-ready-default --tasks clean build --timeout 300 --output-dir build/corpus-native-ready-default-21`
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --verbose`
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/unsupported-manifest.json --contract-only --output-dir build/corpus-contract-unsupported`
-- `cargo test -p gradle-substrate-daemon download_artifact_streams`
+- `cargo test -p gradle-substrate-daemon download_artifact -- --nocapture`
 - `python3 tools/performance/rust_substrate_perf_report.py build/corpus-authoritative-21/corpus_summary.json --output build/corpus-authoritative-21/performance.md`
 - `./tools/stabilization/run_strict_stabilization.sh quick`
 - `./tools/demo/rust_substrate_demo.sh --quick`

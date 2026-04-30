@@ -3,7 +3,7 @@
 
 This is intentionally small and local:
   - daemon readiness is measured by Unix socket availability
-  - dependency transport uses the checked-in local HTTP streaming smoke test
+  - dependency transport uses the checked-in local HTTP store/cache/checksum smoke test
   - file watching uses a native notify first-event latency test
 
 Build time is kept outside the headline timings so the numbers describe runtime
@@ -180,7 +180,7 @@ def print_summary(results: list[dict[str, object]]) -> None:
 
     print("\nWhy these are visible:")
     print("- daemon_socket_ready is the time before Gradle can send work to the Rust sidecar")
-    print("- dependency_transport_http_stream is the bounded Rust path for Maven artifact bytes")
+    print("- dependency_transport_store_checksum is the bounded Rust path for Maven bytes, local store, cache hit, and checksum verification")
     print("- file_watch_first_event is the delay before source edits become observable")
 
 
@@ -194,8 +194,8 @@ def main() -> int:
     results = [
         measure_daemon_readiness(),
         measure_cargo_test(
-            "dependency_transport_http_stream",
-            "test_download_artifact_streams_bytes_from_http",
+            "dependency_transport_store_checksum",
+            "test_download_artifact_populates_store_and_checksum_cache",
             timeout=60,
         ),
         measure_cargo_test(

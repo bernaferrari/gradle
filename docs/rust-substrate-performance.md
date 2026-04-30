@@ -27,5 +27,6 @@ For first-minute demo evidence, run:
 python3 tools/demo/first_60_seconds.py --output build/first60.json
 ```
 
-That reports daemon socket readiness, Rust dependency-transport smoke timing,
-and native file-watch first-event latency without relying on full-build timing.
+That reports daemon socket readiness, Rust dependency-transport/store/checksum
+smoke timing, and native file-watch first-event latency without relying on
+full-build timing.
