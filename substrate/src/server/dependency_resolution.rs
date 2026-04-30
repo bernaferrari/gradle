@@ -576,9 +576,17 @@ impl DependencyResolutionServiceImpl {
         }
     }
 
-    fn artifact_cache_key(group: &str, name: &str, version: &str, classifier: &str) -> String {
-        let mut key =
-            String::with_capacity(group.len() + name.len() + version.len() + classifier.len() + 3);
+    fn artifact_cache_key(
+        group: &str,
+        name: &str,
+        version: &str,
+        classifier: &str,
+        extension: &str,
+    ) -> String {
+        let extension = Self::normalize_extension(extension);
+        let mut key = String::with_capacity(
+            group.len() + name.len() + version.len() + classifier.len() + extension.len() + 4,
+        );
         key.push_str(group);
         key.push(':');
         key.push_str(name);
@@ -586,6 +594,8 @@ impl DependencyResolutionServiceImpl {
         key.push_str(version);
         key.push(':');
         key.push_str(classifier);
+        key.push(':');
+        key.push_str(&extension);
         key
     }
 
@@ -2126,7 +2136,14 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
     ) -> Result<Response<CheckArtifactCacheResponse>, Status> {
         let req = request.into_inner();
 
-        let key = Self::artifact_cache_key(&req.group, &req.name, &req.version, &req.classifier);
+        let extension = Self::normalize_extension(&req.extension);
+        let key = Self::artifact_cache_key(
+            &req.group,
+            &req.name,
+            &req.version,
+            &req.classifier,
+            &extension,
+        );
 
         if let Some(cached) = self.artifact_cache.get(&key) {
             self.resolution_stats
@@ -2203,7 +2220,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             &req.name,
             &req.version,
             &req.classifier,
-            &req.extension,
+            &extension,
         );
         if path.exists() {
             let metadata = path.metadata().ok();
@@ -2232,7 +2249,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                 name: req.name.clone(),
                 version: req.version.clone(),
                 classifier: req.classifier.clone(),
-                extension: req.extension.clone(),
+                extension: extension.clone(),
                 sha256: actual_sha256.clone(),
                 local_path: path.to_string_lossy().into_owned(),
                 size,
@@ -2562,13 +2579,12 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
     ) -> Result<Response<AddArtifactToCacheResponse>, Status> {
         let req = request.into_inner();
 
-        let key = Self::artifact_cache_key(&req.group, &req.name, &req.version, &req.classifier);
-
         let group = req.group.clone();
         let name = req.name.clone();
         let version = req.version.clone();
         let classifier = req.classifier.clone();
         let extension = "jar".to_string();
+        let key = Self::artifact_cache_key(&group, &name, &version, &classifier, &extension);
 
         // Compute persistent store path
         let store_path = self.artifact_path(&group, &name, &version, &classifier, &extension);
@@ -2639,6 +2655,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                 &entry.name,
                 &entry.version,
                 &entry.classifier,
+                "jar",
             );
 
             match self.artifact_cache.get(&cache_key) {
@@ -3117,9 +3134,33 @@ mod tests {
 
     #[test]
     fn test_artifact_cache_key() {
-        let key =
-            DependencyResolutionServiceImpl::artifact_cache_key("com.example", "my-lib", "1.0", "");
-        assert_eq!(key, "com.example:my-lib:1.0:");
+        let key = DependencyResolutionServiceImpl::artifact_cache_key(
+            "com.example",
+            "my-lib",
+            "1.0",
+            "",
+            "jar",
+        );
+        assert_eq!(key, "com.example:my-lib:1.0::jar");
+
+        let sources_key = DependencyResolutionServiceImpl::artifact_cache_key(
+            "com.example",
+            "my-lib",
+            "1.0",
+            "sources",
+            ".jar",
+        );
+        assert_eq!(sources_key, "com.example:my-lib:1.0:sources:jar");
+
+        let pom_key = DependencyResolutionServiceImpl::artifact_cache_key(
+            "com.example",
+            "my-lib",
+            "1.0",
+            "",
+            "pom",
+        );
+        assert_eq!(pom_key, "com.example:my-lib:1.0::pom");
+        assert_ne!(key, pom_key);
     }
 
     #[tokio::test]
@@ -3717,8 +3758,15 @@ mod tests {
         assert_eq!(content, b"test artifact content");
 
         // Verify .sha256 sidecar exists
-        let sha_path = expected.with_extension("sha256");
+        let sha_path = DependencyResolutionServiceImpl::sha256_sidecar_path(&expected);
         assert!(sha_path.exists(), "SHA-256 sidecar should be written");
+        assert_eq!(
+            std::fs::read_to_string(&sha_path).unwrap(),
+            format!(
+                "{}  test-lib-1.0.jar\n",
+                DependencyResolutionServiceImpl::compute_sha256(b"test artifact content")
+            )
+        );
     }
 
     #[test]
@@ -3757,6 +3805,7 @@ mod tests {
             "cold-lib",
             "1.0",
             "",
+            "jar",
         );
         assert!(!svc.artifact_cache.contains_key(&key));
 
