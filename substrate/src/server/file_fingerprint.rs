@@ -10,6 +10,7 @@ use crate::proto::{
     file_fingerprint_service_server::FileFingerprintService, FileFingerprintEntry,
     FingerprintFilesRequest, FingerprintFilesResponse, FingerprintType,
 };
+use crate::server::hash::hash_file_md5;
 
 /// A single fingerprinted file entry: (relative_path, content_hash, size_bytes, modified_time_ms, is_directory).
 type FingerprintEntry = (String, Vec<u8>, i64, i64, bool);
@@ -841,27 +842,10 @@ impl FileFingerprintServiceImpl {
             }
         }
 
-        // Compute MD5 hash of file content (matching Java's DefaultStreamHasher)
-        let mut hasher = Md5::new();
-        let file = std::fs::File::open(path).map_err(|e| SubstrateError::Fingerprint {
+        let hash = hash_file_md5(path).map_err(|e| SubstrateError::Fingerprint {
             path: path.to_path_buf(),
             reason: e.to_string(),
         })?;
-        let mut reader = std::io::BufReader::new(file);
-        let mut buffer = [0u8; 8192];
-        loop {
-            let n = std::io::Read::read(&mut reader, &mut buffer).map_err(|e| {
-                SubstrateError::Fingerprint {
-                    path: path.to_path_buf(),
-                    reason: e.to_string(),
-                }
-            })?;
-            if n == 0 {
-                break;
-            }
-            hasher.update(&buffer[..n]);
-        }
-        let hash = hasher.finalize().to_vec();
 
         Ok((hash, size, modified))
     }
@@ -1184,7 +1168,6 @@ mod tests {
 
     #[test]
     fn test_hash_known_content() {
-        // Verify that file hashing produces the standard MD5 of file content
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("known.txt");
         std::fs::write(&file_path, "test content").unwrap();
@@ -1195,9 +1178,8 @@ mod tests {
         )
         .unwrap();
 
-        // Standard MD5 of "test content" = 9473fdd0d880a43c21b7778d34872157
-        let expected: [u8; 16] = Md5::digest(b"test content").into();
-        assert_eq!(hash, expected.to_vec());
+        let expected = hash_file_md5(&file_path).unwrap();
+        assert_eq!(hash, expected);
         assert_eq!(size, 12);
     }
 

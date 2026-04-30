@@ -7,6 +7,8 @@ inspect a profiler:
 - dependency transport: whether Maven artifact bytes stream through Rust fast and land in the Rust store with checksum evidence
 - dependency read-through: whether Gradle can skip remote artifact access when Rust already has the JAR
 - metadata read-through: whether Gradle can skip remote POM metadata access when Rust already has the POM
+- hashing/fingerprinting: whether installed Gradle can run with Rust
+  build-session hash/fingerprint shadowing and no parity mismatches
 - file watching: how quickly an edit becomes observable
 
 Run:
@@ -27,3 +29,23 @@ These are not full Gradle replacement claims. Gradle DSL and unsupported plugin
 semantics still go through the JVM compatibility island. This harness exists to
 keep the Rust work focused on perceptible first-minute wins while the broader
 authoritative corpus continues to guard correctness.
+
+For the installed-distribution hash/fingerprint smoke, build the local install
+image and run a small corpus project with only the scope-safe flags enabled:
+
+```bash
+./gradlew :distributions-full:install \
+  -Pgradle_installPath=$PWD/build/gradle-under-test \
+  -Dorg.gradle.unsafe.isolated-projects=false \
+  -Dorg.gradle.configuration-cache=false \
+  --no-daemon --console=plain
+
+build/gradle-under-test/bin/gradle \
+  -p testing/corpus/java-library-kotlin-dsl clean classes \
+  --no-daemon --console=plain --info \
+  -Dorg.gradle.rust.substrate.enabled=true \
+  -Dorg.gradle.rust.substrate.daemon.path=$PWD/target/debug/gradle-substrate-daemon \
+  -Dorg.gradle.rust.substrate.hashing.enabled=true \
+  -Dorg.gradle.rust.substrate.fingerprint.enabled=true \
+  -Dorg.gradle.rust.substrate.shadow.report-mismatches=true
+```

@@ -24,19 +24,21 @@ impl JvmHostClient {
                 .connect()
                 .await?
         } else if endpoint.starts_with("http://") || endpoint.starts_with("https://") {
-            Endpoint::from_shared(endpoint.to_string())?.connect().await?
+            Endpoint::from_shared(endpoint.to_string())?
+                .connect()
+                .await?
         } else {
             let path = endpoint.to_string();
             Endpoint::from_shared("http://localhost".to_string())?
-            .connect_with_connector(tower::service_fn(move |_: tonic::transport::Uri| {
-                let path = path.clone();
-                async move {
-                    let stream = tokio::net::UnixStream::connect(&path).await?;
-                    let io = hyper_util::rt::TokioIo::new(stream);
-                    Ok::<_, io::Error>(io)
-                }
-            }))
-            .await?
+                .connect_with_connector(tower::service_fn(move |_: tonic::transport::Uri| {
+                    let path = path.clone();
+                    async move {
+                        let stream = tokio::net::UnixStream::connect(&path).await?;
+                        let io = hyper_util::rt::TokioIo::new(stream);
+                        Ok::<_, io::Error>(io)
+                    }
+                }))
+                .await?
         };
         Ok(Self {
             client: JvmHostServiceClient::new(channel),

@@ -46,6 +46,7 @@ import org.gradle.initialization.RootBuildLifecycleListener;
 import org.gradle.internal.build.BuildAddedListener;
 import org.gradle.internal.buildoption.InternalOption;
 import org.gradle.internal.buildoption.InternalOptions;
+import org.gradle.internal.buildoption.RustSubstrateOptions;
 import org.gradle.internal.classloader.ClasspathHasher;
 import org.gradle.internal.event.ListenerManager;
 import org.gradle.internal.execution.FileCollectionFingerprinterRegistry;
@@ -73,6 +74,17 @@ import org.gradle.internal.nativeintegration.NativeCapabilities;
 import org.gradle.internal.nativeintegration.filesystem.FileSystem;
 import org.gradle.internal.nativeintegration.services.NativeServices;
 import org.gradle.internal.os.OperatingSystem;
+import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.rustbridge.SubstrateException;
+import org.gradle.internal.rustbridge.fingerprint.RustFileFingerprintClient;
+import org.gradle.internal.rustbridge.fingerprint.ShadowingFileCollectionSnapshotter;
+import org.gradle.internal.rustbridge.hash.RustGrpcFileHasher;
+import org.gradle.internal.rustbridge.hash.ShadowingFileHasher;
+import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
+import org.gradle.internal.rustbridge.snapshot.RustValueSnapshotClient;
+import org.gradle.internal.rustbridge.snapshot.ShadowingInputFingerprinter;
+import org.gradle.internal.rustbridge.snapshot.ShadowingValueSnapshotter;
+import org.gradle.internal.rustbridge.snapshot.SnapshotHashDelegate;
 import org.gradle.internal.serialize.HashCodeSerializer;
 import org.gradle.internal.service.PrivateService;
 import org.gradle.internal.service.Provides;
@@ -337,9 +349,11 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
             FileSystem fileSystem,
             StreamHasher streamHasher,
             StringInterner stringInterner,
-            FileHasherStatistics.Collector statisticsCollector
+            FileHasherStatistics.Collector statisticsCollector,
+            InternalOptions options,
+            @Nullable SubstrateClient substrateClient
         ) {
-            FileHasher localDelegate = new DefaultFileHasher(streamHasher);
+            FileHasher localDelegate = createBuildSessionLocalHasher(streamHasher, options, substrateClient);
             CachingFileHasher localHasher = new CachingFileHasher(localDelegate, cacheAccess, stringInterner, fileTimeStampInspector, "fileHashes", fileSystem, FILE_HASHER_MEMORY_CACHE_SIZE, statisticsCollector);
             return new SplitFileHasher(globalHasher, localHasher, globalCacheLocations);
         }
@@ -373,9 +387,25 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
         @Provides
         FileCollectionSnapshotter createFileCollectionSnapshotter(
             FileSystemAccess fileSystemAccess,
-            Stat stat
+            Stat stat,
+            InternalOptions options,
+            @Nullable SubstrateClient substrateClient
         ) {
-            return new DefaultFileCollectionSnapshotter(fileSystemAccess, stat);
+            FileCollectionSnapshotter delegate = new DefaultFileCollectionSnapshotter(fileSystemAccess, stat);
+            if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_FINGERPRINTING)) {
+                return delegate;
+            }
+            if (RustSubstrateOptions.isSubsystemAuthoritative(options, RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_FINGERPRINTING)) {
+                throw new SubstrateException("Authoritative Rust file fingerprinting is not enabled in build-session VFS wiring yet");
+            }
+            if (!isUsable(substrateClient)) {
+                return delegate;
+            }
+            return new ShadowingFileCollectionSnapshotter(
+                delegate,
+                new RustFileFingerprintClient(substrateClient),
+                createMismatchReporter(options)
+            );
         }
 
         @Provides
@@ -406,10 +436,30 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
         InputFingerprinter createInputFingerprinter(
             FileCollectionSnapshotter snapshotter,
             FileCollectionFingerprinterRegistry fingerprinterRegistry,
-            ValueSnapshotter valueSnapshotter
+            ValueSnapshotter valueSnapshotter,
+            InternalOptions options,
+            @Nullable SubstrateClient substrateClient
         ) {
-            return new DefaultInputFingerprinter(
+            InputFingerprinter delegate = new DefaultInputFingerprinter(
                 snapshotter, fingerprinterRegistry, valueSnapshotter);
+            if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_SNAPSHOTTING)) {
+                return delegate;
+            }
+            if (RustSubstrateOptions.isSubsystemAuthoritative(options, RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_SNAPSHOTTING)) {
+                throw new SubstrateException("Authoritative Rust value snapshotting is not enabled in build-session input fingerprinting yet");
+            }
+            if (!isUsable(substrateClient)) {
+                return delegate;
+            }
+            return new ShadowingInputFingerprinter(
+                delegate,
+                new ShadowingValueSnapshotter(
+                    new SnapshotHashDelegate(valueSnapshotter),
+                    new RustValueSnapshotClient(substrateClient),
+                    createMismatchReporter(options),
+                    false
+                )
+            );
         }
 
         @Provides
@@ -421,6 +471,41 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
             IndexedCache<HashCode, HashCode> resourceHashesCache = store.createIndexedCache(IndexedCacheParameters.of("resourceHashesCache", HashCode.class, new HashCodeSerializer()), 800000, true);
             DefaultResourceSnapshotterCacheService localCache = new DefaultResourceSnapshotterCacheService(resourceHashesCache);
             return new SplitResourceSnapshotterCacheService(globalCache, localCache, globalCacheLocations);
+        }
+
+        private static FileHasher createBuildSessionLocalHasher(
+            StreamHasher streamHasher,
+            InternalOptions options,
+            @Nullable SubstrateClient substrateClient
+        ) {
+            FileHasher javaHasher = new DefaultFileHasher(streamHasher);
+            if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_HASHING)) {
+                return javaHasher;
+            }
+            boolean authoritative = RustSubstrateOptions.isSubsystemAuthoritative(
+                options,
+                RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_HASHING
+            );
+            if (!isUsable(substrateClient)) {
+                if (authoritative) {
+                    throw new SubstrateException("Authoritative Rust hashing is enabled but the Rust substrate client is unavailable");
+                }
+                return javaHasher;
+            }
+            return new ShadowingFileHasher(
+                javaHasher,
+                new RustGrpcFileHasher(substrateClient),
+                createMismatchReporter(options),
+                authoritative
+            );
+        }
+
+        private static boolean isUsable(@Nullable SubstrateClient substrateClient) {
+            return substrateClient != null && !substrateClient.isNoop();
+        }
+
+        private static HashMismatchReporter createMismatchReporter(InternalOptions options) {
+            return new HashMismatchReporter(options.getBoolean(RustSubstrateOptions.REPORT_MISMATCHES));
         }
     }
 }
