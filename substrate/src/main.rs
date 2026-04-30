@@ -466,7 +466,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             VersionCatalogServiceImpl::new(),
         ));
     if let Some(address) = tcp_address {
-        router.serve_with_shutdown(address, shutdown_signal()).await?;
+        router
+            .serve_with_shutdown(address, shutdown_signal())
+            .await?;
     } else if let Some(listener) = listener {
         router
             .serve_with_incoming_shutdown(

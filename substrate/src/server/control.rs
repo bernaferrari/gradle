@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use tonic::{Request, Response, Status};
 
+use super::authoritative::AuthoritativeConfig;
 use crate::client::jvm_host::JvmHostClient;
 use crate::client::jvm_host_bridge::JvmHostBridge;
-use super::authoritative::AuthoritativeConfig;
 use crate::proto::{
     control_service_server::ControlService, GetAuthoritativeModeRequest,
     GetAuthoritativeModeResponse, HandshakeRequest, HandshakeResponse, SetAuthoritativeModeRequest,
