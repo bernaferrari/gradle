@@ -66,6 +66,10 @@
          <trust file=".*-sources[.]jar" regex="true"/>
          <trust file=".*[.]pom" regex="true"/>
       </trusted-artifacts>
+      <ignored-keys>
+         <ignored-key id="3AD93C3C677A106E" reason="Key couldn't be downloaded from any key server"/>
+         <ignored-key id="79752DB6C966F0B8" reason="Key couldn't be downloaded from any key server"/>
+      </ignored-keys>
       <trusted-keys>
          <trusted-key id="0057FBD7F284A1C1B4F1E891EE6E41E5483F557D" group="com.github.jnr" name="jnr-x86asm"/>
          <trusted-key id="015479E1055341431B4545AB72475FD306B9CAB7" group="com.googlecode.javaewah"/>
@@ -374,7 +378,7 @@
             <trusting group="org.codehaus.plexus"/>
             <trusting group="^org[.]apache[.]maven($|([.].*))" regex="true"/>
          </trusted-key>
-         <trusted-key id="B02335AA54CCF21E52BBF9ABD9C565AA72BA2FDD" group="io.grpc" name="grpc-context"/>
+         <trusted-key id="B02335AA54CCF21E52BBF9ABD9C565AA72BA2FDD" group="io.grpc"/>
          <trusted-key id="B1FC0E1FA329669191F8306F5BCEE695141E6086" group="javax.enterprise" name="cdi-api"/>
          <trusted-key id="B41089A2DA79B0FA5810252872385FF0AF338D52" group="joda-time" name="joda-time"/>
          <trusted-key id="B6E73D84EA4FCC47166087253FAAD2CD5ECBB314">
