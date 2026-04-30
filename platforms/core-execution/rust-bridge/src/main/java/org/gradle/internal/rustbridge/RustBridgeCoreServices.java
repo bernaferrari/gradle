@@ -3,6 +3,7 @@ package org.gradle.internal.rustbridge;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.buildoption.InternalOptions;
 import org.gradle.internal.buildoption.RustArtifactCacheReadThroughRegistry;
+import org.gradle.internal.buildoption.RustMetadataCacheReadThroughRegistry;
 import org.gradle.internal.buildoption.RustSubstrateOptions;
 import org.gradle.internal.event.ListenerManager;
 import org.gradle.internal.rustbridge.bootstrap.BootstrapLifecycleListener;
@@ -15,6 +16,7 @@ import org.gradle.internal.rustbridge.configcache.RustConfigCacheClient;
 import org.gradle.internal.rustbridge.dependency.DependencyResolutionShadowListener;
 import org.gradle.internal.rustbridge.dependency.RustArtifactCacheReadThrough;
 import org.gradle.internal.rustbridge.dependency.RustDependencyResolutionClient;
+import org.gradle.internal.rustbridge.dependency.RustMetadataCacheReadThrough;
 import org.gradle.internal.rustbridge.history.RustExecutionHistoryClient;
 import org.gradle.internal.rustbridge.jvmhost.BuildPlanTaskSelectionSnapshot;
 import org.gradle.internal.rustbridge.jvmhost.JvmHostServiceImpl;
@@ -228,7 +230,7 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
             ListenerManager listenerManager,
             InternalOptions options
         ) {
-            configureArtifactCacheReadThrough(rustDependencyResolutionClient, options);
+            configureDependencyReadThrough(rustDependencyResolutionClient, options);
             if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_DEPENDENCY_RESOLUTION)) {
                 return null;
             }
@@ -243,15 +245,20 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
             return listener;
         }
 
-        private static void configureArtifactCacheReadThrough(
+        private static void configureDependencyReadThrough(
             RustDependencyResolutionClient rustDependencyResolutionClient,
             InternalOptions options
         ) {
-            if (RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_DEPENDENCY_RESOLUTION)
-                && options.getBoolean(RustSubstrateOptions.ENABLE_RUST_DEPENDENCY_ARTIFACT_READ_THROUGH)) {
+            boolean dependencyEnabled = RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_DEPENDENCY_RESOLUTION);
+            if (dependencyEnabled && options.getBoolean(RustSubstrateOptions.ENABLE_RUST_DEPENDENCY_ARTIFACT_READ_THROUGH)) {
                 RustArtifactCacheReadThroughRegistry.set(new RustArtifactCacheReadThrough(rustDependencyResolutionClient));
             } else {
                 RustArtifactCacheReadThroughRegistry.reset();
+            }
+            if (dependencyEnabled && options.getBoolean(RustSubstrateOptions.ENABLE_RUST_DEPENDENCY_METADATA_READ_THROUGH)) {
+                RustMetadataCacheReadThroughRegistry.set(new RustMetadataCacheReadThrough(rustDependencyResolutionClient));
+            } else {
+                RustMetadataCacheReadThroughRegistry.reset();
             }
         }
 

@@ -65,6 +65,11 @@
   lookups: warm cache first, persisted Maven-layout `.pom` metadata second,
   network last. Successful network fetches commit atomically, write `.sha256`
   sidecars, and populate the warm cache for parent/BOM/transitive POM reuse.
+- Gradle has an opt-in metadata read-through path
+  (`org.gradle.rust.substrate.dependency.readthrough.metadata=true`) that asks
+  Rust for URL-addressed cached `.pom` metadata when Gradle has no acceptable
+  local cache entry. Existing Gradle cache refresh/revalidation semantics still
+  win when a Gradle cache entry exists.
 - The Gradle dependency shadow listener has an explicit artifact mirror mode
   (`org.gradle.rust.substrate.dependency.mirror.artifacts=true`) that observes
   real resolved external module JARs, computes SHA-256 in the JVM bridge, and
@@ -148,6 +153,8 @@
 - `cargo test -p gradle-substrate-daemon fetch_pom -- --nocapture`
 - `cargo test -p gradle-substrate-daemon persistent_store_roundtrip -- --nocapture`
 - `cargo test -p gradle-substrate-daemon cold_path -- --nocapture`
+- `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.dependency.RustMetadataCacheReadThroughTest`
+- `./gradlew :dependency-management:test --tests org.gradle.internal.resource.transfer.DefaultCacheAwareExternalResourceAccessorTest -x :distributions-core:generateLicenseFile`
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.dependency.DependencyResolutionShadowListenerTest`
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.dependency.RustArtifactCacheReadThroughTest`
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.e2e.SubstrateE2ETest.dependencyArtifactReadThroughReturnsArtifactFromRustStore -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon`

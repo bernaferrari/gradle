@@ -24,6 +24,7 @@ import org.gradle.api.internal.artifacts.ivyservice.resolutionstrategy.ExternalR
 import org.gradle.api.internal.file.temp.TemporaryFileProvider;
 import org.gradle.cache.internal.ProducerGuard;
 import org.gradle.internal.UncheckedException;
+import org.gradle.internal.buildoption.RustMetadataCacheReadThroughRegistry;
 import org.gradle.internal.hash.ChecksumService;
 import org.gradle.internal.hash.HashCode;
 import org.gradle.internal.hash.Hashing;
@@ -37,6 +38,7 @@ import org.gradle.internal.resource.local.FileResourceRepository;
 import org.gradle.internal.resource.local.LocallyAvailableExternalResource;
 import org.gradle.internal.resource.local.LocallyAvailableResource;
 import org.gradle.internal.resource.local.LocallyAvailableResourceCandidates;
+import org.gradle.internal.resource.metadata.DefaultExternalResourceMetaData;
 import org.gradle.internal.resource.metadata.ExternalResourceMetaData;
 import org.gradle.internal.resource.metadata.ExternalResourceMetaDataCompare;
 import org.gradle.util.internal.BuildCommencedTimeProvider;
@@ -89,6 +91,13 @@ public class DefaultCacheAwareExternalResourceAccessor implements CacheAwareExte
             // We might be able to use a cached/locally available version
             if (cached != null && !externalResourceCachePolicy.mustRefreshExternalResource(getAgeMillis(timeProvider, cached))) {
                 return fileResourceRepository.resource(cached.getCachedFile(), location.getUri(), cached.getExternalResourceMetaData());
+            }
+
+            if (cached == null) {
+                LocallyAvailableExternalResource rustCachedMetadata = findRustCachedMetadata(location);
+                if (rustCachedMetadata != null) {
+                    return rustCachedMetadata;
+                }
             }
 
             // We have a cached version, but it might be out of date, so we tell the upstreams to revalidate too
@@ -146,6 +155,28 @@ public class DefaultCacheAwareExternalResourceAccessor implements CacheAwareExte
             // All local/cached options failed, get directly
             return copyToCache(location, fileStore, delegate.withProgressLogging().resource(location, revalidate));
         });
+    }
+
+    @Nullable
+    private LocallyAvailableExternalResource findRustCachedMetadata(ExternalResourceName location) {
+        String path = location.getUri().getPath();
+        if (path == null || !path.endsWith(".pom")) {
+            return null;
+        }
+        File file = RustMetadataCacheReadThroughRegistry.get().findCachedMetadata(location.getUri(), "pom");
+        if (file == null || !file.isFile()) {
+            return null;
+        }
+        LOGGER.debug("Found Rust cached metadata for {} at {}", location, file);
+        ExternalResourceMetaData metaData = new DefaultExternalResourceMetaData(
+            location.getUri(),
+            0,
+            file.length(),
+            "text/xml",
+            null,
+            null
+        );
+        return fileResourceRepository.resource(file, location.getUri(), metaData);
     }
 
     @Nullable

@@ -4,6 +4,8 @@ import gradle.substrate.v1.AddArtifactToCacheRequest;
 import gradle.substrate.v1.AddArtifactToCacheResponse;
 import gradle.substrate.v1.CheckArtifactCacheRequest;
 import gradle.substrate.v1.CheckArtifactCacheResponse;
+import gradle.substrate.v1.CheckMetadataCacheRequest;
+import gradle.substrate.v1.CheckMetadataCacheResponse;
 import gradle.substrate.v1.DependencyDescriptor;
 import gradle.substrate.v1.DependencyResolutionServiceGrpc;
 import gradle.substrate.v1.DownloadArtifactRequest;
@@ -213,6 +215,42 @@ public class RustDependencyResolutionClient {
                 .setName(name)
                 .setVersion(version)
                 .setClassifier(classifier)
+                .setExtension(extension)
+                .setSha256(sha256)
+                .build());
+
+        return new CacheCheckResult(
+            response.getCached(),
+            response.getLocalPath(),
+            response.getCachedSize_()
+        );
+    }
+
+    /**
+     * Check if external metadata is in the Rust metadata cache.
+     */
+    public CacheCheckResult checkMetadataCache(String url, String extension, String sha256) {
+        try {
+            return checkMetadataCacheStrict(url, extension, sha256);
+        } catch (Exception e) {
+            LOGGER.debug("[substrate:dep-resolve] metadata cache check failed", e);
+            return CacheCheckResult.notCached();
+        }
+    }
+
+    /**
+     * Check if external metadata is in the Rust metadata cache.
+     *
+     * @throws RuntimeException when substrate is unavailable or the RPC fails.
+     */
+    public CacheCheckResult checkMetadataCacheStrict(String url, String extension, String sha256) {
+        if (client.isNoop()) {
+            throw new IllegalStateException("Substrate not available");
+        }
+
+        CheckMetadataCacheResponse response = client.getDependencyResolutionStub()
+            .checkMetadataCache(CheckMetadataCacheRequest.newBuilder()
+                .setUrl(url)
                 .setExtension(extension)
                 .setSha256(sha256)
                 .build());

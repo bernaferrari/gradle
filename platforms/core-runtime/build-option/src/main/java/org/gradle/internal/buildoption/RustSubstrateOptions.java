@@ -198,6 +198,14 @@ public class RustSubstrateOptions {
         InternalOptions.ofBoolean("org.gradle.rust.substrate.dependency.readthrough.artifacts", false);
 
     /**
+     * Read external metadata from the Rust metadata store before remote repository access.
+     * Property: org.gradle.rust.substrate.dependency.readthrough.metadata
+     * Default: false
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_DEPENDENCY_METADATA_READ_THROUGH =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.dependency.readthrough.metadata", false);
+
+    /**
      * Enable Phase 19: Rust-native file system watching.
      * Property: org.gradle.rust.substrate.filewatch.enabled
      * Default: false
