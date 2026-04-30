@@ -10,10 +10,11 @@ use tonic::{Request, Response, Status};
 use crate::proto::{
     dependency_resolution_service_server::DependencyResolutionService, AddArtifactToCacheRequest,
     AddArtifactToCacheResponse, CheckArtifactCacheRequest, CheckArtifactCacheResponse,
-    ChecksumFailure, DependencyDescriptor, GetResolutionStatsRequest, GetResolutionStatsResponse,
-    RecordResolutionRequest, RecordResolutionResponse, RepositoryDescriptor,
-    ResolveDependenciesRequest, ResolveDependenciesResponse, ResolvedDependency,
-    VerifyDependencyChecksumsRequest, VerifyDependencyChecksumsResponse,
+    CheckMetadataCacheRequest, CheckMetadataCacheResponse, ChecksumFailure, DependencyDescriptor,
+    GetResolutionStatsRequest, GetResolutionStatsResponse, RecordResolutionRequest,
+    RecordResolutionResponse, RepositoryDescriptor, ResolveDependenciesRequest,
+    ResolveDependenciesResponse, ResolvedDependency, VerifyDependencyChecksumsRequest,
+    VerifyDependencyChecksumsResponse,
 };
 
 // ---------------------------------------------------------------------------
@@ -636,6 +637,18 @@ impl DependencyResolutionServiceImpl {
         key
     }
 
+    fn metadata_url_cache_key(url: &str, extension: &str) -> String {
+        let extension = Self::normalize_extension(extension);
+        let digest = Self::compute_sha256(url.as_bytes());
+        let mut key =
+            String::with_capacity("metadata-url:".len() + digest.len() + extension.len() + 1);
+        key.push_str("metadata-url:");
+        key.push_str(&digest);
+        key.push(':');
+        key.push_str(&extension);
+        key
+    }
+
     fn metadata_path(
         &self,
         repo: &RepositoryDescriptor,
@@ -657,6 +670,18 @@ impl DependencyResolutionServiceImpl {
             .join(name)
             .join(version)
             .join(filename)
+    }
+
+    fn metadata_url_path(&self, url: &str, extension: &str) -> PathBuf {
+        let digest = Self::compute_sha256(url.as_bytes());
+        self.artifact_store_dir
+            .join("_metadata")
+            .join("by-url")
+            .join(format!(
+                "{}.{}",
+                digest,
+                Self::normalize_extension(extension)
+            ))
     }
 
     async fn read_cached_text_artifact(
@@ -758,6 +783,56 @@ impl DependencyResolutionServiceImpl {
         Ok(())
     }
 
+    async fn persist_text_artifact_alias(
+        &self,
+        key: &str,
+        path: &Path,
+        source_path: &Path,
+        group: &str,
+        name: &str,
+        version: &str,
+        classifier: &str,
+        extension: &str,
+        content: &str,
+    ) -> Result<(), String> {
+        if path.as_os_str().is_empty() || path == source_path {
+            return Ok(());
+        }
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| format!("Failed to create metadata alias directory: {}", e))?;
+        }
+        if path.exists() {
+            let _ = tokio::fs::remove_file(path).await;
+        }
+        if tokio::fs::hard_link(source_path, path).await.is_err() {
+            tokio::fs::copy(source_path, path)
+                .await
+                .map_err(|e| format!("Failed to copy metadata alias file: {}", e))?;
+        }
+
+        let sha256 = Self::compute_sha256(content.as_bytes());
+        if let Err(e) = Self::write_sha256_sidecar(path, &sha256).await {
+            tracing::warn!(path = %path.display(), error = %e, "Failed to write metadata alias checksum sidecar");
+        }
+        self.artifact_cache.insert(
+            key.to_string(),
+            CachedArtifact {
+                group: group.to_string(),
+                name: name.to_string(),
+                version: version.to_string(),
+                classifier: classifier.to_string(),
+                extension: extension.to_string(),
+                sha256,
+                local_path: path.to_string_lossy().into_owned(),
+                size: content.len() as i64,
+                cached_at_ms: Self::now_ms(),
+            },
+        );
+        Ok(())
+    }
+
     /// Fetch a POM file from a Maven repository and parse it.
     async fn fetch_pom(
         &self,
@@ -770,6 +845,19 @@ impl DependencyResolutionServiceImpl {
         let classifier = "";
         let key = Self::metadata_cache_key(repo, group, name, version, extension);
         let cache_path = self.metadata_path(repo, group, name, version, extension);
+        let group_path = Self::group_to_path(group);
+        let path = format!(
+            "{}/{}/{}/{}-{}.pom",
+            group_path, name, version, name, version
+        );
+        let url = self
+            .build_request(repo, &path)
+            .build()
+            .map_err(|e| format!("Failed to build POM request: {}", e))?
+            .url()
+            .to_string();
+        let url_key = Self::metadata_url_cache_key(&url, extension);
+        let url_cache_path = self.metadata_url_path(&url, extension);
         if let Some(cached) = self
             .read_cached_text_artifact(
                 &key,
@@ -784,12 +872,20 @@ impl DependencyResolutionServiceImpl {
         {
             return Ok(cached);
         }
-
-        let group_path = Self::group_to_path(group);
-        let path = format!(
-            "{}/{}/{}/{}-{}.pom",
-            group_path, name, version, name, version
-        );
+        if let Some(cached) = self
+            .read_cached_text_artifact(
+                &url_key,
+                &url_cache_path,
+                group,
+                name,
+                version,
+                classifier,
+                extension,
+            )
+            .await
+        {
+            return Ok(cached);
+        }
 
         let response = self
             .build_request(repo, &path)
@@ -805,6 +901,18 @@ impl DependencyResolutionServiceImpl {
                     .map_err(|e| format!("Failed to read POM response: {}", e))?;
                 self.persist_text_artifact(
                     &key,
+                    &cache_path,
+                    group,
+                    name,
+                    version,
+                    classifier,
+                    extension,
+                    &content,
+                )
+                .await?;
+                self.persist_text_artifact_alias(
+                    &url_key,
+                    &url_cache_path,
                     &cache_path,
                     group,
                     name,
@@ -2473,6 +2581,95 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
         }))
     }
 
+    async fn check_metadata_cache(
+        &self,
+        request: Request<CheckMetadataCacheRequest>,
+    ) -> Result<Response<CheckMetadataCacheResponse>, Status> {
+        let req = request.into_inner();
+        if req.url.is_empty() {
+            return Ok(Response::new(CheckMetadataCacheResponse {
+                cached: false,
+                local_path: String::new(),
+                cached_size: 0,
+            }));
+        }
+
+        let extension = Self::normalize_extension(&req.extension);
+        let key = Self::metadata_url_cache_key(&req.url, &extension);
+        if let Some(cached) = self.artifact_cache.get(&key) {
+            let cached_sha256 = cached.sha256.clone();
+            let cached_local_path = cached.local_path.clone();
+            let cached_size = cached.size;
+            drop(cached);
+
+            let actual_sha256 = if !req.sha256.is_empty() && cached_sha256.is_empty() {
+                Self::compute_file_sha256(Path::new(&cached_local_path))
+                    .await
+                    .unwrap_or_default()
+            } else {
+                cached_sha256
+            };
+            if !req.sha256.is_empty() && actual_sha256 != req.sha256 {
+                return Ok(Response::new(CheckMetadataCacheResponse {
+                    cached: false,
+                    local_path: String::new(),
+                    cached_size: 0,
+                }));
+            }
+            if Path::new(&cached_local_path).is_file() {
+                self.resolution_stats
+                    .cache_hits
+                    .fetch_add(1, Ordering::Relaxed);
+                return Ok(Response::new(CheckMetadataCacheResponse {
+                    cached: true,
+                    local_path: cached_local_path,
+                    cached_size,
+                }));
+            }
+        }
+
+        let path = self.metadata_url_path(&req.url, &extension);
+        if path.exists() {
+            let size = path.metadata().map(|m| m.len() as i64).unwrap_or(0);
+            let actual_sha256 = Self::compute_file_sha256(&path).await.unwrap_or_default();
+            if !req.sha256.is_empty() && actual_sha256 != req.sha256 {
+                return Ok(Response::new(CheckMetadataCacheResponse {
+                    cached: false,
+                    local_path: String::new(),
+                    cached_size: 0,
+                }));
+            }
+            self.artifact_cache.insert(
+                key,
+                CachedArtifact {
+                    group: String::new(),
+                    name: String::new(),
+                    version: String::new(),
+                    classifier: String::new(),
+                    extension,
+                    sha256: actual_sha256,
+                    local_path: path.to_string_lossy().into_owned(),
+                    size,
+                    cached_at_ms: Self::now_ms(),
+                },
+            );
+            self.resolution_stats
+                .cache_hits
+                .fetch_add(1, Ordering::Relaxed);
+            return Ok(Response::new(CheckMetadataCacheResponse {
+                cached: true,
+                local_path: path.to_string_lossy().into_owned(),
+                cached_size: size,
+            }));
+        }
+
+        Ok(Response::new(CheckMetadataCacheResponse {
+            cached: false,
+            local_path: String::new(),
+            cached_size: 0,
+        }))
+    }
+
     type DownloadArtifactStream = std::pin::Pin<
         Box<
             dyn tonic::codegen::tokio_stream::Stream<
@@ -3269,6 +3466,19 @@ mod tests {
             svc.artifact_cache.contains_key(&cache_key),
             "POM metadata should populate the warm artifact cache"
         );
+
+        let metadata_url = format!("http://{}/org/example/demo/1.0/demo-1.0.pom", addr);
+        let url_cached = svc
+            .check_metadata_cache(Request::new(CheckMetadataCacheRequest {
+                url: metadata_url,
+                extension: "pom".to_string(),
+                sha256: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(url_cached.cached);
+        assert!(url_cached.local_path.ends_with(".pom"));
 
         let second = svc
             .fetch_pom("org.example", "demo", "1.0", &repo)

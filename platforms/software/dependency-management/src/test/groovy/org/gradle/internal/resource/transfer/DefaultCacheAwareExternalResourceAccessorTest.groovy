@@ -21,6 +21,7 @@ import org.gradle.api.internal.artifacts.ivyservice.ArtifactCacheLockingAccessCo
 import org.gradle.api.internal.artifacts.ivyservice.resolutionstrategy.DefaultExternalResourceCachePolicy
 import org.gradle.api.internal.file.temp.TemporaryFileProvider
 import org.gradle.cache.internal.ProducerGuard
+import org.gradle.internal.buildoption.RustMetadataCacheReadThroughRegistry
 import org.gradle.internal.hash.Hashing
 import org.gradle.internal.resource.ExternalResource
 import org.gradle.internal.resource.ExternalResourceName
@@ -63,6 +64,10 @@ class DefaultCacheAwareExternalResourceAccessorTest extends Specification {
         }
     }
     final cache = new DefaultCacheAwareExternalResourceAccessor(repository, index, timeProvider, temporaryFileProvider, cacheAccessCoordinator, cachePolicy, producerGuard, fileRepository, TestUtil.checksumService)
+
+    def cleanup() {
+        RustMetadataCacheReadThroughRegistry.reset()
+    }
 
     def "returns null when the request resource is not cached and does not exist in the remote repository"() {
         def location = new ExternalResourceName("thing")
@@ -135,6 +140,34 @@ class DefaultCacheAwareExternalResourceAccessorTest extends Specification {
         1 * index.store("thing", cachedFile, metaData)
         1 * fileRepository.resource(cachedFile, location.uri, metaData) >> cachedResource
         0 * _._
+    }
+
+    def "uses rust cached pom metadata when gradle has no local cached resource"() {
+        given:
+        def location = new ExternalResourceName(new URI("https://repo.example.test/maven2/org/example/demo/1.0/demo-1.0.pom"))
+        def fileStore = Mock(CacheAwareExternalResourceAccessor.ResourceFileStore)
+        def localCandidates = Mock(LocallyAvailableResourceCandidates)
+        def rustPom = tempDir.createFile("demo-1.0.pom")
+        rustPom.text = "<project/>"
+        def resultResource = Stub(LocallyAvailableExternalResource)
+        RustMetadataCacheReadThroughRegistry.set({ URI uri, String extension ->
+            assert uri == location.uri
+            assert extension == "pom"
+            rustPom
+        } as RustMetadataCacheReadThroughRegistry.MetadataCacheReadThrough)
+
+        when:
+        def result = cache.getResource(location, null, fileStore, localCandidates)
+
+        then:
+        result == resultResource
+
+        and:
+        1 * index.lookup(location.toString()) >> null
+        1 * fileRepository.resource(rustPom, location.uri, { it.contentLength == rustPom.length() && it.contentType == "text/xml" }) >> resultResource
+        0 * repository._
+        0 * progressLoggingRepo._
+        0 * fileStore._
     }
 
     def "reuses cached resource if it has not expired"() {

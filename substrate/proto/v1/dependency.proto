@@ -10,6 +10,7 @@ import "v1/configuration.proto";
 service DependencyResolutionService {
   rpc ResolveDependencies(ResolveDependenciesRequest) returns (ResolveDependenciesResponse);
   rpc CheckArtifactCache(CheckArtifactCacheRequest) returns (CheckArtifactCacheResponse);
+  rpc CheckMetadataCache(CheckMetadataCacheRequest) returns (CheckMetadataCacheResponse);
   rpc DownloadArtifact(DownloadArtifactRequest) returns (stream DownloadArtifactChunk);
   rpc RecordResolution(RecordResolutionRequest) returns (RecordResolutionResponse);
   rpc GetResolutionStats(GetResolutionStatsRequest) returns (GetResolutionStatsResponse);
@@ -90,6 +91,18 @@ message CheckArtifactCacheRequest {
 }
 
 message CheckArtifactCacheResponse {
+  bool cached = 1;
+  string local_path = 2;
+  int64 cached_size = 3;
+}
+
+message CheckMetadataCacheRequest {
+  string url = 1;
+  string extension = 2;
+  string sha256 = 3;
+}
+
+message CheckMetadataCacheResponse {
   bool cached = 1;
   string local_path = 2;
   int64 cached_size = 3;
