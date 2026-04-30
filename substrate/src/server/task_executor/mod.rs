@@ -3,6 +3,7 @@ mod delete;
 mod exec_task;
 mod jar;
 mod java_compile;
+mod java_exec;
 mod lifecycle;
 mod mkdir_op;
 mod symlink;
@@ -15,6 +16,7 @@ pub use delete::DeleteTaskExecutor;
 pub use exec_task::ExecTaskExecutor;
 pub use jar::JarTaskExecutor;
 pub use java_compile::JavaCompileExecutor;
+pub use java_exec::JavaExecTaskExecutor;
 pub use lifecycle::LifecycleTaskExecutor;
 pub use mkdir_op::MkdirTaskExecutor;
 pub use symlink::SymlinkTaskExecutor;
@@ -81,6 +83,7 @@ impl TaskInput {
                 | "Mkdir"
                 | "Symlink"
                 | "JavaCompile"
+                | "JavaExec"
                 | "TestExec"
                 | "Exec"
                 | "Jar"
@@ -135,6 +138,9 @@ impl TaskExecutorRegistry {
 
         let java_compile = JavaCompileExecutor::new();
         executors.insert(java_compile.task_type().to_string(), Box::new(java_compile));
+
+        let java_exec = JavaExecTaskExecutor::new();
+        executors.insert(java_exec.task_type().to_string(), Box::new(java_exec));
 
         let test_exec = TestExecExecutor::new();
         executors.insert(test_exec.task_type().to_string(), Box::new(test_exec));
@@ -209,6 +215,7 @@ mod tests {
         assert!(types.contains(&"Mkdir"));
         assert!(types.contains(&"Symlink"));
         assert!(types.contains(&"JavaCompile"));
+        assert!(types.contains(&"JavaExec"));
         assert!(types.contains(&"TestExec"));
         assert!(types.contains(&"Exec"));
         assert!(types.contains(&"Jar"));
