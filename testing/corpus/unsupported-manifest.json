@@ -1,0 +1,22 @@
+{
+  "root": ".",
+  "projects": [
+    {
+      "name": "custom-task-unsupported-kotlin-dsl",
+      "path": "custom-task-unsupported-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_substrate_fail_closed": true,
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 0,
+        "plugins": ["base"],
+        "tasks": ["customJvmTask"],
+        "outputs": ["build/custom/task.txt"],
+        "dependencies": [],
+        "project_dependencies": [],
+        "toolchains": []
+      }
+    }
+  ]
+}

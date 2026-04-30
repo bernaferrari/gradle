@@ -444,6 +444,12 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
         ("external-process", "JavaExec") | (_, "JavaExec") => {
             compat_task_type(task, "org.gradle.api.tasks.JavaExec")
         }
+        ("documentation", "Javadoc") | (_, "Javadoc") if javadoc_contract_complete(task) => {
+            "Javadoc".to_string()
+        }
+        ("documentation", "Javadoc") | (_, "Javadoc") => {
+            compat_task_type(task, "org.gradle.api.tasks.javadoc.Javadoc")
+        }
         ("lifecycle", _) | (_, "Lifecycle") if no_task_actions(task) => "Lifecycle".to_string(),
         _ => task.implementation_id.clone(),
     }
@@ -452,6 +458,7 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
 fn execution_context_json(task: &CanonicalBuildPlanTask, task_type: &str) -> String {
     let source_files = match task_type {
         "JavaCompile" => java_source_paths(task),
+        "Javadoc" => java_source_paths(task),
         "TestExec" => test_class_dir_paths(task),
         "Delete" => destroyable_paths(task),
         _ => input_paths(task),
@@ -522,6 +529,10 @@ fn exec_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
 
 fn java_exec_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
     has_input_value(task, "classpath") && has_input_value(task, "main_class")
+}
+
+fn javadoc_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
+    !java_source_paths(task).is_empty() && has_outputs(task)
 }
 
 fn compat_task_type(task: &CanonicalBuildPlanTask, fallback: &str) -> String {
@@ -648,6 +659,14 @@ fn task_options(
         insert_input_option(task, &mut options, "jvm_args", "jvm_args");
         insert_input_option(task, &mut options, "working_dir", "working_dir");
         insert_input_option(task, &mut options, "ignore_exit_value", "ignore_exit_value");
+    } else if task_type == "Javadoc" {
+        insert_input_option(task, &mut options, "java_home", "java_home");
+        insert_input_option(task, &mut options, "classpath", "classpath");
+        insert_input_option(task, &mut options, "destination_dir", "destination_dir");
+        insert_input_option(task, &mut options, "title", "title");
+        insert_input_option(task, &mut options, "max_memory", "max_memory");
+        insert_input_option(task, &mut options, "encoding", "encoding");
+        insert_input_option(task, &mut options, "no_timestamp", "no_timestamp");
     }
     options
 }
@@ -1694,6 +1713,112 @@ mod tests {
         };
 
         assert_eq!(executable_task_type(&task), "org.gradle.api.tasks.JavaExec");
+    }
+
+    #[test]
+    fn test_javadoc_contract_lowers_to_native_with_context_options() {
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":javadoc".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.api.tasks.javadoc.Javadoc".to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "declared-outputs".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "documentation".to_string(),
+            input_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "source0".to_string(),
+                    kind: "source".to_string(),
+                    value: "/repo/src/main/java/App.java".to_string(),
+                    normalization: "relative".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "java_home".to_string(),
+                    kind: "value".to_string(),
+                    value: "/jdk".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "classpath".to_string(),
+                    kind: "value".to_string(),
+                    value: "/repo/build/classes/java/main".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "no_timestamp".to_string(),
+                    kind: "value".to_string(),
+                    value: "true".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+            ],
+            output_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                    name: "output".to_string(),
+                    kind: "directory".to_string(),
+                    path: "/repo/build/docs/javadoc".to_string(),
+                },
+            ],
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        let task_type = executable_task_type(&task);
+        let context: serde_json::Value =
+            serde_json::from_str(&execution_context_json(&task, &task_type)).unwrap();
+
+        assert_eq!(task_type, "Javadoc");
+        assert_eq!(context["source_files"][0], "/repo/src/main/java/App.java");
+        assert_eq!(context["target_dir"], "/repo/build/docs/javadoc");
+        assert_eq!(context["options"]["java_home"], "/jdk");
+        assert_eq!(context["options"]["no_timestamp"], "true");
+    }
+
+    #[test]
+    fn test_javadoc_without_sources_does_not_lower_to_native() {
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":javadoc".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.api.tasks.javadoc.Javadoc".to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "declared-outputs".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "documentation".to_string(),
+            input_specs: Vec::new(),
+            output_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                    name: "output".to_string(),
+                    kind: "directory".to_string(),
+                    path: "/repo/build/docs/javadoc".to_string(),
+                },
+            ],
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        assert_eq!(
+            executable_task_type(&task),
+            "org.gradle.api.tasks.javadoc.Javadoc"
+        );
     }
 
     #[test]

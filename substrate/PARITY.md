@@ -22,7 +22,8 @@
   Java multi-project, resource expansion, JavaCompile options, standalone
   Copy/Sync transforms, CopySpec duplicates, nested Copy/Sync and Zip/Tar
   CopySpec mappings, Zip/Tar/War/Ear archive tasks, a simple Exec task, and a
-  JavaExec task through that explicit gate with `target/debug/gradle-substrate-daemon`.
+  JavaExec task, and a Javadoc task through that explicit gate with
+  `target/debug/gradle-substrate-daemon`.
 - A separate networked JUnit corpus build proves native `TestExec` lowering for
   a non-empty JUnit Platform test task, including include/exclude tag capture,
   when the test runtime contains the JUnit Platform ConsoleLauncher.
@@ -32,6 +33,15 @@
 - Native `JavaExec` lowering captures Java home, classpath, main class, JVM
   args, application args, working directory, and ignore-exit-value from the JVM
   task model, and fails closed unless classpath and main class are present.
+- Native `Javadoc` lowering captures Java home, source files, classpath,
+  destination directory, title, encoding, max memory, and timestamp behavior,
+  and lowers only when source files and declared outputs are present.
+- The native-ready default gate
+  `org.gradle.rust.substrate.runbuild.native-ready-default=true` tries Rust
+  RunBuild first and delegates back to JVM execution when the selected plan is
+  not fully native-ready.
+- `testing/corpus/unsupported-manifest.json` tracks work that must remain
+  outside approximate native execution until a complete contract exists.
 - Native dependency resolution handles inherited Maven exclusions per dependency
   edge, so one dependency's exclusions no longer remove sibling dependencies.
 - Native dependency resolution preserves Maven dependency scopes on resolved
@@ -80,15 +90,15 @@
 ## Gaps
 
 - Full dependency resolution semantics are not yet parity-complete.
-- Real Gradle invocation does not use Rust as the default executor yet; the
-  authoritative build-work gate is intentionally opt-in and fail-closed while
-  coverage expands beyond the checked-in Java corpus.
+- Real Gradle invocation does not use Rust as the unconditional default executor
+  yet; the authoritative build-work gate is intentionally opt-in and fail-closed
+  while the native-ready default gate delegates on incomplete plans.
 - Kotlin/Groovy DSL evaluation and legacy plugin execution remain JVM-host
   compatibility islands.
 - More task types need native-ready contract capture before broad no-fallback
   execution is realistic, especially arbitrary copy filters/actions beyond
-  direct expand, Javadoc-style process tasks, Gradle archive metadata edge
-  cases beyond entry inventory, and native symlink copy/archive semantics.
+  direct expand, Gradle archive metadata edge cases beyond entry inventory, and
+  native symlink copy/archive semantics.
 
 ## Validation
 
@@ -98,6 +108,8 @@
 - `./gradlew :core:test --tests org.gradle.execution.RustAuthoritativeBuildExecutionActionTest -x :distributions-core:generateLicenseFile`
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --verbose`
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --verbose`
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/unsupported-manifest.json --contract-only --output-dir build/corpus-contract-unsupported`
+- `python3 tools/performance/rust_substrate_perf_report.py build/corpus-authoritative-20/corpus_summary.json --output build/corpus-authoritative-20/performance.md`
 - `./tools/stabilization/run_strict_stabilization.sh quick`
 - `./tools/demo/rust_substrate_demo.sh --quick`
 
@@ -105,9 +117,10 @@
 
 1. Expand differential corpus coverage for external dependency and richer
    task-graph semantics.
-2. Add an explicit unsupported/fail-closed corpus for symlinks, arbitrary
-   CopySpec actions, unsupported copy filters, and unsupported test filters.
-3. Add native-ready contracts for richer `Copy`/`Sync` specs and another common
-   process task such as `Javadoc`.
+2. Expand the unsupported corpus from custom JVM work into symlink CopySpec,
+   arbitrary CopySpec actions, unsupported copy filters, and unsupported test
+   filters as those signals become observable in the bridge.
+3. Add native-ready contracts for richer `Copy`/`Sync` specs and the next common
+   process task after `Javadoc`.
 4. Reduce bridge source exclusions as APIs are stabilized.
 5. Track upstream commit synchronization in this file for each parity push.

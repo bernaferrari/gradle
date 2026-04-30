@@ -238,6 +238,38 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
+    public void capturesNativeReadyJavadocContractFromTaskModel() throws IOException {
+        File sourceDir = temporaryFolder.newFolder("src", "main", "java");
+        File sourceFile = new File(sourceDir, "App.java");
+        assertTrue(sourceFile.createNewFile());
+        File classesDir = temporaryFolder.newFolder("build/classes/java/main");
+        File docsDir = temporaryFolder.newFolder("build/docs/javadoc");
+
+        Task javadoc = javadocTask(sourceFile, classesDir, docsDir);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(javadoc, Javadoc.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals(":javadoc", task.getPath());
+        assertEquals("documentation", task.getActionKind());
+        assertEquals("process", task.getWorkerIsolation());
+        assertEquals("Javadoc", inputs.get("taskType"));
+        assertFalse(inputs.get("java_home").isEmpty());
+        assertEquals(classesDir.getAbsolutePath(), inputs.get("classpath"));
+        assertEquals(docsDir.getAbsolutePath(), inputs.get("destination_dir"));
+        assertEquals("API", inputs.get("title"));
+        assertEquals("UTF-8", inputs.get("encoding"));
+        assertEquals("true", inputs.get("no_timestamp"));
+        assertTrue(task.getInputSpecsList().stream()
+            .anyMatch(input -> input.getKind().equals("source") && input.getValue().equals(sourceFile.getAbsolutePath())));
+        assertTrue(task.getOutputSpecsList().stream()
+            .map(BuildPlanTaskOutputSpec::getPath)
+            .anyMatch(path -> path.equals(docsDir.getAbsolutePath())));
+    }
+
+    @org.junit.Test
     public void capturesProcessResourcesAsNativeFileTransform() throws IOException {
         File resourceFile = temporaryFolder.newFile("application.properties");
         File outputDir = temporaryFolder.newFolder("build/resources/main");
@@ -586,6 +618,67 @@ public class ProjectModelProviderAdapterTest {
                     return workingDir;
                 case "isIgnoreExitValue":
                     return false;
+                case "compareTo":
+                    return 0;
+                default:
+                    return defaultValue(method.getReturnType());
+            }
+        });
+    }
+
+    private static Task javadocTask(File sourceFile, File classesDir, File docsDir) {
+        FileCollection source = fileCollection(sourceFile);
+        FileCollection classpath = fileCollection(classesDir);
+        FileCollection outputs = fileCollection(docsDir);
+        Project project = proxy(Project.class, (proxy, method, args) -> {
+            if (method.getName().equals("getPath")) {
+                return ":";
+            }
+            return defaultValue(method.getReturnType());
+        });
+        TaskDependency noDependencies = proxy(TaskDependency.class, (proxy, method, args) -> {
+            if (method.getName().equals("getDependencies")) {
+                return Collections.emptySet();
+            }
+            return defaultValue(method.getReturnType());
+        });
+        return proxy(new Class<?>[] {Task.class, JavadocContract.class}, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "getPath":
+                    return ":javadoc";
+                case "getProject":
+                    return project;
+                case "getName":
+                    return "javadoc";
+                case "getEnabled":
+                    return true;
+                case "getGroup":
+                case "getDescription":
+                    return "";
+                case "getTaskDependencies":
+                case "getShouldRunAfter":
+                case "getMustRunAfter":
+                case "getFinalizedBy":
+                    return noDependencies;
+                case "getInputs":
+                    return filesOwner(method.getReturnType(), source);
+                case "getOutputs":
+                    return filesOwner(method.getReturnType(), outputs);
+                case "getLocalState":
+                case "getDestroyables":
+                    return registeredFilesOwner(method.getReturnType());
+                case "getSource":
+                    return source;
+                case "getClasspath":
+                    return classpath;
+                case "getDestinationDir":
+                    return docsDir;
+                case "getTitle":
+                    return "API";
+                case "getMaxMemory":
+                    return "256m";
+                case "getOptions":
+                    return new JavadocOptionsContract();
                 case "compareTo":
                     return 0;
                 default:
@@ -954,6 +1047,15 @@ public class ProjectModelProviderAdapterTest {
         boolean isIgnoreExitValue();
     }
 
+    public interface JavadocContract {
+        FileCollection getSource();
+        FileCollection getClasspath();
+        File getDestinationDir();
+        String getTitle();
+        String getMaxMemory();
+        JavadocOptionsContract getOptions();
+    }
+
     public interface CopySpecContract {
         boolean hasCustomActions();
         Object buildRootResolver();
@@ -986,6 +1088,16 @@ public class ProjectModelProviderAdapterTest {
 
         public FileCollection getAnnotationProcessorPath() {
             return fileCollection();
+        }
+    }
+
+    public static class JavadocOptionsContract {
+        public String getEncoding() {
+            return "UTF-8";
+        }
+
+        public boolean isNoTimestamp() {
+            return true;
         }
     }
 
@@ -1127,6 +1239,9 @@ public class ProjectModelProviderAdapterTest {
     }
 
     public static class Tar {
+    }
+
+    public static class Javadoc {
     }
 
     public static class Test {

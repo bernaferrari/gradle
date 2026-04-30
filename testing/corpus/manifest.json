@@ -304,6 +304,22 @@
         "project_dependencies": [],
         "toolchains": ["17"]
       }
+    },
+    {
+      "name": "javadoc-kotlin-dsl",
+      "path": "javadoc-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 1,
+        "plugins": ["java"],
+        "tasks": [],
+        "outputs": [],
+        "dependencies": [],
+        "project_dependencies": [],
+        "toolchains": ["17"]
+      }
     }
   ]
 }

@@ -4,6 +4,7 @@ mod exec_task;
 mod jar;
 mod java_compile;
 mod java_exec;
+mod javadoc;
 mod lifecycle;
 mod mkdir_op;
 mod symlink;
@@ -17,6 +18,7 @@ pub use exec_task::ExecTaskExecutor;
 pub use jar::JarTaskExecutor;
 pub use java_compile::JavaCompileExecutor;
 pub use java_exec::JavaExecTaskExecutor;
+pub use javadoc::JavadocTaskExecutor;
 pub use lifecycle::LifecycleTaskExecutor;
 pub use mkdir_op::MkdirTaskExecutor;
 pub use symlink::SymlinkTaskExecutor;
@@ -84,6 +86,7 @@ impl TaskInput {
                 | "Symlink"
                 | "JavaCompile"
                 | "JavaExec"
+                | "Javadoc"
                 | "TestExec"
                 | "Exec"
                 | "Jar"
@@ -141,6 +144,9 @@ impl TaskExecutorRegistry {
 
         let java_exec = JavaExecTaskExecutor::new();
         executors.insert(java_exec.task_type().to_string(), Box::new(java_exec));
+
+        let javadoc = JavadocTaskExecutor::new();
+        executors.insert(javadoc.task_type().to_string(), Box::new(javadoc));
 
         let test_exec = TestExecExecutor::new();
         executors.insert(test_exec.task_type().to_string(), Box::new(test_exec));
@@ -216,6 +222,7 @@ mod tests {
         assert!(types.contains(&"Symlink"));
         assert!(types.contains(&"JavaCompile"));
         assert!(types.contains(&"JavaExec"));
+        assert!(types.contains(&"Javadoc"));
         assert!(types.contains(&"TestExec"));
         assert!(types.contains(&"Exec"));
         assert!(types.contains(&"Jar"));
@@ -250,6 +257,7 @@ mod tests {
         assert!(TaskInput::is_native_supported("Mkdir"));
         assert!(TaskInput::is_native_supported("Symlink"));
         assert!(TaskInput::is_native_supported("JavaCompile"));
+        assert!(TaskInput::is_native_supported("Javadoc"));
         assert!(TaskInput::is_native_supported("TestExec"));
         assert!(TaskInput::is_native_supported("Exec"));
         assert!(TaskInput::is_native_supported("Zip"));

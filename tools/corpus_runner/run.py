@@ -56,6 +56,7 @@ class RunResult:
 STABLE_BUILD_OUTPUT_ROOTS = {
     "classes",
     "resources",
+    "docs",
     "libs",
     "distributions",
     "install",
@@ -183,6 +184,8 @@ def scan_project_contract(project_dir: str) -> dict:
             plugins.add("java")
         if re.search(r"^\s*application\s*$", text, re.MULTILINE):
             plugins.add("application")
+        if re.search(r"^\s*base\s*$", text, re.MULTILINE):
+            plugins.add("base")
 
         tasks.update(re.findall(r"tasks\.register(?:<[^>]+>)?\([\"']([^\"']+)[\"']", text))
         tasks.update(re.findall(r"^\s*task\s+([A-Za-z_][A-Za-z0-9_]*)\b", text, re.MULTILINE))
@@ -246,6 +249,7 @@ def build_gradle_command(
     substrate_mode: str = "shadow",
     daemon_binary: str | None = None,
     runbuild_authoritative: bool = False,
+    runbuild_native_ready_default: bool = False,
 ) -> list[str]:
     """Build the Gradle invocation used by corpus runs."""
     cmd = ["./gradlew"] if os.path.exists(os.path.join(project_dir, "gradlew")) else ["gradle"]
@@ -262,6 +266,8 @@ def build_gradle_command(
             cmd.append(f"-Dorg.gradle.rust.substrate.daemon.path={daemon_binary}")
         if runbuild_authoritative:
             cmd.append("-Dorg.gradle.rust.substrate.runbuild.authoritative=true")
+        if runbuild_native_ready_default:
+            cmd.append("-Dorg.gradle.rust.substrate.runbuild.native-ready-default=true")
 
     return cmd
 
@@ -299,6 +305,26 @@ def compare_run_pair(upstream: RunResult, substrate: RunResult, allow_noop_subst
         and checks["output_hashes_match"]
         and checks["archive_entries_match"]
     )
+    return checks
+
+
+def compare_expected_fail_closed(upstream: RunResult, substrate: RunResult) -> dict:
+    """Return explicit checks for projects that should reject native execution."""
+    failure_markers = (
+        "Rust authoritative run-build did not complete",
+        "No executor for task type",
+        "not natively executable",
+        "jvmForwarded=",
+    )
+    checks = {
+        "successful": upstream.exit_code == 0 and substrate.exit_code != 0,
+        "no_fallback": not substrate.substrate_noop,
+        "upstream_successful": upstream.exit_code == 0,
+        "substrate_failed": substrate.exit_code != 0,
+        "no_noop_fallback": not substrate.substrate_noop,
+        "fail_closed_message": any(marker in substrate.output for marker in failure_markers),
+    }
+    checks["match"] = all(checks.values())
     return checks
 
 
@@ -386,6 +412,7 @@ def run_build(
     substrate_mode: str = "shadow",
     daemon_binary: str | None = None,
     runbuild_authoritative: bool = False,
+    runbuild_native_ready_default: bool = False,
 ) -> RunResult:
     """Run gradle on a project directory."""
     cmd = build_gradle_command(
@@ -395,6 +422,7 @@ def run_build(
         substrate_mode=substrate_mode,
         daemon_binary=daemon_binary,
         runbuild_authoritative=runbuild_authoritative,
+        runbuild_native_ready_default=runbuild_native_ready_default,
     )
     
     start = time.monotonic()
@@ -463,6 +491,8 @@ def main():
                        help="Do not fail if the substrate candidate falls back to no-op mode")
     parser.add_argument("--runbuild-authoritative", action="store_true",
                        help="Enable the explicit no-fallback Rust RunBuild gate for the substrate candidate")
+    parser.add_argument("--runbuild-native-ready-default", action="store_true",
+                       help="Try Rust RunBuild first and delegate to JVM when the selected plan is not fully native-ready")
     parser.add_argument("--timeout", type=int, default=300, help="Timeout per project in seconds")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
     parser.add_argument("--output-dir", default=None, help="Directory for results")
@@ -485,12 +515,12 @@ def main():
 
     projects = []
     if args.project:
-        projects.append(args.project)
+        projects.append({"name": os.path.basename(args.project), "resolved_path": args.project})
     elif args.projects:
-        projects.extend(args.projects)
+        projects.extend({"name": os.path.basename(project), "resolved_path": project} for project in args.projects)
     elif args.manifest:
         _root, manifest_projects = load_manifest(args.manifest)
-        projects.extend(project["resolved_path"] for project in manifest_projects)
+        projects.extend(manifest_projects)
     
     if not projects:
         print("No projects specified. Use --project or --projects.")
@@ -498,14 +528,17 @@ def main():
     
     results = {}
     
-    for project in projects:
+    for project_entry in projects:
+        project = project_entry["resolved_path"]
+        project_name = project_entry.get("name") or os.path.basename(project)
+        expected_fail_closed = bool(project_entry.get("expected_substrate_fail_closed", False))
         print(f"\n{'='*60}")
         print(f"Running project: {project}")
         print(f"{'='*60}")
         
         if not os.path.exists(project):
             print(f"  Project not found: {project}")
-            results[os.path.basename(project)] = {"error": "Project not found"}
+            results[project_name] = {"error": "Project not found"}
             continue
         
         # Run upstream
@@ -522,17 +555,24 @@ def main():
             substrate_mode=args.substrate_mode,
             daemon_binary=args.daemon_binary,
             runbuild_authoritative=args.runbuild_authoritative,
+            runbuild_native_ready_default=args.runbuild_native_ready_default,
         )
-        checks = compare_run_pair(upstream, substrate, allow_noop_substrate=args.allow_noop_substrate)
+        checks = compare_expected_fail_closed(upstream, substrate) if expected_fail_closed else compare_run_pair(
+            upstream,
+            substrate,
+            allow_noop_substrate=args.allow_noop_substrate,
+        )
         
-        results[os.path.basename(project)] = {
+        results[project_name] = {
             "upstream": upstream.to_dict(),
             "substrate": substrate.to_dict(),
             "checks": checks,
             "match": checks["match"],
         }
+        if expected_fail_closed:
+            results[project_name]["expected_substrate_fail_closed"] = True
         if substrate.substrate_noop and not args.allow_noop_substrate:
-            results[os.path.basename(project)]["error"] = "Substrate candidate used no-op fallback"
+            results[project_name]["error"] = "Substrate candidate used no-op fallback"
         
         if args.verbose:
             print(f"    Upstream tasks: {len(upstream.tasks)}")
