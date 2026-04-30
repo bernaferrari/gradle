@@ -470,8 +470,11 @@ impl FileWatchService for FileWatchServiceImpl {
                     Status::internal(format!("Failed to watch path for polling: {}", e))
                 })?;
 
-            // Keep the watcher alive for the duration of the stream
+            // Keep the watcher alive for the duration of the stream. Dropping the
+            // watcher here would close the sender and end the stream immediately.
+            let stream_watcher = stream_watcher;
             let stream = async_stream::stream! {
+                let _watcher = stream_watcher;
                 // Yield events as they arrive
                 // The watcher sends events through the channel
                 // When the caller drops the stream receiver, this future is cancelled
@@ -617,6 +620,82 @@ mod tests {
             &["**/*.java".to_string()],
             &[]
         ));
+    }
+
+    #[tokio::test]
+    async fn file_watch_reports_first_change_quickly() {
+        use tokio_stream::StreamExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root_path = dir.path().to_string_lossy().into_owned();
+        let svc = FileWatchServiceImpl::new();
+
+        let start = svc
+            .start_watching(Request::new(StartWatchingRequest {
+                root_path: root_path.clone(),
+                include_patterns: vec!["**/*.java".to_string()],
+                exclude_patterns: vec![],
+                debounce_ms: 0,
+                follow_symlinks: true,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let mut stream = svc
+            .poll_changes(Request::new(PollChangesRequest {
+                watch_id: start.watch_id.clone(),
+                since_timestamp_ms: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Give the platform watcher a short moment to subscribe before the write.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let src_dir = dir.path().join("src");
+        tokio::fs::create_dir_all(&src_dir).await.unwrap();
+        let changed_file = src_dir.join("Probe.java");
+        let changed_suffix = changed_file.to_string_lossy().into_owned();
+        let changed_at = Instant::now();
+        tokio::fs::write(&changed_file, b"class Probe {}\n")
+            .await
+            .unwrap();
+
+        let event = tokio::time::timeout(Duration::from_secs(3), async {
+            while let Some(event) = stream.next().await {
+                let event = event.unwrap();
+                if event.path.ends_with(&changed_suffix) || event.path == changed_suffix {
+                    return event;
+                }
+            }
+            panic!("file watcher stream ended before reporting the changed file");
+        })
+        .await
+        .expect("file watcher did not report the first Java file change within 3s");
+
+        let latency_ms = changed_at.elapsed().as_millis();
+        println!("file_watch_first_change_latency_ms={latency_ms}");
+        assert!(
+            event.change_type == "CREATED" || event.change_type == "MODIFIED",
+            "unexpected change type: {}",
+            event.change_type
+        );
+        assert!(
+            latency_ms < 1_500,
+            "first file-watch event took {latency_ms}ms"
+        );
+
+        drop(stream);
+        let stopped = svc
+            .stop_watching(Request::new(StopWatchingRequest {
+                watch_id: start.watch_id,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(stopped.stopped);
     }
 
     #[test]

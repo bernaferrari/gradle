@@ -20,3 +20,12 @@ The generated report records matched projects, no-fallback projects, task-count
 parity, observed upstream wall time, observed Rust-substrate wall time, and the
 percentage delta. Treat whole-build wall time as trend evidence; use dedicated
 benchmarks for subsystem-level claims.
+
+For first-minute demo evidence, run:
+
+```bash
+python3 tools/demo/first_60_seconds.py --output build/first60.json
+```
+
+That reports daemon socket readiness, Rust dependency-transport smoke timing,
+and native file-watch first-event latency without relying on full-build timing.
