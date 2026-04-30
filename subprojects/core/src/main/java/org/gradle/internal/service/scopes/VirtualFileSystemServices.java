@@ -395,16 +395,19 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
             if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_FINGERPRINTING)) {
                 return delegate;
             }
-            if (RustSubstrateOptions.isSubsystemAuthoritative(options, RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_FINGERPRINTING)) {
-                throw new SubstrateException("Authoritative Rust file fingerprinting is not enabled in build-session VFS wiring yet");
-            }
+            boolean authoritative = RustSubstrateOptions.isSubsystemAuthoritative(options, RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_FINGERPRINTING);
             if (!isUsable(substrateClient)) {
+                if (authoritative) {
+                    throw new SubstrateException("Authoritative Rust file fingerprinting is enabled but the Rust substrate client is unavailable");
+                }
                 return delegate;
             }
             return new ShadowingFileCollectionSnapshotter(
                 delegate,
                 new RustFileFingerprintClient(substrateClient),
-                createMismatchReporter(options)
+                createMismatchReporter(options),
+                authoritative,
+                stat
             );
         }
 

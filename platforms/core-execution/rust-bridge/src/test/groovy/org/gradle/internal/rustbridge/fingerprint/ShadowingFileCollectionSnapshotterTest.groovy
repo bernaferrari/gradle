@@ -2,11 +2,14 @@ package org.gradle.internal.rustbridge.fingerprint
 
 import org.gradle.api.internal.file.FileCollectionInternal
 import org.gradle.api.internal.file.FileCollectionStructureVisitor
+import org.gradle.api.internal.file.FileTreeInternal
 import org.gradle.internal.execution.FileCollectionSnapshotter
 import org.gradle.internal.file.FileMetadata
 import org.gradle.internal.file.impl.DefaultFileMetadata
 import org.gradle.internal.hash.HashCode
+import org.gradle.internal.rustbridge.SubstrateException
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter
+import org.gradle.internal.snapshot.DirectorySnapshot
 import org.gradle.internal.snapshot.FileSystemSnapshot
 import org.gradle.internal.snapshot.RegularFileSnapshot
 import org.gradle.internal.snapshot.SnapshotVisitResult
@@ -145,6 +148,128 @@ class ShadowingFileCollectionSnapshotterTest extends Specification {
         result.is(javaSnapshot)
     }
 
+    def "authoritative snapshot builds regular file snapshots from rust without java delegate"() {
+        given:
+        def javaDelegate = Mock(FileCollectionSnapshotter)
+        def rustClient = Mock(RustFileFingerprintClient)
+        def reporter = Mock(HashMismatchReporter)
+        def rustResult = Mock(RustFileFingerprintClient.FingerprintResult)
+        def rustEntry = Mock(RustFileFingerprintClient.IndividualFingerprint)
+        def hash = HashCode.fromBytes("authoritative-md5".bytes)
+        def tmp = File.createTempFile("authoritative-fp", ".txt")
+        tmp.deleteOnExit()
+        tmp.text = "x"
+        def file = singleFileCollection(tmp.absolutePath)
+        def snapshotter = new ShadowingFileCollectionSnapshotter(javaDelegate, rustClient, reporter, true)
+
+        rustEntry.isDirectory() >> false
+        rustEntry.getPath() >> tmp.absolutePath
+        rustEntry.getHash() >> hash
+        rustEntry.getLastModified() >> 123L
+        rustEntry.getSize() >> 1L
+
+        when:
+        def result = snapshotter.snapshot(file)
+
+        then:
+        0 * javaDelegate._
+        1 * rustClient.fingerprintFiles(_, "ABSOLUTE_PATH", []) >> rustResult
+        1 * rustResult.isSuccess() >> true
+        1 * rustResult.getEntries() >> [rustEntry]
+
+        and:
+        def roots = result.roots().toList()
+        roots.size() == 1
+        roots[0] instanceof RegularFileSnapshot
+        roots[0].absolutePath == tmp.absolutePath
+        roots[0].hash == hash
+    }
+
+    def "authoritative snapshot builds directory snapshots from rust file hashes"() {
+        given:
+        def javaDelegate = Mock(FileCollectionSnapshotter)
+        def rustClient = Mock(RustFileFingerprintClient)
+        def reporter = Mock(HashMismatchReporter)
+        def rustResult = Mock(RustFileFingerprintClient.FingerprintResult)
+        def rustEntry = Mock(RustFileFingerprintClient.IndividualFingerprint)
+        def hash = HashCode.fromBytes("directory-md5---".bytes)
+        def dir = File.createTempDir("authoritative-fp-dir", "")
+        def child = new File(dir, "child.txt")
+        child.text = "x"
+        child.deleteOnExit()
+        dir.deleteOnExit()
+        def file = singleFileCollection(dir.absolutePath)
+        def snapshotter = new ShadowingFileCollectionSnapshotter(javaDelegate, rustClient, reporter, true)
+
+        rustEntry.isDirectory() >> false
+        rustEntry.getPath() >> child.absolutePath
+        rustEntry.getHash() >> hash
+        rustEntry.getLastModified() >> 123L
+        rustEntry.getSize() >> 1L
+
+        when:
+        def result = snapshotter.snapshot(file)
+
+        then:
+        0 * javaDelegate._
+        1 * rustClient.fingerprintFiles(_, "ABSOLUTE_PATH", []) >> rustResult
+        1 * rustResult.isSuccess() >> true
+        1 * rustResult.getEntries() >> [rustEntry]
+
+        and:
+        def roots = result.roots().toList()
+        roots.size() == 1
+        roots[0] instanceof DirectorySnapshot
+        roots[0].children.size() == 1
+        roots[0].children[0] instanceof RegularFileSnapshot
+        roots[0].children[0].absolutePath == child.absolutePath
+        roots[0].children[0].hash == hash
+    }
+
+    def "authoritative snapshot fails closed for file-tree-backed files"() {
+        given:
+        def javaDelegate = Mock(FileCollectionSnapshotter)
+        def rustClient = Mock(RustFileFingerprintClient)
+        def reporter = Mock(HashMismatchReporter)
+        def backingFile = File.createTempFile("authoritative-fp-file-tree-backed", ".zip")
+        backingFile.deleteOnExit()
+        def file = fileTreeBackedByFileCollection(backingFile.absolutePath)
+        def snapshotter = new ShadowingFileCollectionSnapshotter(javaDelegate, rustClient, reporter, true)
+
+        when:
+        snapshotter.snapshot(file)
+
+        then:
+        def e = thrown(SubstrateException)
+        e.message.contains("does not yet support file-tree-backed files")
+        0 * javaDelegate._
+        0 * rustClient._
+    }
+
+    def "authoritative snapshot fails closed when rust omits requested file"() {
+        given:
+        def javaDelegate = Mock(FileCollectionSnapshotter)
+        def rustClient = Mock(RustFileFingerprintClient)
+        def reporter = Mock(HashMismatchReporter)
+        def rustResult = Mock(RustFileFingerprintClient.FingerprintResult)
+        def tmp = File.createTempFile("authoritative-fp-missing", ".txt")
+        tmp.deleteOnExit()
+        tmp.text = "x"
+        def file = singleFileCollection(tmp.absolutePath)
+        def snapshotter = new ShadowingFileCollectionSnapshotter(javaDelegate, rustClient, reporter, true)
+
+        when:
+        snapshotter.snapshot(file)
+
+        then:
+        0 * javaDelegate._
+        1 * rustClient.fingerprintFiles(_, "ABSOLUTE_PATH", []) >> rustResult
+        1 * rustResult.isSuccess() >> true
+        1 * rustResult.getEntries() >> []
+        def e = thrown(SubstrateException)
+        e.message.contains("returned no entry")
+    }
+
     private FileCollectionInternal emptyFileCollection() {
         def file = Mock(FileCollectionInternal)
         file.visitStructure(_) >> { args ->
@@ -159,6 +284,15 @@ class ShadowingFileCollectionSnapshotterTest extends Specification {
         file.visitStructure(_) >> { args ->
             def visitor = args[0] as FileCollectionStructureVisitor
             visitor.visitCollection(null, [new File(path)])
+        }
+        file
+    }
+
+    private FileCollectionInternal fileTreeBackedByFileCollection(String path) {
+        def file = Mock(FileCollectionInternal)
+        file.visitStructure(_) >> { args ->
+            def visitor = args[0] as FileCollectionStructureVisitor
+            visitor.visitFileTreeBackedByFile(new File(path), Mock(FileTreeInternal), null)
         }
         file
     }

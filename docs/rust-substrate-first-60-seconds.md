@@ -8,7 +8,7 @@ inspect a profiler:
 - dependency read-through: whether Gradle can skip remote artifact access when Rust already has the JAR
 - metadata read-through: whether Gradle can skip remote POM metadata access when Rust already has the POM
 - hashing/fingerprinting: whether installed Gradle can run with Rust
-  build-session hash/fingerprint shadowing and no parity mismatches
+  build-session hashing plus file-collection snapshot/fingerprint support
 - file watching: how quickly an edit becomes observable
 
 Run:
@@ -31,7 +31,9 @@ keep the Rust work focused on perceptible first-minute wins while the broader
 authoritative corpus continues to guard correctness.
 
 For the installed-distribution hash/fingerprint smoke, build the local install
-image and run a small corpus project with only the scope-safe flags enabled:
+image and run a small corpus project with only the scope-safe flags enabled.
+Shadow mode compares Java and Rust hashes without changing Gradle's returned
+snapshots:
 
 ```bash
 ./gradlew :distributions-full:install \
@@ -48,4 +50,19 @@ build/gradle-under-test/bin/gradle \
   -Dorg.gradle.rust.substrate.hashing.enabled=true \
   -Dorg.gradle.rust.substrate.fingerprint.enabled=true \
   -Dorg.gradle.rust.substrate.shadow.report-mismatches=true
+```
+
+The supported authoritative slice can also materialize Gradle-compatible
+file-collection snapshots from Rust hashes for direct files, missing roots,
+directories, and PatternSet-backed file trees:
+
+```bash
+build/gradle-under-test/bin/gradle \
+  -p testing/corpus/java-library-kotlin-dsl clean classes \
+  --no-daemon --console=plain --info \
+  -Dorg.gradle.rust.substrate.enabled=true \
+  -Dorg.gradle.rust.substrate.daemon.path=$PWD/target/debug/gradle-substrate-daemon \
+  -Dorg.gradle.rust.substrate.hashing.enabled=true \
+  -Dorg.gradle.rust.substrate.fingerprint.enabled=true \
+  -Dorg.gradle.rust.substrate.fingerprint.authoritative=true
 ```
