@@ -182,6 +182,14 @@ public class RustSubstrateOptions {
         InternalOptions.ofBoolean("org.gradle.rust.substrate.dependency.enabled", false);
 
     /**
+     * Mirror real Gradle-resolved external artifacts into the Rust artifact store.
+     * Property: org.gradle.rust.substrate.dependency.mirror.artifacts
+     * Default: false
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_DEPENDENCY_ARTIFACT_MIRROR =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.dependency.mirror.artifacts", false);
+
+    /**
      * Enable Phase 19: Rust-native file system watching.
      * Property: org.gradle.rust.substrate.filewatch.enabled
      * Default: false

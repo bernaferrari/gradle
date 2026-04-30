@@ -57,6 +57,12 @@
   Rust artifact store, writes `.sha256` sidecars, validates cold and warm cache
   hits against requested SHA-256 values, and can verify checksums from persisted
   artifacts.
+- The Gradle dependency shadow listener has an explicit artifact mirror mode
+  (`org.gradle.rust.substrate.dependency.mirror.artifacts=true`) that observes
+  real resolved external module JARs, computes SHA-256 in the JVM bridge, and
+  registers those artifacts into the Rust artifact store. The mode is opt-in
+  because querying artifacts from a resolution listener can force artifact
+  downloads earlier than a graph-only resolution would.
 - Archive tasks (`Jar`, `Zip`, `War`, `Ear`, `Tar`) can lower to native Rust
   archive execution when the task model provides input paths and an output
   archive path. ZIP-compatible tasks emit ZIP-compatible archives; `Tar` emits
@@ -98,6 +104,9 @@
 ## Gaps
 
 - Full dependency resolution semantics are not yet parity-complete.
+- Rust does not yet short-circuit Gradle's artifact resolver from the Rust
+  artifact store; the current bridge integration mirrors real Gradle-resolved
+  artifacts into Rust so a later resolver replacement has trustworthy data.
 - Real Gradle invocation does not use Rust as the unconditional default executor
   yet; the authoritative build-work gate is intentionally opt-in and fail-closed
   while the native-ready default gate delegates on incomplete plans.
@@ -119,6 +128,7 @@
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --verbose`
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/unsupported-manifest.json --contract-only --output-dir build/corpus-contract-unsupported`
 - `cargo test -p gradle-substrate-daemon download_artifact -- --nocapture`
+- `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.dependency.DependencyResolutionShadowListenerTest`
 - `python3 tools/performance/rust_substrate_perf_report.py build/corpus-authoritative-21/corpus_summary.json --output build/corpus-authoritative-21/performance.md`
 - `./tools/stabilization/run_strict_stabilization.sh quick`
 - `./tools/demo/rust_substrate_demo.sh --quick`
