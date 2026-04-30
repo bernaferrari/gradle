@@ -1,14 +1,20 @@
 package org.gradle.internal.rustbridge.e2e;
 
+import org.gradle.internal.rustbridge.dependency.RustArtifactCacheReadThrough;
+import org.gradle.internal.rustbridge.dependency.RustDependencyResolutionClient;
 import org.gradle.internal.rustbridge.SubstrateClient;
 import gradle.substrate.v1.*;
+import org.junit.After;
 import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 
 import static org.junit.Assert.*;
 
@@ -28,6 +34,7 @@ public class SubstrateE2ETest {
     private Process daemonProcess;
     private Path socketDirectory;
     private Path socketPath;
+    private Path artifactStoreDirectory;
 
     @Before
     public void setUp() throws Exception {
@@ -44,10 +51,12 @@ public class SubstrateE2ETest {
 
         socketDirectory = Files.createTempDirectory("substrate-e2e-");
         socketPath = socketDirectory.resolve("substrate.sock");
+        artifactStoreDirectory = socketDirectory.resolve("artifacts");
 
         ProcessBuilder pb = new ProcessBuilder(
             binary,
             "--socket-path", socketPath.toString(),
+            "--artifact-store-dir", artifactStoreDirectory.toString(),
             "--log-level", "info"
         );
         pb.environment().put("SUBSTRATE_LOG_LEVEL", "info");
@@ -84,6 +93,23 @@ public class SubstrateE2ETest {
         );
 
         client = SubstrateClient.connect(socketPath.toString());
+    }
+
+    @After
+    public void tearDown() throws Exception {
+        if (client != null) {
+            client.close();
+        }
+        if (daemonProcess != null) {
+            daemonProcess.destroy();
+            if (!daemonProcess.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                daemonProcess.destroyForcibly();
+                daemonProcess.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+            }
+        }
+        if (socketDirectory != null) {
+            deleteRecursively(socketDirectory);
+        }
     }
 
     // --- Control Service ---
@@ -140,6 +166,38 @@ public class SubstrateE2ETest {
         assertEquals("a.txt", response.getResults(0).getAbsolutePath());
         assertEquals("b.txt", response.getResults(1).getAbsolutePath());
         assertEquals("c.txt", response.getResults(2).getAbsolutePath());
+    }
+
+    // --- Dependency Artifact Cache ---
+
+    @Test
+    public void dependencyArtifactReadThroughReturnsArtifactFromRustStore() throws Exception {
+        Path sourceArtifact = socketDirectory.resolve("demo-1.2.3.jar");
+        byte[] bytes = "artifact bytes from rust store".getBytes(StandardCharsets.UTF_8);
+        Files.write(sourceArtifact, bytes);
+
+        RustDependencyResolutionClient dependencyClient = new RustDependencyResolutionClient(client);
+        boolean accepted = dependencyClient.addArtifactToCacheStrict(
+            "org.example",
+            "demo",
+            "1.2.3",
+            "",
+            sourceArtifact.toString(),
+            bytes.length,
+            ""
+        );
+        assertTrue("Rust daemon should accept artifact cache registration", accepted);
+
+        RustArtifactCacheReadThrough readThrough = new RustArtifactCacheReadThrough(dependencyClient);
+        File resolvedArtifact = readThrough.findCachedArtifact("org.example", "demo", "1.2.3", "", "jar");
+
+        assertNotNull("Read-through should resolve artifact from Rust cache", resolvedArtifact);
+        assertTrue(resolvedArtifact.isFile());
+        assertTrue(
+            "Resolved artifact should come from the daemon artifact store",
+            resolvedArtifact.toPath().startsWith(artifactStoreDirectory)
+        );
+        assertArrayEquals(bytes, Files.readAllBytes(resolvedArtifact.toPath()));
     }
 
     // --- Execution Plan Service ---
@@ -533,5 +591,19 @@ public class SubstrateE2ETest {
         assertEquals(1, metricsResponse.getMetricsCount());
         assertEquals("e2e.lifecycle.test", metricsResponse.getMetrics(0).getName());
         assertEquals(100.0, metricsResponse.getMetrics(0).getLast(), 0.001);
+    }
+
+    private static void deleteRecursively(Path root) throws IOException {
+        if (!Files.exists(root)) {
+            return;
+        }
+        try (java.util.stream.Stream<Path> paths = Files.walk(root)) {
+            paths.sorted(Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException ignored) {
+                }
+            });
+        }
     }
 }
