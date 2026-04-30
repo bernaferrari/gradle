@@ -160,12 +160,12 @@ public class RustBootstrapClient {
                 LOGGER.debug("[substrate:bootstrap] refreshed build-plan shadow for {} at {}",
                     response.getBuildId(), response.getArtifactPath());
             } else {
-                LOGGER.debug("[substrate:bootstrap] build-plan shadow refresh skipped for {}: {}",
+                LOGGER.warn("[substrate:bootstrap] build-plan shadow refresh skipped for {}: {}",
                     response.getBuildId(), response.getErrorMessage());
             }
             return response.getRefreshed();
         } catch (Exception e) {
-            LOGGER.debug("[substrate:bootstrap] refresh build-plan shadow failed", e);
+            LOGGER.warn("[substrate:bootstrap] refresh build-plan shadow failed", e);
             return false;
         }
     }

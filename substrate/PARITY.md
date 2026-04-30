@@ -18,6 +18,10 @@
   `org.gradle.rust.substrate.runbuild.authoritative=true` executes the selected
   build-plan shadow through Rust `RunBuild` and skips Gradle's JVM task executor
   only when Rust reports exactly the scheduled task count with zero JVM forwards.
+- Installed Gradle-under-test runs now use loopback TCP for the Rust daemon and
+  JVM host bridge when Unix-domain socket transports are unavailable, and the
+  authoritative executor refreshes the selected build-plan shadow directly from
+  the finalized Gradle task plan before invoking Rust `RunBuild`.
 - The checked-in offline corpus covers Java library, Java application,
   Java multi-project, resource expansion, JavaCompile options, standalone
   Copy/Sync transforms, CopySpec duplicates, nested Copy/Sync and Zip/Tar
@@ -46,7 +50,9 @@
 - `testing/corpus/unsupported-manifest.json` tracks work that must remain
   outside approximate native execution until a complete contract exists. It now
   covers custom JVM task actions, unsupported CopySpec filter/actions,
-  Copy/archive symlink inputs, and unsupported Test filter combinations.
+  Copy/archive symlink inputs, and unsupported Test filter combinations. With a
+  Gradle-under-test distribution built from this fork, the unsupported corpus
+  passes 6/6 as expected fail-closed with no JVM task forwards.
 - Native dependency resolution handles inherited Maven exclusions per dependency
   edge, so one dependency's exclusions no longer remove sibling dependencies.
 - Native dependency resolution preserves Maven dependency scopes on resolved
@@ -141,6 +147,9 @@
   execution is realistic, especially arbitrary copy filters/actions beyond
   direct expand, Gradle archive metadata edge cases beyond entry inventory, and
   native symlink copy/archive semantics.
+- Rust VFS/hash/fingerprint service injection is currently disabled in
+  user-home/global VFS scopes for installed distributions; those services need
+  a dedicated scope-safe wiring pass before re-enabling.
 
 ## Validation
 
@@ -152,7 +161,8 @@
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-native-ready-default --tasks clean build --timeout 300 --output-dir build/corpus-native-ready-default-21`
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --verbose`
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/unsupported-manifest.json --contract-only --output-dir build/corpus-contract-unsupported`
-- `python3 tools/corpus_runner/run.py --manifest testing/corpus/unsupported-manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-unsupported-fail-closed` now fails honestly without `--gradle-command` because the bootstrap wrapper does not emit substrate run-build markers.
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/unsupported-manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-unsupported-fail-closed-under-test`
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/unsupported-manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-unsupported-fail-closed` fails honestly without `--gradle-command` because the bootstrap wrapper does not emit substrate run-build markers.
 - `cargo test -p gradle-substrate-daemon download_artifact -- --nocapture`
 - `cargo test -p gradle-substrate-daemon artifact_cache -- --nocapture`
 - `cargo test -p gradle-substrate-daemon fetch_pom -- --nocapture`
@@ -172,10 +182,9 @@
 
 1. Expand differential corpus coverage for external dependency and richer
    task-graph semantics.
-2. Build or locate a Gradle-under-test distribution for authoritative corpus
-   gates, then rerun the expanded unsupported corpus as a true fail-closed
-   RunBuild check.
-3. Add native-ready contracts for richer `Copy`/`Sync` specs and the next common
+2. Add native-ready contracts for richer `Copy`/`Sync` specs and the next common
    process task after `Javadoc`.
+3. Re-enable Rust VFS/hash/fingerprint integration through scope-safe installed
+   distribution wiring.
 4. Reduce bridge source exclusions as APIs are stabilized.
 5. Track upstream commit synchronization in this file for each parity push.

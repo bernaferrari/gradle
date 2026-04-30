@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -86,6 +87,10 @@ struct Args {
     /// Path to the Unix domain socket to listen on
     #[arg(long, default_value = "/tmp/gradle-substrate.sock")]
     socket_path: String,
+
+    /// Optional TCP address to listen on instead of a Unix domain socket
+    #[arg(long)]
+    tcp_address: Option<String>,
 
     /// Log level (trace, debug, info, warn, error)
     #[arg(long, default_value = "info", env = "SUBSTRATE_LOG_LEVEL")]
@@ -192,10 +197,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Authoritative mode configuration (shared across services)
     let authoritative_config = Arc::new(AuthoritativeConfig::new());
 
-    // Phase 0: Control
-    let control = ControlServiceImpl::with_config(shutdown_tx.clone(), authoritative_config);
-    let control_for_jvm = control.clone();
     let jvm_bridge = Arc::new(JvmHostBridge::new());
+    // Phase 0: Control
+    let control = ControlServiceImpl::with_config(shutdown_tx.clone(), authoritative_config)
+        .with_jvm_host_bridge(Arc::clone(&jvm_bridge));
+    let control_for_jvm = control.clone();
 
     // Phase 1: Hashing
     let hash = HashServiceImpl;
@@ -356,7 +362,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let garbage_collection =
         GarbageCollectionServiceImpl::new(gc_cache_dir, gc_history_dir, gc_config_cache_dir);
 
-    let listener = UnixListener::bind(&socket_path)?;
+    let tcp_address = args
+        .tcp_address
+        .as_deref()
+        .map(str::parse::<SocketAddr>)
+        .transpose()?;
+    let listener = match tcp_address {
+        Some(_) => None,
+        None => Some(UnixListener::bind(&socket_path)?),
+    };
+    let listen_endpoint = tcp_address
+        .map(|address| format!("tcp://{address}"))
+        .unwrap_or_else(|| args.socket_path.clone());
 
     // Print startup banner with version metadata
     let commit = env!("APP_COMMIT", "git commit hash");
@@ -370,7 +387,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
          Cache dir: {}\n\
          Services: 39 (control, dag-executor, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console, test-execution, artifact-publishing, build-init, incremental-compilation, build-metrics, garbage-collection, version-catalog, parser, classpath, filewatch, jvmhost)",
         env!("CARGO_PKG_VERSION"),
-        args.socket_path,
+        listen_endpoint,
         startup_start.elapsed().as_millis(),
         args.cache_dir,
     );
@@ -399,7 +416,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("No JVM host connection established — running in standalone mode");
     });
 
-    Server::builder()
+    let router = Server::builder()
         .add_service(ControlServiceServer::new(control))
         .add_service(DagExecutorServiceServer::new(dag_executor))
         .add_service(HashServiceServer::new(hash))
@@ -447,12 +464,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(GarbageCollectionServiceServer::new(garbage_collection))
         .add_service(VersionCatalogServiceServer::new(
             VersionCatalogServiceImpl::new(),
-        ))
-        .serve_with_incoming_shutdown(
-            tokio_stream::wrappers::UnixListenerStream::new(listener),
-            shutdown_signal(),
-        )
-        .await?;
+        ));
+    if let Some(address) = tcp_address {
+        router.serve_with_shutdown(address, shutdown_signal()).await?;
+    } else if let Some(listener) = listener {
+        router
+            .serve_with_incoming_shutdown(
+                tokio_stream::wrappers::UnixListenerStream::new(listener),
+                shutdown_signal(),
+            )
+            .await?;
+    }
 
     tracing::info!("Daemon shut down cleanly");
 

@@ -55,12 +55,10 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
 
     @Override
     public void registerGlobalServices(ServiceRegistration registration) {
-        registration.addProvider(new GlobalServices());
     }
 
     @Override
     public void registerGradleUserHomeServices(ServiceRegistration registration) {
-        registration.addProvider(new UserHomeServices());
     }
 
     @Override
@@ -73,9 +71,8 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
         registration.addProvider(new BuildServices());
     }
 
-    private static class GlobalServices implements ServiceRegistrationProvider {
+    private static class BuildSessionServices implements ServiceRegistrationProvider {
         @Provides
-        @PrivateService
         DaemonLauncher createDaemonLauncher(InternalOptions options) {
             if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
                 return DaemonLauncher.noop();
@@ -99,9 +96,7 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
                 ? DaemonLauncher.withJvmHost(daemonBinary, socketDirectory)
                 : DaemonLauncher.of(daemonBinary, socketDirectory);
         }
-    }
 
-    private static class UserHomeServices implements ServiceRegistrationProvider {
         @Provides
         SubstrateClient createSubstrateClient(DaemonLauncher launcher, InternalOptions options) {
             SubstrateClient client;
@@ -131,9 +126,7 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
             LOGGER.warn("[substrate] bridge is running in no-op fallback mode: {}", reason, cause);
             return SubstrateClient.noop(reason);
         }
-    }
 
-    private static class BuildSessionServices implements ServiceRegistrationProvider {
         @Provides
         HashMismatchReporter createHashMismatchReporter() {
             return new HashMismatchReporter(true);
@@ -142,7 +135,13 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
 
     private static class BuildServices implements ServiceRegistrationProvider {
         @Provides
-        RustBootstrapClient createRustBootstrapClient(SubstrateClient client) {
+        RustBootstrapClient createRustBootstrapClient(
+            SubstrateClient client,
+            JvmHostBridgeWiring jvmHostBridgeWiring
+        ) {
+            if (jvmHostBridgeWiring == null) {
+                throw new IllegalStateException("JVM host bridge wiring service was not initialized");
+            }
             return new RustBootstrapClient(client);
         }
 
@@ -184,12 +183,6 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
         @Provides
         RustBuildExecutionClient createRustBuildExecutionClient(SubstrateClient client) {
             return new RustBuildExecutionClient(client);
-        }
-
-        @Provides
-        @PrivateService
-        BuildPlanTaskSelectionSnapshot createBuildPlanTaskSelectionSnapshot() {
-            return new BuildPlanTaskSelectionSnapshot();
         }
 
         @Provides
@@ -289,11 +282,15 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
             RustTaskGraphClient rustTaskGraphClient,
             RustBuildExecutionClient rustBuildExecutionClient,
             RustBootstrapClient bootstrapClient,
+            JvmHostBridgeWiring jvmHostBridgeWiring,
             BuildPlanTaskSelectionSnapshot taskSelectionSnapshot,
             HashMismatchReporter mismatchReporter,
             ListenerManager listenerManager,
             InternalOptions options
         ) {
+            if (jvmHostBridgeWiring == null) {
+                throw new IllegalStateException("JVM host bridge wiring service was not initialized");
+            }
             if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
                 return null;
             }

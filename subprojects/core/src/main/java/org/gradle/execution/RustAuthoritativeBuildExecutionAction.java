@@ -15,6 +15,8 @@
  */
 package org.gradle.execution;
 
+import gradle.substrate.v1.BuildPlanTask;
+
 import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.internal.GradleInternal;
@@ -24,13 +26,21 @@ import org.gradle.execution.plan.LocalTaskNode;
 import org.gradle.execution.plan.Node;
 import org.gradle.internal.build.ExecutionResult;
 import org.gradle.internal.rustbridge.SubstrateException;
+import org.gradle.internal.rustbridge.bootstrap.RustBootstrapClient;
 import org.gradle.internal.rustbridge.eventstream.BuildIdHolder;
+import org.gradle.internal.rustbridge.jvmhost.BuildPlanTaskSelectionSnapshot;
+import org.gradle.internal.rustbridge.jvmhost.ProjectModelProviderAdapter;
 import org.gradle.internal.rustbridge.taskgraph.RustBuildExecutionClient;
 import org.gradle.internal.rustbridge.taskgraph.RustBuildExecutionClient.RunBuildResult;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -45,15 +55,31 @@ public class RustAuthoritativeBuildExecutionAction implements BuildWorkExecutor 
     private final BuildWorkExecutor delegate;
     private final RustBuildExecutionClient buildExecutionClient;
     private final boolean failClosed;
+    @Nullable
+    private final RustBootstrapClient bootstrapClient;
+    @Nullable
+    private final BuildPlanTaskSelectionSnapshot taskSelectionSnapshot;
 
     public RustAuthoritativeBuildExecutionAction(
         BuildWorkExecutor delegate,
         RustBuildExecutionClient buildExecutionClient,
         boolean failClosed
     ) {
+        this(delegate, buildExecutionClient, failClosed, null, null);
+    }
+
+    public RustAuthoritativeBuildExecutionAction(
+        BuildWorkExecutor delegate,
+        RustBuildExecutionClient buildExecutionClient,
+        boolean failClosed,
+        @Nullable RustBootstrapClient bootstrapClient,
+        @Nullable BuildPlanTaskSelectionSnapshot taskSelectionSnapshot
+    ) {
         this.delegate = delegate;
         this.buildExecutionClient = buildExecutionClient;
         this.failClosed = failClosed;
+        this.bootstrapClient = bootstrapClient;
+        this.taskSelectionSnapshot = taskSelectionSnapshot;
     }
 
     @Override
@@ -67,6 +93,21 @@ public class RustAuthoritativeBuildExecutionAction implements BuildWorkExecutor 
 
         String activeBuildId = BuildIdHolder.getBuildId();
         String buildId = activeBuildId.isEmpty() ? "build" : activeBuildId;
+        if (!refreshSelectedBuildPlanShadow(plan, buildId, expectedTasks)) {
+            SubstrateException failure = new SubstrateException(
+                "Rust authoritative run-build could not refresh the selected build-plan shadow for "
+                    + buildId + ": expectedTasks=" + expectedTasks
+            );
+            if (failClosed) {
+                return ExecutionResult.failed(failure);
+            }
+            LOGGER.warn(
+                "[substrate:run-build] Rust build-plan shadow refresh failed; delegating to JVM executor: {}",
+                failure.getMessage()
+            );
+            return delegate.execute(gradle, plan);
+        }
+
         RunBuildResult result = buildExecutionClient.runBuild(
             buildId,
             Runtime.getRuntime().availableProcessors(),
@@ -131,5 +172,84 @@ public class RustAuthoritativeBuildExecutionAction implements BuildWorkExecutor 
                 }
             }
         });
+    }
+
+    private boolean refreshSelectedBuildPlanShadow(FinalizedExecutionPlan plan, String buildId, int expectedTasks) {
+        if (bootstrapClient == null || taskSelectionSnapshot == null) {
+            return true;
+        }
+
+        ScheduledTaskGraph scheduledTaskGraph = captureScheduledTaskGraph(plan);
+        if (scheduledTaskGraph.taskPaths.size() != expectedTasks) {
+            LOGGER.warn(
+                "[substrate:run-build] selected task snapshot has {} tasks but Gradle scheduled {}; refusing Rust run-build",
+                scheduledTaskGraph.taskPaths.size(),
+                expectedTasks
+            );
+            return false;
+        }
+
+        taskSelectionSnapshot.recordSelectedTasks(
+            scheduledTaskGraph.taskPaths,
+            scheduledTaskGraph.dependencies,
+            scheduledTaskGraph.taskContracts
+        );
+        boolean refreshed = bootstrapClient.refreshBuildPlanShadow(buildId);
+        if (!refreshed) {
+            LOGGER.warn("[substrate:run-build] build-plan shadow refresh failed for {}", buildId);
+        }
+        return refreshed;
+    }
+
+    private static ScheduledTaskGraph captureScheduledTaskGraph(FinalizedExecutionPlan plan) {
+        List<String> taskPaths = new ArrayList<>();
+        List<BuildPlanTask> taskContracts = new ArrayList<>();
+        Map<String, List<String>> dependencies = new LinkedHashMap<>();
+        Map<Node, String> nodePaths = new LinkedHashMap<>();
+        Map<Node, Task> nodeTasks = new LinkedHashMap<>();
+
+        plan.getContents().getScheduledNodes().visitNodes((nodes, entryNodes) -> {
+            for (Node node : nodes) {
+                if (node instanceof LocalTaskNode) {
+                    Task task = ((LocalTaskNode) node).getTask();
+                    String taskPath = task.getPath();
+                    taskPaths.add(taskPath);
+                    nodePaths.put(node, taskPath);
+                    nodeTasks.put(node, task);
+                }
+            }
+            for (Map.Entry<Node, String> entry : nodePaths.entrySet()) {
+                List<String> taskDependencies = new ArrayList<>();
+                for (Node dependency : entry.getKey().getDependencySuccessors()) {
+                    String dependencyPath = nodePaths.get(dependency);
+                    if (dependencyPath != null) {
+                        taskDependencies.add(dependencyPath);
+                    }
+                }
+                dependencies.put(entry.getValue(), taskDependencies);
+                Task task = nodeTasks.get(entry.getKey());
+                if (task != null) {
+                    taskContracts.add(ProjectModelProviderAdapter.toBuildPlanTask(task, taskDependencies));
+                }
+            }
+        });
+
+        return new ScheduledTaskGraph(taskPaths, dependencies, taskContracts);
+    }
+
+    private static final class ScheduledTaskGraph {
+        private final List<String> taskPaths;
+        private final Map<String, List<String>> dependencies;
+        private final List<BuildPlanTask> taskContracts;
+
+        private ScheduledTaskGraph(
+            List<String> taskPaths,
+            Map<String, List<String>> dependencies,
+            List<BuildPlanTask> taskContracts
+        ) {
+            this.taskPaths = taskPaths;
+            this.dependencies = dependencies;
+            this.taskContracts = taskContracts;
+        }
     }
 }

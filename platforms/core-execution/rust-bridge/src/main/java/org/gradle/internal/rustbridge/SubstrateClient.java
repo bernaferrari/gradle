@@ -14,13 +14,14 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * gRPC client for communicating with the Rust substrate daemon.
- * Connects via Unix domain socket.
+ * Connects via loopback TCP by default, with Unix domain socket support for environments
+ * that package the required Netty native transports.
  *
  * <p>Provides blocking stubs for all 33 substrate services.
  * When the substrate is disabled (noop mode), all stub getters
  * throw {@link SubstrateException}.</p>
  */
-@ServiceScope(Scope.UserHome.class)
+@ServiceScope(Scope.BuildSession.class)
 public class SubstrateClient implements Closeable {
 
     private static final String CLIENT_PROTOCOL_VERSION = "1.0.0";
@@ -198,21 +199,18 @@ public class SubstrateClient implements Closeable {
     }
 
     /**
-     * Creates a SubstrateClient connected to the given Unix socket path.
+     * Creates a SubstrateClient connected to the given endpoint.
      */
     public static SubstrateClient connect(String socketPath) throws IOException {
         return connect(socketPath, null);
     }
 
     /**
-     * Creates a SubstrateClient connected to the given Unix socket path,
-     * with an optional JVM host socket path for reverse-direction RPC.
+     * Creates a SubstrateClient connected to the given endpoint, with an optional JVM host
+     * endpoint for reverse-direction RPC.
      */
-    public static SubstrateClient connect(String socketPath, String jvmHostSocketPath) throws IOException {
-        ManagedChannel channel = NettyChannelBuilder
-            .forAddress(new DomainSocketAddress(socketPath))
-            .usePlaintext()
-            .build();
+    public static SubstrateClient connect(String endpoint, String jvmHostSocketPath) throws IOException {
+        ManagedChannel channel = createChannel(endpoint);
         SubstrateClient client = new SubstrateClient(channel, false, "", jvmHostSocketPath);
         try {
             client.performHandshake();
@@ -221,6 +219,31 @@ public class SubstrateClient implements Closeable {
             throw e;
         }
         return client;
+    }
+
+    private static ManagedChannel createChannel(String endpoint) throws IOException {
+        if (endpoint.startsWith("tcp://")) {
+            String address = endpoint.substring("tcp://".length());
+            int portSeparator = address.lastIndexOf(':');
+            if (portSeparator <= 0 || portSeparator == address.length() - 1) {
+                throw new IOException("Invalid substrate TCP endpoint: " + endpoint);
+            }
+            String host = address.substring(0, portSeparator);
+            int port;
+            try {
+                port = Integer.parseInt(address.substring(portSeparator + 1));
+            } catch (NumberFormatException e) {
+                throw new IOException("Invalid substrate TCP endpoint port: " + endpoint, e);
+            }
+            return NettyChannelBuilder
+                .forAddress(host, port)
+                .usePlaintext()
+                .build();
+        }
+        return NettyChannelBuilder
+            .forAddress(new DomainSocketAddress(endpoint))
+            .usePlaintext()
+            .build();
     }
 
     /**

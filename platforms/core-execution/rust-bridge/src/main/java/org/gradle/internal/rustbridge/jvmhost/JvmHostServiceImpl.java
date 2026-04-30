@@ -140,7 +140,11 @@ public class JvmHostServiceImpl {
         if (taskSelectionSnapshot != null) {
             BuildPlanTaskSelectionSnapshot.Snapshot selectedGraph = taskSelectionSnapshot.snapshot();
             if (selectedGraph.isPopulated()) {
-                tasks = getSelectedBuildPlanTasks(selectedGraph);
+                if (!selectedGraph.getTaskContracts().isEmpty()) {
+                    tasks = selectedGraph.getTaskContracts();
+                } else {
+                    tasks = getSelectedBuildPlanTasks(selectedGraph);
+                }
                 taskSource = "jvm-host-selected-task-graph";
             }
         }

@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use tonic::{Request, Response, Status};
 
+use crate::client::jvm_host::JvmHostClient;
+use crate::client::jvm_host_bridge::JvmHostBridge;
 use super::authoritative::AuthoritativeConfig;
 use crate::proto::{
     control_service_server::ControlService, GetAuthoritativeModeRequest,
@@ -15,6 +17,7 @@ pub struct ControlServiceImpl {
     shutdown_tx: tokio::sync::broadcast::Sender<()>,
     authoritative_config: Arc<AuthoritativeConfig>,
     jvm_host_socket_path: Arc<tokio::sync::RwLock<Option<String>>>,
+    jvm_host_bridge: Option<Arc<JvmHostBridge>>,
 }
 
 impl Default for ControlServiceImpl {
@@ -37,7 +40,13 @@ impl ControlServiceImpl {
             shutdown_tx,
             authoritative_config,
             jvm_host_socket_path: Arc::new(tokio::sync::RwLock::new(None)),
+            jvm_host_bridge: None,
         }
+    }
+
+    pub fn with_jvm_host_bridge(mut self, jvm_host_bridge: Arc<JvmHostBridge>) -> Self {
+        self.jvm_host_bridge = Some(jvm_host_bridge);
+        self
     }
 
     /// Get the JVM host socket path provided during handshake.
@@ -84,6 +93,17 @@ impl ControlService for ControlServiceImpl {
         if !req.jvm_host_socket_path.is_empty() {
             *self.jvm_host_socket_path.write().await = Some(req.jvm_host_socket_path.clone());
             tracing::info!(jvm_host_socket = %req.jvm_host_socket_path, "JVM host socket path registered");
+            if let Some(jvm_host_bridge) = &self.jvm_host_bridge {
+                match JvmHostClient::connect(&req.jvm_host_socket_path).await {
+                    Ok(jvm_client) => {
+                        tracing::info!(endpoint = %req.jvm_host_socket_path, "Connected to JVM host during handshake");
+                        jvm_host_bridge.set_client(jvm_client).await;
+                    }
+                    Err(e) => {
+                        tracing::warn!(endpoint = %req.jvm_host_socket_path, error = %e, "Failed to connect to JVM host during handshake");
+                    }
+                }
+            }
         }
 
         Ok(Response::new(HandshakeResponse {

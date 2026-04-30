@@ -5,6 +5,8 @@ import org.slf4j.Logger;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -14,7 +16,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import gradle.substrate.v1.*;
+import io.grpc.BindableService;
 import io.grpc.Server;
+import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
+import io.grpc.netty.shaded.io.netty.channel.EventLoopGroup;
 import io.grpc.netty.shaded.io.netty.channel.ServerChannel;
 import io.grpc.stub.StreamObserver;
 
@@ -35,7 +40,10 @@ public class JvmHostServer implements Closeable {
 
     private final Server server;
     private final String socketPath;
+    private String endpoint;
     private final JvmHostServiceImpl serviceImpl;
+    private final EventLoopGroup bossGroup;
+    private final EventLoopGroup workerGroup;
 
     public JvmHostServer(String socketPath, JvmHostServiceImpl serviceImpl) throws IOException {
         this.socketPath = socketPath;
@@ -53,10 +61,7 @@ public class JvmHostServer implements Closeable {
             Files.createDirectories(parent);
         }
 
-        this.server = io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder
-            .forAddress(new io.grpc.netty.shaded.io.netty.channel.unix.DomainSocketAddress(socketPath))
-            .channelType(domainServerChannelType())
-            .addService(new JvmHostServiceGrpc.JvmHostServiceImplBase() {
+        BindableService grpcService = new JvmHostServiceGrpc.JvmHostServiceImplBase() {
                 @Override
                 public void evaluateScript(
                     EvaluateScriptRequest request,
@@ -230,24 +235,85 @@ public class JvmHostServer implements Closeable {
                     responseObserver.onNext(response);
                     responseObserver.onCompleted();
                 }
-            })
-            .build();
+            };
+
+        EventLoopGroup domainBossGroup = null;
+        EventLoopGroup domainWorkerGroup = null;
+        Server builtServer;
+        try {
+            DomainSocketTransport transport = domainSocketTransport();
+            domainBossGroup = transport.bossGroup;
+            domainWorkerGroup = transport.workerGroup;
+            builtServer = NettyServerBuilder
+                .forAddress(new io.grpc.netty.shaded.io.netty.channel.unix.DomainSocketAddress(socketPath))
+                .bossEventLoopGroup(domainBossGroup)
+                .workerEventLoopGroup(domainWorkerGroup)
+                .channelType(transport.channelType)
+                .addService(grpcService)
+                .build();
+            this.endpoint = socketPath;
+        } catch (IOException e) {
+            LOGGER.info("[substrate] JVM host Unix socket transport is unavailable ({}); using loopback TCP", e.getMessage());
+            builtServer = NettyServerBuilder
+                .forAddress(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0))
+                .addService(grpcService)
+                .build();
+            this.endpoint = "";
+        }
+        this.bossGroup = domainBossGroup;
+        this.workerGroup = domainWorkerGroup;
+        this.server = builtServer;
     }
 
     @SuppressWarnings("unchecked")
-    private static Class<? extends ServerChannel> domainServerChannelType() throws IOException {
+    private static DomainSocketTransport domainSocketTransport() throws IOException {
+        String osName = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+        String first = osName.contains("mac") || osName.contains("darwin") ? "kqueue" : "epoll";
+        String second = first.equals("kqueue") ? "epoll" : "kqueue";
+        IOException firstFailure;
         try {
-            return (Class<? extends ServerChannel>) Class.forName(
-                "io.grpc.netty.shaded.io.netty.channel.epoll.EpollServerDomainSocketChannel"
+            return domainSocketTransport(first);
+        } catch (IOException e) {
+            firstFailure = e;
+        }
+        try {
+            return domainSocketTransport(second);
+        } catch (IOException e) {
+            e.addSuppressed(firstFailure);
+            throw e;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static DomainSocketTransport domainSocketTransport(String transport) throws IOException {
+        String packageName = "io.grpc.netty.shaded.io.netty.channel." + transport + ".";
+        String classPrefix = transport.equals("kqueue") ? "KQueue" : "Epoll";
+        try {
+            Class<? extends ServerChannel> channelType = (Class<? extends ServerChannel>) Class.forName(
+                packageName + classPrefix + "ServerDomainSocketChannel"
             );
-        } catch (ClassNotFoundException ignored) {
-            try {
-                return (Class<? extends ServerChannel>) Class.forName(
-                    "io.grpc.netty.shaded.io.netty.channel.kqueue.KQueueServerDomainSocketChannel"
-                );
-            } catch (ClassNotFoundException e) {
-                throw new IOException("No Netty domain socket server channel is available", e);
-            }
+            Class<?> eventLoopGroupType = Class.forName(packageName + classPrefix + "EventLoopGroup");
+            EventLoopGroup bossGroup = (EventLoopGroup) eventLoopGroupType.getConstructor(int.class).newInstance(1);
+            EventLoopGroup workerGroup = (EventLoopGroup) eventLoopGroupType.getConstructor(int.class).newInstance(1);
+            return new DomainSocketTransport(channelType, bossGroup, workerGroup);
+        } catch (ReflectiveOperationException | LinkageError e) {
+            throw new IOException("Netty " + transport + " domain socket transport is unavailable", e);
+        }
+    }
+
+    private static final class DomainSocketTransport {
+        private final Class<? extends ServerChannel> channelType;
+        private final EventLoopGroup bossGroup;
+        private final EventLoopGroup workerGroup;
+
+        private DomainSocketTransport(
+            Class<? extends ServerChannel> channelType,
+            EventLoopGroup bossGroup,
+            EventLoopGroup workerGroup
+        ) {
+            this.channelType = channelType;
+            this.bossGroup = bossGroup;
+            this.workerGroup = workerGroup;
         }
     }
 
@@ -256,14 +322,17 @@ public class JvmHostServer implements Closeable {
      */
     public void start() throws IOException {
         server.start();
-        LOGGER.info("[substrate] JVM host server started on {}", socketPath);
+        if (endpoint.isEmpty()) {
+            endpoint = "tcp://127.0.0.1:" + server.getPort();
+        }
+        LOGGER.info("[substrate] JVM host server started on {}", endpoint);
     }
 
     /**
      * Get the socket path this server is listening on.
      */
     public String getSocketPath() {
-        return socketPath;
+        return endpoint;
     }
 
     /**
@@ -291,6 +360,16 @@ public class JvmHostServer implements Closeable {
                 Files.deleteIfExists(java.nio.file.Paths.get(socketPath));
             } catch (IOException e) {
                 LOGGER.debug("[substrate] failed to delete JVM host socket {}", socketPath, e);
+            }
+            if (bossGroup != null && workerGroup != null) {
+                io.grpc.netty.shaded.io.netty.util.concurrent.Future<?> bossShutdown = bossGroup.shutdownGracefully();
+                io.grpc.netty.shaded.io.netty.util.concurrent.Future<?> workerShutdown = workerGroup.shutdownGracefully();
+                if (!bossShutdown.awaitUninterruptibly().isSuccess()) {
+                    LOGGER.debug("[substrate] JVM host boss event loop shutdown failed", bossShutdown.cause());
+                }
+                if (!workerShutdown.awaitUninterruptibly().isSuccess()) {
+                    LOGGER.debug("[substrate] JVM host worker event loop shutdown failed", workerShutdown.cause());
+                }
             }
             LOGGER.info("[substrate] JVM host server stopped");
         }
