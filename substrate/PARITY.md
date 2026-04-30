@@ -23,8 +23,10 @@
   Copy/Sync transforms, CopySpec duplicates, nested Copy/Sync and Zip/Tar
   CopySpec mappings, Zip/Tar/War/Ear archive tasks, a simple Exec task, and a
   JavaExec task, Javadoc task, and an OSS-style Java library slice with
-  sources JAR/Javadoc/report outputs through that explicit gate with
-  `target/debug/gradle-substrate-daemon`.
+  sources JAR/Javadoc/report outputs. Authoritative RunBuild corpus claims
+  require a Gradle-under-test distribution built from this fork plus
+  `target/debug/gradle-substrate-daemon`; the corpus runner now rejects
+  bootstrap/upstream Gradle runs that do not emit a substrate run-build signal.
 - A separate networked JUnit corpus build proves native `TestExec` lowering for
   a non-empty JUnit Platform test task, including include/exclude tag capture,
   when the test runtime contains the JUnit Platform ConsoleLauncher.
@@ -42,7 +44,9 @@
   RunBuild first and delegates back to JVM execution when the selected plan is
   not fully native-ready. The offline corpus passes through this gate at 21/21.
 - `testing/corpus/unsupported-manifest.json` tracks work that must remain
-  outside approximate native execution until a complete contract exists.
+  outside approximate native execution until a complete contract exists. It now
+  covers custom JVM task actions, unsupported CopySpec filter/actions,
+  Copy/archive symlink inputs, and unsupported Test filter combinations.
 - Native dependency resolution handles inherited Maven exclusions per dependency
   edge, so one dependency's exclusions no longer remove sibling dependencies.
 - Native dependency resolution preserves Maven dependency scopes on resolved
@@ -144,10 +148,11 @@
 - `cargo test -p gradle-substrate-daemon --test hash_compatibility_test`
 - `cargo test -p gradle-substrate-daemon --test build_plan_shadow_test refreshed_native_ready_shadow_plan_runs_java_lifecycle_without_jvm_fallback -- --exact`
 - `./gradlew :core:test --tests org.gradle.execution.RustAuthoritativeBuildExecutionActionTest -x :distributions-core:generateLicenseFile`
-- `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --verbose`
-- `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-native-ready-default --tasks clean build --timeout 300 --output-dir build/corpus-native-ready-default-21`
-- `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --verbose`
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --verbose`
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-native-ready-default --tasks clean build --timeout 300 --output-dir build/corpus-native-ready-default-21`
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --verbose`
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/unsupported-manifest.json --contract-only --output-dir build/corpus-contract-unsupported`
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/unsupported-manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-unsupported-fail-closed` now fails honestly without `--gradle-command` because the bootstrap wrapper does not emit substrate run-build markers.
 - `cargo test -p gradle-substrate-daemon download_artifact -- --nocapture`
 - `cargo test -p gradle-substrate-daemon artifact_cache -- --nocapture`
 - `cargo test -p gradle-substrate-daemon fetch_pom -- --nocapture`
@@ -167,9 +172,9 @@
 
 1. Expand differential corpus coverage for external dependency and richer
    task-graph semantics.
-2. Expand the unsupported corpus from custom JVM work into symlink CopySpec,
-   arbitrary CopySpec actions, unsupported copy filters, and unsupported test
-   filters as those signals become observable in the bridge.
+2. Build or locate a Gradle-under-test distribution for authoritative corpus
+   gates, then rerun the expanded unsupported corpus as a true fail-closed
+   RunBuild check.
 3. Add native-ready contracts for richer `Copy`/`Sync` specs and the next common
    process task after `Javadoc`.
 4. Reduce bridge source exclusions as APIs are stabilized.

@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.dirname(__file__))
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 @dataclass
 class RunResult:
     exit_code: int
@@ -73,6 +75,23 @@ ARCHIVE_SUFFIXES = {
     ".war",
     ".zip",
 }
+
+RUNBUILD_OUTPUT_MARKERS = (
+    "[substrate:run-build]",
+    "Rust authoritative run-build",
+    "Rust run-build was incomplete",
+)
+
+
+def default_gradle_command() -> str | None:
+    """Return an explicit Gradle-under-test command from the environment."""
+    gradle_bin = os.environ.get("GRADLE_UNDER_TEST_BIN")
+    if gradle_bin:
+        return gradle_bin
+    gradle_home = os.environ.get("GRADLE_UNDER_TEST")
+    if gradle_home:
+        return str(Path(gradle_home) / "bin" / "gradle")
+    return None
 
 
 def snapshot_build_outputs(project_dir: str) -> list[str]:
@@ -172,6 +191,8 @@ def scan_project_contract(project_dir: str) -> dict:
     dependencies: set[str] = set()
     project_dependencies: set[str] = set()
     toolchains: set[str] = set()
+    unsupported_features: set[str] = set()
+    contains_symlinks = any(path.is_symlink() for path in root.rglob("*"))
 
     for build_file in build_files + settings_files:
         text = build_file.read_text(encoding="utf-8")
@@ -189,11 +210,24 @@ def scan_project_contract(project_dir: str) -> dict:
 
         tasks.update(re.findall(r"tasks\.register(?:<[^>]+>)?\([\"']([^\"']+)[\"']", text))
         tasks.update(re.findall(r"^\s*task\s+([A-Za-z_][A-Za-z0-9_]*)\b", text, re.MULTILINE))
+        has_unsupported_test_filters = re.search(r"includeTestsMatching\(", text) and re.search(r"excludeTestsMatching\(", text)
+        if has_unsupported_test_filters:
+            tasks.add("test")
         outputs.update(re.findall(r"outputs\.(?:dir|file)\([\"']([^\"']+)[\"']\)", text))
         dependencies.update(re.findall(r"[\"']([A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[^\"']+)[\"']", text))
         project_dependencies.update(re.findall(r"project\([\"']:([^\"']+)[\"']\)", text))
         toolchains.update(re.findall(r"JavaVersion\.VERSION_([0-9]+)", text))
         toolchains.update(re.findall(r"languageVersion\.set\(JavaLanguageVersion\.of\(([0-9]+)\)\)", text))
+        if re.search(r"tasks\.register<Copy>\([^)]+\)\s*\{.*?\bfilter\s*\{", text, re.DOTALL):
+            unsupported_features.add("copy-filter-action")
+        if re.search(r"tasks\.register<Copy>\([^)]+\)\s*\{.*?\beachFile\s*\{", text, re.DOTALL):
+            unsupported_features.add("copy-eachfile-action")
+        if has_unsupported_test_filters:
+            unsupported_features.add("unsupported-test-filters")
+        if contains_symlinks and re.search(r"tasks\.register<Copy>\(", text):
+            unsupported_features.add("copy-symlink-input")
+        if contains_symlinks and re.search(r"tasks\.register<(?:Jar|Zip|Tar|War|Ear)>\(", text):
+            unsupported_features.add("archive-symlink-input")
 
     return {
         "build_file_count": len(build_files),
@@ -205,6 +239,7 @@ def scan_project_contract(project_dir: str) -> dict:
         "dependencies": sorted(dependencies),
         "project_dependencies": sorted(project_dependencies),
         "toolchains": sorted(toolchains),
+        "unsupported_features": sorted(unsupported_features),
     }
 
 
@@ -250,9 +285,17 @@ def build_gradle_command(
     daemon_binary: str | None = None,
     runbuild_authoritative: bool = False,
     runbuild_native_ready_default: bool = False,
+    gradle_command: str | None = None,
 ) -> list[str]:
     """Build the Gradle invocation used by corpus runs."""
-    cmd = ["./gradlew"] if os.path.exists(os.path.join(project_dir, "gradlew")) else ["gradle"]
+    if gradle_command:
+        cmd = [gradle_command, "-p", project_dir]
+    elif os.path.exists(os.path.join(project_dir, "gradlew")):
+        cmd = ["./gradlew"]
+    elif (REPO_ROOT / "gradlew").exists():
+        cmd = [str(REPO_ROOT / "gradlew"), "-p", project_dir]
+    else:
+        cmd = ["gradle"]
     cmd.extend(tasks or ["clean", "build"])
     cmd.extend(["--no-daemon", "--console=plain"])
     
@@ -268,6 +311,8 @@ def build_gradle_command(
             cmd.append("-Dorg.gradle.rust.substrate.runbuild.authoritative=true")
         if runbuild_native_ready_default:
             cmd.append("-Dorg.gradle.rust.substrate.runbuild.native-ready-default=true")
+        if runbuild_authoritative or runbuild_native_ready_default:
+            cmd.append("--info")
 
     return cmd
 
@@ -279,8 +324,14 @@ def detect_substrate_noop(output: str) -> bool:
         "Substrate client is in no-op mode",
         "daemon-binary-missing:",
         "substrate-disabled",
+        "substrate-inactive:",
     )
     return any(marker in output for marker in markers)
+
+
+def runbuild_marker_missing(output: str) -> bool:
+    """Return true when an explicit RunBuild gate produced no substrate signal."""
+    return not any(marker in output for marker in RUNBUILD_OUTPUT_MARKERS)
 
 
 def compare_run_pair(upstream: RunResult, substrate: RunResult, allow_noop_substrate: bool = False) -> dict:
@@ -413,6 +464,7 @@ def run_build(
     daemon_binary: str | None = None,
     runbuild_authoritative: bool = False,
     runbuild_native_ready_default: bool = False,
+    gradle_command: str | None = None,
 ) -> RunResult:
     """Run gradle on a project directory."""
     cmd = build_gradle_command(
@@ -423,6 +475,7 @@ def run_build(
         daemon_binary=daemon_binary,
         runbuild_authoritative=runbuild_authoritative,
         runbuild_native_ready_default=runbuild_native_ready_default,
+        gradle_command=gradle_command,
     )
     
     start = time.monotonic()
@@ -435,6 +488,11 @@ def run_build(
             timeout=timeout,
         )
         output = result.stdout + result.stderr
+        if substrate and (runbuild_authoritative or runbuild_native_ready_default) and runbuild_marker_missing(output):
+            output += (
+                "\n[substrate] substrate-inactive: run-build marker missing; "
+                "use a Gradle-under-test distribution that contains rust-bridge services\n"
+            )
         
         # Extract tasks from output
         tasks = []
@@ -487,6 +545,8 @@ def main():
                        help="Rust substrate mode used for the candidate run")
     parser.add_argument("--daemon-binary", default=None,
                        help="Path to gradle-substrate-daemon for the substrate run")
+    parser.add_argument("--gradle-command", default=default_gradle_command(),
+                       help="Gradle-under-test executable to run corpus projects, usually a built local distribution's bin/gradle")
     parser.add_argument("--allow-noop-substrate", action="store_true",
                        help="Do not fail if the substrate candidate falls back to no-op mode")
     parser.add_argument("--runbuild-authoritative", action="store_true",
@@ -543,7 +603,13 @@ def main():
         
         # Run upstream
         print("  Running upstream Gradle...")
-        upstream = run_build(project, substrate=False, timeout=args.timeout, tasks=args.tasks)
+        upstream = run_build(
+            project,
+            substrate=False,
+            timeout=args.timeout,
+            tasks=args.tasks,
+            gradle_command=args.gradle_command,
+        )
         
         # Run with substrate
         print("  Running Rust substrate...")
@@ -556,6 +622,7 @@ def main():
             daemon_binary=args.daemon_binary,
             runbuild_authoritative=args.runbuild_authoritative,
             runbuild_native_ready_default=args.runbuild_native_ready_default,
+            gradle_command=args.gradle_command,
         )
         checks = compare_expected_fail_closed(upstream, substrate) if expected_fail_closed else compare_run_pair(
             upstream,

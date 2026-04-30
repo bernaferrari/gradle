@@ -29,18 +29,21 @@ python3 tools/corpus_runner/run.py \
 # Run in shadow mode with an explicit substrate daemon binary
 python3 tools/corpus_runner/run.py \
   --project /path/to/project \
+  --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" \
   --substrate-mode shadow \
   --daemon-binary /path/to/gradle-substrate-daemon
 
 # Run the explicit no-fallback RunBuild gate against the checked-in corpus
 python3 tools/corpus_runner/run.py \
   --manifest testing/corpus/manifest.json \
+  --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" \
   --daemon-binary target/debug/gradle-substrate-daemon \
   --runbuild-authoritative
 
 # Run the explicit no-fallback RunBuild gate against the networked JUnit corpus
 python3 tools/corpus_runner/run.py \
   --manifest testing/corpus/external-manifest.json \
+  --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" \
   --daemon-binary target/debug/gradle-substrate-daemon \
   --runbuild-authoritative
 
@@ -67,6 +70,14 @@ It then compares:
 The substrate candidate is considered invalid if Gradle reports that it used
 no-op fallback mode. Use `--allow-noop-substrate` only when explicitly testing
 fallback behavior rather than Rust parity.
+
+RunBuild parity claims must use a Gradle-under-test distribution built from
+this fork. Pass it with `--gradle-command`, set `GRADLE_UNDER_TEST_BIN`, or set
+`GRADLE_UNDER_TEST` to the distribution home. The repository wrapper is only a
+bootstrap wrapper and may run an upstream Gradle distribution that does not
+contain the Rust bridge. For explicit RunBuild gates, the runner adds `--info`
+and rejects the substrate candidate if no `[substrate:run-build]` signal is
+observed.
 
 `--runbuild-authoritative` adds
 `-Dorg.gradle.rust.substrate.runbuild.authoritative=true`. This is stricter
@@ -99,7 +110,9 @@ adds a pinned JUnit Platform sample for real non-empty test execution with
 include/exclude tag filtering plus a richer dependency constraints/exclusion
 sample, and requires network or a warm Gradle dependency cache.
 `testing/corpus/unsupported-manifest.json` tracks work that must not be
-approximated natively until a complete contract exists.
+approximated natively until a complete contract exists. It covers custom JVM
+task actions, unsupported CopySpec filters/actions, Copy/archive symlink
+inputs, and unsupported Test filter combinations.
 
 Reference-mode runs compare upstream Gradle and Rust substrate exit codes, task
 lists, and stable build output file inventories under `build/classes`,
