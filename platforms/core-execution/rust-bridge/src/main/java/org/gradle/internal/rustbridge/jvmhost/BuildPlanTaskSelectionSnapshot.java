@@ -2,6 +2,7 @@ package org.gradle.internal.rustbridge.jvmhost;
 
 import gradle.substrate.v1.BuildPlanTask;
 
+import org.gradle.api.Task;
 import org.gradle.internal.service.scopes.Scope;
 import org.gradle.internal.service.scopes.ServiceScope;
 
@@ -20,11 +21,20 @@ public class BuildPlanTaskSelectionSnapshot {
     private volatile Snapshot snapshot = Snapshot.notPopulated();
 
     public void recordSelectedTasks(List<String> taskPaths, Map<String, List<String>> taskDependencies) {
-        snapshot = Snapshot.populated(taskPaths, taskDependencies, Collections.emptyList());
+        snapshot = Snapshot.populated(taskPaths, taskDependencies, Collections.emptyList(), Collections.emptyList());
     }
 
     public void recordSelectedTasks(List<String> taskPaths, Map<String, List<String>> taskDependencies, List<BuildPlanTask> taskContracts) {
-        snapshot = Snapshot.populated(taskPaths, taskDependencies, taskContracts);
+        snapshot = Snapshot.populated(taskPaths, taskDependencies, Collections.emptyList(), taskContracts);
+    }
+
+    public void recordSelectedTasks(
+        List<String> taskPaths,
+        Map<String, List<String>> taskDependencies,
+        List<Task> taskReferences,
+        List<BuildPlanTask> taskContracts
+    ) {
+        snapshot = Snapshot.populated(taskPaths, taskDependencies, taskReferences, taskContracts);
     }
 
     public Snapshot snapshot() {
@@ -35,12 +45,14 @@ public class BuildPlanTaskSelectionSnapshot {
         private final boolean populated;
         private final List<String> taskPaths;
         private final Map<String, List<String>> taskDependencies;
+        private final List<Task> taskReferences;
         private final List<BuildPlanTask> taskContracts;
 
         private Snapshot(
             boolean populated,
             List<String> taskPaths,
             Map<String, List<String>> taskDependencies,
+            List<Task> taskReferences,
             List<BuildPlanTask> taskContracts
         ) {
             this.populated = populated;
@@ -50,19 +62,21 @@ public class BuildPlanTaskSelectionSnapshot {
                 copiedDependencies.put(entry.getKey(), Collections.unmodifiableList(new ArrayList<>(entry.getValue())));
             }
             this.taskDependencies = Collections.unmodifiableMap(copiedDependencies);
+            this.taskReferences = Collections.unmodifiableList(new ArrayList<>(taskReferences));
             this.taskContracts = Collections.unmodifiableList(new ArrayList<>(taskContracts));
         }
 
         private static Snapshot notPopulated() {
-            return new Snapshot(false, Collections.emptyList(), Collections.emptyMap(), Collections.emptyList());
+            return new Snapshot(false, Collections.emptyList(), Collections.emptyMap(), Collections.emptyList(), Collections.emptyList());
         }
 
         private static Snapshot populated(
             List<String> taskPaths,
             Map<String, List<String>> taskDependencies,
+            List<Task> taskReferences,
             List<BuildPlanTask> taskContracts
         ) {
-            return new Snapshot(true, taskPaths, taskDependencies, taskContracts);
+            return new Snapshot(true, taskPaths, taskDependencies, taskReferences, taskContracts);
         }
 
         public boolean isPopulated() {
@@ -75,6 +89,10 @@ public class BuildPlanTaskSelectionSnapshot {
 
         public List<String> getDependencies(String taskPath) {
             return taskDependencies.getOrDefault(taskPath, Collections.emptyList());
+        }
+
+        public List<Task> getTaskReferences() {
+            return taskReferences;
         }
 
         public List<BuildPlanTask> getTaskContracts() {

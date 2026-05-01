@@ -74,7 +74,7 @@ public class TaskGraphShadowListener implements TaskExecutionGraphListener {
         }
 
         if (taskSelectionSnapshot != null) {
-            taskSelectionSnapshot.recordSelectedTasks(taskPaths, taskDependencies, taskContracts);
+            taskSelectionSnapshot.recordSelectedTasks(taskPaths, taskDependencies, tasks, taskContracts);
         }
 
         String activeBuildId = BuildIdHolder.getBuildId();
