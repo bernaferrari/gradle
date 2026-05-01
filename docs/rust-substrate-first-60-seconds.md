@@ -54,7 +54,9 @@ build/gradle-under-test/bin/gradle \
 
 The supported authoritative slice can also materialize Gradle-compatible
 file-collection snapshots from Rust hashes for direct files, missing roots,
-directories, and PatternSet-backed file trees:
+directories, and PatternSet-backed file trees. Value snapshotting can also be
+made authoritative for exact built-in value shapes while failing closed for
+JVM-only serialization/classloader cases:
 
 ```bash
 build/gradle-under-test/bin/gradle \
@@ -63,6 +65,9 @@ build/gradle-under-test/bin/gradle \
   -Dorg.gradle.rust.substrate.enabled=true \
   -Dorg.gradle.rust.substrate.daemon.path=$PWD/target/debug/gradle-substrate-daemon \
   -Dorg.gradle.rust.substrate.hashing.enabled=true \
+  -Dorg.gradle.rust.substrate.hashing.authoritative=true \
   -Dorg.gradle.rust.substrate.fingerprint.enabled=true \
-  -Dorg.gradle.rust.substrate.fingerprint.authoritative=true
+  -Dorg.gradle.rust.substrate.fingerprint.authoritative=true \
+  -Dorg.gradle.rust.substrate.snapshotting.enabled=true \
+  -Dorg.gradle.rust.substrate.snapshotting.authoritative=true
 ```

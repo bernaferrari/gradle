@@ -153,9 +153,11 @@
   direct files, missing roots, directories, and PatternSet-backed file trees by
   materializing Gradle-compatible regular-file, missing-file, and Merkle
   directory snapshot objects from Rust hashes. It still fails closed for
-  symlinks, special files, and file-tree-backed archives. Value snapshotting is
-  still shadow-only because its Gradle-facing value snapshot objects are not yet
-  materialized from Rust results.
+  symlinks, special files, and file-tree-backed archives. Value snapshotting can
+  now run authoritatively for exact built-in value shapes that do not require
+  Java serialization or classloader hashes: null, strings, booleans, integer/
+  long/short numbers, files, enums, hash codes, lists, sets, maps, object
+  arrays, and primitive arrays. Unsupported JVM-only values fail closed.
 - User-home/global VFS and file watching remain JVM-owned in installed
   distributions. Moving those scopes requires a separate design that does not
   request build-session-only Rust services from global providers.
@@ -185,12 +187,16 @@
 - `./gradlew :dependency-management:test --tests org.gradle.api.internal.artifacts.ivyservice.ivyresolve.RepositoryChainArtifactResolverTest -x :distributions-core:generateLicenseFile`
 - `cargo test -q -p gradle-substrate-daemon server::file_fingerprint::tests -- --nocapture`
 - `./gradlew :rust-bridge:compileJava :core:compileJava --no-daemon --console=plain`
+- `cargo build -q -p gradle-substrate-daemon`
+- `./gradlew :rust-bridge:test --tests '*AuthoritativeRustValueSnapshotterTest' --tests '*ShadowingValueSnapshotterTest' --tests '*ShadowingInputFingerprinterTest' --no-daemon --console=plain`
 - `./gradlew :rust-bridge:test --tests '*ShadowingFileHasherTest' --tests '*ShadowingFileCollectionSnapshotterTest' --tests '*ShadowingInputFingerprinterTest' --no-daemon --console=plain`
 - `./gradlew :rust-bridge:test --tests '*ShadowingFileCollectionSnapshotterTest' --no-daemon --console=plain`
 - `./gradlew :distributions-full:install -Pgradle_installPath=$PWD/build/gradle-under-test -Dorg.gradle.unsafe.isolated-projects=false -Dorg.gradle.configuration-cache=false --no-daemon --console=plain`
 - `build/gradle-under-test/bin/gradle -p testing/corpus/java-library-kotlin-dsl clean classes --no-daemon --console=plain -Dorg.gradle.rust.substrate.enabled=true -Dorg.gradle.rust.substrate.daemon.path=$PWD/target/debug/gradle-substrate-daemon -Dorg.gradle.rust.substrate.hashing.enabled=true -Dorg.gradle.rust.substrate.fingerprint.enabled=true -Dorg.gradle.rust.substrate.shadow.report-mismatches=true --info`
 - `build/gradle-under-test/bin/gradle -p testing/corpus/java-library-kotlin-dsl clean classes --no-daemon --console=plain -Dorg.gradle.rust.substrate.enabled=true -Dorg.gradle.rust.substrate.daemon.path=$PWD/target/debug/gradle-substrate-daemon -Dorg.gradle.rust.substrate.hashing.enabled=true -Dorg.gradle.rust.substrate.fingerprint.enabled=true -Dorg.gradle.rust.substrate.fingerprint.authoritative=true --info`
 - `build/gradle-under-test/bin/gradle -p testing/corpus/java-library-kotlin-dsl classes --no-daemon --console=plain -Dorg.gradle.rust.substrate.enabled=true -Dorg.gradle.rust.substrate.daemon.path=$PWD/target/debug/gradle-substrate-daemon -Dorg.gradle.rust.substrate.hashing.enabled=true -Dorg.gradle.rust.substrate.fingerprint.enabled=true -Dorg.gradle.rust.substrate.fingerprint.authoritative=true --info`
+- `build/gradle-under-test/bin/gradle -p testing/corpus/java-library-kotlin-dsl clean classes --no-daemon --console=plain -Dorg.gradle.rust.substrate.enabled=true -Dorg.gradle.rust.substrate.daemon.path=$PWD/target/debug/gradle-substrate-daemon -Dorg.gradle.rust.substrate.hashing.enabled=true -Dorg.gradle.rust.substrate.hashing.authoritative=true -Dorg.gradle.rust.substrate.fingerprint.enabled=true -Dorg.gradle.rust.substrate.fingerprint.authoritative=true -Dorg.gradle.rust.substrate.snapshotting.enabled=true -Dorg.gradle.rust.substrate.snapshotting.authoritative=true`
+- `build/gradle-under-test/bin/gradle -p testing/corpus/java-library-kotlin-dsl classes --no-daemon --console=plain -Dorg.gradle.rust.substrate.enabled=true -Dorg.gradle.rust.substrate.daemon.path=$PWD/target/debug/gradle-substrate-daemon -Dorg.gradle.rust.substrate.hashing.enabled=true -Dorg.gradle.rust.substrate.hashing.authoritative=true -Dorg.gradle.rust.substrate.fingerprint.enabled=true -Dorg.gradle.rust.substrate.fingerprint.authoritative=true -Dorg.gradle.rust.substrate.snapshotting.enabled=true -Dorg.gradle.rust.substrate.snapshotting.authoritative=true`
 - `python3 tools/performance/rust_substrate_perf_report.py build/corpus-authoritative-21/corpus_summary.json --output build/corpus-authoritative-21/performance.md`
 - `./tools/stabilization/run_strict_stabilization.sh quick`
 - `./tools/demo/rust_substrate_demo.sh --quick`

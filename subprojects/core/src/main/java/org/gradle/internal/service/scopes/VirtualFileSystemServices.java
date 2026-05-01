@@ -81,6 +81,7 @@ import org.gradle.internal.rustbridge.fingerprint.ShadowingFileCollectionSnapsho
 import org.gradle.internal.rustbridge.hash.RustGrpcFileHasher;
 import org.gradle.internal.rustbridge.hash.ShadowingFileHasher;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
+import org.gradle.internal.rustbridge.snapshot.AuthoritativeRustValueSnapshotter;
 import org.gradle.internal.rustbridge.snapshot.RustValueSnapshotClient;
 import org.gradle.internal.rustbridge.snapshot.ShadowingInputFingerprinter;
 import org.gradle.internal.rustbridge.snapshot.ShadowingValueSnapshotter;
@@ -443,14 +444,24 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
             InternalOptions options,
             @Nullable SubstrateClient substrateClient
         ) {
-            InputFingerprinter delegate = new DefaultInputFingerprinter(
-                snapshotter, fingerprinterRegistry, valueSnapshotter);
             if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_SNAPSHOTTING)) {
-                return delegate;
+                return new DefaultInputFingerprinter(snapshotter, fingerprinterRegistry, valueSnapshotter);
             }
             if (RustSubstrateOptions.isSubsystemAuthoritative(options, RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_SNAPSHOTTING)) {
-                throw new SubstrateException("Authoritative Rust value snapshotting is not enabled in build-session input fingerprinting yet");
+                if (!isUsable(substrateClient)) {
+                    throw new SubstrateException("Authoritative Rust value snapshotting is unavailable");
+                }
+                return new DefaultInputFingerprinter(
+                    snapshotter,
+                    fingerprinterRegistry,
+                    new AuthoritativeRustValueSnapshotter(
+                        new RustValueSnapshotClient(substrateClient),
+                        createMismatchReporter(options)
+                    )
+                );
             }
+            InputFingerprinter delegate = new DefaultInputFingerprinter(
+                snapshotter, fingerprinterRegistry, valueSnapshotter);
             if (!isUsable(substrateClient)) {
                 return delegate;
             }
