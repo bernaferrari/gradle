@@ -281,6 +281,7 @@ class DependencyResolutionShadowListenerTest extends Specification {
             "demo",
             "1.2.3",
             "sources",
+            "jar",
             jar.absolutePath,
             jar.length(),
             DependencyResolutionShadowListener.sha256(jar)
@@ -290,7 +291,62 @@ class DependencyResolutionShadowListenerTest extends Specification {
         0 * reporter.reportRustError(_, _)
     }
 
-    def "mirror mode ignores project and non-jar artifacts"() {
+    def "mirror mode copies non-jar module artifacts with their extension"() {
+        given:
+        def client = Mock(RustDependencyResolutionClient)
+        def reporter = Mock(HashMismatchReporter)
+        def listener = new DependencyResolutionShadowListener(client, reporter, false, true)
+        def aar = temporaryFolder.newFile("demo-1.2.3-debug.aar")
+        aar.text = "artifact bytes"
+
+        def moduleId = Mock(ModuleComponentIdentifier) {
+            getGroup() >> "org.example"
+            getModule() >> "demo"
+            getVersion() >> "1.2.3"
+        }
+        def artifactId = Mock(ComponentArtifactIdentifier) {
+            getComponentIdentifier() >> moduleId
+            getDisplayName() >> "demo debug aar"
+        }
+        def artifact = Mock(ResolvedArtifactResult) {
+            getId() >> artifactId
+            getFile() >> aar
+        }
+        def artifacts = Mock(ArtifactCollection) {
+            getArtifacts() >> ([artifact] as Set)
+        }
+        def resolutionResult = Mock(ResolutionResult) {
+            getAllComponents() >> ([] as Set)
+            getAllDependencies() >> ([] as Set)
+        }
+        def dependencies = Mock(ResolvableDependencies) {
+            getName() >> "runtimeClasspath"
+            getResolutionResult() >> resolutionResult
+            getArtifacts() >> artifacts
+        }
+        listener.beforeResolve(dependencies)
+
+        when:
+        listener.afterResolve(dependencies)
+
+        then:
+        listener.mirroredArtifactCount == 1
+        1 * client.addArtifactToCache(
+            "org.example",
+            "demo",
+            "1.2.3",
+            "debug",
+            "aar",
+            aar.absolutePath,
+            aar.length(),
+            DependencyResolutionShadowListener.sha256(aar)
+        ) >> true
+        1 * client.recordResolution("runtimeClasspath", _, 0, true, 0)
+        1 * reporter.reportMatch()
+        0 * reporter.reportRustError(_, _)
+    }
+
+    def "mirror mode ignores project artifacts"() {
         given:
         def client = Mock(RustDependencyResolutionClient)
         def reporter = Mock(HashMismatchReporter)
@@ -325,7 +381,7 @@ class DependencyResolutionShadowListenerTest extends Specification {
 
         then:
         listener.mirroredArtifactCount == 0
-        0 * client.addArtifactToCache(_, _, _, _, _, _, _)
+        0 * client.addArtifactToCache(_, _, _, _, _, _, _, _)
         1 * client.recordResolution("runtimeClasspath", _, 0, true, 0)
         1 * reporter.reportMatch()
     }
@@ -340,5 +396,17 @@ class DependencyResolutionShadowListenerTest extends Specification {
         "demo-1.2.3-sources.jar"    | "sources"
         "other-1.2.3.jar"           | ""
         "demo-1.2.3.module"         | ""
+    }
+
+    def "extension inference handles common module artifact names"() {
+        expect:
+        DependencyResolutionShadowListener.inferExtension(fileName) == extension
+
+        where:
+        fileName                    | extension
+        "demo-1.2.3.jar"            | "jar"
+        "demo-1.2.3-debug.aar"      | "aar"
+        "demo-1.2.3.pom"            | "pom"
+        "README"                    | ""
     }
 }

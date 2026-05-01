@@ -195,11 +195,15 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
         ModuleComponentIdentifier moduleId = (ModuleComponentIdentifier) componentId;
 
         File file = artifact.getFile();
-        if (!file.isFile() || !file.getName().endsWith(".jar")) {
+        if (!file.isFile()) {
             return false;
         }
 
-        String classifier = inferClassifier(file.getName(), moduleId.getModule(), moduleId.getVersion());
+        String extension = inferExtension(file.getName());
+        if (extension.isEmpty()) {
+            return false;
+        }
+        String classifier = inferClassifier(file.getName(), moduleId.getModule(), moduleId.getVersion(), extension);
         try {
             String sha256 = sha256(file);
             boolean accepted = client.addArtifactToCache(
@@ -207,6 +211,7 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
                 moduleId.getModule(),
                 moduleId.getVersion(),
                 classifier,
+                extension,
                 file.getAbsolutePath(),
                 file.length(),
                 sha256
@@ -226,18 +231,31 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
     }
 
     static String inferClassifier(String fileName, String moduleName, String version) {
+        return inferClassifier(fileName, moduleName, version, inferExtension(fileName));
+    }
+
+    static String inferClassifier(String fileName, String moduleName, String version, String extension) {
         String prefix = moduleName + "-" + version;
-        if (!fileName.startsWith(prefix) || !fileName.endsWith(".jar")) {
+        String suffix = "." + extension;
+        if (extension.isEmpty() || !fileName.startsWith(prefix) || !fileName.endsWith(suffix)) {
             return "";
         }
-        String suffix = fileName.substring(prefix.length(), fileName.length() - ".jar".length());
-        if (suffix.isEmpty()) {
+        String classifierSuffix = fileName.substring(prefix.length(), fileName.length() - suffix.length());
+        if (classifierSuffix.isEmpty()) {
             return "";
         }
-        if (suffix.startsWith("-")) {
-            return suffix.substring(1);
+        if (classifierSuffix.startsWith("-")) {
+            return classifierSuffix.substring(1);
         }
         return "";
+    }
+
+    static String inferExtension(String fileName) {
+        int dot = fileName.lastIndexOf('.');
+        if (dot < 0 || dot == fileName.length() - 1) {
+            return "";
+        }
+        return fileName.substring(dot + 1);
     }
 
     static String sha256(File file) throws IOException {

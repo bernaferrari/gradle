@@ -311,8 +311,17 @@ public class RustDependencyResolutionClient {
     public boolean addArtifactToCache(String group, String name, String version,
                                        String classifier, String localPath,
                                        long size, String sha256) {
+        return addArtifactToCache(group, name, version, classifier, "jar", localPath, size, sha256);
+    }
+
+    /**
+     * Add an artifact to the Rust-side cache after download.
+     */
+    public boolean addArtifactToCache(String group, String name, String version,
+                                       String classifier, String extension, String localPath,
+                                       long size, String sha256) {
         try {
-            return addArtifactToCacheStrict(group, name, version, classifier, localPath, size, sha256);
+            return addArtifactToCacheStrict(group, name, version, classifier, extension, localPath, size, sha256);
         } catch (Exception e) {
             LOGGER.debug("[substrate:dep-resolve] add artifact to cache failed", e);
             return false;
@@ -333,6 +342,24 @@ public class RustDependencyResolutionClient {
         long size,
         String sha256
     ) {
+        return addArtifactToCacheStrict(group, name, version, classifier, "jar", localPath, size, sha256);
+    }
+
+    /**
+     * Add an artifact to the Rust-side cache after download.
+     *
+     * @throws RuntimeException when substrate is unavailable or the RPC fails.
+     */
+    public boolean addArtifactToCacheStrict(
+        String group,
+        String name,
+        String version,
+        String classifier,
+        String extension,
+        String localPath,
+        long size,
+        String sha256
+    ) {
         if (client.isNoop()) {
             throw new IllegalStateException("Substrate not available");
         }
@@ -343,6 +370,7 @@ public class RustDependencyResolutionClient {
                 .setName(name)
                 .setVersion(version)
                 .setClassifier(classifier)
+                .setExtension(extension)
                 .setLocalPath(localPath)
                 .setSize(size)
                 .setSha256(sha256)

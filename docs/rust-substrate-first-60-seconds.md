@@ -5,7 +5,8 @@ inspect a profiler:
 
 - daemon readiness: how quickly the Rust sidecar can accept work
 - dependency transport: whether Maven artifact bytes stream through Rust fast and land in the Rust store with checksum evidence
-- dependency read-through: whether Gradle can skip remote artifact access when Rust already has the JAR
+- dependency read-through: whether Gradle can skip remote artifact access when
+  Rust already has the requested external module artifact
 - metadata read-through: whether Gradle can skip remote POM metadata access when Rust already has the POM
 - hashing/fingerprinting: whether installed Gradle can run with Rust
   build-session hashing plus file-collection snapshot/fingerprint support
