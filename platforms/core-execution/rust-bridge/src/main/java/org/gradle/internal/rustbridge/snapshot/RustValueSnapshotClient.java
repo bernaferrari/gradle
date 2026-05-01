@@ -66,6 +66,52 @@ public class RustValueSnapshotClient {
         }
     }
 
+    /**
+     * Snapshot already-canonicalized value payloads via Rust.
+     *
+     * <p>This is used by authoritative value snapshotting after the JVM bridge
+     * has proved it can materialize Gradle-compatible {@code ValueSnapshot}
+     * objects for the same payload. The Rust side owns the deterministic hash
+     * over the canonical model, while unsupported JVM-only semantics fail
+     * before this method is called.</p>
+     */
+    public SnapshotResult snapshotCanonicalValues(
+        Map<String, String> canonicalProperties,
+        String implementationFingerprint
+    ) {
+        if (client.isNoop()) {
+            return SnapshotResult.error("Substrate client is in no-op mode");
+        }
+
+        try {
+            List<PropertyValue> protoValues = new ArrayList<>();
+            for (Map.Entry<String, String> entry : canonicalProperties.entrySet()) {
+                protoValues.add(PropertyValue.newBuilder()
+                    .setName(entry.getKey())
+                    .setTypeName("gradle.substrate.canonical-value-v1")
+                    .setStringValue(entry.getValue())
+                    .build());
+            }
+
+            SnapshotValuesResponse response = client.getValueSnapshotStub()
+                .snapshotValues(SnapshotValuesRequest.newBuilder()
+                    .addAllValues(protoValues)
+                    .setImplementationFingerprint(implementationFingerprint)
+                    .build());
+
+            if (!response.getSuccess()) {
+                return SnapshotResult.error(response.getErrorMessage());
+            }
+
+            return SnapshotResult.success(
+                response.getCompositeHash().toByteArray(),
+                response.getResultsList()
+            );
+        } catch (Exception e) {
+            return SnapshotResult.error("Rust snapshot failed: " + e.getMessage());
+        }
+    }
+
     private PropertyValue toPropertyValue(String name, Object value) {
         PropertyValue.Builder builder = PropertyValue.newBuilder()
             .setName(name)
@@ -81,6 +127,10 @@ public class RustValueSnapshotClient {
             builder.setLongValue(((Integer) value).longValue());
         } else if (value instanceof Long) {
             builder.setLongValue((Long) value);
+        } else if (value instanceof Short) {
+            builder.setLongValue(((Short) value).longValue());
+        } else if (value instanceof java.io.File) {
+            builder.setStringValue(((java.io.File) value).getPath());
         } else if (value instanceof List) {
             builder.setListValue(serializeToString(value));
         } else if (value instanceof Map) {
