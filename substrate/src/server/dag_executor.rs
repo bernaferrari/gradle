@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
@@ -39,6 +39,29 @@ struct TaskSlot {
     predicted_outcome: i32,
     input_fingerprint: String,
     execution_context_json: String,
+    critical_path_remaining_ms: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ReadyTask {
+    task_path: String,
+    critical_path_remaining_ms: i64,
+    sequence: u64,
+}
+
+impl Ord for ReadyTask {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.critical_path_remaining_ms
+            .cmp(&other.critical_path_remaining_ms)
+            .then_with(|| other.sequence.cmp(&self.sequence))
+            .then_with(|| other.task_path.cmp(&self.task_path))
+    }
+}
+
+impl PartialOrd for ReadyTask {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 /// Runtime state for an active build execution.
@@ -48,7 +71,8 @@ struct BuildExecution {
     status: String,
     start_time_ms: i64,
     /// Tasks whose dependencies are all satisfied.
-    ready_queue: std::sync::Mutex<VecDeque<String>>,
+    ready_queue: std::sync::Mutex<BinaryHeap<ReadyTask>>,
+    ready_sequence: u64,
     /// Tasks currently being executed by the JVM.
     executing: std::sync::Mutex<HashSet<String>>,
     /// Reverse adjacency: task -> list of tasks that depend on it.
@@ -259,9 +283,70 @@ impl DagExecutorServiceImpl {
         }
     }
 
+    fn compute_critical_path_remaining(
+        nodes: &[crate::proto::ExecutionNode],
+        task_filter: &Option<HashSet<String>>,
+    ) -> HashMap<String, i64> {
+        let mut dependents: HashMap<String, Vec<String>> = HashMap::with_capacity(nodes.len());
+        let mut estimates: HashMap<String, i64> = HashMap::with_capacity(nodes.len());
+
+        for node in nodes {
+            if !Self::passes_filter(&node.task_path, task_filter) {
+                continue;
+            }
+            estimates.insert(node.task_path.clone(), node.estimated_duration_ms.max(0));
+            for dep in node
+                .dependencies
+                .iter()
+                .filter(|dep| Self::passes_filter(dep, task_filter))
+            {
+                dependents
+                    .entry(dep.clone())
+                    .or_default()
+                    .push(node.task_path.clone());
+            }
+        }
+
+        let mut remaining: HashMap<String, i64> = HashMap::with_capacity(estimates.len());
+        for node in nodes.iter().rev() {
+            if !Self::passes_filter(&node.task_path, task_filter) {
+                continue;
+            }
+            let longest_dependent = dependents
+                .get(&node.task_path)
+                .into_iter()
+                .flat_map(|deps| deps.iter())
+                .filter_map(|dep| remaining.get(dep).copied())
+                .max()
+                .unwrap_or(0);
+            let estimate = estimates.get(&node.task_path).copied().unwrap_or(0);
+            remaining.insert(node.task_path.clone(), estimate + longest_dependent);
+        }
+        remaining
+    }
+
+    fn enqueue_ready_task(execution: &mut BuildExecution, task_path: String) {
+        let critical_path_remaining_ms = execution
+            .tasks
+            .get(&task_path)
+            .map(|slot| slot.critical_path_remaining_ms)
+            .unwrap_or(0);
+        let ready_task = ReadyTask {
+            task_path,
+            critical_path_remaining_ms,
+            sequence: execution.ready_sequence,
+        };
+        execution.ready_sequence = execution.ready_sequence.saturating_add(1);
+        execution
+            .ready_queue
+            .lock()
+            .expect("ready_queue lock should not be poisoned")
+            .push(ready_task);
+    }
+
     /// Try to mark dependents as ready after a task finishes.
     /// Returns list of newly ready task paths.
-    fn try_unblock_dependents(execution: &BuildExecution, finished_task: &str) -> Vec<String> {
+    fn try_unblock_dependents(execution: &mut BuildExecution, finished_task: &str) -> Vec<String> {
         let dep_count = execution
             .dependents
             .get(finished_task)
@@ -290,14 +375,8 @@ impl DagExecutorServiceImpl {
             }
         }
         // Update ready queue
-        if !newly_ready.is_empty() {
-            let mut queue = execution
-                .ready_queue
-                .lock()
-                .expect("ready_queue lock should not be poisoned");
-            for task in &newly_ready {
-                queue.push_back(task.clone());
-            }
+        for task in &newly_ready {
+            Self::enqueue_ready_task(execution, task.clone());
         }
         newly_ready
     }
@@ -321,7 +400,11 @@ impl DagExecutorServiceImpl {
                     slot.status = "SKIPPED".to_string();
                     // Remove from ready queue if present
                     if let Ok(mut queue) = execution.ready_queue.lock() {
-                        queue.retain(|t| t != &task_path);
+                        let retained: BinaryHeap<_> = queue
+                            .drain()
+                            .filter(|ready| ready.task_path != task_path)
+                            .collect();
+                        *queue = retained;
                     }
                     // Continue BFS to dependents of this task
                     if let Some(next_deps) = execution.dependents.get(&task_path) {
@@ -417,9 +500,11 @@ impl DagExecutorService for DagExecutorServiceImpl {
 
         // Build task slots and dependents map
         let task_count = plan_response.execution_order.len();
+        let critical_path_remaining =
+            Self::compute_critical_path_remaining(&plan_response.execution_order, &task_filter);
         let mut tasks = HashMap::with_capacity(task_count);
         let mut dependents: HashMap<String, Vec<String>> = HashMap::with_capacity(task_count);
-        let mut ready_queue = VecDeque::new();
+        let ready_queue = BinaryHeap::new();
 
         for node in &plan_response.execution_order {
             if !Self::passes_filter(&node.task_path, &task_filter) {
@@ -454,13 +539,12 @@ impl DagExecutorService for DagExecutorServiceImpl {
                     predicted_outcome: PredictedOutcome::PredictedUnknown as i32,
                     input_fingerprint: String::new(),
                     execution_context_json: node.execution_context_json.clone(),
+                    critical_path_remaining_ms: critical_path_remaining
+                        .get(&node.task_path)
+                        .copied()
+                        .unwrap_or(node.estimated_duration_ms.max(0)),
                 },
             );
-
-            // Root tasks (no dependencies) are immediately ready
-            if node.dependencies.is_empty() {
-                ready_queue.push_back(node.task_path.clone());
-            }
         }
 
         let total_tasks = tasks.len() as i32;
@@ -478,11 +562,12 @@ impl DagExecutorService for DagExecutorServiceImpl {
 
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
 
-        let execution = BuildExecution {
+        let mut execution = BuildExecution {
             build_id: build_id.clone(),
             status: "EXECUTING".to_string(),
             start_time_ms: Self::now_ms(),
             ready_queue: std::sync::Mutex::new(ready_queue),
+            ready_sequence: 0,
             executing: std::sync::Mutex::new(HashSet::new()),
             dependents,
             tasks,
@@ -498,6 +583,16 @@ impl DagExecutorService for DagExecutorServiceImpl {
             cancel_tx,
             failure_message: String::new(),
         };
+
+        let initial_ready: Vec<String> = execution
+            .tasks
+            .values()
+            .filter(|slot| slot.dependencies.is_empty())
+            .map(|slot| slot.task_path.clone())
+            .collect();
+        for task_path in initial_ready {
+            Self::enqueue_ready_task(&mut execution, task_path);
+        }
 
         self.builds.insert(build_id.clone(), execution);
         self.builds_started.fetch_add(1, Ordering::Relaxed);
@@ -1143,7 +1238,8 @@ impl DagExecutorService for DagExecutorServiceImpl {
 
             // Pop from ready queue
             if let Ok(mut queue) = execution.ready_queue.lock() {
-                if let Some(task_path) = queue.pop_front() {
+                while let Some(ready_task) = queue.pop() {
+                    let task_path = ready_task.task_path;
                     // Mark as executing
                     if let Ok(mut executing) = execution.executing.lock() {
                         executing.insert(task_path.clone());
@@ -1152,7 +1248,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                         return Ok(Response::new(GetNextTaskResponse {
                             task_path,
                             task_type: slot.task_type.clone(),
-                            estimated_duration_ms: 0,
+                            estimated_duration_ms: ready_task.critical_path_remaining_ms,
                         }));
                     }
                 }
@@ -1274,7 +1370,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
             }
 
             let newly_ready = if req.success {
-                Self::try_unblock_dependents(&execution, &req.task_path)
+                Self::try_unblock_dependents(&mut execution, &req.task_path)
             } else {
                 execution.failure_message = req.failure_message.clone();
                 Self::skip_transitive_dependents(&mut execution, &req.task_path);
@@ -2597,6 +2693,87 @@ mod tests {
 
         assert_eq!(status.status, "COMPLETED");
         assert_eq!(status.total_tasks, 4);
+    }
+
+    #[tokio::test]
+    async fn test_get_next_task_prioritizes_critical_path_remaining_time() {
+        let history = Arc::new(
+            super::super::execution_history::ExecutionHistoryServiceImpl::new(
+                std::path::PathBuf::new(),
+            ),
+        );
+        history.store_task_duration(":fastRoot", 10);
+        history.store_task_duration(":fastLeaf", 10);
+        history.store_task_duration(":slowRoot", 10);
+        history.store_task_duration(":slowMid", 500);
+        history.store_task_duration(":slowLeaf", 500);
+        let task_graph =
+            Arc::new(super::super::task_graph::TaskGraphServiceImpl::with_history(history));
+        let svc = make_svc_with_task_graph(task_graph);
+
+        register_chain(
+            &svc,
+            "build-critical-path",
+            &[
+                (":fastRoot", "Task", &[]),
+                (":fastLeaf", "Task", &[":fastRoot"]),
+                (":slowRoot", "Task", &[]),
+                (":slowMid", "Task", &[":slowRoot"]),
+                (":slowLeaf", "Task", &[":slowMid"]),
+            ],
+        )
+        .await;
+
+        svc.start_build(Request::new(StartBuildRequest {
+            build_id: "build-critical-path".to_string(),
+            max_parallelism: 1,
+            task_filter: vec![],
+        }))
+        .await
+        .unwrap();
+
+        let first = svc
+            .get_next_task(Request::new(GetNextTaskRequest {
+                build_id: "build-critical-path".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(first.task_path, ":slowRoot");
+        assert_eq!(first.estimated_duration_ms, 1010);
+    }
+
+    #[tokio::test]
+    async fn test_filtered_task_becomes_ready_when_filtered_dependencies_are_absent() {
+        let svc = make_svc();
+        register_chain(
+            &svc,
+            "build-filtered-root",
+            &[(":a", "Task", &[]), (":b", "Task", &[":a"])],
+        )
+        .await;
+
+        let start = svc
+            .start_build(Request::new(StartBuildRequest {
+                build_id: "build-filtered-root".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![":b".to_string()],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(start.accepted);
+        assert_eq!(start.total_tasks, 1);
+
+        let next = svc
+            .get_next_task(Request::new(GetNextTaskRequest {
+                build_id: "build-filtered-root".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(next.task_path, ":b");
     }
 
     // -----------------------------------------------------------------------
