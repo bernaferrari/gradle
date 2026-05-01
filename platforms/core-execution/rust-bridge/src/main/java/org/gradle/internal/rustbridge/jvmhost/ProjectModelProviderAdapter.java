@@ -269,7 +269,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             inputs.put("description", description);
         }
         if ("JavaCompile".equals(shortTaskTypeName)) {
-            captureJavaCompileInputs(task, inputs);
+            captureJavaCompileInputs(task, taskType, inputs);
         }
         if (isArchiveTask(shortTaskTypeName)) {
             captureJarInputs(task, inputs);
@@ -278,19 +278,19 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             captureFileTransformInputs(task, inputs);
         }
         if ("Test".equals(shortTaskTypeName)) {
-            captureTestInputs(task, inputs);
+            captureTestInputs(task, taskType, inputs);
         }
         if ("Exec".equals(shortTaskTypeName)) {
             captureExecInputs(task, inputs);
         }
         if ("JavaExec".equals(shortTaskTypeName)) {
-            captureJavaExecInputs(task, inputs);
+            captureJavaExecInputs(task, taskType, inputs);
         }
         if (isCreateStartScriptsTask(shortTaskTypeName)) {
             captureStartScriptsInputs(task, inputs);
         }
         if ("Javadoc".equals(shortTaskTypeName)) {
-            captureJavadocInputs(task, inputs);
+            captureJavadocInputs(task, taskType, inputs);
         }
         if ("DefaultTask".equals(shortTaskTypeName) || "Task".equals(shortTaskTypeName)) {
             captureStaticWriteFileInputs(task, inputs);
@@ -334,17 +334,17 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         return builder.build();
     }
 
-    private static void captureJavaCompileInputs(Task task, Map<String, String> inputs) {
+    private static void captureJavaCompileInputs(Task task, Class<?> taskType, Map<String, String> inputs) {
         putIfPresent(inputs, "java_home", javaCompilerHome(task));
-        putIfPresent(inputs, "source_version", stringOrEmpty(invokeOptional(task, "getSourceCompatibility")));
-        putIfPresent(inputs, "target_version", stringOrEmpty(invokeOptional(task, "getTargetCompatibility")));
+        putIfPresent(inputs, "source_version", stringOrEmpty(invokeOptional(task, taskType, "getSourceCompatibility")));
+        putIfPresent(inputs, "target_version", stringOrEmpty(invokeOptional(task, taskType, "getTargetCompatibility")));
         putIfPresent(inputs, "classpath", mergedClasspath(
-            fileCollectionPathString(invokeOptional(task, "getClasspath")),
+            fileCollectionPathString(invokeOptional(task, taskType, "getClasspath")),
             sourceSetConfigurationClasspath(task, "compile", "Java", "CompileClasspath"),
             taskInputClasspath(task)
         ));
 
-        Object options = invokeOptional(task, "getOptions");
+        Object options = invokeOptional(task, taskType, "getOptions");
         if (options != null) {
             putIfPresent(inputs, "release", providerValue(invokeOptional(options, "getRelease")));
             putIfPresent(inputs, "encoding", stringOrEmpty(invokeOptional(options, "getEncoding")));
@@ -600,22 +600,22 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         return false;
     }
 
-    private static void captureTestInputs(Task task, Map<String, String> inputs) {
+    private static void captureTestInputs(Task task, Class<?> taskType, Map<String, String> inputs) {
         putIfPresent(inputs, "java_home", System.getProperty("java.home"));
         putIfPresent(inputs, "classpath", mergedClasspath(
-            fileCollectionPathString(invokeOptional(task, "getClasspath")),
+            fileCollectionPathString(invokeOptional(task, taskType, "getClasspath")),
             sourceSetConfigurationClasspath(task, "", "", "RuntimeClasspath"),
             taskInputClasspath(task)
         ));
-        putIfPresent(inputs, "test_classes_dirs", fileCollectionPathString(invokeOptional(task, "getTestClassesDirs")));
-        putIfPresent(inputs, "working_dir", filePath(invokeOptional(task, "getWorkingDir")));
-        putIfPresent(inputs, "max_heap_size", stringOrEmpty(invokeOptional(task, "getMaxHeapSize")));
-        putIfPresent(inputs, "jvm_args", stringList(invokeOptional(task, "getJvmArgs")));
-        putIfPresent(inputs, "jvm_args_json", stringListJson(invokeOptional(task, "getJvmArgs")));
-        putIfPresent(inputs, "system_properties", stringMap(invokeOptional(task, "getSystemProperties")));
+        putIfPresent(inputs, "test_classes_dirs", fileCollectionPathString(invokeOptional(task, taskType, "getTestClassesDirs")));
+        putIfPresent(inputs, "working_dir", filePath(invokeOptional(task, taskType, "getWorkingDir")));
+        putIfPresent(inputs, "max_heap_size", stringOrEmpty(invokeOptional(task, taskType, "getMaxHeapSize")));
+        putIfPresent(inputs, "jvm_args", stringList(invokeOptional(task, taskType, "getJvmArgs")));
+        putIfPresent(inputs, "jvm_args_json", stringListJson(invokeOptional(task, taskType, "getJvmArgs")));
+        putIfPresent(inputs, "system_properties", stringMap(invokeOptional(task, taskType, "getSystemProperties")));
         putIfPresent(inputs, "xml_report_dir", testXmlReportDirectory(task));
         captureTestFilterInputs(task, inputs);
-        Object options = invokeOptional(task, "getOptions");
+        Object options = invokeOptional(task, taskType, "getOptions");
         putIfPresent(inputs, "include_tags", stringCollection(invokeOptional(options, "getIncludeTags")));
         putIfPresent(inputs, "exclude_tags", stringCollection(invokeOptional(options, "getExcludeTags")));
         inputs.put("scan_classpath", "true");
@@ -645,16 +645,16 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "ignore_exit_value", booleanString(invokeOptional(task, "isIgnoreExitValue")));
     }
 
-    private static void captureJavaExecInputs(Task task, Map<String, String> inputs) {
+    private static void captureJavaExecInputs(Task task, Class<?> taskType, Map<String, String> inputs) {
         putIfPresent(inputs, "java_home", javaLauncherHome(task));
-        putIfPresent(inputs, "classpath", fileCollectionPathString(invokeOptional(task, "getClasspath")));
+        putIfPresent(inputs, "classpath", fileCollectionPathString(invokeOptional(task, taskType, "getClasspath")));
         putIfPresent(inputs, "main_class", javaExecMainClass(task));
-        putIfPresent(inputs, "args", stringList(invokeOptional(task, "getArgs")));
-        putIfPresent(inputs, "args_json", stringListJson(invokeOptional(task, "getArgs")));
-        putIfPresent(inputs, "jvm_args", stringList(invokeOptional(task, "getJvmArgs")));
-        putIfPresent(inputs, "jvm_args_json", stringListJson(invokeOptional(task, "getJvmArgs")));
-        putIfPresent(inputs, "working_dir", filePath(invokeOptional(task, "getWorkingDir")));
-        putIfPresent(inputs, "ignore_exit_value", booleanString(invokeOptional(task, "isIgnoreExitValue")));
+        putIfPresent(inputs, "args", stringList(invokeOptional(task, taskType, "getArgs")));
+        putIfPresent(inputs, "args_json", stringListJson(invokeOptional(task, taskType, "getArgs")));
+        putIfPresent(inputs, "jvm_args", stringList(invokeOptional(task, taskType, "getJvmArgs")));
+        putIfPresent(inputs, "jvm_args_json", stringListJson(invokeOptional(task, taskType, "getJvmArgs")));
+        putIfPresent(inputs, "working_dir", filePath(invokeOptional(task, taskType, "getWorkingDir")));
+        putIfPresent(inputs, "ignore_exit_value", booleanString(invokeOptional(task, taskType, "isIgnoreExitValue")));
     }
 
     private static void captureStartScriptsInputs(Task task, Map<String, String> inputs) {
@@ -671,13 +671,13 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "windows_script", filePath(invokeOptional(task, "getWindowsScript")));
     }
 
-    private static void captureJavadocInputs(Task task, Map<String, String> inputs) {
+    private static void captureJavadocInputs(Task task, Class<?> taskType, Map<String, String> inputs) {
         putIfPresent(inputs, "java_home", javadocToolHome(task));
-        putIfPresent(inputs, "classpath", fileCollectionPathString(invokeOptional(task, "getClasspath")));
-        putIfPresent(inputs, "destination_dir", filePath(invokeOptional(task, "getDestinationDir")));
-        putIfPresent(inputs, "title", stringOrEmpty(invokeOptional(task, "getTitle")));
-        putIfPresent(inputs, "max_memory", stringOrEmpty(invokeOptional(task, "getMaxMemory")));
-        Object options = invokeOptional(task, "getOptions");
+        putIfPresent(inputs, "classpath", fileCollectionPathString(invokeOptional(task, taskType, "getClasspath")));
+        putIfPresent(inputs, "destination_dir", filePath(invokeOptional(task, taskType, "getDestinationDir")));
+        putIfPresent(inputs, "title", stringOrEmpty(invokeOptional(task, taskType, "getTitle")));
+        putIfPresent(inputs, "max_memory", stringOrEmpty(invokeOptional(task, taskType, "getMaxMemory")));
+        Object options = invokeOptional(task, taskType, "getOptions");
         putIfPresent(inputs, "encoding", stringOrEmpty(invokeOptional(options, "getEncoding")));
         putIfPresent(inputs, "no_timestamp", booleanString(invokeOptional(options, "isNoTimestamp")));
     }
@@ -1394,15 +1394,35 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
 
     @Nullable
     private static Object invokeOptional(@Nullable Object target, String methodName) {
+        return invokeOptional(target, null, methodName);
+    }
+
+    @Nullable
+    private static Object invokeOptional(@Nullable Object target, @Nullable Class<?> methodOwner, String methodName) {
         if (target == null) {
             return null;
         }
         try {
-            Method method = target.getClass().getMethod(methodName);
+            Method method = methodOwnerMethod(methodOwner, methodName);
+            if (method == null) {
+                method = target.getClass().getMethod(methodName);
+            }
             method.setAccessible(true);
             return method.invoke(target);
         } catch (IllegalAccessException | InvocationTargetException | NoSuchMethodException | RuntimeException e) {
             LOGGER.debug("[substrate-jvmhost] Optional method unavailable: {}.{}", target.getClass().getName(), methodName, e);
+            return null;
+        }
+    }
+
+    @Nullable
+    private static Method methodOwnerMethod(@Nullable Class<?> methodOwner, String methodName) {
+        if (methodOwner == null) {
+            return null;
+        }
+        try {
+            return methodOwner.getMethod(methodName);
+        } catch (NoSuchMethodException e) {
             return null;
         }
     }
