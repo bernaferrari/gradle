@@ -24,6 +24,7 @@ import org.gradle.api.internal.artifacts.ivyservice.resolutionstrategy.ExternalR
 import org.gradle.api.internal.file.temp.TemporaryFileProvider;
 import org.gradle.cache.internal.ProducerGuard;
 import org.gradle.internal.UncheckedException;
+import org.gradle.internal.buildoption.RustExternalResourceDownloadRegistry;
 import org.gradle.internal.buildoption.RustMetadataCacheReadThroughRegistry;
 import org.gradle.internal.hash.ChecksumService;
 import org.gradle.internal.hash.HashCode;
@@ -83,21 +84,25 @@ public class DefaultCacheAwareExternalResourceAccessor implements CacheAwareExte
             LOGGER.debug("Constructing external resource: {}", location);
             CachedExternalResource cached = cachedExternalResourceIndex.lookup(location.toString());
 
+            if (cached == null) {
+                LocallyAvailableExternalResource rustCachedMetadata = findRustCachedMetadata(location);
+                if (rustCachedMetadata != null) {
+                    return rustCachedMetadata;
+                }
+            }
+
             // If we have no caching options, just get the thing directly
             if (cached == null && (additionalCandidates == null || additionalCandidates.isNone())) {
+                LocallyAvailableExternalResource rustDownloaded = copyViaRustToCache(location, fileStore);
+                if (rustDownloaded != null) {
+                    return rustDownloaded;
+                }
                 return copyToCache(location, fileStore, delegate.withProgressLogging().resource(location));
             }
 
             // We might be able to use a cached/locally available version
             if (cached != null && !externalResourceCachePolicy.mustRefreshExternalResource(getAgeMillis(timeProvider, cached))) {
                 return fileResourceRepository.resource(cached.getCachedFile(), location.getUri(), cached.getExternalResourceMetaData());
-            }
-
-            if (cached == null) {
-                LocallyAvailableExternalResource rustCachedMetadata = findRustCachedMetadata(location);
-                if (rustCachedMetadata != null) {
-                    return rustCachedMetadata;
-                }
             }
 
             // We have a cached version, but it might be out of date, so we tell the upstreams to revalidate too
@@ -177,6 +182,35 @@ public class DefaultCacheAwareExternalResourceAccessor implements CacheAwareExte
             null
         );
         return fileResourceRepository.resource(file, location.getUri(), metaData);
+    }
+
+    @Nullable
+    private LocallyAvailableExternalResource copyViaRustToCache(final ExternalResourceName source, final ResourceFileStore fileStore) {
+        File destination = temporaryFileProvider.createTemporaryFile("gradle_download", "bin");
+        try {
+            if (!RustExternalResourceDownloadRegistry.get().download(source.getUri(), destination)) {
+                return null;
+            }
+            if (!destination.isFile()) {
+                return null;
+            }
+
+            ExternalResourceMetaData metaData = new DefaultExternalResourceMetaData(
+                source.getUri(),
+                0,
+                destination.length(),
+                null,
+                null,
+                checksumService.sha1(destination)
+            );
+            LOGGER.debug("Downloaded external resource through Rust transport: {} -> {}", source, destination);
+            return moveIntoCache(source, destination, fileStore, metaData);
+        } catch (Exception e) {
+            LOGGER.debug("Rust transport did not provide external resource {}; falling back to Java transport", source, e);
+            return null;
+        } finally {
+            destination.delete();
+        }
     }
 
     @Nullable

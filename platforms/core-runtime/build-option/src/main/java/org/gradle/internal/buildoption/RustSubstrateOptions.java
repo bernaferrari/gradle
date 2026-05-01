@@ -206,6 +206,14 @@ public class RustSubstrateOptions {
         InternalOptions.ofBoolean("org.gradle.rust.substrate.dependency.readthrough.metadata", false);
 
     /**
+     * Download uncached external dependency resources through the Rust transport before falling back to Java transport.
+     * Property: org.gradle.rust.substrate.dependency.download.enabled
+     * Default: false
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_DEPENDENCY_RESOURCE_DOWNLOAD =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.dependency.download.enabled", false);
+
+    /**
      * Enable Phase 19: Rust-native file system watching.
      * Property: org.gradle.rust.substrate.filewatch.enabled
      * Default: false

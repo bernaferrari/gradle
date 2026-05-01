@@ -3,6 +3,7 @@ package org.gradle.internal.rustbridge;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.buildoption.InternalOptions;
 import org.gradle.internal.buildoption.RustArtifactCacheReadThroughRegistry;
+import org.gradle.internal.buildoption.RustExternalResourceDownloadRegistry;
 import org.gradle.internal.buildoption.RustMetadataCacheReadThroughRegistry;
 import org.gradle.internal.buildoption.RustSubstrateOptions;
 import org.gradle.internal.event.ListenerManager;
@@ -16,6 +17,7 @@ import org.gradle.internal.rustbridge.configcache.RustConfigCacheClient;
 import org.gradle.internal.rustbridge.dependency.DependencyResolutionShadowListener;
 import org.gradle.internal.rustbridge.dependency.RustArtifactCacheReadThrough;
 import org.gradle.internal.rustbridge.dependency.RustDependencyResolutionClient;
+import org.gradle.internal.rustbridge.dependency.RustExternalResourceDownload;
 import org.gradle.internal.rustbridge.dependency.RustMetadataCacheReadThrough;
 import org.gradle.internal.rustbridge.history.RustExecutionHistoryClient;
 import org.gradle.internal.rustbridge.jvmhost.BuildPlanTaskSelectionSnapshot;
@@ -252,6 +254,11 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
                 RustMetadataCacheReadThroughRegistry.set(new RustMetadataCacheReadThrough(rustDependencyResolutionClient));
             } else {
                 RustMetadataCacheReadThroughRegistry.reset();
+            }
+            if (dependencyEnabled && options.getBoolean(RustSubstrateOptions.ENABLE_RUST_DEPENDENCY_RESOURCE_DOWNLOAD)) {
+                RustExternalResourceDownloadRegistry.set(new RustExternalResourceDownload(rustDependencyResolutionClient));
+            } else {
+                RustExternalResourceDownloadRegistry.reset();
             }
         }
 

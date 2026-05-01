@@ -4,6 +4,7 @@ import org.gradle.internal.rustbridge.dependency.RustArtifactCacheReadThrough;
 import org.gradle.internal.rustbridge.dependency.RustDependencyResolutionClient;
 import org.gradle.internal.rustbridge.SubstrateClient;
 import gradle.substrate.v1.*;
+import com.sun.net.httpserver.HttpServer;
 import org.junit.After;
 import org.junit.Assume;
 import org.junit.Before;
@@ -11,6 +12,8 @@ import org.junit.Test;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -232,6 +235,33 @@ public class SubstrateE2ETest {
         );
         assertTrue("Resolved artifact path should preserve extension", resolvedArtifact.getName().endsWith(".aar"));
         assertArrayEquals(bytes, Files.readAllBytes(resolvedArtifact.toPath()));
+    }
+
+    @Test
+    public void dependencyDownloadStreamsResourceThroughRustTransport() throws Exception {
+        byte[] bytes = "downloaded through rust transport".getBytes(StandardCharsets.UTF_8);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/demo.jar", exchange -> {
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(bytes);
+            }
+        });
+        server.start();
+        try {
+            Path destination = socketDirectory.resolve("downloaded-demo.jar");
+            RustDependencyResolutionClient dependencyClient = new RustDependencyResolutionClient(client);
+            RustDependencyResolutionClient.DownloadResult result = dependencyClient.downloadResourceStrict(
+                new java.net.URI("http://127.0.0.1:" + server.getAddress().getPort() + "/demo.jar"),
+                destination.toFile()
+            );
+
+            assertTrue("Rust transport download should succeed", result.isSuccess());
+            assertEquals(bytes.length, result.getBytesWritten());
+            assertArrayEquals(bytes, Files.readAllBytes(destination));
+        } finally {
+            server.stop(0);
+        }
     }
 
     // --- Execution Plan Service ---
