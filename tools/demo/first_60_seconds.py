@@ -208,6 +208,7 @@ def print_summary(results: list[dict[str, object]]) -> None:
     print("\nWhy these are visible:")
     print("- daemon_socket_ready is the time before Gradle can send work to the Rust sidecar")
     print("- dependency_transport_store_checksum is the bounded Rust path for Maven bytes, local store, cache hit, and checksum verification")
+    print("- dependency_metadata_transport_cache proves URL-only POM downloads through Rust warm the Rust metadata cache")
     print("- dependency_artifact_readthrough proves Gradle can skip remote artifact access when Rust already has the JAR")
     print("- dependency_metadata_readthrough proves Gradle can skip remote POM metadata access and can route uncached resource downloads through Rust")
     print("- file_watch_first_event is the delay before source edits become observable")
@@ -225,6 +226,11 @@ def main() -> int:
         measure_cargo_test(
             "dependency_transport_store_checksum",
             "test_download_artifact_populates_store_and_checksum_cache",
+            timeout=60,
+        ),
+        measure_cargo_test(
+            "dependency_metadata_transport_cache",
+            "test_download_metadata_url_populates_metadata_cache",
             timeout=60,
         ),
         measure_gradle_test(

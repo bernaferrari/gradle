@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use dashmap::DashMap;
@@ -8,13 +8,13 @@ use sha2::{Digest, Sha256};
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
-    dependency_resolution_service_server::DependencyResolutionService, AddArtifactToCacheRequest,
-    AddArtifactToCacheResponse, CheckArtifactCacheRequest, CheckArtifactCacheResponse,
-    CheckMetadataCacheRequest, CheckMetadataCacheResponse, ChecksumFailure, DependencyDescriptor,
-    GetResolutionStatsRequest, GetResolutionStatsResponse, RecordResolutionRequest,
-    RecordResolutionResponse, RepositoryDescriptor, ResolveDependenciesRequest,
-    ResolveDependenciesResponse, ResolvedDependency, VerifyDependencyChecksumsRequest,
-    VerifyDependencyChecksumsResponse,
+    AddArtifactToCacheRequest, AddArtifactToCacheResponse, CheckArtifactCacheRequest,
+    CheckArtifactCacheResponse, CheckMetadataCacheRequest, CheckMetadataCacheResponse,
+    ChecksumFailure, DependencyDescriptor, GetResolutionStatsRequest, GetResolutionStatsResponse,
+    RecordResolutionRequest, RecordResolutionResponse, RepositoryDescriptor,
+    ResolveDependenciesRequest, ResolveDependenciesResponse, ResolvedDependency,
+    VerifyDependencyChecksumsRequest, VerifyDependencyChecksumsResponse,
+    dependency_resolution_service_server::DependencyResolutionService,
 };
 
 // ---------------------------------------------------------------------------
@@ -296,6 +296,13 @@ impl DependencyResolutionServiceImpl {
         } else {
             extension.to_string()
         }
+    }
+
+    fn is_metadata_extension(extension: &str) -> bool {
+        matches!(
+            Self::normalize_extension(extension).as_str(),
+            "pom" | "module" | "ivy"
+        )
     }
 
     fn now_ms() -> i64 {
@@ -2703,22 +2710,43 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
         };
         let client = self.http_client.clone();
         let extension = Self::normalize_extension(&req.extension);
-        let cache_key = Self::artifact_cache_key(
-            &req.group,
-            &req.name,
-            &req.version,
-            &req.classifier,
-            &extension,
-        );
-        let artifact_cache = Arc::clone(&self.artifact_cache);
-        let cache_group = req.group.clone();
-        let cache_name = req.name.clone();
-        let cache_version = req.version.clone();
-        let cache_classifier = req.classifier.clone();
-        let cache_extension = extension.clone();
-        let store_path = if req.group.is_empty() || req.name.is_empty() || req.version.is_empty() {
-            PathBuf::new()
+        let has_coordinate =
+            !(req.group.is_empty() || req.name.is_empty() || req.version.is_empty());
+        let is_url_metadata = !has_coordinate && Self::is_metadata_extension(&extension);
+        let cache_key = if is_url_metadata {
+            Self::metadata_url_cache_key(&url, &extension)
         } else {
+            Self::artifact_cache_key(
+                &req.group,
+                &req.name,
+                &req.version,
+                &req.classifier,
+                &extension,
+            )
+        };
+        let artifact_cache = Arc::clone(&self.artifact_cache);
+        let cache_group = if has_coordinate {
+            req.group.clone()
+        } else {
+            String::new()
+        };
+        let cache_name = if has_coordinate {
+            req.name.clone()
+        } else {
+            String::new()
+        };
+        let cache_version = if has_coordinate {
+            req.version.clone()
+        } else {
+            String::new()
+        };
+        let cache_classifier = if has_coordinate {
+            req.classifier.clone()
+        } else {
+            String::new()
+        };
+        let cache_extension = extension.clone();
+        let store_path = if has_coordinate {
             self.artifact_path(
                 &req.group,
                 &req.name,
@@ -2726,6 +2754,10 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                 &req.classifier,
                 &extension,
             )
+        } else if is_url_metadata {
+            self.metadata_url_path(&url, &extension)
+        } else {
+            PathBuf::new()
         };
 
         let stream = async_stream::stream! {
@@ -3403,6 +3435,83 @@ mod tests {
             .into_inner();
         assert!(checksum.all_matched);
         assert!(checksum.failures.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_download_metadata_url_populates_metadata_cache() {
+        use futures_util::StreamExt;
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body = b"<project><modelVersion>4.0.0</modelVersion></project>".to_vec();
+        let expected_sha256 = DependencyResolutionServiceImpl::compute_sha256(&body);
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/xml\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.write_all(&body).unwrap();
+        });
+
+        let store = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let url = format!("http://{}/org/example/demo/1.0/demo-1.0.pom", addr);
+        let mut stream = svc
+            .download_artifact(Request::new(crate::proto::DownloadArtifactRequest {
+                url: url.clone(),
+                extension: "pom".to_string(),
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let mut downloaded = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.unwrap();
+            assert!(chunk.error_message.is_empty(), "{}", chunk.error_message);
+            downloaded.extend_from_slice(&chunk.data);
+            if chunk.is_last {
+                break;
+            }
+        }
+        server.join().unwrap();
+
+        assert_eq!(
+            downloaded,
+            b"<project><modelVersion>4.0.0</modelVersion></project>"
+        );
+
+        let cached = svc
+            .check_metadata_cache(Request::new(CheckMetadataCacheRequest {
+                url,
+                extension: "pom".to_string(),
+                sha256: expected_sha256.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(cached.cached);
+        assert_eq!(
+            tokio::fs::read(&cached.local_path).await.unwrap(),
+            b"<project><modelVersion>4.0.0</modelVersion></project>"
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(DependencyResolutionServiceImpl::sha256_sidecar_path(
+                Path::new(&cached.local_path)
+            ))
+            .await
+            .unwrap()
+            .split_whitespace()
+            .next(),
+            Some(expected_sha256.as_str())
+        );
     }
 
     #[tokio::test]

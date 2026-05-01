@@ -31,6 +31,7 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Client for the Rust dependency resolution service.
@@ -360,6 +361,11 @@ public class RustDependencyResolutionClient {
                 .setVersion(coordinate.version)
                 .setClassifier(coordinate.classifier)
                 .setExtension(coordinate.extension);
+        } else {
+            String metadataExtension = metadataExtensionFor(location);
+            if (!metadataExtension.isEmpty()) {
+                request.setExtension(metadataExtension);
+            }
         }
 
         Iterator<DownloadArtifactChunk> chunks = client.getDependencyResolutionStub()
@@ -388,6 +394,24 @@ public class RustDependencyResolutionClient {
         }
 
         return DownloadResult.success(bytesWritten, totalSize);
+    }
+
+    private static String metadataExtensionFor(URI location) {
+        String path = location.getPath();
+        if (path == null) {
+            return "";
+        }
+        String lowerPath = path.toLowerCase(Locale.ROOT);
+        if (lowerPath.endsWith(".pom")) {
+            return "pom";
+        }
+        if (lowerPath.endsWith(".module")) {
+            return "module";
+        }
+        if (lowerPath.endsWith(".ivy")) {
+            return "ivy";
+        }
+        return "";
     }
 
     /**

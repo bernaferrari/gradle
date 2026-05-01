@@ -4,7 +4,8 @@ The visible wins should be things people can feel immediately, before they
 inspect a profiler:
 
 - daemon readiness: how quickly the Rust sidecar can accept work
-- dependency transport: whether Maven artifact bytes stream through Rust fast and land in the Rust store with checksum evidence
+- dependency transport: whether Maven artifact and metadata bytes stream through
+  Rust fast and land in the Rust stores with checksum evidence
 - dependency read-through: whether Gradle can skip remote artifact access when
   Rust already has the requested external module artifact
 - metadata read-through: whether Gradle can skip remote POM metadata access when Rust already has the POM
@@ -22,6 +23,8 @@ The script reports:
 
 - `daemon_socket_ready`: process launch until the Unix socket exists
 - `dependency_transport_store_checksum`: local HTTP artifact streaming through the Rust dependency service, persisted store write, cache hit, and checksum verification
+- `dependency_metadata_transport_cache`: URL-only POM streaming through the Rust
+  transport, persisted metadata-store write, and later metadata cache hit
 - `dependency_artifact_readthrough`: focused Gradle resolver test proving the Rust read-through hook resolves before remote access
 - `dependency_metadata_readthrough`: focused Gradle resource-cache test proving the Rust POM metadata read-through hook resolves before remote access
 - `file_watch_first_event`: native file watcher latency from write to event
