@@ -44,6 +44,38 @@ class AuthoritativeRustValueSnapshotterTest extends Specification {
         snapshotter.snapshot("value", candidate).is(candidate)
     }
 
+    def "snapshots multiple values with one Rust canonical batch"() {
+        given:
+        def candidate = new StringValueSnapshot("old")
+
+        when:
+        def snapshots = snapshotter.snapshotAll(
+            [alpha: "value", beta: 7],
+            [alpha: candidate]
+        )
+
+        then:
+        1 * rustClient.snapshotCanonicalValues({ Map<String, String> values ->
+            values.keySet() == ["alpha", "beta"] as Set && values.alpha && values.beta
+        }, "") >> RustValueSnapshotClient.SnapshotResult.success("rust-hash".bytes, [])
+        snapshots.keySet() == ["alpha", "beta"] as Set
+        snapshots.alpha == new StringValueSnapshot("value")
+        !snapshots.alpha.is(candidate)
+    }
+
+    def "batch snapshot reuses candidate when supported value did not change"() {
+        given:
+        def candidate = new StringValueSnapshot("value")
+
+        when:
+        def snapshots = snapshotter.snapshotAll([alpha: "value"], [alpha: candidate])
+
+        then:
+        1 * rustClient.snapshotCanonicalValues(_, "") >>
+            RustValueSnapshotClient.SnapshotResult.success("rust-hash".bytes, [])
+        snapshots.alpha.is(candidate)
+    }
+
     def "fails closed before Rust for unsupported JVM-only values"() {
         when:
         snapshotter.snapshot(new Object())
@@ -51,6 +83,17 @@ class AuthoritativeRustValueSnapshotterTest extends Specification {
         then:
         def failure = thrown(ValueSnapshottingException)
         failure.message.contains("does not support values of type java.lang.Object")
+        0 * rustClient._
+    }
+
+    def "batch fails closed with property name before Rust for unsupported JVM-only values"() {
+        when:
+        snapshotter.snapshotAll([safe: "value", bad: new Object()], [:])
+
+        then:
+        def failure = thrown(AuthoritativeRustValueSnapshotter.PropertySnapshottingException)
+        failure.propertyName == "bad"
+        failure.message.contains("input property 'bad'")
         0 * rustClient._
     }
 

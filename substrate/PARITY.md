@@ -158,6 +158,9 @@
   Java serialization or classloader hashes: null, strings, booleans, integer/
   long/short numbers, files, enums, hash codes, lists, sets, maps, object
   arrays, and primitive arrays. Unsupported JVM-only values fail closed.
+  Authoritative value input fingerprinting batches supported value properties
+  into one Rust canonical snapshot RPC per fingerprinting pass instead of one
+  RPC per property.
 - User-home/global VFS and file watching remain JVM-owned in installed
   distributions. Moving those scopes requires a separate design that does not
   request build-session-only Rust services from global providers.
@@ -189,6 +192,7 @@
 - `./gradlew :rust-bridge:compileJava :core:compileJava --no-daemon --console=plain`
 - `cargo build -q -p gradle-substrate-daemon`
 - `./gradlew :rust-bridge:test --tests '*AuthoritativeRustValueSnapshotterTest' --tests '*ShadowingValueSnapshotterTest' --tests '*ShadowingInputFingerprinterTest' --no-daemon --console=plain`
+- `./gradlew :rust-bridge:test --tests '*AuthoritativeRustValueSnapshotterTest' --no-daemon --console=plain`
 - `./gradlew :rust-bridge:test --tests '*ShadowingFileHasherTest' --tests '*ShadowingFileCollectionSnapshotterTest' --tests '*ShadowingInputFingerprinterTest' --no-daemon --console=plain`
 - `./gradlew :rust-bridge:test --tests '*ShadowingFileCollectionSnapshotterTest' --no-daemon --console=plain`
 - `./gradlew :distributions-full:install -Pgradle_installPath=$PWD/build/gradle-under-test -Dorg.gradle.unsafe.isolated-projects=false -Dorg.gradle.configuration-cache=false --no-daemon --console=plain`

@@ -82,6 +82,7 @@ import org.gradle.internal.rustbridge.fingerprint.ShadowingFileCollectionSnapsho
 import org.gradle.internal.rustbridge.hash.RustGrpcFileHasher;
 import org.gradle.internal.rustbridge.hash.ShadowingFileHasher;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
+import org.gradle.internal.rustbridge.snapshot.AuthoritativeRustInputFingerprinter;
 import org.gradle.internal.rustbridge.snapshot.AuthoritativeRustValueSnapshotter;
 import org.gradle.internal.rustbridge.snapshot.RustValueSnapshotClient;
 import org.gradle.internal.rustbridge.snapshot.ShadowingInputFingerprinter;
@@ -463,7 +464,7 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
                 if (!isUsable(substrateClient)) {
                     throw new SubstrateException("Authoritative Rust value snapshotting is unavailable");
                 }
-                return new DefaultInputFingerprinter(
+                return new AuthoritativeRustInputFingerprinter(
                     snapshotter,
                     fingerprinterRegistry,
                     new AuthoritativeRustValueSnapshotter(
