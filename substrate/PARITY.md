@@ -90,10 +90,10 @@
 - Gradle artifact resolution has an explicit Rust read-through mode
   (`org.gradle.rust.substrate.dependency.readthrough.artifacts=true`) that
   consults the Rust artifact store after Gradle local access and before remote
-  repository access for safe Maven-layout external module artifact coordinates.
-  Cache misses fall back to Gradle's normal remote resolver. The Java bridge
-  read-through path is covered by a gated E2E test against a real Rust daemon
-  and artifact store.
+  repository access for safe Maven-layout external module artifact coordinates,
+  including non-JAR artifacts with explicit extensions. Cache misses fall back
+  to Gradle's normal remote resolver. The Java bridge read-through path is
+  covered by gated E2E tests against a real Rust daemon and artifact store.
 - Archive tasks (`Jar`, `Zip`, `War`, `Ear`, `Tar`) can lower to native Rust
   archive execution when the task model provides input paths and an output
   archive path. ZIP-compatible tasks emit ZIP-compatible archives; `Tar` emits
@@ -192,6 +192,7 @@
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.dependency.DependencyResolutionShadowListenerTest`
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.dependency.RustArtifactCacheReadThroughTest`
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.e2e.SubstrateE2ETest.dependencyArtifactReadThroughReturnsArtifactFromRustStore -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon`
+- `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.e2e.SubstrateE2ETest.dependencyArtifactReadThroughPreservesArtifactExtension -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon`
 - `./gradlew :dependency-management:test --tests org.gradle.api.internal.artifacts.ivyservice.ivyresolve.RepositoryChainArtifactResolverTest -x :distributions-core:generateLicenseFile`
 - `cargo test -q -p gradle-substrate-daemon server::file_fingerprint::tests -- --nocapture`
 - `./gradlew :rust-bridge:compileJava :core:compileJava --no-daemon --console=plain`

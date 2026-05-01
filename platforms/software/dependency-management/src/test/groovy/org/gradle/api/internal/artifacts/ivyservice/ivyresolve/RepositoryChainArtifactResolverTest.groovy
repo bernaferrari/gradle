@@ -33,6 +33,7 @@ class RepositoryChainArtifactResolverTest extends Specification {
     final artifactFile = new File("dontcare")
     final moduleVersionId = DefaultModuleVersionIdentifier.newId("group", "name", "1.0")
     final artifact = new DefaultModuleComponentArtifactMetadata(DefaultModuleComponentIdentifier.newId(moduleVersionId), new DefaultIvyArtifactName("name", "jar", "jar"))
+    final aarArtifact = new DefaultModuleComponentArtifactMetadata(DefaultModuleComponentIdentifier.newId(moduleVersionId), new DefaultIvyArtifactName("name", "aar", "aar"))
     final result = new DefaultBuildableArtifactResolveResult()
     final calculatedValueContainerFactory = new CalculatedValueContainerFactory(Mock(ProjectLeaseRegistry), Mock(ServiceRegistry))
 
@@ -156,6 +157,37 @@ class RepositoryChainArtifactResolverTest extends Specification {
 
         then:
         1 * localAccess2.resolveArtifact(artifact, moduleSources, _)
+        0 * remoteAccess2._
+        result.result.file == rustCachedFile
+    }
+
+    def "uses read-through artifact cache for non-jar external module artifacts"() {
+        given:
+        def rustCachedFile = new File("rust-cache-artifact.aar")
+        RustArtifactCacheReadThroughRegistry.set({ group, name, version, classifier, extension ->
+            assert group == "group"
+            assert name == "name"
+            assert version == "1.0"
+            assert classifier == ""
+            assert extension == "aar"
+            rustCachedFile
+        } as RustArtifactCacheReadThroughRegistry.ArtifactCacheReadThrough)
+
+        when:
+        resolver.resolveArtifact(component, aarArtifact, result)
+
+        then:
+        result.hasResult()
+        cache.size() == 1
+        cache.values().contains(result.result)
+        and:
+        0 * _._
+
+        when:
+        result.result.file
+
+        then:
+        1 * localAccess2.resolveArtifact(aarArtifact, moduleSources, _)
         0 * remoteAccess2._
         result.result.file == rustCachedFile
     }
