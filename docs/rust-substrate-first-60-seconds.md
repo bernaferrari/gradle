@@ -26,6 +26,9 @@ The script reports:
 - `dependency_transport_store_checksum`: local HTTP artifact streaming through the Rust dependency service, persisted store write, cache hit, and checksum verification
 - `dependency_metadata_transport_cache`: URL-only POM streaming through the Rust
   transport, persisted metadata-store write, and later metadata cache hit
+- `dependency_dynamic_metadata_transport_cache`: URL-only
+  `maven-metadata.xml` streaming through the Rust transport, persisted
+  metadata-store write, and later dynamic-version metadata cache hit
 - `dependency_artifact_readthrough`: focused Gradle resolver test proving the Rust read-through hook resolves before remote access
 - `dependency_metadata_readthrough`: focused Gradle resource-cache test proving the Rust POM, Gradle module, and Maven version-list metadata read-through hook resolves before remote access
 - `file_watch_first_event`: native file watcher latency from write to event
