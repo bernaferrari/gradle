@@ -301,7 +301,7 @@ impl DependencyResolutionServiceImpl {
     fn is_metadata_extension(extension: &str) -> bool {
         matches!(
             Self::normalize_extension(extension).as_str(),
-            "pom" | "module" | "ivy"
+            "pom" | "module" | "ivy" | "maven-metadata.xml"
         )
     }
 
@@ -3260,6 +3260,25 @@ mod tests {
             dotted_url,
             "https://repo.example.test/maven/org/example/demo/1.2.3/demo-1.2.3-javadoc.jar"
         );
+    }
+
+    #[test]
+    fn test_metadata_extensions_include_maven_metadata() {
+        assert!(DependencyResolutionServiceImpl::is_metadata_extension(
+            "pom"
+        ));
+        assert!(DependencyResolutionServiceImpl::is_metadata_extension(
+            "module"
+        ));
+        assert!(DependencyResolutionServiceImpl::is_metadata_extension(
+            "ivy"
+        ));
+        assert!(DependencyResolutionServiceImpl::is_metadata_extension(
+            "maven-metadata.xml"
+        ));
+        assert!(!DependencyResolutionServiceImpl::is_metadata_extension(
+            "xml"
+        ));
     }
 
     #[tokio::test]

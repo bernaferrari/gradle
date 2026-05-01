@@ -51,6 +51,7 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 
 public class DefaultCacheAwareExternalResourceAccessor implements CacheAwareExternalResourceAccessor {
 
@@ -197,14 +198,18 @@ public class DefaultCacheAwareExternalResourceAccessor implements CacheAwareExte
         if (path == null) {
             return null;
         }
-        if (path.endsWith(".pom")) {
+        String lowerPath = path.toLowerCase(Locale.ROOT);
+        if (lowerPath.endsWith(".pom")) {
             return "pom";
         }
-        if (path.endsWith(".module")) {
+        if (lowerPath.endsWith(".module")) {
             return "module";
         }
-        if (path.endsWith(".ivy")) {
+        if (lowerPath.endsWith(".ivy")) {
             return "ivy";
+        }
+        if (lowerPath.endsWith("/maven-metadata.xml")) {
+            return "maven-metadata.xml";
         }
         return null;
     }

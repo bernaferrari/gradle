@@ -71,8 +71,8 @@
   safe external module artifact by explicit coordinate, the coordinate is passed
   to Rust so the same streamed download also populates the coordinate-addressed
   Rust artifact store for future read-through hits. URL-only `.pom`, `.module`,
-  and `.ivy` downloads also populate the URL-addressed Rust metadata store for
-  later metadata read-through.
+  `.ivy`, and `maven-metadata.xml` downloads also populate the URL-addressed
+  Rust metadata store for later metadata read-through.
 - Native dependency transport now persists downloaded Maven artifacts into the
   Rust artifact store, writes `.sha256` sidecars, validates cold and warm cache
   hits against requested SHA-256 values, populates the warm artifact cache
@@ -87,9 +87,10 @@
   sidecars, and populate the warm cache for parent/BOM/transitive POM reuse.
 - Gradle has an opt-in metadata read-through path
   (`org.gradle.rust.substrate.dependency.readthrough.metadata=true`) that asks
-  Rust for URL-addressed cached `.pom`, `.module`, and `.ivy` metadata when
-  Gradle has no acceptable local cache entry. Existing Gradle cache
-  refresh/revalidation semantics still win when a Gradle cache entry exists.
+  Rust for URL-addressed cached `.pom`, `.module`, `.ivy`, and
+  `maven-metadata.xml` metadata when Gradle has no acceptable local cache entry.
+  Existing Gradle cache refresh/revalidation semantics still win when a Gradle
+  cache entry exists.
 - The Gradle dependency shadow listener has an explicit artifact mirror mode
   (`org.gradle.rust.substrate.dependency.mirror.artifacts=true`) that observes
   real resolved external module artifacts, computes SHA-256 in the JVM bridge,

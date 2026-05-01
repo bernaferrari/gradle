@@ -411,6 +411,9 @@ public class RustDependencyResolutionClient {
         if (lowerPath.endsWith(".ivy")) {
             return "ivy";
         }
+        if (lowerPath.endsWith("/maven-metadata.xml")) {
+            return "maven-metadata.xml";
+        }
         return "";
     }
 

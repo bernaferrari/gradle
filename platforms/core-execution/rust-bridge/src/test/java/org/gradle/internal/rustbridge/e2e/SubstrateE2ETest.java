@@ -316,6 +316,41 @@ public class SubstrateE2ETest {
         }
     }
 
+    @Test
+    public void dependencyDownloadPopulatesMavenMetadataUrlCache() throws Exception {
+        byte[] bytes = "<metadata><versioning><latest>1.2.3</latest></versioning></metadata>".getBytes(StandardCharsets.UTF_8);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/maven2/org/example/demo/maven-metadata.xml", exchange -> {
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(bytes);
+            }
+        });
+        server.start();
+        try {
+            String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/maven2/org/example/demo/maven-metadata.xml";
+            Path destination = socketDirectory.resolve("maven-metadata.xml");
+            RustDependencyResolutionClient dependencyClient = new RustDependencyResolutionClient(client);
+            RustDependencyResolutionClient.DownloadResult result = dependencyClient.downloadResourceStrict(
+                new java.net.URI(url),
+                destination.toFile()
+            );
+            RustDependencyResolutionClient.CacheCheckResult cachedMetadata = dependencyClient.checkMetadataCacheStrict(
+                url,
+                "maven-metadata.xml",
+                ""
+            );
+
+            assertTrue("Rust maven metadata download should succeed", result.isSuccess());
+            assertEquals(bytes.length, result.getBytesWritten());
+            assertArrayEquals(bytes, Files.readAllBytes(destination));
+            assertTrue("Rust transport should populate URL-addressed maven metadata store", cachedMetadata.isCached());
+            assertArrayEquals(bytes, Files.readAllBytes(new File(cachedMetadata.getLocalPath()).toPath()));
+        } finally {
+            server.stop(0);
+        }
+    }
+
     // --- Execution Plan Service ---
 
     @Test
