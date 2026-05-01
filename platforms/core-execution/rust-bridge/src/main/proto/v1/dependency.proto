@@ -154,6 +154,7 @@ message AddArtifactToCacheRequest {
   string local_path = 5;
   int64 size = 6;
   string sha256 = 7;
+  string extension = 8;
 }
 
 message AddArtifactToCacheResponse { bool accepted = 1; }

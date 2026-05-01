@@ -2996,7 +2996,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
         let name = req.name.clone();
         let version = req.version.clone();
         let classifier = req.classifier.clone();
-        let extension = "jar".to_string();
+        let extension = Self::normalize_extension(&req.extension);
         let key = Self::artifact_cache_key(&group, &name, &version, &classifier, &extension);
 
         // Compute persistent store path
@@ -3698,6 +3698,7 @@ mod tests {
             local_path: "/tmp/my-lib-1.0.jar".to_string(),
             size: 1024,
             sha256: "abc123".to_string(),
+            extension: String::new(),
         }))
         .await
         .unwrap();
@@ -4251,6 +4252,7 @@ mod tests {
             local_path: src.to_string_lossy().into_owned(),
             size: 20,
             sha256: "abc123".to_string(),
+            extension: String::new(),
         }))
         .await
         .unwrap();
@@ -4274,6 +4276,56 @@ mod tests {
                 DependencyResolutionServiceImpl::compute_sha256(b"test artifact content")
             )
         );
+    }
+
+    #[tokio::test]
+    async fn test_add_artifact_to_cache_preserves_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(dir.path().to_path_buf());
+        let src = dir.path().join("demo-1.0-debug.aar");
+        std::fs::write(&src, b"aar bytes").unwrap();
+
+        svc.add_artifact_to_cache(Request::new(AddArtifactToCacheRequest {
+            group: "com.example".to_string(),
+            name: "demo".to_string(),
+            version: "1.0".to_string(),
+            classifier: "debug".to_string(),
+            local_path: src.to_string_lossy().into_owned(),
+            size: 9,
+            sha256: String::new(),
+            extension: "aar".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        let aar_hit = svc
+            .check_artifact_cache(Request::new(CheckArtifactCacheRequest {
+                group: "com.example".to_string(),
+                name: "demo".to_string(),
+                version: "1.0".to_string(),
+                classifier: "debug".to_string(),
+                sha256: String::new(),
+                extension: "aar".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(aar_hit.cached);
+        assert!(aar_hit.local_path.ends_with("demo-1.0-debug.aar"));
+
+        let jar_miss = svc
+            .check_artifact_cache(Request::new(CheckArtifactCacheRequest {
+                group: "com.example".to_string(),
+                name: "demo".to_string(),
+                version: "1.0".to_string(),
+                classifier: "debug".to_string(),
+                sha256: String::new(),
+                extension: "jar".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!jar_miss.cached);
     }
 
     #[test]

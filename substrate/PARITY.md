@@ -82,17 +82,18 @@
   win when a Gradle cache entry exists.
 - The Gradle dependency shadow listener has an explicit artifact mirror mode
   (`org.gradle.rust.substrate.dependency.mirror.artifacts=true`) that observes
-  real resolved external module JARs, computes SHA-256 in the JVM bridge, and
-  registers those artifacts into the Rust artifact store. The mode is opt-in
-  because querying artifacts from a resolution listener can force artifact
-  downloads earlier than a graph-only resolution would.
+  real resolved external module artifacts, computes SHA-256 in the JVM bridge,
+  preserves classifier and extension in the Rust cache key, and registers those
+  artifacts into the Rust artifact store. The mode is opt-in because querying
+  artifacts from a resolution listener can force artifact downloads earlier than
+  a graph-only resolution would.
 - Gradle artifact resolution has an explicit Rust read-through mode
   (`org.gradle.rust.substrate.dependency.readthrough.artifacts=true`) that
   consults the Rust artifact store after Gradle local access and before remote
-  repository access for safe external module JAR coordinates. Unsupported
-  artifact shapes and cache misses fall back to Gradle's normal remote
-  resolver. The Java bridge read-through path is covered by a gated E2E test
-  against a real Rust daemon and artifact store.
+  repository access for safe Maven-layout external module artifact coordinates.
+  Cache misses fall back to Gradle's normal remote resolver. The Java bridge
+  read-through path is covered by a gated E2E test against a real Rust daemon
+  and artifact store.
 - Archive tasks (`Jar`, `Zip`, `War`, `Ear`, `Tar`) can lower to native Rust
   archive execution when the task model provides input paths and an output
   archive path. ZIP-compatible tasks emit ZIP-compatible archives; `Tar` emits
@@ -135,9 +136,9 @@
 
 - Full dependency resolution semantics are not yet parity-complete.
 - Rust can now short-circuit Gradle remote artifact fetches from the Rust
-  artifact store for opt-in, Maven-layout external JAR coordinates, but it does
-  not yet replace metadata resolution, variant selection, conflict resolution,
-  or Ivy/non-JAR artifact resolution.
+  artifact store for opt-in, Maven-layout external artifact coordinates, but it
+  does not yet replace metadata resolution, variant selection, conflict
+  resolution, or Ivy artifact resolution.
 - Real Gradle invocation does not use Rust as the unconditional default executor
   yet; the authoritative build-work gate is intentionally opt-in and fail-closed
   while the native-ready default gate delegates on incomplete plans.
@@ -184,6 +185,7 @@
 - `cargo test -p gradle-substrate-daemon artifact_cache -- --nocapture`
 - `cargo test -p gradle-substrate-daemon fetch_pom -- --nocapture`
 - `cargo test -p gradle-substrate-daemon persistent_store_roundtrip -- --nocapture`
+- `cargo test -p gradle-substrate-daemon test_add_artifact_to_cache_preserves_extension`
 - `cargo test -p gradle-substrate-daemon cold_path -- --nocapture`
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.dependency.RustMetadataCacheReadThroughTest`
 - `./gradlew :dependency-management:test --tests org.gradle.internal.resource.transfer.DefaultCacheAwareExternalResourceAccessorTest -x :distributions-core:generateLicenseFile`

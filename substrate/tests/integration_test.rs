@@ -1231,6 +1231,7 @@ async fn test_dependency_resolution_cache_e2e() {
             local_path: "/tmp/test-lib-1.0.jar".to_string(),
             size: 2048,
             sha256: "deadbeef".to_string(),
+            extension: String::new(),
         }))
         .await
         .unwrap()
@@ -3921,6 +3922,7 @@ async fn test_plugin_to_dependency_resolution_chain() {
             local_path: "/tmp/slf4j-api-2.0.9.jar".to_string(),
             size: 4096,
             sha256: "abcdef".to_string(),
+            extension: String::new(),
         }))
         .await
         .unwrap();
@@ -3934,6 +3936,7 @@ async fn test_plugin_to_dependency_resolution_chain() {
             local_path: "/tmp/junit-jupiter-api-5.10.0.jar".to_string(),
             size: 8192,
             sha256: "fedcba".to_string(),
+            extension: String::new(),
         }))
         .await
         .unwrap();
