@@ -174,8 +174,28 @@ impl TaskGraphServiceImpl {
             self.cleanup_build(build_id);
         }
 
+        let mut plan_tasks = artifact.plan.tasks;
+        let task_outputs: HashMap<String, Vec<String>> = plan_tasks
+            .iter()
+            .map(|task| (task.path.clone(), task.outputs.clone()))
+            .collect();
+
+        let clean_tasks: Vec<String> = plan_tasks
+            .iter()
+            .filter(|task| is_clean_task_path(&task.path))
+            .map(|task| task.path.clone())
+            .collect();
+
         let mut loaded = 0usize;
-        for task in artifact.plan.tasks {
+        for mut task in plan_tasks.drain(..) {
+            enrich_task_contract_from_graph(&mut task, &task_outputs);
+            if !clean_tasks.is_empty() && !is_clean_task_path(&task.path) {
+                for clean_task in &clean_tasks {
+                    if !task.depends_on.contains(clean_task) {
+                        task.depends_on.push(clean_task.clone());
+                    }
+                }
+            }
             let estimated = self.lookup_historical_duration(&task.path);
             let task_type = executable_task_type(&task);
             let execution_context_json = execution_context_json(&task, &task_type);
@@ -404,19 +424,30 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
         .rsplit('.')
         .next()
         .unwrap_or(task.implementation_id.as_str());
-    match (task.action_kind.as_str(), simple) {
+    let logical = logical_gradle_task_type(simple);
+    match (task.action_kind.as_str(), logical.as_str()) {
         ("mkdir", _) | ("create-directory", _) | (_, "Mkdir") => "Mkdir".to_string(),
+        ("compile", "JavaCompile") | (_, "JavaCompile") if java_compile_no_source(task) => {
+            "Lifecycle".to_string()
+        }
         ("compile", "JavaCompile") | (_, "JavaCompile") if java_compile_contract_complete(task) => {
             "JavaCompile".to_string()
         }
         ("compile", "JavaCompile") | (_, "JavaCompile") => {
             compat_task_type(task, "org.gradle.api.tasks.compile.JavaCompile")
         }
-        ("archive", "Jar") | (_, "Jar") if archive_contract_complete(task) => "Jar".to_string(),
-        ("archive", "Zip") | (_, "Zip") if archive_contract_complete(task) => "Zip".to_string(),
-        ("archive", "War") | (_, "War") if archive_contract_complete(task) => "War".to_string(),
-        ("archive", "Ear") | (_, "Ear") if archive_contract_complete(task) => "Ear".to_string(),
-        ("archive", "Tar") | (_, "Tar") if archive_contract_complete(task) => "Tar".to_string(),
+        ("archive", archive_type) | (_, archive_type)
+            if is_archive_logical_type(archive_type)
+                && has_input_value_equal(task, "copy_contains_symlinks", "true") =>
+        {
+            task.implementation_id.clone()
+        }
+        ("archive", "Jar") | (_, "Jar") => "Jar".to_string(),
+        ("archive", "Zip") | (_, "Zip") => "Zip".to_string(),
+        ("archive", "War") | (_, "War") => "War".to_string(),
+        ("archive", "Ear") | (_, "Ear") => "Ear".to_string(),
+        ("archive", "Tar") | (_, "Tar") => "Tar".to_string(),
+        ("test", "Test") | (_, "Test") if test_no_source(task) => "Lifecycle".to_string(),
         ("test", "Test") | (_, "Test") if test_exec_contract_complete(task) => {
             "TestExec".to_string()
         }
@@ -424,7 +455,12 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
             compat_task_type(task, "org.gradle.api.tasks.testing.Test")
         }
         ("file-transform", "ProcessResources") | (_, "ProcessResources")
-            if copy_contract_complete(task) =>
+            if process_resources_no_source(task) =>
+        {
+            "Lifecycle".to_string()
+        }
+        ("file-transform", "ProcessResources") | (_, "ProcessResources")
+            if process_resources_contract_complete(task) =>
         {
             "Copy".to_string()
         }
@@ -441,8 +477,8 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
         ("external-process", "JavaExec") | (_, "JavaExec") if java_exec_contract_complete(task) => {
             "JavaExec".to_string()
         }
-        ("external-process", "JavaExec") | (_, "JavaExec") => {
-            compat_task_type(task, "org.gradle.api.tasks.JavaExec")
+        ("start-scripts", "CreateStartScripts") | (_, "CreateStartScripts") => {
+            "CreateStartScripts".to_string()
         }
         ("documentation", "Javadoc") | (_, "Javadoc") if javadoc_contract_complete(task) => {
             "Javadoc".to_string()
@@ -450,9 +486,171 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
         ("documentation", "Javadoc") | (_, "Javadoc") => {
             compat_task_type(task, "org.gradle.api.tasks.javadoc.Javadoc")
         }
+        ("jvm-task", "DefaultTask") | (_, "DefaultTask")
+            if static_write_file_contract_complete(task) =>
+        {
+            "WriteFile".to_string()
+        }
         ("lifecycle", _) | (_, "Lifecycle") if no_task_actions(task) => "Lifecycle".to_string(),
         _ => task.implementation_id.clone(),
     }
+}
+
+fn logical_gradle_task_type(simple: &str) -> String {
+    const KNOWN_TASK_TYPES: [&str; 20] = [
+        "JavaCompile",
+        "Jar",
+        "Zip",
+        "War",
+        "Ear",
+        "Tar",
+        "Test",
+        "ProcessResources",
+        "Copy",
+        "Sync",
+        "Delete",
+        "Exec",
+        "JavaExec",
+        "CreateStartScripts",
+        "Javadoc",
+        "Lifecycle",
+        "Mkdir",
+        "Symlink",
+        "Help",
+        "Wrapper",
+    ];
+    for task_type in KNOWN_TASK_TYPES {
+        if simple == task_type || simple.starts_with(&format!("{task_type}_")) {
+            return task_type.to_string();
+        }
+    }
+    simple.to_string()
+}
+
+fn is_clean_task_path(path: &str) -> bool {
+    path == ":clean" || path.ends_with(":clean")
+}
+
+fn enrich_task_contract_from_graph(
+    task: &mut CanonicalBuildPlanTask,
+    task_outputs: &HashMap<String, Vec<String>>,
+) {
+    if is_java_compile_task(task) && !has_input_value(task, "classpath") {
+        let classpath = task
+            .depends_on
+            .iter()
+            .filter_map(|dependency| task_outputs.get(dependency))
+            .flat_map(|outputs| outputs.iter())
+            .filter(|output| is_java_classes_output(output))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if !classpath.is_empty() {
+            if let Ok(joined) = std::env::join_paths(classpath.iter().map(std::path::Path::new)) {
+                set_value_input(
+                    task,
+                    "classpath",
+                    joined.to_string_lossy().as_ref(),
+                    "graph-inferred-project-classpath",
+                    "classpath",
+                );
+            }
+        }
+    }
+
+    if is_distribution_archive_task(task) && !has_input_value(task, "graph_distribution_libs") {
+        let libs = task
+            .depends_on
+            .iter()
+            .filter_map(|dependency| task_outputs.get(dependency))
+            .flat_map(|outputs| outputs.iter())
+            .filter(|output| is_jar_output(output))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if !libs.is_empty() {
+            if let Ok(joined) = std::env::join_paths(libs.iter().map(std::path::Path::new)) {
+                set_value_input(
+                    task,
+                    "graph_distribution_libs",
+                    joined.to_string_lossy().as_ref(),
+                    "graph-inferred-distribution-libs",
+                    "classpath",
+                );
+            }
+        }
+    }
+}
+
+fn is_distribution_archive_task(task: &CanonicalBuildPlanTask) -> bool {
+    let simple = task
+        .implementation_id
+        .rsplit('.')
+        .next()
+        .unwrap_or(task.implementation_id.as_str());
+    matches!(logical_gradle_task_type(simple).as_str(), "Zip" | "Tar")
+        && input_value(task, "archive_file")
+            .map(|path| path.replace('\\', "/").contains("/build/distributions/"))
+            .unwrap_or(false)
+}
+
+fn is_jar_output(output: &str) -> bool {
+    std::path::Path::new(output)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.eq_ignore_ascii_case("jar"))
+        .unwrap_or(false)
+}
+
+fn is_java_compile_task(task: &CanonicalBuildPlanTask) -> bool {
+    let simple = task
+        .implementation_id
+        .rsplit('.')
+        .next()
+        .unwrap_or(task.implementation_id.as_str());
+    logical_gradle_task_type(simple) == "JavaCompile"
+}
+
+fn is_java_classes_output(output: &str) -> bool {
+    let normalized = output.replace('\\', "/");
+    normalized.contains("/build/classes/") && std::path::Path::new(output).extension().is_none()
+}
+
+fn set_value_input(
+    task: &mut CanonicalBuildPlanTask,
+    name: &str,
+    value: &str,
+    source: &str,
+    normalization: &str,
+) {
+    task.inputs.insert(name.to_string(), value.to_string());
+    if let Some(input) = task
+        .input_specs
+        .iter_mut()
+        .find(|input| input.kind == "value" && input.name == name)
+    {
+        input.value = value.to_string();
+        return;
+    }
+    task.input_specs
+        .push(super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+            name: name.to_string(),
+            kind: "value".to_string(),
+            value: value.to_string(),
+            normalization: normalization.to_string(),
+            optional: false,
+        });
+    task.diagnostics
+        .push(super::build_plan_ir::CanonicalBuildPlanTaskDiagnostic {
+            severity: "info".to_string(),
+            code: source.to_string(),
+            message: format!("Inferred {} from selected task graph dependencies", name),
+            source: "rust-task-graph".to_string(),
+        });
+}
+
+fn is_archive_logical_type(task_type: &str) -> bool {
+    matches!(task_type, "Jar" | "Zip" | "War" | "Ear" | "Tar")
 }
 
 fn execution_context_json(task: &CanonicalBuildPlanTask, task_type: &str) -> String {
@@ -461,6 +659,7 @@ fn execution_context_json(task: &CanonicalBuildPlanTask, task_type: &str) -> Str
         "Javadoc" => java_source_paths(task),
         "TestExec" => test_class_dir_paths(task),
         "Delete" => destroyable_paths(task),
+        "Copy" if is_process_resources_task(task) => process_resources_source_paths(task),
         _ => input_paths(task),
     };
     let output_paths = output_paths(task);
@@ -493,8 +692,9 @@ fn execution_context_json(task: &CanonicalBuildPlanTask, task_type: &str) -> Str
     }
 
     serde_json::json!({
-        "source_files": if task_type == "Mkdir" { output_paths } else { source_files },
+        "source_files": if task_type == "Mkdir" { output_paths.clone() } else { source_files },
         "target_dir": target_dir,
+        "output_files": output_paths,
         "options": options,
     })
     .to_string()
@@ -504,16 +704,18 @@ fn java_compile_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
     !java_source_paths(task).is_empty() && has_outputs(task)
 }
 
+fn java_compile_no_source(task: &CanonicalBuildPlanTask) -> bool {
+    java_source_paths(task).is_empty() && has_outputs(task)
+}
+
 fn test_exec_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
     has_input_value(task, "classpath")
         && has_input_value(task, "test_classes_dirs")
         && !has_input_value_equal(task, "test_unsupported_filters", "true")
 }
 
-fn archive_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
-    has_input_paths(task)
-        && has_outputs(task)
-        && !has_input_value_equal(task, "copy_contains_symlinks", "true")
+fn test_no_source(task: &CanonicalBuildPlanTask) -> bool {
+    !has_input_value(task, "classpath") && input_value_paths_missing(task, "test_classes_dirs")
 }
 
 fn copy_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
@@ -523,16 +725,34 @@ fn copy_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
         && !has_input_value_equal(task, "copy_contains_symlinks", "true")
 }
 
+fn process_resources_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
+    !process_resources_source_paths(task).is_empty()
+        && has_outputs(task)
+        && !has_input_value_equal(task, "copy_unsupported_custom_actions", "true")
+        && !has_input_value_equal(task, "copy_contains_symlinks", "true")
+}
+
+fn process_resources_no_source(task: &CanonicalBuildPlanTask) -> bool {
+    process_resources_source_paths(task)
+        .iter()
+        .all(|path| !std::path::Path::new(path).exists())
+}
+
 fn exec_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
     has_input_value(task, "executable")
 }
 
 fn java_exec_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
-    has_input_value(task, "classpath") && has_input_value(task, "main_class")
+    has_input_value(task, "main_class")
+        && (has_input_value(task, "classpath") || has_input_value(task, "working_dir"))
 }
 
 fn javadoc_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
     !java_source_paths(task).is_empty() && has_outputs(task)
+}
+
+fn static_write_file_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
+    has_input_value(task, "static_output_text_b64") && task.outputs.len() == 1
 }
 
 fn compat_task_type(task: &CanonicalBuildPlanTask, fallback: &str) -> String {
@@ -554,6 +774,14 @@ fn task_options(
         insert_input_option(task, &mut options, "processor_path", "processor_path");
         insert_input_option(task, &mut options, "encoding", "encoding");
         insert_input_option(task, &mut options, "parameters", "parameters");
+        insert_input_option(task, &mut options, "debug", "debug");
+        insert_input_option(task, &mut options, "compiler_args", "compiler_args");
+        insert_input_option(
+            task,
+            &mut options,
+            "compiler_args_json",
+            "compiler_args_json",
+        );
         insert_input_option(task, &mut options, "release", "release");
         if !options.contains_key("release") {
             insert_input_option(task, &mut options, "source_version", "source_version");
@@ -563,6 +791,7 @@ fn task_options(
         }
     } else if is_zip_archive_executor(task_type) {
         insert_input_option(task, &mut options, "archive_file_name", "jarName");
+        insert_input_option(task, &mut options, "archive_file", "archive_file");
         insert_input_option(task, &mut options, "main_class", "mainClass");
         insert_manifest_options(task, &mut options);
         insert_input_option(
@@ -583,10 +812,17 @@ fn task_options(
             "copy_file_mappings",
             "copy_file_mappings",
         );
+        insert_input_option(
+            task,
+            &mut options,
+            "graph_distribution_libs",
+            "graph_distribution_libs",
+        );
         insert_input_option(task, &mut options, "file_permissions", "file_permissions");
         insert_input_option(task, &mut options, "dir_permissions", "dir_permissions");
     } else if task_type == "Tar" {
         insert_input_option(task, &mut options, "archive_file_name", "tarName");
+        insert_input_option(task, &mut options, "archive_file", "archive_file");
         insert_input_option(task, &mut options, "archive_compression", "compression");
         insert_input_option(
             task,
@@ -605,6 +841,12 @@ fn task_options(
             &mut options,
             "copy_file_mappings",
             "copy_file_mappings",
+        );
+        insert_input_option(
+            task,
+            &mut options,
+            "graph_distribution_libs",
+            "graph_distribution_libs",
         );
         insert_input_option(task, &mut options, "file_permissions", "file_permissions");
         insert_input_option(task, &mut options, "dir_permissions", "dir_permissions");
@@ -640,6 +882,7 @@ fn task_options(
         insert_input_option(task, &mut options, "working_dir", "working_dir");
         insert_input_option(task, &mut options, "xml_report_dir", "xml_report_dir");
         insert_input_option(task, &mut options, "jvm_args", "jvm_args");
+        insert_input_option(task, &mut options, "jvm_args_json", "jvm_args_json");
         insert_input_option(task, &mut options, "system_properties", "system_properties");
         insert_input_option(task, &mut options, "scan_classpath", "scan_classpath");
         insert_input_option(task, &mut options, "test_filter", "test_filter");
@@ -649,16 +892,44 @@ fn task_options(
     } else if task_type == "Exec" {
         insert_input_option(task, &mut options, "executable", "executable");
         insert_input_option(task, &mut options, "args", "args");
+        insert_input_option(task, &mut options, "args_json", "args_json");
         insert_input_option(task, &mut options, "working_dir", "working_dir");
         insert_input_option(task, &mut options, "ignore_exit_value", "ignore_exit_value");
     } else if task_type == "JavaExec" {
         insert_input_option(task, &mut options, "java_home", "java_home");
         insert_input_option(task, &mut options, "classpath", "classpath");
+        if !options.contains_key("classpath") {
+            if let Some(classpath) = inferred_java_exec_classpath(task) {
+                options.insert(
+                    "classpath".to_string(),
+                    serde_json::Value::String(classpath),
+                );
+            }
+        }
         insert_input_option(task, &mut options, "main_class", "main_class");
         insert_input_option(task, &mut options, "args", "args");
+        insert_input_option(task, &mut options, "args_json", "args_json");
         insert_input_option(task, &mut options, "jvm_args", "jvm_args");
+        insert_input_option(task, &mut options, "jvm_args_json", "jvm_args_json");
         insert_input_option(task, &mut options, "working_dir", "working_dir");
         insert_input_option(task, &mut options, "ignore_exit_value", "ignore_exit_value");
+    } else if task_type == "CreateStartScripts" {
+        insert_input_option(task, &mut options, "application_name", "application_name");
+        insert_input_option(task, &mut options, "main_class", "main_class");
+        insert_input_option(task, &mut options, "main_module", "main_module");
+        insert_input_option(task, &mut options, "classpath", "classpath");
+        insert_input_option(task, &mut options, "output_dir", "output_dir");
+        insert_input_option(task, &mut options, "executable_dir", "executable_dir");
+        insert_input_option(task, &mut options, "default_jvm_opts", "default_jvm_opts");
+        insert_input_option(
+            task,
+            &mut options,
+            "opts_environment_var",
+            "opts_environment_var",
+        );
+        insert_input_option(task, &mut options, "git_ref", "git_ref");
+        insert_input_option(task, &mut options, "unix_script", "unix_script");
+        insert_input_option(task, &mut options, "windows_script", "windows_script");
     } else if task_type == "Javadoc" {
         insert_input_option(task, &mut options, "java_home", "java_home");
         insert_input_option(task, &mut options, "classpath", "classpath");
@@ -667,6 +938,13 @@ fn task_options(
         insert_input_option(task, &mut options, "max_memory", "max_memory");
         insert_input_option(task, &mut options, "encoding", "encoding");
         insert_input_option(task, &mut options, "no_timestamp", "no_timestamp");
+    } else if task_type == "WriteFile" {
+        insert_input_option(
+            task,
+            &mut options,
+            "static_output_text_b64",
+            "static_output_text_b64",
+        );
     }
     options
 }
@@ -708,6 +986,17 @@ fn has_input_value_equal(task: &CanonicalBuildPlanTask, input_name: &str, expect
             && input.name == input_name
             && input.value.trim().eq_ignore_ascii_case(expected)
     })
+}
+
+fn input_value_paths_missing(task: &CanonicalBuildPlanTask, input_name: &str) -> bool {
+    task.input_specs
+        .iter()
+        .find(|input| input.kind == "value" && input.name == input_name)
+        .map(|input| {
+            std::env::split_paths(&input.value)
+                .all(|path| path.as_os_str().is_empty() || !path.exists())
+        })
+        .unwrap_or(true)
 }
 
 fn insert_max_heap_option(
@@ -759,6 +1048,32 @@ fn insert_input_option(
             serde_json::Value::String(normalize_java_option(value)),
         );
     }
+}
+
+fn input_value(task: &CanonicalBuildPlanTask, input_name: &str) -> Option<String> {
+    task.input_specs
+        .iter()
+        .find(|input| input.kind == "value" && input.name == input_name)
+        .map(|input| input.value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn inferred_java_exec_classpath(task: &CanonicalBuildPlanTask) -> Option<String> {
+    let project_dir = input_value(task, "working_dir")?;
+    let mut entries = Vec::new();
+    for relative in ["build/classes/java/main", "build/resources/main"] {
+        let path = std::path::Path::new(&project_dir).join(relative);
+        if path.exists() {
+            entries.push(path);
+        }
+    }
+    if entries.is_empty() {
+        return None;
+    }
+    std::env::join_paths(entries)
+        .ok()
+        .map(|value| value.to_string_lossy().into_owned())
 }
 
 fn normalize_java_option(value: &str) -> String {
@@ -823,6 +1138,48 @@ fn java_source_paths(task: &CanonicalBuildPlanTask) -> Vec<String> {
         .into_iter()
         .filter(|path| path.ends_with(".java"))
         .collect()
+}
+
+fn is_process_resources_task(task: &CanonicalBuildPlanTask) -> bool {
+    logical_gradle_task_type(
+        task.implementation_id
+            .rsplit('.')
+            .next()
+            .unwrap_or(task.implementation_id.as_str()),
+    ) == "ProcessResources"
+}
+
+fn process_resources_source_paths(task: &CanonicalBuildPlanTask) -> Vec<String> {
+    let declared = input_paths(task);
+    if !declared.is_empty() {
+        return declared;
+    }
+    infer_process_resources_source_dir(task)
+        .into_iter()
+        .collect()
+}
+
+fn infer_process_resources_source_dir(task: &CanonicalBuildPlanTask) -> Option<String> {
+    let output = output_paths(task).into_iter().next()?;
+    let marker = format!(
+        "{}build{}resources{}",
+        std::path::MAIN_SEPARATOR,
+        std::path::MAIN_SEPARATOR,
+        std::path::MAIN_SEPARATOR
+    );
+    let (project_root, rest) = output.split_once(&marker)?;
+    let source_set = rest
+        .split(std::path::MAIN_SEPARATOR)
+        .next()
+        .filter(|value| !value.is_empty())?;
+    Some(format!(
+        "{}{}src{}{}{}resources",
+        project_root,
+        std::path::MAIN_SEPARATOR,
+        std::path::MAIN_SEPARATOR,
+        source_set,
+        std::path::MAIN_SEPARATOR
+    ))
 }
 
 fn test_class_dir_paths(task: &CanonicalBuildPlanTask) -> Vec<String> {
@@ -1201,6 +1558,143 @@ mod tests {
         TaskGraphServiceImpl::new()
     }
 
+    fn canonical_task(
+        path: &str,
+        implementation_id: &str,
+        depends_on: Vec<String>,
+        outputs: Vec<String>,
+    ) -> CanonicalBuildPlanTask {
+        CanonicalBuildPlanTask {
+            path: path.to_string(),
+            project_path: ":".to_string(),
+            implementation_id: implementation_id.to_string(),
+            depends_on,
+            inputs: Default::default(),
+            outputs,
+            worker_isolation: "process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "unknown".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: String::new(),
+            input_specs: Vec::new(),
+            output_specs: Vec::new(),
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_graph_enrichment_adds_project_compile_outputs_to_missing_java_classpath() {
+        let mut task = canonical_task(
+            ":app:compileJava",
+            "org.gradle.api.tasks.compile.JavaCompile",
+            vec![":lib:compileJava".to_string()],
+            vec!["/repo/app/build/classes/java/main".to_string()],
+        );
+        task.input_specs.push(
+            super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                name: "source0".to_string(),
+                kind: "source".to_string(),
+                value: "/repo/app/src/main/java/App.java".to_string(),
+                normalization: "absolute-path".to_string(),
+                optional: false,
+            },
+        );
+        let task_outputs = HashMap::from([(
+            ":lib:compileJava".to_string(),
+            vec![
+                "/repo/lib/build/classes/java/main".to_string(),
+                "/repo/lib/build/generated/sources/headers/java/main".to_string(),
+            ],
+        )]);
+
+        enrich_task_contract_from_graph(&mut task, &task_outputs);
+
+        assert_eq!(
+            input_value(&task, "classpath").as_deref(),
+            Some("/repo/lib/build/classes/java/main")
+        );
+        assert_eq!(executable_task_type(&task), "JavaCompile");
+    }
+
+    #[test]
+    fn test_graph_enrichment_adds_project_jars_to_distribution_archives() {
+        let mut task = canonical_task(
+            ":app:distZip",
+            "org.gradle.api.tasks.bundling.Zip",
+            vec![":app:jar".to_string(), ":lib:jar".to_string()],
+            Vec::new(),
+        );
+        set_value_input(
+            &mut task,
+            "archive_file",
+            "/repo/app/build/distributions/app-1.0.zip",
+            "test",
+            "scalar",
+        );
+        let task_outputs = HashMap::from([
+            (
+                ":app:jar".to_string(),
+                vec!["/repo/app/build/libs/app-1.0.jar".to_string()],
+            ),
+            (
+                ":lib:jar".to_string(),
+                vec!["/repo/lib/build/libs/lib-1.0.jar".to_string()],
+            ),
+        ]);
+
+        enrich_task_contract_from_graph(&mut task, &task_outputs);
+
+        let libs = input_value(&task, "graph_distribution_libs").unwrap();
+        let split = std::env::split_paths(&libs)
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            split,
+            vec![
+                "/repo/app/build/libs/app-1.0.jar",
+                "/repo/lib/build/libs/lib-1.0.jar"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_static_write_file_contract_lowers_default_task_to_native_executor() {
+        let mut task = canonical_task(
+            ":apiContractReport",
+            "org.gradle.api.DefaultTask",
+            Vec::new(),
+            vec!["/repo/build/reports/api-contract.txt".to_string()],
+        );
+        task.action_kind = "jvm-task".to_string();
+        set_value_input(
+            &mut task,
+            "static_output_text_b64",
+            "b3NzLXN0eWxlIGFwaSBjb250cmFjdAo=",
+            "test",
+            "scalar",
+        );
+
+        let task_type = executable_task_type(&task);
+        let context =
+            serde_json::from_str::<serde_json::Value>(&execution_context_json(&task, &task_type))
+                .unwrap();
+
+        assert_eq!(task_type, "WriteFile");
+        assert_eq!(
+            context["target_dir"],
+            "/repo/build/reports/api-contract.txt"
+        );
+        assert_eq!(
+            context["options"]["static_output_text_b64"],
+            "b3NzLXN0eWxlIGFwaSBjb250cmFjdAo="
+        );
+    }
+
     #[tokio::test]
     async fn test_resolve_hydrates_from_build_plan_shadow_when_no_tasks_registered() {
         let temp = tempfile::tempdir().unwrap();
@@ -1351,6 +1845,39 @@ mod tests {
         assert_eq!(context["target_dir"], "/repo/build/classes/java/main");
         assert_eq!(context["options"]["release"], "17");
         assert!(context["options"].get("source_version").is_none());
+    }
+
+    #[test]
+    fn test_java_compile_without_sources_lowers_to_lifecycle() {
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":compileTestJava".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.api.tasks.compile.JavaCompile".to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "unknown".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "compile".to_string(),
+            input_specs: Vec::new(),
+            output_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                    name: "classes".to_string(),
+                    kind: "directory".to_string(),
+                    path: "/repo/build/classes/java/test".to_string(),
+                },
+            ],
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        assert_eq!(executable_task_type(&task), "Lifecycle");
     }
 
     #[test]
@@ -1508,6 +2035,49 @@ mod tests {
             executable_task_type(&task),
             "org.gradle.api.tasks.testing.Test"
         );
+    }
+
+    #[test]
+    fn test_test_with_missing_test_classes_and_no_classpath_lowers_to_lifecycle() {
+        let temp = tempfile::tempdir().unwrap();
+        let missing_test_classes = temp.path().join("build/classes/java/test");
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":test".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.api.tasks.testing.Test".to_string(),
+            depends_on: vec![":testClasses".to_string()],
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "declared-outputs".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "test".to_string(),
+            input_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "test_classes_dirs".to_string(),
+                    kind: "value".to_string(),
+                    value: missing_test_classes.to_string_lossy().into_owned(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+            ],
+            output_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                    name: "results".to_string(),
+                    kind: "directory".to_string(),
+                    path: "/repo/build/test-results/test".to_string(),
+                },
+            ],
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        assert_eq!(executable_task_type(&task), "Lifecycle");
     }
 
     #[test]
@@ -1716,6 +2286,201 @@ mod tests {
     }
 
     #[test]
+    fn test_java_exec_without_captured_classpath_infers_standard_java_plugin_outputs() {
+        let temp = tempfile::tempdir().unwrap();
+        let classes_dir = temp.path().join("build/classes/java/main");
+        std::fs::create_dir_all(&classes_dir).unwrap();
+
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":runTool".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.api.tasks.JavaExec".to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "not-cacheable".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "external-process".to_string(),
+            input_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "main_class".to_string(),
+                    kind: "value".to_string(),
+                    value: "example.Tool".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "working_dir".to_string(),
+                    kind: "value".to_string(),
+                    value: temp.path().to_string_lossy().into_owned(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+            ],
+            output_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                    name: "output".to_string(),
+                    kind: "file".to_string(),
+                    path: temp
+                        .path()
+                        .join("build/resources/javaexec-result.txt")
+                        .to_string_lossy()
+                        .into_owned(),
+                },
+            ],
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        let task_type = executable_task_type(&task);
+        let context: serde_json::Value =
+            serde_json::from_str(&execution_context_json(&task, &task_type)).unwrap();
+
+        assert_eq!(task_type, "JavaExec");
+        assert_eq!(
+            context["options"]["classpath"],
+            classes_dir.to_string_lossy().as_ref()
+        );
+    }
+
+    #[test]
+    fn test_start_scripts_contract_lowers_to_native_with_context_options() {
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":startScripts".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.jvm.application.tasks.CreateStartScripts".to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "in-process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "declared-outputs".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "start-scripts".to_string(),
+            input_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "application_name".to_string(),
+                    kind: "value".to_string(),
+                    value: "demo-app".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "main_class".to_string(),
+                    kind: "value".to_string(),
+                    value: "example.Main".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "classpath".to_string(),
+                    kind: "value".to_string(),
+                    value: "/repo/build/libs/demo-app.jar".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "output_dir".to_string(),
+                    kind: "value".to_string(),
+                    value: "/repo/build/scripts".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "opts_environment_var".to_string(),
+                    kind: "value".to_string(),
+                    value: "DEMO_APP_OPTS".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+            ],
+            output_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                    name: "output".to_string(),
+                    kind: "directory".to_string(),
+                    path: "/repo/build/scripts".to_string(),
+                },
+            ],
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        let task_type = executable_task_type(&task);
+        let context: serde_json::Value =
+            serde_json::from_str(&execution_context_json(&task, &task_type)).unwrap();
+
+        assert_eq!(task_type, "CreateStartScripts");
+        assert_eq!(context["target_dir"], "/repo/build/scripts");
+        assert_eq!(context["options"]["application_name"], "demo-app");
+        assert_eq!(context["options"]["main_class"], "example.Main");
+        assert_eq!(
+            context["options"]["classpath"],
+            "/repo/build/libs/demo-app.jar"
+        );
+        assert_eq!(context["options"]["output_dir"], "/repo/build/scripts");
+        assert_eq!(context["options"]["opts_environment_var"], "DEMO_APP_OPTS");
+    }
+
+    #[test]
+    fn test_start_scripts_without_main_class_lowers_to_fail_closed_native_executor() {
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":startScripts".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.jvm.application.tasks.CreateStartScripts".to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "in-process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "declared-outputs".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "start-scripts".to_string(),
+            input_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "application_name".to_string(),
+                    kind: "value".to_string(),
+                    value: "demo-app".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "classpath".to_string(),
+                    kind: "value".to_string(),
+                    value: "/repo/build/libs/demo-app.jar".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "output_dir".to_string(),
+                    kind: "value".to_string(),
+                    value: "/repo/build/scripts".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+            ],
+            output_specs: Vec::new(),
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        assert_eq!(executable_task_type(&task), "CreateStartScripts");
+    }
+
+    #[test]
     fn test_javadoc_contract_lowers_to_native_with_context_options() {
         let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
             path: ":javadoc".to_string(),
@@ -1880,6 +2645,146 @@ mod tests {
         assert_eq!(task_type, "Copy");
         assert_eq!(context["options"]["file_permissions"], "493");
         assert_eq!(context["options"]["dir_permissions"], "448");
+    }
+
+    #[test]
+    fn test_process_resources_without_sources_lowers_to_lifecycle() {
+        let temp = tempfile::tempdir().unwrap();
+        let missing_resources = temp.path().join("src/main/resources");
+        let output_dir = temp.path().join("build/resources/main");
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":processResources".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.language.jvm.tasks.ProcessResources".to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "in-process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "declared-outputs".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "file-transform".to_string(),
+            input_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "input0".to_string(),
+                    kind: "path".to_string(),
+                    value: missing_resources.to_string_lossy().into_owned(),
+                    normalization: "absolute-path".to_string(),
+                    optional: false,
+                },
+            ],
+            output_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                    name: "destination".to_string(),
+                    kind: "directory".to_string(),
+                    path: output_dir.to_string_lossy().into_owned(),
+                },
+            ],
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        assert_eq!(executable_task_type(&task), "Lifecycle");
+    }
+
+    #[test]
+    fn test_process_resources_with_sources_lowers_to_native_copy() {
+        let temp = tempfile::tempdir().unwrap();
+        let resources_dir = temp.path().join("src/main/resources");
+        let output_dir = temp.path().join("build/resources/main");
+        std::fs::create_dir_all(&resources_dir).unwrap();
+        std::fs::write(resources_dir.join("app.properties"), "name=app\n").unwrap();
+
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":processResources".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.language.jvm.tasks.ProcessResources".to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "in-process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "declared-outputs".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "file-transform".to_string(),
+            input_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "input0".to_string(),
+                    kind: "path".to_string(),
+                    value: resources_dir.to_string_lossy().into_owned(),
+                    normalization: "absolute-path".to_string(),
+                    optional: false,
+                },
+            ],
+            output_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                    name: "destination".to_string(),
+                    kind: "directory".to_string(),
+                    path: output_dir.to_string_lossy().into_owned(),
+                },
+            ],
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        assert_eq!(executable_task_type(&task), "Copy");
+    }
+
+    #[test]
+    fn test_decorated_process_resources_lowers_to_native_copy() {
+        let temp = tempfile::tempdir().unwrap();
+        let resources_dir = temp.path().join("src/main/resources");
+        let output_dir = temp.path().join("build/resources/main");
+        std::fs::create_dir_all(&resources_dir).unwrap();
+        std::fs::write(resources_dir.join("app.properties"), "name=app\n").unwrap();
+
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":processResources".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.language.jvm.tasks.ProcessResources_Decorated"
+                .to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "in-process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "declared-outputs".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "file-transform".to_string(),
+            input_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "input0".to_string(),
+                    kind: "path".to_string(),
+                    value: resources_dir.to_string_lossy().into_owned(),
+                    normalization: "absolute-path".to_string(),
+                    optional: false,
+                },
+            ],
+            output_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                    name: "destination".to_string(),
+                    kind: "directory".to_string(),
+                    path: output_dir.to_string_lossy().into_owned(),
+                },
+            ],
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        assert_eq!(logical_gradle_task_type("Jar_Decorated"), "Jar");
+        assert_eq!(executable_task_type(&task), "Copy");
     }
 
     #[test]

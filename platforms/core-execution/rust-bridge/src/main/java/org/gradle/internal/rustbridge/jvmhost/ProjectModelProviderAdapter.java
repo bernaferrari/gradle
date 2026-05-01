@@ -35,6 +35,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Adapter that reads Gradle's project model reflectively from the build service registry
@@ -282,8 +284,14 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if ("JavaExec".equals(shortTaskTypeName)) {
             captureJavaExecInputs(task, inputs);
         }
+        if (isCreateStartScriptsTask(shortTaskTypeName)) {
+            captureStartScriptsInputs(task, inputs);
+        }
         if ("Javadoc".equals(shortTaskTypeName)) {
             captureJavadocInputs(task, inputs);
+        }
+        if ("DefaultTask".equals(shortTaskTypeName) || "Task".equals(shortTaskTypeName)) {
+            captureStaticWriteFileInputs(task, inputs);
         }
 
         BuildPlanTask.Builder builder = BuildPlanTask.newBuilder()
@@ -325,7 +333,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     }
 
     private static void captureJavaCompileInputs(Task task, Map<String, String> inputs) {
-        putIfPresent(inputs, "java_home", System.getProperty("java.home"));
+        putIfPresent(inputs, "java_home", javaCompilerHome(task));
         putIfPresent(inputs, "source_version", stringOrEmpty(invokeOptional(task, "getSourceCompatibility")));
         putIfPresent(inputs, "target_version", stringOrEmpty(invokeOptional(task, "getTargetCompatibility")));
         putIfPresent(inputs, "classpath", fileCollectionPathString(invokeOptional(task, "getClasspath")));
@@ -335,7 +343,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             putIfPresent(inputs, "release", providerValue(invokeOptional(options, "getRelease")));
             putIfPresent(inputs, "encoding", stringOrEmpty(invokeOptional(options, "getEncoding")));
             putIfPresent(inputs, "parameters", booleanString(invokeOptional(options, "isParameters")));
+            putIfPresent(inputs, "debug", booleanString(invokeOptional(options, "isDebug")));
             putIfPresent(inputs, "processor_path", fileCollectionPathString(invokeOptional(options, "getAnnotationProcessorPath")));
+            putIfPresent(inputs, "compiler_args", stringList(invokeOptional(options, "getCompilerArgs")));
+            putIfPresent(inputs, "compiler_args_json", stringListJson(invokeOptional(options, "getCompilerArgs")));
         }
     }
 
@@ -376,6 +387,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             if (!destPath.getPathString().isEmpty()) {
                 hasNestedDestination[0] = true;
             }
+            int mappingCountBeforeVisit = mappings.size();
             ((FileTree) sourceValue).visit(details -> {
                 RelativePath sourcePath = details.getRelativePath();
                 RelativePath outputPath = destPath.append(!details.isDirectory(), sourcePath.getSegments());
@@ -385,6 +397,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
                     + ">"
                     + (details.isDirectory() ? "D" : "F"));
             });
+            if (mappings.size() == mappingCountBeforeVisit) {
+                addDeclaredSourceFileMappings(mappings, destPath, (FileCollection) sourceValue);
+            }
         };
         try {
             invoke(resolver, "walk", Action.class, visitor);
@@ -393,6 +408,32 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             return "";
         }
         return hasNestedDestination[0] ? String.join(",", mappings) : "";
+    }
+
+    private static void addDeclaredSourceFileMappings(
+        List<String> mappings,
+        RelativePath destPath,
+        FileCollection source
+    ) {
+        Set<File> files;
+        try {
+            files = source.getFiles();
+        } catch (RuntimeException e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to capture declared CopySpec source files", e);
+            return;
+        }
+        for (File file : files) {
+            String fileName = file.getName();
+            if (fileName.isEmpty()) {
+                continue;
+            }
+            RelativePath outputPath = destPath.append(!file.isDirectory(), fileName);
+            mappings.add(encodeMapping(file.getAbsolutePath())
+                + ">"
+                + encodeMapping(outputPath.getPathString())
+                + ">"
+                + (file.isDirectory() ? "D" : "F"));
+        }
     }
 
     private static String encodeMapping(String value) {
@@ -424,25 +465,34 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     }
 
     private static boolean isArchiveTask(String simpleName) {
-        return "Jar".equals(simpleName)
-            || "War".equals(simpleName)
-            || "Ear".equals(simpleName)
-            || "Zip".equals(simpleName)
-            || "Tar".equals(simpleName);
+        return isTaskNamed(simpleName, "Jar")
+            || isTaskNamed(simpleName, "War")
+            || isTaskNamed(simpleName, "Ear")
+            || isTaskNamed(simpleName, "Zip")
+            || isTaskNamed(simpleName, "Tar");
     }
 
     private static boolean isFileTransformTask(String simpleName) {
-        return "Copy".equals(simpleName) || "Sync".equals(simpleName) || "ProcessResources".equals(simpleName);
+        return isTaskNamed(simpleName, "Copy") || isTaskNamed(simpleName, "Sync") || isTaskNamed(simpleName, "ProcessResources");
+    }
+
+    private static boolean isCreateStartScriptsTask(String simpleName) {
+        return isTaskNamed(simpleName, "CreateStartScripts");
+    }
+
+    private static boolean isTaskNamed(String simpleName, String taskName) {
+        return taskName.equals(simpleName) || simpleName.startsWith(taskName + "_");
     }
 
     private static void captureFileTransformInputs(Task task, Map<String, String> inputs) {
-        putIfPresent(inputs, "expand_properties", stringMap(safeInputProperties(task)));
+        String expandProperties = stringMap(safeInputProperties(task));
+        putIfPresent(inputs, "expand_properties", expandProperties);
         Object rootSpec = invokeOptional(task, "getRootSpec");
         boolean hasCustomActions = Boolean.TRUE.equals(invokeOptional(rootSpec, "hasCustomActions"));
         List<String> copyActionClasses = copyActionClassNames(rootSpec);
         inputs.put("copy_has_custom_actions", Boolean.toString(hasCustomActions));
         putIfPresent(inputs, "copy_custom_action_types", String.join(",", copyActionClasses));
-        inputs.put("copy_unsupported_custom_actions", Boolean.toString(hasUnsupportedCopyActions(hasCustomActions, copyActionClasses)));
+        inputs.put("copy_unsupported_custom_actions", Boolean.toString(hasUnsupportedCopyActions(hasCustomActions, copyActionClasses, expandProperties)));
         putIfPresent(inputs, "duplicates_strategy", stringOrEmpty(invokeOptional(rootSpec, "getDuplicatesStrategy")));
         putIfPresent(inputs, "filtering_charset", stringOrEmpty(invokeOptional(rootSpec, "getFilteringCharset")));
         putIfPresent(inputs, "include_patterns", stringCollection(invokeOptional(rootSpec, "getIncludes")));
@@ -515,15 +565,29 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         return classes;
     }
 
-    private static boolean hasUnsupportedCopyActions(boolean hasCustomActions, List<String> copyActionClasses) {
+    private static boolean hasUnsupportedCopyActions(boolean hasCustomActions, List<String> copyActionClasses, String expandProperties) {
         if (!hasCustomActions && copyActionClasses.isEmpty()) {
             return false;
         }
         if (copyActionClasses.isEmpty()) {
-            return hasCustomActions;
+            return hasCustomActions && !hasUserExpandProperties(expandProperties);
         }
         for (String className : copyActionClasses) {
             if (!className.endsWith("MapBackedExpandAction")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasUserExpandProperties(String expandProperties) {
+        if (expandProperties.isEmpty()) {
+            return false;
+        }
+        for (String entry : expandProperties.split(",")) {
+            int equals = entry.indexOf('=');
+            String key = equals < 0 ? entry : entry.substring(0, equals);
+            if (!key.startsWith("rootSpec$")) {
                 return true;
             }
         }
@@ -537,6 +601,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "working_dir", filePath(invokeOptional(task, "getWorkingDir")));
         putIfPresent(inputs, "max_heap_size", stringOrEmpty(invokeOptional(task, "getMaxHeapSize")));
         putIfPresent(inputs, "jvm_args", stringList(invokeOptional(task, "getJvmArgs")));
+        putIfPresent(inputs, "jvm_args_json", stringListJson(invokeOptional(task, "getJvmArgs")));
         putIfPresent(inputs, "system_properties", stringMap(invokeOptional(task, "getSystemProperties")));
         putIfPresent(inputs, "xml_report_dir", testXmlReportDirectory(task));
         captureTestFilterInputs(task, inputs);
@@ -565,6 +630,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     private static void captureExecInputs(Task task, Map<String, String> inputs) {
         putIfPresent(inputs, "executable", stringOrEmpty(invokeOptional(task, "getExecutable")));
         putIfPresent(inputs, "args", stringList(invokeOptional(task, "getArgs")));
+        putIfPresent(inputs, "args_json", stringListJson(invokeOptional(task, "getArgs")));
         putIfPresent(inputs, "working_dir", filePath(invokeOptional(task, "getWorkingDir")));
         putIfPresent(inputs, "ignore_exit_value", booleanString(invokeOptional(task, "isIgnoreExitValue")));
     }
@@ -574,13 +640,29 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "classpath", fileCollectionPathString(invokeOptional(task, "getClasspath")));
         putIfPresent(inputs, "main_class", javaExecMainClass(task));
         putIfPresent(inputs, "args", stringList(invokeOptional(task, "getArgs")));
+        putIfPresent(inputs, "args_json", stringListJson(invokeOptional(task, "getArgs")));
         putIfPresent(inputs, "jvm_args", stringList(invokeOptional(task, "getJvmArgs")));
+        putIfPresent(inputs, "jvm_args_json", stringListJson(invokeOptional(task, "getJvmArgs")));
         putIfPresent(inputs, "working_dir", filePath(invokeOptional(task, "getWorkingDir")));
         putIfPresent(inputs, "ignore_exit_value", booleanString(invokeOptional(task, "isIgnoreExitValue")));
     }
 
+    private static void captureStartScriptsInputs(Task task, Map<String, String> inputs) {
+        putIfPresent(inputs, "application_name", stringOrEmpty(invokeOptional(task, "getApplicationName")));
+        putIfPresent(inputs, "main_class", providerValue(invokeOptional(task, "getMainClass")));
+        putIfPresent(inputs, "main_module", providerValue(invokeOptional(task, "getMainModule")));
+        putIfPresent(inputs, "classpath", fileCollectionPathString(invokeOptional(task, "getClasspath")));
+        putIfPresent(inputs, "output_dir", filePath(invokeOptional(task, "getOutputDir")));
+        putIfPresent(inputs, "executable_dir", stringOrEmpty(invokeOptional(task, "getExecutableDir")));
+        putIfPresent(inputs, "default_jvm_opts", stringList(invokeOptional(task, "getDefaultJvmOpts")));
+        putIfPresent(inputs, "opts_environment_var", stringOrEmpty(invokeOptional(task, "getOptsEnvironmentVar")));
+        putIfPresent(inputs, "git_ref", providerValue(invokeOptional(task, "getGitRef")));
+        putIfPresent(inputs, "unix_script", filePath(invokeOptional(task, "getUnixScript")));
+        putIfPresent(inputs, "windows_script", filePath(invokeOptional(task, "getWindowsScript")));
+    }
+
     private static void captureJavadocInputs(Task task, Map<String, String> inputs) {
-        putIfPresent(inputs, "java_home", javaLauncherHome(task));
+        putIfPresent(inputs, "java_home", javadocToolHome(task));
         putIfPresent(inputs, "classpath", fileCollectionPathString(invokeOptional(task, "getClasspath")));
         putIfPresent(inputs, "destination_dir", filePath(invokeOptional(task, "getDestinationDir")));
         putIfPresent(inputs, "title", stringOrEmpty(invokeOptional(task, "getTitle")));
@@ -588,6 +670,84 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         Object options = invokeOptional(task, "getOptions");
         putIfPresent(inputs, "encoding", stringOrEmpty(invokeOptional(options, "getEncoding")));
         putIfPresent(inputs, "no_timestamp", booleanString(invokeOptional(options, "isNoTimestamp")));
+    }
+
+    private static void captureStaticWriteFileInputs(Task task, Map<String, String> inputs) {
+        if (taskActionCount(task) != 1) {
+            return;
+        }
+        List<String> outputs = fileCollectionPaths(safeOutputFiles(task));
+        if (outputs.size() != 1) {
+            return;
+        }
+        String text = staticWriteTextLiteral(task.getProject().getBuildFile(), task.getName());
+        if (text.isEmpty()) {
+            return;
+        }
+        inputs.put("static_output_text_b64", Base64.getEncoder().encodeToString(text.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private static String staticWriteTextLiteral(File buildFile, String taskName) {
+        if (buildFile == null || !buildFile.isFile()) {
+            return "";
+        }
+        try {
+            String source = new String(Files.readAllBytes(buildFile.toPath()), StandardCharsets.UTF_8);
+            String quotedTaskName = Pattern.quote(taskName);
+            Pattern pattern = Pattern.compile(
+                "tasks\\.register\\s*\\(\\s*[\"']" + quotedTaskName + "[\"']\\s*\\)\\s*\\{.*?writeText\\s*\\(\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*\\)",
+                Pattern.DOTALL
+            );
+            Matcher matcher = pattern.matcher(source);
+            if (!matcher.find()) {
+                return "";
+            }
+            return decodeJavaStringLiteral(matcher.group(1));
+        } catch (RuntimeException | java.io.IOException e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to extract static writeText literal for {}", taskName, e);
+            return "";
+        }
+    }
+
+    private static String decodeJavaStringLiteral(String value) {
+        StringBuilder decoded = new StringBuilder(value.length());
+        boolean escaping = false;
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (!escaping) {
+                if (c == '\\') {
+                    escaping = true;
+                } else {
+                    decoded.append(c);
+                }
+                continue;
+            }
+            switch (c) {
+                case 'n':
+                    decoded.append('\n');
+                    break;
+                case 'r':
+                    decoded.append('\r');
+                    break;
+                case 't':
+                    decoded.append('\t');
+                    break;
+                case '"':
+                    decoded.append('"');
+                    break;
+                case '\\':
+                    decoded.append('\\');
+                    break;
+                default:
+                    decoded.append(c);
+                    break;
+            }
+            escaping = false;
+        }
+        if (escaping) {
+            decoded.append('\\');
+        }
+        return decoded.toString();
     }
 
     private static String javaExecMainClass(Task task) {
@@ -611,6 +771,46 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             return installationPath;
         }
         String executablePath = providerFilePath(invokeOptional(launcher, "getExecutablePath"));
+        if (!executablePath.isEmpty()) {
+            File executable = new File(executablePath);
+            File binDir = executable.getParentFile();
+            File homeDir = binDir == null ? null : binDir.getParentFile();
+            if (homeDir != null) {
+                return homeDir.getAbsolutePath();
+            }
+        }
+        return System.getProperty("java.home");
+    }
+
+    private static String javadocToolHome(Task task) {
+        Object toolProvider = invokeOptional(task, "getJavadocTool");
+        Object tool = invokeOptional(toolProvider, "getOrNull");
+        Object metadata = invokeOptional(tool, "getMetadata");
+        String installationPath = providerFilePath(invokeOptional(metadata, "getInstallationPath"));
+        if (!installationPath.isEmpty()) {
+            return installationPath;
+        }
+        String executablePath = providerFilePath(invokeOptional(tool, "getExecutablePath"));
+        if (!executablePath.isEmpty()) {
+            File executable = new File(executablePath);
+            File binDir = executable.getParentFile();
+            File homeDir = binDir == null ? null : binDir.getParentFile();
+            if (homeDir != null) {
+                return homeDir.getAbsolutePath();
+            }
+        }
+        return javaLauncherHome(task);
+    }
+
+    private static String javaCompilerHome(Task task) {
+        Object compilerProvider = invokeOptional(task, "getJavaCompiler");
+        Object compiler = invokeOptional(compilerProvider, "getOrNull");
+        Object metadata = invokeOptional(compiler, "getMetadata");
+        String installationPath = providerFilePath(invokeOptional(metadata, "getInstallationPath"));
+        if (!installationPath.isEmpty()) {
+            return installationPath;
+        }
+        String executablePath = providerFilePath(invokeOptional(compiler, "getExecutablePath"));
         if (!executablePath.isEmpty()) {
             File executable = new File(executablePath);
             File binDir = executable.getParentFile();
@@ -676,7 +876,12 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if (!(files instanceof FileCollection)) {
             return "";
         }
-        return String.join(File.pathSeparator, fileCollectionPaths((FileCollection) files));
+        try {
+            return ((FileCollection) files).getAsPath();
+        } catch (RuntimeException e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to read file collection path string", e);
+            return String.join(File.pathSeparator, fileCollectionPaths((FileCollection) files));
+        }
     }
 
     private static String filePath(@Nullable Object value) {
@@ -694,6 +899,66 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             }
         }
         return String.join(" ", values);
+    }
+
+    private static String stringListJson(@Nullable Object value) {
+        if (!(value instanceof Iterable)) {
+            return "";
+        }
+        List<String> values = new ArrayList<>();
+        for (Object item : (Iterable<?>) value) {
+            if (item != null) {
+                values.add(item.toString());
+            }
+        }
+        if (values.isEmpty()) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder("[");
+        for (int i = 0; i < values.size(); i++) {
+            if (i > 0) {
+                builder.append(',');
+            }
+            builder.append('"').append(escapeJson(values.get(i))).append('"');
+        }
+        return builder.append(']').toString();
+    }
+
+    private static String escapeJson(String value) {
+        StringBuilder builder = new StringBuilder(value.length() + 8);
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            switch (ch) {
+                case '"':
+                    builder.append("\\\"");
+                    break;
+                case '\\':
+                    builder.append("\\\\");
+                    break;
+                case '\b':
+                    builder.append("\\b");
+                    break;
+                case '\f':
+                    builder.append("\\f");
+                    break;
+                case '\n':
+                    builder.append("\\n");
+                    break;
+                case '\r':
+                    builder.append("\\r");
+                    break;
+                case '\t':
+                    builder.append("\\t");
+                    break;
+                default:
+                    if (ch < 0x20) {
+                        builder.append(String.format("\\u%04x", (int) ch));
+                    } else {
+                        builder.append(ch);
+                    }
+            }
+        }
+        return builder.toString();
     }
 
     private static String stringCollection(@Nullable Object value) {
@@ -903,21 +1168,20 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if ("Test".equals(simpleName)) {
             return "test";
         }
-        if ("Copy".equals(simpleName) || "Sync".equals(simpleName) || "ProcessResources".equals(simpleName)) {
+        if (isFileTransformTask(simpleName)) {
             return "file-transform";
         }
-        if ("Delete".equals(simpleName)) {
+        if (isTaskNamed(simpleName, "Delete")) {
             return "delete";
         }
-        if ("Jar".equals(simpleName)
-            || "War".equals(simpleName)
-            || "Ear".equals(simpleName)
-            || "Zip".equals(simpleName)
-            || "Tar".equals(simpleName)) {
+        if (isArchiveTask(simpleName)) {
             return "archive";
         }
         if ("Exec".equals(simpleName) || "JavaExec".equals(simpleName)) {
             return "external-process";
+        }
+        if (isCreateStartScriptsTask(simpleName)) {
+            return "start-scripts";
         }
         if ("Javadoc".equals(simpleName)) {
             return "documentation";
@@ -942,15 +1206,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             || "Scaladoc".equals(simpleName)) {
             return "process";
         }
-        if ("Copy".equals(simpleName)
-            || "Sync".equals(simpleName)
-            || "ProcessResources".equals(simpleName)
-            || "Delete".equals(simpleName)
-            || "Jar".equals(simpleName)
-            || "War".equals(simpleName)
-            || "Ear".equals(simpleName)
-            || "Zip".equals(simpleName)
-            || "Tar".equals(simpleName)) {
+        if (isFileTransformTask(simpleName)
+            || isTaskNamed(simpleName, "Delete")
+            || isArchiveTask(simpleName)
+            || isCreateStartScriptsTask(simpleName)) {
             return "in-process";
         }
         return "compat-jvm";

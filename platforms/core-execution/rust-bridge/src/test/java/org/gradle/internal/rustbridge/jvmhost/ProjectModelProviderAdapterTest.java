@@ -15,6 +15,7 @@ import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.Collections;
@@ -40,8 +41,9 @@ public class ProjectModelProviderAdapterTest {
         assertTrue(sourceFile.createNewFile());
         File outputDir = temporaryFolder.newFolder("build/classes/java/main");
         File classpathEntry = temporaryFolder.newFolder("build/classes/java/dependency");
+        File javaHome = temporaryFolder.newFolder("jdks", "jdk-17");
 
-        Task compileJava = javaCompileTask(sourceFile, outputDir, classpathEntry);
+        Task compileJava = javaCompileTask(sourceFile, outputDir, classpathEntry, javaHome);
 
         BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(compileJava, JavaCompile.class);
         Map<String, String> inputs = task.getInputSpecsList().stream()
@@ -52,12 +54,15 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("compile", task.getActionKind());
         assertEquals("process", task.getWorkerIsolation());
         assertEquals("JavaCompile", inputs.get("taskType"));
-        assertFalse(inputs.get("java_home").isEmpty());
+        assertEquals(javaHome.getAbsolutePath(), inputs.get("java_home"));
         assertEquals("17", inputs.get("source_version"));
         assertEquals("17", inputs.get("target_version"));
         assertEquals("17", inputs.get("release"));
         assertEquals("UTF-8", inputs.get("encoding"));
         assertEquals(classpathEntry.getAbsolutePath(), inputs.get("classpath"));
+        assertEquals("true", inputs.get("debug"));
+        assertEquals("-parameters", inputs.get("compiler_args"));
+        assertEquals("[\"-parameters\"]", inputs.get("compiler_args_json"));
         assertTrue(task.getInputSpecsList().stream()
             .anyMatch(input -> input.getKind().equals("source") && input.getValue().equals(sourceFile.getAbsolutePath())));
         assertTrue(task.getOutputSpecsList().stream()
@@ -172,6 +177,7 @@ public class ProjectModelProviderAdapterTest {
         assertEquals(testClassesDir.getAbsolutePath(), inputs.get("test_classes_dirs"));
         assertEquals(workingDir.getAbsolutePath(), inputs.get("working_dir"));
         assertEquals("-ea -Dcustom=true", inputs.get("jvm_args"));
+        assertEquals("[\"-ea\",\"-Dcustom=true\"]", inputs.get("jvm_args_json"));
         assertEquals("env=test", inputs.get("system_properties"));
         assertEquals(reportsDir.getAbsolutePath(), inputs.get("xml_report_dir"));
         assertEquals("example.*Test", inputs.get("test_filter"));
@@ -198,7 +204,8 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("process", task.getWorkerIsolation());
         assertEquals("Exec", inputs.get("taskType"));
         assertEquals("/usr/bin/touch", inputs.get("executable"));
-        assertEquals("generated.txt", inputs.get("args"));
+        assertEquals("generated file.txt", inputs.get("args"));
+        assertEquals("[\"generated file.txt\"]", inputs.get("args_json"));
         assertEquals(workingDir.getAbsolutePath(), inputs.get("working_dir"));
         assertEquals("false", inputs.get("ignore_exit_value"));
         assertTrue(task.getOutputSpecsList().stream()
@@ -228,13 +235,46 @@ public class ProjectModelProviderAdapterTest {
         assertFalse(inputs.get("java_home").isEmpty());
         assertEquals(classesDir.getAbsolutePath(), inputs.get("classpath"));
         assertEquals("example.Tool", inputs.get("main_class"));
-        assertEquals(outputFile.getAbsolutePath() + " expected-token", inputs.get("args"));
+        assertEquals(outputFile.getAbsolutePath() + " expected token", inputs.get("args"));
+        assertEquals("[\"" + outputFile.getAbsolutePath().replace("\\", "\\\\") + "\",\"expected token\"]", inputs.get("args_json"));
         assertEquals("-Dnative=true -Xmx128m", inputs.get("jvm_args"));
+        assertEquals("[\"-Dnative=true\",\"-Xmx128m\"]", inputs.get("jvm_args_json"));
         assertEquals(workingDir.getAbsolutePath(), inputs.get("working_dir"));
         assertEquals("false", inputs.get("ignore_exit_value"));
         assertTrue(task.getOutputSpecsList().stream()
             .map(BuildPlanTaskOutputSpec::getPath)
             .anyMatch(path -> path.equals(outputFile.getAbsolutePath())));
+    }
+
+    @org.junit.Test
+    public void capturesNativeReadyStartScriptsContractFromTaskModel() throws IOException {
+        File jarFile = temporaryFolder.newFile("corpus-app-1.0.jar");
+        File outputDir = temporaryFolder.newFolder("build/scripts");
+
+        Task startScripts = startScriptsTask(jarFile, outputDir);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(startScripts, CreateStartScripts.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals(":startScripts", task.getPath());
+        assertEquals("start-scripts", task.getActionKind());
+        assertEquals("in-process", task.getWorkerIsolation());
+        assertEquals("CreateStartScripts", inputs.get("taskType"));
+        assertEquals("corpus-app", inputs.get("application_name"));
+        assertEquals("example.App", inputs.get("main_class"));
+        assertEquals(jarFile.getAbsolutePath(), inputs.get("classpath"));
+        assertEquals(outputDir.getAbsolutePath(), inputs.get("output_dir"));
+        assertEquals("bin", inputs.get("executable_dir"));
+        assertEquals("-Ddemo=true -Xmx128m", inputs.get("default_jvm_opts"));
+        assertEquals("CORPUS_APP_OPTS", inputs.get("opts_environment_var"));
+        assertEquals("HEAD", inputs.get("git_ref"));
+        assertEquals(new File(outputDir, "corpus-app").getAbsolutePath(), inputs.get("unix_script"));
+        assertEquals(new File(outputDir, "corpus-app.bat").getAbsolutePath(), inputs.get("windows_script"));
+        assertTrue(task.getOutputSpecsList().stream()
+            .map(BuildPlanTaskOutputSpec::getPath)
+            .anyMatch(path -> path.equals(outputDir.getAbsolutePath())));
     }
 
     @org.junit.Test
@@ -380,7 +420,29 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("0", inputs.get("action_count"));
     }
 
-    private static Task javaCompileTask(File sourceFile, File outputDir, File classpathEntry) {
+    @org.junit.Test
+    public void capturesStaticWriteFileDefaultTaskContract() throws IOException {
+        File buildFile = temporaryFolder.newFile("build.gradle.kts");
+        Files.write(buildFile.toPath(), Collections.singletonList(
+            "tasks.register(\"apiContractReport\") { doLast { output.writeText(\"oss-style api contract\\n\") } }"
+        ), StandardCharsets.UTF_8);
+        File outputFile = new File(temporaryFolder.getRoot(), "build/reports/api-contract.txt");
+        Task report = staticWriteFileTask(buildFile, outputFile);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(report, DefaultTask.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("jvm-task", task.getActionKind());
+        assertEquals("1", inputs.get("action_count"));
+        assertEquals("b3NzLXN0eWxlIGFwaSBjb250cmFjdAo=", inputs.get("static_output_text_b64"));
+        assertTrue(task.getOutputSpecsList().stream()
+            .map(BuildPlanTaskOutputSpec::getPath)
+            .anyMatch(path -> path.equals(outputFile.getAbsolutePath())));
+    }
+
+    private static Task javaCompileTask(File sourceFile, File outputDir, File classpathEntry, File javaHome) {
         FileCollection source = fileCollection(sourceFile);
         FileCollection classpath = fileCollection(classpathEntry);
         FileCollection outputs = fileCollection(outputDir);
@@ -430,6 +492,8 @@ public class ProjectModelProviderAdapterTest {
                     return source;
                 case "getOptions":
                     return new CompileOptionsContract();
+                case "getJavaCompiler":
+                    return new JavaCompilerProvider(javaHome);
                 case "compareTo":
                     return 0;
                 default:
@@ -553,7 +617,7 @@ public class ProjectModelProviderAdapterTest {
                 case "getExecutable":
                     return "/usr/bin/touch";
                 case "getArgs":
-                    return Collections.singletonList("generated.txt");
+                    return Collections.singletonList("generated file.txt");
                 case "getWorkingDir":
                     return workingDir;
                 case "isIgnoreExitValue":
@@ -611,13 +675,83 @@ public class ProjectModelProviderAdapterTest {
                 case "getMainClass":
                     return new ValueProvider("example.Tool");
                 case "getArgs":
-                    return Arrays.asList(outputFile.getAbsolutePath(), "expected-token");
+                    return Arrays.asList(outputFile.getAbsolutePath(), "expected token");
                 case "getJvmArgs":
                     return Arrays.asList("-Dnative=true", "-Xmx128m");
                 case "getWorkingDir":
                     return workingDir;
                 case "isIgnoreExitValue":
                     return false;
+                case "compareTo":
+                    return 0;
+                default:
+                    return defaultValue(method.getReturnType());
+            }
+        });
+    }
+
+    private static Task startScriptsTask(File jarFile, File outputDir) {
+        FileCollection classpath = fileCollection(jarFile);
+        FileCollection outputs = fileCollection(outputDir);
+        Project project = proxy(Project.class, (proxy, method, args) -> {
+            if (method.getName().equals("getPath")) {
+                return ":";
+            }
+            return defaultValue(method.getReturnType());
+        });
+        TaskDependency noDependencies = proxy(TaskDependency.class, (proxy, method, args) -> {
+            if (method.getName().equals("getDependencies")) {
+                return Collections.emptySet();
+            }
+            return defaultValue(method.getReturnType());
+        });
+        return proxy(new Class<?>[] {Task.class, CreateStartScriptsContract.class}, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "getPath":
+                    return ":startScripts";
+                case "getProject":
+                    return project;
+                case "getName":
+                    return "startScripts";
+                case "getEnabled":
+                    return true;
+                case "getGroup":
+                case "getDescription":
+                    return "";
+                case "getTaskDependencies":
+                case "getShouldRunAfter":
+                case "getMustRunAfter":
+                case "getFinalizedBy":
+                    return noDependencies;
+                case "getInputs":
+                    return filesOwner(method.getReturnType(), classpath);
+                case "getOutputs":
+                    return filesOwner(method.getReturnType(), outputs);
+                case "getLocalState":
+                case "getDestroyables":
+                    return registeredFilesOwner(method.getReturnType());
+                case "getApplicationName":
+                    return "corpus-app";
+                case "getMainClass":
+                    return new ValueProvider("example.App");
+                case "getMainModule":
+                    return new ValueProvider("");
+                case "getClasspath":
+                    return classpath;
+                case "getOutputDir":
+                    return outputDir;
+                case "getExecutableDir":
+                    return "bin";
+                case "getDefaultJvmOpts":
+                    return Arrays.asList("-Ddemo=true", "-Xmx128m");
+                case "getOptsEnvironmentVar":
+                    return "CORPUS_APP_OPTS";
+                case "getGitRef":
+                    return new ValueProvider("HEAD");
+                case "getUnixScript":
+                    return new File(outputDir, "corpus-app");
+                case "getWindowsScript":
+                    return new File(outputDir, "corpus-app.bat");
                 case "compareTo":
                     return 0;
                 default:
@@ -808,6 +942,58 @@ public class ProjectModelProviderAdapterTest {
         });
     }
 
+    private static Task staticWriteFileTask(File buildFile, File outputFile) {
+        FileCollection outputs = fileCollection(outputFile);
+        Project project = proxy(Project.class, (proxy, method, args) -> {
+            if (method.getName().equals("getPath")) {
+                return ":";
+            }
+            if (method.getName().equals("getBuildFile")) {
+                return buildFile;
+            }
+            return defaultValue(method.getReturnType());
+        });
+        TaskDependency noDependencies = proxy(TaskDependency.class, (proxy, method, args) -> {
+            if (method.getName().equals("getDependencies")) {
+                return Collections.emptySet();
+            }
+            return defaultValue(method.getReturnType());
+        });
+        return proxy(new Class<?>[] {Task.class, FileTransformTaskContract.class}, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "getPath":
+                    return ":apiContractReport";
+                case "getProject":
+                    return project;
+                case "getName":
+                    return "apiContractReport";
+                case "getEnabled":
+                    return true;
+                case "getGroup":
+                case "getDescription":
+                    return "";
+                case "getTaskDependencies":
+                case "getShouldRunAfter":
+                case "getMustRunAfter":
+                case "getFinalizedBy":
+                    return noDependencies;
+                case "getInputs":
+                    return filesOwner(method.getReturnType(), fileCollection());
+                case "getOutputs":
+                    return filesOwner(method.getReturnType(), outputs);
+                case "getLocalState":
+                case "getDestroyables":
+                    return registeredFilesOwner(method.getReturnType());
+                case "getActions":
+                    return Collections.singletonList(new Object());
+                case "compareTo":
+                    return 0;
+                default:
+                    return defaultValue(method.getReturnType());
+            }
+        });
+    }
+
     private static Task basicFileTransformTask(
         String path,
         String name,
@@ -943,6 +1129,11 @@ public class ProjectModelProviderAdapterTest {
             if (method.getName().equals("getFiles")) {
                 return fileSet;
             }
+            if (method.getName().equals("getAsPath")) {
+                return fileSet.stream()
+                    .map(File::getAbsolutePath)
+                    .collect(Collectors.joining(File.pathSeparator));
+            }
             return defaultValue(method.getReturnType());
         });
     }
@@ -1003,6 +1194,7 @@ public class ProjectModelProviderAdapterTest {
         FileCollection getClasspath();
         FileCollection getSource();
         CompileOptionsContract getOptions();
+        JavaCompilerProvider getJavaCompiler();
     }
 
     public interface JarContract {
@@ -1047,6 +1239,20 @@ public class ProjectModelProviderAdapterTest {
         boolean isIgnoreExitValue();
     }
 
+    public interface CreateStartScriptsContract {
+        String getApplicationName();
+        ValueProvider getMainClass();
+        ValueProvider getMainModule();
+        FileCollection getClasspath();
+        File getOutputDir();
+        String getExecutableDir();
+        Iterable<String> getDefaultJvmOpts();
+        String getOptsEnvironmentVar();
+        ValueProvider getGitRef();
+        File getUnixScript();
+        File getWindowsScript();
+    }
+
     public interface JavadocContract {
         FileCollection getSource();
         FileCollection getClasspath();
@@ -1086,8 +1292,16 @@ public class ProjectModelProviderAdapterTest {
             return "UTF-8";
         }
 
+        public boolean isDebug() {
+            return true;
+        }
+
         public FileCollection getAnnotationProcessorPath() {
             return fileCollection();
+        }
+
+        public Iterable<String> getCompilerArgs() {
+            return Collections.singletonList("-parameters");
         }
     }
 
@@ -1167,6 +1381,46 @@ public class ProjectModelProviderAdapterTest {
 
         public RegularFile getOrNull() {
             return new RegularFile(file);
+        }
+    }
+
+    public static class JavaCompilerProvider {
+        private final File javaHome;
+
+        JavaCompilerProvider(File javaHome) {
+            this.javaHome = javaHome;
+        }
+
+        public JavaCompiler getOrNull() {
+            return new JavaCompiler(javaHome);
+        }
+    }
+
+    public static class JavaCompiler {
+        private final File javaHome;
+
+        JavaCompiler(File javaHome) {
+            this.javaHome = javaHome;
+        }
+
+        public JavaToolchainMetadata getMetadata() {
+            return new JavaToolchainMetadata(javaHome);
+        }
+
+        public FileProvider getExecutablePath() {
+            return new FileProvider(new File(javaHome, "bin/javac"));
+        }
+    }
+
+    public static class JavaToolchainMetadata {
+        private final File javaHome;
+
+        JavaToolchainMetadata(File javaHome) {
+            this.javaHome = javaHome;
+        }
+
+        public FileProvider getInstallationPath() {
+            return new FileProvider(javaHome);
         }
     }
 
@@ -1251,6 +1505,9 @@ public class ProjectModelProviderAdapterTest {
     }
 
     public static class JavaExec {
+    }
+
+    public static class CreateStartScripts {
     }
 
     public static class Copy {

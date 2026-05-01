@@ -4,8 +4,8 @@ use std::pin::Pin;
 
 use crate::server::task_executor::copy::{
     apply_unix_mode, case_sensitive, dir_permission_mode, duplicate_strategy, expand_bytes,
-    file_permission_mode, include_empty_dirs, parse_copy_file_mappings, parse_expand_properties,
-    parse_patterns, path_included,
+    file_permission_mode, include_empty_dirs, inferred_relative_source_path,
+    parse_copy_file_mappings, parse_expand_properties, parse_patterns, path_included,
 };
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
@@ -218,10 +218,56 @@ impl TaskExecutor for SyncTaskExecutor {
         } else {
             for source_dir in &input.source_files {
                 if !source_dir.is_dir() {
-                    result.success = false;
-                    result.error_message =
-                        format!("Source is not a directory: {}", source_dir.display());
-                    return result;
+                    if !source_dir.exists() {
+                        result.success = false;
+                        result.error_message =
+                            format!("Source file not found: {}", source_dir.display());
+                        return result;
+                    }
+                    let relative = inferred_relative_source_path(source_dir);
+                    if !path_included(
+                        &relative,
+                        &include_patterns,
+                        &exclude_patterns,
+                        case_sensitive,
+                    ) {
+                        continue;
+                    }
+                    expected_files.insert(relative.clone());
+                    let dest_file = input.target_dir.join(&relative);
+                    if !seen_destinations.insert(dest_file.clone()) {
+                        match duplicate_strategy.as_str() {
+                            "EXCLUDE" => continue,
+                            "FAIL" => {
+                                result.success = false;
+                                result.error_message =
+                                    format!("Duplicate sync destination: {}", dest_file.display());
+                                return result;
+                            }
+                            _ => {}
+                        }
+                    }
+                    if let Some(parent) = relative
+                        .parent()
+                        .filter(|parent| !parent.as_os_str().is_empty())
+                    {
+                        expected_dirs.insert(parent.to_path_buf());
+                    }
+                    if let Err(e) = Self::copy_file(
+                        source_dir,
+                        &dest_file,
+                        &mut result,
+                        &expand_properties,
+                        file_mode,
+                        dir_mode,
+                    )
+                    .await
+                    {
+                        result.success = false;
+                        result.error_message = e;
+                        return result;
+                    }
+                    continue;
                 }
 
                 if include_empty_dirs {

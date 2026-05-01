@@ -41,9 +41,15 @@ class RunResult:
     duration_ms: int = 0
     
     def to_dict(self):
+        preview = ""
+        if self.output:
+            if len(self.output) <= 5000:
+                preview = self.output
+            else:
+                preview = self.output[:1000] + "\n...\n" + self.output[-4000:]
         return {
             "exit_code": self.exit_code,
-            "output_preview": self.output[:1000] if self.output else "",
+            "output_preview": preview,
             "tasks": self.tasks,
             "task_count": len(self.tasks),
             "output_file_count": len(self.output_files),
@@ -337,6 +343,27 @@ def runbuild_marker_missing(output: str) -> bool:
     return not any(marker in output for marker in RUNBUILD_OUTPUT_MARKERS)
 
 
+def parse_tasks_from_output(stdout: str, output: str) -> list[str]:
+    """Extract executed or selected Gradle task paths from build output.
+
+    Authoritative RunBuild intentionally skips Gradle's JVM task executor, so
+    Gradle does not print the usual `> Task` lines. In that mode the selected
+    plan is still available in `--info` output as `Tasks to be executed`.
+    """
+    tasks: list[str] = []
+    for line in stdout.splitlines():
+        if "> Task " in line:
+            task_name = line.split("> Task", 1)[1].strip().split(" ")[0]
+            tasks.append(task_name)
+    if tasks:
+        return tasks
+
+    match = re.search(r"Tasks to be executed:\s*\[(.*?)\]", output, re.DOTALL)
+    if not match:
+        return []
+    return re.findall(r"task '([^']+)'", match.group(1))
+
+
 def compare_run_pair(upstream: RunResult, substrate: RunResult, allow_noop_substrate: bool = False) -> dict:
     """Return explicit parity checks for one upstream/substrate project pair."""
     substrate_usable = allow_noop_substrate or not substrate.substrate_noop
@@ -497,12 +524,7 @@ def run_build(
                 "use a Gradle-under-test distribution that contains rust-bridge services\n"
             )
         
-        # Extract tasks from output
-        tasks = []
-        for line in result.stdout.split('\n'):
-            if '> Task ' in line:
-                task_name = line.split('> Task')[1].strip().split(' ')[0]
-                tasks.append(task_name)
+        tasks = parse_tasks_from_output(result.stdout, output)
         
         output_files = snapshot_build_outputs(project_dir) if result.returncode == 0 else []
         output_hashes = snapshot_build_output_hashes(project_dir, output_files) if output_files else {}

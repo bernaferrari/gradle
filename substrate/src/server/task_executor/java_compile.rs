@@ -3,7 +3,7 @@ use std::process::Stdio;
 
 use tokio::process::Command;
 
-use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
+use crate::server::task_executor::{option_string_list, TaskExecutor, TaskInput, TaskResult};
 
 /// Result of a Java compilation.
 #[derive(Debug, Clone, Default)]
@@ -85,9 +85,9 @@ impl JavaCompileExecutor {
             cmd.arg("-processor").arg(processors);
         }
 
-        // Release version (-release)
+        // Release version (--release)
         if let Some(release) = input.options.get("release") {
-            cmd.arg("-release").arg(release);
+            cmd.arg("--release").arg(release);
         }
 
         // Source compatibility (-source)
@@ -103,6 +103,18 @@ impl JavaCompileExecutor {
         // Encoding
         if let Some(encoding) = input.options.get("encoding") {
             cmd.arg("-encoding").arg(encoding);
+        }
+
+        // Gradle JavaCompile defaults debug=true, which maps to javac's full debug metadata.
+        if input
+            .options
+            .get("debug")
+            .map(|value| value == "false")
+            .unwrap_or(false)
+        {
+            cmd.arg("-g:none");
+        } else {
+            cmd.arg("-g");
         }
 
         // Generated sources directory (-s)
@@ -135,6 +147,10 @@ impl JavaCompileExecutor {
             if params == "true" {
                 cmd.arg("-parameters");
             }
+        }
+
+        for arg in option_string_list(&input.options, "compiler_args_json", "compiler_args") {
+            cmd.arg(arg);
         }
 
         // Proc only (generate but don't compile)
@@ -244,10 +260,22 @@ impl JavaCompileExecutor {
                 result.source_files_compiled = input.source_files.len() as u64;
 
                 if !result.success {
+                    let diagnostic_excerpt = combined
+                        .lines()
+                        .filter(|line| !line.trim().is_empty())
+                        .take(40)
+                        .collect::<Vec<_>>()
+                        .join("\n");
                     result.error_message = format!(
-                        "javac failed with exit code {}: {} errors",
+                        "javac failed with exit code {}: {} errors{}{}",
                         result.exit_code,
-                        result.errors.len()
+                        result.errors.len(),
+                        if diagnostic_excerpt.is_empty() {
+                            ""
+                        } else {
+                            "\n"
+                        },
+                        diagnostic_excerpt
                     );
                 } else {
                     // Collect output .class files

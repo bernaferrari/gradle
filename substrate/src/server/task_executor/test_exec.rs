@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use tokio::process::Command;
 
-use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
+use crate::server::task_executor::{option_string_list, TaskExecutor, TaskInput, TaskResult};
 
 /// Outcome of a single test method.
 #[derive(Debug, Clone, PartialEq)]
@@ -90,7 +90,7 @@ impl TestExecExecutor {
     /// - `include_engines`: comma-separated JUnit 5 engine IDs (default: "junit-jupiter")
     /// - `exclude_tags`: comma-separated JUnit 5 tags to exclude
     /// - `include_tags`: comma-separated JUnit 5 tags to include
-    /// - `jvm_args`: additional JVM arguments (space-separated)
+    /// - `jvm_args_json`: exact JVM argument vector (`jvm_args` is legacy fallback)
     /// - `working_dir`: working directory for the test process
     /// - `xml_report_dir`: directory to write JUnit XML reports (for parsing)
     /// - `fork_count`: number of parallel test JVM forks (default: 1)
@@ -110,11 +110,11 @@ impl TestExecExecutor {
         cmd.arg(format!("-Xmx{}m", max_heap));
 
         // Additional JVM args
-        if let Some(jvm_args) = input.options.get("jvm_args") {
-            for arg in jvm_args.split_whitespace() {
-                cmd.arg(arg);
-            }
-        }
+        cmd.args(option_string_list(
+            &input.options,
+            "jvm_args_json",
+            "jvm_args",
+        ));
 
         // System properties
         if let Some(props) = input.options.get("system_properties") {

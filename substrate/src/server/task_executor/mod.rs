@@ -7,10 +7,12 @@ mod java_exec;
 mod javadoc;
 mod lifecycle;
 mod mkdir_op;
+mod start_scripts;
 mod symlink;
 mod sync;
 mod tar;
 mod test_exec;
+mod write_file;
 
 pub use copy::CopyTaskExecutor;
 pub use delete::DeleteTaskExecutor;
@@ -21,10 +23,12 @@ pub use java_exec::JavaExecTaskExecutor;
 pub use javadoc::JavadocTaskExecutor;
 pub use lifecycle::LifecycleTaskExecutor;
 pub use mkdir_op::MkdirTaskExecutor;
+pub use start_scripts::StartScriptsTaskExecutor;
 pub use symlink::SymlinkTaskExecutor;
 pub use sync::SyncTaskExecutor;
 pub use tar::TarTaskExecutor;
 pub use test_exec::TestExecExecutor;
+pub use write_file::WriteFileTaskExecutor;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -87,6 +91,7 @@ impl TaskInput {
                 | "JavaCompile"
                 | "JavaExec"
                 | "Javadoc"
+                | "CreateStartScripts"
                 | "TestExec"
                 | "Exec"
                 | "Jar"
@@ -94,6 +99,7 @@ impl TaskInput {
                 | "War"
                 | "Ear"
                 | "Tar"
+                | "WriteFile"
                 | "Lifecycle"
         )
     }
@@ -112,6 +118,29 @@ pub trait TaskExecutor: Send + Sync {
     fn can_execute(&self, task_type: &str) -> bool {
         self.task_type() == task_type
     }
+}
+
+/// Read a Gradle process argument list from task options.
+///
+/// New bridge contracts provide exact JSON arrays so arguments containing
+/// spaces are preserved. Older contracts only have whitespace-separated strings;
+/// keep that as a compatibility fallback for existing fixtures and callers.
+pub(crate) fn option_string_list(
+    options: &HashMap<String, String>,
+    json_name: &str,
+    legacy_name: &str,
+) -> Vec<String> {
+    if let Some(value) = options.get(json_name).map(|value| value.trim()) {
+        if !value.is_empty() {
+            if let Ok(values) = serde_json::from_str::<Vec<String>>(value) {
+                return values;
+            }
+        }
+    }
+    options
+        .get(legacy_name)
+        .map(|args| args.split_whitespace().map(str::to_string).collect())
+        .unwrap_or_default()
 }
 
 /// Registry of task executors.
@@ -148,6 +177,12 @@ impl TaskExecutorRegistry {
         let javadoc = JavadocTaskExecutor::new();
         executors.insert(javadoc.task_type().to_string(), Box::new(javadoc));
 
+        let start_scripts = StartScriptsTaskExecutor::new();
+        executors.insert(
+            start_scripts.task_type().to_string(),
+            Box::new(start_scripts),
+        );
+
         let test_exec = TestExecExecutor::new();
         executors.insert(test_exec.task_type().to_string(), Box::new(test_exec));
 
@@ -162,6 +197,12 @@ impl TaskExecutorRegistry {
 
         let tar_executor = TarTaskExecutor::new();
         executors.insert(tar_executor.task_type().to_string(), Box::new(tar_executor));
+
+        let write_file_executor = WriteFileTaskExecutor::new();
+        executors.insert(
+            write_file_executor.task_type().to_string(),
+            Box::new(write_file_executor),
+        );
 
         let lifecycle_executor = LifecycleTaskExecutor::new();
         executors.insert(
@@ -223,6 +264,7 @@ mod tests {
         assert!(types.contains(&"JavaCompile"));
         assert!(types.contains(&"JavaExec"));
         assert!(types.contains(&"Javadoc"));
+        assert!(types.contains(&"CreateStartScripts"));
         assert!(types.contains(&"TestExec"));
         assert!(types.contains(&"Exec"));
         assert!(types.contains(&"Jar"));

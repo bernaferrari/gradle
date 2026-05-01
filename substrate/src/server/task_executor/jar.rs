@@ -1,5 +1,5 @@
 use std::io::{Read as StdRead, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use std::collections::HashSet;
 
@@ -210,6 +210,7 @@ impl JarTaskExecutor {
         base: &Path,
         current: &Path,
         entries: &mut Vec<ZipEntry>,
+        emitted_dirs: &mut HashSet<String>,
         include_empty_dirs: bool,
         file_mode: u32,
         dir_mode: u32,
@@ -227,26 +228,58 @@ impl JarTaskExecutor {
 
             if path.is_dir() {
                 if include_empty_dirs {
-                    entries.push(ZipEntry::dir(
-                        format!("{}/", name.trim_end_matches('/')),
-                        dir_mode,
-                    ));
+                    push_zip_dir_entry(entries, emitted_dirs, &name, dir_mode);
                 }
                 Self::collect_files(
                     base,
                     &path,
                     entries,
+                    emitted_dirs,
                     include_empty_dirs,
                     file_mode,
                     dir_mode,
                 )?;
             } else {
+                push_zip_parent_dirs(entries, emitted_dirs, &name, dir_mode);
                 let data = std::fs::read(&path)
                     .map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
                 entries.push(ZipEntry::file(name, data, file_mode));
             }
         }
         Ok(())
+    }
+
+    fn collect_file_entries_with_inferred_root(
+        source_files: &[PathBuf],
+        entries: &mut Vec<ZipEntry>,
+        file_mode: u32,
+        dir_mode: u32,
+    ) -> Result<bool, String> {
+        if source_files.len() < 2 || source_files.iter().any(|source| source.is_dir()) {
+            return Ok(false);
+        }
+        let Some(root) = common_file_parent(source_files) else {
+            return Ok(false);
+        };
+        if !looks_like_archive_source_root(&root) {
+            return Ok(false);
+        }
+
+        let mut emitted_dirs = HashSet::new();
+        for source in source_files {
+            if !source.exists() {
+                return Err(format!("Source file not found: {}", source.display()));
+            }
+            let relative = source
+                .strip_prefix(&root)
+                .map_err(|e| format!("Cannot relativize {}: {}", source.display(), e))?;
+            let name = relative.to_string_lossy().replace('\\', "/");
+            push_zip_parent_dirs(entries, &mut emitted_dirs, &name, dir_mode);
+            let data = std::fs::read(source)
+                .map_err(|e| format!("Cannot read {}: {}", source.display(), e))?;
+            entries.push(ZipEntry::file(name, data, file_mode));
+        }
+        Ok(true)
     }
 
     fn collect_mapped_entries(
@@ -260,22 +293,29 @@ impl JarTaskExecutor {
         if mappings.is_empty() {
             return Ok(false);
         }
+        let mut emitted_dirs = HashSet::new();
         for mapping in mappings {
+            let name = mapping.relative_path.to_string_lossy().replace('\\', "/");
             if !mapping.source.exists() {
+                if is_manifest_entry(&name) && has_manifest_options(options) {
+                    if include_empty_dirs {
+                        push_zip_parent_dirs(entries, &mut emitted_dirs, &name, dir_mode);
+                    }
+                    continue;
+                }
                 return Err(format!(
                     "Source file not found: {}",
                     mapping.source.display()
                 ));
             }
-            let name = mapping.relative_path.to_string_lossy().replace('\\', "/");
             if mapping.is_dir {
                 if include_empty_dirs {
-                    entries.push(ZipEntry::dir(
-                        format!("{}/", name.trim_end_matches('/')),
-                        dir_mode,
-                    ));
+                    push_zip_dir_entry(entries, &mut emitted_dirs, &name, dir_mode);
                 }
                 continue;
+            }
+            if include_empty_dirs {
+                push_zip_parent_dirs(entries, &mut emitted_dirs, &name, dir_mode);
             }
             let data = std::fs::read(&mapping.source)
                 .map_err(|e| format!("Cannot read {}: {}", mapping.source.display(), e))?;
@@ -300,6 +340,7 @@ impl JarTaskExecutor {
         let mut custom_attributes: Vec<_> = options
             .iter()
             .filter_map(|(key, value)| key.strip_prefix("manifest.").map(|name| (name, value)))
+            .filter(|(name, _)| !name.eq_ignore_ascii_case("Manifest-Version"))
             .collect();
         custom_attributes.sort_unstable_by(|left, right| left.0.cmp(right.0));
         for (attr_name, value) in custom_attributes {
@@ -412,6 +453,228 @@ fn append_wrapped_manifest_line(out: &mut Vec<u8>, line: &str) {
         remaining = &remaining[take..];
         first = false;
     }
+}
+
+fn push_zip_parent_dirs(
+    entries: &mut Vec<ZipEntry>,
+    emitted_dirs: &mut HashSet<String>,
+    entry_name: &str,
+    dir_mode: u32,
+) {
+    let mut prefix = String::new();
+    for segment in entry_name.split('/').filter(|segment| !segment.is_empty()) {
+        if !prefix.is_empty() {
+            prefix.push('/');
+        }
+        prefix.push_str(segment);
+        if prefix == entry_name.trim_end_matches('/') {
+            break;
+        }
+        push_zip_dir_entry(entries, emitted_dirs, &prefix, dir_mode);
+    }
+}
+
+fn push_zip_dir_entry(
+    entries: &mut Vec<ZipEntry>,
+    emitted_dirs: &mut HashSet<String>,
+    name: &str,
+    dir_mode: u32,
+) {
+    let normalized = format!("{}/", name.trim_end_matches('/'));
+    if normalized == "/" || !emitted_dirs.insert(normalized.clone()) {
+        return;
+    }
+    entries.push(ZipEntry::dir(normalized, dir_mode));
+}
+
+fn collect_application_distribution_zip_entries(
+    archive_path: &Path,
+    options: &std::collections::HashMap<String, String>,
+    entries: &mut Vec<ZipEntry>,
+    include_empty_dirs: bool,
+    file_mode: u32,
+    dir_mode: u32,
+) -> Result<bool, String> {
+    if archive_path
+        .parent()
+        .and_then(|path| path.file_name())
+        .and_then(|name| name.to_str())
+        != Some("distributions")
+    {
+        return Ok(false);
+    }
+    let Some(root_name) = distribution_root_name(archive_path) else {
+        return Ok(false);
+    };
+    let Some(build_dir) = archive_path.parent().and_then(|path| path.parent()) else {
+        return Ok(false);
+    };
+
+    let mut files = Vec::new();
+    collect_existing_files(
+        &build_dir.join("scripts"),
+        &format!("{root_name}/bin"),
+        &mut files,
+    )?;
+    collect_existing_files(
+        &build_dir.join("libs"),
+        &format!("{root_name}/lib"),
+        &mut files,
+    )?;
+    collect_graph_distribution_libs(options, &format!("{root_name}/lib"), &mut files);
+    if files.is_empty() {
+        return Ok(false);
+    }
+
+    let mut emitted_dirs = HashSet::new();
+    for (source, name) in files {
+        if include_empty_dirs {
+            push_zip_parent_dirs(entries, &mut emitted_dirs, &name, dir_mode);
+        }
+        let data = std::fs::read(&source)
+            .map_err(|e| format!("Cannot read {}: {}", source.display(), e))?;
+        entries.push(ZipEntry::file(name, data, file_mode));
+    }
+    Ok(true)
+}
+
+fn collect_existing_files(
+    source_dir: &Path,
+    destination_dir: &str,
+    files: &mut Vec<(PathBuf, String)>,
+) -> Result<(), String> {
+    if !source_dir.exists() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(source_dir)
+        .map_err(|e| format!("Cannot read directory {}: {}", source_dir.display(), e))?
+    {
+        let entry = entry.map_err(|e| format!("Cannot read directory entry: {}", e))?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_existing_files(
+                &path,
+                &join_archive_path(destination_dir, &entry.file_name().to_string_lossy()),
+                files,
+            )?;
+            continue;
+        }
+        if !path.is_file() {
+            continue;
+        }
+        files.push((
+            path,
+            join_archive_path(destination_dir, &entry.file_name().to_string_lossy()),
+        ));
+    }
+    files.sort_unstable_by(|left, right| left.1.cmp(&right.1));
+    Ok(())
+}
+
+fn collect_graph_distribution_libs(
+    options: &std::collections::HashMap<String, String>,
+    destination_dir: &str,
+    files: &mut Vec<(PathBuf, String)>,
+) {
+    let Some(libs) = options.get("graph_distribution_libs") else {
+        return;
+    };
+    let mut seen = files
+        .iter()
+        .map(|(_, name)| name.clone())
+        .collect::<HashSet<_>>();
+    for path in std::env::split_paths(libs) {
+        if !path.is_file() {
+            continue;
+        }
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let entry_name = join_archive_path(destination_dir, file_name);
+        if seen.insert(entry_name.clone()) {
+            files.push((path, entry_name));
+        }
+    }
+    files.sort_unstable_by(|left, right| left.1.cmp(&right.1));
+}
+
+fn join_archive_path(parent: &str, child: &str) -> String {
+    let parent = parent.trim_end_matches('/');
+    if parent.is_empty() {
+        child.trim_start_matches('/').to_string()
+    } else {
+        format!("{}/{}", parent, child.trim_start_matches('/'))
+    }
+}
+
+fn collect_convention_archive_entries(
+    archive_path: &Path,
+    entries: &mut Vec<ZipEntry>,
+    file_mode: u32,
+    dir_mode: u32,
+) -> Result<bool, String> {
+    let Some(build_dir) = archive_path.parent().and_then(|path| path.parent()) else {
+        return Ok(false);
+    };
+    let Some(project_dir) = build_dir.parent() else {
+        return Ok(false);
+    };
+    let archive_name = archive_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    let mut files = Vec::new();
+    if archive_name.ends_with(".war") {
+        collect_existing_files(&project_dir.join("src/main/webapp"), "", &mut files)?;
+        collect_existing_files(
+            &build_dir.join("classes/java/main"),
+            "WEB-INF/classes",
+            &mut files,
+        )?;
+        collect_existing_files(
+            &build_dir.join("resources/main"),
+            "WEB-INF/classes",
+            &mut files,
+        )?;
+    } else if archive_name.ends_with(".ear") {
+        collect_existing_files(&project_dir.join("src/main/application"), "", &mut files)?;
+    } else if archive_name.ends_with("-sources.jar") {
+        collect_existing_files(&project_dir.join("src/main/java"), "", &mut files)?;
+        collect_existing_files(&project_dir.join("src/main/resources"), "", &mut files)?;
+    } else if archive_name.ends_with(".jar") {
+        collect_existing_files(&build_dir.join("classes/java/main"), "", &mut files)?;
+        collect_existing_files(&build_dir.join("resources/main"), "", &mut files)?;
+    }
+
+    if files.is_empty() {
+        return Ok(false);
+    }
+
+    let mut emitted_dirs = HashSet::new();
+    for existing in entries.iter().filter(|entry| entry.is_dir()) {
+        emitted_dirs.insert(existing.name.clone());
+    }
+    for (source, name) in files {
+        push_zip_parent_dirs(entries, &mut emitted_dirs, &name, dir_mode);
+        let data = std::fs::read(&source)
+            .map_err(|e| format!("Cannot read {}: {}", source.display(), e))?;
+        entries.push(ZipEntry::file(name, data, file_mode));
+    }
+    Ok(true)
+}
+
+fn distribution_root_name(archive_path: &Path) -> Option<String> {
+    let file_name = archive_path.file_name()?.to_str()?;
+    for suffix in [
+        ".tar.gz", ".tar.bz2", ".tgz", ".tbz2", ".tbz", ".zip", ".tar",
+    ] {
+        if let Some(root) = file_name.strip_suffix(suffix) {
+            return Some(root.to_string());
+        }
+    }
+    None
 }
 
 fn archive_duplicate_strategy(options: &std::collections::HashMap<String, String>) -> String {
@@ -536,13 +799,38 @@ impl JarTaskExecutor {
         let file_mode = archive_file_mode(options);
         let dir_mode = archive_dir_mode(options);
 
-        if !Self::collect_mapped_entries(
+        let used_mappings = Self::collect_mapped_entries(
             options,
             &mut entries,
             include_empty_dirs,
             file_mode,
             dir_mode,
-        )? {
+        )?;
+        let mapped_payload_entries = entries.iter().any(|entry| !is_manifest_entry(&entry.name));
+        let collected_convention_entries = if mapped_payload_entries {
+            false
+        } else {
+            collect_convention_archive_entries(jar_path, &mut entries, file_mode, dir_mode)?
+        };
+
+        if !used_mappings
+            && !collected_convention_entries
+            && !collect_application_distribution_zip_entries(
+                jar_path,
+                options,
+                &mut entries,
+                include_empty_dirs,
+                file_mode,
+                dir_mode,
+            )?
+            && !Self::collect_file_entries_with_inferred_root(
+                source_files,
+                &mut entries,
+                file_mode,
+                dir_mode,
+            )?
+        {
+            let mut emitted_dirs = HashSet::new();
             for source in source_files {
                 if !source.is_dir() {
                     let data = std::fs::read(source)
@@ -558,6 +846,7 @@ impl JarTaskExecutor {
                     source,
                     source,
                     &mut entries,
+                    &mut emitted_dirs,
                     include_empty_dirs,
                     file_mode,
                     dir_mode,
@@ -565,8 +854,20 @@ impl JarTaskExecutor {
             }
         }
 
-        if options.contains_key("manifest") || options.contains_key("mainClass") {
+        if has_manifest_options(options) {
             let manifest = Self::create_manifest(options);
+            entries.retain(|entry| !is_manifest_entry(&entry.name));
+            let mut emitted_dirs = entries
+                .iter()
+                .filter(|entry| entry.is_dir())
+                .map(|entry| entry.name.clone())
+                .collect::<HashSet<_>>();
+            push_zip_parent_dirs(
+                &mut entries,
+                &mut emitted_dirs,
+                "META-INF/MANIFEST.MF",
+                dir_mode,
+            );
             entries.push(ZipEntry::file("META-INF/MANIFEST.MF", manifest, file_mode));
         }
 
@@ -615,38 +916,52 @@ impl JarTaskExecutor {
                 entries.push(new_entry);
             }
         } else {
-            for source in source_files {
-                if !source.is_dir() {
-                    let data = std::fs::read(source)
-                        .map_err(|e| format!("Cannot read {}: {}", source.display(), e))?;
-                    let name = source
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("unknown");
-                    entries.retain(|entry| entry.name != name);
-                    entries.push(ZipEntry::file(name, data, file_mode));
-                    continue;
-                }
-
-                let mut new_entries = Vec::new();
-                Self::collect_files(
-                    source,
-                    source,
-                    &mut new_entries,
-                    include_empty_dirs,
-                    file_mode,
-                    dir_mode,
-                )?;
-                for new_entry in new_entries {
+            if Self::collect_file_entries_with_inferred_root(
+                source_files,
+                &mut mapped_entries,
+                file_mode,
+                dir_mode,
+            )? {
+                for new_entry in mapped_entries {
                     entries.retain(|entry| entry.name != new_entry.name);
                     entries.push(new_entry);
+                }
+            } else {
+                let mut emitted_dirs = HashSet::new();
+                for source in source_files {
+                    if !source.is_dir() {
+                        let data = std::fs::read(source)
+                            .map_err(|e| format!("Cannot read {}: {}", source.display(), e))?;
+                        let name = source
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("unknown");
+                        entries.retain(|entry| entry.name != name);
+                        entries.push(ZipEntry::file(name, data, file_mode));
+                        continue;
+                    }
+
+                    let mut new_entries = Vec::new();
+                    Self::collect_files(
+                        source,
+                        source,
+                        &mut new_entries,
+                        &mut emitted_dirs,
+                        include_empty_dirs,
+                        file_mode,
+                        dir_mode,
+                    )?;
+                    for new_entry in new_entries {
+                        entries.retain(|entry| entry.name != new_entry.name);
+                        entries.push(new_entry);
+                    }
                 }
             }
         }
 
-        if options.contains_key("manifest") || options.contains_key("mainClass") {
+        if has_manifest_options(options) {
             let manifest = Self::create_manifest(options);
-            entries.retain(|entry| entry.name != "META-INF/MANIFEST.MF");
+            entries.retain(|entry| !is_manifest_entry(&entry.name));
             entries.push(ZipEntry::file("META-INF/MANIFEST.MF", manifest, file_mode));
         }
 
@@ -660,6 +975,43 @@ impl JarTaskExecutor {
 
         Ok(())
     }
+}
+
+fn has_manifest_options(options: &std::collections::HashMap<String, String>) -> bool {
+    options.contains_key("manifest")
+        || options.contains_key("mainClass")
+        || options.contains_key("classpath")
+        || options.keys().any(|key| key.starts_with("manifest."))
+}
+
+fn is_manifest_entry(name: &str) -> bool {
+    name.eq_ignore_ascii_case("META-INF/MANIFEST.MF")
+}
+
+fn common_file_parent(source_files: &[PathBuf]) -> Option<PathBuf> {
+    let mut root = source_files.first()?.parent()?.to_path_buf();
+    for source in source_files.iter().skip(1) {
+        let parent = source.parent()?;
+        while !parent.starts_with(&root) {
+            if !root.pop() {
+                return None;
+            }
+        }
+    }
+    Some(root)
+}
+
+fn looks_like_archive_source_root(root: &Path) -> bool {
+    let components = root
+        .components()
+        .filter_map(|component| component.as_os_str().to_str())
+        .collect::<Vec<_>>();
+    if components.len() < 2 {
+        return false;
+    }
+    components.windows(2).any(|pair| {
+        pair == ["src", "dist"] || pair == ["classes", "java"] || pair == ["resources", "main"]
+    }) || components.iter().any(|component| *component == "src")
 }
 
 #[cfg(test)]
@@ -909,6 +1261,94 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(entries.contains(&"nested/app.txt".to_string()));
         assert!(!entries.contains(&"app.txt".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_zip_infers_relative_root_for_file_only_archive_sources() {
+        let tmp = TempDir::new().unwrap();
+        let dist_dir = tmp.path().join("src/dist");
+        let out_dir = tmp.path().join("out");
+        let run_script = dist_dir.join("bin/run.sh");
+        let config = dist_dir.join("conf/app.properties");
+        fs::create_dir_all(run_script.parent().unwrap()).unwrap();
+        fs::create_dir_all(config.parent().unwrap()).unwrap();
+        fs::write(&run_script, b"run").unwrap();
+        fs::write(&config, b"name=app").unwrap();
+
+        let executor = JarTaskExecutor::new();
+        let mut input = TaskInput::new("Zip");
+        input.source_files.push(run_script);
+        input.source_files.push(config);
+        input.target_dir = out_dir;
+        input
+            .options
+            .insert("jarName".to_string(), "corpus.zip".to_string());
+        input
+            .options
+            .insert("include_empty_dirs".to_string(), "false".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        let entries = JarTaskExecutor::read_existing_entries(result.output_files.first().unwrap())
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect::<Vec<_>>();
+        assert!(entries.contains(&"bin/".to_string()));
+        assert!(entries.contains(&"bin/run.sh".to_string()));
+        assert!(entries.contains(&"conf/".to_string()));
+        assert!(entries.contains(&"conf/app.properties".to_string()));
+        assert!(!entries.contains(&"run.sh".to_string()));
+        assert!(!entries.contains(&"app.properties".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_jar_synthesizes_missing_manifest_mapping_from_options() {
+        let tmp = TempDir::new().unwrap();
+        let src_dir = tmp.path().join("classes");
+        let out_dir = tmp.path().join("out");
+        let missing_manifest = tmp.path().join("build/tmp/jar/MANIFEST.MF");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::write(src_dir.join("App.class"), b"class").unwrap();
+
+        let mapping = format!(
+            "{}>{}>F,{}>{}>F",
+            URL_SAFE_NO_PAD.encode(src_dir.join("App.class").to_string_lossy().as_bytes()),
+            URL_SAFE_NO_PAD.encode("App.class"),
+            URL_SAFE_NO_PAD.encode(missing_manifest.to_string_lossy().as_bytes()),
+            URL_SAFE_NO_PAD.encode("META-INF/MANIFEST.MF")
+        );
+        let executor = JarTaskExecutor::new();
+        let mut input = TaskInput::new("Jar");
+        input.target_dir = out_dir;
+        input
+            .options
+            .insert("jarName".to_string(), "mapped.jar".to_string());
+        input
+            .options
+            .insert("copy_file_mappings".to_string(), mapping);
+        input
+            .options
+            .insert("manifest.Manifest-Version".to_string(), "1.0".to_string());
+        input.options.insert(
+            "manifest.Implementation-Title".to_string(),
+            "demo".to_string(),
+        );
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        let entries =
+            JarTaskExecutor::read_existing_entries(result.output_files.first().unwrap()).unwrap();
+        let manifest = entries
+            .iter()
+            .find(|entry| entry.name == "META-INF/MANIFEST.MF")
+            .expect("manifest entry should be generated");
+        let manifest_text = String::from_utf8(manifest.data.clone()).unwrap();
+        assert!(manifest_text.contains("Manifest-Version: 1.0"));
+        assert!(manifest_text.contains("Implementation-Title: demo"));
+        assert!(entries.iter().any(|entry| entry.name == "App.class"));
     }
 
     #[tokio::test]
