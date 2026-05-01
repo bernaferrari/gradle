@@ -192,9 +192,16 @@ public class RustAuthoritativeBuildExecutionAction implements BuildWorkExecutor 
         taskSelectionSnapshot.recordSelectedTasks(
             scheduledTaskGraph.taskPaths,
             scheduledTaskGraph.dependencies,
+            scheduledTaskGraph.taskReferences,
             scheduledTaskGraph.taskContracts
         );
-        boolean refreshed = bootstrapClient.refreshBuildPlanShadow(buildId);
+        boolean refreshed = bootstrapClient.refreshBuildPlanShadow(
+            buildId,
+            scheduledTaskGraph.taskContracts,
+            scheduledTaskGraph.taskReferences,
+            "finalized-execution-plan-inline",
+            "gradle-finalized-execution-plan-inline"
+        );
         if (!refreshed) {
             LOGGER.warn("[substrate:run-build] build-plan shadow refresh failed for {}", buildId);
         }
@@ -203,6 +210,7 @@ public class RustAuthoritativeBuildExecutionAction implements BuildWorkExecutor 
 
     private static ScheduledTaskGraph captureScheduledTaskGraph(FinalizedExecutionPlan plan) {
         List<String> taskPaths = new ArrayList<>();
+        List<Task> taskReferences = new ArrayList<>();
         List<BuildPlanTask> taskContracts = new ArrayList<>();
         Map<String, List<String>> dependencies = new LinkedHashMap<>();
         Map<Node, String> nodePaths = new LinkedHashMap<>();
@@ -214,6 +222,7 @@ public class RustAuthoritativeBuildExecutionAction implements BuildWorkExecutor 
                     Task task = ((LocalTaskNode) node).getTask();
                     String taskPath = task.getPath();
                     taskPaths.add(taskPath);
+                    taskReferences.add(task);
                     nodePaths.put(node, taskPath);
                     nodeTasks.put(node, task);
                 }
@@ -234,20 +243,23 @@ public class RustAuthoritativeBuildExecutionAction implements BuildWorkExecutor 
             }
         });
 
-        return new ScheduledTaskGraph(taskPaths, dependencies, taskContracts);
+        return new ScheduledTaskGraph(taskPaths, taskReferences, dependencies, taskContracts);
     }
 
     private static final class ScheduledTaskGraph {
         private final List<String> taskPaths;
+        private final List<Task> taskReferences;
         private final Map<String, List<String>> dependencies;
         private final List<BuildPlanTask> taskContracts;
 
         private ScheduledTaskGraph(
             List<String> taskPaths,
+            List<Task> taskReferences,
             Map<String, List<String>> dependencies,
             List<BuildPlanTask> taskContracts
         ) {
             this.taskPaths = taskPaths;
+            this.taskReferences = taskReferences;
             this.dependencies = dependencies;
             this.taskContracts = taskContracts;
         }

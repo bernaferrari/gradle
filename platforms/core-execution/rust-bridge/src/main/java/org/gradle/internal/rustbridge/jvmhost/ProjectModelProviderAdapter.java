@@ -976,15 +976,34 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     }
 
     private static String fileCollectionPathString(@Nullable Object files) {
-        if (!(files instanceof FileCollection)) {
+        if (files == null) {
             return "";
         }
-        try {
-            return ((FileCollection) files).getAsPath();
-        } catch (RuntimeException e) {
-            LOGGER.debug("[substrate-jvmhost] Failed to read file collection path string", e);
-            return String.join(File.pathSeparator, fileCollectionPaths((FileCollection) files));
+        if (files instanceof FileCollection) {
+            try {
+                return ((FileCollection) files).getAsPath();
+            } catch (RuntimeException e) {
+                LOGGER.debug("[substrate-jvmhost] Failed to read file collection path string", e);
+                return String.join(File.pathSeparator, fileCollectionPaths((FileCollection) files));
+            }
         }
+        Object asPath = invokeOptional(files, "getAsPath");
+        if (asPath != null && !asPath.toString().isEmpty()) {
+            return asPath.toString();
+        }
+        Object rawFiles = invokeOptional(files, "getFiles");
+        if (!(rawFiles instanceof Iterable)) {
+            return "";
+        }
+        TreeSet<String> paths = new TreeSet<>();
+        for (Object file : (Iterable<?>) rawFiles) {
+            if (file instanceof File) {
+                paths.add(((File) file).getAbsolutePath());
+            } else if (file != null && !file.toString().isEmpty()) {
+                paths.add(new File(file.toString()).getAbsolutePath());
+            }
+        }
+        return String.join(File.pathSeparator, paths);
     }
 
     private static String filePath(@Nullable Object value) {
@@ -1345,6 +1364,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     private static Object invoke(Object target, String methodName) {
         try {
             Method method = target.getClass().getMethod(methodName);
+            method.setAccessible(true);
             return method.invoke(target);
         } catch (IllegalAccessException e) {
             throw new IllegalStateException("Cannot access " + target.getClass().getName() + "." + methodName, e);
@@ -1360,6 +1380,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     private static Object invoke(Object target, String methodName, Class<?> argumentType, Object argument) {
         try {
             Method method = target.getClass().getMethod(methodName, argumentType);
+            method.setAccessible(true);
             return method.invoke(target, argument);
         } catch (IllegalAccessException e) {
             throw new IllegalStateException("Cannot access " + target.getClass().getName() + "." + methodName, e);
@@ -1378,6 +1399,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         }
         try {
             Method method = target.getClass().getMethod(methodName);
+            method.setAccessible(true);
             return method.invoke(target);
         } catch (IllegalAccessException | InvocationTargetException | NoSuchMethodException | RuntimeException e) {
             LOGGER.debug("[substrate-jvmhost] Optional method unavailable: {}.{}", target.getClass().getName(), methodName, e);

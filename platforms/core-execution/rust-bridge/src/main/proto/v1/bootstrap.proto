@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package gradle.substrate.v1;
 
+import "v1/buildplan.proto";
+
 option java_multiple_files = true;
 option java_package = "gradle.substrate.v1";
 
@@ -28,7 +30,10 @@ message InitBuildResponse {
   string protocol_version = 3;
   int32 max_parallelism = 4;
 }
-message RefreshBuildPlanShadowRequest { string build_id = 1; }
+message RefreshBuildPlanShadowRequest {
+  string build_id = 1;
+  BuildPlan inline_plan = 2;
+}
 message RefreshBuildPlanShadowResponse {
   string build_id = 1;
   bool refreshed = 2;
