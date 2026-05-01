@@ -93,7 +93,7 @@ class RepositoryChainArtifactResolver implements ArtifactResolver {
         ModuleComponentArtifactIdentifier artifactId = ((ModuleComponentArtifactMetadata) artifact).getId();
         IvyArtifactName artifactName = artifact.getName();
         String extension = artifactName.getExtension();
-        if (!"jar".equals(extension)) {
+        if (extension == null || extension.isEmpty()) {
             return null;
         }
         if (!artifactId.getComponentIdentifier().getModule().equals(artifactName.getName())) {

@@ -200,6 +200,40 @@ public class SubstrateE2ETest {
         assertArrayEquals(bytes, Files.readAllBytes(resolvedArtifact.toPath()));
     }
 
+    @Test
+    public void dependencyArtifactReadThroughPreservesArtifactExtension() throws Exception {
+        Path sourceArtifact = socketDirectory.resolve("demo-1.2.3-debug.aar");
+        byte[] bytes = "aar bytes from rust store".getBytes(StandardCharsets.UTF_8);
+        Files.write(sourceArtifact, bytes);
+
+        RustDependencyResolutionClient dependencyClient = new RustDependencyResolutionClient(client);
+        boolean accepted = dependencyClient.addArtifactToCacheStrict(
+            "org.example",
+            "demo",
+            "1.2.3",
+            "debug",
+            "aar",
+            sourceArtifact.toString(),
+            bytes.length,
+            ""
+        );
+        assertTrue("Rust daemon should accept non-JAR artifact cache registration", accepted);
+
+        RustArtifactCacheReadThrough readThrough = new RustArtifactCacheReadThrough(dependencyClient);
+        File resolvedArtifact = readThrough.findCachedArtifact("org.example", "demo", "1.2.3", "debug", "aar");
+        File jarArtifact = readThrough.findCachedArtifact("org.example", "demo", "1.2.3", "debug", "jar");
+
+        assertNotNull("Read-through should resolve non-JAR artifact from Rust cache", resolvedArtifact);
+        assertNull("Read-through must not return an AAR for a JAR request", jarArtifact);
+        assertTrue(resolvedArtifact.isFile());
+        assertTrue(
+            "Resolved artifact should come from the daemon artifact store",
+            resolvedArtifact.toPath().startsWith(artifactStoreDirectory)
+        );
+        assertTrue("Resolved artifact path should preserve extension", resolvedArtifact.getName().endsWith(".aar"));
+        assertArrayEquals(bytes, Files.readAllBytes(resolvedArtifact.toPath()));
+    }
+
     // --- Execution Plan Service ---
 
     @Test
