@@ -238,6 +238,66 @@ pub(super) fn parse_unix_mode(value: Option<&String>) -> Option<u32> {
     (parsed <= 0o7777).then_some(parsed)
 }
 
+pub(super) fn inferred_relative_source_path(source: &Path) -> PathBuf {
+    if let Some(root) = inferred_source_root(source) {
+        if let Ok(relative) = source.strip_prefix(root) {
+            return relative.to_path_buf();
+        }
+    }
+    PathBuf::from(source.file_name().unwrap_or_default())
+}
+
+pub(super) fn inferred_source_root(source: &Path) -> Option<PathBuf> {
+    let components = source
+        .components()
+        .map(|component| component.as_os_str().to_os_string())
+        .collect::<Vec<_>>();
+    let names = components
+        .iter()
+        .map(|component| component.to_string_lossy())
+        .collect::<Vec<_>>();
+
+    for (index, name) in names.iter().enumerate() {
+        if name == "src" {
+            let mut end = index + 2;
+            if matches!(
+                names.get(index + 1).map(|s| s.as_ref()),
+                Some("main" | "test")
+            ) && matches!(
+                names.get(index + 2).map(|s| s.as_ref()),
+                Some("java" | "resources" | "webapp")
+            ) {
+                end = index + 3;
+            }
+            if components.len() > end {
+                return Some(components[..end].iter().collect());
+            }
+        }
+        if name == "build"
+            && matches!(names.get(index + 1).map(|s| s.as_ref()), Some("classes"))
+            && matches!(names.get(index + 2).map(|s| s.as_ref()), Some("java"))
+            && matches!(
+                names.get(index + 3).map(|s| s.as_ref()),
+                Some("main" | "test")
+            )
+            && components.len() > index + 4
+        {
+            return Some(components[..index + 4].iter().collect());
+        }
+        if name == "build"
+            && matches!(names.get(index + 1).map(|s| s.as_ref()), Some("resources"))
+            && matches!(
+                names.get(index + 2).map(|s| s.as_ref()),
+                Some("main" | "test")
+            )
+            && components.len() > index + 3
+        {
+            return Some(components[..index + 3].iter().collect());
+        }
+    }
+    None
+}
+
 pub(super) fn apply_unix_mode(path: &Path, mode: Option<u32>) -> Result<(), String> {
     let Some(mode) = mode else {
         return Ok(());
@@ -539,16 +599,16 @@ impl TaskExecutor for CopyTaskExecutor {
                     }
                 }
             } else {
-                let relative = Path::new(source.file_name().unwrap_or_default());
+                let relative = inferred_relative_source_path(source);
                 if !path_included(
-                    relative,
+                    &relative,
                     &include_patterns,
                     &exclude_patterns,
                     case_sensitive,
                 ) {
                     continue;
                 }
-                let dest = input.target_dir.join(relative);
+                let dest = input.target_dir.join(&relative);
                 if !seen_destinations.insert(dest.clone()) {
                     match duplicate_strategy.as_str() {
                         "EXCLUDE" => continue,

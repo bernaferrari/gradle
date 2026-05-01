@@ -1,11 +1,11 @@
 use tokio::process::Command;
 
-use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
+use crate::server::task_executor::{option_string_list, TaskExecutor, TaskInput, TaskResult};
 
 /// Executes a simple external process task.
 ///
 /// This intentionally supports only a narrow, deterministic Exec contract:
-/// executable, whitespace-separated args, working directory, and ignore-exit-value.
+/// executable, exact argument vector, working directory, and ignore-exit-value.
 pub struct ExecTaskExecutor;
 
 impl Default for ExecTaskExecutor {
@@ -45,9 +45,7 @@ impl TaskExecutor for ExecTaskExecutor {
             .unwrap_or(false);
 
         let mut command = Command::new(executable);
-        if let Some(args) = input.options.get("args") {
-            command.args(args.split_whitespace());
-        }
+        command.args(option_string_list(&input.options, "args_json", "args"));
         if let Some(working_dir) = input.options.get("working_dir") {
             if !working_dir.trim().is_empty() {
                 command.current_dir(working_dir);
@@ -128,5 +126,26 @@ mod tests {
         let result = executor.execute(&input).await;
 
         assert!(result.success, "{}", result.error_message);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_exec_preserves_json_args_with_spaces() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("created with space.txt");
+        let executor = ExecTaskExecutor::new();
+        let mut input = TaskInput::new("Exec");
+        input
+            .options
+            .insert("executable".to_string(), "/usr/bin/touch".to_string());
+        input.options.insert(
+            "args_json".to_string(),
+            serde_json::to_string(&vec![target.to_string_lossy().to_string()]).unwrap(),
+        );
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert!(target.exists());
     }
 }

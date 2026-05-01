@@ -3,7 +3,8 @@ use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 
 use crate::server::task_executor::copy::{
-    dir_permission_mode, file_permission_mode, include_empty_dirs, parse_copy_file_mappings,
+    dir_permission_mode, file_permission_mode, include_empty_dirs, inferred_relative_source_path,
+    parse_copy_file_mappings,
 };
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
@@ -152,6 +153,7 @@ fn collect_entries(
     let mut entries = Vec::new();
     let mappings = parse_copy_file_mappings(options.get("copy_file_mappings"))?;
     if !mappings.is_empty() {
+        let mut emitted_dirs = HashSet::new();
         for mapping in mappings {
             if !mapping.source.exists() {
                 return Err(format!(
@@ -162,15 +164,11 @@ fn collect_entries(
             let name = normalize_entry_path(&mapping.relative_path);
             if mapping.is_dir {
                 if include_empty_dirs {
-                    entries.push(TarEntry {
-                        name,
-                        data: Vec::new(),
-                        is_dir: true,
-                        mode: dir_mode,
-                    });
+                    push_tar_dir_entry(&mut entries, &mut emitted_dirs, &name, dir_mode);
                 }
                 continue;
             }
+            push_tar_parent_dirs(&mut entries, &mut emitted_dirs, &name, dir_mode);
             entries.push(TarEntry {
                 name,
                 data: std::fs::read(&mapping.source)
@@ -180,37 +178,218 @@ fn collect_entries(
             });
         }
     } else {
-        for source in source_files {
-            if !source.exists() {
-                return Err(format!("Source file not found: {}", source.display()));
-            }
-            if source.is_dir() {
-                collect_dir(
-                    source,
-                    source,
-                    &mut entries,
-                    include_empty_dirs,
-                    file_mode,
-                    dir_mode,
-                )?;
-            } else {
-                let name = source
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .ok_or_else(|| format!("Invalid file name: {}", source.display()))?;
-                entries.push(TarEntry {
-                    name: normalize_entry_name(name),
-                    data: std::fs::read(source)
-                        .map_err(|e| format!("Cannot read {}: {}", source.display(), e))?,
-                    is_dir: false,
-                    mode: file_mode,
-                });
+        if !collect_application_distribution_tar_entries(
+            options,
+            &mut entries,
+            include_empty_dirs,
+            file_mode,
+            dir_mode,
+        )? {
+            let mut emitted_dirs = HashSet::new();
+            for source in source_files {
+                if !source.exists() {
+                    return Err(format!("Source file not found: {}", source.display()));
+                }
+                if source.is_dir() {
+                    collect_dir(
+                        source,
+                        source,
+                        &mut entries,
+                        include_empty_dirs,
+                        file_mode,
+                        dir_mode,
+                    )?;
+                } else {
+                    let relative = inferred_relative_source_path(source);
+                    let name = normalize_entry_path(&relative);
+                    push_tar_parent_dirs(&mut entries, &mut emitted_dirs, &name, dir_mode);
+                    entries.push(TarEntry {
+                        name,
+                        data: std::fs::read(source)
+                            .map_err(|e| format!("Cannot read {}: {}", source.display(), e))?,
+                        is_dir: false,
+                        mode: file_mode,
+                    });
+                }
             }
         }
     }
     entries = resolve_duplicate_entries(entries, duplicate_strategy)?;
     entries.sort_unstable_by(|left, right| left.name.cmp(&right.name));
     Ok(entries)
+}
+
+fn push_tar_parent_dirs(
+    entries: &mut Vec<TarEntry>,
+    emitted_dirs: &mut HashSet<String>,
+    entry_name: &str,
+    dir_mode: u32,
+) {
+    let mut prefix = String::new();
+    for segment in entry_name.split('/').filter(|segment| !segment.is_empty()) {
+        if !prefix.is_empty() {
+            prefix.push('/');
+        }
+        prefix.push_str(segment);
+        if prefix == entry_name.trim_end_matches('/') {
+            break;
+        }
+        push_tar_dir_entry(entries, emitted_dirs, &prefix, dir_mode);
+    }
+}
+
+fn push_tar_dir_entry(
+    entries: &mut Vec<TarEntry>,
+    emitted_dirs: &mut HashSet<String>,
+    name: &str,
+    dir_mode: u32,
+) {
+    let normalized = normalize_entry_name(name);
+    if normalized.is_empty() || !emitted_dirs.insert(normalized.clone()) {
+        return;
+    }
+    entries.push(TarEntry {
+        name: normalized,
+        data: Vec::new(),
+        is_dir: true,
+        mode: dir_mode,
+    });
+}
+
+fn collect_application_distribution_tar_entries(
+    options: &std::collections::HashMap<String, String>,
+    entries: &mut Vec<TarEntry>,
+    include_empty_dirs: bool,
+    file_mode: u32,
+    dir_mode: u32,
+) -> Result<bool, String> {
+    let Some(archive_file) = options.get("archive_file") else {
+        return Ok(false);
+    };
+    let archive_path = Path::new(archive_file);
+    if archive_path
+        .parent()
+        .and_then(|path| path.file_name())
+        .and_then(|name| name.to_str())
+        != Some("distributions")
+    {
+        return Ok(false);
+    }
+    let Some(root_name) = distribution_root_name(archive_path) else {
+        return Ok(false);
+    };
+    let Some(build_dir) = archive_path.parent().and_then(|path| path.parent()) else {
+        return Ok(false);
+    };
+
+    let mut files = Vec::new();
+    collect_existing_files(
+        &build_dir.join("scripts"),
+        &format!("{root_name}/bin"),
+        &mut files,
+    )?;
+    collect_existing_files(
+        &build_dir.join("libs"),
+        &format!("{root_name}/lib"),
+        &mut files,
+    )?;
+    collect_graph_distribution_libs(options, &format!("{root_name}/lib"), &mut files);
+    if files.is_empty() {
+        return Ok(false);
+    }
+
+    let mut emitted_dirs = HashSet::new();
+    for (source, name) in files {
+        if include_empty_dirs {
+            push_tar_parent_dirs(entries, &mut emitted_dirs, &name, dir_mode);
+        }
+        entries.push(TarEntry {
+            name,
+            data: std::fs::read(&source)
+                .map_err(|e| format!("Cannot read {}: {}", source.display(), e))?,
+            is_dir: false,
+            mode: file_mode,
+        });
+    }
+    Ok(true)
+}
+
+fn collect_graph_distribution_libs(
+    options: &std::collections::HashMap<String, String>,
+    destination_dir: &str,
+    files: &mut Vec<(PathBuf, String)>,
+) {
+    let Some(libs) = options.get("graph_distribution_libs") else {
+        return;
+    };
+    let mut seen = files
+        .iter()
+        .map(|(_, name)| name.clone())
+        .collect::<HashSet<_>>();
+    for path in std::env::split_paths(libs) {
+        if !path.is_file() {
+            continue;
+        }
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let entry_name = format!("{}/{}", destination_dir.trim_end_matches('/'), file_name);
+        if seen.insert(entry_name.clone()) {
+            files.push((path, entry_name));
+        }
+    }
+    files.sort_unstable_by(|left, right| left.1.cmp(&right.1));
+}
+
+fn collect_existing_files(
+    source_dir: &Path,
+    destination_dir: &str,
+    files: &mut Vec<(PathBuf, String)>,
+) -> Result<(), String> {
+    if !source_dir.exists() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(source_dir)
+        .map_err(|e| format!("Cannot read directory {}: {}", source_dir.display(), e))?
+    {
+        let entry = entry.map_err(|e| format!("Cannot read directory entry: {}", e))?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_existing_files(
+                &path,
+                &format!(
+                    "{}/{}",
+                    destination_dir.trim_end_matches('/'),
+                    entry.file_name().to_string_lossy()
+                ),
+                files,
+            )?;
+            continue;
+        }
+        if !path.is_file() {
+            continue;
+        }
+        files.push((
+            path,
+            format!(
+                "{}/{}",
+                destination_dir.trim_end_matches('/'),
+                entry.file_name().to_string_lossy()
+            ),
+        ));
+    }
+    files.sort_unstable_by(|left, right| left.1.cmp(&right.1));
+    Ok(())
+}
+
+fn distribution_root_name(archive_path: &Path) -> Option<String> {
+    let file_name = archive_path.file_name()?.to_str()?;
+    for suffix in [".tar.gz", ".tar.bz2", ".tgz", ".tbz2", ".tbz", ".tar"] {
+        if let Some(root) = file_name.strip_suffix(suffix) {
+            return Some(root.to_string());
+        }
+    }
+    None
 }
 
 fn resolve_duplicate_entries(

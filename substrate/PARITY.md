@@ -52,6 +52,14 @@
 - Native `Javadoc` lowering captures Java home, source files, classpath,
   destination directory, title, encoding, max memory, and timestamp behavior,
   and lowers only when source files and declared outputs are present.
+- The Rust task graph enriches selected plans with graph-derived project
+  classpaths and distribution dependency JARs when the JVM bridge exposes the
+  dependency edge but omits the materialized file path. This keeps
+  multiproject Java compile and application distribution packaging inside the
+  Rust-controlled graph.
+- A narrow native `WriteFile` executor supports static single-output report
+  tasks only when the JVM bridge can extract an exact literal `writeText(...)`
+  contract from the build script. Arbitrary task actions still fail closed.
 - The native-ready default gate
   `org.gradle.rust.substrate.runbuild.native-ready-default=true` tries Rust
   RunBuild first and delegates back to JVM execution when the selected plan is
@@ -173,9 +181,10 @@
 - Kotlin/Groovy DSL evaluation and legacy plugin execution remain JVM-host
   compatibility islands.
 - More task types need native-ready contract capture before broad no-fallback
-  execution is realistic, especially arbitrary copy filters/actions beyond
-  direct expand, Gradle archive metadata edge cases beyond entry inventory, and
-  native symlink copy/archive semantics.
+  execution is realistic, especially arbitrary task actions beyond static
+  literal file writes, arbitrary copy filters/actions beyond direct expand,
+  Gradle archive metadata edge cases beyond entry inventory, and native symlink
+  copy/archive semantics.
 - Rust build-session hashing can now shadow or authoritatively replace the
   local `DefaultFileHasher` delegate while preserving Gradle's global/user-home
   VFS scopes. File-collection fingerprinting can now run authoritatively for
@@ -202,6 +211,8 @@
 - `cargo check -p gradle-substrate-daemon`
 - `cargo test -p gradle-substrate-daemon --test hash_compatibility_test`
 - `cargo test -p gradle-substrate-daemon dag_executor -- --nocapture`
+- `cargo test -p gradle-substrate-daemon task_graph -- --nocapture`
+- `cargo test -p gradle-substrate-daemon writes_static_text_to_declared_output_file -- --nocapture`
 - `cargo test -p gradle-substrate-daemon --test build_plan_shadow_test refreshed_native_ready_shadow_plan_runs_java_lifecycle_without_jvm_fallback -- --exact`
 - `./gradlew :core:test --tests org.gradle.execution.RustAuthoritativeBuildExecutionActionTest -x :distributions-core:generateLicenseFile`
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --verbose`

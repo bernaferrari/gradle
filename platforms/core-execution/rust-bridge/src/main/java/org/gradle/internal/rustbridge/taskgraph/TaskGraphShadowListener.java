@@ -1,11 +1,14 @@
 package org.gradle.internal.rustbridge.taskgraph;
 
+import gradle.substrate.v1.BuildPlanTask;
+
 import org.gradle.api.Task;
 import org.gradle.api.execution.TaskExecutionGraph;
 import org.gradle.api.execution.TaskExecutionGraphListener;
 import org.gradle.internal.rustbridge.bootstrap.RustBootstrapClient;
 import org.gradle.internal.rustbridge.eventstream.BuildIdHolder;
 import org.gradle.internal.rustbridge.jvmhost.BuildPlanTaskSelectionSnapshot;
+import org.gradle.internal.rustbridge.jvmhost.ProjectModelProviderAdapter;
 import org.gradle.internal.service.scopes.Scope;
 import org.gradle.internal.service.scopes.ServiceScope;
 import org.jspecify.annotations.Nullable;
@@ -59,17 +62,19 @@ public class TaskGraphShadowListener implements TaskExecutionGraphListener {
         List<Task> tasks = graph.getAllTasks();
         List<String> taskPaths = new ArrayList<>();
         Map<String, List<String>> taskDependencies = new HashMap<>();
+        List<BuildPlanTask> taskContracts = new ArrayList<>();
 
         for (Task task : tasks) {
             String path = task.getPath();
             taskPaths.add(path);
             Set<Task> deps = graph.getDependencies(task);
-            taskDependencies.put(path,
-                deps.stream().map(Task::getPath).collect(Collectors.toList()));
+            List<String> dependencyPaths = deps.stream().map(Task::getPath).collect(Collectors.toList());
+            taskDependencies.put(path, dependencyPaths);
+            taskContracts.add(ProjectModelProviderAdapter.toBuildPlanTask(task, dependencyPaths));
         }
 
         if (taskSelectionSnapshot != null) {
-            taskSelectionSnapshot.recordSelectedTasks(taskPaths, taskDependencies);
+            taskSelectionSnapshot.recordSelectedTasks(taskPaths, taskDependencies, taskContracts);
         }
 
         String activeBuildId = BuildIdHolder.getBuildId();

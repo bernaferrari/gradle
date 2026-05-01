@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use tokio::process::Command;
 
-use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
+use crate::server::task_executor::{option_string_list, TaskExecutor, TaskInput, TaskResult};
 
 /// Executes a Gradle JavaExec task from an explicit, native-ready contract.
 pub struct JavaExecTaskExecutor;
@@ -23,12 +23,6 @@ impl JavaExecTaskExecutor {
             Some(home) => Path::new(home).join("bin").join(java_binary_name()),
             None => PathBuf::from(java_binary_name()),
         }
-    }
-
-    fn split_args(value: Option<&String>) -> Vec<&str> {
-        value
-            .map(|args| args.split_whitespace().collect())
-            .unwrap_or_default()
     }
 }
 
@@ -76,11 +70,15 @@ impl TaskExecutor for JavaExecTaskExecutor {
         let java = Self::java_executable(input.options.get("java_home").map(String::as_str));
 
         let mut command = Command::new(&java);
-        command.args(Self::split_args(input.options.get("jvm_args")));
+        command.args(option_string_list(
+            &input.options,
+            "jvm_args_json",
+            "jvm_args",
+        ));
         command.arg("-cp");
         command.arg(classpath);
         command.arg(main_class);
-        command.args(Self::split_args(input.options.get("args")));
+        command.args(option_string_list(&input.options, "args_json", "args"));
         if let Some(working_dir) = input.options.get("working_dir") {
             if !working_dir.trim().is_empty() {
                 command.current_dir(working_dir);
@@ -196,13 +194,20 @@ mod tests {
             .options
             .insert("main_class".to_string(), "Tool".to_string());
         input.options.insert(
-            "args".to_string(),
-            format!("{} native-javaexec", output.to_string_lossy()),
+            "args_json".to_string(),
+            serde_json::to_string(&vec![
+                output.to_string_lossy().to_string(),
+                "native javaexec with spaces".to_string(),
+            ])
+            .unwrap(),
         );
 
         let result = executor.execute(&input).await;
 
         assert!(result.success, "{}", result.error_message);
-        assert_eq!(std::fs::read_to_string(output).unwrap(), "native-javaexec");
+        assert_eq!(
+            std::fs::read_to_string(output).unwrap(),
+            "native javaexec with spaces"
+        );
     }
 }

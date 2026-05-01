@@ -173,6 +173,26 @@ fn build_task_input(task_type: &str, context_json: Option<&String>) -> TaskInput
     input
 }
 
+fn declared_outputs_present(context_json: Option<&String>) -> bool {
+    let Some(json) = context_json else {
+        return true;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+        return true;
+    };
+    let Some(outputs) = value.get("output_files").and_then(|v| v.as_array()) else {
+        return true;
+    };
+    if outputs.is_empty() {
+        return true;
+    }
+    outputs
+        .iter()
+        .filter_map(|v| v.as_str())
+        .filter(|path| !path.is_empty())
+        .all(|path| std::path::Path::new(path).exists())
+}
+
 /// Result from a spawned task execution, sent back via channel.
 struct TaskExecResult {
     task_path: String,
@@ -712,6 +732,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                     .get(&task_path)
                     .cloned()
                     .or_else(|| self.task_execution_context(&build_id_str, &task_path));
+                let outputs_present = declared_outputs_present(context_json.as_ref());
                 let work_meta = context_json.as_ref().and_then(|json| {
                     serde_json::from_str::<serde_json::Value>(json)
                         .ok()
@@ -802,7 +823,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                         .unwrap_or(crate::proto::PlanAction::Unknown);
 
                     match action {
-                        crate::proto::PlanAction::SkipUpToDate => {
+                        crate::proto::PlanAction::SkipUpToDate if outputs_present => {
                             // Mark task as UP-TO-DATE without executing.
                             self.notify_task_finished(Request::new(NotifyTaskFinishedRequest {
                                 build_id: build_id_str.clone(),
