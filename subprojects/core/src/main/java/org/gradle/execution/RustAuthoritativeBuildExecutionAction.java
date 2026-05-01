@@ -179,6 +179,7 @@ public class RustAuthoritativeBuildExecutionAction implements BuildWorkExecutor 
             return true;
         }
 
+        BuildPlanTaskSelectionSnapshot.Snapshot earlySnapshot = taskSelectionSnapshot.snapshot();
         ScheduledTaskGraph scheduledTaskGraph = captureScheduledTaskGraph(plan);
         if (scheduledTaskGraph.taskPaths.size() != expectedTasks) {
             LOGGER.warn(
@@ -188,16 +189,17 @@ public class RustAuthoritativeBuildExecutionAction implements BuildWorkExecutor 
             );
             return false;
         }
+        List<BuildPlanTask> taskContracts = taskContractsForRust(scheduledTaskGraph, earlySnapshot);
 
         taskSelectionSnapshot.recordSelectedTasks(
             scheduledTaskGraph.taskPaths,
             scheduledTaskGraph.dependencies,
             scheduledTaskGraph.taskReferences,
-            scheduledTaskGraph.taskContracts
+            taskContracts
         );
         boolean refreshed = bootstrapClient.refreshBuildPlanShadow(
             buildId,
-            scheduledTaskGraph.taskContracts,
+            taskContracts,
             scheduledTaskGraph.taskReferences,
             "finalized-execution-plan-inline",
             "gradle-finalized-execution-plan-inline"
@@ -206,6 +208,68 @@ public class RustAuthoritativeBuildExecutionAction implements BuildWorkExecutor 
             LOGGER.warn("[substrate:run-build] build-plan shadow refresh failed for {}", buildId);
         }
         return refreshed;
+    }
+
+    private static List<BuildPlanTask> taskContractsForRust(
+        ScheduledTaskGraph scheduledTaskGraph,
+        BuildPlanTaskSelectionSnapshot.Snapshot earlySnapshot
+    ) {
+        if (canReuseEarlyTaskContracts(scheduledTaskGraph, earlySnapshot)) {
+            LOGGER.info(
+                "[substrate:run-build] reusing {} task contracts captured at task graph population",
+                earlySnapshot.getTaskContracts().size()
+            );
+            return orderedTaskContracts(earlySnapshot, scheduledTaskGraph);
+        }
+        if (earlySnapshot.isPopulated()) {
+            LOGGER.debug(
+                "[substrate:run-build] early task contracts were not reusable; earlyPaths={}, earlyContracts={}, finalizedPaths={}",
+                earlySnapshot.getTaskPaths().size(),
+                earlySnapshot.getTaskContracts().size(),
+                scheduledTaskGraph.taskPaths.size()
+            );
+        }
+        return scheduledTaskGraph.taskContracts;
+    }
+
+    private static boolean canReuseEarlyTaskContracts(
+        ScheduledTaskGraph scheduledTaskGraph,
+        BuildPlanTaskSelectionSnapshot.Snapshot earlySnapshot
+    ) {
+        if (!earlySnapshot.isPopulated()
+            || earlySnapshot.getTaskContracts().isEmpty()
+            || earlySnapshot.getTaskContracts().size() != scheduledTaskGraph.taskPaths.size()
+            || earlySnapshot.getTaskPaths().size() != scheduledTaskGraph.taskPaths.size()) {
+            return false;
+        }
+
+        Set<String> earlyTaskPaths = new HashSet<>(earlySnapshot.getTaskPaths());
+        if (earlyTaskPaths.size() != scheduledTaskGraph.taskPaths.size()) {
+            return false;
+        }
+        for (String taskPath : scheduledTaskGraph.taskPaths) {
+            if (!earlyTaskPaths.contains(taskPath)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static List<BuildPlanTask> orderedTaskContracts(
+        BuildPlanTaskSelectionSnapshot.Snapshot earlySnapshot,
+        ScheduledTaskGraph scheduledTaskGraph
+    ) {
+        Map<String, BuildPlanTask> contractsByPath = new LinkedHashMap<>();
+        List<String> earlyTaskPaths = earlySnapshot.getTaskPaths();
+        List<BuildPlanTask> earlyTaskContracts = earlySnapshot.getTaskContracts();
+        for (int i = 0; i < earlyTaskPaths.size(); i++) {
+            contractsByPath.put(earlyTaskPaths.get(i), earlyTaskContracts.get(i));
+        }
+        List<BuildPlanTask> orderedContracts = new ArrayList<>();
+        for (String taskPath : scheduledTaskGraph.taskPaths) {
+            orderedContracts.add(contractsByPath.get(taskPath));
+        }
+        return orderedContracts;
     }
 
     private static ScheduledTaskGraph captureScheduledTaskGraph(FinalizedExecutionPlan plan) {

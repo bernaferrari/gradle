@@ -294,6 +294,16 @@ impl JarTaskExecutor {
             return Ok(false);
         }
         let mut emitted_dirs = HashSet::new();
+        let duplicate_strategy = archive_duplicate_strategy(options);
+        let available_mapping_names = mappings
+            .iter()
+            .filter(|mapping| mapping.source.exists())
+            .map(|mapping| mapping.relative_path.to_string_lossy().replace('\\', "/"))
+            .collect::<HashSet<_>>();
+        let mut seen_entries = entries
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect::<HashSet<_>>();
         for mapping in mappings {
             let name = mapping.relative_path.to_string_lossy().replace('\\', "/");
             if !mapping.source.exists() {
@@ -301,6 +311,11 @@ impl JarTaskExecutor {
                     if include_empty_dirs {
                         push_zip_parent_dirs(entries, &mut emitted_dirs, &name, dir_mode);
                     }
+                    continue;
+                }
+                if duplicate_strategy == "EXCLUDE"
+                    && (seen_entries.contains(&name) || available_mapping_names.contains(&name))
+                {
                     continue;
                 }
                 return Err(format!(
@@ -319,6 +334,7 @@ impl JarTaskExecutor {
             }
             let data = std::fs::read(&mapping.source)
                 .map_err(|e| format!("Cannot read {}: {}", mapping.source.display(), e))?;
+            seen_entries.insert(name.clone());
             entries.push(ZipEntry::file(name, data, file_mode));
         }
         Ok(true)
@@ -1261,6 +1277,60 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(entries.contains(&"nested/app.txt".to_string()));
         assert!(!entries.contains(&"app.txt".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_ear_excludes_missing_generated_duplicate_descriptor() {
+        let tmp = TempDir::new().unwrap();
+        let app_dir = tmp.path().join("src/main/application");
+        let out_dir = tmp.path().join("out");
+        let descriptor = app_dir.join("META-INF/application.xml");
+        let generated_descriptor = tmp.path().join("build/tmp/ear/application.xml");
+        fs::create_dir_all(descriptor.parent().unwrap()).unwrap();
+        fs::write(&descriptor, b"<application/>").unwrap();
+
+        let mappings = [
+            format!(
+                "{}>{}>F",
+                URL_SAFE_NO_PAD.encode(descriptor.to_string_lossy().as_bytes()),
+                URL_SAFE_NO_PAD.encode("META-INF/application.xml")
+            ),
+            format!(
+                "{}>{}>F",
+                URL_SAFE_NO_PAD.encode(generated_descriptor.to_string_lossy().as_bytes()),
+                URL_SAFE_NO_PAD.encode("META-INF/application.xml")
+            ),
+        ]
+        .join(",");
+
+        let executor = JarTaskExecutor::new();
+        let mut input = TaskInput::new("Ear");
+        input.target_dir = out_dir;
+        input
+            .options
+            .insert("jarName".to_string(), "corpus.ear".to_string());
+        input
+            .options
+            .insert("copy_file_mappings".to_string(), mappings);
+        input
+            .options
+            .insert("duplicates_strategy".to_string(), "EXCLUDE".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        let entries = JarTaskExecutor::read_existing_entries(result.output_files.first().unwrap())
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.as_str() == "META-INF/application.xml")
+                .count(),
+            1
+        );
     }
 
     #[tokio::test]

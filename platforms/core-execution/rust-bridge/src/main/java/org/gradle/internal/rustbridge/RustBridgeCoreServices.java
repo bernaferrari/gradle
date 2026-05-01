@@ -20,6 +20,7 @@ import org.gradle.internal.rustbridge.dependency.RustDependencyResolutionClient;
 import org.gradle.internal.rustbridge.dependency.RustExternalResourceDownload;
 import org.gradle.internal.rustbridge.dependency.RustMetadataCacheReadThrough;
 import org.gradle.internal.rustbridge.history.RustExecutionHistoryClient;
+import org.gradle.internal.rustbridge.jvmhost.BuildPlanTaskSelectionCaptureListener;
 import org.gradle.internal.rustbridge.jvmhost.BuildPlanTaskSelectionSnapshot;
 import org.gradle.internal.rustbridge.jvmhost.JvmHostServiceImpl;
 import org.gradle.internal.rustbridge.jvmhost.JvmTaskExecutionProviderAdapter;
@@ -267,12 +268,14 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
         JvmHostBridgeWiring createJvmHostBridgeWiring(
             DaemonLauncher daemonLauncher,
             BuildPlanTaskSelectionSnapshot taskSelectionSnapshot,
+            ListenerManager listenerManager,
             ServiceRegistry services,
             InternalOptions options
         ) {
             if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
                 return JvmHostBridgeWiring.INSTANCE;
             }
+            listenerManager.addListener(new BuildPlanTaskSelectionCaptureListener(taskSelectionSnapshot));
             JvmHostServiceImpl serviceImpl = daemonLauncher.getJvmHostServiceImpl();
             if (serviceImpl != null) {
                 serviceImpl.setProjectModelProvider(ProjectModelProviderAdapter.fromServiceRegistry(services));
