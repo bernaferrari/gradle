@@ -219,7 +219,7 @@ What this proves:
   - The native-ready-default gate is exercised separately and delegates when a selected plan is incomplete.
   - The authoritative corpus summary records matched projects, no-fallback counts, task parity, output parity, and observed upstream/substrate wall-clock timing.
   - Rust daemon gRPC behavior is exercised when --skip-grpc-e2e is not used.
-  - First-60-second metrics record daemon socket readiness, Rust dependency transport/store/checksum smoke timing, Rust-backed dependency resource seams, and native file-watch first-event latency.
+  - First-60-second metrics record daemon socket readiness, Rust dependency transport/store/checksum smoke timing, Rust-backed dependency artifact/metadata/download seams from one focused Gradle invocation, and native file-watch first-event latency.
 
 What this does not claim:
   - This is not a full Gradle replacement.
