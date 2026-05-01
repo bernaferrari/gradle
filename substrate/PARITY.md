@@ -201,6 +201,7 @@
 - `cargo test -p gradle-substrate-daemon artifact_cache -- --nocapture`
 - `cargo test -p gradle-substrate-daemon fetch_pom -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_download_metadata_url_populates_metadata_cache -- --nocapture`
+- `cargo test -p gradle-substrate-daemon test_download_maven_metadata_url_populates_dynamic_metadata_cache -- --nocapture`
 - `cargo test -p gradle-substrate-daemon persistent_store_roundtrip -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_add_artifact_to_cache_preserves_extension`
 - `cargo test -p gradle-substrate-daemon cold_path -- --nocapture`
