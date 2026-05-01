@@ -1,7 +1,9 @@
 package org.gradle.internal.rustbridge.taskgraph
 
+import org.gradle.api.Project
 import org.gradle.api.Task
 import org.gradle.api.execution.TaskExecutionGraph
+import org.gradle.api.tasks.TaskDependency
 import org.gradle.internal.rustbridge.bootstrap.RustBootstrapClient
 import org.gradle.internal.rustbridge.eventstream.BuildIdHolder
 import org.gradle.internal.rustbridge.jvmhost.BuildPlanTaskSelectionSnapshot
@@ -14,12 +16,9 @@ class TaskGraphShadowListenerTest extends Specification {
         def reporter = Mock(TaskGraphShadowReporter)
         def listener = new TaskGraphShadowListener(reporter)
 
-        def taskA = Mock(Task)
-        def taskB = Mock(Task)
-        def taskC = Mock(Task)
-        taskA.getPath() >> ":app:compileJava"
-        taskB.getPath() >> ":app:processResources"
-        taskC.getPath() >> ":app:classes"
+        def taskA = task(":app:compileJava", "compileJava")
+        def taskB = task(":app:processResources", "processResources")
+        def taskC = task(":app:classes", "classes")
 
         def graph = Mock(TaskExecutionGraph)
         graph.getAllTasks() >> [taskA, taskB, taskC]
@@ -62,12 +61,9 @@ class TaskGraphShadowListenerTest extends Specification {
         def reporter = Mock(TaskGraphShadowReporter)
         def listener = new TaskGraphShadowListener(reporter)
 
-        def libTask = Mock(Task)
-        def utilTask = Mock(Task)
-        def appTask = Mock(Task)
-        libTask.getPath() >> ":lib:jar"
-        utilTask.getPath() >> ":util:jar"
-        appTask.getPath() >> ":app:run"
+        def libTask = task(":lib:jar", "jar")
+        def utilTask = task(":util:jar", "jar")
+        def appTask = task(":app:run", "run")
 
         def graph = Mock(TaskExecutionGraph)
         graph.getAllTasks() >> [libTask, utilTask, appTask]
@@ -96,10 +92,8 @@ class TaskGraphShadowListenerTest extends Specification {
         def snapshot = new BuildPlanTaskSelectionSnapshot()
         def listener = new TaskGraphShadowListener(reporter, snapshot)
 
-        def compile = Mock(Task)
-        def classes = Mock(Task)
-        compile.getPath() >> ":app:compileJava"
-        classes.getPath() >> ":app:classes"
+        def compile = task(":app:compileJava", "compileJava")
+        def classes = task(":app:classes", "classes")
 
         def graph = Mock(TaskExecutionGraph)
         graph.getAllTasks() >> [compile, classes]
@@ -126,10 +120,8 @@ class TaskGraphShadowListenerTest extends Specification {
         def listener = new TaskGraphShadowListener(reporter, snapshot, bootstrapClient)
         BuildIdHolder.setBuildId("build-selected")
 
-        def compile = Mock(Task)
-        def classes = Mock(Task)
-        compile.getPath() >> ":app:compileJava"
-        classes.getPath() >> ":app:classes"
+        def compile = task(":app:compileJava", "compileJava")
+        def classes = task(":app:classes", "classes")
 
         def graph = Mock(TaskExecutionGraph)
         graph.getAllTasks() >> [compile, classes]
@@ -141,9 +133,10 @@ class TaskGraphShadowListenerTest extends Specification {
         listener.graphPopulated(graph)
 
         then:
-        1 * bootstrapClient.refreshBuildPlanShadow("build-selected") >> {
+        1 * bootstrapClient.refreshBuildPlanShadow("build-selected", _) >> { args ->
             assert snapshot.snapshot().populated
             assert snapshot.snapshot().taskPaths == [":app:compileJava", ":app:classes"]
+            assert args[1].tasksCount == 2
             true
         }
         1 * reporter.compareExecutionGraph(_, _, "build-selected")
@@ -152,7 +145,7 @@ class TaskGraphShadowListenerTest extends Specification {
         BuildIdHolder.clear()
     }
 
-    def "graphPopulated does not refresh build-plan shadow without bootstrap build id"() {
+    def "graphPopulated refreshes build-plan shadow with default build id"() {
         given:
         def reporter = Mock(TaskGraphShadowReporter)
         def snapshot = new BuildPlanTaskSelectionSnapshot()
@@ -167,7 +160,7 @@ class TaskGraphShadowListenerTest extends Specification {
         listener.graphPopulated(graph)
 
         then:
-        0 * bootstrapClient.refreshBuildPlanShadow(_)
+        1 * bootstrapClient.refreshBuildPlanShadow("build", _) >> true
         1 * reporter.compareExecutionGraph([], [:], "build")
     }
 
@@ -181,5 +174,27 @@ class TaskGraphShadowListenerTest extends Specification {
         then:
         listener instanceof org.gradle.api.execution.TaskExecutionGraphListener
         noExceptionThrown()
+    }
+
+    private Task task(String path, String name) {
+        def project = Stub(Project) {
+            getPath() >> ":app"
+        }
+        Mock(Task) {
+            getPath() >> path
+            getName() >> name
+            getProject() >> project
+            getEnabled() >> true
+            getGroup() >> null
+            getDescription() >> null
+            getInputs() >> null
+            getOutputs() >> null
+            getDestroyables() >> null
+            getLocalState() >> null
+            getTaskDependencies() >> Stub(TaskDependency)
+            getShouldRunAfter() >> Stub(TaskDependency)
+            getMustRunAfter() >> Stub(TaskDependency)
+            getFinalizedBy() >> Stub(TaskDependency)
+        }
     }
 }

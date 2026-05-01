@@ -88,7 +88,10 @@ into no-op fallback.
 `-Dorg.gradle.rust.substrate.runbuild.authoritative=true`. This is stricter
 than umbrella authoritative mode: Gradle skips its JVM task executor only when
 Rust `RunBuild` completes the selected plan with zero JVM forwards and the exact
-scheduled task count.
+scheduled task count. Current authoritative runs use task contracts captured at
+Gradle task-graph population when they match the finalized execution plan, which
+keeps classpaths and task inputs Gradle-owned while the Rust daemon controls the
+scheduled DAG.
 
 `--runbuild-native-ready-default` adds
 `-Dorg.gradle.rust.substrate.runbuild.native-ready-default=true`. It tries Rust

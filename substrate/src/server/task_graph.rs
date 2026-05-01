@@ -668,7 +668,7 @@ fn external_classpath_candidates(
         return Vec::new();
     }
     let include_test_scope = is_test_scoped_task(task);
-    let mut coordinates = plan_dependencies
+    let coordinates = plan_dependencies
         .iter()
         .filter(|dependency| dependency.project_path == task.project_path)
         .filter(|dependency| {
@@ -677,37 +677,12 @@ fn external_classpath_candidates(
         .filter_map(|dependency| parse_coordinate(&dependency.notation))
         .collect::<Vec<_>>();
 
-    if coordinates.is_empty() {
-        coordinates = build_script_dependency_coordinates(task, include_test_scope);
-        expand_known_coordinate_families(&mut coordinates);
-    }
-
     let mut seen = HashSet::new();
     coordinates
         .into_iter()
         .filter(|coordinate| seen.insert(coordinate.clone()))
         .flat_map(|(group, name, version)| gradle_module_cache_jars(&group, &name, &version))
         .collect()
-}
-
-fn build_script_dependency_coordinates(
-    task: &CanonicalBuildPlanTask,
-    include_test_scope: bool,
-) -> Vec<(String, String, String)> {
-    let Some(project_root) = infer_project_root(task) else {
-        return Vec::new();
-    };
-    let build_file = ["build.gradle.kts", "build.gradle"]
-        .iter()
-        .map(|name| project_root.join(name))
-        .find(|path| path.is_file());
-    let Some(build_file) = build_file else {
-        return Vec::new();
-    };
-    let Ok(source) = std::fs::read_to_string(build_file) else {
-        return Vec::new();
-    };
-    parse_declared_dependency_coordinates(&source, include_test_scope)
 }
 
 fn dependency_configuration_matches_task(configuration: &str, include_test_scope: bool) -> bool {
@@ -787,87 +762,6 @@ fn parse_coordinate(value: &str) -> Option<(String, String, String)> {
         return None;
     }
     Some((group.to_string(), name.to_string(), version.to_string()))
-}
-
-fn parse_declared_dependency_coordinates(
-    source: &str,
-    include_test_scope: bool,
-) -> Vec<(String, String, String)> {
-    let mut coordinates = Vec::new();
-    for configuration in [
-        "api",
-        "implementation",
-        "compileOnly",
-        "runtimeOnly",
-        "testImplementation",
-        "testRuntimeOnly",
-    ] {
-        if configuration.starts_with("test") && !include_test_scope {
-            continue;
-        }
-        let needle = format!("{configuration}(\"");
-        let mut rest = source;
-        while let Some(index) = rest.find(&needle) {
-            let after = &rest[index + needle.len()..];
-            let Some(end) = after.find('"') else {
-                break;
-            };
-            if let Some(coordinate) = parse_coordinate(&after[..end]) {
-                coordinates.push(coordinate);
-            }
-            rest = &after[end + 1..];
-        }
-    }
-    coordinates
-}
-
-fn expand_known_coordinate_families(coordinates: &mut Vec<(String, String, String)>) {
-    let mut extra = Vec::new();
-    for (group, name, version) in coordinates.iter() {
-        if group == "org.junit.jupiter" && name == "junit-jupiter" {
-            extra.push((
-                group.clone(),
-                "junit-jupiter-api".to_string(),
-                version.clone(),
-            ));
-            extra.push((
-                group.clone(),
-                "junit-jupiter-params".to_string(),
-                version.clone(),
-            ));
-            extra.push((
-                group.clone(),
-                "junit-jupiter-engine".to_string(),
-                version.clone(),
-            ));
-            if let Some(platform_version) = version.strip_prefix("5.") {
-                let platform_version = format!("1.{platform_version}");
-                extra.push((
-                    "org.junit.platform".to_string(),
-                    "junit-platform-commons".to_string(),
-                    platform_version.clone(),
-                ));
-                extra.push((
-                    "org.junit.platform".to_string(),
-                    "junit-platform-engine".to_string(),
-                    platform_version,
-                ));
-            }
-            extra.push((
-                "org.opentest4j".to_string(),
-                "opentest4j".to_string(),
-                "1.3.0".to_string(),
-            ));
-            extra.push((
-                "org.apiguardian".to_string(),
-                "apiguardian-api".to_string(),
-                "1.1.2".to_string(),
-            ));
-        }
-    }
-    coordinates.extend(extra);
-    let mut seen = HashSet::new();
-    coordinates.retain(|coordinate| seen.insert(coordinate.clone()));
 }
 
 fn gradle_module_cache_jars(group: &str, name: &str, version: &str) -> Vec<String> {
@@ -1034,6 +928,12 @@ fn test_exec_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
 }
 
 fn test_no_source(task: &CanonicalBuildPlanTask) -> bool {
+    if input_value(task, "working_dir")
+        .map(|working_dir| !has_test_sources_under(std::path::Path::new(&working_dir)))
+        .unwrap_or(false)
+    {
+        return true;
+    }
     !has_input_value(task, "classpath") && input_value_paths_missing(task, "test_classes_dirs")
 }
 
