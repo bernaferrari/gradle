@@ -14,7 +14,9 @@ import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Locale;
+import java.util.Properties;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -27,6 +29,7 @@ public class DaemonLauncher {
     private static final Logger LOGGER = Logging.getLogger(DaemonLauncher.class);
     private static final String SOCKET_NAME = "substrate.sock";
     private static final String JVM_HOST_SOCKET_NAME = "jvm-host.sock";
+    private static final String TCP_ENDPOINT_NAME = "substrate.tcp-endpoint";
     private static final String BINARY_NAME = "gradle-substrate-daemon";
 
     private final File daemonBinary;
@@ -113,6 +116,10 @@ public class DaemonLauncher {
         return new File(socketDirectory, SOCKET_NAME).getAbsolutePath();
     }
 
+    public String getTcpEndpointPath() {
+        return new File(socketDirectory, TCP_ENDPOINT_NAME).getAbsolutePath();
+    }
+
     /**
      * Get the JVM host service implementation, or null if JVM host is not enabled.
      * Used by Build-scoped services to set the ProjectModelProvider.
@@ -142,9 +149,7 @@ public class DaemonLauncher {
         }
 
         Path socketFile = new File(socketDirectory, SOCKET_NAME).toPath();
-        int daemonTcpPort = reserveLoopbackPort();
-        String daemonTcpAddress = "127.0.0.1:" + daemonTcpPort;
-        String daemonEndpoint = "tcp://" + daemonTcpAddress;
+        Path tcpEndpointFile = new File(socketDirectory, TCP_ENDPOINT_NAME).toPath();
         boolean useUnixDomainSocket = Boolean.getBoolean("org.gradle.rust.substrate.unixSocket");
 
         String jvmHostSocketPath = null;
@@ -159,6 +164,7 @@ public class DaemonLauncher {
                 // Stale socket or incompatible daemon; clean up and launch a fresh one.
                 LOGGER.warn("[substrate] Failed to connect to existing daemon, relaunching: {}", connectFailure.getMessage());
                 Files.deleteIfExists(socketFile);
+                Files.deleteIfExists(tcpEndpointFile);
                 if (jvmHostServer != null) {
                     jvmHostServer.close();
                     jvmHostServer = null;
@@ -170,6 +176,25 @@ public class DaemonLauncher {
         // Ensure socket directory exists
         Files.createDirectories(socketDirectory.toPath());
 
+        if (!useUnixDomainSocket) {
+            String existingEndpoint = readTcpEndpoint(tcpEndpointFile, daemonBinary.toPath());
+            if (existingEndpoint != null) {
+                LOGGER.info("[substrate] Connecting to existing daemon at {}", existingEndpoint);
+                jvmHostSocketPath = startJvmHostIfEnabled();
+                try {
+                    return SubstrateClient.connect(existingEndpoint, jvmHostSocketPath);
+                } catch (IOException connectFailure) {
+                    LOGGER.warn("[substrate] Failed to connect to existing daemon, relaunching: {}", connectFailure.getMessage());
+                    Files.deleteIfExists(tcpEndpointFile);
+                    if (jvmHostServer != null) {
+                        jvmHostServer.close();
+                        jvmHostServer = null;
+                        jvmHostSocketPath = null;
+                    }
+                }
+            }
+        }
+
         if (!daemonBinary.exists()) {
             String reason = "daemon-binary-missing:" + daemonBinary.getAbsolutePath();
             LOGGER.warn("[substrate] Daemon binary not found at {}, using no-op mode ({})", daemonBinary, reason);
@@ -180,6 +205,9 @@ public class DaemonLauncher {
         jvmHostSocketPath = startJvmHostIfEnabled();
 
         LOGGER.info("[substrate] Launching daemon from {}", daemonBinary);
+        int daemonTcpPort = reserveLoopbackPort();
+        String daemonTcpAddress = "127.0.0.1:" + daemonTcpPort;
+        String daemonEndpoint = "tcp://" + daemonTcpAddress;
 
         File stateRoot = new File(socketDirectory, "state");
         File cacheDir = new File(stateRoot, "cache");
@@ -219,6 +247,7 @@ public class DaemonLauncher {
         while (attempts < 50) {
             try {
                 SubstrateClient client = SubstrateClient.connect(daemonEndpoint, jvmHostSocketPath);
+                writeTcpEndpoint(tcpEndpointFile, daemonEndpoint, daemonBinary.toPath());
                 LOGGER.info("[substrate] Daemon started successfully");
                 return client;
             } catch (IOException e) {
@@ -234,6 +263,81 @@ public class DaemonLauncher {
         }
 
         throw new SubstrateException("Daemon failed to start: TCP endpoint not reachable after 5 seconds", lastConnectFailure);
+    }
+
+    @Nullable
+    private static String readTcpEndpoint(Path endpointFile, Path daemonBinaryPath) {
+        if (!Files.exists(endpointFile)) {
+            return null;
+        }
+        try {
+            Properties properties = new Properties();
+            try (java.io.Reader reader = Files.newBufferedReader(endpointFile, StandardCharsets.UTF_8)) {
+                properties.load(reader);
+            }
+            String endpoint = properties.getProperty("endpoint", "").trim();
+            if (!endpoint.startsWith("tcp://")) {
+                return null;
+            }
+            if (!daemonBinaryMatches(properties, daemonBinaryPath)) {
+                LOGGER.info("[substrate] Ignoring persisted daemon endpoint because daemon binary identity changed");
+                return null;
+            }
+            return endpoint;
+        } catch (IOException e) {
+            LOGGER.debug("[substrate] Failed to read persisted TCP endpoint {}", endpointFile, e);
+            return null;
+        }
+    }
+
+    private static void writeTcpEndpoint(Path endpointFile, String endpoint, Path daemonBinaryPath) throws IOException {
+        Path parent = endpointFile.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
+        Properties properties = new Properties();
+        properties.setProperty("endpoint", endpoint);
+        properties.setProperty("daemonBinary", daemonBinaryPath.toAbsolutePath().normalize().toString());
+        properties.setProperty("daemonBinaryLastModifiedMillis", Long.toString(Files.getLastModifiedTime(daemonBinaryPath).toMillis()));
+        properties.setProperty("daemonBinarySize", Long.toString(Files.size(daemonBinaryPath)));
+
+        Path tempFile = Files.createTempFile(parent, TCP_ENDPOINT_NAME, ".tmp");
+        try {
+            try (java.io.Writer writer = Files.newBufferedWriter(tempFile, StandardCharsets.UTF_8)) {
+                properties.store(writer, "Gradle Rust substrate daemon endpoint");
+            }
+            try {
+                Files.move(tempFile, endpointFile, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (IOException atomicMoveFailure) {
+                Files.move(tempFile, endpointFile, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(tempFile);
+        }
+    }
+
+    private static boolean daemonBinaryMatches(Properties properties, Path daemonBinaryPath) throws IOException {
+        String expectedPath = daemonBinaryPath.toAbsolutePath().normalize().toString();
+        String actualPath = properties.getProperty("daemonBinary", "");
+        if (!expectedPath.equals(actualPath)) {
+            return false;
+        }
+        long expectedLastModified = Files.getLastModifiedTime(daemonBinaryPath).toMillis();
+        long expectedSize = Files.size(daemonBinaryPath);
+        long actualLastModified = parseLongOrDefault(properties.getProperty("daemonBinaryLastModifiedMillis"), -1);
+        long actualSize = parseLongOrDefault(properties.getProperty("daemonBinarySize"), -1);
+        return expectedLastModified == actualLastModified && expectedSize == actualSize;
+    }
+
+    private static long parseLongOrDefault(@Nullable String value, long defaultValue) {
+        if (value == null) {
+            return defaultValue;
+        }
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
     }
 
     private static int reserveLoopbackPort() throws IOException {
@@ -280,6 +384,13 @@ public class DaemonLauncher {
     }
 
     public void shutdownDaemon() {
+        if (!noop) {
+            try {
+                Files.deleteIfExists(new File(socketDirectory, TCP_ENDPOINT_NAME).toPath());
+            } catch (IOException e) {
+                LOGGER.debug("[substrate] Failed to remove persisted TCP endpoint", e);
+            }
+        }
         // Shut down JVM host server first
         if (jvmHostServer != null) {
             jvmHostServer.close();

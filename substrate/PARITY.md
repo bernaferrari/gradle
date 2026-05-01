@@ -31,6 +31,11 @@
   JVM host bridge when Unix-domain socket transports are unavailable, and the
   authoritative executor refreshes the selected build-plan shadow directly from
   the finalized Gradle task plan before invoking Rust `RunBuild`.
+- The JVM bridge now persists the loopback Rust daemon endpoint under the
+  substrate state directory and reconnects on later Gradle invocations. The
+  endpoint is written atomically, records daemon binary path/mtime/size, and is
+  ignored when the daemon binary identity changes, so local rebuilds do not
+  accidentally attach to an older substrate daemon.
 - The checked-in offline corpus covers Java library, Java application,
   Java multi-project, resource expansion, JavaCompile options, standalone
   Copy/Sync transforms, CopySpec duplicates, nested Copy/Sync and Zip/Tar
@@ -215,7 +220,10 @@
 - `cargo test -p gradle-substrate-daemon writes_static_text_to_declared_output_file -- --nocapture`
 - `cargo test -p gradle-substrate-daemon --test build_plan_shadow_test refreshed_native_ready_shadow_plan_runs_java_lifecycle_without_jvm_fallback -- --exact`
 - `./gradlew :core:test --tests org.gradle.execution.RustAuthoritativeBuildExecutionActionTest -x :distributions-core:generateLicenseFile`
+- `./gradlew :rust-bridge:compileJava :rust-bridge:test --tests '*SubstrateLifecycleTest*' --no-daemon --console=plain`
+- `build/gradle-under-test/bin/gradle -p testing/corpus/java-library-kotlin-dsl clean build --no-daemon --console=plain -Dorg.gradle.rust.substrate.enabled=true -Dorg.gradle.rust.substrate.mode=shadow -Dorg.gradle.rust.substrate.daemon.path=$PWD/target/debug/gradle-substrate-daemon -Dorg.gradle.rust.substrate.runbuild.authoritative=true --info` twice verifies first-launch then persisted TCP daemon reuse.
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --verbose`
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-authoritative-21-daemon-reuse-final --verbose` passed 21/21, no fallback, 200/200 task parity, output/hash/archive parity, observed wall time upstream=101529ms and substrate=155998ms.
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-native-ready-default --tasks clean build --timeout 300 --output-dir build/corpus-native-ready-default-21`
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --verbose`
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/unsupported-manifest.json --contract-only --output-dir build/corpus-contract-unsupported`
