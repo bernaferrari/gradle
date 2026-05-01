@@ -23,6 +23,10 @@
   tasks on the longest path are claimed first. Filtered task selections also
   treat dependencies outside the selected graph as absent when deciding initial
   readiness.
+- Rust `RunBuild` now materializes transitive downstream skips in its response
+  task details after a task failure, so authoritative graph results expose
+  failed and skipped work consistently instead of hiding skipped nodes only in
+  internal build state.
 - Installed Gradle-under-test runs now use loopback TCP for the Rust daemon and
   JVM host bridge when Unix-domain socket transports are unavailable, and the
   authoritative executor refreshes the selected build-plan shadow directly from

@@ -1093,6 +1093,34 @@ impl DagExecutorService for DagExecutorServiceImpl {
             .map(|r| r.into_inner().status)
             .unwrap_or_else(|_| "FAILED".to_string());
 
+        let detailed_paths: HashSet<String> = task_details
+            .iter()
+            .map(|detail| detail.task_path.clone())
+            .collect();
+        if let Some(execution) = self.builds.get(&BuildId::from(build_id_str.clone())) {
+            let mut skipped_details: Vec<TaskExecutionDetail> = execution
+                .tasks
+                .values()
+                .filter(|slot| {
+                    slot.status == "SKIPPED" && !detailed_paths.contains(&slot.task_path)
+                })
+                .map(|slot| TaskExecutionDetail {
+                    task_path: slot.task_path.clone(),
+                    task_type: slot.task_type.clone(),
+                    outcome: "SKIPPED".to_string(),
+                    duration_ms: 0,
+                    execution_mode: "skipped".to_string(),
+                    error_message: if failure_message.is_empty() {
+                        "Skipped by Rust DAG executor".to_string()
+                    } else {
+                        failure_message.clone()
+                    },
+                })
+                .collect();
+            skipped_details.sort_by(|a, b| a.task_path.cmp(&b.task_path));
+            task_details.extend(skipped_details);
+        }
+
         let total_duration = now_ms() - start_time;
 
         tracing::info!(
@@ -3378,6 +3406,14 @@ mod tests {
         assert_eq!(resp.final_status, "FAILED");
         assert_eq!(resp.total_tasks, 2);
         assert_eq!(resp.tasks_failed, 1);
+        assert_eq!(resp.tasks_skipped, 1);
+        assert_eq!(resp.task_details.len(), 2);
+        assert!(resp
+            .task_details
+            .iter()
+            .any(|detail| detail.task_path == ":downstream"
+                && detail.outcome == "SKIPPED"
+                && detail.execution_mode == "skipped"));
         assert!(!resp.failure_message.is_empty());
     }
 
