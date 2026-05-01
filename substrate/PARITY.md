@@ -85,6 +85,9 @@
   lookups: warm cache first, persisted Maven-layout `.pom` metadata second,
   network last. Successful network fetches commit atomically, write `.sha256`
   sidecars, and populate the warm cache for parent/BOM/transitive POM reuse.
+- Rust dependency `maven-metadata.xml` fetches now use the same cache shape for
+  the existing native metadata resolution path: warm cache first, persisted
+  repository-scoped metadata second, URL-addressed metadata third, network last.
 - Gradle has an opt-in metadata read-through path
   (`org.gradle.rust.substrate.dependency.readthrough.metadata=true`) that asks
   Rust for URL-addressed cached `.pom`, `.module`, `.ivy`, and
@@ -202,6 +205,7 @@
 - `cargo test -p gradle-substrate-daemon fetch_pom -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_download_metadata_url_populates_metadata_cache -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_download_maven_metadata_url_populates_dynamic_metadata_cache -- --nocapture`
+- `cargo test -p gradle-substrate-daemon test_fetch_maven_metadata_populates_store_and_reuses_persistent_cache -- --nocapture`
 - `cargo test -p gradle-substrate-daemon persistent_store_roundtrip -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_add_artifact_to_cache_preserves_extension`
 - `cargo test -p gradle-substrate-daemon cold_path -- --nocapture`

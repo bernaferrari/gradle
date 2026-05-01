@@ -563,11 +563,52 @@ impl DependencyResolutionServiceImpl {
         name: &str,
         repo: &RepositoryDescriptor,
     ) -> Result<MavenMetadata, String> {
+        let extension = "maven-metadata.xml";
+        let classifier = "";
+        let version = "";
+        let key = Self::module_metadata_cache_key(repo, group, name, extension);
+        let cache_path = self.module_metadata_path(repo, group, name, extension);
         let group_path = Self::group_to_path(group);
         let path = format!("{}/{}/maven-metadata.xml", group_path, name);
-        let req = self.build_request(repo, &path);
+        let url = self
+            .build_request(repo, &path)
+            .build()
+            .map_err(|e| format!("Failed to build maven-metadata.xml request: {}", e))?
+            .url()
+            .to_string();
+        let url_key = Self::metadata_url_cache_key(&url, extension);
+        let url_cache_path = self.metadata_url_path(&url, extension);
+        if let Some(cached) = self
+            .read_cached_text_artifact(
+                &key,
+                &cache_path,
+                group,
+                name,
+                version,
+                classifier,
+                extension,
+            )
+            .await
+        {
+            return Self::parse_maven_metadata(&cached);
+        }
+        if let Some(cached) = self
+            .read_cached_text_artifact(
+                &url_key,
+                &url_cache_path,
+                group,
+                name,
+                version,
+                classifier,
+                extension,
+            )
+            .await
+        {
+            return Self::parse_maven_metadata(&cached);
+        }
 
-        let resp = req
+        let resp = self
+            .build_request(repo, &path)
             .send()
             .await
             .map_err(|e| format!("Failed to fetch maven-metadata.xml: {}", e))?;
@@ -578,6 +619,29 @@ impl DependencyResolutionServiceImpl {
                     .text()
                     .await
                     .map_err(|e| format!("Failed to read metadata response: {}", e))?;
+                self.persist_text_artifact(
+                    &key,
+                    &cache_path,
+                    group,
+                    name,
+                    version,
+                    classifier,
+                    extension,
+                    &body,
+                )
+                .await?;
+                self.persist_text_artifact_alias(
+                    &url_key,
+                    &url_cache_path,
+                    &cache_path,
+                    group,
+                    name,
+                    version,
+                    classifier,
+                    extension,
+                    &body,
+                )
+                .await?;
                 Self::parse_maven_metadata(&body)
             }
             404 => Err("maven-metadata.xml not found".to_string()),
@@ -644,6 +708,33 @@ impl DependencyResolutionServiceImpl {
         key
     }
 
+    fn module_metadata_cache_key(
+        repo: &RepositoryDescriptor,
+        group: &str,
+        name: &str,
+        extension: &str,
+    ) -> String {
+        let extension = Self::normalize_extension(extension);
+        let repo_id = Self::repository_cache_id(repo);
+        let mut key = String::with_capacity(
+            "module-metadata:".len()
+                + repo_id.len()
+                + group.len()
+                + name.len()
+                + extension.len()
+                + 3,
+        );
+        key.push_str("module-metadata:");
+        key.push_str(&repo_id);
+        key.push(':');
+        key.push_str(group);
+        key.push(':');
+        key.push_str(name);
+        key.push(':');
+        key.push_str(&extension);
+        key
+    }
+
     fn metadata_url_cache_key(url: &str, extension: &str) -> String {
         let extension = Self::normalize_extension(extension);
         let digest = Self::compute_sha256(url.as_bytes());
@@ -677,6 +768,21 @@ impl DependencyResolutionServiceImpl {
             .join(name)
             .join(version)
             .join(filename)
+    }
+
+    fn module_metadata_path(
+        &self,
+        repo: &RepositoryDescriptor,
+        group: &str,
+        name: &str,
+        extension: &str,
+    ) -> PathBuf {
+        self.artifact_store_dir
+            .join("_metadata")
+            .join(Self::repository_cache_id(repo))
+            .join(Self::group_to_path(group))
+            .join(name)
+            .join(Self::normalize_extension(extension))
     }
 
     fn metadata_url_path(&self, url: &str, extension: &str) -> PathBuf {
@@ -3615,6 +3721,83 @@ mod tests {
             .next(),
             Some(expected_sha256.as_str())
         );
+    }
+
+    #[tokio::test]
+    async fn test_fetch_maven_metadata_populates_store_and_reuses_persistent_cache() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body = r#"<metadata>
+  <groupId>org.example</groupId>
+  <artifactId>demo</artifactId>
+  <versioning>
+    <latest>1.5</latest>
+    <release>1.5</release>
+    <versions>
+      <version>1.0</version>
+      <version>1.5</version>
+    </versions>
+  </versioning>
+</metadata>"#
+            .to_string();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/xml\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.write_all(body.as_bytes()).unwrap();
+        });
+
+        let store = tempfile::tempdir().unwrap();
+        let repo = make_repo("local", &format!("http://{}", addr));
+        let svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let first = svc
+            .fetch_maven_metadata("org.example", "demo", &repo)
+            .await
+            .unwrap();
+        server.join().unwrap();
+        assert_eq!(
+            first.versioning.versions,
+            vec!["1.0".to_string(), "1.5".to_string()]
+        );
+
+        let stored = svc.module_metadata_path(&repo, "org.example", "demo", "maven-metadata.xml");
+        assert!(
+            stored.starts_with(store.path().join("_metadata")),
+            "maven-metadata.xml cache should be repository-scoped"
+        );
+        assert!(
+            DependencyResolutionServiceImpl::sha256_sidecar_path(&stored).exists(),
+            "maven-metadata.xml cache should write a SHA-256 sidecar"
+        );
+
+        let url = format!("http://{}/org/example/demo/maven-metadata.xml", addr);
+        let url_cached = svc
+            .check_metadata_cache(Request::new(CheckMetadataCacheRequest {
+                url,
+                extension: "maven-metadata.xml".to_string(),
+                sha256: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(url_cached.cached);
+        assert!(url_cached.local_path.ends_with(".maven-metadata.xml"));
+
+        let second_svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let second = second_svc
+            .fetch_maven_metadata("org.example", "demo", &repo)
+            .await
+            .unwrap();
+        assert_eq!(second.versioning.latest.as_deref(), Some("1.5"));
+        assert_eq!(second.versioning.versions, first.versioning.versions);
     }
 
     #[tokio::test]
