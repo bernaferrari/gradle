@@ -6,6 +6,7 @@ import gradle.substrate.v1.BuildPlanTask;
 import gradle.substrate.v1.ExecuteTaskRequest;
 import gradle.substrate.v1.ExecuteTaskResponse;
 
+import org.gradle.api.Task;
 import org.gradle.api.logging.Logging;
 import org.jspecify.annotations.Nullable;
 
@@ -137,22 +138,50 @@ public class JvmHostServiceImpl {
 
         String taskSource = "jvm-host-realized-tasks";
         List<BuildPlanTask> tasks = getBuildPlanTasks();
+        int selectedTaskReferenceCount = 0;
+        int selectedTaskContractCount = 0;
         if (taskSelectionSnapshot != null) {
             BuildPlanTaskSelectionSnapshot.Snapshot selectedGraph = taskSelectionSnapshot.snapshot();
             if (selectedGraph.isPopulated()) {
-                if (!selectedGraph.getTaskContracts().isEmpty()) {
-                    tasks = selectedGraph.getTaskContracts();
+                selectedTaskReferenceCount = selectedGraph.getTaskReferences().size();
+                selectedTaskContractCount = selectedGraph.getTaskContracts().size();
+                List<BuildPlanTask> selectedTasks = refreshedSelectedTaskReferences(selectedGraph);
+                if (!selectedTasks.isEmpty()) {
+                    tasks = selectedTasks;
+                    taskSource = "jvm-host-selected-task-graph-refreshed";
                 } else {
-                    tasks = getSelectedBuildPlanTasks(selectedGraph);
+                    selectedTasks = getSelectedBuildPlanTasks(selectedGraph);
+                    if (!selectedTasks.isEmpty()) {
+                        tasks = selectedTasks;
+                        taskSource = "jvm-host-selected-task-graph-model-refreshed";
+                    } else if (!selectedGraph.getTaskContracts().isEmpty()) {
+                        tasks = selectedGraph.getTaskContracts();
+                        taskSource = "jvm-host-selected-task-graph-snapshot";
+                    } else {
+                        tasks = selectedTasks;
+                        taskSource = "jvm-host-selected-task-graph-empty";
+                    }
                 }
-                taskSource = "jvm-host-selected-task-graph";
             }
         }
         plan.addAllTasks(tasks);
         plan.putMetadata("taskSource", tasks.isEmpty() ? taskSource + "-empty" : taskSource);
         plan.putMetadata("jvmHostTaskCount", Integer.toString(tasks.size()));
+        plan.putMetadata("selectedTaskReferenceCount", Integer.toString(selectedTaskReferenceCount));
+        plan.putMetadata("selectedTaskContractCount", Integer.toString(selectedTaskContractCount));
 
         return plan.build();
+    }
+
+    private static List<BuildPlanTask> refreshedSelectedTaskReferences(BuildPlanTaskSelectionSnapshot.Snapshot selectedGraph) {
+        if (selectedGraph.getTaskReferences().isEmpty()) {
+            return new java.util.ArrayList<>();
+        }
+        java.util.ArrayList<BuildPlanTask> tasks = new java.util.ArrayList<>();
+        for (Task task : selectedGraph.getTaskReferences()) {
+            tasks.add(ProjectModelProviderAdapter.toBuildPlanTask(task, selectedGraph.getDependencies(task.getPath())));
+        }
+        return tasks;
     }
 
     public List<BuildPlanTask> getBuildPlanTasks() {

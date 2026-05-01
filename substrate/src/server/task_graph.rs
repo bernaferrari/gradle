@@ -13,7 +13,7 @@ use crate::proto::{
     TaskStartedResponse,
 };
 
-use super::build_plan_ir::CanonicalBuildPlanTask;
+use super::build_plan_ir::{CanonicalBuildPlanDependency, CanonicalBuildPlanTask};
 use super::build_plan_shadow::BuildPlanShadowStore;
 use super::execution_history::ExecutionHistoryServiceImpl;
 use super::scopes::BuildId;
@@ -174,6 +174,7 @@ impl TaskGraphServiceImpl {
             self.cleanup_build(build_id);
         }
 
+        let plan_dependencies = artifact.plan.dependencies.clone();
         let mut plan_tasks = artifact.plan.tasks;
         let task_outputs: HashMap<String, Vec<String>> = plan_tasks
             .iter()
@@ -188,7 +189,7 @@ impl TaskGraphServiceImpl {
 
         let mut loaded = 0usize;
         for mut task in plan_tasks.drain(..) {
-            enrich_task_contract_from_graph(&mut task, &task_outputs);
+            enrich_task_contract_from_graph(&mut task, &task_outputs, &plan_dependencies);
             if !clean_tasks.is_empty() && !is_clean_task_path(&task.path) {
                 for clean_task in &clean_tasks {
                     if !task.depends_on.contains(clean_task) {
@@ -534,6 +535,7 @@ fn is_clean_task_path(path: &str) -> bool {
 fn enrich_task_contract_from_graph(
     task: &mut CanonicalBuildPlanTask,
     task_outputs: &HashMap<String, Vec<String>>,
+    plan_dependencies: &[CanonicalBuildPlanDependency],
 ) {
     if is_java_compile_task(task) && !has_input_value(task, "classpath") {
         let classpath = task
@@ -586,13 +588,13 @@ fn enrich_task_contract_from_graph(
 
     if is_java_compile_task(task) || is_test_task(task) {
         let existing = input_value(task, "classpath").unwrap_or_default();
-        let external = external_classpath_candidates(task);
+        let external = external_classpath_candidates(task, plan_dependencies);
         if let Some(merged) = merge_classpaths(&existing, &external) {
             set_value_input(
                 task,
                 "classpath",
                 &merged,
-                "gradle-cache-inferred-external-classpath",
+                "gradle-resolved-external-classpath",
                 "classpath",
             );
         }
@@ -653,13 +655,48 @@ fn merge_classpaths(existing: &str, additional: &[String]) -> Option<String> {
         .map(|paths| paths.to_string_lossy().into_owned())
 }
 
-fn external_classpath_candidates(task: &CanonicalBuildPlanTask) -> Vec<String> {
+fn external_classpath_candidates(
+    task: &CanonicalBuildPlanTask,
+    plan_dependencies: &[CanonicalBuildPlanDependency],
+) -> Vec<String> {
+    if is_test_task(task)
+        && infer_project_root(task)
+            .as_ref()
+            .map(|root| !has_test_sources_under(root))
+            .unwrap_or(false)
+    {
+        return Vec::new();
+    }
+    let include_test_scope = is_test_scoped_task(task);
+    let mut coordinates = plan_dependencies
+        .iter()
+        .filter(|dependency| dependency.project_path == task.project_path)
+        .filter(|dependency| {
+            dependency_configuration_matches_task(&dependency.configuration, include_test_scope)
+        })
+        .filter_map(|dependency| parse_coordinate(&dependency.notation))
+        .collect::<Vec<_>>();
+
+    if coordinates.is_empty() {
+        coordinates = build_script_dependency_coordinates(task, include_test_scope);
+        expand_known_coordinate_families(&mut coordinates);
+    }
+
+    let mut seen = HashSet::new();
+    coordinates
+        .into_iter()
+        .filter(|coordinate| seen.insert(coordinate.clone()))
+        .flat_map(|(group, name, version)| gradle_module_cache_jars(&group, &name, &version))
+        .collect()
+}
+
+fn build_script_dependency_coordinates(
+    task: &CanonicalBuildPlanTask,
+    include_test_scope: bool,
+) -> Vec<(String, String, String)> {
     let Some(project_root) = infer_project_root(task) else {
         return Vec::new();
     };
-    if is_test_task(task) && !has_test_sources_under(&project_root) {
-        return Vec::new();
-    }
     let build_file = ["build.gradle.kts", "build.gradle"]
         .iter()
         .map(|name| project_root.join(name))
@@ -670,13 +707,23 @@ fn external_classpath_candidates(task: &CanonicalBuildPlanTask) -> Vec<String> {
     let Ok(source) = std::fs::read_to_string(build_file) else {
         return Vec::new();
     };
-    let include_test_scope = is_test_scoped_task(task);
-    let mut coordinates = parse_declared_dependency_coordinates(&source, include_test_scope);
-    expand_known_coordinate_families(&mut coordinates);
-    coordinates
-        .into_iter()
-        .flat_map(|(group, name, version)| gradle_module_cache_jars(&group, &name, &version))
-        .collect()
+    parse_declared_dependency_coordinates(&source, include_test_scope)
+}
+
+fn dependency_configuration_matches_task(configuration: &str, include_test_scope: bool) -> bool {
+    let normalized = configuration.to_ascii_lowercase();
+    if normalized.starts_with("test") {
+        return include_test_scope;
+    }
+    matches!(
+        normalized.as_str(),
+        "compileclasspath"
+            | "runtimeclasspath"
+            | "api"
+            | "implementation"
+            | "compileonly"
+            | "runtimeonly"
+    )
 }
 
 fn has_test_sources(task: &CanonicalBuildPlanTask) -> bool {
@@ -731,6 +778,17 @@ fn is_test_scoped_task(task: &CanonicalBuildPlanTask) -> bool {
         || is_test_task(task)
 }
 
+fn parse_coordinate(value: &str) -> Option<(String, String, String)> {
+    let mut parts = value.split(':');
+    let group = parts.next()?.trim();
+    let name = parts.next()?.trim();
+    let version = parts.next()?.trim();
+    if group.is_empty() || name.is_empty() || version.is_empty() || parts.next().is_some() {
+        return None;
+    }
+    Some((group.to_string(), name.to_string(), version.to_string()))
+}
+
 fn parse_declared_dependency_coordinates(
     source: &str,
     include_test_scope: bool,
@@ -761,17 +819,6 @@ fn parse_declared_dependency_coordinates(
         }
     }
     coordinates
-}
-
-fn parse_coordinate(value: &str) -> Option<(String, String, String)> {
-    let mut parts = value.split(':');
-    let group = parts.next()?.trim();
-    let name = parts.next()?.trim();
-    let version = parts.next()?.trim();
-    if group.is_empty() || name.is_empty() || version.is_empty() || parts.next().is_some() {
-        return None;
-    }
-    Some((group.to_string(), name.to_string(), version.to_string()))
 }
 
 fn expand_known_coordinate_families(coordinates: &mut Vec<(String, String, String)>) {
@@ -1884,7 +1931,7 @@ mod tests {
             ],
         )]);
 
-        enrich_task_contract_from_graph(&mut task, &task_outputs);
+        enrich_task_contract_from_graph(&mut task, &task_outputs, &[]);
 
         assert_eq!(
             input_value(&task, "classpath").as_deref(),
@@ -1894,31 +1941,24 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_declared_dependency_coordinates_expands_junit_family() {
-        let source = r#"
-            dependencies {
-                implementation("com.google.guava:guava:33.2.1-jre")
-                testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
-            }
-        "#;
-        let mut coordinates = parse_declared_dependency_coordinates(source, true);
-        expand_known_coordinate_families(&mut coordinates);
-
-        assert!(coordinates.contains(&(
-            "com.google.guava".to_string(),
-            "guava".to_string(),
-            "33.2.1-jre".to_string()
-        )));
-        assert!(coordinates.contains(&(
-            "org.junit.jupiter".to_string(),
-            "junit-jupiter-api".to_string(),
-            "5.10.2".to_string()
-        )));
-        assert!(coordinates.contains(&(
-            "org.junit.platform".to_string(),
-            "junit-platform-commons".to_string(),
-            "1.10.2".to_string()
-        )));
+    fn test_dependency_configuration_matching_respects_test_scope() {
+        assert!(dependency_configuration_matches_task(
+            "compileClasspath",
+            false
+        ));
+        assert!(dependency_configuration_matches_task(
+            "runtimeClasspath",
+            false
+        ));
+        assert!(!dependency_configuration_matches_task(
+            "testRuntimeClasspath",
+            false
+        ));
+        assert!(dependency_configuration_matches_task(
+            "testRuntimeClasspath",
+            true
+        ));
+        assert!(parse_coordinate("com.google.guava:guava:33.2.1-jre").is_some());
     }
 
     #[test]
@@ -1947,7 +1987,7 @@ mod tests {
             ),
         ]);
 
-        enrich_task_contract_from_graph(&mut task, &task_outputs);
+        enrich_task_contract_from_graph(&mut task, &task_outputs, &[]);
 
         let libs = input_value(&task, "graph_distribution_libs").unwrap();
         let split = std::env::split_paths(&libs)

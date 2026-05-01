@@ -340,7 +340,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "target_version", stringOrEmpty(invokeOptional(task, "getTargetCompatibility")));
         putIfPresent(inputs, "classpath", mergedClasspath(
             fileCollectionPathString(invokeOptional(task, "getClasspath")),
-            sourceSetConfigurationClasspath(task, "compile", "Java", "CompileClasspath")
+            sourceSetConfigurationClasspath(task, "compile", "Java", "CompileClasspath"),
+            taskInputClasspath(task)
         ));
 
         Object options = invokeOptional(task, "getOptions");
@@ -603,7 +604,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "java_home", System.getProperty("java.home"));
         putIfPresent(inputs, "classpath", mergedClasspath(
             fileCollectionPathString(invokeOptional(task, "getClasspath")),
-            sourceSetConfigurationClasspath(task, "", "", "RuntimeClasspath")
+            sourceSetConfigurationClasspath(task, "", "", "RuntimeClasspath"),
+            taskInputClasspath(task)
         ));
         putIfPresent(inputs, "test_classes_dirs", fileCollectionPathString(invokeOptional(task, "getTestClassesDirs")));
         putIfPresent(inputs, "working_dir", filePath(invokeOptional(task, "getWorkingDir")));
@@ -877,20 +879,51 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         }
     }
 
-    private static String mergedClasspath(String primary, String secondary) {
-        if (secondary == null || secondary.isEmpty()) {
-            return primary == null ? "" : primary;
-        }
-        if (primary == null || primary.isEmpty()) {
-            return secondary;
-        }
+    private static String taskInputClasspath(Task task) {
         Set<String> entries = new java.util.LinkedHashSet<>();
-        addClasspathEntries(entries, primary);
-        addClasspathEntries(entries, secondary);
+        FileCollection inputFiles = safeInputFiles(task);
+        if (inputFiles == null) {
+            return "";
+        }
+        try {
+            for (File file : inputFiles.getFiles()) {
+                if (isClasspathCandidate(file)) {
+                    entries.add(file.getAbsolutePath());
+                }
+            }
+        } catch (RuntimeException e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to infer classpath from task inputs for {}", task.getPath(), e);
+        }
+        return String.join(File.pathSeparator, entries);
+    }
+
+    private static boolean isClasspathCandidate(File file) {
+        String name = file.getName();
+        if (file.isFile()) {
+            return name.endsWith(".jar") || name.endsWith(".zip");
+        }
+        if (!file.isDirectory()) {
+            return false;
+        }
+        String path = file.getAbsolutePath().replace(File.separatorChar, '/');
+        return path.contains("/build/classes/")
+            || path.contains("/build/resources/")
+            || path.contains("/.gradle/caches/")
+            || path.contains("/build/tmp/");
+    }
+
+    private static String mergedClasspath(String... classpaths) {
+        Set<String> entries = new java.util.LinkedHashSet<>();
+        for (String classpath : classpaths) {
+            addClasspathEntries(entries, classpath);
+        }
         return String.join(File.pathSeparator, entries);
     }
 
     private static void addClasspathEntries(Set<String> entries, String classpath) {
+        if (classpath == null || classpath.isEmpty()) {
+            return;
+        }
         for (String entry : classpath.split(Pattern.quote(File.pathSeparator))) {
             if (!entry.isEmpty()) {
                 entries.add(entry);
