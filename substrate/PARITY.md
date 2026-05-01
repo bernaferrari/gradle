@@ -18,6 +18,11 @@
   `org.gradle.rust.substrate.runbuild.authoritative=true` executes the selected
   build-plan shadow through Rust `RunBuild` and skips Gradle's JVM task executor
   only when Rust reports exactly the scheduled task count with zero JVM forwards.
+- Rust `RunBuild` dispatch now uses a native ready-task priority queue keyed by
+  remaining critical-path duration instead of FIFO order, so independent ready
+  tasks on the longest path are claimed first. Filtered task selections also
+  treat dependencies outside the selected graph as absent when deciding initial
+  readiness.
 - Installed Gradle-under-test runs now use loopback TCP for the Rust daemon and
   JVM host bridge when Unix-domain socket transports are unavailable, and the
   authoritative executor refreshes the selected build-plan shadow directly from
@@ -192,6 +197,7 @@
 
 - `cargo check -p gradle-substrate-daemon`
 - `cargo test -p gradle-substrate-daemon --test hash_compatibility_test`
+- `cargo test -p gradle-substrate-daemon dag_executor -- --nocapture`
 - `cargo test -p gradle-substrate-daemon --test build_plan_shadow_test refreshed_native_ready_shadow_plan_runs_java_lifecycle_without_jvm_fallback -- --exact`
 - `./gradlew :core:test --tests org.gradle.execution.RustAuthoritativeBuildExecutionActionTest -x :distributions-core:generateLicenseFile`
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --verbose`
