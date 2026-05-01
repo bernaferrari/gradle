@@ -87,9 +87,9 @@
   sidecars, and populate the warm cache for parent/BOM/transitive POM reuse.
 - Gradle has an opt-in metadata read-through path
   (`org.gradle.rust.substrate.dependency.readthrough.metadata=true`) that asks
-  Rust for URL-addressed cached `.pom` metadata when Gradle has no acceptable
-  local cache entry. Existing Gradle cache refresh/revalidation semantics still
-  win when a Gradle cache entry exists.
+  Rust for URL-addressed cached `.pom`, `.module`, and `.ivy` metadata when
+  Gradle has no acceptable local cache entry. Existing Gradle cache
+  refresh/revalidation semantics still win when a Gradle cache entry exists.
 - The Gradle dependency shadow listener has an explicit artifact mirror mode
   (`org.gradle.rust.substrate.dependency.mirror.artifacts=true`) that observes
   real resolved external module artifacts, computes SHA-256 in the JVM bridge,
