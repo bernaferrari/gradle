@@ -29,9 +29,11 @@ import java.io.File;
 import java.lang.reflect.Array;
 import java.util.Collections;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 /**
  * Authoritative value snapshotter for values whose Gradle semantics can be
@@ -55,24 +57,55 @@ public class AuthoritativeRustValueSnapshotter implements ValueSnapshotter {
     @Override
     public ValueSnapshot snapshot(@Nullable Object value) throws ValueSnapshottingException {
         SnapshotAndCanonical snapshot = snapshotSupportedValue(value, new IdentityHashMap<>());
-        confirmRustSnapshot(snapshot.canonical);
+        confirmRustSnapshots(Collections.singletonMap(PROPERTY_NAME, snapshot.canonical));
         return snapshot.snapshot;
     }
 
     @Override
     public ValueSnapshot snapshot(@Nullable Object value, ValueSnapshot candidate) throws ValueSnapshottingException {
         SnapshotAndCanonical snapshot = snapshotSupportedValue(value, new IdentityHashMap<>());
-        confirmRustSnapshot(snapshot.canonical);
+        confirmRustSnapshots(Collections.singletonMap(PROPERTY_NAME, snapshot.canonical));
         if (snapshot.snapshot.equals(candidate)) {
             return candidate;
         }
         return snapshot.snapshot;
     }
 
-    private void confirmRustSnapshot(String canonical) {
+    public Map<String, ValueSnapshot> snapshotAll(
+        Map<String, Object> values,
+        Map<String, ValueSnapshot> candidateSnapshots
+    ) throws ValueSnapshottingException {
+        if (values.isEmpty()) {
+            return new TreeMap<>();
+        }
+
+        Map<String, SnapshotAndCanonical> snapshots = new LinkedHashMap<>();
+        Map<String, String> canonicalValues = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : values.entrySet()) {
+            try {
+                SnapshotAndCanonical snapshot = snapshotSupportedValue(entry.getValue(), new IdentityHashMap<>());
+                snapshots.put(entry.getKey(), snapshot);
+                canonicalValues.put(entry.getKey(), snapshot.canonical);
+            } catch (ValueSnapshottingException e) {
+                throw new PropertySnapshottingException(entry.getKey(), entry.getValue(), e);
+            }
+        }
+
+        confirmRustSnapshots(canonicalValues);
+
+        Map<String, ValueSnapshot> result = new TreeMap<>();
+        for (Map.Entry<String, SnapshotAndCanonical> entry : snapshots.entrySet()) {
+            ValueSnapshot snapshot = entry.getValue().snapshot;
+            ValueSnapshot candidate = candidateSnapshots.get(entry.getKey());
+            result.put(entry.getKey(), candidate != null && snapshot.equals(candidate) ? candidate : snapshot);
+        }
+        return result;
+    }
+
+    private void confirmRustSnapshots(Map<String, String> canonicalValues) {
         try {
             RustValueSnapshotClient.SnapshotResult result = rustClient.snapshotCanonicalValues(
-                Collections.singletonMap(PROPERTY_NAME, canonical),
+                canonicalValues,
                 ""
             );
             if (result.isSuccess() && result.getCompositeHash() != null) {
@@ -246,6 +279,27 @@ public class AuthoritativeRustValueSnapshotter implements ValueSnapshotter {
 
     private static ValueSnapshottingException unsupported(Object value) {
         return new ValueSnapshottingException("Authoritative Rust value snapshotting does not support values of type " + value.getClass().getName());
+    }
+
+    public static class PropertySnapshottingException extends ValueSnapshottingException {
+        private final String propertyName;
+        @Nullable
+        private final Object value;
+
+        public PropertySnapshottingException(String propertyName, @Nullable Object value, Throwable cause) {
+            super("Authoritative Rust value snapshotting failed for input property '" + propertyName + "'", cause);
+            this.propertyName = propertyName;
+            this.value = value;
+        }
+
+        public String getPropertyName() {
+            return propertyName;
+        }
+
+        @Nullable
+        public Object getValue() {
+            return value;
+        }
     }
 
     private static class SnapshotAndCanonical {

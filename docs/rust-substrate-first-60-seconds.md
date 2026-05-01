@@ -56,7 +56,8 @@ The supported authoritative slice can also materialize Gradle-compatible
 file-collection snapshots from Rust hashes for direct files, missing roots,
 directories, and PatternSet-backed file trees. Value snapshotting can also be
 made authoritative for exact built-in value shapes while failing closed for
-JVM-only serialization/classloader cases:
+JVM-only serialization/classloader cases. Supported value inputs are batched
+into one Rust canonical snapshot RPC per fingerprinting pass:
 
 ```bash
 build/gradle-under-test/bin/gradle \
