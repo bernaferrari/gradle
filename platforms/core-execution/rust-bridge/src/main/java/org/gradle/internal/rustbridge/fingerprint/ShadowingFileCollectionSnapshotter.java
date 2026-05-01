@@ -57,8 +57,9 @@ import java.util.function.Predicate;
  * <p>In shadow mode, this validates the Rust implementation against the known-good Java one
  * by walking the Java snapshot and comparing individual file hashes.</p>
  *
- * <p>In authoritative mode, this supports direct files, missing paths, and directory roots.
- * Pattern-filtered file trees and symlink roots still fail closed.</p>
+ * <p>In authoritative mode, this supports direct files, missing paths, directory roots,
+ * PatternSet-backed file trees, and file-tree-backed archive files. Symlink and special-file
+ * paths still fail closed until their Gradle access semantics are modeled explicitly.</p>
  */
 public class ShadowingFileCollectionSnapshotter implements FileCollectionSnapshotter {
 
@@ -403,7 +404,7 @@ public class ShadowingFileCollectionSnapshotter implements FileCollectionSnapsho
         @Override
         public void visitFileTreeBackedByFile(File file, FileTreeInternal fileTree, FileSystemMirroringFileTree sourceTree) {
             super.visitFileTreeBackedByFile(file, fileTree, sourceTree);
-            throw new SubstrateException("Authoritative Rust file fingerprinting does not yet support file-tree-backed files: " + file.getAbsolutePath());
+            roots.add(new RootSpec(file.getAbsoluteFile(), null));
         }
 
         private List<RootSpec> getRoots() {
