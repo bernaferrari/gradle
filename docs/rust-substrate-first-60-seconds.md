@@ -8,8 +8,8 @@ inspect a profiler:
   Rust fast and land in the Rust stores with checksum evidence
 - dependency read-through: whether Gradle can skip remote artifact access when
   Rust already has the requested external module artifact
-- metadata read-through: whether Gradle can skip remote POM and Gradle module
-  metadata access when Rust already has the metadata
+- metadata read-through: whether Gradle can skip remote POM, Gradle module, and
+  Maven version-list metadata access when Rust already has the metadata
 - hashing/fingerprinting: whether installed Gradle can run with Rust
   build-session hashing plus file-collection snapshot/fingerprint support
 - file watching: how quickly an edit becomes observable
@@ -27,7 +27,7 @@ The script reports:
 - `dependency_metadata_transport_cache`: URL-only POM streaming through the Rust
   transport, persisted metadata-store write, and later metadata cache hit
 - `dependency_artifact_readthrough`: focused Gradle resolver test proving the Rust read-through hook resolves before remote access
-- `dependency_metadata_readthrough`: focused Gradle resource-cache test proving the Rust POM and Gradle module metadata read-through hook resolves before remote access
+- `dependency_metadata_readthrough`: focused Gradle resource-cache test proving the Rust POM, Gradle module, and Maven version-list metadata read-through hook resolves before remote access
 - `file_watch_first_event`: native file watcher latency from write to event
 
 These are not full Gradle replacement claims. Gradle DSL and unsupported plugin
