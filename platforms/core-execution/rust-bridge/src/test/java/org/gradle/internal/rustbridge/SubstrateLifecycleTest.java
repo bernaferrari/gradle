@@ -74,6 +74,8 @@ public class SubstrateLifecycleTest {
     @Test
     public void requestedJvmHostStartupFailureIsNotIgnored() throws Exception {
         Path tempDir = Files.createTempDirectory("substrate-lifecycle-");
+        String previousUnixSocket = System.getProperty("org.gradle.rust.substrate.unixSocket");
+        System.setProperty("org.gradle.rust.substrate.unixSocket", "true");
         Files.createFile(tempDir.resolve("substrate.sock"));
         Path blockedJvmHostSocket = Files.createDirectory(tempDir.resolve("jvm-host.sock"));
         Files.createFile(blockedJvmHostSocket.resolve("child"));
@@ -83,7 +85,17 @@ public class SubstrateLifecycleTest {
             fail("Expected JVM host startup failure to abort launch");
         } catch (IOException e) {
             assertTrue(e.getMessage().contains("JVM host was requested but failed to start"));
+        } finally {
+            restoreProperty("org.gradle.rust.substrate.unixSocket", previousUnixSocket);
         }
+    }
+
+    @Test
+    public void daemonLauncherExposesPersistedTcpEndpointPath() throws Exception {
+        Path tempDir = Files.createTempDirectory("substrate-lifecycle-");
+        DaemonLauncher launcher = DaemonLauncher.of(tempDir.resolve("daemon").toFile(), tempDir.toFile());
+
+        assertEquals(tempDir.resolve("substrate.tcp-endpoint").toString(), launcher.getTcpEndpointPath());
     }
 
     private static DefaultInternalOptions options(boolean enabled, boolean authoritative, File daemonBinary) {

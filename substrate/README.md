@@ -104,9 +104,15 @@ The real Gradle build-work path now has an opt-in no-fallback gate:
 skips its JVM task executor only after Rust `RunBuild` completes exactly the
 scheduled task count with `allow_jvm_forwarding=false`; otherwise the build
 fails closed. The offline checked-in corpus currently proves that path against
-Java library, Java application, and Java multi-project builds. The separate
+21 projects covering Java lifecycle tasks, Copy/Sync, Zip/Tar/War/Ear, Exec,
+JavaExec, Javadoc, and an OSS-style Java library slice. The separate
 `testing/corpus/external-manifest.json` proof adds a networked JUnit Platform
 build with a non-empty `Test` task lowered to Rust `TestExec`.
+
+Installed Gradle-under-test runs persist the Rust daemon loopback endpoint in
+the substrate state directory and reconnect on later invocations when the daemon
+binary path, mtime, and size still match. This avoids paying native daemon
+startup repeatedly while keeping local rebuilds fail-safe against stale daemons.
 
 **Note:** some symlink-oriented tests are intentionally ignored in sandboxed macOS
 environments because `/var` and `/private/var` can produce ELOOP behavior that does not
@@ -176,8 +182,8 @@ The JVM compatibility host in `platforms/core-execution/rust-bridge/` provides:
 - Shadow listeners that compare Rust and JVM outputs
 - Build model hosting for DSL evaluation
 - A mixed-mode bridge where the active module service layer now covers daemon attach,
-  optional JVM-host attach, lifecycle shadow listeners, cache registration, and the
-  compile-safe execution/configuration/cache shadowing slice
+  persisted loopback daemon reuse, optional JVM-host attach, lifecycle shadow listeners,
+  cache registration, and the compile-safe execution/configuration/cache shadowing slice
 
 ## Directory Structure
 
