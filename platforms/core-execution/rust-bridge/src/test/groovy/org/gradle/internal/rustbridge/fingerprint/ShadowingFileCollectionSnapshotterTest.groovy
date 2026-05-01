@@ -226,24 +226,41 @@ class ShadowingFileCollectionSnapshotterTest extends Specification {
         roots[0].children[0].hash == hash
     }
 
-    def "authoritative snapshot fails closed for file-tree-backed files"() {
+    def "authoritative snapshot hashes file-tree-backed backing files with rust"() {
         given:
         def javaDelegate = Mock(FileCollectionSnapshotter)
         def rustClient = Mock(RustFileFingerprintClient)
         def reporter = Mock(HashMismatchReporter)
+        def rustResult = Mock(RustFileFingerprintClient.FingerprintResult)
+        def rustEntry = Mock(RustFileFingerprintClient.IndividualFingerprint)
+        def hash = HashCode.fromBytes("archive-md5----".bytes)
         def backingFile = File.createTempFile("authoritative-fp-file-tree-backed", ".zip")
         backingFile.deleteOnExit()
+        backingFile.text = "zip bytes"
         def file = fileTreeBackedByFileCollection(backingFile.absolutePath)
         def snapshotter = new ShadowingFileCollectionSnapshotter(javaDelegate, rustClient, reporter, true)
 
+        rustEntry.isDirectory() >> false
+        rustEntry.getPath() >> backingFile.absolutePath
+        rustEntry.getHash() >> hash
+        rustEntry.getLastModified() >> 456L
+        rustEntry.getSize() >> backingFile.length()
+
         when:
-        snapshotter.snapshot(file)
+        def result = snapshotter.snapshot(file)
 
         then:
-        def e = thrown(SubstrateException)
-        e.message.contains("does not yet support file-tree-backed files")
         0 * javaDelegate._
-        0 * rustClient._
+        1 * rustClient.fingerprintFiles(_, "ABSOLUTE_PATH", []) >> rustResult
+        1 * rustResult.isSuccess() >> true
+        1 * rustResult.getEntries() >> [rustEntry]
+
+        and:
+        def roots = result.roots().toList()
+        roots.size() == 1
+        roots[0] instanceof RegularFileSnapshot
+        roots[0].absolutePath == backingFile.absolutePath
+        roots[0].hash == hash
     }
 
     def "authoritative snapshot fails closed when rust omits requested file"() {

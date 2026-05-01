@@ -152,12 +152,15 @@
   VFS scopes. File-collection fingerprinting can now run authoritatively for
   direct files, missing roots, directories, and PatternSet-backed file trees by
   materializing Gradle-compatible regular-file, missing-file, and Merkle
-  directory snapshot objects from Rust hashes. It still fails closed for
-  symlinks, special files, and file-tree-backed archives. Value snapshotting can
-  now run authoritatively for exact built-in value shapes that do not require
-  Java serialization or classloader hashes: null, strings, booleans, integer/
-  long/short numbers, files, enums, hash codes, lists, sets, maps, object
-  arrays, and primitive arrays. Unsupported JVM-only values fail closed.
+  directory snapshot objects from Rust hashes. File-tree-backed archive inputs
+  now snapshot the backing archive file via Rust, matching Gradle's existing
+  fingerprinting boundary while preserving the separate archive-tree `isEmpty`
+  check. It still fails closed for symlinks and special files. Value
+  snapshotting can now run authoritatively for exact built-in value shapes that
+  do not require Java serialization or classloader hashes: null, strings,
+  booleans, integer/long/short numbers, files, enums, hash codes, lists, sets,
+  maps, object arrays, and primitive arrays. Unsupported JVM-only values fail
+  closed.
   Authoritative value input fingerprinting batches supported value properties
   into one Rust canonical snapshot RPC per fingerprinting pass instead of one
   RPC per property.
@@ -212,8 +215,8 @@
 2. Add native-ready contracts for richer `Copy`/`Sync` specs and the next common
    process task after `Javadoc`.
 3. Extend authoritative Rust file-collection snapshotting beyond direct
-   files/directories/file trees to symlink semantics, special files, and
-   file-tree-backed archives, or keep those cases explicitly unsupported.
+   files/directories/file trees/archive-backed files to symlink semantics and
+   special files, or keep those cases explicitly unsupported.
 4. Design a global/user-home VFS bridge that does not leak build-session
    services into global scopes.
 5. Reduce bridge source exclusions as APIs are stabilized.
