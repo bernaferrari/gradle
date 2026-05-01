@@ -29,9 +29,13 @@ The script reports:
 - `dependency_dynamic_metadata_transport_cache`: URL-only
   `maven-metadata.xml` streaming through the Rust transport, persisted
   metadata-store write, and later dynamic-version metadata cache hit
-- `dependency_artifact_readthrough`: focused Gradle resolver test proving the Rust read-through hook resolves before remote access
-- `dependency_metadata_readthrough`: focused Gradle resource-cache test proving the Rust POM, Gradle module, and Maven version-list metadata read-through hook resolves before remote access
+- `dependency_artifact_readthrough`: focused Gradle resolver tests proving the Rust read-through hook resolves JAR and non-JAR artifacts before remote access
+- `dependency_metadata_readthrough`: focused Gradle resource-cache tests proving the Rust POM, Gradle module, Maven version-list metadata, and uncached download hooks resolve before Java remote transport
 - `file_watch_first_event`: native file watcher latency from write to event
+
+The artifact and metadata read-through checks share one Gradle invocation so
+the first-minute demo measures the Rust-backed seams instead of paying repeated
+Gradle test startup overhead.
 
 A broader dependency-management integration smoke also exercises a real Maven
 dynamic-version flow: the first run resolves `1.+` over HTTP and warms Rust,

@@ -164,29 +164,48 @@ def measure_cargo_test(label: str, test_filter: str, timeout: int) -> dict[str, 
     }
 
 
-def measure_gradle_test(label: str, test_filter: str, timeout: int = 90) -> dict[str, object]:
+def measure_gradle_readthrough_smoke(timeout: int = 90) -> list[dict[str, object]]:
+    filters = [
+        "org.gradle.api.internal.artifacts.ivyservice.ivyresolve.RepositoryChainArtifactResolverTest.uses read-through artifact cache between local and remote access",
+        "org.gradle.api.internal.artifacts.ivyservice.ivyresolve.RepositoryChainArtifactResolverTest.uses read-through artifact cache for non-jar external module artifacts",
+        "org.gradle.internal.resource.transfer.DefaultCacheAwareExternalResourceAccessorTest.uses rust cached pom metadata when gradle has no local cached resource",
+        "org.gradle.internal.resource.transfer.DefaultCacheAwareExternalResourceAccessorTest.uses rust cached gradle module metadata when gradle has no local cached resource",
+        "org.gradle.internal.resource.transfer.DefaultCacheAwareExternalResourceAccessorTest.uses rust cached maven metadata when gradle has no local cached resource",
+        "org.gradle.internal.resource.transfer.DefaultCacheAwareExternalResourceAccessorTest.downloads uncached resource through rust transport before java transport",
+        "org.gradle.internal.resource.transfer.DefaultCacheAwareExternalResourceAccessorTest.passes explicit artifact coordinate to rust transport download",
+    ]
+    cmd = [
+        "./gradlew",
+        ":dependency-management:test",
+        "-x",
+        ":distributions-core:generateLicenseFile",
+    ]
+    for test_filter in filters:
+        cmd.extend(["--tests", test_filter])
+
     started = time.perf_counter()
-    completed = run(
-        [
-            "./gradlew",
-            ":dependency-management:test",
-            "--tests",
-            test_filter,
-            "-x",
-            ":distributions-core:generateLicenseFile",
-        ],
-        timeout=timeout,
-    )
+    completed = run(cmd, timeout=timeout)
     elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
     output = completed.stdout + completed.stderr
-    return {
-        "name": label,
+    tail = "\n".join(output.strip().splitlines()[-12:])
+    common = {
         "ok": completed.returncode == 0,
         "elapsed_ms": elapsed_ms,
-        "threshold_ms": 60000,
-        "test_filter": test_filter,
-        "tail": "\n".join(output.strip().splitlines()[-12:]),
+        "threshold_ms": 30000,
+        "test_filters": filters,
+        "shared_gradle_invocation": True,
+        "tail": tail,
     }
+    return [
+        {
+            "name": "dependency_artifact_readthrough",
+            **common,
+        },
+        {
+            "name": "dependency_metadata_readthrough",
+            **common,
+        },
+    ]
 
 
 def write_report(path: Path, results: list[dict[str, object]]) -> None:
@@ -240,14 +259,7 @@ def main() -> int:
             "test_download_maven_metadata_url_populates_dynamic_metadata_cache",
             timeout=60,
         ),
-        measure_gradle_test(
-            "dependency_artifact_readthrough",
-            "org.gradle.api.internal.artifacts.ivyservice.ivyresolve.RepositoryChainArtifactResolverTest",
-        ),
-        measure_gradle_test(
-            "dependency_metadata_readthrough",
-            "org.gradle.internal.resource.transfer.DefaultCacheAwareExternalResourceAccessorTest",
-        ),
+        *measure_gradle_readthrough_smoke(),
         measure_cargo_test(
             "file_watch_first_event",
             "file_watch_reports_first_change_quickly",
