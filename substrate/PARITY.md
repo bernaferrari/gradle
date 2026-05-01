@@ -70,7 +70,9 @@
   Gradle's normal external-resource cache and index. When Gradle is resolving a
   safe external module artifact by explicit coordinate, the coordinate is passed
   to Rust so the same streamed download also populates the coordinate-addressed
-  Rust artifact store for future read-through hits.
+  Rust artifact store for future read-through hits. URL-only `.pom`, `.module`,
+  and `.ivy` downloads also populate the URL-addressed Rust metadata store for
+  later metadata read-through.
 - Native dependency transport now persists downloaded Maven artifacts into the
   Rust artifact store, writes `.sha256` sidecars, validates cold and warm cache
   hits against requested SHA-256 values, populates the warm artifact cache
@@ -192,6 +194,7 @@
 - `cargo test -p gradle-substrate-daemon download_artifact -- --nocapture`
 - `cargo test -p gradle-substrate-daemon artifact_cache -- --nocapture`
 - `cargo test -p gradle-substrate-daemon fetch_pom -- --nocapture`
+- `cargo test -p gradle-substrate-daemon test_download_metadata_url_populates_metadata_cache -- --nocapture`
 - `cargo test -p gradle-substrate-daemon persistent_store_roundtrip -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_add_artifact_to_cache_preserves_extension`
 - `cargo test -p gradle-substrate-daemon cold_path -- --nocapture`
@@ -202,6 +205,7 @@
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.e2e.SubstrateE2ETest.dependencyArtifactReadThroughReturnsArtifactFromRustStore -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon`
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.e2e.SubstrateE2ETest.dependencyArtifactReadThroughPreservesArtifactExtension -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon`
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.e2e.SubstrateE2ETest.dependencyDownloadStreamsResourceThroughRustTransport -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon`
+- `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.e2e.SubstrateE2ETest.dependencyDownloadPopulatesMetadataUrlCache -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon`
 - `./gradlew :dependency-management:test --tests org.gradle.api.internal.artifacts.ivyservice.ivyresolve.RepositoryChainArtifactResolverTest -x :distributions-core:generateLicenseFile`
 - `./gradlew :dependency-management:test --tests org.gradle.internal.resource.transfer.DefaultCacheAwareExternalResourceAccessorTest -x :distributions-core:generateLicenseFile`
 - `cargo test -q -p gradle-substrate-daemon server::file_fingerprint::tests -- --nocapture`

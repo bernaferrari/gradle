@@ -281,6 +281,41 @@ public class SubstrateE2ETest {
         }
     }
 
+    @Test
+    public void dependencyDownloadPopulatesMetadataUrlCache() throws Exception {
+        byte[] bytes = "<project><modelVersion>4.0.0</modelVersion></project>".getBytes(StandardCharsets.UTF_8);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/maven2/org/example/demo/1.2.3/demo-1.2.3.pom", exchange -> {
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(bytes);
+            }
+        });
+        server.start();
+        try {
+            String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/maven2/org/example/demo/1.2.3/demo-1.2.3.pom";
+            Path destination = socketDirectory.resolve("downloaded-demo.pom");
+            RustDependencyResolutionClient dependencyClient = new RustDependencyResolutionClient(client);
+            RustDependencyResolutionClient.DownloadResult result = dependencyClient.downloadResourceStrict(
+                new java.net.URI(url),
+                destination.toFile()
+            );
+            RustDependencyResolutionClient.CacheCheckResult cachedMetadata = dependencyClient.checkMetadataCacheStrict(
+                url,
+                "pom",
+                ""
+            );
+
+            assertTrue("Rust metadata download should succeed", result.isSuccess());
+            assertEquals(bytes.length, result.getBytesWritten());
+            assertArrayEquals(bytes, Files.readAllBytes(destination));
+            assertTrue("Rust transport should populate URL-addressed metadata store", cachedMetadata.isCached());
+            assertArrayEquals(bytes, Files.readAllBytes(new File(cachedMetadata.getLocalPath()).toPath()));
+        } finally {
+            server.stop(0);
+        }
+    }
+
     // --- Execution Plan Service ---
 
     @Test

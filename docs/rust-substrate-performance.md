@@ -32,5 +32,6 @@ python3 tools/demo/first_60_seconds.py --output build/first60.json
 ```
 
 That reports daemon socket readiness, Rust dependency-transport/store/checksum
-smoke timing, Gradle artifact/POM read-through from the Rust cache, and native
-file-watch first-event latency without relying on full-build timing.
+smoke timing, URL metadata-store warming through Rust transport, Gradle
+artifact/POM read-through from the Rust cache, and native file-watch first-event
+latency without relying on full-build timing.
