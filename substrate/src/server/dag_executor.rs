@@ -39,6 +39,7 @@ struct TaskSlot {
     predicted_outcome: i32,
     input_fingerprint: String,
     execution_context_json: String,
+    estimated_duration_ms: i64,
     critical_path_remaining_ms: i64,
 }
 
@@ -539,6 +540,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                     predicted_outcome: PredictedOutcome::PredictedUnknown as i32,
                     input_fingerprint: String::new(),
                     execution_context_json: node.execution_context_json.clone(),
+                    estimated_duration_ms: node.estimated_duration_ms.max(0),
                     critical_path_remaining_ms: critical_path_remaining
                         .get(&node.task_path)
                         .copied()
@@ -1276,7 +1278,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                         return Ok(Response::new(GetNextTaskResponse {
                             task_path,
                             task_type: slot.task_type.clone(),
-                            estimated_duration_ms: ready_task.critical_path_remaining_ms,
+                            estimated_duration_ms: slot.estimated_duration_ms,
                         }));
                     }
                 }
@@ -2769,7 +2771,7 @@ mod tests {
             .into_inner();
 
         assert_eq!(first.task_path, ":slowRoot");
-        assert_eq!(first.estimated_duration_ms, 1010);
+        assert_eq!(first.estimated_duration_ms, 10);
     }
 
     #[tokio::test]
