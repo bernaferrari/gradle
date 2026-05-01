@@ -111,9 +111,10 @@ Zip/Tar nested CopySpec mappings, Zip/Tar gzip+bzip2/War/Ear archive builds,
 simple Java launcher Exec and JavaExec tasks, and native Javadoc. The optional
 offline corpus also includes an OSS-style Java library slice with sources
 JAR/Javadoc/static report outputs. The optional `testing/corpus/external-manifest.json`
-adds a pinned JUnit Platform sample for real non-empty test execution with
-include/exclude tag filtering plus a richer dependency constraints/exclusion
-sample, and requires network or a warm Gradle dependency cache.
+adds pinned external-dependency builds for real non-empty JUnit Platform test
+execution with include/exclude tag filtering plus a richer dependency
+constraints/exclusion sample, and requires network or a warm Gradle dependency
+cache.
 `testing/corpus/unsupported-manifest.json` tracks work that must not be
 approximated natively until a complete contract exists. It covers custom JVM
 task actions beyond static literal file writes, unsupported CopySpec

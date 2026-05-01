@@ -6,6 +6,8 @@ import gradle.substrate.v1.BuildPlanTaskOutputSpec;
 
 import org.gradle.api.Project;
 import org.gradle.api.Task;
+import org.gradle.api.artifacts.Configuration;
+import org.gradle.api.artifacts.ConfigurationContainer;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.tasks.TaskDependency;
 import org.junit.Rule;
@@ -68,6 +70,37 @@ public class ProjectModelProviderAdapterTest {
         assertTrue(task.getOutputSpecsList().stream()
             .map(BuildPlanTaskOutputSpec::getPath)
             .anyMatch(path -> path.equals(outputDir.getAbsolutePath())));
+    }
+
+    @org.junit.Test
+    public void augmentsStandardJavaCompileClasspathFromResolvableConfiguration() throws IOException {
+        File sourceDir = temporaryFolder.newFolder("src", "test", "java");
+        File sourceFile = new File(sourceDir, "AppTest.java");
+        assertTrue(sourceFile.createNewFile());
+        File outputDir = temporaryFolder.newFolder("build/classes/java/test");
+        File mainClasses = temporaryFolder.newFolder("build/classes/java/main");
+        File junitJar = temporaryFolder.newFile("junit-jupiter-api.jar");
+        File javaHome = temporaryFolder.newFolder("jdks", "jdk-17");
+
+        Task compileTestJava = javaCompileTask(
+            ":compileTestJava",
+            "compileTestJava",
+            sourceFile,
+            outputDir,
+            fileCollection(mainClasses),
+            javaHome,
+            configurationContainer("testCompileClasspath", fileCollection(mainClasses, junitJar))
+        );
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(compileTestJava, JavaCompile.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals(
+            fileCollectionPathStringForTest(fileCollection(mainClasses, junitJar)),
+            inputs.get("classpath")
+        );
     }
 
     @org.junit.Test
@@ -185,6 +218,33 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("slow", inputs.get("exclude_tags"));
         assertEquals("false", inputs.get("test_unsupported_filters"));
         assertEquals("true", inputs.get("scan_classpath"));
+    }
+
+    @org.junit.Test
+    public void augmentsStandardTestClasspathFromResolvableConfiguration() throws IOException {
+        File testClassesDir = temporaryFolder.newFolder("build/classes/java/test");
+        File runtimeJar = temporaryFolder.newFile("junit-platform-console-standalone.jar");
+        File engineJar = temporaryFolder.newFile("junit-jupiter-engine.jar");
+        File reportsDir = temporaryFolder.newFolder("build/test-results/test");
+        File workingDir = temporaryFolder.newFolder("work");
+
+        Task test = testTask(
+            testClassesDir,
+            runtimeJar,
+            reportsDir,
+            workingDir,
+            configurationContainer("testRuntimeClasspath", fileCollection(testClassesDir, runtimeJar, engineJar))
+        );
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(test, Test.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals(
+            fileCollectionPathStringForTest(fileCollection(testClassesDir, runtimeJar, engineJar)),
+            inputs.get("classpath")
+        );
     }
 
     @org.junit.Test
@@ -443,12 +503,34 @@ public class ProjectModelProviderAdapterTest {
     }
 
     private static Task javaCompileTask(File sourceFile, File outputDir, File classpathEntry, File javaHome) {
+        return javaCompileTask(
+            ":compileJava",
+            "compileJava",
+            sourceFile,
+            outputDir,
+            fileCollection(classpathEntry),
+            javaHome,
+            null
+        );
+    }
+
+    private static Task javaCompileTask(
+        String path,
+        String name,
+        File sourceFile,
+        File outputDir,
+        FileCollection classpath,
+        File javaHome,
+        ConfigurationContainer configurations
+    ) {
         FileCollection source = fileCollection(sourceFile);
-        FileCollection classpath = fileCollection(classpathEntry);
         FileCollection outputs = fileCollection(outputDir);
         Project project = proxy(Project.class, (proxy, method, args) -> {
             if (method.getName().equals("getPath")) {
                 return ":";
+            }
+            if (method.getName().equals("getConfigurations")) {
+                return configurations;
             }
             return defaultValue(method.getReturnType());
         });
@@ -461,11 +543,11 @@ public class ProjectModelProviderAdapterTest {
         return proxy(new Class<?>[] {Task.class, JavaCompileContract.class}, (proxy, method, args) -> {
             switch (method.getName()) {
                 case "getPath":
-                    return ":compileJava";
+                    return path;
                 case "getProject":
                     return project;
                 case "getName":
-                    return "compileJava";
+                    return name;
                 case "getEnabled":
                     return true;
                 case "getGroup":
@@ -509,12 +591,25 @@ public class ProjectModelProviderAdapterTest {
     }
 
     private static Task testTask(File testClassesDir, File runtimeJar, File reportsDir, File workingDir) {
+        return testTask(testClassesDir, runtimeJar, reportsDir, workingDir, null);
+    }
+
+    private static Task testTask(
+        File testClassesDir,
+        File runtimeJar,
+        File reportsDir,
+        File workingDir,
+        ConfigurationContainer configurations
+    ) {
         FileCollection testClasses = fileCollection(testClassesDir);
         FileCollection classpath = fileCollection(testClassesDir, runtimeJar);
         FileCollection outputs = fileCollection(reportsDir);
         Project project = proxy(Project.class, (proxy, method, args) -> {
             if (method.getName().equals("getPath")) {
                 return ":";
+            }
+            if (method.getName().equals("getConfigurations")) {
+                return configurations;
             }
             return defaultValue(method.getReturnType());
         });
@@ -1133,6 +1228,27 @@ public class ProjectModelProviderAdapterTest {
                 return fileSet.stream()
                     .map(File::getAbsolutePath)
                     .collect(Collectors.joining(File.pathSeparator));
+            }
+            return defaultValue(method.getReturnType());
+        });
+    }
+
+    private static ConfigurationContainer configurationContainer(String name, FileCollection files) {
+        Configuration configuration = proxy(Configuration.class, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "isCanBeResolved":
+                    return true;
+                case "getFiles":
+                    return files.getFiles();
+                case "getAsPath":
+                    return files.getAsPath();
+                default:
+                    return defaultValue(method.getReturnType());
+            }
+        });
+        return proxy(ConfigurationContainer.class, (proxy, method, args) -> {
+            if (method.getName().equals("findByName") && args != null && args.length == 1 && name.equals(args[0])) {
+                return configuration;
             }
             return defaultValue(method.getReturnType());
         });

@@ -45,9 +45,10 @@
   require a Gradle-under-test distribution built from this fork plus
   `target/debug/gradle-substrate-daemon`; the corpus runner now rejects
   bootstrap/upstream Gradle runs that do not emit a substrate run-build signal.
-- A separate networked JUnit corpus build proves native `TestExec` lowering for
-  a non-empty JUnit Platform test task, including include/exclude tag capture,
-  when the test runtime contains the JUnit Platform ConsoleLauncher.
+- A separate networked external-dependency corpus proves native Java compile and
+  `TestExec` lowering for dependency-backed builds: a non-empty JUnit Platform
+  test task with include/exclude tag capture plus a dependency
+  constraints/exclusions sample.
 - Native `TestExec` lowering captures a single Gradle include test filter and
   JUnit Platform include/exclude tags, and fails closed for unsupported filter
   shapes rather than approximating them.
@@ -62,6 +63,13 @@
   dependency edge but omits the materialized file path. This keeps
   multiproject Java compile and application distribution packaging inside the
   Rust-controlled graph.
+- The JVM bridge captures standard Java source-set compile/test classpaths
+  from resolvable Gradle configurations when task-local classpath snapshots are
+  incomplete. Rust also has a narrow local Gradle module-cache inference bridge
+  for direct Maven dependencies in JavaCompile/Test tasks, including the pinned
+  JUnit Platform family used by the external corpus. This is intentionally
+  fail-closed and should be replaced by complete finalized-plan capture rather
+  than expanded into a general dependency solver.
 - A narrow native `WriteFile` executor supports static single-output report
   tasks only when the JVM bridge can extract an exact literal `writeText(...)`
   contract from the build script. Arbitrary task actions still fail closed.
@@ -190,6 +198,11 @@
   literal file writes, arbitrary copy filters/actions beyond direct expand,
   Gradle archive metadata edge cases beyond entry inventory, and native symlink
   copy/archive semantics.
+- External dependency classpaths are now covered by the external corpus, but
+  the current Rust-side direct-coordinate module-cache inference is a bridge.
+  The durable fix is complete finalized-plan classpath capture from Gradle's
+  task model before Rust executes, so dependency semantics stay Gradle-owned
+  until the native solver is parity-complete.
 - Rust build-session hashing can now shadow or authoritatively replace the
   local `DefaultFileHasher` delegate while preserving Gradle's global/user-home
   VFS scopes. File-collection fingerprinting can now run authoritatively for
@@ -221,11 +234,14 @@
 - `cargo test -p gradle-substrate-daemon --test build_plan_shadow_test refreshed_native_ready_shadow_plan_runs_java_lifecycle_without_jvm_fallback -- --exact`
 - `./gradlew :core:test --tests org.gradle.execution.RustAuthoritativeBuildExecutionActionTest -x :distributions-core:generateLicenseFile`
 - `./gradlew :rust-bridge:compileJava :rust-bridge:test --tests '*SubstrateLifecycleTest*' --no-daemon --console=plain`
+- `./gradlew :rust-bridge:compileJava :rust-bridge:test --tests '*ProjectModelProviderAdapterTest*' --no-daemon --console=plain`
 - `build/gradle-under-test/bin/gradle -p testing/corpus/java-library-kotlin-dsl clean build --no-daemon --console=plain -Dorg.gradle.rust.substrate.enabled=true -Dorg.gradle.rust.substrate.mode=shadow -Dorg.gradle.rust.substrate.daemon.path=$PWD/target/debug/gradle-substrate-daemon -Dorg.gradle.rust.substrate.runbuild.authoritative=true --info` twice verifies first-launch then persisted TCP daemon reuse.
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --verbose`
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-authoritative-21-daemon-reuse-final --verbose` passed 21/21, no fallback, 200/200 task parity, output/hash/archive parity, observed wall time upstream=101529ms and substrate=155998ms.
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-authoritative-21-external-classpath --verbose` passed 21/21, no fallback, 200/200 task parity, output/hash/archive parity, observed wall time upstream=118407ms and substrate=169730ms.
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-native-ready-default --tasks clean build --timeout 300 --output-dir build/corpus-native-ready-default-21`
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --verbose`
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-external-rust-cache-classpath-3 --verbose` passed 2/2, no fallback, 25/25 task parity, output/hash/archive parity, observed wall time upstream=7739ms and substrate=17479ms.
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/unsupported-manifest.json --contract-only --output-dir build/corpus-contract-unsupported`
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/unsupported-manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-unsupported-fail-closed-under-test`
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/unsupported-manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-unsupported-fail-closed` fails honestly without `--gradle-command` because the bootstrap wrapper does not emit substrate run-build markers.
@@ -268,8 +284,8 @@
 
 ## Next Sync Actions
 
-1. Expand differential corpus coverage for external dependency and richer
-   task-graph semantics.
+1. Replace Rust-side local module-cache classpath inference with complete
+   finalized-plan classpath capture from the JVM bridge.
 2. Add native-ready contracts for richer `Copy`/`Sync` specs and the next common
    process task after `Javadoc`.
 3. Extend authoritative Rust file-collection snapshotting beyond direct

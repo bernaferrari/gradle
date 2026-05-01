@@ -8,6 +8,8 @@ import gradle.substrate.v1.BuildPlanTaskOutputSpec;
 import org.gradle.api.Action;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
+import org.gradle.api.artifacts.Configuration;
+import org.gradle.api.artifacts.ConfigurationContainer;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.file.FileTree;
 import org.gradle.api.file.RelativePath;
@@ -336,7 +338,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "java_home", javaCompilerHome(task));
         putIfPresent(inputs, "source_version", stringOrEmpty(invokeOptional(task, "getSourceCompatibility")));
         putIfPresent(inputs, "target_version", stringOrEmpty(invokeOptional(task, "getTargetCompatibility")));
-        putIfPresent(inputs, "classpath", fileCollectionPathString(invokeOptional(task, "getClasspath")));
+        putIfPresent(inputs, "classpath", mergedClasspath(
+            fileCollectionPathString(invokeOptional(task, "getClasspath")),
+            sourceSetConfigurationClasspath(task, "compile", "Java", "CompileClasspath")
+        ));
 
         Object options = invokeOptional(task, "getOptions");
         if (options != null) {
@@ -596,7 +601,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
 
     private static void captureTestInputs(Task task, Map<String, String> inputs) {
         putIfPresent(inputs, "java_home", System.getProperty("java.home"));
-        putIfPresent(inputs, "classpath", fileCollectionPathString(invokeOptional(task, "getClasspath")));
+        putIfPresent(inputs, "classpath", mergedClasspath(
+            fileCollectionPathString(invokeOptional(task, "getClasspath")),
+            sourceSetConfigurationClasspath(task, "", "", "RuntimeClasspath")
+        ));
         putIfPresent(inputs, "test_classes_dirs", fileCollectionPathString(invokeOptional(task, "getTestClassesDirs")));
         putIfPresent(inputs, "working_dir", filePath(invokeOptional(task, "getWorkingDir")));
         putIfPresent(inputs, "max_heap_size", stringOrEmpty(invokeOptional(task, "getMaxHeapSize")));
@@ -825,6 +833,68 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     private static void putIfPresent(Map<String, String> inputs, String key, String value) {
         if (value != null && !value.isEmpty()) {
             inputs.put(key, value);
+        }
+    }
+
+    private static String sourceSetConfigurationClasspath(
+        Task task,
+        String taskPrefix,
+        String taskSuffix,
+        String configurationSuffix
+    ) {
+        String taskName = task.getName();
+        if (!taskName.startsWith(taskPrefix) || !taskName.endsWith(taskSuffix)) {
+            return "";
+        }
+        String sourceSetPart = taskName.substring(taskPrefix.length(), taskName.length() - taskSuffix.length());
+        String sourceSetPrefix;
+        if (sourceSetPart.isEmpty()) {
+            sourceSetPrefix = "";
+        } else {
+            sourceSetPrefix = Character.toLowerCase(sourceSetPart.charAt(0)) + sourceSetPart.substring(1);
+        }
+        String configurationName = sourceSetPrefix + configurationSuffix;
+        if (configurationName.equals(configurationSuffix) && "CompileClasspath".equals(configurationSuffix)) {
+            configurationName = "compileClasspath";
+        }
+        if (configurationName.equals(configurationSuffix) && "RuntimeClasspath".equals(configurationSuffix)) {
+            configurationName = "testRuntimeClasspath";
+        }
+        return configurationClasspath(task, configurationName);
+    }
+
+    private static String configurationClasspath(Task task, String configurationName) {
+        try {
+            ConfigurationContainer configurations = task.getProject().getConfigurations();
+            Configuration configuration = configurations.findByName(configurationName);
+            if (configuration == null || !configuration.isCanBeResolved()) {
+                return "";
+            }
+            return fileCollectionPathString(configuration);
+        } catch (RuntimeException e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to read configuration classpath {}", configurationName, e);
+            return "";
+        }
+    }
+
+    private static String mergedClasspath(String primary, String secondary) {
+        if (secondary == null || secondary.isEmpty()) {
+            return primary == null ? "" : primary;
+        }
+        if (primary == null || primary.isEmpty()) {
+            return secondary;
+        }
+        Set<String> entries = new java.util.LinkedHashSet<>();
+        addClasspathEntries(entries, primary);
+        addClasspathEntries(entries, secondary);
+        return String.join(File.pathSeparator, entries);
+    }
+
+    private static void addClasspathEntries(Set<String> entries, String classpath) {
+        for (String entry : classpath.split(Pattern.quote(File.pathSeparator))) {
+            if (!entry.isEmpty()) {
+                entries.add(entry);
+            }
         }
     }
 

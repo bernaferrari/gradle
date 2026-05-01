@@ -517,6 +517,8 @@ impl TestExecExecutor {
                     } else {
                         result.error_message = failure_details.join("\n");
                     }
+                } else {
+                    normalize_gradle_junit_reports(&xml_report_dir);
                 }
 
                 tracing::debug!(
@@ -535,6 +537,40 @@ impl TestExecExecutor {
 
         result.duration_ms = start.elapsed().as_millis() as u64;
         result
+    }
+}
+
+fn normalize_gradle_junit_reports(report_dir: &Path) {
+    let console_report = report_dir.join("TEST-junit-jupiter.xml");
+    if !console_report.is_file() {
+        return;
+    }
+    let Ok(xml) = std::fs::read_to_string(&console_report) else {
+        return;
+    };
+    let Some(class_name) = first_xml_attribute(&xml, "classname") else {
+        return;
+    };
+    let gradle_report = report_dir.join(format!("TEST-{class_name}.xml"));
+    if std::fs::write(&gradle_report, xml).is_ok() {
+        let _ = std::fs::remove_file(&console_report);
+    }
+    let binary_dir = report_dir.join("binary");
+    if std::fs::create_dir_all(&binary_dir).is_ok() {
+        let _ = std::fs::write(binary_dir.join("output-events.bin"), []);
+        let _ = std::fs::write(binary_dir.join("results-generic.bin"), []);
+    }
+}
+
+fn first_xml_attribute(xml: &str, attribute: &str) -> Option<String> {
+    let needle = format!("{attribute}=\"");
+    let start = xml.find(&needle)? + needle.len();
+    let end = xml[start..].find('"')?;
+    let value = &xml[start..start + end];
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
     }
 }
 
@@ -1077,6 +1113,24 @@ mod tests {
     fn test_collect_xml_files_empty() {
         let files = collect_xml_files(Path::new("/nonexistent"));
         assert!(files.is_empty());
+    }
+
+    #[test]
+    fn test_normalize_gradle_junit_reports_renames_console_report() {
+        let tmp = tempfile::tempdir().unwrap();
+        let report_dir = tmp.path();
+        std::fs::write(
+            report_dir.join("TEST-junit-jupiter.xml"),
+            r#"<testsuite><testcase classname="example.CalculatorTest" name="addsNumbers()"/></testsuite>"#,
+        )
+        .unwrap();
+
+        normalize_gradle_junit_reports(report_dir);
+
+        assert!(!report_dir.join("TEST-junit-jupiter.xml").exists());
+        assert!(report_dir.join("TEST-example.CalculatorTest.xml").is_file());
+        assert!(report_dir.join("binary/output-events.bin").is_file());
+        assert!(report_dir.join("binary/results-generic.bin").is_file());
     }
 
     #[tokio::test]
