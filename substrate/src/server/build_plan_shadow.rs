@@ -75,6 +75,21 @@ impl BuildPlanShadowStore {
         plan: &CanonicalBuildPlan,
         source: &str,
     ) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
+        let path = self.artifact_path(&plan.build_id);
+        if !is_inline_shadow_source(source) && path.exists() {
+            let bytes = std::fs::read(&path)?;
+            let existing: BuildPlanShadowArtifact = serde_json::from_slice(&bytes)?;
+            if is_inline_shadow_source(&existing.source)
+                || existing
+                    .plan
+                    .metadata
+                    .get("source")
+                    .is_some_and(|source| is_inline_shadow_source(source))
+            {
+                return Ok(path);
+            }
+        }
+
         validate_schema_version(plan)
             .map_err(|e| format!("build plan schema validation failed: {}", e))?;
 
@@ -90,7 +105,6 @@ impl BuildPlanShadowStore {
             source: source.to_string(),
         };
 
-        let path = self.artifact_path(&artifact.plan.build_id);
         let payload = serde_json::to_vec_pretty(&artifact)?;
         std::fs::write(&path, payload)?;
         Ok(path)
@@ -123,6 +137,18 @@ pub async fn capture_and_persist_shadow_from_jvm(
     store: &BuildPlanShadowStore,
     build_id: &str,
 ) -> Result<Option<PathBuf>, Box<dyn std::error::Error + Send + Sync>> {
+    if let Some(existing) = store.load_plan(build_id)? {
+        if is_inline_shadow_source(&existing.source)
+            || existing
+                .plan
+                .metadata
+                .get("source")
+                .is_some_and(|source| is_inline_shadow_source(source))
+        {
+            return Ok(Some(store.artifact_path_for_build_id(build_id)));
+        }
+    }
+
     let Some(model) = bridge.get_build_model(build_id).await? else {
         return Ok(None);
     };
@@ -131,6 +157,17 @@ pub async fn capture_and_persist_shadow_from_jvm(
 
     let plan =
         canonical_plan_from_jvm_bridge(bridge, build_id, &model, env.as_ref(), host_plan).await?;
+    if let Some(existing) = store.load_plan(build_id)? {
+        if is_inline_shadow_source(&existing.source)
+            || existing
+                .plan
+                .metadata
+                .get("source")
+                .is_some_and(|source| is_inline_shadow_source(source))
+        {
+            return Ok(Some(store.artifact_path_for_build_id(build_id)));
+        }
+    }
     let path = store.persist_plan(&plan, "jvm-host-shadow")?;
     if let Some(artifact) = store.load_plan(build_id)? {
         let diff = diff_expected_vs_artifact(&plan, &artifact);
@@ -168,6 +205,13 @@ pub async fn verify_shadow_against_jvm(
     };
 
     Ok(diff_expected_vs_artifact(&expected, &artifact))
+}
+
+fn is_inline_shadow_source(source: &str) -> bool {
+    matches!(
+        source,
+        "task-graph-listener-inline" | "finalized-execution-plan-inline" | "inline-build-plan"
+    )
 }
 
 pub async fn canonical_plan_from_jvm_bridge(

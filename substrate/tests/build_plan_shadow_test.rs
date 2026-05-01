@@ -10,12 +10,12 @@ use gradle_substrate_daemon::proto::jvm_host_service_server::{
     JvmHostService, JvmHostServiceServer,
 };
 use gradle_substrate_daemon::proto::{
-    BuildPlan, BuildPlanTask, BuildPlanTaskDiagnostic, BuildPlanTaskInputSpec,
-    BuildPlanTaskOutputSpec, EvaluateScriptRequest, EvaluateScriptResponse, ExecuteTaskRequest,
-    ExecuteTaskResponse, GetBuildEnvironmentRequest, GetBuildEnvironmentResponse,
-    GetBuildModelRequest, GetBuildModelResponse, GetBuildPlanRequest, GetBuildPlanResponse,
-    InitBuildRequest, ProjectModel, RefreshBuildPlanShadowRequest, ResolveConfigRequest,
-    ResolveConfigResponse, RunBuildRequest,
+    BuildPlan, BuildPlanDependency, BuildPlanProject, BuildPlanTask, BuildPlanTaskDiagnostic,
+    BuildPlanTaskInputSpec, BuildPlanTaskOutputSpec, EvaluateScriptRequest, EvaluateScriptResponse,
+    ExecuteTaskRequest, ExecuteTaskResponse, GetBuildEnvironmentRequest,
+    GetBuildEnvironmentResponse, GetBuildModelRequest, GetBuildModelResponse, GetBuildPlanRequest,
+    GetBuildPlanResponse, InitBuildRequest, ProjectModel, RefreshBuildPlanShadowRequest,
+    ResolveConfigRequest, ResolveConfigResponse, RunBuildRequest,
 };
 use gradle_substrate_daemon::server::bootstrap::BootstrapServiceImpl;
 use gradle_substrate_daemon::server::build_plan_ir::BUILD_PLAN_SCHEMA_VERSION;
@@ -1060,6 +1060,7 @@ async fn bootstrap_refresh_build_plan_shadow_rewrites_selected_graph_artifact() 
     let response = bootstrap
         .refresh_build_plan_shadow(Request::new(RefreshBuildPlanShadowRequest {
             build_id: build_id.to_string(),
+            inline_plan: None,
         }))
         .await
         .unwrap()
@@ -1087,6 +1088,82 @@ async fn bootstrap_refresh_build_plan_shadow_rewrites_selected_graph_artifact() 
         Some("jvm-host-build-plan")
     );
     assert_eq!(artifact.plan.tasks.len(), mock_build_plan_tasks().len());
+}
+
+#[tokio::test]
+async fn bootstrap_refresh_build_plan_shadow_persists_inline_selected_plan_without_jvm_callback() {
+    let bridge = Arc::new(JvmHostBridge::new());
+    let cache_dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(BuildPlanShadowStore::new(PathBuf::from(cache_dir.path())));
+    let scope_registry = Arc::new(ScopeRegistry::new());
+    let bootstrap = BootstrapServiceImpl::with_scope_registry_and_shadow(
+        scope_registry,
+        Arc::clone(&bridge),
+        Arc::clone(&store),
+    );
+
+    let build_id = "build-inline-shadow";
+    let response = bootstrap
+        .refresh_build_plan_shadow(Request::new(RefreshBuildPlanShadowRequest {
+            build_id: build_id.to_string(),
+            inline_plan: Some(BuildPlan {
+                schema_version: BUILD_PLAN_SCHEMA_VERSION,
+                build_id: "stale-build-id".to_string(),
+                projects: vec![BuildPlanProject {
+                    path: ":".to_string(),
+                    name: "root".to_string(),
+                    project_dir: "/repo".to_string(),
+                }],
+                tasks: vec![BuildPlanTask {
+                    path: ":compileJava".to_string(),
+                    project_path: ":".to_string(),
+                    implementation_id: "org.gradle.api.tasks.compile.JavaCompile".to_string(),
+                    depends_on: Vec::new(),
+                    inputs: HashMap::new(),
+                    outputs: Vec::new(),
+                    worker_isolation: "process".to_string(),
+                    should_run_after: Vec::new(),
+                    must_run_after: Vec::new(),
+                    finalized_by: Vec::new(),
+                    cacheability: "unknown".to_string(),
+                    local_state: Vec::new(),
+                    destroyables: Vec::new(),
+                    action_kind: "compile".to_string(),
+                    input_specs: Vec::new(),
+                    output_specs: Vec::new(),
+                    environment_inputs: Vec::new(),
+                    system_property_inputs: Vec::new(),
+                    diagnostics: Vec::new(),
+                }],
+                dependencies: vec![BuildPlanDependency {
+                    project_path: ":".to_string(),
+                    configuration: "compileClasspath".to_string(),
+                    notation: "com.google.guava:guava:33.0.0-jre".to_string(),
+                }],
+                toolchains: Vec::new(),
+                metadata: HashMap::from([(
+                    "taskSource".to_string(),
+                    "jvm-selected-task-graph-inline".to_string(),
+                )]),
+            }),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(response.refreshed, "{}", response.error_message);
+    let artifact = store
+        .load_plan(build_id)
+        .unwrap()
+        .expect("expected inline shadow artifact");
+    assert_eq!(artifact.source, "task-graph-listener-inline");
+    assert_eq!(artifact.plan.build_id, build_id);
+    assert_eq!(artifact.plan.tasks.len(), 1);
+    assert_eq!(artifact.plan.dependencies.len(), 1);
+    assert_eq!(
+        artifact.plan.metadata.get("source").map(String::as_str),
+        Some("task-graph-listener-inline")
+    );
 }
 
 #[tokio::test]
@@ -1128,6 +1205,7 @@ async fn refreshed_native_ready_shadow_plan_runs_compile_java_without_jvm_fallba
     let refreshed = bootstrap
         .refresh_build_plan_shadow(Request::new(RefreshBuildPlanShadowRequest {
             build_id: build_id.to_string(),
+            inline_plan: None,
         }))
         .await
         .unwrap()
@@ -1224,6 +1302,7 @@ async fn refreshed_native_ready_shadow_plan_runs_java_lifecycle_without_jvm_fall
     let refreshed = bootstrap
         .refresh_build_plan_shadow(Request::new(RefreshBuildPlanShadowRequest {
             build_id: build_id.to_string(),
+            inline_plan: None,
         }))
         .await
         .unwrap()

@@ -1,6 +1,9 @@
 package org.gradle.internal.rustbridge.bootstrap;
 
 import gradle.substrate.v1.BootstrapServiceGrpc;
+import gradle.substrate.v1.BuildPlan;
+import gradle.substrate.v1.BuildPlanProject;
+import gradle.substrate.v1.BuildPlanTask;
 import gradle.substrate.v1.CompleteBuildRequest;
 import gradle.substrate.v1.CompleteBuildResponse;
 import gradle.substrate.v1.GetSubstrateInfoRequest;
@@ -11,12 +14,15 @@ import gradle.substrate.v1.InitBuildRequest;
 import gradle.substrate.v1.InitBuildResponse;
 import gradle.substrate.v1.RefreshBuildPlanShadowRequest;
 import gradle.substrate.v1.RefreshBuildPlanShadowResponse;
+import org.gradle.api.Project;
+import org.gradle.api.Task;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
 import org.gradle.internal.service.scopes.Scope;
 import org.gradle.internal.service.scopes.ServiceScope;
 import org.slf4j.Logger;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -146,15 +152,35 @@ public class RustBootstrapClient {
      * the selected task graph.
      */
     public boolean refreshBuildPlanShadow(String buildId) {
+        return refreshBuildPlanShadow(buildId, null);
+    }
+
+    public boolean refreshBuildPlanShadow(
+        String buildId,
+        List<BuildPlanTask> taskContracts,
+        List<Task> taskReferences,
+        String source,
+        String taskSource
+    ) {
+        return refreshBuildPlanShadow(
+            buildId,
+            inlineBuildPlan(buildId, taskContracts, taskReferences, source, taskSource)
+        );
+    }
+
+    public boolean refreshBuildPlanShadow(String buildId, BuildPlan inlinePlan) {
         if (client.isNoop()) {
             return false;
         }
 
         try {
+            RefreshBuildPlanShadowRequest.Builder request = RefreshBuildPlanShadowRequest.newBuilder()
+                .setBuildId(buildId != null ? buildId : "");
+            if (inlinePlan != null) {
+                request.setInlinePlan(inlinePlan);
+            }
             RefreshBuildPlanShadowResponse response = client.getBootstrapStub()
-                .refreshBuildPlanShadow(RefreshBuildPlanShadowRequest.newBuilder()
-                    .setBuildId(buildId != null ? buildId : "")
-                    .build());
+                .refreshBuildPlanShadow(request.build());
 
             if (response.getRefreshed()) {
                 LOGGER.debug("[substrate:bootstrap] refreshed build-plan shadow for {} at {}",
@@ -168,6 +194,38 @@ public class RustBootstrapClient {
             LOGGER.warn("[substrate:bootstrap] refresh build-plan shadow failed", e);
             return false;
         }
+    }
+
+    private static BuildPlan inlineBuildPlan(
+        String buildId,
+        List<BuildPlanTask> taskContracts,
+        List<Task> taskReferences,
+        String source,
+        String taskSource
+    ) {
+        BuildPlan.Builder plan = BuildPlan.newBuilder()
+            .setSchemaVersion(2)
+            .setBuildId(buildId != null ? buildId : "")
+            .addAllTasks(taskContracts)
+            .putMetadata("source", source)
+            .putMetadata("taskSource", taskSource)
+            .putMetadata("selectedTaskReferenceCount", Integer.toString(taskReferences.size()))
+            .putMetadata("selectedTaskContractCount", Integer.toString(taskContracts.size()))
+            .putMetadata("dependencyCount", "0")
+            .putMetadata("dependencyCapture", "deferred");
+
+        Map<String, Project> projectsByPath = new LinkedHashMap<>();
+        for (Task task : taskReferences) {
+            projectsByPath.putIfAbsent(task.getProject().getPath(), task.getProject());
+        }
+        for (Project project : projectsByPath.values()) {
+            plan.addProjects(BuildPlanProject.newBuilder()
+                .setPath(project.getPath())
+                .setName(project.getName())
+                .setProjectDir(project.getProjectDir().getAbsolutePath())
+                .build());
+        }
+        return plan.build();
     }
 
     /**

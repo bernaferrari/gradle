@@ -6,6 +6,7 @@ use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
 use super::build_event_stream::BuildEventStreamServiceImpl;
+use super::build_plan_ir::from_proto;
 use super::build_plan_shadow::{capture_and_persist_shadow_from_jvm, BuildPlanShadowStore};
 use super::scopes::{BuildId, ScopeRegistry, SessionId};
 use crate::client::jvm_host_bridge::JvmHostBridge;
@@ -318,20 +319,64 @@ impl BootstrapService for BootstrapServiceImpl {
             return Err(Status::invalid_argument("build_id must not be empty"));
         }
 
-        let Some(jvm_bridge) = self.jvm_bridge.as_ref() else {
-            return Ok(Response::new(RefreshBuildPlanShadowResponse {
-                build_id: req.build_id,
-                refreshed: false,
-                artifact_path: String::new(),
-                error_message: "JVM host bridge is not configured".to_string(),
-            }));
-        };
         let Some(shadow_store) = self.build_plan_shadow_store.as_ref() else {
             return Ok(Response::new(RefreshBuildPlanShadowResponse {
                 build_id: req.build_id,
                 refreshed: false,
                 artifact_path: String::new(),
                 error_message: "build plan shadow store is not configured".to_string(),
+            }));
+        };
+
+        if let Some(inline_plan) = req.inline_plan.as_ref() {
+            let mut plan = from_proto(inline_plan);
+            plan.build_id = req.build_id.clone();
+            let source = plan
+                .metadata
+                .get("source")
+                .filter(|value| !value.is_empty())
+                .cloned()
+                .unwrap_or_else(|| "task-graph-listener-inline".to_string());
+            plan.metadata.insert("source".to_string(), source.clone());
+            match shadow_store.persist_plan(&plan, &source) {
+                Ok(path) => {
+                    let artifact_path = path.display().to_string();
+                    tracing::info!(
+                        build_id = %req.build_id,
+                        artifact = %artifact_path,
+                        task_count = plan.tasks.len(),
+                        dependency_count = plan.dependencies.len(),
+                        "Refreshed inline JVM->Rust build plan shadow artifact"
+                    );
+                    return Ok(Response::new(RefreshBuildPlanShadowResponse {
+                        build_id: req.build_id,
+                        refreshed: true,
+                        artifact_path,
+                        error_message: String::new(),
+                    }));
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        build_id = %req.build_id,
+                        error = %error,
+                        "Failed persisting inline JVM->Rust build plan shadow artifact"
+                    );
+                    return Ok(Response::new(RefreshBuildPlanShadowResponse {
+                        build_id: req.build_id,
+                        refreshed: false,
+                        artifact_path: String::new(),
+                        error_message: error.to_string(),
+                    }));
+                }
+            }
+        }
+
+        let Some(jvm_bridge) = self.jvm_bridge.as_ref() else {
+            return Ok(Response::new(RefreshBuildPlanShadowResponse {
+                build_id: req.build_id,
+                refreshed: false,
+                artifact_path: String::new(),
+                error_message: "JVM host bridge is not configured".to_string(),
             }));
         };
 
