@@ -17,6 +17,7 @@
 package org.gradle.internal.rustbridge.dependency;
 
 import org.gradle.internal.buildoption.RustExternalResourceDownloadRegistry;
+import org.gradle.internal.buildoption.RustExternalResourceDownloadRegistry.ExternalResourceCoordinate;
 
 import java.io.File;
 import java.net.URI;
@@ -34,5 +35,23 @@ public class RustExternalResourceDownload implements RustExternalResourceDownloa
     @Override
     public boolean download(URI location, File destination) {
         return client.downloadResource(location, destination).isSuccess();
+    }
+
+    @Override
+    public boolean download(URI location, File destination, ExternalResourceCoordinate coordinate) {
+        if (coordinate == null) {
+            return download(location, destination);
+        }
+        return client.downloadResource(
+            location,
+            destination,
+            new RustDependencyResolutionClient.MavenArtifactCoordinate(
+                coordinate.getGroup(),
+                coordinate.getName(),
+                coordinate.getVersion(),
+                coordinate.getClassifier(),
+                coordinate.getExtension()
+            )
+        ).isSuccess();
     }
 }

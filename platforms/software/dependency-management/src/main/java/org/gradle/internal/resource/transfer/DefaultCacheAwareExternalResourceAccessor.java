@@ -25,6 +25,7 @@ import org.gradle.api.internal.file.temp.TemporaryFileProvider;
 import org.gradle.cache.internal.ProducerGuard;
 import org.gradle.internal.UncheckedException;
 import org.gradle.internal.buildoption.RustExternalResourceDownloadRegistry;
+import org.gradle.internal.buildoption.RustExternalResourceDownloadRegistry.ExternalResourceCoordinate;
 import org.gradle.internal.buildoption.RustMetadataCacheReadThroughRegistry;
 import org.gradle.internal.hash.ChecksumService;
 import org.gradle.internal.hash.HashCode;
@@ -80,6 +81,12 @@ public class DefaultCacheAwareExternalResourceAccessor implements CacheAwareExte
     @Nullable
     @Override
     public LocallyAvailableExternalResource getResource(final ExternalResourceName location, @Nullable String baseName, final ResourceFileStore fileStore, @Nullable final LocallyAvailableResourceCandidates additionalCandidates) {
+        return getResource(location, baseName, fileStore, additionalCandidates, null);
+    }
+
+    @Nullable
+    @Override
+    public LocallyAvailableExternalResource getResource(final ExternalResourceName location, @Nullable String baseName, final ResourceFileStore fileStore, @Nullable final LocallyAvailableResourceCandidates additionalCandidates, @Nullable ExternalResourceCoordinate coordinate) {
         return producerGuard.guardByKey(location, () -> {
             LOGGER.debug("Constructing external resource: {}", location);
             CachedExternalResource cached = cachedExternalResourceIndex.lookup(location.toString());
@@ -93,7 +100,7 @@ public class DefaultCacheAwareExternalResourceAccessor implements CacheAwareExte
 
             // If we have no caching options, just get the thing directly
             if (cached == null && (additionalCandidates == null || additionalCandidates.isNone())) {
-                LocallyAvailableExternalResource rustDownloaded = copyViaRustToCache(location, fileStore);
+                LocallyAvailableExternalResource rustDownloaded = copyViaRustToCache(location, fileStore, coordinate);
                 if (rustDownloaded != null) {
                     return rustDownloaded;
                 }
@@ -185,10 +192,10 @@ public class DefaultCacheAwareExternalResourceAccessor implements CacheAwareExte
     }
 
     @Nullable
-    private LocallyAvailableExternalResource copyViaRustToCache(final ExternalResourceName source, final ResourceFileStore fileStore) {
+    private LocallyAvailableExternalResource copyViaRustToCache(final ExternalResourceName source, final ResourceFileStore fileStore, @Nullable ExternalResourceCoordinate coordinate) {
         File destination = temporaryFileProvider.createTemporaryFile("gradle_download", "bin");
         try {
-            if (!RustExternalResourceDownloadRegistry.get().download(source.getUri(), destination)) {
+            if (!RustExternalResourceDownloadRegistry.get().download(source.getUri(), destination, coordinate)) {
                 return null;
             }
             if (!destination.isFile()) {
