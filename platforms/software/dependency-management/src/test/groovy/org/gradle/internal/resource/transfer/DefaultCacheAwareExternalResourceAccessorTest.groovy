@@ -23,6 +23,7 @@ import org.gradle.api.internal.file.temp.TemporaryFileProvider
 import org.gradle.cache.internal.ProducerGuard
 import org.gradle.internal.buildoption.RustMetadataCacheReadThroughRegistry
 import org.gradle.internal.buildoption.RustExternalResourceDownloadRegistry
+import org.gradle.internal.buildoption.RustExternalResourceDownloadRegistry.ExternalResourceCoordinate
 import org.gradle.internal.hash.Hashing
 import org.gradle.internal.resource.ExternalResource
 import org.gradle.internal.resource.ExternalResourceName
@@ -197,6 +198,47 @@ class DefaultCacheAwareExternalResourceAccessorTest extends Specification {
         1 * fileStore.moveIntoCache(tempFile) >> localResource
         1 * index.store(location.toString(), cachedFile, { it.contentLength == "downloaded by rust".bytes.length && it.sha1 == Hashing.sha1().hashBytes("downloaded by rust".bytes) })
         1 * fileRepository.resource(cachedFile, location.uri, { it.contentLength == "downloaded by rust".bytes.length }) >> resultResource
+        0 * repository._
+        0 * progressLoggingRepo._
+    }
+
+    def "passes explicit artifact coordinate to rust transport download"() {
+        given:
+        def location = new ExternalResourceName(new URI("https://repo.example.test/maven2/org/example/demo/1.0/demo-1.0-sources.jar"))
+        def coordinate = new ExternalResourceCoordinate("org.example", "demo", "1.0", "sources", "jar")
+        def capturedCoordinate = null
+        def fileStore = Mock(CacheAwareExternalResourceAccessor.ResourceFileStore)
+        def localCandidates = Mock(LocallyAvailableResourceCandidates)
+        def localResource = new DefaultLocallyAvailableResource(cachedFile, TestUtil.checksumService)
+        def resultResource = Stub(LocallyAvailableExternalResource)
+        RustExternalResourceDownloadRegistry.set(new RustExternalResourceDownloadRegistry.ExternalResourceDownload() {
+            @Override
+            boolean download(URI uri, File destination) {
+                false
+            }
+
+            @Override
+            boolean download(URI uri, File destination, ExternalResourceCoordinate candidate) {
+                assert uri == location.uri
+                capturedCoordinate = candidate
+                destination.bytes = "downloaded by rust with coordinate".bytes
+                true
+            }
+        })
+
+        when:
+        def result = cache.getResource(location, null, fileStore, localCandidates, coordinate)
+
+        then:
+        result == resultResource
+        capturedCoordinate.is(coordinate)
+
+        and:
+        1 * index.lookup(location.toString()) >> null
+        1 * localCandidates.isNone() >> true
+        1 * fileStore.moveIntoCache(tempFile) >> localResource
+        1 * index.store(location.toString(), cachedFile, _)
+        1 * fileRepository.resource(cachedFile, location.uri, _) >> resultResource
         0 * repository._
         0 * progressLoggingRepo._
     }

@@ -19,6 +19,8 @@ import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
 import org.gradle.internal.component.external.model.ModuleComponentArtifactIdentifier;
 import org.gradle.internal.component.external.model.ModuleComponentArtifactMetadata;
 import org.gradle.internal.component.external.model.UrlBackedArtifactMetadata;
+import org.gradle.internal.component.model.IvyArtifactName;
+import org.gradle.internal.buildoption.RustExternalResourceDownloadRegistry.ExternalResourceCoordinate;
 import org.gradle.internal.component.model.ModuleDescriptorArtifactMetadata;
 import org.gradle.internal.resolve.result.ResourceAwareResolveResult;
 import org.gradle.internal.resource.ExternalResourceName;
@@ -146,7 +148,7 @@ class DefaultExternalResourceArtifactResolver implements ExternalResourceArtifac
             LOGGER.debug("Loading {}", location);
             LocallyAvailableResourceCandidates localCandidates = locallyAvailableResourceFinder.findCandidates(artifact);
             try {
-                LocallyAvailableExternalResource resource = resourceAccessor.getResource(location, null, getFileStore(artifact), localCandidates);
+                LocallyAvailableExternalResource resource = resourceAccessor.getResource(location, null, getFileStore(artifact), localCandidates, rustDownloadCoordinate(artifact));
                 if (resource != null) {
                     return resource;
                 }
@@ -164,6 +166,20 @@ class DefaultExternalResourceArtifactResolver implements ExternalResourceArtifac
                 return artifact.getId();
             }
         };
+    }
+
+    private ExternalResourceCoordinate rustDownloadCoordinate(ModuleComponentArtifactMetadata artifact) {
+        ModuleComponentIdentifier component = artifact.getId().getComponentIdentifier();
+        IvyArtifactName artifactName = artifact.getName();
+        String extension = artifactName.getExtension();
+        if (extension == null || extension.isEmpty() || "pom".equals(extension) || "module".equals(extension)) {
+            return null;
+        }
+        if (!component.getModule().equals(artifactName.getName())) {
+            return null;
+        }
+        String classifier = artifactName.getClassifier() == null ? "" : artifactName.getClassifier();
+        return new ExternalResourceCoordinate(component.getGroup(), component.getModule(), component.getVersion(), classifier, extension);
     }
 
     private boolean isIncomplete(ResourcePattern resourcePattern, ModuleComponentArtifactMetadata artifact) {

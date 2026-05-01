@@ -17,6 +17,7 @@
 package org.gradle.internal.resource.transfer;
 
 import org.gradle.internal.resource.ExternalResourceName;
+import org.gradle.internal.buildoption.RustExternalResourceDownloadRegistry.ExternalResourceCoordinate;
 import org.gradle.internal.resource.local.FileStore;
 import org.gradle.internal.resource.local.LocallyAvailableExternalResource;
 import org.gradle.internal.resource.local.LocallyAvailableResource;
@@ -38,6 +39,11 @@ public interface CacheAwareExternalResourceAccessor {
      */
     @Nullable
     LocallyAvailableExternalResource getResource(ExternalResourceName source, @Nullable String baseName, ResourceFileStore fileStore, @Nullable LocallyAvailableResourceCandidates additionalCandidates) throws IOException;
+
+    @Nullable
+    default LocallyAvailableExternalResource getResource(ExternalResourceName source, @Nullable String baseName, ResourceFileStore fileStore, @Nullable LocallyAvailableResourceCandidates additionalCandidates, @Nullable ExternalResourceCoordinate coordinate) throws IOException {
+        return getResource(source, baseName, fileStore, additionalCandidates);
+    }
 
     interface ResourceFileStore {
         /**

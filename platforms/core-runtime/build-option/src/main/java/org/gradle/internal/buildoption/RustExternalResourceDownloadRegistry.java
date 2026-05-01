@@ -23,10 +23,50 @@ import java.net.URI;
  * Process-local hook for optional Rust-backed external resource downloads.
  */
 public final class RustExternalResourceDownloadRegistry {
+    public static final class ExternalResourceCoordinate {
+        private final String group;
+        private final String name;
+        private final String version;
+        private final String classifier;
+        private final String extension;
+
+        public ExternalResourceCoordinate(String group, String name, String version, String classifier, String extension) {
+            this.group = group;
+            this.name = name;
+            this.version = version;
+            this.classifier = classifier;
+            this.extension = extension;
+        }
+
+        public String getGroup() {
+            return group;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public String getVersion() {
+            return version;
+        }
+
+        public String getClassifier() {
+            return classifier;
+        }
+
+        public String getExtension() {
+            return extension;
+        }
+    }
+
     public interface ExternalResourceDownload {
         ExternalResourceDownload NO_OP = (location, destination) -> false;
 
         boolean download(URI location, File destination);
+
+        default boolean download(URI location, File destination, ExternalResourceCoordinate coordinate) {
+            return download(location, destination);
+        }
     }
 
     private static volatile ExternalResourceDownload download = ExternalResourceDownload.NO_OP;

@@ -241,7 +241,7 @@ public class SubstrateE2ETest {
     public void dependencyDownloadStreamsResourceThroughRustTransport() throws Exception {
         byte[] bytes = "downloaded through rust transport".getBytes(StandardCharsets.UTF_8);
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/demo.jar", exchange -> {
+        server.createContext("/maven2/org/example/demo/1.2.3/demo-1.2.3-sources.jar", exchange -> {
             exchange.sendResponseHeaders(200, bytes.length);
             try (OutputStream output = exchange.getResponseBody()) {
                 output.write(bytes);
@@ -252,13 +252,30 @@ public class SubstrateE2ETest {
             Path destination = socketDirectory.resolve("downloaded-demo.jar");
             RustDependencyResolutionClient dependencyClient = new RustDependencyResolutionClient(client);
             RustDependencyResolutionClient.DownloadResult result = dependencyClient.downloadResourceStrict(
-                new java.net.URI("http://127.0.0.1:" + server.getAddress().getPort() + "/demo.jar"),
-                destination.toFile()
+                new java.net.URI("http://127.0.0.1:" + server.getAddress().getPort() + "/maven2/org/example/demo/1.2.3/demo-1.2.3-sources.jar"),
+                destination.toFile(),
+                new RustDependencyResolutionClient.MavenArtifactCoordinate(
+                    "org.example",
+                    "demo",
+                    "1.2.3",
+                    "sources",
+                    "jar"
+                )
+            );
+            RustDependencyResolutionClient.CacheCheckResult cachedArtifact = dependencyClient.checkArtifactCacheStrict(
+                "org.example",
+                "demo",
+                "1.2.3",
+                "sources",
+                "jar",
+                ""
             );
 
             assertTrue("Rust transport download should succeed", result.isSuccess());
             assertEquals(bytes.length, result.getBytesWritten());
             assertArrayEquals(bytes, Files.readAllBytes(destination));
+            assertTrue("Rust transport should populate coordinate-addressed artifact store", cachedArtifact.isCached());
+            assertArrayEquals(bytes, Files.readAllBytes(new File(cachedArtifact.getLocalPath()).toPath()));
         } finally {
             server.stop(0);
         }

@@ -134,6 +134,22 @@ public class RustDependencyResolutionClient {
         public long getTotalSize() { return totalSize; }
     }
 
+    public static class MavenArtifactCoordinate {
+        private final String group;
+        private final String name;
+        private final String version;
+        private final String classifier;
+        private final String extension;
+
+        public MavenArtifactCoordinate(String group, String name, String version, String classifier, String extension) {
+            this.group = group;
+            this.name = name;
+            this.version = version;
+            this.classifier = classifier;
+            this.extension = extension;
+        }
+    }
+
     /**
      * Resolve a dependency graph via the Rust substrate daemon.
      */
@@ -301,8 +317,15 @@ public class RustDependencyResolutionClient {
      * Download an external resource through the Rust transport into {@code destination}.
      */
     public DownloadResult downloadResource(URI location, File destination) {
+        return downloadResource(location, destination, null);
+    }
+
+    /**
+     * Download an external resource through the Rust transport into {@code destination}.
+     */
+    public DownloadResult downloadResource(URI location, File destination, MavenArtifactCoordinate coordinate) {
         try {
-            return downloadResourceStrict(location, destination);
+            return downloadResourceStrict(location, destination, coordinate);
         } catch (Exception e) {
             LOGGER.debug("[substrate:dep-resolve] resource download failed", e);
             return DownloadResult.failed(e.getMessage());
@@ -315,14 +338,32 @@ public class RustDependencyResolutionClient {
      * @throws RuntimeException when substrate is unavailable, the RPC fails, or the Rust transport reports an error.
      */
     public DownloadResult downloadResourceStrict(URI location, File destination) {
+        return downloadResourceStrict(location, destination, null);
+    }
+
+    /**
+     * Download an external resource through the Rust transport into {@code destination}.
+     *
+     * @throws RuntimeException when substrate is unavailable, the RPC fails, or the Rust transport reports an error.
+     */
+    public DownloadResult downloadResourceStrict(URI location, File destination, MavenArtifactCoordinate coordinate) {
         if (client.isNoop()) {
             throw new IllegalStateException("Substrate not available");
         }
 
+        DownloadArtifactRequest.Builder request = DownloadArtifactRequest.newBuilder()
+            .setUrl(location.toString());
+        if (coordinate != null) {
+            request
+                .setGroup(coordinate.group)
+                .setName(coordinate.name)
+                .setVersion(coordinate.version)
+                .setClassifier(coordinate.classifier)
+                .setExtension(coordinate.extension);
+        }
+
         Iterator<DownloadArtifactChunk> chunks = client.getDependencyResolutionStub()
-            .downloadArtifact(DownloadArtifactRequest.newBuilder()
-                .setUrl(location.toString())
-                .build());
+            .downloadArtifact(request.build());
 
         long bytesWritten = 0;
         long totalSize = -1;

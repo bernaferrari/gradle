@@ -67,7 +67,10 @@
   (`org.gradle.rust.substrate.dependency.download.enabled=true`) that lets the
   Rust dependency transport serve uncached repository GETs before falling back
   to Gradle's Java transport. Successful Rust downloads still move through
-  Gradle's normal external-resource cache and index.
+  Gradle's normal external-resource cache and index. When Gradle is resolving a
+  safe external module artifact by explicit coordinate, the coordinate is passed
+  to Rust so the same streamed download also populates the coordinate-addressed
+  Rust artifact store for future read-through hits.
 - Native dependency transport now persists downloaded Maven artifacts into the
   Rust artifact store, writes `.sha256` sidecars, validates cold and warm cache
   hits against requested SHA-256 values, populates the warm artifact cache
