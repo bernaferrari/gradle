@@ -91,6 +91,11 @@
   `maven-metadata.xml` metadata when Gradle has no acceptable local cache entry.
   Existing Gradle cache refresh/revalidation semantics still win when a Gradle
   cache entry exists.
+- A focused no-daemon integration smoke now warms Rust through a real HTTP
+  Maven dynamic-version resolution, switches to a fresh Gradle user home, and
+  resolves the same `1.+` dependency again with no remote expectations. This
+  proves the dynamic-version `maven-metadata.xml`, selected POM, and artifact
+  can read through from Rust stores before Gradle's remote path.
 - The Gradle dependency shadow listener has an explicit artifact mirror mode
   (`org.gradle.rust.substrate.dependency.mirror.artifacts=true`) that observes
   real resolved external module artifacts, computes SHA-256 in the JVM bridge,
@@ -207,6 +212,7 @@
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.e2e.SubstrateE2ETest.dependencyArtifactReadThroughPreservesArtifactExtension -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon`
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.e2e.SubstrateE2ETest.dependencyDownloadStreamsResourceThroughRustTransport -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon`
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.e2e.SubstrateE2ETest.dependencyDownloadPopulatesMetadataUrlCache -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon`
+- `./gradlew :dependency-management:noDaemonIntegTest --tests "org.gradle.integtests.resolve.maven.MavenDynamicResolveIntegrationTest.rust transport warms dynamic version metadata for later no-remote read-through" -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon -x :distributions-core:generateLicenseFile --no-daemon --console=plain`
 - `./gradlew :dependency-management:test --tests org.gradle.api.internal.artifacts.ivyservice.ivyresolve.RepositoryChainArtifactResolverTest -x :distributions-core:generateLicenseFile`
 - `./gradlew :dependency-management:test --tests org.gradle.internal.resource.transfer.DefaultCacheAwareExternalResourceAccessorTest -x :distributions-core:generateLicenseFile`
 - `cargo test -q -p gradle-substrate-daemon server::file_fingerprint::tests -- --nocapture`
