@@ -30,6 +30,12 @@ The script reports:
 - `dependency_metadata_readthrough`: focused Gradle resource-cache test proving the Rust POM, Gradle module, and Maven version-list metadata read-through hook resolves before remote access
 - `file_watch_first_event`: native file watcher latency from write to event
 
+A broader dependency-management integration smoke also exercises a real Maven
+dynamic-version flow: the first run resolves `1.+` over HTTP and warms Rust,
+then a second run with a fresh Gradle user home resolves with no remote
+expectations by reading `maven-metadata.xml`, the selected POM, and the artifact
+from Rust stores.
+
 These are not full Gradle replacement claims. Gradle DSL and unsupported plugin
 semantics still go through the JVM compatibility island. This harness exists to
 keep the Rust work focused on perceptible first-minute wins while the broader

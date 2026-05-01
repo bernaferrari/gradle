@@ -17,10 +17,61 @@
 package org.gradle.integtests.resolve.maven
 
 import org.gradle.integtests.fixtures.AbstractHttpDependencyResolutionTest
+import org.junit.Assume
 
 import static org.gradle.internal.resource.transport.http.JavaSystemPropertiesHttpTimeoutSettings.SOCKET_TIMEOUT_SYSTEM_PROPERTY
 
 class MavenDynamicResolveIntegrationTest extends AbstractHttpDependencyResolutionTest {
+
+    def "rust transport warms dynamic version metadata for later no-remote read-through"() {
+        given:
+        def daemonBinary = substrateDaemonBinary()
+        Assume.assumeTrue("Rust substrate daemon binary is required for this integration smoke: ${daemonBinary}", daemonBinary.isFile())
+
+        def substrateHome = file("substrate-home")
+        configureRustDependencyPath(daemonBinary, substrateHome)
+
+        mavenHttpRepo.module("org.test", "projectA", "1.0").publish()
+        def selected = mavenHttpRepo.module("org.test", "projectA", "1.5").publish()
+
+        buildFile << """
+repositories {
+    maven { url = "${mavenHttpRepo.uri}" }
+}
+
+configurations { compile }
+
+dependencies {
+    compile("org.test:projectA:1.+")
+}
+
+task retrieve(type: Sync) {
+    from configurations.compile
+    into 'libs'
+}
+"""
+
+        and:
+        mavenHttpRepo.getModuleMetaData("org.test", "projectA").expectGet()
+        selected.pom.expectGet()
+        selected.artifact.expectGet()
+
+        when:
+        run "retrieve"
+
+        then:
+        file("libs").assertHasDescendants("projectA-1.5.jar")
+        file("libs/projectA-1.5.jar").assertIsCopyOf(selected.artifactFile)
+
+        when:
+        server.resetExpectations()
+        executer.withGradleUserHomeDir(file("second-user-home"))
+        run "retrieve"
+
+        then:
+        file("libs").assertHasDescendants("projectA-1.5.jar")
+        file("libs/projectA-1.5.jar").assertIsCopyOf(selected.artifactFile)
+    }
 
     def "can resolve snapshot versions with version range"() {
         given:
@@ -480,5 +531,23 @@ Searched in the following locations:
              from configurations.compile
          }
          """
+    }
+
+    private void configureRustDependencyPath(File daemonBinary, File substrateHome) {
+        executer.beforeExecute {
+            executer.withArgument("--no-daemon")
+            executer.withArgument("-Duser.home=${substrateHome.absolutePath}")
+            executer.withArgument("-Dorg.gradle.rust.substrate.enabled=true")
+            executer.withArgument("-Dorg.gradle.rust.substrate.dependency.enabled=true")
+            executer.withArgument("-Dorg.gradle.rust.substrate.dependency.download.enabled=true")
+            executer.withArgument("-Dorg.gradle.rust.substrate.dependency.readthrough.metadata=true")
+            executer.withArgument("-Dorg.gradle.rust.substrate.dependency.readthrough.artifacts=true")
+            executer.withArgument("-Dorg.gradle.rust.substrate.daemon.path=${daemonBinary.absolutePath}")
+        }
+    }
+
+    private static File substrateDaemonBinary() {
+        def configured = System.getProperty("substrate.test.binary")
+        return configured ? new File(configured) : new File("target/debug/gradle-substrate-daemon")
     }
 }
