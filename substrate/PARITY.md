@@ -63,6 +63,11 @@
 - Native dependency transport can stream artifact bytes over HTTP from a
   repository-derived Maven artifact URL, with retry/error handling in the Rust
   dependency-resolution service.
+- Gradle has an opt-in external resource download path
+  (`org.gradle.rust.substrate.dependency.download.enabled=true`) that lets the
+  Rust dependency transport serve uncached repository GETs before falling back
+  to Gradle's Java transport. Successful Rust downloads still move through
+  Gradle's normal external-resource cache and index.
 - Native dependency transport now persists downloaded Maven artifacts into the
   Rust artifact store, writes `.sha256` sidecars, validates cold and warm cache
   hits against requested SHA-256 values, populates the warm artifact cache
@@ -193,7 +198,9 @@
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.dependency.RustArtifactCacheReadThroughTest`
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.e2e.SubstrateE2ETest.dependencyArtifactReadThroughReturnsArtifactFromRustStore -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon`
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.e2e.SubstrateE2ETest.dependencyArtifactReadThroughPreservesArtifactExtension -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon`
+- `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.e2e.SubstrateE2ETest.dependencyDownloadStreamsResourceThroughRustTransport -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon`
 - `./gradlew :dependency-management:test --tests org.gradle.api.internal.artifacts.ivyservice.ivyresolve.RepositoryChainArtifactResolverTest -x :distributions-core:generateLicenseFile`
+- `./gradlew :dependency-management:test --tests org.gradle.internal.resource.transfer.DefaultCacheAwareExternalResourceAccessorTest -x :distributions-core:generateLicenseFile`
 - `cargo test -q -p gradle-substrate-daemon server::file_fingerprint::tests -- --nocapture`
 - `./gradlew :rust-bridge:compileJava :core:compileJava --no-daemon --console=plain`
 - `cargo build -q -p gradle-substrate-daemon`

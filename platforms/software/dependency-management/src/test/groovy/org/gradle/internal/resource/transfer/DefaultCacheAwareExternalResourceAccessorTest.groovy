@@ -22,6 +22,7 @@ import org.gradle.api.internal.artifacts.ivyservice.resolutionstrategy.DefaultEx
 import org.gradle.api.internal.file.temp.TemporaryFileProvider
 import org.gradle.cache.internal.ProducerGuard
 import org.gradle.internal.buildoption.RustMetadataCacheReadThroughRegistry
+import org.gradle.internal.buildoption.RustExternalResourceDownloadRegistry
 import org.gradle.internal.hash.Hashing
 import org.gradle.internal.resource.ExternalResource
 import org.gradle.internal.resource.ExternalResourceName
@@ -67,6 +68,7 @@ class DefaultCacheAwareExternalResourceAccessorTest extends Specification {
 
     def cleanup() {
         RustMetadataCacheReadThroughRegistry.reset()
+        RustExternalResourceDownloadRegistry.reset()
     }
 
     def "returns null when the request resource is not cached and does not exist in the remote repository"() {
@@ -168,6 +170,35 @@ class DefaultCacheAwareExternalResourceAccessorTest extends Specification {
         0 * repository._
         0 * progressLoggingRepo._
         0 * fileStore._
+    }
+
+    def "downloads uncached resource through rust transport before java transport"() {
+        given:
+        def location = new ExternalResourceName(new URI("https://repo.example.test/maven2/org/example/demo/1.0/demo-1.0.jar"))
+        def fileStore = Mock(CacheAwareExternalResourceAccessor.ResourceFileStore)
+        def localCandidates = Mock(LocallyAvailableResourceCandidates)
+        def localResource = new DefaultLocallyAvailableResource(cachedFile, TestUtil.checksumService)
+        def resultResource = Stub(LocallyAvailableExternalResource)
+        RustExternalResourceDownloadRegistry.set({ URI uri, File destination ->
+            assert uri == location.uri
+            destination.bytes = "downloaded by rust".bytes
+            true
+        } as RustExternalResourceDownloadRegistry.ExternalResourceDownload)
+
+        when:
+        def result = cache.getResource(location, null, fileStore, localCandidates)
+
+        then:
+        result == resultResource
+
+        and:
+        1 * index.lookup(location.toString()) >> null
+        1 * localCandidates.isNone() >> true
+        1 * fileStore.moveIntoCache(tempFile) >> localResource
+        1 * index.store(location.toString(), cachedFile, { it.contentLength == "downloaded by rust".bytes.length && it.sha1 == Hashing.sha1().hashBytes("downloaded by rust".bytes) })
+        1 * fileRepository.resource(cachedFile, location.uri, { it.contentLength == "downloaded by rust".bytes.length }) >> resultResource
+        0 * repository._
+        0 * progressLoggingRepo._
     }
 
     def "reuses cached resource if it has not expired"() {

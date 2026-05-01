@@ -4,6 +4,7 @@
 This is intentionally small and local:
   - daemon readiness is measured by Unix socket availability
   - dependency transport uses the checked-in local HTTP store/cache/checksum smoke test
+    and the Gradle resource seam test for Rust-backed uncached downloads
   - dependency read-through uses focused Gradle seam tests proving remote fetch is skipped
   - file watching uses a native notify first-event latency test
 
@@ -208,7 +209,7 @@ def print_summary(results: list[dict[str, object]]) -> None:
     print("- daemon_socket_ready is the time before Gradle can send work to the Rust sidecar")
     print("- dependency_transport_store_checksum is the bounded Rust path for Maven bytes, local store, cache hit, and checksum verification")
     print("- dependency_artifact_readthrough proves Gradle can skip remote artifact access when Rust already has the JAR")
-    print("- dependency_metadata_readthrough proves Gradle can skip remote POM metadata access when Rust already has the POM")
+    print("- dependency_metadata_readthrough proves Gradle can skip remote POM metadata access and can route uncached resource downloads through Rust")
     print("- file_watch_first_event is the delay before source edits become observable")
 
 

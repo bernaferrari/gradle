@@ -212,14 +212,14 @@ What this proves:
   - The external dependency corpus has deterministic dependency/constraint contract coverage without requiring network in the demo contract step.
   - Unsupported JVM/custom work is tracked separately so native execution does not silently claim unsupported parity.
   - A captured JVM-host Java lifecycle build-plan shadow can execute JavaCompile, ProcessResources, classes, and Jar through Rust with JVM fallback disabled.
-  - Rust dependency transport can stream artifact bytes over HTTP in the daemon service.
+  - Rust dependency transport can stream artifact bytes over HTTP in the daemon service, and an opt-in Gradle external-resource seam can route uncached repository downloads through Rust before falling back to Java transport.
   - Native Copy/ProcessResources/Sync coverage includes recursive directory sources, declared token expansion, CopySpec include/exclude patterns, nested CopySpec into mappings for Copy and Sync, duplicate destination strategies, empty-directory semantics, and copied file permissions.
   - Native archive coverage includes Zip, Tar gzip+bzip2, War, and Ear tasks with reproducible ZIP timestamps, nested CopySpec into mappings for Zip and Tar, duplicate-entry strategy handling, empty-directory semantics, file permissions, and bzip2 TAR output.
   - When sample builds are enabled, the checked-in Java corpus exercises the explicit no-fallback RunBuild gate from real Gradle invocations and compares stable output inventories, non-archive SHA-256 hashes, and archive entry inventories.
   - The native-ready-default gate is exercised separately and delegates when a selected plan is incomplete.
   - The authoritative corpus summary records matched projects, no-fallback counts, task parity, output parity, and observed upstream/substrate wall-clock timing.
   - Rust daemon gRPC behavior is exercised when --skip-grpc-e2e is not used.
-  - First-60-second metrics record daemon socket readiness, Rust dependency transport/store/checksum smoke timing, and native file-watch first-event latency.
+  - First-60-second metrics record daemon socket readiness, Rust dependency transport/store/checksum smoke timing, Rust-backed dependency resource seams, and native file-watch first-event latency.
 
 What this does not claim:
   - This is not a full Gradle replacement.

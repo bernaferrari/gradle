@@ -24,7 +24,12 @@ import org.gradle.internal.service.scopes.Scope;
 import org.gradle.internal.service.scopes.ServiceScope;
 import org.slf4j.Logger;
 
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.net.URI;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -97,6 +102,36 @@ public class RustDependencyResolutionClient {
         public boolean isCached() { return cached; }
         public String getLocalPath() { return localPath; }
         public long getCachedSize() { return cachedSize; }
+    }
+
+    /**
+     * Result of downloading an external resource through the Rust transport.
+     */
+    public static class DownloadResult {
+        private final boolean success;
+        private final String errorMessage;
+        private final long bytesWritten;
+        private final long totalSize;
+
+        private DownloadResult(boolean success, String errorMessage, long bytesWritten, long totalSize) {
+            this.success = success;
+            this.errorMessage = errorMessage;
+            this.bytesWritten = bytesWritten;
+            this.totalSize = totalSize;
+        }
+
+        public static DownloadResult success(long bytesWritten, long totalSize) {
+            return new DownloadResult(true, "", bytesWritten, totalSize);
+        }
+
+        public static DownloadResult failed(String errorMessage) {
+            return new DownloadResult(false, errorMessage, 0, 0);
+        }
+
+        public boolean isSuccess() { return success; }
+        public String getErrorMessage() { return errorMessage; }
+        public long getBytesWritten() { return bytesWritten; }
+        public long getTotalSize() { return totalSize; }
     }
 
     /**
@@ -260,6 +295,58 @@ public class RustDependencyResolutionClient {
             response.getLocalPath(),
             response.getCachedSize_()
         );
+    }
+
+    /**
+     * Download an external resource through the Rust transport into {@code destination}.
+     */
+    public DownloadResult downloadResource(URI location, File destination) {
+        try {
+            return downloadResourceStrict(location, destination);
+        } catch (Exception e) {
+            LOGGER.debug("[substrate:dep-resolve] resource download failed", e);
+            return DownloadResult.failed(e.getMessage());
+        }
+    }
+
+    /**
+     * Download an external resource through the Rust transport into {@code destination}.
+     *
+     * @throws RuntimeException when substrate is unavailable, the RPC fails, or the Rust transport reports an error.
+     */
+    public DownloadResult downloadResourceStrict(URI location, File destination) {
+        if (client.isNoop()) {
+            throw new IllegalStateException("Substrate not available");
+        }
+
+        Iterator<DownloadArtifactChunk> chunks = client.getDependencyResolutionStub()
+            .downloadArtifact(DownloadArtifactRequest.newBuilder()
+                .setUrl(location.toString())
+                .build());
+
+        long bytesWritten = 0;
+        long totalSize = -1;
+        try (BufferedOutputStream output = new BufferedOutputStream(new FileOutputStream(destination))) {
+            while (chunks.hasNext()) {
+                DownloadArtifactChunk chunk = chunks.next();
+                if (!chunk.getErrorMessage().isEmpty()) {
+                    destination.delete();
+                    throw new IllegalStateException(chunk.getErrorMessage());
+                }
+                if (chunk.getTotalSize() >= 0) {
+                    totalSize = chunk.getTotalSize();
+                }
+                if (!chunk.getData().isEmpty()) {
+                    chunk.getData().writeTo(output);
+                    bytesWritten += chunk.getData().size();
+                }
+            }
+        } catch (Exception e) {
+            destination.delete();
+            throw new RuntimeException("Rust resource download failed for " + location, e);
+        }
+
+        return DownloadResult.success(bytesWritten, totalSize);
     }
 
     /**
