@@ -173,6 +173,34 @@ class DefaultCacheAwareExternalResourceAccessorTest extends Specification {
         0 * fileStore._
     }
 
+    def "uses rust cached gradle module metadata when gradle has no local cached resource"() {
+        given:
+        def location = new ExternalResourceName(new URI("https://repo.example.test/maven2/org/example/demo/1.0/demo-1.0.module"))
+        def fileStore = Mock(CacheAwareExternalResourceAccessor.ResourceFileStore)
+        def localCandidates = Mock(LocallyAvailableResourceCandidates)
+        def rustModule = tempDir.createFile("demo-1.0.module")
+        rustModule.text = '{"formatVersion":"1.1"}'
+        def resultResource = Stub(LocallyAvailableExternalResource)
+        RustMetadataCacheReadThroughRegistry.set({ URI uri, String extension ->
+            assert uri == location.uri
+            assert extension == "module"
+            rustModule
+        } as RustMetadataCacheReadThroughRegistry.MetadataCacheReadThrough)
+
+        when:
+        def result = cache.getResource(location, null, fileStore, localCandidates)
+
+        then:
+        result == resultResource
+
+        and:
+        1 * index.lookup(location.toString()) >> null
+        1 * fileRepository.resource(rustModule, location.uri, { it.contentLength == rustModule.length() && it.contentType == "application/json" }) >> resultResource
+        0 * repository._
+        0 * progressLoggingRepo._
+        0 * fileStore._
+    }
+
     def "downloads uncached resource through rust transport before java transport"() {
         given:
         def location = new ExternalResourceName(new URI("https://repo.example.test/maven2/org/example/demo/1.0/demo-1.0.jar"))

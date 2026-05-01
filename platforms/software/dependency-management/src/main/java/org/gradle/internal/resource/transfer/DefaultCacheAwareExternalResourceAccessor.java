@@ -171,11 +171,11 @@ public class DefaultCacheAwareExternalResourceAccessor implements CacheAwareExte
 
     @Nullable
     private LocallyAvailableExternalResource findRustCachedMetadata(ExternalResourceName location) {
-        String path = location.getUri().getPath();
-        if (path == null || !path.endsWith(".pom")) {
+        String extension = metadataExtensionFor(location);
+        if (extension == null) {
             return null;
         }
-        File file = RustMetadataCacheReadThroughRegistry.get().findCachedMetadata(location.getUri(), "pom");
+        File file = RustMetadataCacheReadThroughRegistry.get().findCachedMetadata(location.getUri(), extension);
         if (file == null || !file.isFile()) {
             return null;
         }
@@ -184,11 +184,36 @@ public class DefaultCacheAwareExternalResourceAccessor implements CacheAwareExte
             location.getUri(),
             0,
             file.length(),
-            "text/xml",
+            metadataContentType(extension),
             null,
             null
         );
         return fileResourceRepository.resource(file, location.getUri(), metaData);
+    }
+
+    @Nullable
+    private static String metadataExtensionFor(ExternalResourceName location) {
+        String path = location.getUri().getPath();
+        if (path == null) {
+            return null;
+        }
+        if (path.endsWith(".pom")) {
+            return "pom";
+        }
+        if (path.endsWith(".module")) {
+            return "module";
+        }
+        if (path.endsWith(".ivy")) {
+            return "ivy";
+        }
+        return null;
+    }
+
+    private static String metadataContentType(String extension) {
+        if ("module".equals(extension)) {
+            return "application/json";
+        }
+        return "text/xml";
     }
 
     @Nullable
