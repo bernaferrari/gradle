@@ -653,6 +653,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "args_json", stringListJson(invokeOptional(task, taskType, "getArgs")));
         putIfPresent(inputs, "jvm_args", stringList(invokeOptional(task, taskType, "getJvmArgs")));
         putIfPresent(inputs, "jvm_args_json", stringListJson(invokeOptional(task, taskType, "getJvmArgs")));
+        putIfPresent(inputs, "max_heap_size", stringOrEmpty(invokeOptional(task, taskType, "getMaxHeapSize")));
         putIfPresent(inputs, "system_properties", stringMap(invokeOptional(task, taskType, "getSystemProperties")));
         putIfPresent(inputs, "working_dir", filePath(invokeOptional(task, taskType, "getWorkingDir")));
         putIfPresent(inputs, "ignore_exit_value", booleanString(invokeOptional(task, taskType, "isIgnoreExitValue")));

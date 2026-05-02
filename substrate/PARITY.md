@@ -57,8 +57,8 @@
 - Native `TestExec` lowering captures a single Gradle include test filter and
   JUnit Platform include/exclude tags, and fails closed for unsupported filter
   shapes rather than approximating them.
-- Native `JavaExec` lowering captures Java home, classpath, main class, JVM
-  args, system properties, application args, working directory, and
+- Native `JavaExec` lowering captures Java home, classpath, main class, max
+  heap size, JVM args, system properties, application args, working directory, and
   ignore-exit-value from the JVM task model, and fails closed unless the main
   class and either a captured classpath or an inferable standard Java-plugin
   output classpath are present.
