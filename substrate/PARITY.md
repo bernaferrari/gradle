@@ -58,9 +58,10 @@
   JUnit Platform include/exclude tags, and fails closed for unsupported filter
   shapes rather than approximating them.
 - Native `JavaExec` lowering captures Java home, classpath, main class, JVM
-  args, application args, working directory, and ignore-exit-value from the JVM
-  task model, and fails closed unless the main class and either a captured
-  classpath or an inferable standard Java-plugin output classpath are present.
+  args, system properties, application args, working directory, and
+  ignore-exit-value from the JVM task model, and fails closed unless the main
+  class and either a captured classpath or an inferable standard Java-plugin
+  output classpath are present.
 - Native `Javadoc` lowering captures Java home, source files, classpath,
   destination directory, title, encoding, max memory, and timestamp behavior,
   honors max-memory JVM options in the Rust executor, and lowers only when
