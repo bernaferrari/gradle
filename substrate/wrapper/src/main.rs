@@ -443,6 +443,11 @@ fn substrate_gradle_flags(mode: SubstrateCliMode, daemon_path: &Path) -> Vec<Str
         "-Dorg.gradle.rust.substrate.enabled=true".to_string(),
         "-Dorg.gradle.rust.substrate.taskgraph.enabled=true".to_string(),
         "-Dorg.gradle.rust.substrate.runbuild.enabled=true".to_string(),
+        "-Dorg.gradle.rust.substrate.dependency.enabled=true".to_string(),
+        "-Dorg.gradle.rust.substrate.dependency.download.enabled=true".to_string(),
+        "-Dorg.gradle.rust.substrate.dependency.readthrough.metadata=true".to_string(),
+        "-Dorg.gradle.rust.substrate.dependency.readthrough.artifacts=true".to_string(),
+        "-Dorg.gradle.rust.substrate.dependency.prefetch.artifacts=true".to_string(),
         format!(
             "-Dorg.gradle.rust.substrate.daemon.path={}",
             daemon_path.display()
@@ -803,6 +808,18 @@ distributionSha256Sum=abc123
         assert!(flags.contains(&"-Dorg.gradle.rust.substrate.enabled=true".to_string()));
         assert!(flags.contains(&"-Dorg.gradle.rust.substrate.taskgraph.enabled=true".to_string()));
         assert!(flags.contains(&"-Dorg.gradle.rust.substrate.runbuild.enabled=true".to_string()));
+        assert!(flags.contains(&"-Dorg.gradle.rust.substrate.dependency.enabled=true".to_string()));
+        assert!(flags
+            .contains(&"-Dorg.gradle.rust.substrate.dependency.download.enabled=true".to_string()));
+        assert!(flags.contains(
+            &"-Dorg.gradle.rust.substrate.dependency.readthrough.metadata=true".to_string()
+        ));
+        assert!(flags.contains(
+            &"-Dorg.gradle.rust.substrate.dependency.readthrough.artifacts=true".to_string()
+        ));
+        assert!(flags.contains(
+            &"-Dorg.gradle.rust.substrate.dependency.prefetch.artifacts=true".to_string()
+        ));
         assert!(flags.contains(
             &"-Dorg.gradle.rust.substrate.runbuild.native-ready-default=true".to_string()
         ));

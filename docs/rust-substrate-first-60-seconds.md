@@ -29,10 +29,11 @@ python3 tools/demo/first_60_seconds.py --mode fast --output build/first60.json
 ```
 
 The Rust wrapper can also be used as the first-minute entry point after the
-workspace binaries are built. `--rust-substrate` injects the minimal Rust DAG
-flags and uses the native-ready-default gate, so unsupported builds delegate
-back to Gradle instead of claiming native parity. `--rust-substrate-authoritative`
-uses the stricter no-fallback gate for corpus/demo validation.
+workspace binaries are built. `--rust-substrate` injects the Rust DAG flags plus
+safe dependency transport/read-through flags and uses the native-ready-default
+gate, so unsupported builds delegate back to Gradle instead of claiming native
+parity. `--rust-substrate-authoritative` uses the stricter no-fallback gate for
+corpus/demo validation.
 
 ```bash
 cargo build -p gradle-wrapper -p gradle-substrate-daemon
