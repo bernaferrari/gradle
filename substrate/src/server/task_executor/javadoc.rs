@@ -24,6 +24,19 @@ impl JavadocTaskExecutor {
             None => PathBuf::from(javadoc_binary_name()),
         }
     }
+
+    fn max_memory_arg(max_memory: Option<&str>) -> Option<String> {
+        let value = max_memory
+            .map(str::trim)
+            .filter(|value| !value.is_empty())?;
+        if value.starts_with("-J") {
+            Some(value.to_string())
+        } else if value.starts_with("-Xmx") {
+            Some(format!("-J{}", value))
+        } else {
+            Some(format!("-J-Xmx{}", value))
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -96,6 +109,11 @@ impl TaskExecutor for JavadocTaskExecutor {
             command.arg("-doctitle").arg(title);
             command.arg("-windowtitle").arg(title);
         }
+        if let Some(max_memory) =
+            Self::max_memory_arg(input.options.get("max_memory").map(String::as_str))
+        {
+            command.arg(max_memory);
+        }
         if let Some(classpath) = input
             .options
             .get("classpath")
@@ -157,6 +175,23 @@ mod tests {
 
         assert!(!result.success);
         assert!(result.error_message.contains("missing source files"));
+    }
+
+    #[test]
+    fn test_javadoc_max_memory_arg_normalizes_gradle_contract() {
+        assert_eq!(
+            JavadocTaskExecutor::max_memory_arg(Some("256m")),
+            Some("-J-Xmx256m".to_string())
+        );
+        assert_eq!(
+            JavadocTaskExecutor::max_memory_arg(Some("-Xmx512m")),
+            Some("-J-Xmx512m".to_string())
+        );
+        assert_eq!(
+            JavadocTaskExecutor::max_memory_arg(Some("-J-Xmx1g")),
+            Some("-J-Xmx1g".to_string())
+        );
+        assert_eq!(JavadocTaskExecutor::max_memory_arg(Some(" ")), None);
     }
 
     #[tokio::test]
