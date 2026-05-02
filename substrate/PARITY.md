@@ -23,6 +23,13 @@
   It keeps only the early selected-task contract capture needed to execute the
   finalized Gradle DAG from Rust, while umbrella `mode=shadow` still enables the
   broader listener set for subsystem shadowing.
+- The Rust wrapper binary now has first-minute substrate entry points:
+  `--rust-substrate` strips the wrapper-only flag, injects the minimal Rust DAG
+  flags, locates `gradle-substrate-daemon`, and uses native-ready-default
+  execution; `--rust-substrate-authoritative` injects the stricter no-fallback
+  RunBuild gate for validation. `GRADLEW_DISTRIBUTION_DIR` can point the Rust
+  wrapper at a local install image from this fork, and launcher discovery now
+  supports both ZIP-extracted and direct install-image `lib/` layouts.
 - Rust `RunBuild` dispatch now uses a native ready-task priority queue keyed by
   remaining critical-path duration instead of FIFO order, so independent ready
   tasks on the longest path are claimed first. Filtered task selections also
@@ -414,6 +421,8 @@
 - `python3 tools/demo/first_60_seconds.py --mode fast --skip-build --output build/first60-lifecycle-gated-installed.json` passed against the rebuilt distribution with daemon socket ready=1451.5ms (daemon self-report 6ms), authoritative Rust DAG=16797.9ms with cold 13977.5ms/11 Rust tasks, warm 2810.6ms/11 Rust tasks, Gradle configuration-cache reuse on the warm run, 7 Rust up-to-date skips, 4 Rust no-source/skipped tasks, 0 JVM forwards, authoritative output SHA-256 `92cf8132cd7364798a080c27ca6c160811e962cab18bb92f2872f061878a8490`, real-build dependency read-through=8150.7ms with remote requests avoided=7/7, and file-watch first event=13ms.
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-authoritative-lifecycle-gated --verbose` passed 21/21, no fallback, 200/200 task parity, output inventory/hash/archive parity, observed wall time upstream=122649ms and substrate=67367ms.
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-external-lifecycle-gated --verbose` passed 2/2, no fallback, 25/25 task parity, output inventory/hash/archive parity, observed wall time upstream=20507ms and substrate=8968ms.
+- `cargo test -p gradle-wrapper` passed after adding wrapper-level Rust substrate CLI modes and minimal flag injection tests.
+- `cargo build -p gradle-wrapper` built the native wrapper binary, and `GRADLEW_DISTRIBUTION_DIR=$PWD/build/gradle-under-test target/debug/gradlew --rust-substrate-authoritative -p testing/corpus/java-library-kotlin-dsl clean build --no-daemon --console=plain --info` plus the same command with `--rust-substrate` both executed 12 Gradle tasks through Rust RunBuild, skipped the JVM task executor, and finished successfully.
 - `cargo test -p gradle-substrate-daemon test_persistent_store_roundtrip -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_add_artifact_to_cache -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_artifact_cache_rejects_missing_local_file -- --nocapture`

@@ -98,7 +98,10 @@ fn parse_properties(content: &str) -> Result<WrapperProperties, String> {
 }
 
 fn load_properties(project_dir: &Path) -> Result<WrapperProperties, String> {
-    let props_path = project_dir.join("gradle").join("wrapper").join("gradle-wrapper.properties");
+    let props_path = project_dir
+        .join("gradle")
+        .join("wrapper")
+        .join("gradle-wrapper.properties");
     let content = std::fs::read_to_string(&props_path)
         .map_err(|e| format!("Failed to read {}: {}", props_path.display(), e))?;
     parse_properties(&content)
@@ -135,7 +138,8 @@ fn url_hash(url: &str) -> String {
 fn extract_version_from_url(url: &str) -> String {
     // URL format: .../gradle-{version}-bin.zip or .../gradle-{version}-all.zip
     let filename = url.rsplit('/').next().unwrap_or(url);
-    let name = filename.strip_suffix("-bin.zip")
+    let name = filename
+        .strip_suffix("-bin.zip")
         .or_else(|| filename.strip_suffix("-all.zip"))
         .unwrap_or(filename);
     name.strip_prefix("gradle-").unwrap_or(name).to_string()
@@ -200,8 +204,8 @@ fn download_with_progress(url: &str, dest: &Path, timeout_ms: u64) -> Result<(),
             .map_err(|e| format!("Failed to create directory: {}", e))?;
     }
 
-    let mut file = std::fs::File::create(dest)
-        .map_err(|e| format!("Failed to create file: {}", e))?;
+    let mut file =
+        std::fs::File::create(dest).map_err(|e| format!("Failed to create file: {}", e))?;
 
     let mut buf = [0u8; 8192];
     loop {
@@ -242,14 +246,21 @@ fn verify_sha256(path: &Path, expected: &str) -> Result<(), String> {
     }
 }
 
-fn install_distribution(props: &WrapperProperties, paths: &InstallationPaths) -> Result<(), String> {
+fn install_distribution(
+    props: &WrapperProperties,
+    paths: &InstallationPaths,
+) -> Result<(), String> {
     // Already installed?
     if paths.marker_path.exists() {
         return Ok(());
     }
 
     // Download
-    download_with_progress(&props.distribution_url, &paths.zip_path, props.network_timeout)?;
+    download_with_progress(
+        &props.distribution_url,
+        &paths.zip_path,
+        props.network_timeout,
+    )?;
 
     // Verify SHA-256
     if let Some(ref expected) = props.distribution_sha256_sum {
@@ -259,9 +270,10 @@ fn install_distribution(props: &WrapperProperties, paths: &InstallationPaths) ->
 
     // Extract ZIP
     eprintln!("Extracting distribution...");
-    let file = std::fs::File::open(&paths.zip_path)
-        .map_err(|e| format!("Failed to open ZIP: {}", e))?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("Failed to read ZIP: {}", e))?;
+    let file =
+        std::fs::File::open(&paths.zip_path).map_err(|e| format!("Failed to open ZIP: {}", e))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| format!("Failed to read ZIP: {}", e))?;
 
     std::fs::create_dir_all(&paths.dist_dir)
         .map_err(|e| format!("Failed to create dist dir: {}", e))?;
@@ -286,10 +298,9 @@ fn install_distribution(props: &WrapperProperties, paths: &InstallationPaths) ->
                 .map_err(|e| format!("Failed to create parent: {}", e))?;
         }
 
-        let mut outfile = std::fs::File::create(&outpath)
-            .map_err(|e| format!("Failed to create file: {}", e))?;
-        io::copy(&mut entry, &mut outfile)
-            .map_err(|e| format!("Failed to write file: {}", e))?;
+        let mut outfile =
+            std::fs::File::create(&outpath).map_err(|e| format!("Failed to create file: {}", e))?;
+        io::copy(&mut entry, &mut outfile).map_err(|e| format!("Failed to write file: {}", e))?;
     }
 
     // Verify launcher JAR exists
@@ -298,21 +309,22 @@ fn install_distribution(props: &WrapperProperties, paths: &InstallationPaths) ->
         .ok_or_else(|| "gradle-launcher-*.jar not found in distribution lib/".to_string())?;
 
     // Write marker
-    std::fs::write(&paths.marker_path, "")
-        .map_err(|e| format!("Failed to write marker: {}", e))?;
+    std::fs::write(&paths.marker_path, "").map_err(|e| format!("Failed to write marker: {}", e))?;
 
-    eprintln!(
-        "Installed to {}",
-        paths.dist_dir.display()
-    );
+    eprintln!("Installed to {}", paths.dist_dir.display());
     drop(launcher);
     Ok(())
 }
 
 fn find_lib_dir(dist_dir: &Path) -> Result<PathBuf, String> {
+    let direct_lib = dist_dir.join("lib");
+    if direct_lib.exists() {
+        return Ok(direct_lib);
+    }
+
     // The ZIP contains a single top-level directory
-    for entry in std::fs::read_dir(dist_dir)
-        .map_err(|e| format!("Failed to read dist dir: {}", e))?
+    for entry in
+        std::fs::read_dir(dist_dir).map_err(|e| format!("Failed to read dist dir: {}", e))?
     {
         let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
         if entry.path().is_dir() {
@@ -342,6 +354,134 @@ fn find_file_with_prefix(dir: &Path, prefix: &str, suffix: &str) -> Option<PathB
 // Gradle launcher
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SubstrateCliMode {
+    Off,
+    NativeReadyDefault,
+    Authoritative,
+}
+
+struct WrapperCli {
+    gradle_args: Vec<String>,
+    substrate_mode: SubstrateCliMode,
+}
+
+fn env_truthy(name: &str) -> bool {
+    std::env::var(name)
+        .map(|value| {
+            let value = value.trim();
+            value == "1" || value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("yes")
+        })
+        .unwrap_or(false)
+}
+
+fn parse_wrapper_cli(args: impl IntoIterator<Item = String>) -> WrapperCli {
+    let mut gradle_args = Vec::new();
+    let mut substrate_mode = if env_truthy("GRADLEW_RUST_SUBSTRATE_AUTHORITATIVE") {
+        SubstrateCliMode::Authoritative
+    } else if env_truthy("GRADLEW_RUST_SUBSTRATE") {
+        SubstrateCliMode::NativeReadyDefault
+    } else {
+        SubstrateCliMode::Off
+    };
+
+    for arg in args {
+        match arg.as_str() {
+            "--rust-substrate" => substrate_mode = SubstrateCliMode::NativeReadyDefault,
+            "--rust-substrate-authoritative" => substrate_mode = SubstrateCliMode::Authoritative,
+            "--no-rust-substrate" => substrate_mode = SubstrateCliMode::Off,
+            _ => gradle_args.push(arg),
+        }
+    }
+
+    WrapperCli {
+        gradle_args,
+        substrate_mode,
+    }
+}
+
+fn executable_name(base: &str) -> String {
+    if cfg!(windows) {
+        format!("{}.exe", base)
+    } else {
+        base.to_string()
+    }
+}
+
+fn candidate_substrate_daemon_paths(project_dir: &Path) -> Vec<PathBuf> {
+    let daemon_name = executable_name("gradle-substrate-daemon");
+    let mut candidates = Vec::new();
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(parent) = current_exe.parent() {
+            candidates.push(parent.join(&daemon_name));
+        }
+    }
+    candidates.push(project_dir.join("target").join("debug").join(&daemon_name));
+    candidates.push(
+        project_dir
+            .join("target")
+            .join("release")
+            .join(&daemon_name),
+    );
+    candidates
+}
+
+fn locate_substrate_daemon(project_dir: &Path) -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("GRADLE_SUBSTRATE_DAEMON") {
+        let path = PathBuf::from(path);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+    candidate_substrate_daemon_paths(project_dir)
+        .into_iter()
+        .find(|path| path.exists())
+}
+
+fn substrate_gradle_flags(mode: SubstrateCliMode, daemon_path: &Path) -> Vec<String> {
+    let mut flags = vec![
+        "-Dorg.gradle.rust.substrate.enabled=true".to_string(),
+        "-Dorg.gradle.rust.substrate.taskgraph.enabled=true".to_string(),
+        "-Dorg.gradle.rust.substrate.runbuild.enabled=true".to_string(),
+        format!(
+            "-Dorg.gradle.rust.substrate.daemon.path={}",
+            daemon_path.display()
+        ),
+    ];
+
+    match mode {
+        SubstrateCliMode::Off => {}
+        SubstrateCliMode::NativeReadyDefault => {
+            flags
+                .push("-Dorg.gradle.rust.substrate.runbuild.native-ready-default=true".to_string());
+        }
+        SubstrateCliMode::Authoritative => {
+            flags.push("-Dorg.gradle.rust.substrate.runbuild.authoritative=true".to_string());
+        }
+    }
+
+    flags
+}
+
+fn inject_substrate_flags(
+    mode: SubstrateCliMode,
+    project_dir: &Path,
+    gradle_args: &mut Vec<String>,
+) -> Result<(), String> {
+    if mode == SubstrateCliMode::Off {
+        return Ok(());
+    }
+    let daemon_path = locate_substrate_daemon(project_dir).ok_or_else(|| {
+        "Rust substrate requested, but gradle-substrate-daemon was not found. \
+Set GRADLE_SUBSTRATE_DAEMON or build target/debug/gradle-substrate-daemon."
+            .to_string()
+    })?;
+    let mut flags = substrate_gradle_flags(mode, &daemon_path);
+    flags.append(gradle_args);
+    *gradle_args = flags;
+    Ok(())
+}
+
 fn find_java() -> Result<PathBuf, String> {
     // 1. JAVA_HOME
     if let Ok(java_home) = std::env::var("JAVA_HOME") {
@@ -357,7 +497,8 @@ fn find_java() -> Result<PathBuf, String> {
     }
 
     // 2. PATH
-    let java = which("java").ok_or_else(|| "java not found. Set JAVA_HOME or add java to PATH.".to_string())?;
+    let java = which("java")
+        .ok_or_else(|| "java not found. Set JAVA_HOME or add java to PATH.".to_string())?;
     Ok(java)
 }
 
@@ -388,7 +529,9 @@ fn launch_gradle(dist_dir: &Path, args: &[String]) -> Result<i32, String> {
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
 
-    let status = cmd.status().map_err(|e| format!("Failed to launch Gradle: {}", e))?;
+    let status = cmd
+        .status()
+        .map_err(|e| format!("Failed to launch Gradle: {}", e))?;
     Ok(status.code().unwrap_or(1))
 }
 
@@ -401,11 +544,18 @@ fn print_usage() {
     eprintln!();
     eprintln!("Rust-native Gradle wrapper. Reads gradle-wrapper.properties,");
     eprintln!("downloads the distribution if needed, and launches Gradle.");
+    eprintln!();
+    eprintln!("Rust substrate options:");
+    eprintln!(
+        "  --rust-substrate                 Try Rust RunBuild first, delegate if unsupported"
+    );
+    eprintln!("  --rust-substrate-authoritative   Require Rust RunBuild with no JVM task fallback");
+    eprintln!("  --no-rust-substrate              Disable GRADLEW_RUST_SUBSTRATE env opt-in");
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() > 1 && (args[1] == "--help" || args[1] == "-h") {
+    let raw_args: Vec<String> = std::env::args().collect();
+    if raw_args.len() > 1 && (raw_args[1] == "--help" || raw_args[1] == "-h") {
         print_usage();
         std::process::exit(0);
     }
@@ -413,25 +563,34 @@ fn main() {
     // Find project root (directory containing gradle/wrapper/gradle-wrapper.properties)
     let project_dir = find_project_root().unwrap_or_else(|| PathBuf::from("."));
 
-    let props = match load_properties(&project_dir) {
-        Ok(p) => p,
-        Err(e) => {
+    let dist_dir = if let Ok(override_dir) = std::env::var("GRADLEW_DISTRIBUTION_DIR") {
+        PathBuf::from(override_dir)
+    } else {
+        let props = match load_properties(&project_dir) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        let paths = build_paths(&props);
+
+        if let Err(e) = install_distribution(&props, &paths) {
             eprintln!("Error: {}", e);
             std::process::exit(1);
         }
+        paths.dist_dir
     };
 
-    let paths = build_paths(&props);
-
-    if let Err(e) = install_distribution(&props, &paths) {
+    let cli = parse_wrapper_cli(raw_args.into_iter().skip(1));
+    let mut gradle_args = cli.gradle_args;
+    if let Err(e) = inject_substrate_flags(cli.substrate_mode, &project_dir, &mut gradle_args) {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
 
-    // Pass through args (skip our own binary name)
-    let gradle_args: Vec<String> = args.into_iter().skip(1).collect();
-
-    match launch_gradle(&paths.dist_dir, &gradle_args) {
+    match launch_gradle(&dist_dir, &gradle_args) {
         Ok(code) => std::process::exit(code),
         Err(e) => {
             eprintln!("Error: {}", e);
@@ -443,7 +602,12 @@ fn main() {
 fn find_project_root() -> Option<PathBuf> {
     let mut dir = std::env::current_dir().ok()?;
     loop {
-        if dir.join("gradle").join("wrapper").join("gradle-wrapper.properties").exists() {
+        if dir
+            .join("gradle")
+            .join("wrapper")
+            .join("gradle-wrapper.properties")
+            .exists()
+        {
             return Some(dir);
         }
         if !dir.pop() {
@@ -473,7 +637,10 @@ zipStorePath=wrapper/dists
 distributionSha256Sum=abc123
 ";
         let props = parse_properties(content).unwrap();
-        assert_eq!(props.distribution_url, "https://services.gradle.org/distributions/gradle-9.5-bin.zip");
+        assert_eq!(
+            props.distribution_url,
+            "https://services.gradle.org/distributions/gradle-9.5-bin.zip"
+        );
         assert_eq!(props.distribution_sha256_sum.as_deref(), Some("abc123"));
         assert_eq!(props.network_timeout, 10000);
         assert!(props.validate_distribution_url);
@@ -506,11 +673,15 @@ distributionSha256Sum=abc123
     #[test]
     fn test_extract_version() {
         assert_eq!(
-            extract_version_from_url("https://services.gradle.org/distributions/gradle-9.5-bin.zip"),
+            extract_version_from_url(
+                "https://services.gradle.org/distributions/gradle-9.5-bin.zip"
+            ),
             "9.5"
         );
         assert_eq!(
-            extract_version_from_url("https://services.gradle.org/distributions/gradle-8.0-milestone-1-all.zip"),
+            extract_version_from_url(
+                "https://services.gradle.org/distributions/gradle-8.0-milestone-1-all.zip"
+            ),
             "8.0-milestone-1"
         );
     }
@@ -534,7 +705,8 @@ distributionSha256Sum=abc123
     #[test]
     fn test_build_paths() {
         let props = WrapperProperties {
-            distribution_url: "https://services.gradle.org/distributions/gradle-9.5-bin.zip".to_string(),
+            distribution_url: "https://services.gradle.org/distributions/gradle-9.5-bin.zip"
+                .to_string(),
             ..Default::default()
         };
         let paths = build_paths(&props);
@@ -559,7 +731,11 @@ distributionSha256Sum=abc123
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.bin");
         std::fs::write(&file_path, b"hello").unwrap();
-        assert!(verify_sha256(&file_path, "0000000000000000000000000000000000000000000000000000000000000000").is_err());
+        assert!(verify_sha256(
+            &file_path,
+            "0000000000000000000000000000000000000000000000000000000000000000"
+        )
+        .is_err());
     }
 
     #[test]
@@ -572,5 +748,79 @@ distributionSha256Sum=abc123
     fn test_resolve_base_project() {
         let path = resolve_base("PROJECT");
         assert_eq!(path, PathBuf::from("."));
+    }
+
+    #[test]
+    fn test_find_lib_dir_accepts_direct_install_image() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = dir.path().join("lib");
+        std::fs::create_dir(&lib).unwrap();
+
+        assert_eq!(find_lib_dir(dir.path()).unwrap(), lib);
+    }
+
+    #[test]
+    fn test_parse_wrapper_cli_strips_native_ready_flag() {
+        let cli = parse_wrapper_cli(vec![
+            "--rust-substrate".to_string(),
+            "build".to_string(),
+            "--info".to_string(),
+        ]);
+
+        assert_eq!(cli.substrate_mode, SubstrateCliMode::NativeReadyDefault);
+        assert_eq!(cli.gradle_args, vec!["build", "--info"]);
+    }
+
+    #[test]
+    fn test_parse_wrapper_cli_strips_authoritative_flag() {
+        let cli = parse_wrapper_cli(vec![
+            "--rust-substrate-authoritative".to_string(),
+            "clean".to_string(),
+            "build".to_string(),
+        ]);
+
+        assert_eq!(cli.substrate_mode, SubstrateCliMode::Authoritative);
+        assert_eq!(cli.gradle_args, vec!["clean", "build"]);
+    }
+
+    #[test]
+    fn test_parse_wrapper_cli_no_rust_overrides_previous_flag() {
+        let cli = parse_wrapper_cli(vec![
+            "--rust-substrate".to_string(),
+            "--no-rust-substrate".to_string(),
+            "tasks".to_string(),
+        ]);
+
+        assert_eq!(cli.substrate_mode, SubstrateCliMode::Off);
+        assert_eq!(cli.gradle_args, vec!["tasks"]);
+    }
+
+    #[test]
+    fn test_substrate_gradle_flags_native_ready_default() {
+        let daemon = PathBuf::from("/tmp/gradle-substrate-daemon");
+        let flags = substrate_gradle_flags(SubstrateCliMode::NativeReadyDefault, &daemon);
+
+        assert!(flags.contains(&"-Dorg.gradle.rust.substrate.enabled=true".to_string()));
+        assert!(flags.contains(&"-Dorg.gradle.rust.substrate.taskgraph.enabled=true".to_string()));
+        assert!(flags.contains(&"-Dorg.gradle.rust.substrate.runbuild.enabled=true".to_string()));
+        assert!(flags.contains(
+            &"-Dorg.gradle.rust.substrate.runbuild.native-ready-default=true".to_string()
+        ));
+        assert!(
+            !flags.contains(&"-Dorg.gradle.rust.substrate.runbuild.authoritative=true".to_string())
+        );
+    }
+
+    #[test]
+    fn test_substrate_gradle_flags_authoritative() {
+        let daemon = PathBuf::from("/tmp/gradle-substrate-daemon");
+        let flags = substrate_gradle_flags(SubstrateCliMode::Authoritative, &daemon);
+
+        assert!(
+            flags.contains(&"-Dorg.gradle.rust.substrate.runbuild.authoritative=true".to_string())
+        );
+        assert!(!flags.contains(
+            &"-Dorg.gradle.rust.substrate.runbuild.native-ready-default=true".to_string()
+        ));
     }
 }
