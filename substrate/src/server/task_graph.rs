@@ -963,7 +963,7 @@ fn exec_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
 
 fn java_exec_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
     has_input_value(task, "main_class")
-        && (has_input_value(task, "classpath") || has_input_value(task, "working_dir"))
+        && (has_input_value(task, "classpath") || inferred_java_exec_classpath(task).is_some())
 }
 
 fn javadoc_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
@@ -2512,6 +2512,50 @@ mod tests {
                     name: "classpath".to_string(),
                     kind: "value".to_string(),
                     value: "/repo/build/classes/java/main".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+            ],
+            output_specs: Vec::new(),
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        assert_eq!(executable_task_type(&task), "org.gradle.api.tasks.JavaExec");
+    }
+
+    #[test]
+    fn test_java_exec_without_captured_or_inferable_classpath_does_not_lower_to_native() {
+        let temp = tempfile::tempdir().unwrap();
+
+        let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":runTool".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.api.tasks.JavaExec".to_string(),
+            depends_on: Vec::new(),
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "not-cacheable".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "external-process".to_string(),
+            input_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "main_class".to_string(),
+                    kind: "value".to_string(),
+                    value: "example.Tool".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "working_dir".to_string(),
+                    kind: "value".to_string(),
+                    value: temp.path().to_string_lossy().into_owned(),
                     normalization: "scalar".to_string(),
                     optional: false,
                 },
