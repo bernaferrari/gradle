@@ -117,6 +117,8 @@
   each supported resolved artifact into the Rust artifact store, writes
   `.sha256` sidecars, returns artifact size/SHA-256 on the resolved nodes, and
   fails closed for unsupported artifact URL shapes instead of pretending parity.
+  This is covered both by Rust resolver tests and by a Java bridge E2E test
+  against a real Rust daemon.
 - Rust artifact cache identity includes classifier and normalized extension, so
   in-memory warm hits cannot collide different artifact shapes for the same
   Maven coordinate.
@@ -301,6 +303,7 @@
 - `./gradlew :dependency-management:noDaemonIntegTest --tests "org.gradle.integtests.resolve.maven.MavenDynamicResolveIntegrationTest.rust transport warms dynamic version metadata for later no-remote read-through" -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon -x :distributions-core:generateLicenseFile --no-daemon --console=plain`
 - `./gradlew :dependency-management:test --tests org.gradle.api.internal.artifacts.ivyservice.ivyresolve.RepositoryChainArtifactResolverTest -x :distributions-core:generateLicenseFile`
 - `./gradlew :dependency-management:test --tests org.gradle.internal.resource.transfer.DefaultCacheAwareExternalResourceAccessorTest -x :distributions-core:generateLicenseFile`
+- `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.e2e.SubstrateE2ETest.dependencyResolveCanPrefetchStaticMavenArtifact -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon --no-daemon --console=plain`
 - `cargo test -q -p gradle-substrate-daemon server::file_fingerprint::tests -- --nocapture`
 - `./gradlew :rust-bridge:compileJava :core:compileJava --no-daemon --console=plain`
 - `cargo build -q -p gradle-substrate-daemon`
