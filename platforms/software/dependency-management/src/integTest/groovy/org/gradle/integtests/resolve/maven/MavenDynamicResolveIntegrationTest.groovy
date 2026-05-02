@@ -31,7 +31,10 @@ class MavenDynamicResolveIntegrationTest extends AbstractHttpDependencyResolutio
         def substrateHome = file("substrate-home")
         configureRustDependencyPath(daemonBinary, substrateHome, true)
 
-        def module = mavenHttpRepo.module("org.test", "projectStatic", "1.0").publish()
+        def child = mavenHttpRepo.module("org.test", "projectStaticChild", "1.0").publish()
+        def module = mavenHttpRepo.module("org.test", "projectStatic", "1.0")
+            .dependsOn("org.test", "projectStaticChild", "1.0")
+            .publish()
 
         buildFile << """
 repositories {
@@ -65,13 +68,16 @@ task retrieve(type: Sync) {
 
         and:
         module.pom.expectGet()
+        child.pom.expectGet()
         module.artifact.expectGet()
+        child.artifact.expectGet()
 
         when:
         run "resolveGraph"
 
         then:
         file("build/resolution/graph.txt").text.contains("org.test:projectStatic:1.0")
+        file("build/resolution/graph.txt").text.contains("org.test:projectStaticChild:1.0")
 
         when:
         server.resetExpectations()
@@ -79,8 +85,9 @@ task retrieve(type: Sync) {
         run "retrieve"
 
         then:
-        file("libs").assertHasDescendants("projectStatic-1.0.jar")
+        file("libs").assertHasDescendants("projectStatic-1.0.jar", "projectStaticChild-1.0.jar")
         file("libs/projectStatic-1.0.jar").assertIsCopyOf(module.artifactFile)
+        file("libs/projectStaticChild-1.0.jar").assertIsCopyOf(child.artifactFile)
     }
 
     def "rust transport warms dynamic version metadata for later no-remote read-through"() {

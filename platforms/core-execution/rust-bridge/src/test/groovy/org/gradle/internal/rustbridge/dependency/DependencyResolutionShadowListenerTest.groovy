@@ -368,6 +368,79 @@ class DependencyResolutionShadowListenerTest extends Specification {
         0 * reporter.reportRustError(_, _)
     }
 
+    def "prefetch mode warms resolved static transitive graph artifacts"() {
+        given:
+        def client = Mock(RustDependencyResolutionClient)
+        def reporter = Mock(HashMismatchReporter)
+        def repository = RepositoryDescriptor.newBuilder()
+            .setId("local")
+            .setUrl("http://repo.test/maven2")
+            .setM2Compatible(true)
+            .build()
+        def listener = new DependencyResolutionShadowListener(
+            client,
+            reporter,
+            false,
+            false,
+            true,
+            { deps -> [repository] } as DependencyResolutionShadowListener.RepositoryProvider
+        )
+        def dependency = Mock(ExternalModuleDependency) {
+            getGroup() >> "org.example"
+            getName() >> "demo"
+            getVersion() >> "1.2.3"
+            isChanging() >> false
+            getTargetConfiguration() >> null
+            getExcludeRules() >> ([] as Set)
+            getArtifacts() >> ([] as Set)
+        }
+        def dependencySet = Mock(DependencySet) {
+            iterator() >> ([dependency].iterator())
+        }
+        def directId = Mock(ModuleComponentIdentifier) {
+            getGroup() >> "org.example"
+            getModule() >> "demo"
+            getVersion() >> "1.2.3"
+        }
+        def transitiveId = Mock(ModuleComponentIdentifier) {
+            getGroup() >> "org.example"
+            getModule() >> "child"
+            getVersion() >> "4.5.6"
+        }
+        def direct = Mock(ResolvedComponentResult) {
+            getId() >> directId
+        }
+        def transitive = Mock(ResolvedComponentResult) {
+            getId() >> transitiveId
+        }
+        def resolutionResult = Mock(ResolutionResult) {
+            getAllComponents() >> ([direct, transitive] as Set)
+            getAllDependencies() >> ([] as Set)
+        }
+        def dependencies = Mock(ResolvableDependencies) {
+            getName() >> "runtimeClasspath"
+            getPath() >> ":runtimeClasspath"
+            getDependencies() >> dependencySet
+            getResolutionResult() >> resolutionResult
+        }
+        listener.beforeResolve(dependencies)
+
+        when:
+        listener.afterResolve(dependencies)
+
+        then:
+        listener.prefetchedArtifactCount == 2
+        1 * client.resolveDependencies("runtimeClasspath", { requested ->
+            requested.collect { "${it.group}:${it.name}:${it.version}:${it.extension}" }.sort() == [
+                "org.example:child:4.5.6:jar",
+                "org.example:demo:1.2.3:jar"
+            ]
+        }, [repository], false, true) >> new RustDependencyResolutionClient.ResolutionResult(true, [], "", 14, 2, 84)
+        1 * client.recordResolution("runtimeClasspath", _, 2, true, 0)
+        1 * reporter.reportMatch()
+        0 * reporter.reportRustError(_, _)
+    }
+
     def "prefetch mode skips when static dependency is absent from resolved graph"() {
         given:
         def client = Mock(RustDependencyResolutionClient)

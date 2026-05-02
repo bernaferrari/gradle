@@ -168,10 +168,14 @@
   rather than approximating Gradle semantics. Prefetch is gated by the resolved
   component graph instead of low-level metadata-attempt failures, so harmless
   repository misses such as absent Gradle module metadata do not block static
-  Maven artifact warming. A no-daemon integration smoke now proves this through
-  a real Gradle build: a graph-only first run warms Rust through the listener,
-  then a second run with a fresh Gradle user home retrieves the artifact with
-  no remote repository expectations.
+  Maven artifact warming. Once the declared dependencies pass that contract,
+  the listener prefetches every static Maven module in Gradle's resolved graph
+  as an exact non-transitive artifact request, so graph-only resolution can
+  warm direct and transitive artifacts without re-solving dependency semantics
+  in Rust. A no-daemon integration smoke now proves this through a real Gradle
+  build: a graph-only first run warms Rust through the listener, then a second
+  run with a fresh Gradle user home retrieves direct and transitive artifacts
+  with no remote repository expectations.
 - Gradle artifact resolution has an explicit Rust read-through mode
   (`org.gradle.rust.substrate.dependency.readthrough.artifacts=true`) that
   consults the Rust artifact store after Gradle local access and before remote
@@ -198,8 +202,8 @@
   outputs, reruns with a fresh Gradle user home, materializes the artifact
   again, and reports zero second-run remote requests. That metric now combines
   dynamic metadata/artifact read-through with listener-driven static Maven
-  artifact prefetch, proving the common first-minute dependency path without
-  JVM task forwarding.
+  direct/transitive artifact prefetch, proving the common first-minute
+  dependency path without JVM task forwarding.
 - Archive tasks (`Jar`, `Zip`, `War`, `Ear`, `Tar`) can lower to native Rust
   archive execution when the task model provides input paths and an output
   archive path. ZIP-compatible tasks emit ZIP-compatible archives; `Tar` emits
@@ -339,6 +343,7 @@
 - `./gradlew :dependency-management:noDaemonIntegTest --tests "org.gradle.integtests.resolve.maven.MavenDynamicResolveIntegrationTest.rust listener prefetches static maven artifact for later no-remote read-through" -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon -x :distributions-core:generateLicenseFile --no-daemon --console=plain`
 - `./gradlew :distributions-full:install -Pgradle_installPath=$PWD/build/gradle-under-test --no-daemon --console=plain`
 - `python3 tools/demo/first_60_seconds.py --output build/first60-listener-prefetch.json` passed with daemon socket ready=16.9ms, Rust dependency transport/store/checksum=636.3ms, metadata cache=260.0ms, dynamic metadata cache=257.8ms, static Maven prefetch=266.8ms, shared artifact/metadata read-through Gradle proof=15849.8ms, real-build read-through=8161.2ms with remote requests avoided=5/5 and deterministic dynamic/static output SHA-256 values `742d753d434f2e408762a9cbcc75621c441e0ed5dea5961d65b05ff3013575fc` / `88f9a4aa9c2579d0caa524dac61d45a114f381572629c6645fa28979d2501196`, file-watch first event=12ms.
+- `python3 tools/demo/first_60_seconds.py --output build/first60-transitive-prefetch.json` passed with daemon socket ready=639.5ms, Rust dependency transport/store/checksum=716.0ms, metadata cache=263.5ms, dynamic metadata cache=264.6ms, static Maven prefetch=269.5ms, shared artifact/metadata read-through Gradle proof=15586.8ms, real-build read-through=7964.4ms with remote requests avoided=7/7 and deterministic dynamic/direct-static/transitive-static output SHA-256 values `742d753d434f2e408762a9cbcc75621c441e0ed5dea5961d65b05ff3013575fc` / `88f9a4aa9c2579d0caa524dac61d45a114f381572629c6645fa28979d2501196` / `ecffccc8258a7d1647e4f911a8b9c6874d86f3ef8a88ddf0faad23d3e1cd148b`, file-watch first event=12ms.
 - `cargo test -p gradle-substrate-daemon test_no_checksum -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_cached_text_metadata_read_does_not_freeze_stale_sha -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_persistent_store_roundtrip -- --nocapture`
