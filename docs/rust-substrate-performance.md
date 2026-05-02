@@ -32,7 +32,7 @@ python3 tools/demo/first_60_seconds.py --output build/first60.json
 ```
 
 That reports daemon socket readiness, Rust dependency-transport/store/checksum
-smoke timing, cache-first reuse of Rust-persisted transport bytes, URL
+smoke timing, cache-first reuse of Rust warm-cache and persisted transport bytes, URL
 metadata-store warming through Rust transport, opt-in static Maven artifact
 prefetch through Rust `ResolveDependencies`, Gradle artifact/POM read-through
 from the Rust cache, isolated real-build remote requests avoided when a local

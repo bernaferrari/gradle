@@ -802,6 +802,23 @@ impl DependencyResolutionServiceImpl {
         key
     }
 
+    fn warm_cached_artifact_path(
+        artifact_cache: &DashMap<String, CachedArtifact>,
+        cache_key: &str,
+    ) -> Option<PathBuf> {
+        let cached_local_path = artifact_cache
+            .get(cache_key)
+            .map(|cached| cached.local_path.clone());
+        let cached_local_path = cached_local_path?;
+        let path = PathBuf::from(cached_local_path);
+        if path.is_file() {
+            return Some(path);
+        }
+
+        artifact_cache.remove(cache_key);
+        None
+    }
+
     fn metadata_path(
         &self,
         repo: &RepositoryDescriptor,
@@ -3136,6 +3153,14 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
         } else {
             PathBuf::new()
         };
+        let cached_source_path = Self::warm_cached_artifact_path(&artifact_cache, &cache_key)
+            .or_else(|| {
+                if !store_path.as_os_str().is_empty() && store_path.is_file() {
+                    Some(store_path.clone())
+                } else {
+                    None
+                }
+            });
 
         let stream = async_stream::stream! {
             if url.is_empty() {
@@ -3149,10 +3174,10 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                 return;
             }
 
-            if !store_path.as_os_str().is_empty() && store_path.is_file() {
+            if let Some(cached_source_path) = cached_source_path.as_ref() {
                 use tokio::io::AsyncReadExt;
 
-                match tokio::fs::File::open(&store_path).await {
+                match tokio::fs::File::open(cached_source_path).await {
                     Ok(mut cached_file) => {
                         let total_size = cached_file.metadata().await.map(|m| m.len() as i64).unwrap_or(-1);
                         let mut offset = 0u64;
@@ -3195,12 +3220,14 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                             classifier: cache_classifier.clone(),
                             extension: cache_extension.clone(),
                             sha256: sha256.clone(),
-                            local_path: store_path.to_string_lossy().into_owned(),
+                            local_path: cached_source_path.to_string_lossy().into_owned(),
                             size: offset as i64,
                             cached_at_ms: Self::now_ms(),
                         });
-                        if let Err(e) = Self::write_sha256_sidecar(&store_path, &sha256).await {
-                            tracing::warn!(path = %store_path.display(), error = %e, "Failed to write cached artifact checksum sidecar");
+                        if cached_source_path == &store_path {
+                            if let Err(e) = Self::write_sha256_sidecar(&store_path, &sha256).await {
+                                tracing::warn!(path = %store_path.display(), error = %e, "Failed to write cached artifact checksum sidecar");
+                            }
                         }
 
                         yield Ok(crate::proto::DownloadArtifactChunk {
@@ -3213,7 +3240,8 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                         return;
                     }
                     Err(e) => {
-                        tracing::warn!(path = %store_path.display(), error = %e, "Cached artifact exists but cannot be opened; falling back to HTTP");
+                        artifact_cache.remove(&cache_key);
+                        tracing::warn!(path = %cached_source_path.display(), error = %e, "Cached artifact exists but cannot be opened; falling back to HTTP");
                     }
                 }
             }
@@ -4059,6 +4087,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_download_artifact_streams_warm_cache_local_path_without_http() {
+        use futures_util::StreamExt;
+
+        let store = tempfile::tempdir().unwrap();
+        let local = tempfile::tempdir().unwrap();
+        let local_path = local.path().join("already-warm.jar");
+        let body = b"warm cache artifact served without remote".to_vec();
+        tokio::fs::write(&local_path, &body).await.unwrap();
+
+        let svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let cache_key = DependencyResolutionServiceImpl::artifact_cache_key(
+            "org.example",
+            "demo",
+            "1.0",
+            "",
+            "jar",
+        );
+        svc.artifact_cache.insert(
+            cache_key.clone(),
+            CachedArtifact {
+                group: "org.example".to_string(),
+                name: "demo".to_string(),
+                version: "1.0".to_string(),
+                classifier: String::new(),
+                extension: "jar".to_string(),
+                sha256: String::new(),
+                local_path: local_path.to_string_lossy().into_owned(),
+                size: body.len() as i64,
+                cached_at_ms: DependencyResolutionServiceImpl::now_ms(),
+            },
+        );
+
+        let mut stream = svc
+            .download_artifact(Request::new(crate::proto::DownloadArtifactRequest {
+                group: "org.example".to_string(),
+                name: "demo".to_string(),
+                version: "1.0".to_string(),
+                classifier: String::new(),
+                extension: "jar".to_string(),
+                repositories: vec![make_repo("dead", "http://127.0.0.1:9")],
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let mut downloaded = Vec::new();
+        let mut saw_last = false;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.unwrap();
+            assert!(chunk.error_message.is_empty(), "{}", chunk.error_message);
+            downloaded.extend_from_slice(&chunk.data);
+            saw_last |= chunk.is_last;
+        }
+
+        assert_eq!(downloaded, body);
+        assert!(saw_last);
+        let warmed = svc.artifact_cache.get(&cache_key).unwrap();
+        assert_eq!(warmed.local_path, local_path.to_string_lossy());
+        assert_eq!(
+            warmed.sha256,
+            DependencyResolutionServiceImpl::compute_sha256(&downloaded)
+        );
+    }
+
+    #[tokio::test]
     async fn test_download_metadata_url_populates_metadata_cache() {
         use futures_util::StreamExt;
         use std::io::{Read, Write};
@@ -4202,6 +4296,63 @@ mod tests {
 
         assert_eq!(downloaded, expected);
         assert!(saw_last);
+    }
+
+    #[tokio::test]
+    async fn test_download_metadata_url_streams_warm_cache_local_path_without_http() {
+        use futures_util::StreamExt;
+
+        let store = tempfile::tempdir().unwrap();
+        let local = tempfile::tempdir().unwrap();
+        let local_path = local.path().join("already-warm.pom");
+        let body = b"<project><artifactId>warm</artifactId></project>".to_vec();
+        tokio::fs::write(&local_path, &body).await.unwrap();
+
+        let svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let url = "http://127.0.0.1:9/org/example/demo/1.0/demo-1.0.pom";
+        let cache_key = DependencyResolutionServiceImpl::metadata_url_cache_key(url, "pom");
+        svc.artifact_cache.insert(
+            cache_key.clone(),
+            CachedArtifact {
+                group: String::new(),
+                name: String::new(),
+                version: String::new(),
+                classifier: String::new(),
+                extension: "pom".to_string(),
+                sha256: String::new(),
+                local_path: local_path.to_string_lossy().into_owned(),
+                size: body.len() as i64,
+                cached_at_ms: DependencyResolutionServiceImpl::now_ms(),
+            },
+        );
+
+        let mut stream = svc
+            .download_artifact(Request::new(crate::proto::DownloadArtifactRequest {
+                url: url.to_string(),
+                extension: "pom".to_string(),
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let mut downloaded = Vec::new();
+        let mut saw_last = false;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.unwrap();
+            assert!(chunk.error_message.is_empty(), "{}", chunk.error_message);
+            downloaded.extend_from_slice(&chunk.data);
+            saw_last |= chunk.is_last;
+        }
+
+        assert_eq!(downloaded, body);
+        assert!(saw_last);
+        let warmed = svc.artifact_cache.get(&cache_key).unwrap();
+        assert_eq!(warmed.local_path, local_path.to_string_lossy());
+        assert_eq!(
+            warmed.sha256,
+            DependencyResolutionServiceImpl::compute_sha256(&downloaded)
+        );
     }
 
     #[tokio::test]
