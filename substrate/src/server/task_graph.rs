@@ -1512,6 +1512,12 @@ fn task_options(
         insert_input_option(
             task,
             &mut options,
+            "copy_line_replace_filter",
+            "copy_line_replace_filter",
+        );
+        insert_input_option(
+            task,
+            &mut options,
             "include_empty_dirs",
             "include_empty_dirs",
         );

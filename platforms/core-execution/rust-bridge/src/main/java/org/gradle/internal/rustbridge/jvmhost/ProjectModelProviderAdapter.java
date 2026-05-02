@@ -498,13 +498,18 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         List<String> copyActionClasses = copyActionClassNames(rootSpec);
         String copyFileMappings = nestedCopyFileMappings(rootSpec);
         boolean staticEachFileRelativePathRewrite = false;
+        String lineReplaceFilter = "";
         if (copyFileMappings.isEmpty()) {
             copyFileMappings = staticEachFileRelativePathMappings(task);
             staticEachFileRelativePathRewrite = !copyFileMappings.isEmpty();
         }
+        if (!staticEachFileRelativePathRewrite) {
+            lineReplaceFilter = staticLineReplaceFilter(task);
+        }
+        boolean staticLineReplaceFilter = !lineReplaceFilter.isEmpty();
         inputs.put("copy_has_custom_actions", Boolean.toString(hasCustomActions));
         putIfPresent(inputs, "copy_custom_action_types", String.join(",", copyActionClasses));
-        inputs.put("copy_unsupported_custom_actions", Boolean.toString(hasUnsupportedCopyActions(hasCustomActions, copyActionClasses, expandProperties, staticEachFileRelativePathRewrite)));
+        inputs.put("copy_unsupported_custom_actions", Boolean.toString(hasUnsupportedCopyActions(hasCustomActions, copyActionClasses, expandProperties, staticEachFileRelativePathRewrite, staticLineReplaceFilter)));
         putIfPresent(inputs, "duplicates_strategy", stringOrEmpty(invokeOptional(rootSpec, "getDuplicatesStrategy")));
         putIfPresent(inputs, "filtering_charset", stringOrEmpty(invokeOptional(rootSpec, "getFilteringCharset")));
         putIfPresent(inputs, "include_patterns", stringCollection(invokeOptional(rootSpec, "getIncludes")));
@@ -514,7 +519,52 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "file_permissions", permissionUnixMode(invokeOptional(rootSpec, "getFilePermissions")));
         putIfPresent(inputs, "dir_permissions", permissionUnixMode(invokeOptional(rootSpec, "getDirPermissions")));
         putIfPresent(inputs, "copy_file_mappings", copyFileMappings);
+        putIfPresent(inputs, "copy_line_replace_filter", lineReplaceFilter);
         inputs.put("copy_contains_symlinks", Boolean.toString(containsSymbolicLinks(safeInputFiles(task)) || copySpecContainsSymbolicLinks(rootSpec)));
+    }
+
+    private static String staticLineReplaceFilter(Task task) {
+        String[] replacement = staticLineReplaceFilterReplacement(task);
+        if (replacement.length == 0) {
+            return "";
+        }
+        return encodeMapping(replacement[0]) + ">" + encodeMapping(replacement[1]);
+    }
+
+    private static String[] staticLineReplaceFilterReplacement(Task task) {
+        Object project = task.getProject();
+        Object buildFileValue = invokeOptional(project, "getBuildFile");
+        if (!(buildFileValue instanceof File)) {
+            return new String[0];
+        }
+        File buildFile = (File) buildFileValue;
+        if (!buildFile.isFile()) {
+            return new String[0];
+        }
+        String text;
+        try {
+            text = new String(Files.readAllBytes(buildFile.toPath()), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to inspect build script for static filter rewrite", e);
+            return new String[0];
+        }
+        if (countPatternOccurrences(text, Pattern.compile("\\bfilter\\s*\\{")) != 1 || countOccurrences(text, "eachFile") > 0) {
+            return new String[0];
+        }
+        String taskName = Pattern.quote(task.getName());
+        Pattern pattern = Pattern.compile(
+            "tasks\\.register<Copy>\\(\\s*\"" + taskName + "\"\\s*\\)\\s*\\{(?<body>.*?)filter\\s*\\{\\s*line\\s*:\\s*String\\s*->\\s*line\\.replace\\(\\s*\"(?<from>[^\"]*)\"\\s*,\\s*\"(?<to>[^\"]*)\"\\s*\\)\\s*}\\s*",
+            Pattern.DOTALL
+        );
+        Matcher matcher = pattern.matcher(text);
+        if (!matcher.find()) {
+            return new String[0];
+        }
+        String from = matcher.group("from");
+        if (from.isEmpty()) {
+            return new String[0];
+        }
+        return new String[] { from, matcher.group("to") };
     }
 
     private static String staticEachFileRelativePathMappings(Task task) {
@@ -601,6 +651,15 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         return count;
     }
 
+    private static int countPatternOccurrences(String text, Pattern pattern) {
+        int count = 0;
+        Matcher matcher = pattern.matcher(text);
+        while (matcher.find()) {
+            count++;
+        }
+        return count;
+    }
+
     private static boolean containsSymbolicLinks(@Nullable FileCollection files) {
         if (files == null) {
             return false;
@@ -665,9 +724,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         boolean hasCustomActions,
         List<String> copyActionClasses,
         String expandProperties,
-        boolean staticEachFileRelativePathRewrite
+        boolean staticEachFileRelativePathRewrite,
+        boolean staticLineReplaceFilter
     ) {
-        if (staticEachFileRelativePathRewrite) {
+        if (staticEachFileRelativePathRewrite || staticLineReplaceFilter) {
             return false;
         }
         if (!hasCustomActions && copyActionClasses.isEmpty()) {
