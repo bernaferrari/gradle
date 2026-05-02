@@ -59,7 +59,8 @@
   shapes rather than approximating them.
 - Native `JavaExec` lowering captures Java home, classpath, main class, JVM
   args, application args, working directory, and ignore-exit-value from the JVM
-  task model, and fails closed unless classpath and main class are present.
+  task model, and fails closed unless the main class and either a captured
+  classpath or an inferable standard Java-plugin output classpath are present.
 - Native `Javadoc` lowering captures Java home, source files, classpath,
   destination directory, title, encoding, max memory, and timestamp behavior,
   and lowers only when source files and declared outputs are present.
