@@ -14,7 +14,7 @@ import static org.junit.Assert.assertEquals;
 public class JvmHostServiceImplTest {
 
     @Test
-    public void buildPlanRefreshesSelectedTaskContractsFromLiveModel() {
+    public void buildPlanPrefersSelectedTaskSnapshotOverLiveModelRefresh() {
         BuildPlanTaskSelectionSnapshot selected = new BuildPlanTaskSelectionSnapshot();
         selected.recordSelectedTasks(
             Collections.singletonList(":compileJava"),
@@ -30,27 +30,29 @@ public class JvmHostServiceImplTest {
 
         BuildPlan plan = service.getBuildPlan("build");
 
-        assertEquals("jvm-host-selected-task-graph-model-refreshed", plan.getMetadataOrThrow("taskSource"));
-        assertEquals("fresh-classpath", plan.getTasks(0).getInputsOrThrow("classpath"));
+        assertEquals("jvm-host-selected-task-graph-snapshot", plan.getMetadataOrThrow("taskSource"));
+        assertEquals("stale-classpath", plan.getTasks(0).getInputsOrThrow("classpath"));
     }
 
     @Test
-    public void buildPlanFallsBackToSelectedSnapshotWhenLiveModelRefreshIsUnavailable() {
+    public void buildPlanFallsBackToSelectedModelRefreshWhenSnapshotContractIsUnavailable() {
         BuildPlanTaskSelectionSnapshot selected = new BuildPlanTaskSelectionSnapshot();
         selected.recordSelectedTasks(
             Collections.singletonList(":compileJava"),
             Collections.singletonMap(":compileJava", Collections.emptyList()),
-            Collections.singletonList(task(":compileJava", "snapshot-classpath"))
+            Collections.emptyList()
         );
 
         JvmHostServiceImpl service = new JvmHostServiceImpl();
         service.setTaskSelectionSnapshot(selected);
-        service.setProjectModelProvider(new StubProjectModelProvider(Collections.emptyList()));
+        service.setProjectModelProvider(new StubProjectModelProvider(
+            Collections.singletonList(task(":compileJava", "fresh-classpath"))
+        ));
 
         BuildPlan plan = service.getBuildPlan("build");
 
-        assertEquals("jvm-host-selected-task-graph-snapshot", plan.getMetadataOrThrow("taskSource"));
-        assertEquals("snapshot-classpath", plan.getTasks(0).getInputsOrThrow("classpath"));
+        assertEquals("jvm-host-selected-task-graph-model-refreshed", plan.getMetadataOrThrow("taskSource"));
+        assertEquals("fresh-classpath", plan.getTasks(0).getInputsOrThrow("classpath"));
     }
 
     private static BuildPlanTask task(String path, String classpath) {
