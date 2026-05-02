@@ -151,6 +151,17 @@
   read-through, and uncached resource download seams in one focused Gradle test
   invocation, keeping the visible demo centered on Rust-backed dependency work
   instead of repeated Gradle test startup.
+- Dependency read-through registries are configured from eager JVM-host bridge
+  wiring, not the lazy dependency shadow listener, so normal installed Gradle
+  builds can enable Rust metadata/artifact/download seams before dependency
+  resolution starts.
+- `org.gradle.rust.substrate.state.dir` can isolate the Rust daemon socket and
+  durable stores for repeatable demos/tests without reusing
+  `~/.gradle-substrate`.
+- The first-60-seconds demo also includes an installed Gradle-under-test real
+  build that warms Rust from a local HTTP Maven repository, deletes project
+  outputs, reruns with a fresh Gradle user home, materializes the artifact
+  again, and reports zero second-run remote requests.
 - Archive tasks (`Jar`, `Zip`, `War`, `Ear`, `Tar`) can lower to native Rust
   archive execution when the task model provides input paths and an output
   archive path. ZIP-compatible tasks emit ZIP-compatible archives; `Tar` emits
@@ -299,7 +310,7 @@
 - `build/gradle-under-test/bin/gradle -p testing/corpus/java-library-kotlin-dsl clean classes --no-daemon --console=plain -Dorg.gradle.rust.substrate.enabled=true -Dorg.gradle.rust.substrate.daemon.path=$PWD/target/debug/gradle-substrate-daemon -Dorg.gradle.rust.substrate.hashing.enabled=true -Dorg.gradle.rust.substrate.hashing.authoritative=true -Dorg.gradle.rust.substrate.fingerprint.enabled=true -Dorg.gradle.rust.substrate.fingerprint.authoritative=true -Dorg.gradle.rust.substrate.snapshotting.enabled=true -Dorg.gradle.rust.substrate.snapshotting.authoritative=true`
 - `build/gradle-under-test/bin/gradle -p testing/corpus/java-library-kotlin-dsl classes --no-daemon --console=plain -Dorg.gradle.rust.substrate.enabled=true -Dorg.gradle.rust.substrate.daemon.path=$PWD/target/debug/gradle-substrate-daemon -Dorg.gradle.rust.substrate.hashing.enabled=true -Dorg.gradle.rust.substrate.hashing.authoritative=true -Dorg.gradle.rust.substrate.fingerprint.enabled=true -Dorg.gradle.rust.substrate.fingerprint.authoritative=true -Dorg.gradle.rust.substrate.snapshotting.enabled=true -Dorg.gradle.rust.substrate.snapshotting.authoritative=true`
 - `python3 tools/performance/rust_substrate_perf_report.py build/corpus-authoritative-21/corpus_summary.json --output build/corpus-authoritative-21/performance.md`
-- `python3 tools/demo/first_60_seconds.py --output build/first60-readthrough-combined-final.json` passed with daemon socket ready=549.5ms, Rust dependency transport/store/checksum=695.6ms, metadata cache=307.0ms, dynamic metadata cache=263.7ms, shared artifact/metadata read-through Gradle proof=12064.0ms, file-watch first event=12ms.
+- `python3 tools/demo/first_60_seconds.py --output build/first60-real-build-readthrough.json` passed with daemon socket ready=15.0ms, Rust dependency transport/store/checksum=1007.2ms, metadata cache=267.8ms, dynamic metadata cache=272.0ms, shared artifact/metadata read-through Gradle proof=17068.8ms, real-build read-through=27006.5ms with remote requests avoided=3/3 and output SHA-256 `755f05d20eda43d6e382dd77da1c48760946d5a5a9d5f51b4dc7d5d94ad1dbe9`, file-watch first event=11ms.
 - `./tools/stabilization/run_strict_stabilization.sh quick`
 - `./tools/demo/rust_substrate_demo.sh --quick`
 

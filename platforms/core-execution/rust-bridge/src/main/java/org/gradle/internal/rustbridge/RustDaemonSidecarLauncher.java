@@ -35,7 +35,7 @@ public final class RustDaemonSidecarLauncher {
             return SubstrateClient.noop("substrate-disabled");
         }
 
-        String socketPath = resolveSocketPath();
+        String socketPath = resolveSocketPath(options);
         Path socket = new File(socketPath).toPath();
         if (Files.exists(socket)) {
             try {
@@ -89,10 +89,14 @@ public final class RustDaemonSidecarLauncher {
         return SubstrateClient.noop(reason);
     }
 
-    private static String resolveSocketPath() {
+    private static String resolveSocketPath(InternalOptions options) {
         String override = System.getProperty(SOCKET_PATH_PROPERTY, "").trim();
         if (!override.isEmpty()) {
             return override;
+        }
+        String stateDirectory = options.getValue(RustSubstrateOptions.STATE_DIRECTORY).trim();
+        if (!stateDirectory.isEmpty()) {
+            return new File(stateDirectory, "substrate.sock").getAbsolutePath();
         }
         return new File(System.getProperty("user.home"), DEFAULT_SOCKET_RELATIVE_PATH).getAbsolutePath();
     }

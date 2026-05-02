@@ -93,11 +93,19 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
                 daemonBinary = new File(binaryPath);
             }
 
-            File socketDirectory = new File(System.getProperty("user.home"), ".gradle-substrate");
+            File socketDirectory = resolveStateDirectory(options);
             boolean enableJvmHost = RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_JVM_HOST);
             return enableJvmHost
                 ? DaemonLauncher.withJvmHost(daemonBinary, socketDirectory)
                 : DaemonLauncher.of(daemonBinary, socketDirectory);
+        }
+
+        private static File resolveStateDirectory(InternalOptions options) {
+            String configured = options.getValue(RustSubstrateOptions.STATE_DIRECTORY).trim();
+            if (!configured.isEmpty()) {
+                return new File(configured);
+            }
+            return new File(System.getProperty("user.home"), ".gradle-substrate");
         }
 
         @Provides
@@ -245,7 +253,8 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
             RustDependencyResolutionClient rustDependencyResolutionClient,
             InternalOptions options
         ) {
-            boolean dependencyEnabled = RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_DEPENDENCY_RESOLUTION);
+            boolean dependencyEnabled = RustSubstrateOptions.isSubstrateEnabled(options)
+                && RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_DEPENDENCY_RESOLUTION);
             if (dependencyEnabled && options.getBoolean(RustSubstrateOptions.ENABLE_RUST_DEPENDENCY_ARTIFACT_READ_THROUGH)) {
                 RustArtifactCacheReadThroughRegistry.set(new RustArtifactCacheReadThrough(rustDependencyResolutionClient));
             } else {
@@ -269,9 +278,11 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
             DaemonLauncher daemonLauncher,
             BuildPlanTaskSelectionSnapshot taskSelectionSnapshot,
             ListenerManager listenerManager,
+            RustDependencyResolutionClient rustDependencyResolutionClient,
             ServiceRegistry services,
             InternalOptions options
         ) {
+            configureDependencyReadThrough(rustDependencyResolutionClient, options);
             if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
                 return JvmHostBridgeWiring.INSTANCE;
             }

@@ -86,6 +86,14 @@ public class RustSubstrateOptions {
         InternalOptions.ofString("org.gradle.rust.substrate.daemon.path", "");
 
     /**
+     * Root directory for the Rust daemon socket and durable local state.
+     * Property: org.gradle.rust.substrate.state.dir
+     * Default: "" (uses ${user.home}/.gradle-substrate)
+     */
+    public static final InternalOption<String> STATE_DIRECTORY =
+        InternalOptions.ofString("org.gradle.rust.substrate.state.dir", "");
+
+    /**
      * Report mismatches found during shadow mode.
      * Property: org.gradle.rust.substrate.shadow.report-mismatches
      * Default: true

@@ -16,13 +16,20 @@ responsiveness, not Rust compilation.
 from __future__ import annotations
 
 import argparse
+import functools
+import hashlib
+import http.server
 import json
+import os
 import re
 import shutil
+import socketserver
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import zipfile
 from pathlib import Path
 
 
@@ -208,6 +215,173 @@ def measure_gradle_readthrough_smoke(timeout: int = 90) -> list[dict[str, object
     ]
 
 
+def resolve_gradle_under_test() -> Path | None:
+    configured = os.environ.get("GRADLE_UNDER_TEST_BIN", "").strip()
+    if not configured:
+        gradle_under_test = os.environ.get("GRADLE_UNDER_TEST", "").strip()
+        if gradle_under_test:
+            configured = str(Path(gradle_under_test) / "bin" / "gradle")
+    candidate = Path(configured) if configured else ROOT / "build" / "gradle-under-test" / "bin" / "gradle"
+    return candidate if candidate.exists() else None
+
+
+def write_maven_module(repo: Path) -> None:
+    module_dir = repo / "org" / "test" / "projectA"
+    for version in ("1.0", "1.5"):
+        version_dir = module_dir / version
+        version_dir.mkdir(parents=True, exist_ok=True)
+        (version_dir / f"projectA-{version}.pom").write_text(
+            "<project>"
+            "<modelVersion>4.0.0</modelVersion>"
+            "<groupId>org.test</groupId>"
+            "<artifactId>projectA</artifactId>"
+            f"<version>{version}</version>"
+            "</project>",
+            encoding="utf-8",
+        )
+        with zipfile.ZipFile(version_dir / f"projectA-{version}.jar", "w") as jar:
+            jar.writestr(f"projectA-{version}.txt", f"payload-{version}\n")
+
+    (module_dir / "maven-metadata.xml").write_text(
+        "<metadata>"
+        "<groupId>org.test</groupId>"
+        "<artifactId>projectA</artifactId>"
+        "<versioning>"
+        "<latest>1.5</latest>"
+        "<release>1.5</release>"
+        "<versions><version>1.0</version><version>1.5</version></versions>"
+        "<lastUpdated>20260501000000</lastUpdated>"
+        "</versioning>"
+        "</metadata>",
+        encoding="utf-8",
+    )
+
+
+class CountingHttpServer(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+def measure_real_build_dependency_readthrough(timeout: int = 75) -> dict[str, object]:
+    gradle = resolve_gradle_under_test()
+    if gradle is None:
+        return {
+            "name": "real_build_dependency_readthrough",
+            "ok": True,
+            "skipped": True,
+            "elapsed_ms": 0,
+            "threshold_ms": 30000,
+            "tail": "Skipped: build/gradle-under-test/bin/gradle was not found. Build :distributions-full:install or set GRADLE_UNDER_TEST_BIN.",
+        }
+
+    temp = Path(tempfile.mkdtemp(prefix="gradle-real-readthrough."))
+    repo = temp / "repo"
+    project = temp / "project"
+    requests: list[str] = []
+    server = None
+    started = time.perf_counter()
+
+    try:
+        write_maven_module(repo)
+
+        class Handler(http.server.SimpleHTTPRequestHandler):
+            def log_message(self, fmt: str, *args: object) -> None:
+                pass
+
+            def do_GET(self) -> None:
+                requests.append(self.path)
+                super().do_GET()
+
+            def do_HEAD(self) -> None:
+                requests.append("HEAD " + self.path)
+                super().do_HEAD()
+
+        handler = functools.partial(Handler, directory=str(repo))
+        server = CountingHttpServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        repository_url = f"http://127.0.0.1:{server.server_address[1]}"
+
+        project.mkdir(parents=True)
+        (project / "settings.gradle.kts").write_text('rootProject.name = "real-readthrough"\n', encoding="utf-8")
+        (project / "build.gradle.kts").write_text(
+            f"""
+repositories {{ maven {{ url = uri("{repository_url}") }} }}
+configurations {{ create("compile") }}
+dependencies {{ "compile"("org.test:projectA:1.+") }}
+tasks.register<Sync>("retrieve") {{
+    from(configurations.getByName("compile"))
+    into(layout.buildDirectory.dir("libs"))
+}}
+""",
+            encoding="utf-8",
+        )
+
+        state_dir = temp / "substrate-state"
+
+        def run_retrieve(gradle_home: Path) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+            before = len(requests)
+            completed = subprocess.run(
+                [
+                    str(gradle),
+                    "-p",
+                    str(project),
+                    "retrieve",
+                    "--no-daemon",
+                    "--console=plain",
+                    f"--gradle-user-home={gradle_home}",
+                    "-Dorg.gradle.rust.substrate.enabled=true",
+                    "-Dorg.gradle.rust.substrate.dependency.enabled=true",
+                    "-Dorg.gradle.rust.substrate.dependency.download.enabled=true",
+                    "-Dorg.gradle.rust.substrate.dependency.readthrough.metadata=true",
+                    "-Dorg.gradle.rust.substrate.dependency.readthrough.artifacts=true",
+                    f"-Dorg.gradle.rust.substrate.daemon.path={DAEMON}",
+                    f"-Dorg.gradle.rust.substrate.state.dir={state_dir}",
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+                check=False,
+            )
+            return completed, requests[before:]
+
+        first, first_requests = run_retrieve(temp / "gradle-home-1")
+        shutil.rmtree(project / "build", ignore_errors=True)
+        second, second_requests = run_retrieve(temp / "gradle-home-2")
+
+        output_file = project / "build" / "libs" / "projectA-1.5.jar"
+        output_sha256 = hashlib.sha256(output_file.read_bytes()).hexdigest() if output_file.exists() else None
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+        remote_requests_avoided = len(first_requests) - len(second_requests)
+        ok = (
+            first.returncode == 0
+            and second.returncode == 0
+            and len(first_requests) > 0
+            and len(second_requests) == 0
+            and output_file.exists()
+        )
+        output = first.stdout + first.stderr + "\n--- second run ---\n" + second.stdout + second.stderr
+        return {
+            "name": "real_build_dependency_readthrough",
+            "ok": ok,
+            "elapsed_ms": elapsed_ms,
+            "threshold_ms": 30000,
+            "first_run_remote_requests": len(first_requests),
+            "second_run_remote_requests": len(second_requests),
+            "remote_requests_avoided": remote_requests_avoided,
+            "output_sha256": output_sha256,
+            "first_run_requests": first_requests,
+            "second_run_requests": second_requests,
+            "tail": "\n".join(output.strip().splitlines()[-20:]),
+        }
+    finally:
+        if server is not None:
+            server.shutdown()
+            server.server_close()
+        shutil.rmtree(temp, ignore_errors=True)
+
+
 def write_report(path: Path, results: list[dict[str, object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"results": results}, indent=2) + "\n", encoding="utf-8")
@@ -216,9 +390,14 @@ def write_report(path: Path, results: list[dict[str, object]]) -> None:
 def print_summary(results: list[dict[str, object]]) -> None:
     print("\nFirst-60-second Rust substrate wins")
     for result in results:
-        status = "PASS" if result["ok"] else "FAIL"
+        status = "SKIP" if result.get("skipped") else ("PASS" if result["ok"] else "FAIL")
         if result["name"] == "daemon_socket_ready":
             extra = f", daemon self-reported {result['daemon_reported_ready_ms']}ms"
+        elif result["name"] == "real_build_dependency_readthrough" and not result.get("skipped"):
+            extra = (
+                f", remote avoided {result['remote_requests_avoided']}/"
+                f"{result['first_run_remote_requests']}, output {result['output_sha256']}"
+            )
         elif result.get("runtime_metric_ms") is not None:
             extra = f", first event {result['runtime_metric_ms']}ms"
         else:
@@ -232,6 +411,7 @@ def print_summary(results: list[dict[str, object]]) -> None:
     print("- dependency_dynamic_metadata_transport_cache proves maven-metadata.xml downloads warm the dynamic-version metadata cache")
     print("- dependency_artifact_readthrough proves Gradle can skip remote artifact access when Rust already has the JAR")
     print("- dependency_metadata_readthrough proves Gradle can skip remote POM metadata access and can route uncached resource downloads through Rust")
+    print("- real_build_dependency_readthrough proves a real Gradle build can warm Rust over HTTP, then rerun from a fresh Gradle user home with zero remote requests")
     print("- file_watch_first_event is the delay before source edits become observable")
 
 
@@ -260,6 +440,7 @@ def main() -> int:
             timeout=60,
         ),
         *measure_gradle_readthrough_smoke(),
+        measure_real_build_dependency_readthrough(),
         measure_cargo_test(
             "file_watch_first_event",
             "file_watch_reports_first_change_quickly",
