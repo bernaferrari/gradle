@@ -44,6 +44,8 @@ public class RustBuildExecutionClient {
         private final int tasksSucceeded;
         private final int tasksFailed;
         private final int tasksForwardedToJvm;
+        private final int tasksUpToDate;
+        private final int tasksFromCache;
         private final String planSource;
         private final String failureMessage;
         private final String errorMessage;
@@ -56,6 +58,8 @@ public class RustBuildExecutionClient {
             int tasksSucceeded,
             int tasksFailed,
             int tasksForwardedToJvm,
+            int tasksUpToDate,
+            int tasksFromCache,
             String planSource,
             String failureMessage,
             String errorMessage,
@@ -67,6 +71,8 @@ public class RustBuildExecutionClient {
             this.tasksSucceeded = tasksSucceeded;
             this.tasksFailed = tasksFailed;
             this.tasksForwardedToJvm = tasksForwardedToJvm;
+            this.tasksUpToDate = tasksUpToDate;
+            this.tasksFromCache = tasksFromCache;
             this.planSource = planSource;
             this.failureMessage = failureMessage;
             this.errorMessage = errorMessage;
@@ -82,6 +88,8 @@ public class RustBuildExecutionClient {
                 response.getTasksSucceeded(),
                 response.getTasksFailed(),
                 response.getTasksForwardedToJvm(),
+                response.getTasksUpToDate(),
+                response.getTasksFromCache(),
                 response.getPlanSource(),
                 response.getFailureMessage(),
                 "",
@@ -95,6 +103,8 @@ public class RustBuildExecutionClient {
                 "COMPLETED",
                 totalTasks,
                 tasksSucceeded,
+                0,
+                0,
                 0,
                 0,
                 planSource,
@@ -118,6 +128,8 @@ public class RustBuildExecutionClient {
                 tasksSucceeded,
                 tasksFailed,
                 tasksForwardedToJvm,
+                0,
+                0,
                 planSource,
                 "",
                 "",
@@ -129,6 +141,8 @@ public class RustBuildExecutionClient {
             return new RunBuildResult(
                 false,
                 "FAILED",
+                0,
+                0,
                 0,
                 0,
                 0,
@@ -162,6 +176,14 @@ public class RustBuildExecutionClient {
 
         public int getTasksForwardedToJvm() {
             return tasksForwardedToJvm;
+        }
+
+        public int getTasksUpToDate() {
+            return tasksUpToDate;
+        }
+
+        public int getTasksFromCache() {
+            return tasksFromCache;
         }
 
         public String getPlanSource() {

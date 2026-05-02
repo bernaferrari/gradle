@@ -193,6 +193,20 @@ fn declared_outputs_present(context_json: Option<&String>) -> bool {
         .all(|path| std::path::Path::new(path).exists())
 }
 
+fn context_allows_up_to_date(context_json: Option<&String>) -> bool {
+    let Some(json) = context_json else {
+        return false;
+    };
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("up_to_date_enabled")
+                .and_then(|flag| flag.as_bool())
+        })
+        .unwrap_or(false)
+}
+
 /// Result from a spawned task execution, sent back via channel.
 struct TaskExecResult {
     task_path: String,
@@ -821,9 +835,12 @@ impl DagExecutorService for DagExecutorServiceImpl {
 
                     let action = crate::proto::PlanAction::try_from(plan_resp.action)
                         .unwrap_or(crate::proto::PlanAction::Unknown);
+                    let up_to_date_enabled = context_allows_up_to_date(context_json.as_ref());
 
                     match action {
-                        crate::proto::PlanAction::SkipUpToDate if outputs_present => {
+                        crate::proto::PlanAction::SkipUpToDate
+                            if outputs_present && up_to_date_enabled =>
+                        {
                             // Mark task as UP-TO-DATE without executing.
                             self.notify_task_finished(Request::new(NotifyTaskFinishedRequest {
                                 build_id: build_id_str.clone(),
@@ -3562,6 +3579,7 @@ mod tests {
             "input_file_fingerprints": {"src/Main.java": "abc123"},
             "caching_enabled": false,
             "can_load_from_cache": false,
+            "up_to_date_enabled": true,
             "has_previous_execution_state": false,
             "rebuild_reasons": [],
             "source_files": [dir.path().join("src").to_string_lossy()],
@@ -3599,6 +3617,7 @@ mod tests {
             "input_file_fingerprints": {"src/Main.java": "abc123"},
             "caching_enabled": false,
             "can_load_from_cache": false,
+            "up_to_date_enabled": true,
             "has_previous_execution_state": true,
             "rebuild_reasons": [],
             "source_files": [dir.path().join("src").to_string_lossy()],
@@ -3649,6 +3668,7 @@ mod tests {
             "work_identity": ":project:task1",
             "input_properties": {"key": "value"},
             "input_file_fingerprints": {"f": "hash1"},
+            "up_to_date_enabled": true,
             "rebuild_reasons": [],
             "source_files": [dir.path().join("t1").to_string_lossy()],
             "target_dir": ""
@@ -3659,6 +3679,7 @@ mod tests {
             "work_identity": ":project:task2",
             "input_properties": {"key": "value"},
             "input_file_fingerprints": {"f": "hash2"},
+            "up_to_date_enabled": true,
             "rebuild_reasons": [],
             "source_files": [dir.path().join("t2").to_string_lossy()],
             "target_dir": ""
@@ -3693,6 +3714,7 @@ mod tests {
             "work_identity": ":project:task1",
             "input_properties": {"key": "value"},
             "input_file_fingerprints": {"f": "hash1"},
+            "up_to_date_enabled": true,
             "rebuild_reasons": [],
             "source_files": [dir.path().join("t1").to_string_lossy()],
             "target_dir": ""
@@ -3703,6 +3725,7 @@ mod tests {
             "work_identity": ":project:task2",
             "input_properties": {"key": "value"},
             "input_file_fingerprints": {"f": "hash2"},
+            "up_to_date_enabled": true,
             "rebuild_reasons": [],
             "source_files": [dir.path().join("t2").to_string_lossy()],
             "target_dir": ""
@@ -3774,6 +3797,7 @@ mod tests {
             "work_identity": ":project:compileJava",
             "input_properties": {"cp": "old.jar"},
             "input_file_fingerprints": {"src/A.java": "aaa"},
+            "up_to_date_enabled": true,
             "rebuild_reasons": [],
             "source_files": [dir.path().join("src").to_string_lossy()],
             "target_dir": dir.path().join("classes").to_string_lossy()
@@ -3805,6 +3829,7 @@ mod tests {
             "work_identity": ":project:compileJava",
             "input_properties": {"cp": "old.jar"},
             "input_file_fingerprints": {"src/A.java": "aaa"},
+            "up_to_date_enabled": true,
             "rebuild_reasons": ["output file deleted"],
             "source_files": [dir.path().join("src").to_string_lossy()],
             "target_dir": dir.path().join("classes").to_string_lossy()
@@ -3847,6 +3872,7 @@ mod tests {
             "work_identity": ":project:task",
             "input_properties": {"key": "val"},
             "input_file_fingerprints": {"f": "h1"},
+            "up_to_date_enabled": true,
             "rebuild_reasons": [],
             "source_files": [dir.path().join("t").to_string_lossy()],
             "target_dir": ""

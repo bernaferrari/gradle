@@ -151,14 +151,7 @@ impl ExecutionPlanServiceImpl {
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_millis() as i64)
                     .unwrap_or(0);
-                ph.entries.insert(
-                    key.clone(),
-                    super::execution_history::HistoryEntry {
-                        key,
-                        state,
-                        timestamp_ms: ts,
-                    },
-                );
+                ph.store_serialized_entry(key, state, ts);
             }
         }
     }
@@ -919,5 +912,53 @@ mod tests {
             )
         });
         assert_eq!(record, Some((2, 1100, 600)));
+    }
+
+    #[tokio::test]
+    async fn test_persistent_history_roundtrip_survives_history_disk_reload() {
+        let temp = tempfile::tempdir().unwrap();
+        let history_dir = temp.path().join("history");
+        let history = Arc::new(ExecutionHistoryServiceImpl::new(history_dir.clone()));
+        let svc = ExecutionPlanServiceImpl::with_persistent_history(
+            Arc::new(WorkerScheduler::new(4)),
+            Arc::clone(&history),
+        );
+
+        svc.record_outcome_internal(
+            ":compileJava",
+            PredictedOutcome::PredictedExecute as i32,
+            "EXECUTED",
+            true,
+            500,
+            "fingerprint-a",
+        );
+
+        assert!(std::fs::read_dir(&history_dir).unwrap().any(|entry| entry
+            .unwrap()
+            .path()
+            .extension()
+            .and_then(|ext| ext.to_str())
+            == Some("bin")));
+
+        let reloaded_history = Arc::new(ExecutionHistoryServiceImpl::new(history_dir));
+        assert_eq!(reloaded_history.load_from_disk().await.unwrap(), 1);
+        let reloaded = ExecutionPlanServiceImpl::with_persistent_history(
+            Arc::new(WorkerScheduler::new(4)),
+            Arc::clone(&reloaded_history),
+        );
+        reloaded.load_persistent_history();
+
+        let work = make_work(":compileJava", vec![], vec![]);
+        let mut work = work;
+        work.input_file_fingerprints
+            .insert("source".to_string(), "fingerprint-a".to_string());
+        let fingerprint = ExecutionPlanServiceImpl::compute_fingerprint(&work);
+        let restored = reloaded
+            .history
+            .entries
+            .get(":compileJava")
+            .map(|entry| (entry.input_fingerprint.clone(), entry.duration_ms));
+        assert_eq!(restored, Some(("fingerprint-a".to_string(), 500)));
+        assert_ne!(fingerprint, "");
     }
 }

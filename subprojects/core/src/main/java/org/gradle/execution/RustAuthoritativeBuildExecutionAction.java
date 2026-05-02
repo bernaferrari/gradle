@@ -116,9 +116,11 @@ public class RustAuthoritativeBuildExecutionAction implements BuildWorkExecutor 
 
         if (isCompleteNoFallbackRun(result, expectedTasks)) {
             LOGGER.info(
-                "[substrate:run-build] Rust executed {} Gradle tasks from {} with JVM fallback disabled; JVM task executor skipped",
+                "[substrate:run-build] Rust executed {} Gradle tasks from {} with {} up-to-date and {} from-cache; JVM fallback disabled; JVM task executor skipped",
                 result.getTotalTasks(),
-                result.getPlanSource()
+                result.getPlanSource(),
+                result.getTasksUpToDate(),
+                result.getTasksFromCache()
             );
             return ExecutionResult.succeeded();
         }
@@ -157,7 +159,9 @@ public class RustAuthoritativeBuildExecutionAction implements BuildWorkExecutor 
             + ", totalTasks=" + result.getTotalTasks()
             + ", succeeded=" + result.getTasksSucceeded()
             + ", failed=" + result.getTasksFailed()
-            + ", jvmForwarded=" + result.getTasksForwardedToJvm();
+            + ", jvmForwarded=" + result.getTasksForwardedToJvm()
+            + ", upToDate=" + result.getTasksUpToDate()
+            + ", fromCache=" + result.getTasksFromCache();
     }
 
     private static void bindAllReferencesOfProject(FinalizedExecutionPlan plan) {

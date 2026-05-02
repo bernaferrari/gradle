@@ -532,15 +532,22 @@ def measure_authoritative_runbuild_fast(timeout: int = 90) -> dict[str, object]:
 
         def parse_run(output: str) -> dict[str, object]:
             executed_match = re.search(
-                r"\[substrate:run-build\] Rust executed (\d+)(?: Gradle)? tasks .* JVM (?:forwarding|fallback) disabled",
+                r"\[substrate:run-build\] Rust executed (\d+)(?: Gradle)? tasks .* with (\d+) up-to-date and (\d+) from-cache; JVM (?:forwarding|fallback) disabled",
                 output,
             )
+            if not executed_match:
+                executed_match = re.search(
+                    r"\[substrate:run-build\] Rust executed (\d+)(?: Gradle)? tasks .* JVM (?:forwarding|fallback) disabled",
+                    output,
+                )
             selected_match = re.search(r"Tasks to be executed:\s*\[(.*?)\]", output, re.DOTALL)
             selected_tasks = re.findall(r"task '([^']+)'", selected_match.group(1)) if selected_match else []
             jvm_forwarded_match = re.search(r"jvmForwarded=(\d+)", output)
             return {
                 "marker_present": executed_match is not None,
                 "rust_executed_tasks": int(executed_match.group(1)) if executed_match else 0,
+                "tasks_up_to_date": int(executed_match.group(2)) if executed_match and executed_match.lastindex and executed_match.lastindex >= 2 else 0,
+                "tasks_from_cache": int(executed_match.group(3)) if executed_match and executed_match.lastindex and executed_match.lastindex >= 3 else 0,
                 "selected_task_count": len(selected_tasks),
                 "selected_tasks": selected_tasks,
                 "tasks_forwarded_to_jvm": int(jvm_forwarded_match.group(1)) if jvm_forwarded_match else 0,
@@ -578,6 +585,10 @@ def measure_authoritative_runbuild_fast(timeout: int = 90) -> dict[str, object]:
             "warm_selected_task_count": warm_parsed["selected_task_count"],
             "first_selected_tasks": first_parsed["selected_tasks"],
             "warm_selected_tasks": warm_parsed["selected_tasks"],
+            "first_tasks_up_to_date": first_parsed["tasks_up_to_date"],
+            "warm_tasks_up_to_date": warm_parsed["tasks_up_to_date"],
+            "first_tasks_from_cache": first_parsed["tasks_from_cache"],
+            "warm_tasks_from_cache": warm_parsed["tasks_from_cache"],
             "first_tasks_forwarded_to_jvm": first_parsed["tasks_forwarded_to_jvm"],
             "warm_tasks_forwarded_to_jvm": warm_parsed["tasks_forwarded_to_jvm"],
             "first_configuration_cache_reused": first_parsed["configuration_cache_reused"],
@@ -609,6 +620,7 @@ def print_summary(results: list[dict[str, object]]) -> None:
                 f", cold {result['first_elapsed_ms']}ms/{result['first_rust_executed_tasks']} tasks, "
                 f"warm {result['warm_elapsed_ms']}ms/{result['warm_rust_executed_tasks']} tasks, "
                 f"cc reused {result['warm_configuration_cache_reused']}, "
+                f"warm up-to-date {result['warm_tasks_up_to_date']}, "
                 f"JVM forwards {result['tasks_forwarded_to_jvm']}, "
                 f"output {result['output_sha256']}"
             )
