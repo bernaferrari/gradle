@@ -3149,6 +3149,75 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                 return;
             }
 
+            if !store_path.as_os_str().is_empty() && store_path.is_file() {
+                use tokio::io::AsyncReadExt;
+
+                match tokio::fs::File::open(&store_path).await {
+                    Ok(mut cached_file) => {
+                        let total_size = cached_file.metadata().await.map(|m| m.len() as i64).unwrap_or(-1);
+                        let mut offset = 0u64;
+                        let mut hasher = Sha256::new();
+                        let mut buffer = vec![0u8; 64 * 1024];
+
+                        loop {
+                            match cached_file.read(&mut buffer).await {
+                                Ok(0) => break,
+                                Ok(read) => {
+                                    let bytes = &buffer[..read];
+                                    hasher.update(bytes);
+                                    yield Ok(crate::proto::DownloadArtifactChunk {
+                                        data: bytes.to_vec(),
+                                        offset: offset as i64,
+                                        total_size,
+                                        is_last: false,
+                                        error_message: String::new(),
+                                    });
+                                    offset += read as u64;
+                                }
+                                Err(e) => {
+                                    yield Ok(crate::proto::DownloadArtifactChunk {
+                                        data: Vec::new(),
+                                        offset: offset as i64,
+                                        total_size,
+                                        is_last: true,
+                                        error_message: format!("Failed to read cached artifact: {}", e),
+                                    });
+                                    return;
+                                }
+                            }
+                        }
+
+                        let sha256 = format!("{:x}", hasher.finalize());
+                        artifact_cache.insert(cache_key.clone(), CachedArtifact {
+                            group: cache_group.clone(),
+                            name: cache_name.clone(),
+                            version: cache_version.clone(),
+                            classifier: cache_classifier.clone(),
+                            extension: cache_extension.clone(),
+                            sha256: sha256.clone(),
+                            local_path: store_path.to_string_lossy().into_owned(),
+                            size: offset as i64,
+                            cached_at_ms: Self::now_ms(),
+                        });
+                        if let Err(e) = Self::write_sha256_sidecar(&store_path, &sha256).await {
+                            tracing::warn!(path = %store_path.display(), error = %e, "Failed to write cached artifact checksum sidecar");
+                        }
+
+                        yield Ok(crate::proto::DownloadArtifactChunk {
+                            data: Vec::new(),
+                            offset: offset as i64,
+                            total_size,
+                            is_last: true,
+                            error_message: String::new(),
+                        });
+                        return;
+                    }
+                    Err(e) => {
+                        tracing::warn!(path = %store_path.display(), error = %e, "Cached artifact exists but cannot be opened; falling back to HTTP");
+                    }
+                }
+            }
+
             let mut attempt = 0u32;
             let max_retries = 3u32;
 
@@ -3908,6 +3977,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_download_artifact_streams_persisted_artifact_without_http() {
+        use futures_util::StreamExt;
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body = b"persisted artifact reused without remote".to_vec();
+        let expected = body.clone();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/java-archive\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.write_all(&body).unwrap();
+        });
+
+        let store = tempfile::tempdir().unwrap();
+        let first_svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let mut first = first_svc
+            .download_artifact(Request::new(crate::proto::DownloadArtifactRequest {
+                group: "org.example".to_string(),
+                name: "demo".to_string(),
+                version: "1.0".to_string(),
+                classifier: String::new(),
+                extension: "jar".to_string(),
+                repositories: vec![make_repo("local", &format!("http://{}", addr))],
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        while let Some(chunk) = first.next().await {
+            let chunk = chunk.unwrap();
+            assert!(chunk.error_message.is_empty(), "{}", chunk.error_message);
+            if chunk.is_last {
+                break;
+            }
+        }
+        server.join().unwrap();
+
+        let second_svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let mut second = second_svc
+            .download_artifact(Request::new(crate::proto::DownloadArtifactRequest {
+                group: "org.example".to_string(),
+                name: "demo".to_string(),
+                version: "1.0".to_string(),
+                classifier: String::new(),
+                extension: "jar".to_string(),
+                repositories: vec![make_repo("dead", "http://127.0.0.1:9")],
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let mut downloaded = Vec::new();
+        let mut saw_last = false;
+        while let Some(chunk) = second.next().await {
+            let chunk = chunk.unwrap();
+            assert!(chunk.error_message.is_empty(), "{}", chunk.error_message);
+            downloaded.extend_from_slice(&chunk.data);
+            saw_last |= chunk.is_last;
+        }
+
+        assert_eq!(downloaded, expected);
+        assert!(saw_last);
+        let cache_key = DependencyResolutionServiceImpl::artifact_cache_key(
+            "org.example",
+            "demo",
+            "1.0",
+            "",
+            "jar",
+        );
+        assert!(second_svc.artifact_cache.contains_key(&cache_key));
+    }
+
+    #[tokio::test]
     async fn test_download_metadata_url_populates_metadata_cache() {
         use futures_util::StreamExt;
         use std::io::{Read, Write};
@@ -3982,6 +4133,75 @@ mod tests {
             .next(),
             Some(expected_sha256.as_str())
         );
+    }
+
+    #[tokio::test]
+    async fn test_download_metadata_url_streams_persisted_metadata_without_http() {
+        use futures_util::StreamExt;
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body =
+            b"<project><modelVersion>4.0.0</modelVersion><artifactId>demo</artifactId></project>"
+                .to_vec();
+        let expected = body.clone();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/xml\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.write_all(&body).unwrap();
+        });
+
+        let store = tempfile::tempdir().unwrap();
+        let url = format!("http://{}/org/example/demo/1.0/demo-1.0.pom", addr);
+        let first_svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let mut first = first_svc
+            .download_artifact(Request::new(crate::proto::DownloadArtifactRequest {
+                url: url.clone(),
+                extension: "pom".to_string(),
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        while let Some(chunk) = first.next().await {
+            let chunk = chunk.unwrap();
+            assert!(chunk.error_message.is_empty(), "{}", chunk.error_message);
+            if chunk.is_last {
+                break;
+            }
+        }
+        server.join().unwrap();
+
+        let second_svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let mut second = second_svc
+            .download_artifact(Request::new(crate::proto::DownloadArtifactRequest {
+                url,
+                extension: "pom".to_string(),
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let mut downloaded = Vec::new();
+        let mut saw_last = false;
+        while let Some(chunk) = second.next().await {
+            let chunk = chunk.unwrap();
+            assert!(chunk.error_message.is_empty(), "{}", chunk.error_message);
+            downloaded.extend_from_slice(&chunk.data);
+            saw_last |= chunk.is_last;
+        }
+
+        assert_eq!(downloaded, expected);
+        assert!(saw_last);
     }
 
     #[tokio::test]

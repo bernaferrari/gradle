@@ -5,7 +5,8 @@ inspect a profiler:
 
 - daemon readiness: how quickly the Rust sidecar can accept work
 - dependency transport: whether Maven artifact and metadata bytes stream through
-  Rust fast and land in the Rust stores with checksum evidence
+  Rust fast, land in the Rust stores with checksum evidence, and stream back
+  from those stores before HTTP on repeated requests
 - static Maven prefetch: whether Rust can resolve a simple static Maven module
   and fetch its artifact into the Rust store before Gradle asks for it
 - dependency read-through: whether Gradle can skip remote artifact access when
@@ -28,7 +29,7 @@ python3 tools/demo/first_60_seconds.py --output build/first60.json
 The script reports:
 
 - `daemon_socket_ready`: process launch until the Unix socket exists
-- `dependency_transport_store_checksum`: local HTTP artifact streaming through the Rust dependency service, persisted store write, cache hit, and checksum verification
+- `dependency_transport_store_checksum`: local HTTP artifact streaming through the Rust dependency service, persisted store write, cache hit, checksum verification, and cache-first transport reuse
 - `dependency_metadata_transport_cache`: URL-only POM streaming through the Rust
   transport, persisted metadata-store write, and later metadata cache hit
 - `dependency_dynamic_metadata_transport_cache`: URL-only

@@ -497,7 +497,7 @@ def print_summary(results: list[dict[str, object]]) -> None:
 
     print("\nWhy these are visible:")
     print("- daemon_socket_ready is the time before Gradle can send work to the Rust sidecar")
-    print("- dependency_transport_store_checksum is the bounded Rust path for Maven bytes, local store, cache hit, and checksum verification")
+    print("- dependency_transport_store_checksum is the bounded Rust path for Maven bytes, local store, cache-first transport reuse, cache hit, and checksum verification")
     print("- dependency_metadata_transport_cache proves URL-only POM downloads through Rust warm the Rust metadata cache")
     print("- dependency_dynamic_metadata_transport_cache proves maven-metadata.xml downloads warm the dynamic-version metadata cache")
     print("- dependency_static_maven_prefetch proves Rust can resolve a static Maven module and prefetch the artifact into the Rust store with checksum evidence")
@@ -518,7 +518,7 @@ def main() -> int:
         measure_daemon_readiness(),
         measure_cargo_test(
             "dependency_transport_store_checksum",
-            "test_download_artifact_populates_store_and_checksum_cache",
+            "test_download_",
             timeout=60,
         ),
         measure_cargo_test(
