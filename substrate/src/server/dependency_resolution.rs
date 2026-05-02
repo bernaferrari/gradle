@@ -2828,7 +2828,11 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
         if path.exists() {
             let metadata = path.metadata().ok();
             let size = metadata.as_ref().map(|m| m.len() as i64).unwrap_or(0);
-            let actual_sha256 = Self::compute_file_sha256(&path).await.unwrap_or_default();
+            let actual_sha256 = if req.sha256.is_empty() {
+                String::new()
+            } else {
+                Self::compute_file_sha256(&path).await.unwrap_or_default()
+            };
 
             if !req.sha256.is_empty() && actual_sha256 != req.sha256 {
                 tracing::warn!(
@@ -2934,7 +2938,11 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
         let path = self.metadata_url_path(&req.url, &extension);
         if path.exists() {
             let size = path.metadata().map(|m| m.len() as i64).unwrap_or(0);
-            let actual_sha256 = Self::compute_file_sha256(&path).await.unwrap_or_default();
+            let actual_sha256 = if req.sha256.is_empty() {
+                String::new()
+            } else {
+                Self::compute_file_sha256(&path).await.unwrap_or_default()
+            };
             if !req.sha256.is_empty() && actual_sha256 != req.sha256 {
                 return Ok(Response::new(CheckMetadataCacheResponse {
                     cached: false,
@@ -5114,6 +5122,85 @@ mod tests {
 
         // Now DashMap should have it (warm path next time)
         assert!(svc.artifact_cache.contains_key(&key));
+    }
+
+    #[tokio::test]
+    async fn test_no_checksum_artifact_read_does_not_freeze_stale_sha() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(dir.path().to_path_buf());
+        let artifact_path = svc.artifact_path("com.example", "mutable-lib", "1.0", "", "jar");
+        std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
+        std::fs::write(&artifact_path, b"old bytes").unwrap();
+
+        let warm_without_checksum = svc
+            .check_artifact_cache(Request::new(CheckArtifactCacheRequest {
+                group: "com.example".to_string(),
+                name: "mutable-lib".to_string(),
+                version: "1.0".to_string(),
+                classifier: String::new(),
+                sha256: String::new(),
+                extension: "jar".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(warm_without_checksum.cached);
+
+        std::fs::write(&artifact_path, b"new bytes").unwrap();
+        let new_sha = DependencyResolutionServiceImpl::compute_sha256(b"new bytes");
+        let checked_after_mutation = svc
+            .check_artifact_cache(Request::new(CheckArtifactCacheRequest {
+                group: "com.example".to_string(),
+                name: "mutable-lib".to_string(),
+                version: "1.0".to_string(),
+                classifier: String::new(),
+                sha256: new_sha,
+                extension: "jar".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(
+            checked_after_mutation.cached,
+            "checksum-validated warm reads must hash the current file when the first read did not require a checksum"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_no_checksum_metadata_read_does_not_freeze_stale_sha() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(dir.path().to_path_buf());
+        let url = "https://repo.example.test/org/example/demo/1.0/demo-1.0.pom";
+        let metadata_path = svc.metadata_url_path(url, "pom");
+        std::fs::create_dir_all(metadata_path.parent().unwrap()).unwrap();
+        std::fs::write(&metadata_path, b"<project>old</project>").unwrap();
+
+        let warm_without_checksum = svc
+            .check_metadata_cache(Request::new(CheckMetadataCacheRequest {
+                url: url.to_string(),
+                extension: "pom".to_string(),
+                sha256: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(warm_without_checksum.cached);
+
+        std::fs::write(&metadata_path, b"<project>new</project>").unwrap();
+        let new_sha = DependencyResolutionServiceImpl::compute_sha256(b"<project>new</project>");
+        let checked_after_mutation = svc
+            .check_metadata_cache(Request::new(CheckMetadataCacheRequest {
+                url: url.to_string(),
+                extension: "pom".to_string(),
+                sha256: new_sha,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(
+            checked_after_mutation.cached,
+            "checksum-validated warm metadata reads must hash the current file when the first read did not require a checksum"
+        );
     }
 
     #[test]
