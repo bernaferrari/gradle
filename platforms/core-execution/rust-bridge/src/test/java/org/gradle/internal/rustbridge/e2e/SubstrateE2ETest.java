@@ -17,6 +17,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.Comparator;
 
 import static org.junit.Assert.*;
@@ -346,6 +347,70 @@ public class SubstrateE2ETest {
             assertArrayEquals(bytes, Files.readAllBytes(destination));
             assertTrue("Rust transport should populate URL-addressed maven metadata store", cachedMetadata.isCached());
             assertArrayEquals(bytes, Files.readAllBytes(new File(cachedMetadata.getLocalPath()).toPath()));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    public void dependencyResolveCanPrefetchStaticMavenArtifact() throws Exception {
+        byte[] pom = "<project><modelVersion>4.0.0</modelVersion><groupId>org.example</groupId><artifactId>demo</artifactId><version>1.2.3</version></project>".getBytes(StandardCharsets.UTF_8);
+        byte[] jar = "prefetched through rust dependency resolution".getBytes(StandardCharsets.UTF_8);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/maven2/org/example/demo/1.2.3/demo-1.2.3.pom", exchange -> {
+            exchange.sendResponseHeaders(200, pom.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(pom);
+            }
+        });
+        server.createContext("/maven2/org/example/demo/1.2.3/demo-1.2.3.jar", exchange -> {
+            exchange.sendResponseHeaders(200, jar.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(jar);
+            }
+        });
+        server.start();
+        try {
+            RustDependencyResolutionClient dependencyClient = new RustDependencyResolutionClient(client);
+            RustDependencyResolutionClient.ResolutionResult result = dependencyClient.resolveDependenciesStrict(
+                "compileClasspath",
+                Collections.singletonList(DependencyDescriptor.newBuilder()
+                    .setGroup("org.example")
+                    .setName("demo")
+                    .setVersion("1.2.3")
+                    .setExtension("jar")
+                    .setTransitive(true)
+                    .build()),
+                Collections.singletonList(RepositoryDescriptor.newBuilder()
+                    .setId("local")
+                    .setUrl("http://127.0.0.1:" + server.getAddress().getPort() + "/maven2")
+                    .setM2Compatible(true)
+                    .build()),
+                false,
+                true
+            );
+
+            assertTrue("Rust dependency resolution with prefetch should succeed: " + result.getErrorMessage(), result.isSuccess());
+            assertEquals(1, result.getTotalArtifacts());
+            assertEquals(jar.length, result.getTotalDownloadSize());
+            assertEquals(1, result.getResolvedDependencies().size());
+            ResolvedDependency resolved = result.getResolvedDependencies().get(0);
+            assertEquals("org.example", resolved.getGroup());
+            assertEquals("demo", resolved.getName());
+            assertEquals("1.2.3", resolved.getSelectedVersion());
+            assertEquals(jar.length, resolved.getArtifactSize());
+            assertFalse("Prefetched artifact should carry SHA-256 evidence", resolved.getArtifactSha256().isEmpty());
+
+            RustDependencyResolutionClient.CacheCheckResult cachedArtifact = dependencyClient.checkArtifactCacheStrict(
+                "org.example",
+                "demo",
+                "1.2.3",
+                "",
+                "jar",
+                resolved.getArtifactSha256()
+            );
+            assertTrue("Prefetched artifact should be available for read-through", cachedArtifact.isCached());
+            assertArrayEquals(jar, Files.readAllBytes(new File(cachedArtifact.getLocalPath()).toPath()));
         } finally {
             server.stop(0);
         }
