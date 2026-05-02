@@ -1130,6 +1130,7 @@ fn task_options(
         insert_input_option(task, &mut options, "args_json", "args_json");
         insert_input_option(task, &mut options, "jvm_args", "jvm_args");
         insert_input_option(task, &mut options, "jvm_args_json", "jvm_args_json");
+        insert_input_option(task, &mut options, "system_properties", "system_properties");
         insert_input_option(task, &mut options, "working_dir", "working_dir");
         insert_input_option(task, &mut options, "ignore_exit_value", "ignore_exit_value");
     } else if task_type == "CreateStartScripts" {
@@ -2444,6 +2445,13 @@ mod tests {
                     optional: false,
                 },
                 super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "system_properties".to_string(),
+                    kind: "value".to_string(),
+                    value: "native.prop=from-task".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
                     name: "working_dir".to_string(),
                     kind: "value".to_string(),
                     value: "/repo".to_string(),
@@ -2486,6 +2494,10 @@ mod tests {
             "/repo/build/resources/javaexec-result.txt expected-token"
         );
         assert_eq!(context["options"]["jvm_args"], "-Dnative=true -Xmx128m");
+        assert_eq!(
+            context["options"]["system_properties"],
+            "native.prop=from-task"
+        );
         assert_eq!(context["options"]["working_dir"], "/repo");
         assert_eq!(context["options"]["ignore_exit_value"], "false");
     }
