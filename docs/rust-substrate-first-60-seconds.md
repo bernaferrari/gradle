@@ -47,6 +47,11 @@ GRADLEW_DISTRIBUTION_DIR=$PWD/build/gradle-under-test \
   -p testing/corpus/java-library-kotlin-dsl clean build
 ```
 
+The wrapper still honors `gradle-wrapper.properties` for normal distribution
+download/install, including SHA-256 verification when
+`distributionSha256Sum` is present. When `validateDistributionUrl=true`, it
+fails closed for unsupported URL schemes before fetching.
+
 Fast mode reports:
 
 - `daemon_socket_ready`: process launch until the Unix socket exists

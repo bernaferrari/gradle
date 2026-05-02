@@ -107,6 +107,27 @@ fn load_properties(project_dir: &Path) -> Result<WrapperProperties, String> {
     parse_properties(&content)
 }
 
+fn validate_distribution_url(props: &WrapperProperties) -> Result<(), String> {
+    if !props.validate_distribution_url {
+        return Ok(());
+    }
+    let url = props.distribution_url.trim();
+    if url.starts_with("https://") || url.starts_with("http://") || url.starts_with("file:/") {
+        return Ok(());
+    }
+    Err(format!(
+        "Invalid distributionUrl '{}'. Use http(s):// or file:/, or set validateDistributionUrl=false.",
+        props.distribution_url
+    ))
+}
+
+fn file_url_to_path(url: &str) -> Option<PathBuf> {
+    if let Some(path) = url.strip_prefix("file://") {
+        return Some(PathBuf::from(path));
+    }
+    url.strip_prefix("file:").map(PathBuf::from)
+}
+
 // ---------------------------------------------------------------------------
 // Path assembler
 // ---------------------------------------------------------------------------
@@ -179,6 +200,23 @@ fn build_paths(props: &WrapperProperties) -> InstallationPaths {
 // ---------------------------------------------------------------------------
 
 fn download_with_progress(url: &str, dest: &Path, timeout_ms: u64) -> Result<(), String> {
+    if let Some(source) = file_url_to_path(url) {
+        eprintln!("Copying {}...", source.display());
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create directory: {}", e))?;
+        }
+        std::fs::copy(&source, dest).map_err(|e| {
+            format!(
+                "Failed to copy distribution from {} to {}: {}",
+                source.display(),
+                dest.display(),
+                e
+            )
+        })?;
+        return Ok(());
+    }
+
     eprintln!("Downloading {}...", url);
 
     let client = reqwest::blocking::Client::builder()
@@ -254,6 +292,8 @@ fn install_distribution(
     if paths.marker_path.exists() {
         return Ok(());
     }
+
+    validate_distribution_url(props)?;
 
     // Download
     download_with_progress(
@@ -668,6 +708,51 @@ distributionSha256Sum=abc123
         let content = "networkTimeout=5000\n";
         let result = parse_properties(content);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_distribution_url_accepts_https() {
+        let props = WrapperProperties {
+            distribution_url: "https://services.gradle.org/distributions/gradle-9.5-bin.zip"
+                .to_string(),
+            ..Default::default()
+        };
+
+        assert!(validate_distribution_url(&props).is_ok());
+    }
+
+    #[test]
+    fn test_validate_distribution_url_rejects_unsupported_scheme() {
+        let props = WrapperProperties {
+            distribution_url: "ssh://example.com/gradle.zip".to_string(),
+            ..Default::default()
+        };
+
+        assert!(validate_distribution_url(&props).is_err());
+    }
+
+    #[test]
+    fn test_validate_distribution_url_can_be_disabled() {
+        let props = WrapperProperties {
+            distribution_url: "ssh://example.com/gradle.zip".to_string(),
+            validate_distribution_url: false,
+            ..Default::default()
+        };
+
+        assert!(validate_distribution_url(&props).is_ok());
+    }
+
+    #[test]
+    fn test_file_url_to_path() {
+        assert_eq!(
+            file_url_to_path("file:///tmp/gradle.zip").unwrap(),
+            PathBuf::from("/tmp/gradle.zip")
+        );
+        assert_eq!(
+            file_url_to_path("file:/tmp/gradle.zip").unwrap(),
+            PathBuf::from("/tmp/gradle.zip")
+        );
+        assert!(file_url_to_path("https://example.com/gradle.zip").is_none());
     }
 
     #[test]
