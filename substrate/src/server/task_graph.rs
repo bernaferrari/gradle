@@ -4,6 +4,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use dashmap::DashMap;
 use sha2::{Digest, Sha256};
 use tonic::{Request, Response, Status};
@@ -959,13 +960,13 @@ fn work_input_properties(
     properties.insert("local_state".to_string(), task.local_state.join("\n"));
     properties.insert("destroyables".to_string(), task.destroyables.join("\n"));
     for (key, value) in &task.inputs {
-        if !execution_relevant_input_name(key) {
+        if !execution_relevant_input_property(task, task_type, key, value) {
             continue;
         }
         properties.insert(format!("input.{}", key), value.clone());
     }
     for input in &task.input_specs {
-        if !execution_relevant_input_name(&input.name) {
+        if !execution_relevant_input_spec(task, task_type, input) {
             continue;
         }
         if matches!(
@@ -994,6 +995,149 @@ fn work_input_properties(
 
 fn execution_relevant_input_name(name: &str) -> bool {
     !matches!(name, "description" | "group")
+}
+
+fn execution_relevant_input_property(
+    task: &CanonicalBuildPlanTask,
+    task_type: &str,
+    name: &str,
+    value: &str,
+) -> bool {
+    if !execution_relevant_input_name(name) {
+        return false;
+    }
+    if name == "copy_file_mappings"
+        && redundant_convention_jar_copy_mappings(task, task_type, value)
+    {
+        return false;
+    }
+    true
+}
+
+fn execution_relevant_input_spec(
+    task: &CanonicalBuildPlanTask,
+    task_type: &str,
+    input: &super::build_plan_ir::CanonicalBuildPlanTaskInputSpec,
+) -> bool {
+    if !execution_relevant_input_name(&input.name) {
+        return false;
+    }
+    if input.name == "copy_file_mappings"
+        && redundant_convention_jar_copy_mappings(task, task_type, &input.value)
+    {
+        return false;
+    }
+    if redundant_convention_jar_path_spec(task, task_type, input) {
+        return false;
+    }
+    true
+}
+
+fn redundant_convention_jar_copy_mappings(
+    task: &CanonicalBuildPlanTask,
+    task_type: &str,
+    value: &str,
+) -> bool {
+    if task_type != "Jar" || has_input_value_equal(task, "copy_contains_symlinks", "true") {
+        return false;
+    }
+    let Some(roots) = convention_jar_roots(task) else {
+        return false;
+    };
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    trimmed.split(',').all(|mapping| {
+        let parts = mapping.split('>').collect::<Vec<_>>();
+        if parts.len() != 3 {
+            return false;
+        }
+        let Some(source) = decode_mapping_component(parts[0]) else {
+            return false;
+        };
+        let Some(dest) = decode_mapping_component(parts[1]) else {
+            return false;
+        };
+        matches!(parts[2], "D" | "F") && convention_jar_mapping_is_redundant(&roots, &source, &dest)
+    })
+}
+
+fn redundant_convention_jar_path_spec(
+    task: &CanonicalBuildPlanTask,
+    task_type: &str,
+    input: &super::build_plan_ir::CanonicalBuildPlanTaskInputSpec,
+) -> bool {
+    if task_type != "Jar" {
+        return false;
+    }
+    if !matches!(
+        input.kind.as_str(),
+        "file" | "directory" | "path" | "source"
+    ) {
+        return false;
+    }
+    let Some(index) = input.name.strip_prefix("input") else {
+        return false;
+    };
+    if index.is_empty() || !index.chars().all(|ch| ch.is_ascii_digit()) {
+        return false;
+    }
+    let Some(roots) = convention_jar_roots(task) else {
+        return false;
+    };
+    let path = Path::new(&input.value);
+    path == roots.manifest || path.starts_with(&roots.classes) || path.starts_with(&roots.resources)
+}
+
+struct ConventionJarRoots {
+    classes: std::path::PathBuf,
+    resources: std::path::PathBuf,
+    manifest: std::path::PathBuf,
+}
+
+fn convention_jar_roots(task: &CanonicalBuildPlanTask) -> Option<ConventionJarRoots> {
+    let archive_file =
+        input_value(task, "archive_file").or_else(|| output_paths(task).into_iter().next())?;
+    let archive_path = Path::new(&archive_file);
+    let build_dir = archive_path.parent()?.parent()?;
+    Some(ConventionJarRoots {
+        classes: build_dir.join("classes/java/main"),
+        resources: build_dir.join("resources/main"),
+        manifest: build_dir.join("tmp/jar/MANIFEST.MF"),
+    })
+}
+
+fn decode_mapping_component(value: &str) -> Option<String> {
+    URL_SAFE_NO_PAD
+        .decode(value)
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+}
+
+fn convention_jar_mapping_is_redundant(
+    roots: &ConventionJarRoots,
+    source: &str,
+    dest: &str,
+) -> bool {
+    let source_path = Path::new(source);
+    if dest == "META-INF/MANIFEST.MF" && source_path == roots.manifest {
+        return true;
+    }
+    relative_dest_matches(source_path, &roots.classes, dest)
+        || relative_dest_matches(source_path, &roots.resources, dest)
+}
+
+fn relative_dest_matches(source_path: &Path, root: &Path, dest: &str) -> bool {
+    let Ok(relative) = source_path.strip_prefix(root) else {
+        return false;
+    };
+    let relative = relative
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/");
+    !relative.is_empty() && relative == dest
 }
 
 fn up_to_date_planning_enabled(task_type: &str) -> bool {
@@ -1062,24 +1206,48 @@ fn archive_source_paths(
 
     match task_type {
         "Jar" if archive_name.ends_with("-sources.jar") => {
-            push_unique_path(&mut sources, project_dir.join("src/main/java"));
-            push_unique_path(&mut sources, project_dir.join("src/main/resources"));
+            let java = project_dir.join("src/main/java");
+            let resources = project_dir.join("src/main/resources");
+            retain_sources_not_under(&mut sources, &[java.as_path(), resources.as_path()]);
+            push_unique_path(&mut sources, java);
+            push_unique_path(&mut sources, resources);
         }
         "Jar" if archive_name.ends_with(".jar") => {
-            push_unique_path(&mut sources, build_dir.join("classes/java/main"));
-            push_unique_path(&mut sources, build_dir.join("resources/main"));
+            let classes = build_dir.join("classes/java/main");
+            let resources = build_dir.join("resources/main");
+            retain_sources_not_under(&mut sources, &[classes.as_path(), resources.as_path()]);
+            push_unique_path(&mut sources, classes);
+            push_unique_path(&mut sources, resources);
         }
         "War" => {
-            push_unique_path(&mut sources, project_dir.join("src/main/webapp"));
-            push_unique_path(&mut sources, build_dir.join("classes/java/main"));
-            push_unique_path(&mut sources, build_dir.join("resources/main"));
+            let webapp = project_dir.join("src/main/webapp");
+            let classes = build_dir.join("classes/java/main");
+            let resources = build_dir.join("resources/main");
+            retain_sources_not_under(
+                &mut sources,
+                &[webapp.as_path(), classes.as_path(), resources.as_path()],
+            );
+            push_unique_path(&mut sources, webapp);
+            push_unique_path(&mut sources, classes);
+            push_unique_path(&mut sources, resources);
         }
         "Ear" => {
-            push_unique_path(&mut sources, project_dir.join("src/main/application"));
+            let application = project_dir.join("src/main/application");
+            retain_sources_not_under(&mut sources, &[application.as_path()]);
+            push_unique_path(&mut sources, application);
         }
         _ => {}
     }
     sources
+}
+
+fn retain_sources_not_under(sources: &mut Vec<String>, roots: &[&Path]) {
+    sources.retain(|source| {
+        let path = Path::new(source);
+        !roots
+            .iter()
+            .any(|root| path != *root && path.starts_with(root))
+    });
 }
 
 fn push_unique_path(paths: &mut Vec<String>, path: std::path::PathBuf) {
@@ -2180,6 +2348,123 @@ mod tests {
     }
 
     #[test]
+    fn test_work_input_properties_ignore_redundant_convention_jar_mappings() {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+
+        fn mapping(source: &str, dest: &str, kind: &str) -> String {
+            format!(
+                "{}>{}>{}",
+                URL_SAFE_NO_PAD.encode(source),
+                URL_SAFE_NO_PAD.encode(dest),
+                kind
+            )
+        }
+
+        let mut task = canonical_task(
+            ":jar",
+            "org.gradle.api.tasks.bundling.Jar",
+            Vec::new(),
+            vec!["/repo/build/libs/app.jar".to_string()],
+        );
+        set_value_input(
+            &mut task,
+            "archive_file",
+            "/repo/build/libs/app.jar",
+            "test",
+            "scalar",
+        );
+        set_value_input(
+            &mut task,
+            "copy_contains_symlinks",
+            "false",
+            "test",
+            "scalar",
+        );
+        set_value_input(
+            &mut task,
+            "copy_file_mappings",
+            &[
+                mapping(
+                    "/repo/build/tmp/jar/MANIFEST.MF",
+                    "META-INF/MANIFEST.MF",
+                    "F",
+                ),
+                mapping("/repo/build/classes/java/main/org", "org", "D"),
+                mapping(
+                    "/repo/build/classes/java/main/org/gradle/App.class",
+                    "org/gradle/App.class",
+                    "F",
+                ),
+            ]
+            .join(","),
+            "test",
+            "scalar",
+        );
+        task.input_specs.push(
+            super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                name: "input0".to_string(),
+                kind: "path".to_string(),
+                value: "/repo/build/classes/java/main/org/gradle/App.class".to_string(),
+                normalization: "absolute-path".to_string(),
+                optional: false,
+            },
+        );
+
+        let properties = work_input_properties(&task, "Jar", "/repo/build/libs");
+
+        assert!(!properties.contains_key("input.copy_file_mappings"));
+        assert!(!properties.contains_key("input_value.copy_file_mappings"));
+        assert!(!properties.contains_key("input_path.input0"));
+    }
+
+    #[test]
+    fn test_work_input_properties_keep_custom_jar_mappings() {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+
+        let custom_mapping = format!(
+            "{}>{}>F",
+            URL_SAFE_NO_PAD.encode("/repo/build/classes/java/main/org/gradle/App.class"),
+            URL_SAFE_NO_PAD.encode("custom/org/gradle/App.class")
+        );
+        let mut task = canonical_task(
+            ":jar",
+            "org.gradle.api.tasks.bundling.Jar",
+            Vec::new(),
+            vec!["/repo/build/libs/app.jar".to_string()],
+        );
+        set_value_input(
+            &mut task,
+            "archive_file",
+            "/repo/build/libs/app.jar",
+            "test",
+            "scalar",
+        );
+        set_value_input(
+            &mut task,
+            "copy_contains_symlinks",
+            "false",
+            "test",
+            "scalar",
+        );
+        set_value_input(
+            &mut task,
+            "copy_file_mappings",
+            &custom_mapping,
+            "test",
+            "scalar",
+        );
+
+        let properties = work_input_properties(&task, "Jar", "/repo/build/libs");
+
+        assert_eq!(
+            properties
+                .get("input.copy_file_mappings")
+                .map(String::as_str),
+            Some(custom_mapping.as_str())
+        );
+    }
+
+    #[test]
     fn test_archive_context_includes_convention_source_roots_for_warm_fingerprints() {
         let mut task = canonical_task(
             ":jar",
@@ -2207,6 +2492,48 @@ mod tests {
 
         assert!(source_files.contains(&"/repo/build/classes/java/main"));
         assert!(source_files.contains(&"/repo/build/resources/main"));
+    }
+
+    #[test]
+    fn test_archive_context_deduplicates_sources_under_convention_roots() {
+        let mut task = canonical_task(
+            ":jar",
+            "org.gradle.api.tasks.bundling.Jar",
+            Vec::new(),
+            vec!["/repo/build/libs/app.jar".to_string()],
+        );
+        task.input_specs.push(
+            super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                name: "input0".to_string(),
+                kind: "path".to_string(),
+                value: "/repo/build/classes/java/main/org/gradle/App.class".to_string(),
+                normalization: "absolute-path".to_string(),
+                optional: false,
+            },
+        );
+        task.input_specs.push(
+            super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                name: "input1".to_string(),
+                kind: "path".to_string(),
+                value: "/repo/build/tmp/jar/MANIFEST.MF".to_string(),
+                normalization: "absolute-path".to_string(),
+                optional: false,
+            },
+        );
+
+        let task_type = executable_task_type(&task);
+        let context: serde_json::Value =
+            serde_json::from_str(&execution_context_json(&task, &task_type)).unwrap();
+        let source_files = context["source_files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect::<Vec<_>>();
+
+        assert!(!source_files.contains(&"/repo/build/classes/java/main/org/gradle/App.class"));
+        assert!(source_files.contains(&"/repo/build/classes/java/main"));
+        assert!(source_files.contains(&"/repo/build/tmp/jar/MANIFEST.MF"));
     }
 
     #[test]

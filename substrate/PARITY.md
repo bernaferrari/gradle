@@ -388,6 +388,10 @@
 - `python3 tools/demo/first_60_seconds.py --mode proof --skip-build --output build/first60-proof.json` passed with Rust dependency transport/store/checksum=269.4ms, metadata cache=253.3ms, dynamic metadata cache=256.5ms, static Maven prefetch=262.4ms, and shared artifact/metadata read-through Gradle proof=20506.9ms.
 - `cargo test -p gradle-substrate-daemon test_no_checksum -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_cached_text_metadata_read_does_not_freeze_stale_sha -- --nocapture`
+- `cargo test -p gradle-substrate-daemon test_work_input_properties_ -- --nocapture`
+- `cargo test -p gradle-substrate-daemon test_archive_context -- --nocapture`
+- `cargo build -q -p gradle-substrate-daemon`
+- `python3 tools/demo/first_60_seconds.py --mode fast --skip-build --output build/first60-fast.json` passed with daemon socket ready=1260.3ms (daemon self-report 12ms), authoritative Rust DAG=71683.7ms with cold 68896.3ms/11 Rust tasks, warm 2783.3ms/11 Rust tasks, Gradle configuration-cache reuse on the warm run, 7 Rust up-to-date skips, 4 Rust no-source/skipped tasks, 0 JVM forwards, real-build dependency read-through=7337.6ms with remote requests avoided=7/7 and deterministic dynamic/direct-static/transitive-static output SHA-256 values `742d753d434f2e408762a9cbcc75621c441e0ed5dea5961d65b05ff3013575fc` / `88f9a4aa9c2579d0caa524dac61d45a114f381572629c6645fa28979d2501196` / `ecffccc8258a7d1647e4f911a8b9c6874d86f3ef8a88ddf0faad23d3e1cd148b`, authoritative output SHA-256 `92cf8132cd7364798a080c27ca6c160811e962cab18bb92f2872f061878a8490`, and file-watch first event=14ms.
 - `cargo test -p gradle-substrate-daemon test_persistent_store_roundtrip -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_add_artifact_to_cache -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_artifact_cache_rejects_missing_local_file -- --nocapture`
