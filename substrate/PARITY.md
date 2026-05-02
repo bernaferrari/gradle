@@ -157,6 +157,15 @@
   the single streaming copy+SHA pass. The mode is opt-in because querying
   artifacts from a resolution listener can force artifact downloads earlier
   than a graph-only resolution would.
+- The Gradle dependency shadow listener also has an opt-in static Maven
+  artifact prefetch mode
+  (`org.gradle.rust.substrate.dependency.prefetch.artifacts=true`) that runs
+  only after Java dependency resolution succeeds. The JVM bridge captures a
+  native-ready contract for exactly one HTTP(S) Maven repository plus direct
+  external module dependencies with static versions, no excludes, no target
+  configuration, no changing/SNAPSHOT/dynamic versions, and at most one normal
+  artifact shape. Unsupported shapes fail closed by skipping Rust prefetch
+  rather than approximating Gradle semantics.
 - Gradle artifact resolution has an explicit Rust read-through mode
   (`org.gradle.rust.substrate.dependency.readthrough.artifacts=true`) that
   consults the Rust artifact store after Gradle local access and before remote
@@ -314,6 +323,7 @@
 - `./gradlew :dependency-management:test --tests org.gradle.api.internal.artifacts.ivyservice.ivyresolve.RepositoryChainArtifactResolverTest -x :distributions-core:generateLicenseFile`
 - `./gradlew :dependency-management:test --tests org.gradle.internal.resource.transfer.DefaultCacheAwareExternalResourceAccessorTest -x :distributions-core:generateLicenseFile`
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.e2e.SubstrateE2ETest.dependencyResolveCanPrefetchStaticMavenArtifact -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon --no-daemon --console=plain`
+- `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.dependency.DependencyResolutionShadowListenerTest --no-daemon --console=plain`
 - `cargo test -p gradle-substrate-daemon test_no_checksum -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_cached_text_metadata_read_does_not_freeze_stale_sha -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_persistent_store_roundtrip -- --nocapture`

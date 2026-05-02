@@ -1,7 +1,13 @@
 package org.gradle.internal.rustbridge.dependency;
 
+import gradle.substrate.v1.DependencyDescriptor;
+import gradle.substrate.v1.RepositoryDescriptor;
 import org.gradle.api.artifacts.ArtifactCollection;
+import org.gradle.api.artifacts.Dependency;
+import org.gradle.api.artifacts.DependencyArtifact;
 import org.gradle.api.artifacts.DependencyResolutionListener;
+import org.gradle.api.artifacts.ExternalModuleDependency;
+import org.gradle.api.artifacts.ModuleDependency;
 import org.gradle.api.artifacts.ResolvableDependencies;
 import org.gradle.api.artifacts.component.ComponentArtifactIdentifier;
 import org.gradle.api.artifacts.component.ComponentIdentifier;
@@ -16,6 +22,9 @@ import org.gradle.internal.service.scopes.ServiceScope;
 import org.slf4j.Logger;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 
@@ -33,6 +42,8 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
     private final HashMismatchReporter mismatchReporter;
     private final boolean authoritative;
     private final boolean mirrorArtifacts;
+    private final boolean prefetchArtifacts;
+    private final RepositoryProvider repositoryProvider;
 
     // Track resolution start times for timing measurement
     private final Map<String, Long> resolutionStartTimes = new ConcurrentHashMap<>();
@@ -42,6 +53,12 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
         new java.util.concurrent.atomic.AtomicLong(0);
     private final java.util.concurrent.atomic.AtomicLong mirroredArtifactCount =
         new java.util.concurrent.atomic.AtomicLong(0);
+    private final java.util.concurrent.atomic.AtomicLong prefetchedArtifactCount =
+        new java.util.concurrent.atomic.AtomicLong(0);
+
+    public interface RepositoryProvider {
+        List<RepositoryDescriptor> repositoriesFor(ResolvableDependencies dependencies);
+    }
 
     public DependencyResolutionShadowListener(
         RustDependencyResolutionClient client,
@@ -64,10 +81,23 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
         boolean authoritative,
         boolean mirrorArtifacts
     ) {
+        this(client, mismatchReporter, authoritative, mirrorArtifacts, false, dependencies -> Collections.emptyList());
+    }
+
+    public DependencyResolutionShadowListener(
+        RustDependencyResolutionClient client,
+        HashMismatchReporter mismatchReporter,
+        boolean authoritative,
+        boolean mirrorArtifacts,
+        boolean prefetchArtifacts,
+        RepositoryProvider repositoryProvider
+    ) {
         this.client = client;
         this.mismatchReporter = mismatchReporter;
         this.authoritative = authoritative;
         this.mirrorArtifacts = mirrorArtifacts;
+        this.prefetchArtifacts = prefetchArtifacts;
+        this.repositoryProvider = repositoryProvider;
     }
 
     @Override
@@ -105,6 +135,7 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
             int artifactCount = 0;
             int failureCount = 0;
             int mirroredArtifacts = 0;
+            int prefetchedArtifacts = 0;
 
             try {
                 ResolutionResult result = dependencies.getResolutionResult();
@@ -121,6 +152,11 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
                 LOGGER.debug("[substrate:dep-resolve] could not extract resolution result", e);
             }
 
+            if (prefetchArtifacts && javaSuccess && failureCount == 0) {
+                prefetchedArtifacts = prefetchStaticMavenArtifacts(dependencies);
+                prefetchedArtifactCount.addAndGet(prefetchedArtifacts);
+            }
+
             if (mirrorArtifacts && javaSuccess) {
                 mirroredArtifacts = mirrorResolvedArtifacts(dependencies);
                 mirroredArtifactCount.addAndGet(mirroredArtifacts);
@@ -128,8 +164,8 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
 
             String source = recordResolutionInMode(configName, durationMs, artifactCount, javaSuccess, failureCount);
             LOGGER.debug(
-                "[substrate:dep-resolve] shadow OK: {} ({}ms, {} components, {} failures, {} mirrored artifacts, source={})",
-                configName, durationMs, artifactCount, failureCount, mirroredArtifacts, source
+                "[substrate:dep-resolve] shadow OK: {} ({}ms, {} components, {} failures, {} prefetched artifacts, {} mirrored artifacts, source={})",
+                configName, durationMs, artifactCount, failureCount, prefetchedArtifacts, mirroredArtifacts, source
             );
         } catch (Exception e) {
             mismatchReporter.reportRustError(
@@ -162,8 +198,108 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
         return mirrorArtifacts;
     }
 
+    public boolean isPrefetchArtifacts() {
+        return prefetchArtifacts;
+    }
+
     public long getMirroredArtifactCount() {
         return mirroredArtifactCount.get();
+    }
+
+    public long getPrefetchedArtifactCount() {
+        return prefetchedArtifactCount.get();
+    }
+
+    private int prefetchStaticMavenArtifacts(ResolvableDependencies dependencies) {
+        List<RepositoryDescriptor> repositories = repositoryProvider.repositoriesFor(dependencies);
+        if (repositories.size() != 1) {
+            return 0;
+        }
+
+        List<DependencyDescriptor> descriptors = staticMavenDependencyDescriptors(dependencies);
+        if (descriptors.isEmpty()) {
+            return 0;
+        }
+
+        RustDependencyResolutionClient.ResolutionResult result = client.resolveDependencies(
+            dependencies.getName(),
+            descriptors,
+            repositories,
+            false,
+            true
+        );
+        if (!result.isSuccess()) {
+            mismatchReporter.reportRustError(
+                "dep-artifact-prefetch:" + dependencies.getName(),
+                new IllegalStateException(result.getErrorMessage())
+            );
+            return 0;
+        }
+        return result.getTotalArtifacts();
+    }
+
+    private List<DependencyDescriptor> staticMavenDependencyDescriptors(ResolvableDependencies dependencies) {
+        List<DependencyDescriptor> descriptors = new ArrayList<>();
+        try {
+            for (Dependency dependency : dependencies.getDependencies()) {
+                DependencyDescriptor descriptor = staticMavenDependencyDescriptor(dependency);
+                if (descriptor == null) {
+                    return Collections.emptyList();
+                }
+                descriptors.add(descriptor);
+            }
+        } catch (Exception e) {
+            LOGGER.debug("[substrate:dep-resolve] dependency prefetch contract capture failed", e);
+            return Collections.emptyList();
+        }
+        return Collections.unmodifiableList(descriptors);
+    }
+
+    private DependencyDescriptor staticMavenDependencyDescriptor(Dependency dependency) {
+        if (!(dependency instanceof ExternalModuleDependency)) {
+            return null;
+        }
+        ExternalModuleDependency external = (ExternalModuleDependency) dependency;
+        if (external.isChanging()) {
+            return null;
+        }
+        ModuleDependency module = (ModuleDependency) external;
+        if (module.getTargetConfiguration() != null || !module.getExcludeRules().isEmpty()) {
+            return null;
+        }
+
+        String group = dependency.getGroup();
+        String name = dependency.getName();
+        String version = dependency.getVersion();
+        if (isBlank(group) || isBlank(name) || isBlank(version) || !isStaticVersion(version)) {
+            return null;
+        }
+
+        String classifier = "";
+        String extension = "jar";
+        if (module.getArtifacts().size() > 1) {
+            return null;
+        }
+        if (module.getArtifacts().size() == 1) {
+            DependencyArtifact artifact = module.getArtifacts().iterator().next();
+            if (artifact.getUrl() != null || !name.equals(artifact.getName())) {
+                return null;
+            }
+            classifier = artifact.getClassifier() == null ? "" : artifact.getClassifier();
+            extension = artifact.getExtension() == null ? artifact.getType() : artifact.getExtension();
+            if (isBlank(extension)) {
+                return null;
+            }
+        }
+
+        return DependencyDescriptor.newBuilder()
+            .setGroup(group)
+            .setName(name)
+            .setVersion(version)
+            .setClassifier(classifier)
+            .setExtension(extension)
+            .setTransitive(false)
+            .build();
     }
 
     private int mirrorResolvedArtifacts(ResolvableDependencies dependencies) {
@@ -251,6 +387,23 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
             return "";
         }
         return fileName.substring(dot + 1);
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isEmpty();
+    }
+
+    private static boolean isStaticVersion(String version) {
+        return version.indexOf('+') < 0
+            && version.indexOf('[') < 0
+            && version.indexOf(']') < 0
+            && version.indexOf('(') < 0
+            && version.indexOf(')') < 0
+            && !"latest.release".equalsIgnoreCase(version)
+            && !"latest.integration".equalsIgnoreCase(version)
+            && !"release".equalsIgnoreCase(version)
+            && !"latest".equalsIgnoreCase(version)
+            && !version.endsWith("-SNAPSHOT");
     }
 
     private String recordResolutionInMode(

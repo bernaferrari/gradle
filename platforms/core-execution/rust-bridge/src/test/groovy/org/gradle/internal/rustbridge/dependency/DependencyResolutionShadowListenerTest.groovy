@@ -1,6 +1,9 @@
 package org.gradle.internal.rustbridge.dependency
 
+import gradle.substrate.v1.RepositoryDescriptor
 import org.gradle.api.artifacts.ArtifactCollection
+import org.gradle.api.artifacts.DependencySet
+import org.gradle.api.artifacts.ExternalModuleDependency
 import org.gradle.api.artifacts.ResolvableDependencies
 import org.gradle.api.artifacts.component.ComponentArtifactIdentifier
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
@@ -233,6 +236,118 @@ class DependencyResolutionShadowListenerTest extends Specification {
         }
         1 * reporter.reportRustError("dep-resolve:compileClasspath", _ as RuntimeException)
         0 * client.recordResolution("compileClasspath", _, 0, true, 0)
+    }
+
+    def "prefetch mode warms static direct maven artifacts through rust"() {
+        given:
+        def client = Mock(RustDependencyResolutionClient)
+        def reporter = Mock(HashMismatchReporter)
+        def repository = RepositoryDescriptor.newBuilder()
+            .setId("local")
+            .setUrl("http://repo.test/maven2")
+            .setM2Compatible(true)
+            .build()
+        def listener = new DependencyResolutionShadowListener(
+            client,
+            reporter,
+            false,
+            false,
+            true,
+            { deps -> [repository] } as DependencyResolutionShadowListener.RepositoryProvider
+        )
+        def dependency = Mock(ExternalModuleDependency) {
+            getGroup() >> "org.example"
+            getName() >> "demo"
+            getVersion() >> "1.2.3"
+            isChanging() >> false
+            isTransitive() >> true
+            getTargetConfiguration() >> null
+            getExcludeRules() >> ([] as Set)
+            getArtifacts() >> ([] as Set)
+        }
+        def dependencySet = Mock(DependencySet) {
+            iterator() >> ([dependency].iterator())
+        }
+        def resolutionResult = Mock(ResolutionResult) {
+            getAllComponents() >> ([] as Set)
+            getAllDependencies() >> ([] as Set)
+        }
+        def dependencies = Mock(ResolvableDependencies) {
+            getName() >> "runtimeClasspath"
+            getPath() >> ":runtimeClasspath"
+            getDependencies() >> dependencySet
+            getResolutionResult() >> resolutionResult
+        }
+        listener.beforeResolve(dependencies)
+
+        when:
+        listener.afterResolve(dependencies)
+
+        then:
+        listener.isPrefetchArtifacts()
+        listener.prefetchedArtifactCount == 2
+        1 * client.resolveDependencies("runtimeClasspath", { requested ->
+            requested.size() == 1 &&
+                requested[0].group == "org.example" &&
+                requested[0].name == "demo" &&
+                requested[0].version == "1.2.3" &&
+                requested[0].extension == "jar" &&
+                !requested[0].transitive
+        }, [repository], false, true) >> new RustDependencyResolutionClient.ResolutionResult(true, [], "", 7, 2, 42)
+        1 * client.recordResolution("runtimeClasspath", _, 0, true, 0)
+        1 * reporter.reportMatch()
+        0 * reporter.reportRustError(_, _)
+    }
+
+    def "prefetch mode skips unsupported dynamic versions"() {
+        given:
+        def client = Mock(RustDependencyResolutionClient)
+        def reporter = Mock(HashMismatchReporter)
+        def repository = RepositoryDescriptor.newBuilder()
+            .setId("local")
+            .setUrl("http://repo.test/maven2")
+            .setM2Compatible(true)
+            .build()
+        def listener = new DependencyResolutionShadowListener(
+            client,
+            reporter,
+            false,
+            false,
+            true,
+            { deps -> [repository] } as DependencyResolutionShadowListener.RepositoryProvider
+        )
+        def dependency = Mock(ExternalModuleDependency) {
+            getGroup() >> "org.example"
+            getName() >> "demo"
+            getVersion() >> "1.+"
+            isChanging() >> false
+            getTargetConfiguration() >> null
+            getExcludeRules() >> ([] as Set)
+            getArtifacts() >> ([] as Set)
+        }
+        def dependencySet = Mock(DependencySet) {
+            iterator() >> ([dependency].iterator())
+        }
+        def resolutionResult = Mock(ResolutionResult) {
+            getAllComponents() >> ([] as Set)
+            getAllDependencies() >> ([] as Set)
+        }
+        def dependencies = Mock(ResolvableDependencies) {
+            getName() >> "runtimeClasspath"
+            getPath() >> ":runtimeClasspath"
+            getDependencies() >> dependencySet
+            getResolutionResult() >> resolutionResult
+        }
+        listener.beforeResolve(dependencies)
+
+        when:
+        listener.afterResolve(dependencies)
+
+        then:
+        listener.prefetchedArtifactCount == 0
+        0 * client.resolveDependencies(_, _, _, _, _)
+        1 * client.recordResolution("runtimeClasspath", _, 0, true, 0)
+        1 * reporter.reportMatch()
     }
 
     def "mirror mode copies resolved module artifacts into rust cache"() {
