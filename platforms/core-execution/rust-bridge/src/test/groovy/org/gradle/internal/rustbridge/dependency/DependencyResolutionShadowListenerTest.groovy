@@ -10,6 +10,7 @@ import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.result.ResolvedArtifactResult
 import org.gradle.api.artifacts.result.ResolvedComponentResult
 import org.gradle.api.artifacts.result.ResolutionResult
+import org.gradle.api.artifacts.result.UnresolvedDependencyResult
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
@@ -268,8 +269,16 @@ class DependencyResolutionShadowListenerTest extends Specification {
         def dependencySet = Mock(DependencySet) {
             iterator() >> ([dependency].iterator())
         }
+        def moduleId = Mock(ModuleComponentIdentifier) {
+            getGroup() >> "org.example"
+            getModule() >> "demo"
+            getVersion() >> "1.2.3"
+        }
+        def component = Mock(ResolvedComponentResult) {
+            getId() >> moduleId
+        }
         def resolutionResult = Mock(ResolutionResult) {
-            getAllComponents() >> ([] as Set)
+            getAllComponents() >> ([component] as Set)
             getAllDependencies() >> ([] as Set)
         }
         def dependencies = Mock(ResolvableDependencies) {
@@ -294,9 +303,120 @@ class DependencyResolutionShadowListenerTest extends Specification {
                 requested[0].extension == "jar" &&
                 !requested[0].transitive
         }, [repository], false, true) >> new RustDependencyResolutionClient.ResolutionResult(true, [], "", 7, 2, 42)
-        1 * client.recordResolution("runtimeClasspath", _, 0, true, 0)
+        1 * client.recordResolution("runtimeClasspath", _, 1, true, 0)
         1 * reporter.reportMatch()
         0 * reporter.reportRustError(_, _)
+    }
+
+    def "prefetch mode still warms when non-fatal metadata attempts are reported as unresolved"() {
+        given:
+        def client = Mock(RustDependencyResolutionClient)
+        def reporter = Mock(HashMismatchReporter)
+        def repository = RepositoryDescriptor.newBuilder()
+            .setId("local")
+            .setUrl("http://repo.test/maven2")
+            .setM2Compatible(true)
+            .build()
+        def listener = new DependencyResolutionShadowListener(
+            client,
+            reporter,
+            false,
+            false,
+            true,
+            { deps -> [repository] } as DependencyResolutionShadowListener.RepositoryProvider
+        )
+        def dependency = Mock(ExternalModuleDependency) {
+            getGroup() >> "org.example"
+            getName() >> "demo"
+            getVersion() >> "1.2.3"
+            isChanging() >> false
+            getTargetConfiguration() >> null
+            getExcludeRules() >> ([] as Set)
+            getArtifacts() >> ([] as Set)
+        }
+        def dependencySet = Mock(DependencySet) {
+            iterator() >> ([dependency].iterator())
+        }
+        def moduleId = Mock(ModuleComponentIdentifier) {
+            getGroup() >> "org.example"
+            getModule() >> "demo"
+            getVersion() >> "1.2.3"
+        }
+        def component = Mock(ResolvedComponentResult) {
+            getId() >> moduleId
+        }
+        def resolutionResult = Mock(ResolutionResult) {
+            getAllComponents() >> ([component] as Set)
+            getAllDependencies() >> ([Mock(UnresolvedDependencyResult)] as Set)
+        }
+        def dependencies = Mock(ResolvableDependencies) {
+            getName() >> "runtimeClasspath"
+            getPath() >> ":runtimeClasspath"
+            getDependencies() >> dependencySet
+            getResolutionResult() >> resolutionResult
+        }
+        listener.beforeResolve(dependencies)
+
+        when:
+        listener.afterResolve(dependencies)
+
+        then:
+        listener.prefetchedArtifactCount == 1
+        1 * client.resolveDependencies("runtimeClasspath", _, [repository], false, true) >> new RustDependencyResolutionClient.ResolutionResult(true, [], "", 7, 1, 42)
+        1 * client.recordResolution("runtimeClasspath", _, 1, true, 1)
+        1 * reporter.reportMatch()
+        0 * reporter.reportRustError(_, _)
+    }
+
+    def "prefetch mode skips when static dependency is absent from resolved graph"() {
+        given:
+        def client = Mock(RustDependencyResolutionClient)
+        def reporter = Mock(HashMismatchReporter)
+        def repository = RepositoryDescriptor.newBuilder()
+            .setId("local")
+            .setUrl("http://repo.test/maven2")
+            .setM2Compatible(true)
+            .build()
+        def listener = new DependencyResolutionShadowListener(
+            client,
+            reporter,
+            false,
+            false,
+            true,
+            { deps -> [repository] } as DependencyResolutionShadowListener.RepositoryProvider
+        )
+        def dependency = Mock(ExternalModuleDependency) {
+            getGroup() >> "org.example"
+            getName() >> "demo"
+            getVersion() >> "1.2.3"
+            isChanging() >> false
+            getTargetConfiguration() >> null
+            getExcludeRules() >> ([] as Set)
+            getArtifacts() >> ([] as Set)
+        }
+        def dependencySet = Mock(DependencySet) {
+            iterator() >> ([dependency].iterator())
+        }
+        def resolutionResult = Mock(ResolutionResult) {
+            getAllComponents() >> ([] as Set)
+            getAllDependencies() >> ([Mock(UnresolvedDependencyResult)] as Set)
+        }
+        def dependencies = Mock(ResolvableDependencies) {
+            getName() >> "runtimeClasspath"
+            getPath() >> ":runtimeClasspath"
+            getDependencies() >> dependencySet
+            getResolutionResult() >> resolutionResult
+        }
+        listener.beforeResolve(dependencies)
+
+        when:
+        listener.afterResolve(dependencies)
+
+        then:
+        listener.prefetchedArtifactCount == 0
+        0 * client.resolveDependencies(_, _, _, _, _)
+        1 * client.recordResolution("runtimeClasspath", _, 0, true, 1)
+        1 * reporter.reportMatch()
     }
 
     def "prefetch mode skips unsupported dynamic versions"() {

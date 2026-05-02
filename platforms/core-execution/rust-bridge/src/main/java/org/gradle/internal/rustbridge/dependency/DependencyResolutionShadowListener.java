@@ -13,6 +13,7 @@ import org.gradle.api.artifacts.component.ComponentArtifactIdentifier;
 import org.gradle.api.artifacts.component.ComponentIdentifier;
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
 import org.gradle.api.artifacts.result.ResolvedArtifactResult;
+import org.gradle.api.artifacts.result.ResolvedComponentResult;
 import org.gradle.api.artifacts.result.ResolutionResult;
 import org.gradle.api.artifacts.result.UnresolvedDependencyResult;
 import org.gradle.api.logging.Logging;
@@ -137,8 +138,9 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
             int mirroredArtifacts = 0;
             int prefetchedArtifacts = 0;
 
+            ResolutionResult result = null;
             try {
-                ResolutionResult result = dependencies.getResolutionResult();
+                result = dependencies.getResolutionResult();
                 javaSuccess = result != null;
 
                 if (result != null) {
@@ -152,8 +154,8 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
                 LOGGER.debug("[substrate:dep-resolve] could not extract resolution result", e);
             }
 
-            if (prefetchArtifacts && javaSuccess && failureCount == 0) {
-                prefetchedArtifacts = prefetchStaticMavenArtifacts(dependencies);
+            if (prefetchArtifacts && javaSuccess && result != null) {
+                prefetchedArtifacts = prefetchStaticMavenArtifacts(dependencies, result);
                 prefetchedArtifactCount.addAndGet(prefetchedArtifacts);
             }
 
@@ -210,7 +212,7 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
         return prefetchedArtifactCount.get();
     }
 
-    private int prefetchStaticMavenArtifacts(ResolvableDependencies dependencies) {
+    private int prefetchStaticMavenArtifacts(ResolvableDependencies dependencies, ResolutionResult result) {
         List<RepositoryDescriptor> repositories = repositoryProvider.repositoriesFor(dependencies);
         if (repositories.size() != 1) {
             return 0;
@@ -220,22 +222,45 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
         if (descriptors.isEmpty()) {
             return 0;
         }
+        if (!resolvedGraphContainsAll(descriptors, result)) {
+            return 0;
+        }
 
-        RustDependencyResolutionClient.ResolutionResult result = client.resolveDependencies(
+        RustDependencyResolutionClient.ResolutionResult rustResult = client.resolveDependencies(
             dependencies.getName(),
             descriptors,
             repositories,
             false,
             true
         );
-        if (!result.isSuccess()) {
+        if (!rustResult.isSuccess()) {
             mismatchReporter.reportRustError(
                 "dep-artifact-prefetch:" + dependencies.getName(),
-                new IllegalStateException(result.getErrorMessage())
+                new IllegalStateException(rustResult.getErrorMessage())
             );
             return 0;
         }
-        return result.getTotalArtifacts();
+        return rustResult.getTotalArtifacts();
+    }
+
+    private static boolean resolvedGraphContainsAll(List<DependencyDescriptor> descriptors, ResolutionResult result) {
+        List<ModuleComponentIdentifier> resolvedModules = new ArrayList<>();
+        for (ResolvedComponentResult component : result.getAllComponents()) {
+            ComponentIdentifier id = component.getId();
+            if (id instanceof ModuleComponentIdentifier) {
+                resolvedModules.add((ModuleComponentIdentifier) id);
+            }
+        }
+        for (DependencyDescriptor descriptor : descriptors) {
+            if (!resolvedModules.stream().anyMatch(module ->
+                descriptor.getGroup().equals(module.getGroup())
+                    && descriptor.getName().equals(module.getModule())
+                    && descriptor.getVersion().equals(module.getVersion())
+            )) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private List<DependencyDescriptor> staticMavenDependencyDescriptors(ResolvableDependencies dependencies) {

@@ -259,6 +259,23 @@ def write_maven_module(repo: Path) -> None:
         encoding="utf-8",
     )
 
+    static_dir = repo / "org" / "test" / "projectStatic" / "1.0"
+    static_dir.mkdir(parents=True, exist_ok=True)
+    (static_dir / "projectStatic-1.0.pom").write_text(
+        "<project>"
+        "<modelVersion>4.0.0</modelVersion>"
+        "<groupId>org.test</groupId>"
+        "<artifactId>projectStatic</artifactId>"
+        "<version>1.0</version>"
+        "</project>",
+        encoding="utf-8",
+    )
+    with zipfile.ZipFile(static_dir / "projectStatic-1.0.jar", "w") as jar:
+        entry = zipfile.ZipInfo("projectStatic-1.0.txt")
+        entry.date_time = (1980, 1, 1, 0, 0, 0)
+        entry.compress_type = zipfile.ZIP_STORED
+        jar.writestr(entry, "static-prefetch-payload\n")
+
 
 class CountingHttpServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
@@ -306,30 +323,52 @@ def measure_real_build_dependency_readthrough(timeout: int = 75) -> dict[str, ob
         repository_url = f"http://127.0.0.1:{server.server_address[1]}"
 
         project.mkdir(parents=True)
-        (project / "settings.gradle.kts").write_text('rootProject.name = "real-readthrough"\n', encoding="utf-8")
-        (project / "build.gradle.kts").write_text(
-            f"""
-repositories {{ maven {{ url = uri("{repository_url}") }} }}
-configurations {{ create("compile") }}
-dependencies {{ "compile"("org.test:projectA:1.+") }}
-tasks.register<Sync>("retrieve") {{
-    from(configurations.getByName("compile"))
-    into(layout.buildDirectory.dir("libs"))
-}}
-""",
+        (project / "settings.gradle").write_text("rootProject.name = 'real-readthrough'\n", encoding="utf-8")
+        (project / "build.gradle").write_text(
+            """
+repositories { maven { url = uri("%s") } }
+configurations {
+    compile
+    staticCompile
+}
+dependencies {
+    compile "org.test:projectA:1.+"
+    staticCompile "org.test:projectStatic:1.0"
+}
+tasks.register("retrieve", Sync) {
+    from configurations.compile
+    into layout.buildDirectory.dir("libs")
+}
+tasks.register("resolveStaticGraph") {
+    def outputFile = layout.buildDirectory.file("resolution/static-graph.txt")
+    outputs.file(outputFile)
+    doLast {
+        def modules = configurations.staticCompile.incoming.resolutionResult.allComponents
+            .collect { it.moduleVersion }
+            .findAll { it != null }
+            .collect { "${it.group}:${it.name}:${it.version}" }
+            .sort()
+        outputFile.get().asFile.text = modules.join("\\n")
+    }
+}
+tasks.register("retrieveStatic", Sync) {
+    from configurations.staticCompile
+    into layout.buildDirectory.dir("static-libs")
+}
+""" % repository_url,
             encoding="utf-8",
         )
 
         state_dir = temp / "substrate-state"
 
-        def run_retrieve(gradle_home: Path) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+        def run_gradle(gradle_home: Path, tasks: list[str]) -> tuple[subprocess.CompletedProcess[str], list[str]]:
             before = len(requests)
             completed = subprocess.run(
                 [
                     str(gradle),
                     "-p",
                     str(project),
-                    "retrieve",
+                    *tasks,
                     "--no-daemon",
                     "--console=plain",
                     f"--gradle-user-home={gradle_home}",
@@ -338,6 +377,7 @@ tasks.register<Sync>("retrieve") {{
                     "-Dorg.gradle.rust.substrate.dependency.download.enabled=true",
                     "-Dorg.gradle.rust.substrate.dependency.readthrough.metadata=true",
                     "-Dorg.gradle.rust.substrate.dependency.readthrough.artifacts=true",
+                    "-Dorg.gradle.rust.substrate.dependency.prefetch.artifacts=true",
                     f"-Dorg.gradle.rust.substrate.daemon.path={DAEMON}",
                     f"-Dorg.gradle.rust.substrate.state.dir={state_dir}",
                 ],
@@ -349,12 +389,20 @@ tasks.register<Sync>("retrieve") {{
             )
             return completed, requests[before:]
 
-        first, first_requests = run_retrieve(temp / "gradle-home-1")
+        first, first_requests = run_gradle(temp / "gradle-home-1", ["resolveStaticGraph", "retrieve"])
+        static_graph_file = project / "build" / "resolution" / "static-graph.txt"
+        static_graph_recorded = (
+            static_graph_file.exists() and "org.test:projectStatic:1.0" in static_graph_file.read_text()
+        )
         shutil.rmtree(project / "build", ignore_errors=True)
-        second, second_requests = run_retrieve(temp / "gradle-home-2")
+        second, second_requests = run_gradle(temp / "gradle-home-2", ["retrieve", "retrieveStatic"])
 
         output_file = project / "build" / "libs" / "projectA-1.5.jar"
+        static_output_file = project / "build" / "static-libs" / "projectStatic-1.0.jar"
         output_sha256 = hashlib.sha256(output_file.read_bytes()).hexdigest() if output_file.exists() else None
+        static_output_sha256 = (
+            hashlib.sha256(static_output_file.read_bytes()).hexdigest() if static_output_file.exists() else None
+        )
         elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
         remote_requests_avoided = len(first_requests) - len(second_requests)
         ok = (
@@ -363,6 +411,8 @@ tasks.register<Sync>("retrieve") {{
             and len(first_requests) > 0
             and len(second_requests) == 0
             and output_file.exists()
+            and static_output_file.exists()
+            and static_graph_recorded
         )
         output = first.stdout + first.stderr + "\n--- second run ---\n" + second.stdout + second.stderr
         return {
@@ -374,6 +424,8 @@ tasks.register<Sync>("retrieve") {{
             "second_run_remote_requests": len(second_requests),
             "remote_requests_avoided": remote_requests_avoided,
             "output_sha256": output_sha256,
+            "static_prefetch_output_sha256": static_output_sha256,
+            "static_prefetch_graph_recorded": static_graph_recorded,
             "first_run_requests": first_requests,
             "second_run_requests": second_requests,
             "tail": "\n".join(output.strip().splitlines()[-20:]),
@@ -399,7 +451,8 @@ def print_summary(results: list[dict[str, object]]) -> None:
         elif result["name"] == "real_build_dependency_readthrough" and not result.get("skipped"):
             extra = (
                 f", remote avoided {result['remote_requests_avoided']}/"
-                f"{result['first_run_remote_requests']}, output {result['output_sha256']}"
+                f"{result['first_run_remote_requests']}, output {result['output_sha256']}, "
+                f"static {result['static_prefetch_output_sha256']}"
             )
         elif result.get("runtime_metric_ms") is not None:
             extra = f", first event {result['runtime_metric_ms']}ms"
@@ -415,7 +468,7 @@ def print_summary(results: list[dict[str, object]]) -> None:
     print("- dependency_static_maven_prefetch proves Rust can resolve a static Maven module and prefetch the artifact into the Rust store with checksum evidence")
     print("- dependency_artifact_readthrough proves Gradle can skip remote artifact access when Rust already has the JAR")
     print("- dependency_metadata_readthrough proves Gradle can skip remote POM metadata access and can route uncached resource downloads through Rust")
-    print("- real_build_dependency_readthrough proves a real Gradle build can warm Rust over HTTP, then rerun from a fresh Gradle user home with zero remote requests")
+    print("- real_build_dependency_readthrough proves a real Gradle build can warm Rust over HTTP, including listener static prefetch, then rerun from a fresh Gradle user home with zero remote requests")
     print("- file_watch_first_event is the delay before source edits become observable")
 
 

@@ -129,6 +129,7 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
     private static Object invoke(Object target, String method) {
         try {
             Method m = target.getClass().getMethod(method);
+            m.setAccessible(true);
             return m.invoke(target);
         } catch (Exception e) {
             throw new IllegalStateException("Could not invoke " + method + " on " + target.getClass().getName(), e);
