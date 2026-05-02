@@ -162,7 +162,6 @@ class CorpusRunnerCommandTest(unittest.TestCase):
 
         self.assertIn("custom-task-unsupported-kotlin-dsl", results)
         self.assertIn("copy-filter-unsupported-kotlin-dsl", results)
-        self.assertIn("copy-eachfile-unsupported-kotlin-dsl", results)
         self.assertIn("test-filters-unsupported-kotlin-dsl", results)
         failures = {
             name: result["mismatches"]

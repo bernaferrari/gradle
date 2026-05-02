@@ -178,6 +178,22 @@
       }
     },
     {
+      "name": "copy-eachfile-kotlin-dsl",
+      "path": "copy-eachfile-unsupported-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 0,
+        "plugins": ["base"],
+        "tasks": ["copyWithAction"],
+        "outputs": ["build/rewritten"],
+        "dependencies": [],
+        "project_dependencies": [],
+        "toolchains": []
+      }
+    },
+    {
       "name": "sync-nested-spec-kotlin-dsl",
       "path": "sync-nested-spec-kotlin-dsl",
       "tasks": ["clean", "build"],

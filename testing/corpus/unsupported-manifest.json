@@ -37,24 +37,6 @@
       }
     },
     {
-      "name": "copy-eachfile-unsupported-kotlin-dsl",
-      "path": "copy-eachfile-unsupported-kotlin-dsl",
-      "tasks": ["clean", "build"],
-      "expected_substrate_fail_closed": true,
-      "expected_contract": {
-        "build_file_count": 1,
-        "settings_file_count": 1,
-        "source_file_count": 0,
-        "plugins": ["base"],
-        "tasks": ["copyWithAction"],
-        "outputs": ["build/rewritten"],
-        "dependencies": [],
-        "project_dependencies": [],
-        "toolchains": [],
-        "unsupported_features": ["copy-eachfile-action"]
-      }
-    },
-    {
       "name": "test-filters-unsupported-kotlin-dsl",
       "path": "test-filters-unsupported-kotlin-dsl",
       "tasks": ["clean", "build"],

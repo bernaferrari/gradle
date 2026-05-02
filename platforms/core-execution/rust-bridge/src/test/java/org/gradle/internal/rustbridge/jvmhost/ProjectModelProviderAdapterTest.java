@@ -20,6 +20,7 @@ import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -442,6 +443,47 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("true", inputs.get("copy_has_custom_actions"));
         assertEquals("true", inputs.get("copy_unsupported_custom_actions"));
         assertTrue(inputs.get("copy_custom_action_types").endsWith("ArbitraryCopyAction"));
+    }
+
+    @org.junit.Test
+    public void capturesStaticEachFileRelativePathRewriteAsNativeReadyMappings() throws IOException {
+        File buildFile = temporaryFolder.newFile("build.gradle.kts");
+        Files.write(buildFile.toPath(), Arrays.asList(
+            "plugins { base }",
+            "tasks.register<Copy>(\"copyWithAction\") {",
+            "    from(\"src/raw\")",
+            "    into(layout.buildDirectory.dir(\"rewritten\"))",
+            "    eachFile {",
+            "        relativePath = RelativePath(true, \"renamed\", name)",
+            "    }",
+            "}"
+        ), StandardCharsets.UTF_8);
+        File resourceFile = temporaryFolder.newFile("message.txt");
+        File outputDir = temporaryFolder.newFolder("build/rewritten");
+
+        Task copy = basicFileTransformTask(
+            ":copyWithAction",
+            "copyWithAction",
+            fileCollection(resourceFile),
+            fileCollection(outputDir),
+            Collections.emptyMap(),
+            true,
+            false,
+            buildFile
+        );
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(copy, Copy.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("true", inputs.get("copy_has_custom_actions"));
+        assertEquals("false", inputs.get("copy_unsupported_custom_actions"));
+        assertTrue(inputs.get("copy_custom_action_types").endsWith("ArbitraryCopyAction"));
+        String[] mapping = inputs.get("copy_file_mappings").split(">");
+        assertEquals(resourceFile.getAbsolutePath(), decodeMapping(mapping[0]));
+        assertEquals("renamed/message.txt", decodeMapping(mapping[1]));
+        assertEquals("F", mapping[2]);
     }
 
     @org.junit.Test
@@ -1112,9 +1154,25 @@ public class ProjectModelProviderAdapterTest {
         boolean customActions,
         boolean supportedCustomActions
     ) {
+        return basicFileTransformTask(path, name, inputs, outputs, inputProperties, customActions, supportedCustomActions, null);
+    }
+
+    private static Task basicFileTransformTask(
+        String path,
+        String name,
+        FileCollection inputs,
+        FileCollection outputs,
+        Map<String, String> inputProperties,
+        boolean customActions,
+        boolean supportedCustomActions,
+        File buildFile
+    ) {
         Project project = proxy(Project.class, (proxy, method, args) -> {
             if (method.getName().equals("getPath")) {
                 return ":";
+            }
+            if (method.getName().equals("getBuildFile")) {
+                return buildFile;
             }
             return defaultValue(method.getReturnType());
         });
@@ -1159,6 +1217,10 @@ public class ProjectModelProviderAdapterTest {
                     return defaultValue(method.getReturnType());
             }
         });
+    }
+
+    private static String decodeMapping(String value) {
+        return new String(Base64.getUrlDecoder().decode(value), StandardCharsets.UTF_8);
     }
 
     private static Object filesOwner(Class<?> type, FileCollection files) {

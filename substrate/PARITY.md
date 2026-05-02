@@ -68,7 +68,8 @@
   Java multi-project, resource expansion, JavaCompile options, standalone
   Copy/Sync transforms, CopySpec duplicates, nested Copy/Sync and Zip/Tar
   CopySpec mappings, simple Copy/Zip file-symlink inputs that Gradle follows as
-  target bytes, Zip/Tar/War/Ear archive tasks, a simple Exec task, and a
+  target bytes, a static `eachFile` relative-path rewrite captured as explicit
+  copy mappings, Zip/Tar/War/Ear archive tasks, a simple Exec task, and a
   JavaExec task, Javadoc task, and an OSS-style Java library slice with sources
   JAR/Javadoc/report outputs. Authoritative RunBuild corpus claims require a
   Gradle-under-test distribution built from this fork plus
@@ -110,12 +111,13 @@
   `org.gradle.rust.substrate.runbuild.native-ready-default=true` tries Rust
   RunBuild first and delegates back to JVM execution when the selected plan is
   not fully native-ready. The authoritative offline no-fallback corpus now
-  passes 23/23.
+  passes 24/24.
 - `testing/corpus/unsupported-manifest.json` tracks work that must remain
   outside approximate native execution until a complete contract exists. It now
-  covers custom JVM task actions, unsupported CopySpec filter/actions, and
-  unsupported Test filter combinations. Contract-only validation covers these
-  4 known unsupported shapes; the normal parity runner intentionally reports
+  covers custom JVM task actions, unsupported CopySpec filters/actions beyond
+  the static relative-path rewrite, and unsupported Test filter combinations.
+  Contract-only validation covers these 3 known unsupported shapes; the normal
+  parity runner intentionally reports
   mismatches for unsupported projects rather than treating approximate native
   execution as acceptable.
 - Native dependency resolution handles inherited Maven exclusions per dependency
@@ -282,6 +284,10 @@
 - Native `Copy` and `Sync` can consume JVM-captured nested CopySpec file
   mappings for child `into(...)` destinations instead of flattening every
   source at the output root.
+- Native `Copy` can execute a narrow static `eachFile` relative-path rewrite
+  when the JVM bridge recognizes `relativePath = RelativePath(true, "prefix",
+  name)` and emits explicit source-to-destination file mappings. Other
+  arbitrary copy actions and content filters still fail closed.
 - Native ZIP-compatible and TAR archive tasks honor captured duplicate
   destination strategies for `INCLUDE`, `EXCLUDE`, and `FAIL`.
 - Native ZIP-compatible and TAR archive tasks honor captured CopySpec
@@ -443,6 +449,13 @@
 - `python3 tools/corpus_runner/run.py --project "$PWD/testing/corpus/copy-symlink-unsupported-kotlin-dsl" --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-copy-symlink-native --verbose` passed 1/1, no fallback, 5/5 task parity, output inventory/hash parity, observed wall time upstream=3435ms and substrate=3556ms.
 - `python3 tools/corpus_runner/run.py --project "$PWD/testing/corpus/archive-symlink-unsupported-kotlin-dsl" --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-archive-symlink-native --verbose` passed 1/1, no fallback, 5/5 task parity, output inventory/hash/archive parity, observed wall time upstream=3799ms and substrate=3564ms.
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --timeout 300 --output-dir build/corpus-authoritative-symlink-native --verbose` passed 23/23, no fallback, 210/210 task parity, output inventory/hash/archive parity, observed wall time upstream=62712ms and substrate=69354ms.
+- `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.jvmhost.ProjectModelProviderAdapterTest.capturesStaticEachFileRelativePathRewriteAsNativeReadyMappings --no-daemon --console=plain` passed after adding the narrow static `eachFile` relative-path mapping capture.
+- `python3 -m unittest tools.corpus_runner.test_run` passed after moving the static `eachFile` corpus project from unsupported to supported.
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --contract-only --output-dir build/corpus-contract-eachfile-supported` passed 24/24 supported corpus contract checks.
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/unsupported-manifest.json --contract-only --output-dir build/corpus-contract-unsupported-after-eachfile` passed 3/3 unsupported corpus contract checks.
+- `./gradlew :distributions-full:install -Pgradle_installPath=$PWD/build/gradle-under-test --no-daemon --console=plain` rebuilt the Gradle-under-test install image with the static `eachFile` bridge contract.
+- `python3 tools/corpus_runner/run.py --project "$PWD/testing/corpus/copy-eachfile-unsupported-kotlin-dsl" --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-copy-eachfile-native-final --verbose` passed 1/1, no fallback, 5/5 task parity, output inventory/hash parity, observed wall time upstream=9862ms and substrate=2713ms.
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --timeout 300 --output-dir build/corpus-authoritative-eachfile-native-final --verbose` passed 24/24, no fallback, 215/215 task parity, output inventory/hash/archive parity, observed wall time upstream=122001ms and substrate=72184ms.
 - `cargo test -p gradle-wrapper` passed after adding wrapper-level Rust substrate CLI modes and minimal DAG plus dependency transport/read-through flag injection tests.
 - `cargo build -p gradle-wrapper` built the native wrapper binary, and `GRADLEW_DISTRIBUTION_DIR=$PWD/build/gradle-under-test target/debug/gradlew --rust-substrate-authoritative -p testing/corpus/java-library-kotlin-dsl clean build --no-daemon --console=plain --info` plus the same command with `--rust-substrate` both executed 12 Gradle tasks through Rust RunBuild, skipped the JVM task executor, and finished successfully. `GRADLEW_DISTRIBUTION_DIR=$PWD/build/gradle-under-test target/debug/gradlew --rust-substrate -p testing/corpus/java-junit-kotlin-dsl clean build --no-daemon --console=plain --info` also executed 12 external-dependency-backed tasks through Rust RunBuild with the JVM task executor skipped.
 - `cargo test -p gradle-wrapper` passed after adding Rust wrapper distribution URL validation and local `file:/` distribution copy support.
