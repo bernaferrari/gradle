@@ -122,6 +122,7 @@ impl CopyTaskExecutor {
         dest: &Path,
         result: &mut TaskResult,
         expand_properties: &[(String, String)],
+        line_replace_filter: Option<&LineReplaceFilter>,
         file_mode: Option<u32>,
         dir_mode: Option<u32>,
     ) -> Result<(), String> {
@@ -131,7 +132,7 @@ impl CopyTaskExecutor {
                 .map_err(|e| format!("Failed to create directory {}: {}", parent.display(), e))?;
             apply_unix_mode(parent, dir_mode)?;
         }
-        let bytes = if expand_properties.is_empty() {
+        let bytes = if expand_properties.is_empty() && line_replace_filter.is_none() {
             tokio::fs::copy(src, dest)
                 .await
                 .map_err(|e| format!("Failed to copy {}: {}", src.display(), e))?
@@ -139,11 +140,11 @@ impl CopyTaskExecutor {
             let data = tokio::fs::read(src)
                 .await
                 .map_err(|e| format!("Failed to read {}: {}", src.display(), e))?;
-            let expanded = expand_bytes(data, expand_properties);
-            tokio::fs::write(dest, &expanded)
+            let transformed = transform_bytes(data, expand_properties, line_replace_filter);
+            tokio::fs::write(dest, &transformed)
                 .await
                 .map_err(|e| format!("Failed to write {}: {}", dest.display(), e))?;
-            expanded.len() as u64
+            transformed.len() as u64
         };
         apply_unix_mode(dest, file_mode)?;
         result.files_processed += 1;
@@ -151,6 +152,12 @@ impl CopyTaskExecutor {
         result.output_files.push(dest.to_path_buf());
         Ok(())
     }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(super) struct LineReplaceFilter {
+    from: Vec<u8>,
+    to: Vec<u8>,
 }
 
 pub(super) fn parse_expand_properties(value: Option<&String>) -> Vec<(String, String)> {
@@ -176,6 +183,70 @@ pub(super) fn expand_bytes(data: Vec<u8>, properties: &[(String, String)]) -> Ve
         text = text.replace(&format!("${}", key), value);
     }
     text.into_bytes()
+}
+
+pub(super) fn parse_line_replace_filter(
+    value: Option<&String>,
+) -> Result<Option<LineReplaceFilter>, String> {
+    let Some(value) = value
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let mut parts = value.split('>');
+    let from = parts
+        .next()
+        .ok_or_else(|| "Copy filter is missing source literal".to_string())
+        .and_then(decode_mapping)?;
+    let to = parts
+        .next()
+        .ok_or_else(|| "Copy filter is missing replacement literal".to_string())
+        .and_then(decode_mapping)?;
+    if parts.next().is_some() {
+        return Err("Copy filter has too many fields".to_string());
+    }
+    if from.is_empty() {
+        return Err("Copy filter source literal must not be empty".to_string());
+    }
+    Ok(Some(LineReplaceFilter {
+        from: from.into_bytes(),
+        to: to.into_bytes(),
+    }))
+}
+
+fn transform_bytes(
+    data: Vec<u8>,
+    expand_properties: &[(String, String)],
+    line_replace_filter: Option<&LineReplaceFilter>,
+) -> Vec<u8> {
+    let mut transformed = if expand_properties.is_empty() {
+        data
+    } else {
+        expand_bytes(data, expand_properties)
+    };
+    if let Some(filter) = line_replace_filter {
+        transformed = replace_bytes(&transformed, &filter.from, &filter.to);
+    }
+    transformed
+}
+
+fn replace_bytes(data: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
+    if from.is_empty() {
+        return data.to_vec();
+    }
+    let mut output = Vec::with_capacity(data.len());
+    let mut index = 0;
+    while index < data.len() {
+        if data[index..].starts_with(from) {
+            output.extend_from_slice(to);
+            index += from.len();
+        } else {
+            output.push(data[index]);
+            index += 1;
+        }
+    }
+    output
 }
 
 pub(super) fn duplicate_strategy(input: &TaskInput) -> String {
@@ -480,6 +551,15 @@ impl TaskExecutor for CopyTaskExecutor {
         }
 
         let expand_properties = parse_expand_properties(input.options.get("expand_properties"));
+        let line_replace_filter =
+            match parse_line_replace_filter(input.options.get("copy_line_replace_filter")) {
+                Ok(filter) => filter,
+                Err(e) => {
+                    result.success = false;
+                    result.error_message = e;
+                    return result;
+                }
+            };
         let duplicate_strategy = duplicate_strategy(input);
         let include_patterns = parse_patterns(input.options.get("include_patterns"));
         let exclude_patterns = parse_patterns(input.options.get("exclude_patterns"));
@@ -546,6 +626,7 @@ impl TaskExecutor for CopyTaskExecutor {
                     &dest,
                     &mut result,
                     &expand_properties,
+                    line_replace_filter.as_ref(),
                     file_mode,
                     dir_mode,
                 )
@@ -636,6 +717,7 @@ impl TaskExecutor for CopyTaskExecutor {
                         &dest,
                         &mut result,
                         &expand_properties,
+                        line_replace_filter.as_ref(),
                         file_mode,
                         dir_mode,
                     )
@@ -674,6 +756,7 @@ impl TaskExecutor for CopyTaskExecutor {
                     &dest,
                     &mut result,
                     &expand_properties,
+                    line_replace_filter.as_ref(),
                     file_mode,
                     dir_mode,
                 )
@@ -1144,6 +1227,38 @@ mod tests {
                 .await
                 .unwrap(),
             b"mapped"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_copy_applies_static_line_replace_filter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let dest_dir = tmp.path().join("dest");
+        tokio::fs::create_dir_all(&src_dir).await.unwrap();
+        tokio::fs::write(src_dir.join("message.txt"), b"hello TOKEN\nTOKEN again")
+            .await
+            .unwrap();
+
+        let replacement = format!(
+            "{}>{}",
+            URL_SAFE_NO_PAD.encode("TOKEN"),
+            URL_SAFE_NO_PAD.encode("native-copy-filter")
+        );
+        let executor = CopyTaskExecutor::new();
+        let mut input = TaskInput::new("Copy");
+        input.source_files.push(src_dir);
+        input.target_dir = dest_dir.clone();
+        input
+            .options
+            .insert("copy_line_replace_filter".to_string(), replacement);
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert_eq!(
+            tokio::fs::read(dest_dir.join("message.txt")).await.unwrap(),
+            b"hello native-copy-filter\nnative-copy-filter again"
         );
     }
 }

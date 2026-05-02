@@ -384,6 +384,22 @@
         "project_dependencies": [],
         "toolchains": ["17"]
       }
+    },
+    {
+      "name": "copy-filter-unsupported-kotlin-dsl",
+      "path": "copy-filter-unsupported-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 0,
+        "plugins": ["base"],
+        "tasks": ["copyFiltered"],
+        "outputs": ["build/filtered"],
+        "dependencies": [],
+        "project_dependencies": [],
+        "toolchains": []
+      }
     }
   ]
 }

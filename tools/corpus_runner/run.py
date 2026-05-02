@@ -223,7 +223,12 @@ def scan_project_contract(project_dir: str) -> dict:
         project_dependencies.update(re.findall(r"project\([\"']:([^\"']+)[\"']\)", text))
         toolchains.update(re.findall(r"JavaVersion\.VERSION_([0-9]+)", text))
         toolchains.update(re.findall(r"languageVersion\.set\(JavaLanguageVersion\.of\(([0-9]+)\)\)", text))
-        if re.search(r"tasks\.register<Copy>\([^)]+\)\s*\{.*?\bfilter\s*\{", text, re.DOTALL):
+        has_static_line_replace_filter = re.search(
+            r"tasks\.register<Copy>\([^)]+\)\s*\{.*?\bfilter\s*\{\s*line\s*:\s*String\s*->\s*line\.replace\(\s*\"[^\"]+\"\s*,\s*\"[^\"]*\"\s*\)",
+            text,
+            re.DOTALL,
+        )
+        if re.search(r"tasks\.register<Copy>\([^)]+\)\s*\{.*?\bfilter\s*\{", text, re.DOTALL) and not has_static_line_replace_filter:
             unsupported_features.add("copy-filter-action")
         has_static_eachfile_relative_path = re.search(
             r"tasks\.register<Copy>\([^)]+\)\s*\{.*?\beachFile\s*\{\s*relativePath\s*=\s*RelativePath\(\s*true\s*,\s*\"[^\"]+\"\s*,\s*name\s*\)",
