@@ -299,6 +299,7 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("[\"" + outputFile.getAbsolutePath().replace("\\", "\\\\") + "\",\"expected token\"]", inputs.get("args_json"));
         assertEquals("-Dnative=true -Xmx128m", inputs.get("jvm_args"));
         assertEquals("[\"-Dnative=true\",\"-Xmx128m\"]", inputs.get("jvm_args_json"));
+        assertEquals("256m", inputs.get("max_heap_size"));
         assertEquals("native.prop=from-task", inputs.get("system_properties"));
         assertEquals(workingDir.getAbsolutePath(), inputs.get("working_dir"));
         assertEquals("false", inputs.get("ignore_exit_value"));
@@ -774,6 +775,8 @@ public class ProjectModelProviderAdapterTest {
                     return Arrays.asList(outputFile.getAbsolutePath(), "expected token");
                 case "getJvmArgs":
                     return Arrays.asList("-Dnative=true", "-Xmx128m");
+                case "getMaxHeapSize":
+                    return "256m";
                 case "getSystemProperties":
                     return Collections.singletonMap("native.prop", "from-task");
                 case "getWorkingDir":
@@ -1354,6 +1357,7 @@ public class ProjectModelProviderAdapterTest {
         ValueProvider getMainClass();
         Iterable<String> getArgs();
         Iterable<String> getJvmArgs();
+        String getMaxHeapSize();
         Map<String, String> getSystemProperties();
         File getWorkingDir();
         boolean isIgnoreExitValue();

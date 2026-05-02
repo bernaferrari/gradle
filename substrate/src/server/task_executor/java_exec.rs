@@ -34,6 +34,17 @@ impl JavaExecTaskExecutor {
             .map(|prop| format!("-D{}", prop))
             .collect()
     }
+
+    fn max_heap_arg(max_heap_size: Option<&str>) -> Option<String> {
+        let value = max_heap_size
+            .map(str::trim)
+            .filter(|value| !value.is_empty())?;
+        if value.starts_with("-Xmx") {
+            Some(value.to_string())
+        } else {
+            Some(format!("-Xmx{}", value))
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -80,6 +91,11 @@ impl TaskExecutor for JavaExecTaskExecutor {
         let java = Self::java_executable(input.options.get("java_home").map(String::as_str));
 
         let mut command = Command::new(&java);
+        if let Some(max_heap) =
+            Self::max_heap_arg(input.options.get("max_heap_size").map(String::as_str))
+        {
+            command.arg(max_heap);
+        }
         command.args(option_string_list(
             &input.options,
             "jvm_args_json",
@@ -235,6 +251,19 @@ mod tests {
             vec!["-Dkey=value".to_string()]
         );
         assert!(JavaExecTaskExecutor::system_property_args(Some(" ")).is_empty());
+    }
+
+    #[test]
+    fn test_java_exec_max_heap_arg_normalizes_gradle_contract() {
+        assert_eq!(
+            JavaExecTaskExecutor::max_heap_arg(Some("256m")),
+            Some("-Xmx256m".to_string())
+        );
+        assert_eq!(
+            JavaExecTaskExecutor::max_heap_arg(Some("-Xmx1g")),
+            Some("-Xmx1g".to_string())
+        );
+        assert_eq!(JavaExecTaskExecutor::max_heap_arg(Some(" ")), None);
     }
 
     #[tokio::test]
