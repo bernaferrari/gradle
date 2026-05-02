@@ -12,6 +12,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -96,6 +97,24 @@ public class SubstrateLifecycleTest {
         DaemonLauncher launcher = DaemonLauncher.of(tempDir.resolve("daemon").toFile(), tempDir.toFile());
 
         assertEquals(tempDir.resolve("substrate.tcp-endpoint").toString(), launcher.getTcpEndpointPath());
+    }
+
+    @Test
+    public void shadowModeDoesNotStartJvmHostUnlessExplicitlyRequested() {
+        Map<String, String> values = new HashMap<>();
+        values.put(RustSubstrateOptions.SUBSTRATE_MODE.getPropertyName(), "shadow");
+
+        assertTrue(RustSubstrateOptions.isSubstrateEnabled(new DefaultInternalOptions(values)));
+        assertFalse(RustBridgeCoreServices.shouldEnableJvmHost(new DefaultInternalOptions(values)));
+    }
+
+    @Test
+    public void explicitJvmHostFlagStillEnablesCompatibilityBackchannel() {
+        Map<String, String> values = new HashMap<>();
+        values.put(RustSubstrateOptions.ENABLE_SUBSTRATE.getPropertyName(), "true");
+        values.put(RustSubstrateOptions.ENABLE_JVM_HOST.getPropertyName(), "true");
+
+        assertTrue(RustBridgeCoreServices.shouldEnableJvmHost(new DefaultInternalOptions(values)));
     }
 
     private static DefaultInternalOptions options(boolean enabled, boolean authoritative, File daemonBinary) {
