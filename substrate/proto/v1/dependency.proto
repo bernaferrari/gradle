@@ -55,6 +55,10 @@ message ResolveDependenciesRequest {
   ResolutionStrategyConfig resolution_strategy = 6;
   // Target scope for resolution (e.g., "compile", "runtime").
   string target_scope = 7;
+  // If true, fetch resolved Maven artifacts into the Rust artifact store.
+  // This is intentionally opt-in; callers that only need graph metadata should
+  // not pay artifact download cost.
+  bool prefetch_artifacts = 8;
 }
 
 message ResolvedDependency {

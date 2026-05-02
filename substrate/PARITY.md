@@ -112,6 +112,11 @@
   hits against requested SHA-256 values, populates the warm artifact cache
   immediately after a successful streamed download commit, and can verify
   checksums from persisted artifacts.
+- Native dependency resolution has an opt-in `prefetch_artifacts` mode for
+  static Maven artifact URLs. When requested, Rust resolves the graph, fetches
+  each supported resolved artifact into the Rust artifact store, writes
+  `.sha256` sidecars, returns artifact size/SHA-256 on the resolved nodes, and
+  fails closed for unsupported artifact URL shapes instead of pretending parity.
 - Rust artifact cache identity includes classifier and normalized extension, so
   in-memory warm hits cannot collide different artifact shapes for the same
   Maven coordinate.
@@ -147,10 +152,10 @@
   including non-JAR artifacts with explicit extensions. Cache misses fall back
   to Gradle's normal remote resolver. The Java bridge read-through path is
   covered by gated E2E tests against a real Rust daemon and artifact store.
-- The first-60-seconds demo now proves artifact read-through, metadata
-  read-through, and uncached resource download seams in one focused Gradle test
-  invocation, keeping the visible demo centered on Rust-backed dependency work
-  instead of repeated Gradle test startup.
+- The first-60-seconds demo now proves static Maven artifact prefetch, artifact
+  read-through, metadata read-through, and uncached resource download seams in
+  focused checks, keeping the visible demo centered on Rust-backed dependency
+  work instead of repeated Gradle test startup.
 - Dependency read-through registries are configured from eager JVM-host bridge
   wiring, not the lazy dependency shadow listener, so normal installed Gradle
   builds can enable Rust metadata/artifact/download seams before dependency
@@ -310,7 +315,7 @@
 - `build/gradle-under-test/bin/gradle -p testing/corpus/java-library-kotlin-dsl clean classes --no-daemon --console=plain -Dorg.gradle.rust.substrate.enabled=true -Dorg.gradle.rust.substrate.daemon.path=$PWD/target/debug/gradle-substrate-daemon -Dorg.gradle.rust.substrate.hashing.enabled=true -Dorg.gradle.rust.substrate.hashing.authoritative=true -Dorg.gradle.rust.substrate.fingerprint.enabled=true -Dorg.gradle.rust.substrate.fingerprint.authoritative=true -Dorg.gradle.rust.substrate.snapshotting.enabled=true -Dorg.gradle.rust.substrate.snapshotting.authoritative=true`
 - `build/gradle-under-test/bin/gradle -p testing/corpus/java-library-kotlin-dsl classes --no-daemon --console=plain -Dorg.gradle.rust.substrate.enabled=true -Dorg.gradle.rust.substrate.daemon.path=$PWD/target/debug/gradle-substrate-daemon -Dorg.gradle.rust.substrate.hashing.enabled=true -Dorg.gradle.rust.substrate.hashing.authoritative=true -Dorg.gradle.rust.substrate.fingerprint.enabled=true -Dorg.gradle.rust.substrate.fingerprint.authoritative=true -Dorg.gradle.rust.substrate.snapshotting.enabled=true -Dorg.gradle.rust.substrate.snapshotting.authoritative=true`
 - `python3 tools/performance/rust_substrate_perf_report.py build/corpus-authoritative-21/corpus_summary.json --output build/corpus-authoritative-21/performance.md`
-- `python3 tools/demo/first_60_seconds.py --output build/first60-real-build-readthrough.json` passed with daemon socket ready=15.0ms, Rust dependency transport/store/checksum=1007.2ms, metadata cache=267.8ms, dynamic metadata cache=272.0ms, shared artifact/metadata read-through Gradle proof=17068.8ms, real-build read-through=27006.5ms with remote requests avoided=3/3 and output SHA-256 `755f05d20eda43d6e382dd77da1c48760946d5a5a9d5f51b4dc7d5d94ad1dbe9`, file-watch first event=11ms.
+- `python3 tools/demo/first_60_seconds.py --output build/first60-static-prefetch-final.json` passed with daemon socket ready=546.4ms, Rust dependency transport/store/checksum=774.3ms, metadata cache=294.9ms, dynamic metadata cache=265.9ms, static Maven prefetch=268.2ms, shared artifact/metadata read-through Gradle proof=8302.8ms, real-build read-through=25457.9ms with remote requests avoided=3/3 and deterministic output SHA-256 `742d753d434f2e408762a9cbcc75621c441e0ed5dea5961d65b05ff3013575fc`, file-watch first event=12ms.
 - `./tools/stabilization/run_strict_stabilization.sh quick`
 - `./tools/demo/rust_substrate_demo.sh --quick`
 
