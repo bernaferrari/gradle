@@ -218,11 +218,15 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
             return 0;
         }
 
-        List<DependencyDescriptor> descriptors = staticMavenDependencyDescriptors(dependencies);
-        if (descriptors.isEmpty()) {
+        List<DependencyDescriptor> declaredDescriptors = staticMavenDependencyDescriptors(dependencies);
+        if (declaredDescriptors.isEmpty()) {
             return 0;
         }
-        if (!resolvedGraphContainsAll(descriptors, result)) {
+        if (!resolvedGraphContainsAll(declaredDescriptors, result)) {
+            return 0;
+        }
+        List<DependencyDescriptor> descriptors = staticMavenDependencyDescriptors(result);
+        if (descriptors.isEmpty()) {
             return 0;
         }
 
@@ -261,6 +265,39 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
             }
         }
         return true;
+    }
+
+    private List<DependencyDescriptor> staticMavenDependencyDescriptors(ResolutionResult result) {
+        List<DependencyDescriptor> descriptors = new ArrayList<>();
+        try {
+            for (ResolvedComponentResult component : result.getAllComponents()) {
+                ComponentIdentifier id = component.getId();
+                if (!(id instanceof ModuleComponentIdentifier)) {
+                    continue;
+                }
+                DependencyDescriptor descriptor = staticMavenDependencyDescriptor((ModuleComponentIdentifier) id);
+                if (descriptor == null) {
+                    return Collections.emptyList();
+                }
+                if (!containsDescriptor(descriptors, descriptor)) {
+                    descriptors.add(descriptor);
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.debug("[substrate:dep-resolve] resolved graph prefetch contract capture failed", e);
+            return Collections.emptyList();
+        }
+        return Collections.unmodifiableList(descriptors);
+    }
+
+    private static boolean containsDescriptor(List<DependencyDescriptor> descriptors, DependencyDescriptor candidate) {
+        return descriptors.stream().anyMatch(existing ->
+            existing.getGroup().equals(candidate.getGroup())
+                && existing.getName().equals(candidate.getName())
+                && existing.getVersion().equals(candidate.getVersion())
+                && existing.getClassifier().equals(candidate.getClassifier())
+                && existing.getExtension().equals(candidate.getExtension())
+        );
     }
 
     private List<DependencyDescriptor> staticMavenDependencyDescriptors(ResolvableDependencies dependencies) {
@@ -323,6 +360,23 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
             .setVersion(version)
             .setClassifier(classifier)
             .setExtension(extension)
+            .setTransitive(false)
+            .build();
+    }
+
+    private DependencyDescriptor staticMavenDependencyDescriptor(ModuleComponentIdentifier id) {
+        String group = id.getGroup();
+        String name = id.getModule();
+        String version = id.getVersion();
+        if (isBlank(group) || isBlank(name) || isBlank(version) || !isStaticVersion(version)) {
+            return null;
+        }
+        return DependencyDescriptor.newBuilder()
+            .setGroup(group)
+            .setName(name)
+            .setVersion(version)
+            .setClassifier("")
+            .setExtension("jar")
             .setTransitive(false)
             .build();
     }

@@ -36,8 +36,9 @@ smoke timing, URL metadata-store warming through Rust transport, opt-in static
 Maven artifact prefetch through Rust `ResolveDependencies`, Gradle artifact/POM
 read-through from the Rust cache, isolated real-build remote requests avoided
 when a local Gradle-under-test install is present, listener static artifact
-prefetch in that installed build, and native file-watch first-event latency
-without relying on full-build timing. The Gradle
+prefetch for direct and transitive artifacts in that installed build, and
+native file-watch first-event latency without relying on full-build timing. The
+Gradle
 read-through checks share one focused test invocation so the demo stays inside
 the first minute while still proving artifact, metadata, and uncached-download
 Rust seams.

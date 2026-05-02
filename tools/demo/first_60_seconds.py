@@ -267,6 +267,13 @@ def write_maven_module(repo: Path) -> None:
         "<groupId>org.test</groupId>"
         "<artifactId>projectStatic</artifactId>"
         "<version>1.0</version>"
+        "<dependencies>"
+        "<dependency>"
+        "<groupId>org.test</groupId>"
+        "<artifactId>projectStaticChild</artifactId>"
+        "<version>1.0</version>"
+        "</dependency>"
+        "</dependencies>"
         "</project>",
         encoding="utf-8",
     )
@@ -275,6 +282,23 @@ def write_maven_module(repo: Path) -> None:
         entry.date_time = (1980, 1, 1, 0, 0, 0)
         entry.compress_type = zipfile.ZIP_STORED
         jar.writestr(entry, "static-prefetch-payload\n")
+
+    static_child_dir = repo / "org" / "test" / "projectStaticChild" / "1.0"
+    static_child_dir.mkdir(parents=True, exist_ok=True)
+    (static_child_dir / "projectStaticChild-1.0.pom").write_text(
+        "<project>"
+        "<modelVersion>4.0.0</modelVersion>"
+        "<groupId>org.test</groupId>"
+        "<artifactId>projectStaticChild</artifactId>"
+        "<version>1.0</version>"
+        "</project>",
+        encoding="utf-8",
+    )
+    with zipfile.ZipFile(static_child_dir / "projectStaticChild-1.0.jar", "w") as jar:
+        entry = zipfile.ZipInfo("projectStaticChild-1.0.txt")
+        entry.date_time = (1980, 1, 1, 0, 0, 0)
+        entry.compress_type = zipfile.ZIP_STORED
+        jar.writestr(entry, "static-prefetch-child-payload\n")
 
 
 class CountingHttpServer(socketserver.ThreadingTCPServer):
@@ -391,17 +415,25 @@ tasks.register("retrieveStatic", Sync) {
 
         first, first_requests = run_gradle(temp / "gradle-home-1", ["resolveStaticGraph", "retrieve"])
         static_graph_file = project / "build" / "resolution" / "static-graph.txt"
+        static_graph_text = static_graph_file.read_text() if static_graph_file.exists() else ""
         static_graph_recorded = (
-            static_graph_file.exists() and "org.test:projectStatic:1.0" in static_graph_file.read_text()
+            "org.test:projectStatic:1.0" in static_graph_text
+            and "org.test:projectStaticChild:1.0" in static_graph_text
         )
         shutil.rmtree(project / "build", ignore_errors=True)
         second, second_requests = run_gradle(temp / "gradle-home-2", ["retrieve", "retrieveStatic"])
 
         output_file = project / "build" / "libs" / "projectA-1.5.jar"
         static_output_file = project / "build" / "static-libs" / "projectStatic-1.0.jar"
+        static_child_output_file = project / "build" / "static-libs" / "projectStaticChild-1.0.jar"
         output_sha256 = hashlib.sha256(output_file.read_bytes()).hexdigest() if output_file.exists() else None
         static_output_sha256 = (
             hashlib.sha256(static_output_file.read_bytes()).hexdigest() if static_output_file.exists() else None
+        )
+        static_child_output_sha256 = (
+            hashlib.sha256(static_child_output_file.read_bytes()).hexdigest()
+            if static_child_output_file.exists()
+            else None
         )
         elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
         remote_requests_avoided = len(first_requests) - len(second_requests)
@@ -412,6 +444,7 @@ tasks.register("retrieveStatic", Sync) {
             and len(second_requests) == 0
             and output_file.exists()
             and static_output_file.exists()
+            and static_child_output_file.exists()
             and static_graph_recorded
         )
         output = first.stdout + first.stderr + "\n--- second run ---\n" + second.stdout + second.stderr
@@ -425,6 +458,7 @@ tasks.register("retrieveStatic", Sync) {
             "remote_requests_avoided": remote_requests_avoided,
             "output_sha256": output_sha256,
             "static_prefetch_output_sha256": static_output_sha256,
+            "static_prefetch_child_output_sha256": static_child_output_sha256,
             "static_prefetch_graph_recorded": static_graph_recorded,
             "first_run_requests": first_requests,
             "second_run_requests": second_requests,
@@ -452,7 +486,8 @@ def print_summary(results: list[dict[str, object]]) -> None:
             extra = (
                 f", remote avoided {result['remote_requests_avoided']}/"
                 f"{result['first_run_remote_requests']}, output {result['output_sha256']}, "
-                f"static {result['static_prefetch_output_sha256']}"
+                f"static {result['static_prefetch_output_sha256']}, "
+                f"static child {result['static_prefetch_child_output_sha256']}"
             )
         elif result.get("runtime_metric_ms") is not None:
             extra = f", first event {result['runtime_metric_ms']}ms"
