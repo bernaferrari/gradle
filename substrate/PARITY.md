@@ -119,7 +119,8 @@
   into the Rust store with a single streaming copy+SHA pass and atomic commit,
   and Rust rejects caller-provided SHA-256 mismatches or missing local files
   instead of caching them. Warm artifact-cache entries fail closed and are
-  evicted when the persisted file has disappeared.
+  evicted when the persisted file has disappeared; URL metadata warm-cache
+  entries follow the same stale-file eviction behavior.
 - Native dependency resolution has an opt-in `prefetch_artifacts` mode for
   static Maven artifact URLs. When requested, Rust resolves the graph, fetches
   each supported resolved artifact into the Rust artifact store, writes
@@ -319,6 +320,7 @@
 - `cargo test -p gradle-substrate-daemon test_add_artifact_to_cache -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_artifact_cache_rejects_missing_local_file -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_warm_artifact_cache_miss_when_file_disappears -- --nocapture`
+- `cargo test -p gradle-substrate-daemon test_warm_metadata_cache_evicts_missing_file -- --nocapture`
 - `cargo test -q -p gradle-substrate-daemon server::file_fingerprint::tests -- --nocapture`
 - `./gradlew :rust-bridge:compileJava :core:compileJava --no-daemon --console=plain`
 - `cargo build -q -p gradle-substrate-daemon`
