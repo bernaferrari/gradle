@@ -16,10 +16,6 @@ import org.gradle.internal.service.scopes.ServiceScope;
 import org.slf4j.Logger;
 
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 
@@ -205,7 +201,6 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
         }
         String classifier = inferClassifier(file.getName(), moduleId.getModule(), moduleId.getVersion(), extension);
         try {
-            String sha256 = sha256(file);
             boolean accepted = client.addArtifactToCache(
                 moduleId.getGroup(),
                 moduleId.getModule(),
@@ -214,7 +209,7 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
                 extension,
                 file.getAbsolutePath(),
                 file.length(),
-                sha256
+                ""
             );
             if (!accepted) {
                 mismatchReporter.reportRustError(
@@ -256,33 +251,6 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
             return "";
         }
         return fileName.substring(dot + 1);
-    }
-
-    static String sha256(File file) throws IOException {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] buffer = new byte[64 * 1024];
-            try (FileInputStream input = new FileInputStream(file)) {
-                int read;
-                while ((read = input.read(buffer)) >= 0) {
-                    if (read > 0) {
-                        digest.update(buffer, 0, read);
-                    }
-                }
-            }
-            return toHex(digest.digest());
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 digest is not available", e);
-        }
-    }
-
-    private static String toHex(byte[] bytes) {
-        StringBuilder out = new StringBuilder(bytes.length * 2);
-        for (byte value : bytes) {
-            out.append(Character.forDigit((value >> 4) & 0x0f, 16));
-            out.append(Character.forDigit(value & 0x0f, 16));
-        }
-        return out.toString();
     }
 
     private String recordResolutionInMode(
