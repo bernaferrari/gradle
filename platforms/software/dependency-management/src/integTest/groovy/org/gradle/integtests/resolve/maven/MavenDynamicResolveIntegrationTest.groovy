@@ -23,6 +23,66 @@ import static org.gradle.internal.resource.transport.http.JavaSystemPropertiesHt
 
 class MavenDynamicResolveIntegrationTest extends AbstractHttpDependencyResolutionTest {
 
+    def "rust listener prefetches static maven artifact for later no-remote read-through"() {
+        given:
+        def daemonBinary = substrateDaemonBinary()
+        Assume.assumeTrue("Rust substrate daemon binary is required for this integration smoke: ${daemonBinary}", daemonBinary.isFile())
+
+        def substrateHome = file("substrate-home")
+        configureRustDependencyPath(daemonBinary, substrateHome, true)
+
+        def module = mavenHttpRepo.module("org.test", "projectStatic", "1.0").publish()
+
+        buildFile << """
+repositories {
+    maven { url = "${mavenHttpRepo.uri}" }
+}
+
+configurations { compile }
+
+dependencies {
+    compile("org.test:projectStatic:1.0")
+}
+
+tasks.register("resolveGraph") {
+    def outputFile = layout.buildDirectory.file("resolution/graph.txt")
+    outputs.file(outputFile)
+    doLast {
+        def modules = configurations.compile.incoming.resolutionResult.allComponents
+            .collect { it.moduleVersion }
+            .findAll { it != null }
+            .collect { "\${it.group}:\${it.name}:\${it.version}" }
+            .sort()
+        outputFile.get().asFile.text = modules.join("\\n")
+    }
+}
+
+task retrieve(type: Sync) {
+    from configurations.compile
+    into 'libs'
+}
+"""
+
+        and:
+        module.pom.expectGet()
+        module.artifact.expectGet()
+
+        when:
+        run "resolveGraph"
+
+        then:
+        file("build/resolution/graph.txt").text.contains("org.test:projectStatic:1.0")
+
+        when:
+        server.resetExpectations()
+        executer.withGradleUserHomeDir(file("second-user-home"))
+        run "retrieve"
+
+        then:
+        file("libs").assertHasDescendants("projectStatic-1.0.jar")
+        file("libs/projectStatic-1.0.jar").assertIsCopyOf(module.artifactFile)
+    }
+
     def "rust transport warms dynamic version metadata for later no-remote read-through"() {
         given:
         def daemonBinary = substrateDaemonBinary()
@@ -533,7 +593,7 @@ Searched in the following locations:
          """
     }
 
-    private void configureRustDependencyPath(File daemonBinary, File substrateHome) {
+    private void configureRustDependencyPath(File daemonBinary, File substrateHome, boolean prefetchArtifacts = false) {
         executer.beforeExecute {
             executer.withArgument("--no-daemon")
             executer.withArgument("-Duser.home=${substrateHome.absolutePath}")
@@ -542,6 +602,9 @@ Searched in the following locations:
             executer.withArgument("-Dorg.gradle.rust.substrate.dependency.download.enabled=true")
             executer.withArgument("-Dorg.gradle.rust.substrate.dependency.readthrough.metadata=true")
             executer.withArgument("-Dorg.gradle.rust.substrate.dependency.readthrough.artifacts=true")
+            if (prefetchArtifacts) {
+                executer.withArgument("-Dorg.gradle.rust.substrate.dependency.prefetch.artifacts=true")
+            }
             executer.withArgument("-Dorg.gradle.rust.substrate.daemon.path=${daemonBinary.absolutePath}")
         }
     }
