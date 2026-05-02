@@ -33,7 +33,9 @@ python3 tools/demo/first_60_seconds.py --output build/first60.json
 
 That reports daemon socket readiness, Rust dependency-transport/store/checksum
 smoke timing, URL metadata-store warming through Rust transport, Gradle
-artifact/POM read-through from the Rust cache, and native file-watch first-event
-latency without relying on full-build timing. The Gradle read-through checks
-share one focused test invocation so the demo stays inside the first minute
-while still proving artifact, metadata, and uncached-download Rust seams.
+artifact/POM read-through from the Rust cache, isolated real-build remote
+requests avoided when a local Gradle-under-test install is present, and native
+file-watch first-event latency without relying on full-build timing. The Gradle
+read-through checks share one focused test invocation so the demo stays inside
+the first minute while still proving artifact, metadata, and uncached-download
+Rust seams.
