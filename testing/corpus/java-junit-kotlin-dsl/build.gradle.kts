@@ -20,6 +20,10 @@ dependencies {
 }
 
 tasks.test {
+    filter {
+        includeTestsMatching("org.gradle.substrate.corpus.junit.*Test")
+        excludeTestsMatching("org.gradle.substrate.corpus.junit.Legacy*")
+    }
     useJUnitPlatform {
         includeTags("fast")
         excludeTags("slow")

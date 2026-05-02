@@ -1533,6 +1533,18 @@ fn task_options(
         insert_input_option(task, &mut options, "system_properties", "system_properties");
         insert_input_option(task, &mut options, "scan_classpath", "scan_classpath");
         insert_input_option(task, &mut options, "test_filter", "test_filter");
+        insert_input_option(
+            task,
+            &mut options,
+            "test_filter_includes",
+            "test_filter_includes",
+        );
+        insert_input_option(
+            task,
+            &mut options,
+            "test_filter_excludes",
+            "test_filter_excludes",
+        );
         insert_input_option(task, &mut options, "include_tags", "include_tags");
         insert_input_option(task, &mut options, "exclude_tags", "exclude_tags");
         insert_max_heap_option(task, &mut options);
@@ -2919,6 +2931,20 @@ mod tests {
                     optional: false,
                 },
                 super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "test_filter_includes".to_string(),
+                    kind: "value".to_string(),
+                    value: "example.*Test".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "test_filter_excludes".to_string(),
+                    kind: "value".to_string(),
+                    value: "example.Legacy*".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
                     name: "include_tags".to_string(),
                     kind: "value".to_string(),
                     value: "fast,integration".to_string(),
@@ -2956,6 +2982,11 @@ mod tests {
         assert_eq!(context["options"]["max_heap_mb"], "1024");
         assert_eq!(context["options"]["scan_classpath"], "true");
         assert_eq!(context["options"]["test_filter"], "example.*Test");
+        assert_eq!(context["options"]["test_filter_includes"], "example.*Test");
+        assert_eq!(
+            context["options"]["test_filter_excludes"],
+            "example.Legacy*"
+        );
         assert_eq!(context["options"]["include_tags"], "fast,integration");
         assert_eq!(context["options"]["exclude_tags"], "slow");
     }

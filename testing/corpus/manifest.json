@@ -400,6 +400,22 @@
         "project_dependencies": [],
         "toolchains": []
       }
+    },
+    {
+      "name": "test-filters-unsupported-kotlin-dsl",
+      "path": "test-filters-unsupported-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 1,
+        "plugins": ["java"],
+        "tasks": ["test"],
+        "outputs": ["build/test-results/test"],
+        "dependencies": [],
+        "project_dependencies": [],
+        "toolchains": []
+      }
     }
   ]
 }

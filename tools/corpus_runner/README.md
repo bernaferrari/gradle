@@ -114,18 +114,19 @@ Zip/Tar nested CopySpec mappings, Zip/Tar gzip+bzip2/War/Ear archive builds,
 simple Java launcher Exec and JavaExec tasks, native Javadoc, and simple
 Copy/Zip file-symlink inputs that Gradle follows as target bytes, plus a
 static `eachFile` relative-path rewrite captured as explicit copy mappings and
-a static `filter { line.replace(...) }` literal replacement. The
+a static `filter { line.replace(...) }` literal replacement, plus class-name
+Test include/exclude filters. The
 optional offline corpus also includes an OSS-style Java library slice with
 sources JAR/Javadoc/static report outputs. The optional `testing/corpus/external-manifest.json`
 adds pinned external-dependency builds for real non-empty JUnit Platform test
-execution with include/exclude tag filtering plus a richer dependency
-constraints/exclusion sample, and requires network or a warm Gradle dependency
-cache.
+execution with include/exclude tag filtering and class-name Test filters, plus
+a richer dependency constraints/exclusion sample, and requires network or a warm
+Gradle dependency cache.
 `testing/corpus/unsupported-manifest.json` tracks work that must not be
 approximated natively until a complete contract exists. It covers custom JVM
 task actions beyond static literal file writes, unsupported CopySpec actions
 and filter shapes beyond the static relative-path rewrite and static literal
-line replacement, and unsupported Test filter combinations.
+line replacement, and method-level Test filters.
 
 Reference-mode runs compare upstream Gradle and Rust substrate exit codes, task
 lists, and stable build output file inventories under `build/classes`,

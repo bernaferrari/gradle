@@ -215,8 +215,14 @@ def scan_project_contract(project_dir: str) -> dict:
 
         tasks.update(re.findall(r"tasks\.register(?:<[^>]+>)?\([\"']([^\"']+)[\"']", text))
         tasks.update(re.findall(r"^\s*task\s+([A-Za-z_][A-Za-z0-9_]*)\b", text, re.MULTILINE))
-        has_unsupported_test_filters = re.search(r"includeTestsMatching\(", text) and re.search(r"excludeTestsMatching\(", text)
-        if has_unsupported_test_filters:
+        test_filter_patterns = re.findall(
+            r"(?:includeTestsMatching|excludeTestsMatching)\(\s*[\"']([^\"']+)[\"']\s*\)",
+            text,
+        )
+        has_unsupported_test_filters = bool(test_filter_patterns) and not all(
+            looks_like_class_test_filter(pattern) for pattern in test_filter_patterns
+        )
+        if test_filter_patterns:
             tasks.add("test")
         outputs.update(re.findall(r"outputs\.(?:dir|file)\([\"']([^\"']+)[\"']\)", text))
         dependencies.update(re.findall(r"[\"']([A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[^\"']+)[\"']", text))
@@ -252,6 +258,15 @@ def scan_project_contract(project_dir: str) -> dict:
         "toolchains": sorted(toolchains),
         "unsupported_features": sorted(unsupported_features),
     }
+
+
+def looks_like_class_test_filter(pattern: str) -> bool:
+    if not pattern or "#" in pattern or " " in pattern:
+        return False
+    last_segment = pattern.rsplit(".", 1)[-1]
+    if not last_segment:
+        return False
+    return last_segment[0] in "*?" or last_segment[0].isupper()
 
 
 def compare_contract(actual: dict, expected: dict) -> list[str]:

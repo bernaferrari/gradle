@@ -78,11 +78,11 @@
   bootstrap/upstream Gradle runs that do not emit a substrate run-build signal.
 - A separate networked external-dependency corpus proves native Java compile and
   `TestExec` lowering for dependency-backed builds: a non-empty JUnit Platform
-  test task with include/exclude tag capture plus a dependency
+  test task with include/exclude tag and class-name filter capture plus a dependency
   constraints/exclusions sample.
-- Native `TestExec` lowering captures a single Gradle include test filter and
-  JUnit Platform include/exclude tags, and fails closed for unsupported filter
-  shapes rather than approximating them.
+- Native `TestExec` lowering captures Gradle class-name include/exclude filters
+  and JUnit Platform include/exclude tags, and fails closed for method-level or
+  otherwise unsupported filter shapes rather than approximating them.
 - Native `JavaExec` lowering captures Java home, classpath, main class, max
   heap size, JVM args, system properties, application args, environment,
   working directory, and ignore-exit-value from the JVM task model, and fails
@@ -112,12 +112,10 @@
   `org.gradle.rust.substrate.runbuild.native-ready-default=true` tries Rust
   RunBuild first and delegates back to JVM execution when the selected plan is
   not fully native-ready. The authoritative offline no-fallback corpus now
-  passes 25/25.
+  passes 26/26.
 - `testing/corpus/unsupported-manifest.json` tracks work that must remain
   outside approximate native execution until a complete contract exists. It now
-  covers custom JVM task actions, unsupported CopySpec actions and filter
-  shapes beyond the static relative-path rewrite and static literal line
-  replacement, and unsupported Test filter combinations. Contract-only
+  covers custom JVM task actions and method-level Test filters. Contract-only
   validation covers these 2 known unsupported shapes; the normal
   parity runner intentionally reports
   mismatches for unsupported projects rather than treating approximate native
@@ -294,6 +292,10 @@
   line.replace("from", "to") }` literal replacement when the JVM bridge can
   encode the replacement exactly. Other arbitrary filter closures still fail
   closed.
+- Native `TestExec` can execute class-name include/exclude filters through JUnit
+  Platform `--include-classname`/`--exclude-classname` arguments. Method-level
+  and display-name-style filters still fail closed because they are not
+  equivalent to JUnit class-name filtering.
 - Native ZIP-compatible and TAR archive tasks honor captured duplicate
   destination strategies for `INCLUDE`, `EXCLUDE`, and `FAIL`.
 - Native ZIP-compatible and TAR archive tasks honor captured CopySpec
@@ -327,8 +329,8 @@
 - More task types need native-ready contract capture before broad no-fallback
   execution is realistic, especially arbitrary task actions beyond static
   literal file writes, arbitrary copy filters/actions beyond direct expand,
-  Gradle archive metadata edge cases beyond entry inventory, and native symlink
-  copy/archive semantics.
+  method-level Test filters, Gradle archive metadata edge cases beyond entry
+  inventory, and native symlink copy/archive semantics.
 - External dependency classpaths are now covered by the external corpus through
   Gradle-captured selected task contracts. Project/dependency model capture can
   still be richer, but task execution no longer uses the removed Rust-side
@@ -471,6 +473,16 @@
 - `python3 tools/corpus_runner/run.py --project "$PWD/testing/corpus/copy-filter-unsupported-kotlin-dsl" --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-copy-filter-native --verbose` passed 1/1, no fallback, 5/5 task parity, output inventory/hash parity, observed wall time upstream=10245ms and substrate=3285ms.
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --timeout 300 --output-dir build/corpus-authoritative-copy-filter-native --verbose` passed 25/25, no fallback, 220/220 task parity, output inventory/hash/archive parity, observed wall time upstream=127333ms and substrate=75563ms.
 - `python3 tools/corpus_runner/run.py --project "$PWD/testing/corpus/copy-filter-unsupported-kotlin-dsl" --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-copy-filter-native-final --verbose` passed 1/1 after rebuilding the install image from the final source, no fallback, 5/5 task parity, output inventory/hash parity, observed wall time upstream=10153ms and substrate=2738ms.
+- `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.jvmhost.ProjectModelProviderAdapterTest.capturesNativeReadyTestExecContractFromTaskModel --tests org.gradle.internal.rustbridge.jvmhost.ProjectModelProviderAdapterTest.capturesClassNameTestIncludeAndExcludeFiltersAsNativeReady --no-daemon --console=plain` passed after promoting class-name Test include/exclude filters to native-ready contracts.
+- `cargo test -p gradle-substrate-daemon test_build_command_test_filter -- --nocapture`, `cargo test -p gradle-substrate-daemon test_build_command_include_and_exclude_test_filters -- --nocapture`, `cargo test -p gradle-substrate-daemon test_gradle_test_pattern_to_regex_escapes_regex_metacharacters -- --nocapture`, and `cargo test -p gradle-substrate-daemon test_test_contract_lowers_to_native_test_exec_with_context_options -- --nocapture` passed after mapping Gradle class-name filters to JUnit Platform include/exclude classname regexes.
+- `python3 -m unittest tools.corpus_runner.test_run` passed after moving the class-only Test filter corpus project from unsupported to supported and adding a method-level Test filter project that remains fail-closed.
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --contract-only --output-dir build/corpus-contract-test-filters-supported` passed 26/26 supported corpus contract checks.
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/unsupported-manifest.json --contract-only --output-dir build/corpus-contract-unsupported-after-test-filters` passed 2/2 unsupported corpus contract checks.
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --contract-only --output-dir build/corpus-contract-external-test-filters` passed 2/2 external corpus contract checks.
+- `./gradlew :distributions-full:install -Pgradle_installPath=$PWD/build/gradle-under-test --no-daemon --console=plain` rebuilt the Gradle-under-test install image with the Test filter bridge contract.
+- `python3 tools/corpus_runner/run.py --project "$PWD/testing/corpus/test-filters-unsupported-kotlin-dsl" --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-test-filters-native --verbose` passed 1/1, no fallback, 12/12 task parity, output inventory/hash/archive parity, observed wall time upstream=14584ms and substrate=4892ms.
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-external-test-filters-native --verbose` passed 2/2, no fallback, 25/25 task parity, output inventory/hash/archive parity, observed wall time upstream=23368ms and substrate=9476ms. The JUnit sample includes a failing legacy test class that must be excluded by the native class-name filter.
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --timeout 300 --output-dir build/corpus-authoritative-test-filters-native --verbose` passed 26/26, no fallback, 232/232 task parity, output inventory/hash/archive parity, observed wall time upstream=147796ms and substrate=83649ms.
 - `cargo test -p gradle-wrapper` passed after adding wrapper-level Rust substrate CLI modes and minimal DAG plus dependency transport/read-through flag injection tests.
 - `cargo build -p gradle-wrapper` built the native wrapper binary, and `GRADLEW_DISTRIBUTION_DIR=$PWD/build/gradle-under-test target/debug/gradlew --rust-substrate-authoritative -p testing/corpus/java-library-kotlin-dsl clean build --no-daemon --console=plain --info` plus the same command with `--rust-substrate` both executed 12 Gradle tasks through Rust RunBuild, skipped the JVM task executor, and finished successfully. `GRADLEW_DISTRIBUTION_DIR=$PWD/build/gradle-under-test target/debug/gradlew --rust-substrate -p testing/corpus/java-junit-kotlin-dsl clean build --no-daemon --console=plain --info` also executed 12 external-dependency-backed tasks through Rust RunBuild with the JVM task executor skipped.
 - `cargo test -p gradle-wrapper` passed after adding Rust wrapper distribution URL validation and local `file:/` distribution copy support.
@@ -501,15 +513,15 @@
 
 ## Next Sync Actions
 
-1. Add native-ready contracts for richer `Copy`/`Sync` specs and the next common
-   process task after `Javadoc`.
-2. Continue replacing dependency-resolution pieces with narrow, parity-tested
-   Rust services while Gradle remains the source of truth for full variant and
-   conflict semantics.
-3. Extend authoritative Rust file-collection snapshotting beyond direct
-   files/directories/file trees/archive-backed files to symlink semantics and
-   special files, or keep those cases explicitly unsupported.
-4. Design a global/user-home VFS bridge that does not leak build-session
-   services into global scopes.
-5. Reduce bridge source exclusions as APIs are stabilized.
-6. Track upstream commit synchronization in this file for each parity push.
+1. Execute Beads roadmap `gradle-fork-dyy`: Rust owns CLI launch, daemon state,
+   plan-cache hit execution, DAG scheduling, VFS/snapshots, caches, dependency
+   transport/resolution, worker orchestration, and standard task execution.
+2. Keep Groovy/Kotlin DSL evaluation, arbitrary `buildSrc`/JVM plugin code, and
+   reflection-heavy Gradle APIs as compatibility islands behind typed,
+   fail-closed contracts.
+3. Prioritize first-60s visible wins: native CLI startup/prewarm, no-op VFS
+   responsiveness, Rust dependency fetch/read-through, and default Rust DAG for
+   native-ready standard builds.
+4. Continue reducing the bridge to an IR/compatibility boundary rather than an
+   execution path, with every fallback reason observable and tracked.
+5. Track upstream commit synchronization in this file for each parity push.
