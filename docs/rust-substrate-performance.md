@@ -31,11 +31,12 @@ For first-minute demo evidence, run the fast path first:
 python3 tools/demo/first_60_seconds.py --mode fast --output build/first60.json
 ```
 
-That reports daemon socket readiness, an authoritative Rust `RunBuild` of a
-small Java-library corpus project with zero JVM task forwards, isolated
-real-build remote requests avoided when a local Gradle-under-test install is
-present, listener static artifact prefetch for direct and transitive artifacts
-in that installed build, and native file-watch first-event latency.
+That reports daemon socket readiness, cold and warm authoritative Rust
+`RunBuild` invocations of a small Java-library corpus project with zero JVM
+task forwards, isolated real-build remote requests avoided when a local
+Gradle-under-test install is present, listener static artifact prefetch for
+direct and transitive artifacts in that installed build, and native file-watch
+first-event latency.
 
 For the heavier proof harness, run:
 

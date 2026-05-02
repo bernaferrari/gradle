@@ -196,12 +196,12 @@
   covered by gated E2E tests against a real Rust daemon and artifact store.
 - The first-60-seconds demo has a fast mode for user-visible wins and a proof
   mode for heavier subsystem checks. Fast mode reports daemon readiness,
-  explicit authoritative Rust `RunBuild` on a copied Java-library corpus
-  project with zero JVM task forwards, real-build dependency read-through with
-  static direct/transitive prefetch, and native file-watch latency. Proof mode
-  keeps static Maven artifact prefetch, artifact read-through, metadata
-  read-through, and uncached resource download seam checks available without
-  slowing the visible path.
+  cold and warm explicit authoritative Rust `RunBuild` on a copied
+  Java-library corpus project with zero JVM task forwards, real-build
+  dependency read-through with static direct/transitive prefetch, and native
+  file-watch latency. Proof mode keeps static Maven artifact prefetch, artifact
+  read-through, metadata read-through, and uncached resource download seam
+  checks available without slowing the visible path.
 - Dependency read-through registries are configured from eager JVM-host bridge
   wiring, not the lazy dependency shadow listener, so normal installed Gradle
   builds can enable Rust metadata/artifact/download seams before dependency
@@ -362,7 +362,7 @@
 - `python3 tools/demo/first_60_seconds.py --output build/first60-listener-prefetch.json` passed with daemon socket ready=16.9ms, Rust dependency transport/store/checksum=636.3ms, metadata cache=260.0ms, dynamic metadata cache=257.8ms, static Maven prefetch=266.8ms, shared artifact/metadata read-through Gradle proof=15849.8ms, real-build read-through=8161.2ms with remote requests avoided=5/5 and deterministic dynamic/static output SHA-256 values `742d753d434f2e408762a9cbcc75621c441e0ed5dea5961d65b05ff3013575fc` / `88f9a4aa9c2579d0caa524dac61d45a114f381572629c6645fa28979d2501196`, file-watch first event=12ms.
 - `python3 tools/demo/first_60_seconds.py --output build/first60-transitive-prefetch.json` passed with daemon socket ready=639.5ms, Rust dependency transport/store/checksum=716.0ms, metadata cache=263.5ms, dynamic metadata cache=264.6ms, static Maven prefetch=269.5ms, shared artifact/metadata read-through Gradle proof=15586.8ms, real-build read-through=7964.4ms with remote requests avoided=7/7 and deterministic dynamic/direct-static/transitive-static output SHA-256 values `742d753d434f2e408762a9cbcc75621c441e0ed5dea5961d65b05ff3013575fc` / `88f9a4aa9c2579d0caa524dac61d45a114f381572629c6645fa28979d2501196` / `ecffccc8258a7d1647e4f911a8b9c6874d86f3ef8a88ddf0faad23d3e1cd148b`, file-watch first event=12ms.
 - `python3 tools/demo/first_60_seconds.py --output build/first60-cache-first-transport.json` passed with daemon socket ready=1397.8ms (daemon self-report 10ms), Rust dependency transport/store/checksum/cache-first reuse=21757.6ms, metadata cache=500.0ms, dynamic metadata cache=266.8ms, static Maven prefetch=272.9ms, shared artifact/metadata read-through Gradle proof=15497.8ms, real-build read-through=8854.7ms with remote requests avoided=7/7 and deterministic dynamic/direct-static/transitive-static output SHA-256 values `742d753d434f2e408762a9cbcc75621c441e0ed5dea5961d65b05ff3013575fc` / `88f9a4aa9c2579d0caa524dac61d45a114f381572629c6645fa28979d2501196` / `ecffccc8258a7d1647e4f911a8b9c6874d86f3ef8a88ddf0faad23d3e1cd148b`, file-watch first event=12ms.
-- `python3 tools/demo/first_60_seconds.py --mode fast --skip-build --output build/first60-fast.json` passed with daemon socket ready=532.3ms (daemon self-report 9ms), authoritative Rust DAG=20094.8ms with 12 Rust-executed tasks and 0 JVM forwards, real-build dependency read-through=8483.5ms with remote requests avoided=7/7 and deterministic dynamic/direct-static/transitive-static output SHA-256 values `742d753d434f2e408762a9cbcc75621c441e0ed5dea5961d65b05ff3013575fc` / `88f9a4aa9c2579d0caa524dac61d45a114f381572629c6645fa28979d2501196` / `ecffccc8258a7d1647e4f911a8b9c6874d86f3ef8a88ddf0faad23d3e1cd148b`, and file-watch first event=11ms.
+- `python3 tools/demo/first_60_seconds.py --mode fast --skip-build --output build/first60-fast.json` passed with daemon socket ready=645.3ms (daemon self-report 10ms), authoritative Rust DAG=27729.7ms with cold 18844.2ms/12 Rust tasks, warm 8882.1ms/11 Rust tasks, 0 JVM forwards, real-build dependency read-through=7589.8ms with remote requests avoided=7/7 and deterministic dynamic/direct-static/transitive-static output SHA-256 values `742d753d434f2e408762a9cbcc75621c441e0ed5dea5961d65b05ff3013575fc` / `88f9a4aa9c2579d0caa524dac61d45a114f381572629c6645fa28979d2501196` / `ecffccc8258a7d1647e4f911a8b9c6874d86f3ef8a88ddf0faad23d3e1cd148b`, and file-watch first event=10ms.
 - `python3 tools/demo/first_60_seconds.py --mode proof --skip-build --output build/first60-proof.json` passed with Rust dependency transport/store/checksum=269.4ms, metadata cache=253.3ms, dynamic metadata cache=256.5ms, static Maven prefetch=262.4ms, and shared artifact/metadata read-through Gradle proof=20506.9ms.
 - `cargo test -p gradle-substrate-daemon test_no_checksum -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_cached_text_metadata_read_does_not_freeze_stale_sha -- --nocapture`
