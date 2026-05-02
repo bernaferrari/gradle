@@ -5,8 +5,10 @@
 
 use std::fmt::Write as FmtWrite;
 use std::io::{self, Read, Write};
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 
@@ -478,7 +480,21 @@ fn locate_substrate_daemon(project_dir: &Path) -> Option<PathBuf> {
         .find(|path| path.exists())
 }
 
-fn substrate_gradle_flags(mode: SubstrateCliMode, daemon_path: &Path) -> Vec<String> {
+fn default_substrate_state_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("GRADLE_SUBSTRATE_STATE_DIR") {
+        return PathBuf::from(dir);
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home).join(".gradle-substrate");
+    }
+    PathBuf::from(".gradle-substrate")
+}
+
+fn substrate_gradle_flags(
+    mode: SubstrateCliMode,
+    daemon_path: &Path,
+    state_dir: &Path,
+) -> Vec<String> {
     let mut flags = vec![
         "-Dorg.gradle.rust.substrate.enabled=true".to_string(),
         "-Dorg.gradle.rust.substrate.taskgraph.enabled=true".to_string(),
@@ -491,6 +507,10 @@ fn substrate_gradle_flags(mode: SubstrateCliMode, daemon_path: &Path) -> Vec<Str
         format!(
             "-Dorg.gradle.rust.substrate.daemon.path={}",
             daemon_path.display()
+        ),
+        format!(
+            "-Dorg.gradle.rust.substrate.state.dir={}",
+            state_dir.display()
         ),
     ];
 
@@ -508,6 +528,202 @@ fn substrate_gradle_flags(mode: SubstrateCliMode, daemon_path: &Path) -> Vec<Str
     flags
 }
 
+fn reserve_loopback_port() -> Result<u16, String> {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|e| format!("Failed to reserve Rust substrate daemon port: {}", e))?;
+    let port = listener
+        .local_addr()
+        .map_err(|e| format!("Failed to inspect Rust substrate daemon port: {}", e))?
+        .port();
+    drop(listener);
+    Ok(port)
+}
+
+fn state_subdir(state_dir: &Path, name: &str) -> PathBuf {
+    state_dir.join("state").join(name)
+}
+
+fn daemon_binary_identity(daemon_path: &Path) -> Result<(String, u64, u64), String> {
+    let metadata = std::fs::metadata(daemon_path).map_err(|e| {
+        format!(
+            "Failed to inspect Rust substrate daemon {}: {}",
+            daemon_path.display(),
+            e
+        )
+    })?;
+    let modified = metadata
+        .modified()
+        .map_err(|e| {
+            format!(
+                "Failed to inspect Rust substrate daemon mtime {}: {}",
+                daemon_path.display(),
+                e
+            )
+        })?
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| {
+            format!(
+                "Rust substrate daemon mtime is before UNIX_EPOCH for {}: {}",
+                daemon_path.display(),
+                e
+            )
+        })?
+        .as_millis() as u64;
+    Ok((
+        daemon_path
+            .canonicalize()
+            .unwrap_or_else(|_| daemon_path.to_path_buf())
+            .to_string_lossy()
+            .to_string(),
+        modified,
+        metadata.len(),
+    ))
+}
+
+fn read_endpoint_file(path: &Path, daemon_path: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let mut endpoint = None;
+    let mut binary = None;
+    let mut modified = None;
+    let mut size = None;
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with('!') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match key.trim() {
+            "endpoint" => endpoint = Some(value.trim().to_string()),
+            "daemonBinary" => binary = Some(value.trim().to_string()),
+            "daemonBinaryLastModifiedMillis" => modified = value.trim().parse::<u64>().ok(),
+            "daemonBinarySize" => size = value.trim().parse::<u64>().ok(),
+            _ => {}
+        }
+    }
+    let (expected_binary, expected_modified, expected_size) =
+        daemon_binary_identity(daemon_path).ok()?;
+    if binary.as_deref() != Some(expected_binary.as_str())
+        || modified != Some(expected_modified)
+        || size != Some(expected_size)
+    {
+        return None;
+    }
+    endpoint.filter(|value| value.starts_with("tcp://"))
+}
+
+fn endpoint_connects(endpoint: &str) -> bool {
+    let Some(address) = endpoint.strip_prefix("tcp://") else {
+        return false;
+    };
+    address
+        .parse()
+        .ok()
+        .and_then(|address| TcpStream::connect_timeout(&address, Duration::from_millis(150)).ok())
+        .is_some()
+}
+
+fn write_endpoint_file(path: &Path, endpoint: &str, daemon_path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create endpoint directory: {}", e))?;
+    }
+    let (binary, modified, size) = daemon_binary_identity(daemon_path)?;
+    let temp_path = path.with_extension("tmp");
+    let content = format!(
+        "# Gradle Rust substrate daemon endpoint\nendpoint={endpoint}\ndaemonBinary={binary}\ndaemonBinaryLastModifiedMillis={modified}\ndaemonBinarySize={size}\n"
+    );
+    std::fs::write(&temp_path, content)
+        .map_err(|e| format!("Failed to write {}: {}", temp_path.display(), e))?;
+    std::fs::rename(&temp_path, path)
+        .map_err(|e| format!("Failed to publish {}: {}", path.display(), e))?;
+    Ok(())
+}
+
+fn prewarm_substrate_daemon(daemon_path: &Path, state_dir: &Path) -> Result<(), String> {
+    if !env_truthy("GRADLEW_RUST_PREWARM") && std::env::var("GRADLEW_RUST_PREWARM").is_ok() {
+        return Ok(());
+    }
+
+    let endpoint_file = state_dir.join("substrate.tcp-endpoint");
+    if let Some(endpoint) = read_endpoint_file(&endpoint_file, daemon_path) {
+        if endpoint_connects(&endpoint) {
+            return Ok(());
+        }
+        let _ = std::fs::remove_file(&endpoint_file);
+    }
+
+    let cache_dir = state_subdir(state_dir, "cache");
+    let history_dir = state_subdir(state_dir, "history");
+    let config_cache_dir = state_subdir(state_dir, "config-cache");
+    let toolchain_dir = state_subdir(state_dir, "toolchains");
+    let artifact_store_dir = state_subdir(state_dir, "artifacts");
+    for dir in [
+        state_dir,
+        &cache_dir,
+        &history_dir,
+        &config_cache_dir,
+        &toolchain_dir,
+        &artifact_store_dir,
+    ] {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| format!("Failed to create {}: {}", dir.display(), e))?;
+    }
+
+    let port = reserve_loopback_port()?;
+    let tcp_address = format!("127.0.0.1:{port}");
+    let endpoint = format!("tcp://{tcp_address}");
+    let socket_path = state_dir.join("substrate.sock");
+
+    let mut child = Command::new(daemon_path)
+        .arg("--socket-path")
+        .arg(&socket_path)
+        .arg("--tcp-address")
+        .arg(&tcp_address)
+        .arg("--log-level")
+        .arg("info")
+        .arg("--cache-dir")
+        .arg(&cache_dir)
+        .arg("--history-dir")
+        .arg(&history_dir)
+        .arg("--config-cache-dir")
+        .arg(&config_cache_dir)
+        .arg("--toolchain-dir")
+        .arg(&toolchain_dir)
+        .arg("--artifact-store-dir")
+        .arg(&artifact_store_dir)
+        .env("SUBSTRATE_LOG_LEVEL", "info")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| {
+            format!(
+                "Failed to launch Rust substrate daemon {}: {}",
+                daemon_path.display(),
+                e
+            )
+        })?;
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if endpoint_connects(&endpoint) {
+            write_endpoint_file(&endpoint_file, &endpoint, daemon_path)?;
+            return Ok(());
+        }
+        if let Ok(Some(status)) = child.try_wait() {
+            return Err(format!(
+                "Rust substrate daemon exited before accepting connections: {}",
+                status
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    Err("Rust substrate daemon did not accept connections within 5 seconds".to_string())
+}
+
 fn inject_substrate_flags(
     mode: SubstrateCliMode,
     project_dir: &Path,
@@ -521,7 +737,9 @@ fn inject_substrate_flags(
 Set GRADLE_SUBSTRATE_DAEMON or build target/debug/gradle-substrate-daemon."
             .to_string()
     })?;
-    let mut flags = substrate_gradle_flags(mode, &daemon_path);
+    let state_dir = default_substrate_state_dir();
+    prewarm_substrate_daemon(&daemon_path, &state_dir)?;
+    let mut flags = substrate_gradle_flags(mode, &daemon_path, &state_dir);
     flags.append(gradle_args);
     *gradle_args = flags;
     Ok(())
@@ -888,11 +1106,16 @@ distributionSha256Sum=abc123
     #[test]
     fn test_substrate_gradle_flags_native_ready_default() {
         let daemon = PathBuf::from("/tmp/gradle-substrate-daemon");
-        let flags = substrate_gradle_flags(SubstrateCliMode::NativeReadyDefault, &daemon);
+        let state_dir = PathBuf::from("/tmp/gradle-substrate-state");
+        let flags =
+            substrate_gradle_flags(SubstrateCliMode::NativeReadyDefault, &daemon, &state_dir);
 
         assert!(flags.contains(&"-Dorg.gradle.rust.substrate.enabled=true".to_string()));
         assert!(flags.contains(&"-Dorg.gradle.rust.substrate.taskgraph.enabled=true".to_string()));
         assert!(flags.contains(&"-Dorg.gradle.rust.substrate.runbuild.enabled=true".to_string()));
+        assert!(flags.contains(
+            &"-Dorg.gradle.rust.substrate.state.dir=/tmp/gradle-substrate-state".to_string()
+        ));
         assert!(flags.contains(&"-Dorg.gradle.rust.substrate.dependency.enabled=true".to_string()));
         assert!(flags
             .contains(&"-Dorg.gradle.rust.substrate.dependency.download.enabled=true".to_string()));
@@ -916,7 +1139,8 @@ distributionSha256Sum=abc123
     #[test]
     fn test_substrate_gradle_flags_authoritative() {
         let daemon = PathBuf::from("/tmp/gradle-substrate-daemon");
-        let flags = substrate_gradle_flags(SubstrateCliMode::Authoritative, &daemon);
+        let state_dir = PathBuf::from("/tmp/gradle-substrate-state");
+        let flags = substrate_gradle_flags(SubstrateCliMode::Authoritative, &daemon, &state_dir);
 
         assert!(
             flags.contains(&"-Dorg.gradle.rust.substrate.runbuild.authoritative=true".to_string())
@@ -924,5 +1148,34 @@ distributionSha256Sum=abc123
         assert!(!flags.contains(
             &"-Dorg.gradle.rust.substrate.runbuild.native-ready-default=true".to_string()
         ));
+    }
+
+    #[test]
+    fn test_endpoint_file_roundtrip_matches_daemon_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let daemon = dir.path().join("gradle-substrate-daemon");
+        std::fs::write(&daemon, b"daemon").unwrap();
+        let endpoint_file = dir.path().join("substrate.tcp-endpoint");
+
+        write_endpoint_file(&endpoint_file, "tcp://127.0.0.1:12345", &daemon).unwrap();
+
+        assert_eq!(
+            read_endpoint_file(&endpoint_file, &daemon).as_deref(),
+            Some("tcp://127.0.0.1:12345")
+        );
+    }
+
+    #[test]
+    fn test_endpoint_file_rejects_different_daemon_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let daemon = dir.path().join("gradle-substrate-daemon");
+        let other_daemon = dir.path().join("other-gradle-substrate-daemon");
+        std::fs::write(&daemon, b"daemon").unwrap();
+        std::fs::write(&other_daemon, b"other").unwrap();
+        let endpoint_file = dir.path().join("substrate.tcp-endpoint");
+
+        write_endpoint_file(&endpoint_file, "tcp://127.0.0.1:12345", &daemon).unwrap();
+
+        assert!(read_endpoint_file(&endpoint_file, &other_daemon).is_none());
     }
 }

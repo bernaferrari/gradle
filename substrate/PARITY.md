@@ -35,6 +35,12 @@
   supports `http(s)://` and `file:/` distribution URLs, copies local file
   distributions into the wrapper ZIP store, and still applies SHA-256
   verification when `distributionSha256Sum` is present.
+- The Rust wrapper now prewarms `gradle-substrate-daemon` for substrate runs:
+  it creates the same state directories as the JVM bridge, starts the daemon on
+  loopback TCP, writes the Java-compatible `substrate.tcp-endpoint` identity
+  file, and injects the matching `org.gradle.rust.substrate.state.dir`. The JVM
+  bridge can then connect to the existing Rust daemon instead of owning sidecar
+  startup.
 - Rust `RunBuild` dispatch now uses a native ready-task priority queue keyed by
   remaining critical-path duration instead of FIFO order, so independent ready
   tasks on the longest path are claimed first. Filtered task selections also
@@ -429,6 +435,8 @@
 - `cargo test -p gradle-wrapper` passed after adding wrapper-level Rust substrate CLI modes and minimal DAG plus dependency transport/read-through flag injection tests.
 - `cargo build -p gradle-wrapper` built the native wrapper binary, and `GRADLEW_DISTRIBUTION_DIR=$PWD/build/gradle-under-test target/debug/gradlew --rust-substrate-authoritative -p testing/corpus/java-library-kotlin-dsl clean build --no-daemon --console=plain --info` plus the same command with `--rust-substrate` both executed 12 Gradle tasks through Rust RunBuild, skipped the JVM task executor, and finished successfully. `GRADLEW_DISTRIBUTION_DIR=$PWD/build/gradle-under-test target/debug/gradlew --rust-substrate -p testing/corpus/java-junit-kotlin-dsl clean build --no-daemon --console=plain --info` also executed 12 external-dependency-backed tasks through Rust RunBuild with the JVM task executor skipped.
 - `cargo test -p gradle-wrapper` passed after adding Rust wrapper distribution URL validation and local `file:/` distribution copy support.
+- `cargo test -p gradle-wrapper` passed after adding Rust wrapper daemon prewarm and endpoint-file identity tests.
+- `cargo build -p gradle-wrapper` passed, and `GRADLE_SUBSTRATE_STATE_DIR=$PWD/build/wrapper-prewarm-state GRADLEW_DISTRIBUTION_DIR=$PWD/build/gradle-under-test target/debug/gradlew --rust-substrate-authoritative -p testing/corpus/java-library-kotlin-dsl clean build --no-daemon --console=plain --info` showed the JVM bridge `Connecting to existing daemon at tcp://...`, then Rust RunBuild executed 12 tasks with JVM fallback disabled and the JVM task executor skipped.
 - `cargo test -p gradle-substrate-daemon test_persistent_store_roundtrip -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_add_artifact_to_cache -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_artifact_cache_rejects_missing_local_file -- --nocapture`

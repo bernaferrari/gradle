@@ -52,6 +52,14 @@ download/install, including SHA-256 verification when
 `distributionSha256Sum` is present. When `validateDistributionUrl=true`, it
 fails closed for unsupported URL schemes before fetching.
 
+On Rust substrate runs, the wrapper also prewarms `gradle-substrate-daemon`
+before launching Gradle and writes the same loopback endpoint file the JVM
+bridge understands. That makes the normal Rust path `Rust wrapper -> Rust
+daemon -> Gradle compatibility/configuration -> Rust RunBuild`, instead of
+having the JVM bridge own sidecar startup. Set `GRADLE_SUBSTRATE_STATE_DIR` to
+isolate daemon state, or `GRADLEW_RUST_PREWARM=false` to disable wrapper
+prewarm while debugging.
+
 Fast mode reports:
 
 - `daemon_socket_ready`: process launch until the Unix socket exists
