@@ -4,6 +4,8 @@ The visible wins should be things people can feel immediately, before they
 inspect a profiler:
 
 - daemon readiness: how quickly the Rust sidecar can accept work
+- authoritative Rust DAG: whether a real Gradle invocation can hand a small
+  build to Rust `RunBuild` with zero JVM task forwards
 - dependency transport: whether Maven artifact and metadata bytes stream through
   Rust fast, land in the Rust stores with checksum evidence, and stream back
   from those stores before HTTP on repeated requests
@@ -23,12 +25,26 @@ inspect a profiler:
 Run:
 
 ```bash
-python3 tools/demo/first_60_seconds.py --output build/first60.json
+python3 tools/demo/first_60_seconds.py --mode fast --output build/first60.json
 ```
 
-The script reports:
+Fast mode reports:
 
 - `daemon_socket_ready`: process launch until the Unix socket exists
+- `authoritative_rust_dag`: a copied Java-library corpus project built through
+  explicit authoritative Rust `RunBuild`, including Rust task count, JVM
+  forwards, and deterministic output hash
+- `real_build_dependency_readthrough`: an installed Gradle-under-test build resolving a local HTTP Maven `1.+` dependency plus a static Maven graph-only dependency with a transitive child and isolated Rust state; the first run warms dynamic metadata/artifact stores and listener-prefetches the static direct/transitive artifacts, while the second run deletes `build/`, uses a fresh Gradle user home, materializes all artifacts again, and reports remote requests avoided
+- `file_watch_first_event`: native file watcher latency from write to event
+
+Proof mode keeps the heavier subsystem checks out of the default visible demo:
+
+```bash
+python3 tools/demo/first_60_seconds.py --mode proof --output build/first60-proof.json
+```
+
+Proof mode reports:
+
 - `dependency_transport_store_checksum`: local HTTP artifact streaming through the Rust dependency service, persisted store write, warm-cache and persisted-store reuse before HTTP, cache hit, checksum verification, and cache-first transport reuse
 - `dependency_metadata_transport_cache`: URL-only POM streaming through the Rust
   transport, persisted metadata-store write, and later metadata cache hit
@@ -40,12 +56,13 @@ The script reports:
   artifact cache hit, total download size, and SHA-256 evidence
 - `dependency_artifact_readthrough`: focused Gradle resolver tests proving the Rust read-through hook resolves JAR and non-JAR artifacts before remote access
 - `dependency_metadata_readthrough`: focused Gradle resource-cache tests proving the Rust POM, Gradle module, Maven version-list metadata, and uncached download hooks resolve before Java remote transport
-- `real_build_dependency_readthrough`: an installed Gradle-under-test build resolving a local HTTP Maven `1.+` dependency plus a static Maven graph-only dependency with a transitive child and isolated Rust state; the first run warms dynamic metadata/artifact stores and listener-prefetches the static direct/transitive artifacts, while the second run deletes `build/`, uses a fresh Gradle user home, materializes all artifacts again, and reports remote requests avoided
-- `file_watch_first_event`: native file watcher latency from write to event
 
 The artifact and metadata read-through checks share one Gradle invocation so
 the first-minute demo measures the Rust-backed seams instead of paying repeated
 Gradle test startup overhead.
+
+Use `--mode all` when you want both the fast path and proof harness in one
+command.
 
 The real-build read-through metric runs when `build/gradle-under-test/bin/gradle`
 exists, or when `GRADLE_UNDER_TEST_BIN`/`GRADLE_UNDER_TEST` points at a local

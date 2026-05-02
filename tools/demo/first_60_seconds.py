@@ -3,7 +3,9 @@
 
 This is intentionally small and local:
   - daemon readiness is measured by Unix socket availability
-  - dependency transport uses the checked-in local HTTP store/cache/checksum smoke test
+  - fast mode reports user-visible warm daemon, Rust DAG, dependency read-through,
+    and file-watch responsiveness
+  - proof mode runs the heavier checked-in transport/cache/checksum smoke tests
     and the Gradle resource seam test for Rust-backed uncached downloads
   - dynamic metadata transport uses a local HTTP maven-metadata.xml smoke test
   - dependency read-through uses focused Gradle seam tests proving remote fetch is skipped
@@ -471,6 +473,89 @@ tasks.register("retrieveStatic", Sync) {
         shutil.rmtree(temp, ignore_errors=True)
 
 
+def measure_authoritative_runbuild_fast(timeout: int = 90) -> dict[str, object]:
+    gradle = resolve_gradle_under_test()
+    if gradle is None:
+        return {
+            "name": "authoritative_rust_dag",
+            "ok": True,
+            "skipped": True,
+            "elapsed_ms": 0,
+            "threshold_ms": 30000,
+            "tail": "Skipped: build/gradle-under-test/bin/gradle was not found. Build :distributions-full:install or set GRADLE_UNDER_TEST_BIN.",
+        }
+
+    source_project = ROOT / "testing" / "corpus" / "java-library-kotlin-dsl"
+    temp = Path(tempfile.mkdtemp(prefix="gradle-rust-dag-fast."))
+    project = temp / "project"
+    state_dir = temp / "substrate-state"
+    started = time.perf_counter()
+
+    try:
+        shutil.copytree(
+            source_project,
+            project,
+            ignore=shutil.ignore_patterns(".gradle", "build"),
+        )
+        completed = subprocess.run(
+            [
+                str(gradle),
+                "-p",
+                str(project),
+                "clean",
+                "build",
+                "--no-daemon",
+                "--console=plain",
+                "--info",
+                f"--gradle-user-home={temp / 'gradle-home'}",
+                "-Dorg.gradle.rust.substrate.enabled=true",
+                "-Dorg.gradle.rust.substrate.mode=shadow",
+                "-Dorg.gradle.rust.substrate.runbuild.authoritative=true",
+                f"-Dorg.gradle.rust.substrate.daemon.path={DAEMON}",
+                f"-Dorg.gradle.rust.substrate.state.dir={state_dir}",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+        output = completed.stdout + completed.stderr
+        executed_match = re.search(
+            r"\[substrate:run-build\] Rust executed (\d+)(?: Gradle)? tasks .* JVM (?:forwarding|fallback) disabled",
+            output,
+        )
+        selected_match = re.search(r"Tasks to be executed:\s*\[(.*?)\]", output, re.DOTALL)
+        selected_tasks = re.findall(r"task '([^']+)'", selected_match.group(1)) if selected_match else []
+        jar = project / "build" / "libs" / "corpus-java-library-1.0.0.jar"
+        output_sha256 = hashlib.sha256(jar.read_bytes()).hexdigest() if jar.exists() else None
+        jvm_forwarded_match = re.search(r"jvmForwarded=(\d+)", output)
+        tasks_forwarded_to_jvm = int(jvm_forwarded_match.group(1)) if jvm_forwarded_match else 0
+        rust_executed_tasks = int(executed_match.group(1)) if executed_match else 0
+        ok = (
+            completed.returncode == 0
+            and executed_match is not None
+            and rust_executed_tasks > 0
+            and tasks_forwarded_to_jvm == 0
+            and jar.exists()
+        )
+        return {
+            "name": "authoritative_rust_dag",
+            "ok": ok,
+            "elapsed_ms": elapsed_ms,
+            "threshold_ms": 30000,
+            "rust_executed_tasks": rust_executed_tasks,
+            "selected_task_count": len(selected_tasks),
+            "selected_tasks": selected_tasks,
+            "tasks_forwarded_to_jvm": tasks_forwarded_to_jvm,
+            "output_sha256": output_sha256,
+            "tail": "\n".join(output.strip().splitlines()[-20:]),
+        }
+    finally:
+        shutil.rmtree(temp, ignore_errors=True)
+
+
 def write_report(path: Path, results: list[dict[str, object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"results": results}, indent=2) + "\n", encoding="utf-8")
@@ -482,6 +567,12 @@ def print_summary(results: list[dict[str, object]]) -> None:
         status = "SKIP" if result.get("skipped") else ("PASS" if result["ok"] else "FAIL")
         if result["name"] == "daemon_socket_ready":
             extra = f", daemon self-reported {result['daemon_reported_ready_ms']}ms"
+        elif result["name"] == "authoritative_rust_dag" and not result.get("skipped"):
+            extra = (
+                f", rust tasks {result['rust_executed_tasks']}, "
+                f"JVM forwards {result['tasks_forwarded_to_jvm']}, "
+                f"output {result['output_sha256']}"
+            )
         elif result["name"] == "real_build_dependency_readthrough" and not result.get("skipped"):
             extra = (
                 f", remote avoided {result['remote_requests_avoided']}/"
@@ -495,55 +586,81 @@ def print_summary(results: list[dict[str, object]]) -> None:
             extra = ""
         print(f"{status} {result['name']}: {result['elapsed_ms']}ms{extra}")
 
+    explanations = {
+        "daemon_socket_ready": "the time before Gradle can send work to the Rust sidecar",
+        "authoritative_rust_dag": "a real Gradle invocation handing a Java-library build to Rust RunBuild with zero JVM task forwards",
+        "real_build_dependency_readthrough": "a real Gradle build warming Rust over HTTP, including listener static prefetch, then rerunning from a fresh Gradle user home with zero remote requests",
+        "file_watch_first_event": "the delay before source edits become observable",
+        "dependency_transport_store_checksum": "the bounded Rust path for Maven bytes, local store, cache-first transport reuse, cache hit, and checksum verification",
+        "dependency_metadata_transport_cache": "URL-only POM downloads through Rust warming the Rust metadata cache",
+        "dependency_dynamic_metadata_transport_cache": "maven-metadata.xml downloads warming the dynamic-version metadata cache",
+        "dependency_static_maven_prefetch": "Rust resolving a static Maven module and prefetching the artifact into the Rust store with checksum evidence",
+        "dependency_artifact_readthrough": "Gradle skipping remote artifact access when Rust already has the JAR",
+        "dependency_metadata_readthrough": "Gradle skipping remote POM metadata access and routing uncached resource downloads through Rust",
+    }
     print("\nWhy these are visible:")
-    print("- daemon_socket_ready is the time before Gradle can send work to the Rust sidecar")
-    print("- dependency_transport_store_checksum is the bounded Rust path for Maven bytes, local store, cache-first transport reuse, cache hit, and checksum verification")
-    print("- dependency_metadata_transport_cache proves URL-only POM downloads through Rust warm the Rust metadata cache")
-    print("- dependency_dynamic_metadata_transport_cache proves maven-metadata.xml downloads warm the dynamic-version metadata cache")
-    print("- dependency_static_maven_prefetch proves Rust can resolve a static Maven module and prefetch the artifact into the Rust store with checksum evidence")
-    print("- dependency_artifact_readthrough proves Gradle can skip remote artifact access when Rust already has the JAR")
-    print("- dependency_metadata_readthrough proves Gradle can skip remote POM metadata access and can route uncached resource downloads through Rust")
-    print("- real_build_dependency_readthrough proves a real Gradle build can warm Rust over HTTP, including listener static prefetch, then rerun from a fresh Gradle user home with zero remote requests")
-    print("- file_watch_first_event is the delay before source edits become observable")
+    for result in results:
+        explanation = explanations.get(str(result["name"]))
+        if explanation:
+            print(f"- {result['name']} is {explanation}")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-build", action="store_true", help="fail if the daemon binary is missing")
+    parser.add_argument(
+        "--mode",
+        choices=("fast", "proof", "all"),
+        default="fast",
+        help="fast reports user-visible runtime wins; proof adds heavier subsystem smoke checks; all runs both",
+    )
     parser.add_argument("--output", type=Path, help="write JSON metrics to this path")
     args = parser.parse_args()
 
     ensure_daemon_built(args.skip_build)
-    results = [
-        measure_daemon_readiness(),
-        measure_cargo_test(
-            "dependency_transport_store_checksum",
-            "test_download_",
-            timeout=60,
-        ),
-        measure_cargo_test(
-            "dependency_metadata_transport_cache",
-            "test_download_metadata_url_populates_metadata_cache",
-            timeout=60,
-        ),
-        measure_cargo_test(
-            "dependency_dynamic_metadata_transport_cache",
-            "test_download_maven_metadata_url_populates_dynamic_metadata_cache",
-            timeout=60,
-        ),
-        measure_cargo_test(
-            "dependency_static_maven_prefetch",
-            "test_resolve_dependencies_prefetches_static_maven_artifact",
-            timeout=60,
-        ),
-        *measure_gradle_readthrough_smoke(),
-        measure_real_build_dependency_readthrough(),
-        measure_cargo_test(
-            "file_watch_first_event",
-            "file_watch_reports_first_change_quickly",
-            timeout=60,
-        ),
-    ]
+    def fast_results() -> list[dict[str, object]]:
+        return [
+            measure_daemon_readiness(),
+            measure_authoritative_runbuild_fast(),
+            measure_real_build_dependency_readthrough(),
+            measure_cargo_test(
+                "file_watch_first_event",
+                "file_watch_reports_first_change_quickly",
+                timeout=60,
+            ),
+        ]
+
+    def proof_results() -> list[dict[str, object]]:
+        return [
+            measure_cargo_test(
+                "dependency_transport_store_checksum",
+                "test_download_",
+                timeout=60,
+            ),
+            measure_cargo_test(
+                "dependency_metadata_transport_cache",
+                "test_download_metadata_url_populates_metadata_cache",
+                timeout=60,
+            ),
+            measure_cargo_test(
+                "dependency_dynamic_metadata_transport_cache",
+                "test_download_maven_metadata_url_populates_dynamic_metadata_cache",
+                timeout=60,
+            ),
+            measure_cargo_test(
+                "dependency_static_maven_prefetch",
+                "test_resolve_dependencies_prefetches_static_maven_artifact",
+                timeout=60,
+            ),
+            *measure_gradle_readthrough_smoke(),
+        ]
+
+    if args.mode == "fast":
+        results = fast_results()
+    elif args.mode == "proof":
+        results = proof_results()
+    else:
+        results = fast_results() + proof_results()
 
     print_summary(results)
     if args.output:

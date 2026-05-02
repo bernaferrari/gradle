@@ -14,7 +14,7 @@ usage() {
 Usage: tools/demo/rust_substrate_demo.sh [--quick|--full] [--skip-first60] [--skip-sample-builds] [--skip-grpc-e2e] [--skip-native-shadow] [--output-dir DIR]
 
 Runs an honest Rust substrate demo:
-  - first-60-second visible wins: daemon ready time, dependency transport/store/checksum smoke, static Maven prefetch, artifact/POM read-through, real-build remote requests avoided, file-watch latency
+  - first-60-second visible wins: daemon ready time, authoritative Rust RunBuild with zero JVM forwards, real-build remote requests avoided, file-watch latency
   - strict stabilization gate
   - checked-in offline corpus contract validation
   - external dependency and unsupported corpus contract validation
@@ -95,6 +95,7 @@ run_step() {
 if [[ "$RUN_FIRST60" -eq 1 ]]; then
   run_step "First-60-second visible Rust wins" \
     python3 ./tools/demo/first_60_seconds.py \
+      --mode fast \
       --output "$OUTPUT_DIR/first60.json"
 fi
 
@@ -219,7 +220,7 @@ What this proves:
   - The native-ready-default gate is exercised separately and delegates when a selected plan is incomplete.
   - The authoritative corpus summary records matched projects, no-fallback counts, task parity, output parity, and observed upstream/substrate wall-clock timing.
   - Rust daemon gRPC behavior is exercised when --skip-grpc-e2e is not used.
-  - First-60-second metrics record daemon socket readiness, Rust dependency transport/store/checksum smoke timing, opt-in static Maven prefetch through Rust ResolveDependencies, Rust-backed dependency artifact/metadata/download seams from one focused Gradle invocation, isolated real-build remote requests avoided when a local install is present, and native file-watch first-event latency.
+  - First-60-second fast metrics record daemon socket readiness, explicit authoritative Rust RunBuild with zero JVM task forwards, isolated real-build remote requests avoided when a local install is present, and native file-watch first-event latency. The heavier first-60 proof mode keeps Rust dependency transport/store/checksum, static Maven prefetch, and focused artifact/metadata read-through checks available without slowing the visible path.
 
 What this does not claim:
   - This is not a full Gradle replacement.
