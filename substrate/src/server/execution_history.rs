@@ -177,6 +177,36 @@ impl ExecutionHistoryServiceImpl {
         }
         0
     }
+
+    /// Store a serialized history entry from in-process services that already own
+    /// the encoded state and cannot await the gRPC `store_history` path.
+    pub(crate) fn store_serialized_entry(&self, key: String, state: Vec<u8>, timestamp_ms: i64) {
+        let entry = HistoryEntry {
+            key: key.clone(),
+            state,
+            timestamp_ms,
+        };
+        self.entries.insert(key.clone(), entry.clone());
+        self.stores.fetch_add(1, Ordering::Relaxed);
+        if self.persistence_dir.as_os_str().is_empty() {
+            return;
+        }
+        if let Err(error) = std::fs::create_dir_all(&self.persistence_dir) {
+            tracing::warn!("Failed to create history directory for {}: {}", key, error);
+            return;
+        }
+        let path = self.state_file_path(&key);
+        match bincode::serialize(&entry) {
+            Ok(data) => {
+                if let Err(error) = std::fs::write(&path, data) {
+                    tracing::warn!("Failed to persist history for {}: {}", key, error);
+                }
+            }
+            Err(error) => {
+                tracing::warn!("Failed to encode history for {}: {}", key, error);
+            }
+        }
+    }
 }
 
 #[tonic::async_trait]

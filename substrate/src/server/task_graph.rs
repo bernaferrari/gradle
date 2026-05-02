@@ -1,8 +1,11 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::io::Read;
+use std::path::Path;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
 use dashmap::DashMap;
+use sha2::{Digest, Sha256};
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
@@ -904,13 +907,209 @@ fn execution_context_json(task: &CanonicalBuildPlanTask, task_type: &str) -> Str
         }
     }
 
+    let execution_source_files = if task_type == "Mkdir" {
+        output_paths.clone()
+    } else {
+        source_files
+    };
+    let input_file_fingerprints = work_input_file_fingerprints(&execution_source_files);
+
     serde_json::json!({
-        "source_files": if task_type == "Mkdir" { output_paths.clone() } else { source_files },
+        "source_files": execution_source_files,
         "target_dir": target_dir,
         "output_files": output_paths,
         "options": options,
+        "work_identity": task.path,
+        "display_name": task.path,
+        "implementation_class": task.implementation_id,
+        "input_properties": work_input_properties(task, task_type, &target_dir),
+        "input_file_fingerprints": input_file_fingerprints,
+        "caching_enabled": cacheability_allows_cache(&task.cacheability),
+        "can_load_from_cache": cacheability_allows_cache(&task.cacheability),
+        "up_to_date_enabled": up_to_date_planning_enabled(task_type),
+        "has_previous_execution_state": false,
+        "rebuild_reasons": [],
     })
     .to_string()
+}
+
+fn cacheability_allows_cache(cacheability: &str) -> bool {
+    let value = cacheability.trim().to_ascii_lowercase();
+    value == "cacheable" || value == "enabled" || value == "true"
+}
+
+fn work_input_properties(
+    task: &CanonicalBuildPlanTask,
+    task_type: &str,
+    target_dir: &str,
+) -> BTreeMap<String, String> {
+    let mut properties = BTreeMap::new();
+    properties.insert("task_type".to_string(), task_type.to_string());
+    properties.insert(
+        "implementation_class".to_string(),
+        task.implementation_id.clone(),
+    );
+    properties.insert("action_kind".to_string(), task.action_kind.clone());
+    properties.insert("cacheability".to_string(), task.cacheability.clone());
+    properties.insert("target_dir".to_string(), target_dir.to_string());
+    properties.insert("outputs".to_string(), output_paths(task).join("\n"));
+    properties.insert("local_state".to_string(), task.local_state.join("\n"));
+    properties.insert("destroyables".to_string(), task.destroyables.join("\n"));
+    for (key, value) in &task.inputs {
+        if !execution_relevant_input_name(key) {
+            continue;
+        }
+        properties.insert(format!("input.{}", key), value.clone());
+    }
+    for input in &task.input_specs {
+        if !execution_relevant_input_name(&input.name) {
+            continue;
+        }
+        if matches!(
+            input.kind.as_str(),
+            "file" | "directory" | "path" | "source"
+        ) {
+            properties.insert(format!("input_path.{}", input.name), input.value.clone());
+        } else {
+            properties.insert(format!("input_value.{}", input.name), input.value.clone());
+        }
+        properties.insert(
+            format!("input_normalization.{}", input.name),
+            input.normalization.clone(),
+        );
+        properties.insert(
+            format!("input_optional.{}", input.name),
+            input.optional.to_string(),
+        );
+    }
+    for output in &task.output_specs {
+        properties.insert(format!("output.{}", output.name), output.path.clone());
+        properties.insert(format!("output_kind.{}", output.name), output.kind.clone());
+    }
+    properties
+}
+
+fn execution_relevant_input_name(name: &str) -> bool {
+    !matches!(name, "description" | "group")
+}
+
+fn up_to_date_planning_enabled(task_type: &str) -> bool {
+    matches!(
+        task_type,
+        "Lifecycle"
+            | "JavaCompile"
+            | "Javadoc"
+            | "Copy"
+            | "Sync"
+            | "Jar"
+            | "Zip"
+            | "War"
+            | "Ear"
+            | "Tar"
+            | "TestExec"
+            | "CreateStartScripts"
+            | "WriteFile"
+            | "Mkdir"
+            | "Delete"
+    )
+}
+
+fn work_input_file_fingerprints(paths: &[String]) -> BTreeMap<String, String> {
+    let mut fingerprints = BTreeMap::new();
+    for path in paths.iter().filter(|path| !path.trim().is_empty()) {
+        fingerprints.insert(path.clone(), fingerprint_path(Path::new(path)));
+    }
+    fingerprints
+}
+
+fn fingerprint_path(path: &Path) -> String {
+    if !path.exists() {
+        return "missing".to_string();
+    }
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return "unreadable".to_string();
+    };
+    if metadata.file_type().is_symlink() {
+        return std::fs::read_link(path)
+            .map(|target| format!("symlink:{}", target.to_string_lossy()))
+            .unwrap_or_else(|_| "symlink:unreadable".to_string());
+    }
+    if metadata.is_file() {
+        return fingerprint_file(path);
+    }
+    if metadata.is_dir() {
+        return fingerprint_directory(path);
+    }
+    format!("other:{}", metadata.len())
+}
+
+fn fingerprint_file(path: &Path) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"file\0");
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return "file:unreadable".to_string();
+    };
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        match file.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(n) => hasher.update(&buffer[..n]),
+            Err(_) => return "file:unreadable".to_string(),
+        }
+    }
+    crate::server::cache::hex::encode(hasher.finalize().as_ref())
+}
+
+fn fingerprint_directory(path: &Path) -> String {
+    let mut entries = Vec::new();
+    collect_directory_fingerprints(path, path, &mut entries);
+    entries.sort_unstable();
+    let mut hasher = Sha256::new();
+    hasher.update(b"dir\0");
+    for entry in entries {
+        hasher.update(entry.as_bytes());
+        hasher.update(b"\0");
+    }
+    crate::server::cache::hex::encode(hasher.finalize().as_ref())
+}
+
+fn collect_directory_fingerprints(root: &Path, path: &Path, entries: &mut Vec<String>) {
+    let Ok(read_dir) = std::fs::read_dir(path) else {
+        entries.push(format!("{}=unreadable", relative_path(root, path)));
+        return;
+    };
+    for entry in read_dir.flatten() {
+        let entry_path = entry.path();
+        let relative = relative_path(root, &entry_path);
+        let Ok(metadata) = std::fs::symlink_metadata(&entry_path) else {
+            entries.push(format!("{}=unreadable", relative));
+            continue;
+        };
+        if metadata.file_type().is_symlink() {
+            let target = std::fs::read_link(&entry_path)
+                .map(|target| target.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| "unreadable".to_string());
+            entries.push(format!("{}=symlink:{}", relative, target));
+        } else if metadata.is_file() {
+            entries.push(format!(
+                "{}=file:{}",
+                relative,
+                fingerprint_file(&entry_path)
+            ));
+        } else if metadata.is_dir() {
+            entries.push(format!("{}=dir", relative));
+            collect_directory_fingerprints(root, &entry_path, entries);
+        } else {
+            entries.push(format!("{}=other:{}", relative, metadata.len()));
+        }
+    }
+}
+
+fn relative_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/")
 }
 
 fn java_compile_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
@@ -1810,6 +2009,107 @@ mod tests {
             system_property_inputs: Vec::new(),
             diagnostics: Vec::new(),
         }
+    }
+
+    #[test]
+    fn test_execution_context_includes_work_metadata_for_rust_up_to_date_planning() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("src/main/java/App.java");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, "public class App {}\n").unwrap();
+        let output = temp.path().join("build/classes/java/main");
+
+        let mut task = canonical_task(
+            ":compileJava",
+            "org.gradle.api.tasks.compile.JavaCompile",
+            Vec::new(),
+            vec![output.to_string_lossy().into_owned()],
+        );
+        task.cacheability = "cacheable".to_string();
+        task.input_specs.push(
+            super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                name: "source0".to_string(),
+                kind: "source".to_string(),
+                value: source.to_string_lossy().into_owned(),
+                normalization: "absolute-path".to_string(),
+                optional: false,
+            },
+        );
+        set_value_input(&mut task, "release", "17", "test", "scalar");
+
+        let task_type = executable_task_type(&task);
+        let context: serde_json::Value =
+            serde_json::from_str(&execution_context_json(&task, &task_type)).unwrap();
+
+        assert_eq!(context["work_identity"], ":compileJava");
+        assert_eq!(context["display_name"], ":compileJava");
+        assert_eq!(
+            context["implementation_class"],
+            "org.gradle.api.tasks.compile.JavaCompile"
+        );
+        assert_eq!(context["input_properties"]["input_value.release"], "17");
+        assert_eq!(context["caching_enabled"], true);
+        assert_eq!(context["can_load_from_cache"], true);
+        assert_eq!(context["up_to_date_enabled"], true);
+        assert!(
+            context["input_file_fingerprints"][source.to_string_lossy().as_ref()]
+                .as_str()
+                .unwrap()
+                .len()
+                >= 32
+        );
+    }
+
+    #[test]
+    fn test_work_input_file_fingerprint_changes_when_source_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("App.java");
+        std::fs::write(&source, "class App { int value() { return 1; } }\n").unwrap();
+        let paths = vec![source.to_string_lossy().into_owned()];
+
+        let first = work_input_file_fingerprints(&paths);
+        std::fs::write(&source, "class App { int value() { return 2; } }\n").unwrap();
+        let second = work_input_file_fingerprints(&paths);
+
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn test_work_input_properties_ignore_cosmetic_gradle_metadata() {
+        let mut first = canonical_task(
+            ":classes",
+            "org.gradle.api.DefaultTask",
+            Vec::new(),
+            Vec::new(),
+        );
+        first.inputs.insert(
+            "description".to_string(),
+            "Assembles main classes.".to_string(),
+        );
+        first
+            .inputs
+            .insert("group".to_string(), "build".to_string());
+        first
+            .inputs
+            .insert("enabled".to_string(), "true".to_string());
+
+        let mut second = canonical_task(
+            ":classes",
+            "org.gradle.api.DefaultTask",
+            Vec::new(),
+            Vec::new(),
+        );
+        second
+            .inputs
+            .insert("enabled".to_string(), "true".to_string());
+
+        assert_eq!(
+            work_input_properties(&first, "Lifecycle", ""),
+            work_input_properties(&second, "Lifecycle", "")
+        );
+        assert!(!up_to_date_planning_enabled("Exec"));
+        assert!(!up_to_date_planning_enabled("JavaExec"));
+        assert!(up_to_date_planning_enabled("JavaCompile"));
     }
 
     #[test]
