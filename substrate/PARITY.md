@@ -63,7 +63,8 @@
   classpath or an inferable standard Java-plugin output classpath are present.
 - Native `Javadoc` lowering captures Java home, source files, classpath,
   destination directory, title, encoding, max memory, and timestamp behavior,
-  and lowers only when source files and declared outputs are present.
+  honors max-memory JVM options in the Rust executor, and lowers only when
+  source files and declared outputs are present.
 - The Rust task graph enriches selected plans with graph-derived project
   classpaths and distribution dependency JARs when the JVM bridge exposes the
   dependency edge but omits the materialized file path. This keeps
