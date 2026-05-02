@@ -3005,6 +3005,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                     cached_size,
                 }));
             }
+            self.artifact_cache.remove(&key);
         }
 
         let path = self.metadata_url_path(&req.url, &extension);
@@ -5449,6 +5450,45 @@ mod tests {
         assert!(
             checked_after_mutation.cached,
             "resolver text-cache reads must not freeze a stale SHA for later checksum validation"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_warm_metadata_cache_evicts_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(dir.path().to_path_buf());
+        let url = "https://repo.example.test/org/example/demo/1.0/demo-1.0.pom";
+        let key = DependencyResolutionServiceImpl::metadata_url_cache_key(url, "pom");
+        let metadata_path = svc.metadata_url_path(url, "pom");
+        std::fs::create_dir_all(metadata_path.parent().unwrap()).unwrap();
+        std::fs::write(&metadata_path, b"<project>cached</project>").unwrap();
+
+        let warmed = svc
+            .check_metadata_cache(Request::new(CheckMetadataCacheRequest {
+                url: url.to_string(),
+                extension: "pom".to_string(),
+                sha256: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(warmed.cached);
+        assert!(svc.artifact_cache.contains_key(&key));
+
+        std::fs::remove_file(&metadata_path).unwrap();
+        let after_delete = svc
+            .check_metadata_cache(Request::new(CheckMetadataCacheRequest {
+                url: url.to_string(),
+                extension: "pom".to_string(),
+                sha256: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!after_delete.cached);
+        assert!(
+            !svc.artifact_cache.contains_key(&key),
+            "missing warm metadata entries should be evicted"
         );
     }
 
