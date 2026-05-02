@@ -284,7 +284,7 @@ class DependencyResolutionShadowListenerTest extends Specification {
             "jar",
             jar.absolutePath,
             jar.length(),
-            DependencyResolutionShadowListener.sha256(jar)
+            ""
         ) >> true
         1 * client.recordResolution("runtimeClasspath", _, 0, true, 0)
         1 * reporter.reportMatch()
@@ -339,7 +339,7 @@ class DependencyResolutionShadowListenerTest extends Specification {
             "aar",
             aar.absolutePath,
             aar.length(),
-            DependencyResolutionShadowListener.sha256(aar)
+            ""
         ) >> true
         1 * client.recordResolution("runtimeClasspath", _, 0, true, 0)
         1 * reporter.reportMatch()
