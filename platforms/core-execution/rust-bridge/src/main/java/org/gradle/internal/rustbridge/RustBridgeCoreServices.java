@@ -14,6 +14,7 @@ import org.gradle.internal.rustbridge.buildresult.BuildResultShadowListener;
 import org.gradle.internal.rustbridge.buildresult.RustBuildResultClient;
 import org.gradle.internal.rustbridge.configcache.ConfigurationCacheShadowListener;
 import org.gradle.internal.rustbridge.configcache.RustConfigCacheClient;
+import org.gradle.internal.rustbridge.dependency.DependencyResolutionModelAdapter;
 import org.gradle.internal.rustbridge.dependency.DependencyResolutionShadowListener;
 import org.gradle.internal.rustbridge.dependency.RustArtifactCacheReadThrough;
 import org.gradle.internal.rustbridge.dependency.RustDependencyResolutionClient;
@@ -232,6 +233,7 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
             RustDependencyResolutionClient rustDependencyResolutionClient,
             HashMismatchReporter mismatchReporter,
             ListenerManager listenerManager,
+            ServiceRegistry services,
             InternalOptions options
         ) {
             configureDependencyReadThrough(rustDependencyResolutionClient, options);
@@ -243,8 +245,16 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
                 RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_DEPENDENCY_RESOLUTION
             );
             boolean mirrorArtifacts = options.getBoolean(RustSubstrateOptions.ENABLE_RUST_DEPENDENCY_ARTIFACT_MIRROR);
+            boolean prefetchArtifacts = options.getBoolean(RustSubstrateOptions.ENABLE_RUST_DEPENDENCY_ARTIFACT_PREFETCH);
             DependencyResolutionShadowListener listener =
-                new DependencyResolutionShadowListener(rustDependencyResolutionClient, mismatchReporter, authoritative, mirrorArtifacts);
+                new DependencyResolutionShadowListener(
+                    rustDependencyResolutionClient,
+                    mismatchReporter,
+                    authoritative,
+                    mirrorArtifacts,
+                    prefetchArtifacts,
+                    DependencyResolutionModelAdapter.fromServiceRegistry(services)
+                );
             listenerManager.addListener(listener);
             return listener;
         }

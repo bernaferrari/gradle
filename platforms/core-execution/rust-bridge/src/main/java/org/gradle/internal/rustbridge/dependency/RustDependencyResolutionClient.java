@@ -59,7 +59,7 @@ public class RustDependencyResolutionClient {
         private final int totalArtifacts;
         private final long totalDownloadSize;
 
-        private ResolutionResult(boolean success, List<ResolvedDependency> resolvedDependencies,
+        ResolutionResult(boolean success, List<ResolvedDependency> resolvedDependencies,
                                 String errorMessage, long resolutionTimeMs,
                                 int totalArtifacts, long totalDownloadSize) {
             this.success = success;

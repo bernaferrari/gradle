@@ -198,6 +198,14 @@ public class RustSubstrateOptions {
         InternalOptions.ofBoolean("org.gradle.rust.substrate.dependency.mirror.artifacts", false);
 
     /**
+     * Prefetch safe static Maven artifacts into the Rust artifact store after Gradle dependency resolution succeeds.
+     * Property: org.gradle.rust.substrate.dependency.prefetch.artifacts
+     * Default: false
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_DEPENDENCY_ARTIFACT_PREFETCH =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.dependency.prefetch.artifacts", false);
+
+    /**
      * Read resolved external artifacts from the Rust artifact store before remote repository access.
      * Property: org.gradle.rust.substrate.dependency.readthrough.artifacts
      * Default: false
