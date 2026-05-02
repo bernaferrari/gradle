@@ -1112,6 +1112,8 @@ fn task_options(
         insert_input_option(task, &mut options, "executable", "executable");
         insert_input_option(task, &mut options, "args", "args");
         insert_input_option(task, &mut options, "args_json", "args_json");
+        insert_input_option(task, &mut options, "environment", "environment");
+        insert_input_option(task, &mut options, "environment_json", "environment_json");
         insert_input_option(task, &mut options, "working_dir", "working_dir");
         insert_input_option(task, &mut options, "ignore_exit_value", "ignore_exit_value");
     } else if task_type == "JavaExec" {
@@ -1132,6 +1134,8 @@ fn task_options(
         insert_input_option(task, &mut options, "jvm_args_json", "jvm_args_json");
         insert_input_option(task, &mut options, "max_heap_size", "max_heap_size");
         insert_input_option(task, &mut options, "system_properties", "system_properties");
+        insert_input_option(task, &mut options, "environment", "environment");
+        insert_input_option(task, &mut options, "environment_json", "environment_json");
         insert_input_option(task, &mut options, "working_dir", "working_dir");
         insert_input_option(task, &mut options, "ignore_exit_value", "ignore_exit_value");
     } else if task_type == "CreateStartScripts" {
@@ -2355,6 +2359,13 @@ mod tests {
                     optional: false,
                 },
                 super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "environment_json".to_string(),
+                    kind: "value".to_string(),
+                    value: "{\"NATIVE_EXEC_ENV\":\"from-task\"}".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
                     name: "working_dir".to_string(),
                     kind: "value".to_string(),
                     value: "/repo/build/exec".to_string(),
@@ -2388,6 +2399,10 @@ mod tests {
         assert_eq!(task_type, "Exec");
         assert_eq!(context["options"]["executable"], "/usr/bin/touch");
         assert_eq!(context["options"]["args"], "generated.txt");
+        assert_eq!(
+            context["options"]["environment_json"],
+            "{\"NATIVE_EXEC_ENV\":\"from-task\"}"
+        );
         assert_eq!(context["options"]["working_dir"], "/repo/build/exec");
         assert_eq!(context["options"]["ignore_exit_value"], "false");
     }
@@ -2460,6 +2475,13 @@ mod tests {
                     optional: false,
                 },
                 super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "environment_json".to_string(),
+                    kind: "value".to_string(),
+                    value: "{\"NATIVE_JAVA_EXEC_ENV\":\"from-task\"}".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
                     name: "working_dir".to_string(),
                     kind: "value".to_string(),
                     value: "/repo".to_string(),
@@ -2506,6 +2528,10 @@ mod tests {
         assert_eq!(
             context["options"]["system_properties"],
             "native.prop=from-task"
+        );
+        assert_eq!(
+            context["options"]["environment_json"],
+            "{\"NATIVE_JAVA_EXEC_ENV\":\"from-task\"}"
         );
         assert_eq!(context["options"]["working_dir"], "/repo");
         assert_eq!(context["options"]["ignore_exit_value"], "false");

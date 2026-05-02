@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 
 use tokio::process::Command;
 
-use crate::server::task_executor::{option_string_list, TaskExecutor, TaskInput, TaskResult};
+use crate::server::task_executor::{
+    option_string_list, option_string_map, TaskExecutor, TaskInput, TaskResult,
+};
 
 /// Executes a Gradle JavaExec task from an explicit, native-ready contract.
 pub struct JavaExecTaskExecutor;
@@ -103,6 +105,11 @@ impl TaskExecutor for JavaExecTaskExecutor {
         ));
         command.args(Self::system_property_args(
             input.options.get("system_properties").map(String::as_str),
+        ));
+        command.envs(option_string_map(
+            &input.options,
+            "environment_json",
+            "environment",
         ));
         command.arg("-cp");
         command.arg(classpath);
@@ -325,5 +332,66 @@ mod tests {
 
         assert!(result.success, "{}", result.error_message);
         assert_eq!(std::fs::read_to_string(output).unwrap(), "from-rust");
+    }
+
+    #[tokio::test]
+    async fn test_java_exec_passes_environment_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("Tool.java");
+        let output = tmp.path().join("result.txt");
+        let mut file = std::fs::File::create(&source).unwrap();
+        writeln!(
+            file,
+            "public class Tool {{ public static void main(String[] args) throws Exception {{ java.nio.file.Files.writeString(java.nio.file.Path.of(args[0]), System.getenv(args[1])); }} }}"
+        )
+        .unwrap();
+
+        let javac = current_java_home()
+            .map(|home| {
+                Path::new(&home)
+                    .join("bin")
+                    .join(if cfg!(windows) { "javac.exe" } else { "javac" })
+            })
+            .unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "javac.exe" } else { "javac" }));
+        let compile = StdCommand::new(javac)
+            .arg(&source)
+            .current_dir(tmp.path())
+            .output()
+            .unwrap();
+        assert!(
+            compile.status.success(),
+            "{}",
+            String::from_utf8_lossy(&compile.stderr)
+        );
+
+        let executor = JavaExecTaskExecutor::new();
+        let mut input = TaskInput::new("JavaExec");
+        if let Some(java_home) = current_java_home() {
+            input.options.insert("java_home".to_string(), java_home);
+        }
+        input.options.insert(
+            "classpath".to_string(),
+            tmp.path().to_string_lossy().into_owned(),
+        );
+        input
+            .options
+            .insert("main_class".to_string(), "Tool".to_string());
+        input.options.insert(
+            "args_json".to_string(),
+            serde_json::to_string(&vec![
+                output.to_string_lossy().to_string(),
+                "NATIVE_JAVA_EXEC_ENV".to_string(),
+            ])
+            .unwrap(),
+        );
+        input.options.insert(
+            "environment_json".to_string(),
+            serde_json::json!({"NATIVE_JAVA_EXEC_ENV": "from-rust-env"}).to_string(),
+        );
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert_eq!(std::fs::read_to_string(output).unwrap(), "from-rust-env");
     }
 }

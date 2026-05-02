@@ -143,6 +143,37 @@ pub(crate) fn option_string_list(
         .unwrap_or_default()
 }
 
+pub(crate) fn option_string_map(
+    options: &HashMap<String, String>,
+    json_name: &str,
+    legacy_name: &str,
+) -> HashMap<String, String> {
+    if let Some(value) = options.get(json_name).map(|value| value.trim()) {
+        if !value.is_empty() {
+            if let Ok(values) = serde_json::from_str::<HashMap<String, String>>(value) {
+                return values;
+            }
+        }
+    }
+
+    options
+        .get(legacy_name)
+        .map(|entries| {
+            entries
+                .split(',')
+                .filter_map(|entry| {
+                    let (key, value) = entry.split_once('=')?;
+                    let key = key.trim();
+                    if key.is_empty() {
+                        return None;
+                    }
+                    Some((key.to_string(), value.trim().to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Registry of task executors.
 pub struct TaskExecutorRegistry {
     executors: HashMap<String, Box<dyn TaskExecutor>>,
@@ -308,5 +339,48 @@ mod tests {
         assert!(TaskInput::is_native_supported("Tar"));
         assert!(TaskInput::is_native_supported("Lifecycle"));
         assert!(!TaskInput::is_native_supported("Test"));
+    }
+
+    #[test]
+    fn test_option_string_map_prefers_json_contract() {
+        let mut options = HashMap::new();
+        options.insert(
+            "environment".to_string(),
+            "FROM_LEGACY=ignored,OTHER=value".to_string(),
+        );
+        options.insert(
+            "environment_json".to_string(),
+            serde_json::json!({
+                "NATIVE_ENV": "from json",
+                "EMPTY": ""
+            })
+            .to_string(),
+        );
+
+        let parsed = option_string_map(&options, "environment_json", "environment");
+
+        assert_eq!(
+            parsed.get("NATIVE_ENV").map(String::as_str),
+            Some("from json")
+        );
+        assert_eq!(parsed.get("EMPTY").map(String::as_str), Some(""));
+        assert!(!parsed.contains_key("FROM_LEGACY"));
+    }
+
+    #[test]
+    fn test_option_string_map_legacy_contract() {
+        let mut options = HashMap::new();
+        options.insert(
+            "environment".to_string(),
+            "NATIVE_ENV=from legacy,OTHER=value".to_string(),
+        );
+
+        let parsed = option_string_map(&options, "environment_json", "environment");
+
+        assert_eq!(
+            parsed.get("NATIVE_ENV").map(String::as_str),
+            Some("from legacy")
+        );
+        assert_eq!(parsed.get("OTHER").map(String::as_str), Some("value"));
     }
 }

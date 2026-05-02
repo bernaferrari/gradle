@@ -266,6 +266,8 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("/usr/bin/touch", inputs.get("executable"));
         assertEquals("generated file.txt", inputs.get("args"));
         assertEquals("[\"generated file.txt\"]", inputs.get("args_json"));
+        assertEquals("NATIVE_EXEC_ENV=from-task", inputs.get("environment"));
+        assertEquals("{\"NATIVE_EXEC_ENV\":\"from-task\"}", inputs.get("environment_json"));
         assertEquals(workingDir.getAbsolutePath(), inputs.get("working_dir"));
         assertEquals("false", inputs.get("ignore_exit_value"));
         assertTrue(task.getOutputSpecsList().stream()
@@ -301,6 +303,8 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("[\"-Dnative=true\",\"-Xmx128m\"]", inputs.get("jvm_args_json"));
         assertEquals("256m", inputs.get("max_heap_size"));
         assertEquals("native.prop=from-task", inputs.get("system_properties"));
+        assertEquals("NATIVE_JAVA_EXEC_ENV=from-task", inputs.get("environment"));
+        assertEquals("{\"NATIVE_JAVA_EXEC_ENV\":\"from-task\"}", inputs.get("environment_json"));
         assertEquals(workingDir.getAbsolutePath(), inputs.get("working_dir"));
         assertEquals("false", inputs.get("ignore_exit_value"));
         assertTrue(task.getOutputSpecsList().stream()
@@ -715,6 +719,8 @@ public class ProjectModelProviderAdapterTest {
                     return "/usr/bin/touch";
                 case "getArgs":
                     return Collections.singletonList("generated file.txt");
+                case "getEnvironment":
+                    return Collections.singletonMap("NATIVE_EXEC_ENV", "from-task");
                 case "getWorkingDir":
                     return workingDir;
                 case "isIgnoreExitValue":
@@ -779,6 +785,8 @@ public class ProjectModelProviderAdapterTest {
                     return "256m";
                 case "getSystemProperties":
                     return Collections.singletonMap("native.prop", "from-task");
+                case "getEnvironment":
+                    return Collections.singletonMap("NATIVE_JAVA_EXEC_ENV", "from-task");
                 case "getWorkingDir":
                     return workingDir;
                 case "isIgnoreExitValue":
@@ -1348,6 +1356,7 @@ public class ProjectModelProviderAdapterTest {
     public interface ExecContract {
         String getExecutable();
         Iterable<String> getArgs();
+        Map<String, String> getEnvironment();
         File getWorkingDir();
         boolean isIgnoreExitValue();
     }
@@ -1359,6 +1368,7 @@ public class ProjectModelProviderAdapterTest {
         Iterable<String> getJvmArgs();
         String getMaxHeapSize();
         Map<String, String> getSystemProperties();
+        Map<String, String> getEnvironment();
         File getWorkingDir();
         boolean isIgnoreExitValue();
     }
