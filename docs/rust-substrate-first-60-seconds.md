@@ -29,7 +29,7 @@ python3 tools/demo/first_60_seconds.py --output build/first60.json
 The script reports:
 
 - `daemon_socket_ready`: process launch until the Unix socket exists
-- `dependency_transport_store_checksum`: local HTTP artifact streaming through the Rust dependency service, persisted store write, cache hit, checksum verification, and cache-first transport reuse
+- `dependency_transport_store_checksum`: local HTTP artifact streaming through the Rust dependency service, persisted store write, warm-cache and persisted-store reuse before HTTP, cache hit, checksum verification, and cache-first transport reuse
 - `dependency_metadata_transport_cache`: URL-only POM streaming through the Rust
   transport, persisted metadata-store write, and later metadata cache hit
 - `dependency_dynamic_metadata_transport_cache`: URL-only

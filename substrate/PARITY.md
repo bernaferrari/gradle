@@ -122,10 +122,11 @@
   evicted when the persisted file has disappeared; URL metadata warm-cache
   entries follow the same stale-file eviction behavior.
 - Rust dependency transport now serves `DownloadArtifact` requests from the
-  persisted Rust artifact/metadata stores before opening HTTP. This moves
-  repeated Gradle external-resource downloads onto the native store path even
-  when the JVM-side caller reaches the download seam instead of the explicit
-  read-through seam.
+  warm Rust artifact cache first, then the persisted Rust artifact/metadata
+  stores, before opening HTTP. Stale warm entries are evicted before fallback.
+  This moves repeated Gradle external-resource downloads onto the native cache
+  path even when the JVM-side caller reaches the download seam instead of the
+  explicit read-through seam.
 - Native dependency resolution has an opt-in `prefetch_artifacts` mode for
   static Maven artifact URLs. When requested, Rust resolves the graph, fetches
   each supported resolved artifact into the Rust artifact store, writes
@@ -328,6 +329,7 @@
 - `cargo test -p gradle-substrate-daemon fetch_pom -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_download_metadata_url_populates_metadata_cache -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_download_maven_metadata_url_populates_dynamic_metadata_cache -- --nocapture`
+- `cargo test -p gradle-substrate-daemon warm_cache_local_path -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_download_ -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_fetch_maven_metadata_populates_store_and_reuses_persistent_cache -- --nocapture`
 - `cargo test -p gradle-substrate-daemon persistent_store_roundtrip -- --nocapture`
