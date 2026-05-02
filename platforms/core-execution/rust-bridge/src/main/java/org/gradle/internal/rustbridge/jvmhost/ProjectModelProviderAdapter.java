@@ -783,16 +783,45 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         Object filter = invokeOptional(task, "getFilter");
         List<String> includes = stringValues(invokeOptional(filter, "getIncludePatterns"));
         List<String> excludes = stringValues(invokeOptional(filter, "getExcludePatterns"));
-        if (includes.size() == 1 && excludes.isEmpty()) {
-            inputs.put("test_filter", includes.get(0));
+        if (includes.isEmpty() && excludes.isEmpty()) {
             inputs.put("test_unsupported_filters", "false");
-        } else if (includes.isEmpty() && excludes.isEmpty()) {
+        } else if (testFilterPatternsAreClassOnly(includes) && testFilterPatternsAreClassOnly(excludes)) {
+            if (includes.size() == 1 && excludes.isEmpty()) {
+                inputs.put("test_filter", includes.get(0));
+            }
+            putIfPresent(inputs, "test_filter_includes", String.join(",", includes));
+            putIfPresent(inputs, "test_filter_excludes", String.join(",", excludes));
             inputs.put("test_unsupported_filters", "false");
         } else {
             putIfPresent(inputs, "test_filter_includes", String.join(",", includes));
             putIfPresent(inputs, "test_filter_excludes", String.join(",", excludes));
             inputs.put("test_unsupported_filters", "true");
         }
+    }
+
+    private static boolean testFilterPatternsAreClassOnly(List<String> patterns) {
+        for (String pattern : patterns) {
+            if (!testFilterPatternIsClassOnly(pattern)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean testFilterPatternIsClassOnly(String pattern) {
+        if (pattern == null || pattern.isEmpty() || pattern.indexOf('#') >= 0 || pattern.indexOf(' ') >= 0) {
+            return false;
+        }
+        String lastSegment = pattern;
+        int lastDot = pattern.lastIndexOf('.');
+        if (lastDot >= 0) {
+            lastSegment = pattern.substring(lastDot + 1);
+        }
+        if (lastSegment.isEmpty()) {
+            return false;
+        }
+        char first = lastSegment.charAt(0);
+        return first == '*' || first == '?' || Character.isUpperCase(first);
     }
 
     private static void captureExecInputs(Task task, Map<String, String> inputs) {

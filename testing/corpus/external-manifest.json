@@ -8,9 +8,9 @@
       "expected_contract": {
         "build_file_count": 1,
         "settings_file_count": 1,
-        "source_file_count": 2,
+        "source_file_count": 3,
         "plugins": ["java-library"],
-        "tasks": ["contractReport"],
+        "tasks": ["contractReport", "test"],
         "outputs": ["build/reports/contract"],
         "dependencies": [
           "org.junit.jupiter:junit-jupiter:5.10.2",

@@ -19,8 +19,8 @@
       }
     },
     {
-      "name": "test-filters-unsupported-kotlin-dsl",
-      "path": "test-filters-unsupported-kotlin-dsl",
+      "name": "test-method-filter-unsupported-kotlin-dsl",
+      "path": "test-method-filter-unsupported-kotlin-dsl",
       "tasks": ["clean", "build"],
       "expected_substrate_fail_closed": true,
       "expected_contract": {

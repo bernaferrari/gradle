@@ -86,7 +86,9 @@ impl TestExecExecutor {
     /// - `java_home`: JDK installation path
     /// - `classpath`: classpath for test execution (test classes + dependencies)
     /// - `test_classes`: comma-separated list of fully-qualified test class names
-    /// - `test_filter`: glob pattern for test method filtering (e.g. "com.foo.*Test")
+    /// - `test_filter`: legacy single Gradle class-name glob pattern (e.g. "com.foo.*Test")
+    /// - `test_filter_includes`: comma-separated Gradle class-name glob patterns
+    /// - `test_filter_excludes`: comma-separated Gradle class-name glob patterns
     /// - `include_engines`: comma-separated JUnit 5 engine IDs (default: "junit-jupiter")
     /// - `exclude_tags`: comma-separated JUnit 5 tags to exclude
     /// - `include_tags`: comma-separated JUnit 5 tags to include
@@ -172,10 +174,7 @@ impl TestExecExecutor {
             }
         }
 
-        // Test filter (class/method patterns)
-        if let Some(filter) = input.options.get("test_filter") {
-            cmd.arg("--filter").arg(filter);
-        }
+        self.append_classname_filters(&mut cmd, input);
 
         // Test classes (positional args to ConsoleLauncher)
         if let Some(test_classes) = input.options.get("test_classes") {
@@ -208,6 +207,21 @@ impl TestExecExecutor {
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
         cmd
+    }
+
+    fn append_classname_filters(&self, cmd: &mut Command, input: &TaskInput) {
+        let mut includes = option_csv_list(&input.options, "test_filter_includes");
+        if includes.is_empty() {
+            includes.extend(option_csv_list(&input.options, "test_filter"));
+        }
+        for include in includes {
+            cmd.arg("--include-classname")
+                .arg(gradle_test_pattern_to_regex(&include));
+        }
+        for exclude in option_csv_list(&input.options, "test_filter_excludes") {
+            cmd.arg("--exclude-classname")
+                .arg(gradle_test_pattern_to_regex(&exclude));
+        }
     }
 
     /// Convert a .java file path to a fully-qualified class name.
@@ -538,6 +552,38 @@ impl TestExecExecutor {
         result.duration_ms = start.elapsed().as_millis() as u64;
         result
     }
+}
+
+fn option_csv_list(options: &std::collections::HashMap<String, String>, key: &str) -> Vec<String> {
+    options
+        .get(key)
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn gradle_test_pattern_to_regex(pattern: &str) -> String {
+    let mut regex = String::from("^");
+    for ch in pattern.chars() {
+        match ch {
+            '*' => regex.push_str(".*"),
+            '?' => regex.push('.'),
+            '.' => regex.push_str("\\."),
+            '$' | '(' | ')' | '+' | '[' | ']' | '{' | '}' | '^' | '|' | '\\' => {
+                regex.push('\\');
+                regex.push(ch);
+            }
+            _ => regex.push(ch),
+        }
+    }
+    regex.push('$');
+    regex
 }
 
 fn normalize_gradle_junit_reports(report_dir: &Path) {
@@ -943,9 +989,45 @@ mod tests {
             .get_args()
             .map(|s| s.to_string_lossy().to_string())
             .collect();
-        let filter_idx = args.iter().position(|a| a == "--filter");
+        let filter_idx = args.iter().position(|a| a == "--include-classname");
         assert!(filter_idx.is_some());
-        assert_eq!(args[filter_idx.unwrap() + 1], "com.example.*Test");
+        assert_eq!(args[filter_idx.unwrap() + 1], "^com\\.example\\..*Test$");
+    }
+
+    #[test]
+    fn test_build_command_include_and_exclude_test_filters() {
+        let executor = TestExecExecutor::new();
+        let mut input = make_test_input();
+        input.options.insert(
+            "test_filter_includes".to_string(),
+            "com.example.*Test".to_string(),
+        );
+        input.options.insert(
+            "test_filter_excludes".to_string(),
+            "com.example.Legacy*".to_string(),
+        );
+        let java = PathBuf::from("/usr/lib/jvm/java-17/bin/java");
+        let cmd = executor.build_command(&java, &input);
+
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
+        let include_idx = args.iter().position(|a| a == "--include-classname");
+        let exclude_idx = args.iter().position(|a| a == "--exclude-classname");
+        assert!(include_idx.is_some());
+        assert!(exclude_idx.is_some());
+        assert_eq!(args[include_idx.unwrap() + 1], "^com\\.example\\..*Test$");
+        assert_eq!(args[exclude_idx.unwrap() + 1], "^com\\.example\\.Legacy.*$");
+    }
+
+    #[test]
+    fn test_gradle_test_pattern_to_regex_escapes_regex_metacharacters() {
+        assert_eq!(
+            gradle_test_pattern_to_regex("com.example.Outer$Nested?Test"),
+            "^com\\.example\\.Outer\\$Nested.Test$"
+        );
     }
 
     #[test]

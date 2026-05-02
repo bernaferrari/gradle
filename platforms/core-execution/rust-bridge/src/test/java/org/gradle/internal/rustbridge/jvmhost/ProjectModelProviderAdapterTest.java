@@ -215,10 +215,41 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("env=test", inputs.get("system_properties"));
         assertEquals(reportsDir.getAbsolutePath(), inputs.get("xml_report_dir"));
         assertEquals("example.*Test", inputs.get("test_filter"));
+        assertEquals("example.*Test", inputs.get("test_filter_includes"));
         assertEquals("fast,integration", inputs.get("include_tags"));
         assertEquals("slow", inputs.get("exclude_tags"));
         assertEquals("false", inputs.get("test_unsupported_filters"));
         assertEquals("true", inputs.get("scan_classpath"));
+    }
+
+    @org.junit.Test
+    public void capturesClassNameTestIncludeAndExcludeFiltersAsNativeReady() throws IOException {
+        File testClassesDir = temporaryFolder.newFolder("build/classes/java/test");
+        File runtimeJar = temporaryFolder.newFile("junit-platform-console-standalone.jar");
+        File reportsDir = temporaryFolder.newFolder("build/test-results/test");
+        File workingDir = temporaryFolder.newFolder("work");
+
+        Task test = testTask(
+            testClassesDir,
+            runtimeJar,
+            reportsDir,
+            workingDir,
+            null,
+            new TestFilterSpec(
+                new LinkedHashSet<>(Arrays.asList("com.example.*Test")),
+                new LinkedHashSet<>(Arrays.asList("com.example.Legacy*"))
+            )
+        );
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(test, Test.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("com.example.*Test", inputs.get("test_filter_includes"));
+        assertEquals("com.example.Legacy*", inputs.get("test_filter_excludes"));
+        assertFalse(inputs.containsKey("test_filter"));
+        assertEquals("false", inputs.get("test_unsupported_filters"));
     }
 
     @org.junit.Test
@@ -687,6 +718,17 @@ public class ProjectModelProviderAdapterTest {
         File workingDir,
         ConfigurationContainer configurations
     ) {
+        return testTask(testClassesDir, runtimeJar, reportsDir, workingDir, configurations, new TestFilterSpec());
+    }
+
+    private static Task testTask(
+        File testClassesDir,
+        File runtimeJar,
+        File reportsDir,
+        File workingDir,
+        ConfigurationContainer configurations,
+        TestFilterSpec filterSpec
+    ) {
         FileCollection testClasses = fileCollection(testClassesDir);
         FileCollection classpath = fileCollection(testClassesDir, runtimeJar);
         FileCollection outputs = fileCollection(reportsDir);
@@ -745,7 +787,7 @@ public class ProjectModelProviderAdapterTest {
                 case "getReports":
                     return new TestReports(reportsDir);
                 case "getFilter":
-                    return new TestFilterSpec();
+                    return filterSpec;
                 case "getOptions":
                     return new JUnitPlatformOptionsSpec();
                 case "compareTo":
@@ -1683,12 +1725,24 @@ public class ProjectModelProviderAdapterTest {
     }
 
     public static class TestFilterSpec {
+        private final Set<String> includePatterns;
+        private final Set<String> excludePatterns;
+
+        public TestFilterSpec() {
+            this(Collections.singleton("example.*Test"), Collections.emptySet());
+        }
+
+        public TestFilterSpec(Set<String> includePatterns, Set<String> excludePatterns) {
+            this.includePatterns = includePatterns;
+            this.excludePatterns = excludePatterns;
+        }
+
         public Set<String> getIncludePatterns() {
-            return Collections.singleton("example.*Test");
+            return includePatterns;
         }
 
         public Set<String> getExcludePatterns() {
-            return Collections.emptySet();
+            return excludePatterns;
         }
     }
 
