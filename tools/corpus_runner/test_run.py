@@ -46,8 +46,10 @@ class CorpusRunnerCommandTest(unittest.TestCase):
             "-Dorg.gradle.rust.substrate.runbuild.authoritative=true",
             command,
         )
+        self.assertIn("-Dorg.gradle.rust.substrate.taskgraph.enabled=true", command)
+        self.assertIn("-Dorg.gradle.rust.substrate.runbuild.enabled=true", command)
+        self.assertNotIn("-Dorg.gradle.rust.substrate.mode=shadow", command)
         self.assertIn("--info", command)
-        self.assertNotIn("-Dorg.gradle.rust.substrate.runbuild.enabled=true", command)
 
     def test_runbuild_native_ready_default_adds_delegating_gate(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -62,6 +64,9 @@ class CorpusRunnerCommandTest(unittest.TestCase):
             "-Dorg.gradle.rust.substrate.runbuild.native-ready-default=true",
             command,
         )
+        self.assertIn("-Dorg.gradle.rust.substrate.taskgraph.enabled=true", command)
+        self.assertIn("-Dorg.gradle.rust.substrate.runbuild.enabled=true", command)
+        self.assertNotIn("-Dorg.gradle.rust.substrate.mode=shadow", command)
         self.assertIn("--info", command)
 
     def test_prefers_project_wrapper_when_present(self):

@@ -307,10 +307,14 @@ def build_gradle_command(
     
     if substrate:
         # Keep this in sync with RustSubstrateOptions.java.
-        cmd.extend([
-            "-Dorg.gradle.rust.substrate.enabled=true",
-            f"-Dorg.gradle.rust.substrate.mode={substrate_mode}",
-        ])
+        cmd.append("-Dorg.gradle.rust.substrate.enabled=true")
+        if runbuild_authoritative or runbuild_native_ready_default:
+            cmd.extend([
+                "-Dorg.gradle.rust.substrate.taskgraph.enabled=true",
+                "-Dorg.gradle.rust.substrate.runbuild.enabled=true",
+            ])
+        else:
+            cmd.append(f"-Dorg.gradle.rust.substrate.mode={substrate_mode}")
         if daemon_binary:
             daemon_path = Path(daemon_binary).expanduser()
             if not daemon_path.is_absolute():
