@@ -198,7 +198,6 @@ def scan_project_contract(project_dir: str) -> dict:
     project_dependencies: set[str] = set()
     toolchains: set[str] = set()
     unsupported_features: set[str] = set()
-    contains_symlinks = any(path.is_symlink() for path in root.rglob("*"))
 
     for build_file in build_files + settings_files:
         text = build_file.read_text(encoding="utf-8")
@@ -230,10 +229,6 @@ def scan_project_contract(project_dir: str) -> dict:
             unsupported_features.add("copy-eachfile-action")
         if has_unsupported_test_filters:
             unsupported_features.add("unsupported-test-filters")
-        if contains_symlinks and re.search(r"tasks\.register<Copy>\(", text):
-            unsupported_features.add("copy-symlink-input")
-        if contains_symlinks and re.search(r"tasks\.register<(?:Jar|Zip|Tar|War|Ear)>\(", text):
-            unsupported_features.add("archive-symlink-input")
 
     return {
         "build_file_count": len(build_files),
