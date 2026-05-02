@@ -907,10 +907,12 @@ fn execution_context_json(task: &CanonicalBuildPlanTask, task_type: &str) -> Str
         }
     }
 
-    let execution_source_files = if task_type == "Mkdir" {
-        output_paths.clone()
-    } else {
-        source_files
+    let execution_source_files = match task_type {
+        "Mkdir" => output_paths.clone(),
+        "Jar" | "Zip" | "War" | "Ear" | "Tar" => {
+            archive_source_paths(task_type, &source_files, &output_paths)
+        }
+        _ => source_files,
     };
     let input_file_fingerprints = work_input_file_fingerprints(&execution_source_files);
 
@@ -927,6 +929,7 @@ fn execution_context_json(task: &CanonicalBuildPlanTask, task_type: &str) -> Str
         "caching_enabled": cacheability_allows_cache(&task.cacheability),
         "can_load_from_cache": cacheability_allows_cache(&task.cacheability),
         "up_to_date_enabled": up_to_date_planning_enabled(task_type),
+        "no_source": no_source_task(task),
         "has_previous_execution_state": false,
         "rebuild_reasons": [],
     })
@@ -1014,12 +1017,76 @@ fn up_to_date_planning_enabled(task_type: &str) -> bool {
     )
 }
 
-fn work_input_file_fingerprints(paths: &[String]) -> BTreeMap<String, String> {
+fn no_source_task(task: &CanonicalBuildPlanTask) -> bool {
+    let simple = task
+        .implementation_id
+        .rsplit('.')
+        .next()
+        .unwrap_or(task.implementation_id.as_str());
+    match logical_gradle_task_type(simple).as_str() {
+        "JavaCompile" => java_compile_no_source(task),
+        "ProcessResources" => process_resources_no_source(task),
+        "Test" => test_no_source(task),
+        _ => false,
+    }
+}
+
+pub(crate) fn work_input_file_fingerprints(paths: &[String]) -> BTreeMap<String, String> {
     let mut fingerprints = BTreeMap::new();
     for path in paths.iter().filter(|path| !path.trim().is_empty()) {
         fingerprints.insert(path.clone(), fingerprint_path(Path::new(path)));
     }
     fingerprints
+}
+
+fn archive_source_paths(
+    task_type: &str,
+    declared_sources: &[String],
+    output_paths: &[String],
+) -> Vec<String> {
+    let mut sources = declared_sources.to_vec();
+    let Some(archive_path) = output_paths.first().map(std::path::Path::new) else {
+        return sources;
+    };
+    let Some(build_dir) = archive_path.parent().and_then(|path| path.parent()) else {
+        return sources;
+    };
+    let Some(project_dir) = build_dir.parent() else {
+        return sources;
+    };
+    let archive_name = archive_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    match task_type {
+        "Jar" if archive_name.ends_with("-sources.jar") => {
+            push_unique_path(&mut sources, project_dir.join("src/main/java"));
+            push_unique_path(&mut sources, project_dir.join("src/main/resources"));
+        }
+        "Jar" if archive_name.ends_with(".jar") => {
+            push_unique_path(&mut sources, build_dir.join("classes/java/main"));
+            push_unique_path(&mut sources, build_dir.join("resources/main"));
+        }
+        "War" => {
+            push_unique_path(&mut sources, project_dir.join("src/main/webapp"));
+            push_unique_path(&mut sources, build_dir.join("classes/java/main"));
+            push_unique_path(&mut sources, build_dir.join("resources/main"));
+        }
+        "Ear" => {
+            push_unique_path(&mut sources, project_dir.join("src/main/application"));
+        }
+        _ => {}
+    }
+    sources
+}
+
+fn push_unique_path(paths: &mut Vec<String>, path: std::path::PathBuf) {
+    let value = path.to_string_lossy().into_owned();
+    if !value.is_empty() && !paths.iter().any(|existing| existing == &value) {
+        paths.push(value);
+    }
 }
 
 fn fingerprint_path(path: &Path) -> String {
@@ -2110,6 +2177,53 @@ mod tests {
         assert!(!up_to_date_planning_enabled("Exec"));
         assert!(!up_to_date_planning_enabled("JavaExec"));
         assert!(up_to_date_planning_enabled("JavaCompile"));
+    }
+
+    #[test]
+    fn test_archive_context_includes_convention_source_roots_for_warm_fingerprints() {
+        let mut task = canonical_task(
+            ":jar",
+            "org.gradle.api.tasks.bundling.Jar",
+            vec![":classes".to_string()],
+            vec!["/repo/build/libs/app.jar".to_string()],
+        );
+        set_value_input(
+            &mut task,
+            "archive_file",
+            "/repo/build/libs/app.jar",
+            "test",
+            "scalar",
+        );
+
+        let task_type = executable_task_type(&task);
+        let context: serde_json::Value =
+            serde_json::from_str(&execution_context_json(&task, &task_type)).unwrap();
+        let source_files = context["source_files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect::<Vec<_>>();
+
+        assert!(source_files.contains(&"/repo/build/classes/java/main"));
+        assert!(source_files.contains(&"/repo/build/resources/main"));
+    }
+
+    #[test]
+    fn test_process_resources_context_marks_no_source() {
+        let task = canonical_task(
+            ":processResources",
+            "org.gradle.language.jvm.tasks.ProcessResources",
+            Vec::new(),
+            vec!["/repo/build/resources/main".to_string()],
+        );
+
+        let task_type = executable_task_type(&task);
+        let context: serde_json::Value =
+            serde_json::from_str(&execution_context_json(&task, &task_type)).unwrap();
+
+        assert_eq!(task_type, "Lifecycle");
+        assert_eq!(context["no_source"], true);
     }
 
     #[test]
