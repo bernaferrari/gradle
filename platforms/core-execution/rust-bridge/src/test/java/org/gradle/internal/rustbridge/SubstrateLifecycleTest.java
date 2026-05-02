@@ -117,6 +117,31 @@ public class SubstrateLifecycleTest {
         assertTrue(RustBridgeCoreServices.shouldEnableJvmHost(new DefaultInternalOptions(values)));
     }
 
+    @Test
+    public void minimalRunBuildFlagsDoNotEnableUnrelatedLifecycleListeners() {
+        Map<String, String> values = new HashMap<>();
+        values.put(RustSubstrateOptions.ENABLE_SUBSTRATE.getPropertyName(), "true");
+        values.put(RustSubstrateOptions.ENABLE_RUST_TASK_GRAPH.getPropertyName(), "true");
+        values.put(RustSubstrateOptions.ENABLE_RUST_RUN_BUILD.getPropertyName(), "true");
+        values.put(RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_RUN_BUILD.getPropertyName(), "true");
+
+        DefaultInternalOptions options = new DefaultInternalOptions(values);
+        assertFalse(RustBridgeCoreServices.shouldEnableBootstrapLifecycle(options));
+        assertFalse(RustBridgeCoreServices.shouldEnableBuildResultLifecycle(options));
+        assertTrue(RustBridgeCoreServices.shouldCaptureSelectedTaskContracts(options));
+    }
+
+    @Test
+    public void umbrellaShadowModeStillEnablesLifecycleListenersForBroadShadowing() {
+        Map<String, String> values = new HashMap<>();
+        values.put(RustSubstrateOptions.SUBSTRATE_MODE.getPropertyName(), "shadow");
+
+        DefaultInternalOptions options = new DefaultInternalOptions(values);
+        assertTrue(RustBridgeCoreServices.shouldEnableBootstrapLifecycle(options));
+        assertTrue(RustBridgeCoreServices.shouldEnableBuildResultLifecycle(options));
+        assertTrue(RustBridgeCoreServices.shouldCaptureSelectedTaskContracts(options));
+    }
+
     private static DefaultInternalOptions options(boolean enabled, boolean authoritative, File daemonBinary) {
         Map<String, String> values = new HashMap<>();
         values.put(RustSubstrateOptions.ENABLE_SUBSTRATE.getPropertyName(), Boolean.toString(enabled));
