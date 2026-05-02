@@ -62,6 +62,23 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
             && options.getBoolean(RustSubstrateOptions.ENABLE_JVM_HOST);
     }
 
+    static boolean shouldEnableBootstrapLifecycle(InternalOptions options) {
+        return RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_BOOTSTRAP);
+    }
+
+    static boolean shouldEnableBuildResultLifecycle(InternalOptions options) {
+        return RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_BUILD_RESULT)
+            || RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_METRICS)
+            || RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_HISTORY);
+    }
+
+    static boolean shouldCaptureSelectedTaskContracts(InternalOptions options) {
+        return shouldEnableJvmHost(options)
+            || RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_RUN_BUILD)
+            || options.getBoolean(RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_RUN_BUILD)
+            || options.getBoolean(RustSubstrateOptions.ENABLE_RUST_NATIVE_READY_DEFAULT_RUN_BUILD);
+    }
+
     @Override
     public void registerGlobalServices(ServiceRegistration registration) {
     }
@@ -335,7 +352,9 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
             if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
                 return JvmHostBridgeWiring.INSTANCE;
             }
-            listenerManager.addListener(new BuildPlanTaskSelectionCaptureListener(taskSelectionSnapshot));
+            if (RustBridgeCoreServices.shouldCaptureSelectedTaskContracts(options)) {
+                listenerManager.addListener(new BuildPlanTaskSelectionCaptureListener(taskSelectionSnapshot));
+            }
             JvmHostServiceImpl serviceImpl = daemonLauncher.getJvmHostServiceImpl();
             if (serviceImpl != null) {
                 serviceImpl.setProjectModelProvider(ProjectModelProviderAdapter.fromServiceRegistry(services));
@@ -403,7 +422,7 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
             ListenerManager listenerManager,
             InternalOptions options
         ) {
-            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+            if (!RustBridgeCoreServices.shouldEnableBuildResultLifecycle(options)) {
                 return null;
             }
             BuildResultShadowListener listener = new BuildResultShadowListener(
@@ -452,7 +471,7 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
             ListenerManager listenerManager,
             InternalOptions options
         ) {
-            if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
+            if (!RustBridgeCoreServices.shouldEnableBootstrapLifecycle(options)) {
                 return null;
             }
             int parallelism = Runtime.getRuntime().availableProcessors();

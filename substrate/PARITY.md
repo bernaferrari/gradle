@@ -18,6 +18,11 @@
   `org.gradle.rust.substrate.runbuild.authoritative=true` executes the selected
   build-plan shadow through Rust `RunBuild` and skips Gradle's JVM task executor
   only when Rust reports exactly the scheduled task count with zero JVM forwards.
+- The explicit Rust `RunBuild` path no longer enables unrelated Java-side
+  bootstrap, build-result, metrics, history, or JVM-host lifecycle services.
+  It keeps only the early selected-task contract capture needed to execute the
+  finalized Gradle DAG from Rust, while umbrella `mode=shadow` still enables the
+  broader listener set for subsystem shadowing.
 - Rust `RunBuild` dispatch now uses a native ready-task priority queue keyed by
   remaining critical-path duration instead of FIFO order, so independent ready
   tasks on the longest path are claimed first. Filtered task selections also
@@ -404,6 +409,11 @@
 - `python3 tools/corpus_runner/run.py --project "$PWD/testing/corpus/java-library-kotlin-dsl" --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-single-minimal-runbuild --verbose` passed 1/1, no fallback, 12/12 task parity, output inventory/hash/archive parity, observed wall time upstream=2854ms and substrate=3311ms.
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-authoritative-minimal-runbuild --verbose` passed 21/21, no fallback, 200/200 task parity, output inventory/hash/archive parity, observed wall time upstream=64023ms and substrate=68744ms.
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-external-minimal-runbuild --verbose` passed 2/2, no fallback, 25/25 task parity, output inventory/hash/archive parity, observed wall time upstream=7015ms and substrate=7948ms.
+- `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.SubstrateLifecycleTest --no-daemon --console=plain` passed after gating unrelated bridge lifecycle listeners off the explicit Rust `RunBuild` path.
+- `./gradlew :distributions-full:install -Pgradle_installPath=$PWD/build/gradle-under-test --no-daemon --console=plain` rebuilt the Gradle-under-test distribution with the explicit `RunBuild` lifecycle gating.
+- `python3 tools/demo/first_60_seconds.py --mode fast --skip-build --output build/first60-lifecycle-gated-installed.json` passed against the rebuilt distribution with daemon socket ready=1451.5ms (daemon self-report 6ms), authoritative Rust DAG=16797.9ms with cold 13977.5ms/11 Rust tasks, warm 2810.6ms/11 Rust tasks, Gradle configuration-cache reuse on the warm run, 7 Rust up-to-date skips, 4 Rust no-source/skipped tasks, 0 JVM forwards, authoritative output SHA-256 `92cf8132cd7364798a080c27ca6c160811e962cab18bb92f2872f061878a8490`, real-build dependency read-through=8150.7ms with remote requests avoided=7/7, and file-watch first event=13ms.
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-authoritative-lifecycle-gated --verbose` passed 21/21, no fallback, 200/200 task parity, output inventory/hash/archive parity, observed wall time upstream=122649ms and substrate=67367ms.
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-external-lifecycle-gated --verbose` passed 2/2, no fallback, 25/25 task parity, output inventory/hash/archive parity, observed wall time upstream=20507ms and substrate=8968ms.
 - `cargo test -p gradle-substrate-daemon test_persistent_store_roundtrip -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_add_artifact_to_cache -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_artifact_cache_rejects_missing_local_file -- --nocapture`
