@@ -497,47 +497,69 @@ def measure_authoritative_runbuild_fast(timeout: int = 90) -> dict[str, object]:
             project,
             ignore=shutil.ignore_patterns(".gradle", "build"),
         )
-        completed = subprocess.run(
-            [
-                str(gradle),
-                "-p",
-                str(project),
-                "clean",
-                "build",
-                "--no-daemon",
-                "--console=plain",
-                "--info",
-                f"--gradle-user-home={temp / 'gradle-home'}",
-                "-Dorg.gradle.rust.substrate.enabled=true",
-                "-Dorg.gradle.rust.substrate.mode=shadow",
-                "-Dorg.gradle.rust.substrate.runbuild.authoritative=true",
-                f"-Dorg.gradle.rust.substrate.daemon.path={DAEMON}",
-                f"-Dorg.gradle.rust.substrate.state.dir={state_dir}",
-            ],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            timeout=timeout,
-            check=False,
-        )
+        gradle_home = temp / "gradle-home"
+
+        def run_authoritative(tasks: list[str]) -> tuple[subprocess.CompletedProcess[str], float]:
+            invocation_started = time.perf_counter()
+            completed = subprocess.run(
+                [
+                    str(gradle),
+                    "-p",
+                    str(project),
+                    *tasks,
+                    "--no-daemon",
+                    "--console=plain",
+                    "--info",
+                    f"--gradle-user-home={gradle_home}",
+                    "-Dorg.gradle.rust.substrate.enabled=true",
+                    "-Dorg.gradle.rust.substrate.mode=shadow",
+                    "-Dorg.gradle.rust.substrate.runbuild.authoritative=true",
+                    f"-Dorg.gradle.rust.substrate.daemon.path={DAEMON}",
+                    f"-Dorg.gradle.rust.substrate.state.dir={state_dir}",
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+                check=False,
+            )
+            return completed, round((time.perf_counter() - invocation_started) * 1000, 1)
+
+        first, first_elapsed_ms = run_authoritative(["clean", "build"])
+        warm, warm_elapsed_ms = run_authoritative(["build"])
         elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
-        output = completed.stdout + completed.stderr
-        executed_match = re.search(
-            r"\[substrate:run-build\] Rust executed (\d+)(?: Gradle)? tasks .* JVM (?:forwarding|fallback) disabled",
-            output,
-        )
-        selected_match = re.search(r"Tasks to be executed:\s*\[(.*?)\]", output, re.DOTALL)
-        selected_tasks = re.findall(r"task '([^']+)'", selected_match.group(1)) if selected_match else []
+
+        def parse_run(output: str) -> dict[str, object]:
+            executed_match = re.search(
+                r"\[substrate:run-build\] Rust executed (\d+)(?: Gradle)? tasks .* JVM (?:forwarding|fallback) disabled",
+                output,
+            )
+            selected_match = re.search(r"Tasks to be executed:\s*\[(.*?)\]", output, re.DOTALL)
+            selected_tasks = re.findall(r"task '([^']+)'", selected_match.group(1)) if selected_match else []
+            jvm_forwarded_match = re.search(r"jvmForwarded=(\d+)", output)
+            return {
+                "marker_present": executed_match is not None,
+                "rust_executed_tasks": int(executed_match.group(1)) if executed_match else 0,
+                "selected_task_count": len(selected_tasks),
+                "selected_tasks": selected_tasks,
+                "tasks_forwarded_to_jvm": int(jvm_forwarded_match.group(1)) if jvm_forwarded_match else 0,
+            }
+
+        first_output = first.stdout + first.stderr
+        warm_output = warm.stdout + warm.stderr
+        first_parsed = parse_run(first_output)
+        warm_parsed = parse_run(warm_output)
         jar = project / "build" / "libs" / "corpus-java-library-1.0.0.jar"
         output_sha256 = hashlib.sha256(jar.read_bytes()).hexdigest() if jar.exists() else None
-        jvm_forwarded_match = re.search(r"jvmForwarded=(\d+)", output)
-        tasks_forwarded_to_jvm = int(jvm_forwarded_match.group(1)) if jvm_forwarded_match else 0
-        rust_executed_tasks = int(executed_match.group(1)) if executed_match else 0
         ok = (
-            completed.returncode == 0
-            and executed_match is not None
-            and rust_executed_tasks > 0
-            and tasks_forwarded_to_jvm == 0
+            first.returncode == 0
+            and warm.returncode == 0
+            and bool(first_parsed["marker_present"])
+            and bool(warm_parsed["marker_present"])
+            and int(first_parsed["rust_executed_tasks"]) > 0
+            and int(warm_parsed["rust_executed_tasks"]) > 0
+            and int(first_parsed["tasks_forwarded_to_jvm"]) == 0
+            and int(warm_parsed["tasks_forwarded_to_jvm"]) == 0
             and jar.exists()
         )
         return {
@@ -545,12 +567,20 @@ def measure_authoritative_runbuild_fast(timeout: int = 90) -> dict[str, object]:
             "ok": ok,
             "elapsed_ms": elapsed_ms,
             "threshold_ms": 30000,
-            "rust_executed_tasks": rust_executed_tasks,
-            "selected_task_count": len(selected_tasks),
-            "selected_tasks": selected_tasks,
-            "tasks_forwarded_to_jvm": tasks_forwarded_to_jvm,
+            "first_elapsed_ms": first_elapsed_ms,
+            "warm_elapsed_ms": warm_elapsed_ms,
+            "first_rust_executed_tasks": first_parsed["rust_executed_tasks"],
+            "warm_rust_executed_tasks": warm_parsed["rust_executed_tasks"],
+            "first_selected_task_count": first_parsed["selected_task_count"],
+            "warm_selected_task_count": warm_parsed["selected_task_count"],
+            "first_selected_tasks": first_parsed["selected_tasks"],
+            "warm_selected_tasks": warm_parsed["selected_tasks"],
+            "first_tasks_forwarded_to_jvm": first_parsed["tasks_forwarded_to_jvm"],
+            "warm_tasks_forwarded_to_jvm": warm_parsed["tasks_forwarded_to_jvm"],
+            "tasks_forwarded_to_jvm": int(first_parsed["tasks_forwarded_to_jvm"])
+            + int(warm_parsed["tasks_forwarded_to_jvm"]),
             "output_sha256": output_sha256,
-            "tail": "\n".join(output.strip().splitlines()[-20:]),
+            "tail": "\n".join((first_output + "\n--- warm run ---\n" + warm_output).strip().splitlines()[-20:]),
         }
     finally:
         shutil.rmtree(temp, ignore_errors=True)
@@ -569,7 +599,8 @@ def print_summary(results: list[dict[str, object]]) -> None:
             extra = f", daemon self-reported {result['daemon_reported_ready_ms']}ms"
         elif result["name"] == "authoritative_rust_dag" and not result.get("skipped"):
             extra = (
-                f", rust tasks {result['rust_executed_tasks']}, "
+                f", cold {result['first_elapsed_ms']}ms/{result['first_rust_executed_tasks']} tasks, "
+                f"warm {result['warm_elapsed_ms']}ms/{result['warm_rust_executed_tasks']} tasks, "
                 f"JVM forwards {result['tasks_forwarded_to_jvm']}, "
                 f"output {result['output_sha256']}"
             )
@@ -588,7 +619,7 @@ def print_summary(results: list[dict[str, object]]) -> None:
 
     explanations = {
         "daemon_socket_ready": "the time before Gradle can send work to the Rust sidecar",
-        "authoritative_rust_dag": "a real Gradle invocation handing a Java-library build to Rust RunBuild with zero JVM task forwards",
+        "authoritative_rust_dag": "cold and warm real Gradle invocations handing a Java-library build to Rust RunBuild with zero JVM task forwards",
         "real_build_dependency_readthrough": "a real Gradle build warming Rust over HTTP, including listener static prefetch, then rerunning from a fresh Gradle user home with zero remote requests",
         "file_watch_first_event": "the delay before source edits become observable",
         "dependency_transport_store_checksum": "the bounded Rust path for Maven bytes, local store, cache-first transport reuse, cache hit, and checksum verification",
