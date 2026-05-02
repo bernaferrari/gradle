@@ -14,7 +14,6 @@ import gradle.substrate.v1.InitBuildRequest;
 import gradle.substrate.v1.InitBuildResponse;
 import gradle.substrate.v1.RefreshBuildPlanShadowRequest;
 import gradle.substrate.v1.RefreshBuildPlanShadowResponse;
-import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
@@ -214,18 +213,29 @@ public class RustBootstrapClient {
             .putMetadata("dependencyCount", "0")
             .putMetadata("dependencyCapture", "deferred");
 
-        Map<String, Project> projectsByPath = new LinkedHashMap<>();
-        for (Task task : taskReferences) {
-            projectsByPath.putIfAbsent(task.getProject().getPath(), task.getProject());
+        Map<String, String> projectNamesByPath = new LinkedHashMap<>();
+        for (BuildPlanTask task : taskContracts) {
+            String projectPath = task.getProjectPath();
+            if (projectPath == null || projectPath.isEmpty()) {
+                continue;
+            }
+            projectNamesByPath.putIfAbsent(projectPath, projectName(projectPath));
         }
-        for (Project project : projectsByPath.values()) {
+        for (Map.Entry<String, String> project : projectNamesByPath.entrySet()) {
             plan.addProjects(BuildPlanProject.newBuilder()
-                .setPath(project.getPath())
-                .setName(project.getName())
-                .setProjectDir(project.getProjectDir().getAbsolutePath())
+                .setPath(project.getKey())
+                .setName(project.getValue())
                 .build());
         }
         return plan.build();
+    }
+
+    private static String projectName(String projectPath) {
+        if (":".equals(projectPath)) {
+            return "root";
+        }
+        int lastSeparator = projectPath.lastIndexOf(':');
+        return lastSeparator >= 0 ? projectPath.substring(lastSeparator + 1) : projectPath;
     }
 
     /**

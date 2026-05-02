@@ -29,7 +29,6 @@ import org.gradle.internal.rustbridge.SubstrateException;
 import org.gradle.internal.rustbridge.bootstrap.RustBootstrapClient;
 import org.gradle.internal.rustbridge.eventstream.BuildIdHolder;
 import org.gradle.internal.rustbridge.jvmhost.BuildPlanTaskSelectionSnapshot;
-import org.gradle.internal.rustbridge.jvmhost.ProjectModelProviderAdapter;
 import org.gradle.internal.rustbridge.taskgraph.RustBuildExecutionClient;
 import org.gradle.internal.rustbridge.taskgraph.RustBuildExecutionClient.RunBuildResult;
 import org.jspecify.annotations.Nullable;
@@ -37,6 +36,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -190,6 +190,12 @@ public class RustAuthoritativeBuildExecutionAction implements BuildWorkExecutor 
             return false;
         }
         List<BuildPlanTask> taskContracts = taskContractsForRust(scheduledTaskGraph, earlySnapshot);
+        if (taskContracts.isEmpty()) {
+            LOGGER.warn(
+                "[substrate:run-build] no reusable captured task contracts for finalized execution plan; refusing Rust run-build"
+            );
+            return false;
+        }
 
         taskSelectionSnapshot.recordSelectedTasks(
             scheduledTaskGraph.taskPaths,
@@ -223,13 +229,13 @@ public class RustAuthoritativeBuildExecutionAction implements BuildWorkExecutor 
         }
         if (earlySnapshot.isPopulated()) {
             LOGGER.debug(
-                "[substrate:run-build] early task contracts were not reusable; earlyPaths={}, earlyContracts={}, finalizedPaths={}",
+                "[substrate:run-build] early task contracts were not reusable; earlyPaths={}, earlyContracts={}, finalizedPaths={}; refusing late live-task contract refresh",
                 earlySnapshot.getTaskPaths().size(),
                 earlySnapshot.getTaskContracts().size(),
                 scheduledTaskGraph.taskPaths.size()
             );
         }
-        return scheduledTaskGraph.taskContracts;
+        return Collections.emptyList();
     }
 
     private static boolean canReuseEarlyTaskContracts(
@@ -275,10 +281,8 @@ public class RustAuthoritativeBuildExecutionAction implements BuildWorkExecutor 
     private static ScheduledTaskGraph captureScheduledTaskGraph(FinalizedExecutionPlan plan) {
         List<String> taskPaths = new ArrayList<>();
         List<Task> taskReferences = new ArrayList<>();
-        List<BuildPlanTask> taskContracts = new ArrayList<>();
         Map<String, List<String>> dependencies = new LinkedHashMap<>();
         Map<Node, String> nodePaths = new LinkedHashMap<>();
-        Map<Node, Task> nodeTasks = new LinkedHashMap<>();
 
         plan.getContents().getScheduledNodes().visitNodes((nodes, entryNodes) -> {
             for (Node node : nodes) {
@@ -288,7 +292,6 @@ public class RustAuthoritativeBuildExecutionAction implements BuildWorkExecutor 
                     taskPaths.add(taskPath);
                     taskReferences.add(task);
                     nodePaths.put(node, taskPath);
-                    nodeTasks.put(node, task);
                 }
             }
             for (Map.Entry<Node, String> entry : nodePaths.entrySet()) {
@@ -300,32 +303,25 @@ public class RustAuthoritativeBuildExecutionAction implements BuildWorkExecutor 
                     }
                 }
                 dependencies.put(entry.getValue(), taskDependencies);
-                Task task = nodeTasks.get(entry.getKey());
-                if (task != null) {
-                    taskContracts.add(ProjectModelProviderAdapter.toBuildPlanTask(task, taskDependencies));
-                }
             }
         });
 
-        return new ScheduledTaskGraph(taskPaths, taskReferences, dependencies, taskContracts);
+        return new ScheduledTaskGraph(taskPaths, taskReferences, dependencies);
     }
 
     private static final class ScheduledTaskGraph {
         private final List<String> taskPaths;
         private final List<Task> taskReferences;
         private final Map<String, List<String>> dependencies;
-        private final List<BuildPlanTask> taskContracts;
 
         private ScheduledTaskGraph(
             List<String> taskPaths,
             List<Task> taskReferences,
-            Map<String, List<String>> dependencies,
-            List<BuildPlanTask> taskContracts
+            Map<String, List<String>> dependencies
         ) {
             this.taskPaths = taskPaths;
             this.taskReferences = taskReferences;
             this.dependencies = dependencies;
-            this.taskContracts = taskContracts;
         }
     }
 }

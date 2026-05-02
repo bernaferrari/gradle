@@ -510,6 +510,7 @@ def measure_authoritative_runbuild_fast(timeout: int = 90) -> dict[str, object]:
                     "--no-daemon",
                     "--console=plain",
                     "--info",
+                    "--configuration-cache",
                     f"--gradle-user-home={gradle_home}",
                     "-Dorg.gradle.rust.substrate.enabled=true",
                     "-Dorg.gradle.rust.substrate.mode=shadow",
@@ -525,7 +526,7 @@ def measure_authoritative_runbuild_fast(timeout: int = 90) -> dict[str, object]:
             )
             return completed, round((time.perf_counter() - invocation_started) * 1000, 1)
 
-        first, first_elapsed_ms = run_authoritative(["clean", "build"])
+        first, first_elapsed_ms = run_authoritative(["build"])
         warm, warm_elapsed_ms = run_authoritative(["build"])
         elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
 
@@ -543,6 +544,8 @@ def measure_authoritative_runbuild_fast(timeout: int = 90) -> dict[str, object]:
                 "selected_task_count": len(selected_tasks),
                 "selected_tasks": selected_tasks,
                 "tasks_forwarded_to_jvm": int(jvm_forwarded_match.group(1)) if jvm_forwarded_match else 0,
+                "configuration_cache_reused": "Configuration cache entry reused" in output,
+                "configuration_cache_stored": "Configuration cache entry stored" in output,
             }
 
         first_output = first.stdout + first.stderr
@@ -577,6 +580,10 @@ def measure_authoritative_runbuild_fast(timeout: int = 90) -> dict[str, object]:
             "warm_selected_tasks": warm_parsed["selected_tasks"],
             "first_tasks_forwarded_to_jvm": first_parsed["tasks_forwarded_to_jvm"],
             "warm_tasks_forwarded_to_jvm": warm_parsed["tasks_forwarded_to_jvm"],
+            "first_configuration_cache_reused": first_parsed["configuration_cache_reused"],
+            "first_configuration_cache_stored": first_parsed["configuration_cache_stored"],
+            "warm_configuration_cache_reused": warm_parsed["configuration_cache_reused"],
+            "warm_configuration_cache_stored": warm_parsed["configuration_cache_stored"],
             "tasks_forwarded_to_jvm": int(first_parsed["tasks_forwarded_to_jvm"])
             + int(warm_parsed["tasks_forwarded_to_jvm"]),
             "output_sha256": output_sha256,
@@ -601,6 +608,7 @@ def print_summary(results: list[dict[str, object]]) -> None:
             extra = (
                 f", cold {result['first_elapsed_ms']}ms/{result['first_rust_executed_tasks']} tasks, "
                 f"warm {result['warm_elapsed_ms']}ms/{result['warm_rust_executed_tasks']} tasks, "
+                f"cc reused {result['warm_configuration_cache_reused']}, "
                 f"JVM forwards {result['tasks_forwarded_to_jvm']}, "
                 f"output {result['output_sha256']}"
             )

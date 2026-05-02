@@ -33,8 +33,9 @@ Fast mode reports:
 - `daemon_socket_ready`: process launch until the Unix socket exists
 - `authoritative_rust_dag`: a copied Java-library corpus project built through
   explicit authoritative Rust `RunBuild`, then invoked again over the same
-  Rust state with no source changes, including cold/warm timings, Rust task
-  counts, JVM forwards, and deterministic output hash
+  Rust state and Gradle configuration-cache state with no source changes,
+  including cold/warm timings, configuration-cache reuse, Rust task counts, JVM
+  forwards, and deterministic output hash
 - `real_build_dependency_readthrough`: an installed Gradle-under-test build resolving a local HTTP Maven `1.+` dependency plus a static Maven graph-only dependency with a transitive child and isolated Rust state; the first run warms dynamic metadata/artifact stores and listener-prefetches the static direct/transitive artifacts, while the second run deletes `build/`, uses a fresh Gradle user home, materializes all artifacts again, and reports remote requests avoided
 - `file_watch_first_event`: native file watcher latency from write to event
 
