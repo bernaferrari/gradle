@@ -13,7 +13,8 @@ inspect a profiler:
 - metadata read-through: whether Gradle can skip remote POM, Gradle module, and
   Maven version-list metadata access when Rust already has the metadata
 - real build read-through: whether an installed Gradle build can warm Rust from
-  HTTP once, then rerun from a fresh Gradle user home with zero remote requests
+  HTTP once, including listener static artifact prefetch, then rerun from a
+  fresh Gradle user home with zero remote requests
 - hashing/fingerprinting: whether installed Gradle can run with Rust
   build-session hashing plus file-collection snapshot/fingerprint support
 - file watching: how quickly an edit becomes observable
@@ -38,7 +39,7 @@ The script reports:
   artifact cache hit, total download size, and SHA-256 evidence
 - `dependency_artifact_readthrough`: focused Gradle resolver tests proving the Rust read-through hook resolves JAR and non-JAR artifacts before remote access
 - `dependency_metadata_readthrough`: focused Gradle resource-cache tests proving the Rust POM, Gradle module, Maven version-list metadata, and uncached download hooks resolve before Java remote transport
-- `real_build_dependency_readthrough`: an installed Gradle-under-test build resolving a local HTTP Maven `1.+` dependency twice with isolated Rust state; the second run deletes `build/`, uses a fresh Gradle user home, materializes the artifact again, and reports remote requests avoided
+- `real_build_dependency_readthrough`: an installed Gradle-under-test build resolving a local HTTP Maven `1.+` dependency plus a static Maven graph-only dependency with isolated Rust state; the first run warms dynamic metadata/artifact stores and listener-prefetches the static artifact, while the second run deletes `build/`, uses a fresh Gradle user home, materializes both artifacts again, and reports remote requests avoided
 - `file_watch_first_event`: native file watcher latency from write to event
 
 The artifact and metadata read-through checks share one Gradle invocation so
@@ -50,11 +51,11 @@ exists, or when `GRADLE_UNDER_TEST_BIN`/`GRADLE_UNDER_TEST` points at a local
 install image from this fork. It uses `org.gradle.rust.substrate.state.dir` so
 the proof is isolated from `~/.gradle-substrate`.
 
-A broader dependency-management integration smoke also exercises a real Maven
-dynamic-version flow: the first run resolves `1.+` over HTTP and warms Rust,
-then a second run with a fresh Gradle user home resolves with no remote
-expectations by reading `maven-metadata.xml`, the selected POM, and the artifact
-from Rust stores.
+A broader dependency-management integration smoke also exercises real Maven
+flows: dynamic-version read-through warms `maven-metadata.xml`, the selected
+POM, and the artifact; static listener prefetch warms an artifact from a
+graph-only first run so a fresh Gradle user home can materialize it without
+remote repository access.
 
 These are not full Gradle replacement claims. Gradle DSL and unsupported plugin
 semantics still go through the JVM compatibility island. This harness exists to

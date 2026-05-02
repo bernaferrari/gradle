@@ -146,6 +146,9 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
     }
 
     private static class BuildServices implements ServiceRegistrationProvider {
+        @Nullable
+        private DependencyResolutionShadowListener dependencyResolutionShadowListener;
+
         @Provides
         RustBootstrapClient createRustBootstrapClient(
             SubstrateClient client,
@@ -236,9 +239,29 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
             ServiceRegistry services,
             InternalOptions options
         ) {
+            return registerDependencyResolutionShadowListener(
+                rustDependencyResolutionClient,
+                mismatchReporter,
+                listenerManager,
+                services,
+                options
+            );
+        }
+
+        @Nullable
+        private DependencyResolutionShadowListener registerDependencyResolutionShadowListener(
+            RustDependencyResolutionClient rustDependencyResolutionClient,
+            HashMismatchReporter mismatchReporter,
+            ListenerManager listenerManager,
+            ServiceRegistry services,
+            InternalOptions options
+        ) {
             configureDependencyReadThrough(rustDependencyResolutionClient, options);
             if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_DEPENDENCY_RESOLUTION)) {
                 return null;
+            }
+            if (dependencyResolutionShadowListener != null) {
+                return dependencyResolutionShadowListener;
             }
             boolean authoritative = RustSubstrateOptions.isSubsystemAuthoritative(
                 options,
@@ -256,6 +279,7 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
                     DependencyResolutionModelAdapter.fromServiceRegistry(services)
                 );
             listenerManager.addListener(listener);
+            dependencyResolutionShadowListener = listener;
             return listener;
         }
 
@@ -289,10 +313,20 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
             BuildPlanTaskSelectionSnapshot taskSelectionSnapshot,
             ListenerManager listenerManager,
             RustDependencyResolutionClient rustDependencyResolutionClient,
+            HashMismatchReporter mismatchReporter,
             ServiceRegistry services,
             InternalOptions options
         ) {
-            configureDependencyReadThrough(rustDependencyResolutionClient, options);
+            DependencyResolutionShadowListener dependencyListener = registerDependencyResolutionShadowListener(
+                rustDependencyResolutionClient,
+                mismatchReporter,
+                listenerManager,
+                services,
+                options
+            );
+            if (dependencyListener != null && dependencyListener.isPrefetchArtifacts()) {
+                LOGGER.debug("[substrate:dep-resolve] dependency resolution listener prefetch is eagerly registered");
+            }
             if (!RustSubstrateOptions.isSubstrateEnabled(options)) {
                 return JvmHostBridgeWiring.INSTANCE;
             }
