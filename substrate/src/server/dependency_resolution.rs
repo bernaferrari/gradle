@@ -826,7 +826,6 @@ impl DependencyResolutionServiceImpl {
 
         let text = tokio::fs::read_to_string(path).await.ok()?;
         let size = text.len() as i64;
-        let sha256 = Self::compute_file_sha256(path).await.unwrap_or_default();
         self.artifact_cache.insert(
             key.to_string(),
             CachedArtifact {
@@ -835,7 +834,7 @@ impl DependencyResolutionServiceImpl {
                 version: version.to_string(),
                 classifier: classifier.to_string(),
                 extension: extension.to_string(),
-                sha256,
+                sha256: String::new(),
                 local_path: path.to_string_lossy().into_owned(),
                 size,
                 cached_at_ms: Self::now_ms(),
@@ -5200,6 +5199,38 @@ mod tests {
         assert!(
             checked_after_mutation.cached,
             "checksum-validated warm metadata reads must hash the current file when the first read did not require a checksum"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_cached_text_metadata_read_does_not_freeze_stale_sha() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(dir.path().to_path_buf());
+        let url = "https://repo.example.test/org/example/demo/1.0/demo-1.0.pom";
+        let key = DependencyResolutionServiceImpl::metadata_url_cache_key(url, "pom");
+        let metadata_path = svc.metadata_url_path(url, "pom");
+        std::fs::create_dir_all(metadata_path.parent().unwrap()).unwrap();
+        std::fs::write(&metadata_path, b"<project>old</project>").unwrap();
+
+        let text = svc
+            .read_cached_text_artifact(&key, &metadata_path, "", "", "", "", "pom")
+            .await;
+        assert_eq!(text.as_deref(), Some("<project>old</project>"));
+
+        std::fs::write(&metadata_path, b"<project>new</project>").unwrap();
+        let new_sha = DependencyResolutionServiceImpl::compute_sha256(b"<project>new</project>");
+        let checked_after_mutation = svc
+            .check_metadata_cache(Request::new(CheckMetadataCacheRequest {
+                url: url.to_string(),
+                extension: "pom".to_string(),
+                sha256: new_sha,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(
+            checked_after_mutation.cached,
+            "resolver text-cache reads must not freeze a stale SHA for later checksum validation"
         );
     }
 

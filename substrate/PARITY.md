@@ -113,7 +113,9 @@
   immediately after a successful streamed download commit, and can verify
   checksums from persisted artifacts. Cold artifact and metadata read-through
   hits skip file hashing when Gradle does not request checksum validation, but
-  retain fail-closed SHA-256 validation on any later checksum-checked read.
+  retain fail-closed SHA-256 validation on any later checksum-checked read; the
+  native resolver's persisted text metadata cache follows the same lazy-SHA
+  rule for warm POM/module/metadata reuse.
 - Native dependency resolution has an opt-in `prefetch_artifacts` mode for
   static Maven artifact URLs. When requested, Rust resolves the graph, fetches
   each supported resolved artifact into the Rust artifact store, writes
@@ -307,6 +309,7 @@
 - `./gradlew :dependency-management:test --tests org.gradle.internal.resource.transfer.DefaultCacheAwareExternalResourceAccessorTest -x :distributions-core:generateLicenseFile`
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.e2e.SubstrateE2ETest.dependencyResolveCanPrefetchStaticMavenArtifact -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon --no-daemon --console=plain`
 - `cargo test -p gradle-substrate-daemon test_no_checksum -- --nocapture`
+- `cargo test -p gradle-substrate-daemon test_cached_text_metadata_read_does_not_freeze_stale_sha -- --nocapture`
 - `cargo test -q -p gradle-substrate-daemon server::file_fingerprint::tests -- --nocapture`
 - `./gradlew :rust-bridge:compileJava :core:compileJava --no-daemon --console=plain`
 - `cargo build -q -p gradle-substrate-daemon`
