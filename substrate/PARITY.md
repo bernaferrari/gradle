@@ -165,7 +165,10 @@
   external module dependencies with static versions, no excludes, no target
   configuration, no changing/SNAPSHOT/dynamic versions, and at most one normal
   artifact shape. Unsupported shapes fail closed by skipping Rust prefetch
-  rather than approximating Gradle semantics.
+  rather than approximating Gradle semantics. A no-daemon integration smoke now
+  proves this through a real Gradle build: a graph-only first run warms Rust
+  through the listener, then a second run with a fresh Gradle user home
+  retrieves the artifact with no remote repository expectations.
 - Gradle artifact resolution has an explicit Rust read-through mode
   (`org.gradle.rust.substrate.dependency.readthrough.artifacts=true`) that
   consults the Rust artifact store after Gradle local access and before remote
@@ -324,6 +327,7 @@
 - `./gradlew :dependency-management:test --tests org.gradle.internal.resource.transfer.DefaultCacheAwareExternalResourceAccessorTest -x :distributions-core:generateLicenseFile`
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.e2e.SubstrateE2ETest.dependencyResolveCanPrefetchStaticMavenArtifact -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon --no-daemon --console=plain`
 - `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.dependency.DependencyResolutionShadowListenerTest --no-daemon --console=plain`
+- `./gradlew :dependency-management:noDaemonIntegTest --tests "org.gradle.integtests.resolve.maven.MavenDynamicResolveIntegrationTest.rust listener prefetches static maven artifact for later no-remote read-through" -Dsubstrate.test.binary=$PWD/target/debug/gradle-substrate-daemon -x :distributions-core:generateLicenseFile --no-daemon --console=plain`
 - `cargo test -p gradle-substrate-daemon test_no_checksum -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_cached_text_metadata_read_does_not_freeze_stale_sha -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_persistent_store_roundtrip -- --nocapture`
