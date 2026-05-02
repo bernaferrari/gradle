@@ -6,6 +6,8 @@ inspect a profiler:
 - daemon readiness: how quickly the Rust sidecar can accept work
 - dependency transport: whether Maven artifact and metadata bytes stream through
   Rust fast and land in the Rust stores with checksum evidence
+- static Maven prefetch: whether Rust can resolve a simple static Maven module
+  and fetch its artifact into the Rust store before Gradle asks for it
 - dependency read-through: whether Gradle can skip remote artifact access when
   Rust already has the requested external module artifact
 - metadata read-through: whether Gradle can skip remote POM, Gradle module, and
@@ -31,6 +33,9 @@ The script reports:
 - `dependency_dynamic_metadata_transport_cache`: URL-only
   `maven-metadata.xml` streaming through the Rust transport, persisted
   metadata-store write, and later dynamic-version metadata cache hit
+- `dependency_static_maven_prefetch`: opt-in Rust `ResolveDependencies`
+  artifact prefetch for a static Maven module, including persisted JAR bytes,
+  artifact cache hit, total download size, and SHA-256 evidence
 - `dependency_artifact_readthrough`: focused Gradle resolver tests proving the Rust read-through hook resolves JAR and non-JAR artifacts before remote access
 - `dependency_metadata_readthrough`: focused Gradle resource-cache tests proving the Rust POM, Gradle module, Maven version-list metadata, and uncached download hooks resolve before Java remote transport
 - `real_build_dependency_readthrough`: an installed Gradle-under-test build resolving a local HTTP Maven `1.+` dependency twice with isolated Rust state; the second run deletes `build/`, uses a fresh Gradle user home, materializes the artifact again, and reports remote requests avoided

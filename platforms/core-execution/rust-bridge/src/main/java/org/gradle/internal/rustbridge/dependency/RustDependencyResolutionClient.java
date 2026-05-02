@@ -160,8 +160,21 @@ public class RustDependencyResolutionClient {
         List<RepositoryDescriptor> repositories,
         boolean lenient
     ) {
+        return resolveDependencies(configurationName, dependencies, repositories, lenient, false);
+    }
+
+    /**
+     * Resolve a dependency graph via the Rust substrate daemon.
+     */
+    public ResolutionResult resolveDependencies(
+        String configurationName,
+        List<DependencyDescriptor> dependencies,
+        List<RepositoryDescriptor> repositories,
+        boolean lenient,
+        boolean prefetchArtifacts
+    ) {
         try {
-            return resolveDependenciesStrict(configurationName, dependencies, repositories, lenient);
+            return resolveDependenciesStrict(configurationName, dependencies, repositories, lenient, prefetchArtifacts);
         } catch (Exception e) {
             LOGGER.debug("[substrate:dep-resolve] gRPC call failed", e);
             return new ResolutionResult(false, new ArrayList<>(), e.getMessage(), 0, 0, 0);
@@ -179,6 +192,21 @@ public class RustDependencyResolutionClient {
         List<RepositoryDescriptor> repositories,
         boolean lenient
     ) {
+        return resolveDependenciesStrict(configurationName, dependencies, repositories, lenient, false);
+    }
+
+    /**
+     * Resolve a dependency graph via the Rust substrate daemon.
+     *
+     * @throws RuntimeException when substrate is unavailable or the RPC fails.
+     */
+    public ResolutionResult resolveDependenciesStrict(
+        String configurationName,
+        List<DependencyDescriptor> dependencies,
+        List<RepositoryDescriptor> repositories,
+        boolean lenient,
+        boolean prefetchArtifacts
+    ) {
         if (client.isNoop()) {
             throw new IllegalStateException("Substrate not available");
         }
@@ -189,6 +217,7 @@ public class RustDependencyResolutionClient {
                 .addAllDependencies(dependencies)
                 .addAllRepositories(repositories)
                 .setLenient(lenient)
+                .setPrefetchArtifacts(prefetchArtifacts)
                 .build());
 
         if (response.getSuccess()) {

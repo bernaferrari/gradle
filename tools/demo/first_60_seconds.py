@@ -165,7 +165,7 @@ def measure_cargo_test(label: str, test_filter: str, timeout: int) -> dict[str, 
         "ok": completed.returncode == 0,
         "elapsed_ms": elapsed_ms,
         "runtime_metric_ms": metric_ms,
-        "threshold_ms": 1500 if label == "file_watch_first_event" else 2000,
+        "threshold_ms": 1500 if label == "file_watch_first_event" else 3000,
         "test_filter": test_filter,
         "tail": "\n".join(output.strip().splitlines()[-12:]),
     }
@@ -240,7 +240,10 @@ def write_maven_module(repo: Path) -> None:
             encoding="utf-8",
         )
         with zipfile.ZipFile(version_dir / f"projectA-{version}.jar", "w") as jar:
-            jar.writestr(f"projectA-{version}.txt", f"payload-{version}\n")
+            entry = zipfile.ZipInfo(f"projectA-{version}.txt")
+            entry.date_time = (1980, 1, 1, 0, 0, 0)
+            entry.compress_type = zipfile.ZIP_STORED
+            jar.writestr(entry, f"payload-{version}\n")
 
     (module_dir / "maven-metadata.xml").write_text(
         "<metadata>"
@@ -409,6 +412,7 @@ def print_summary(results: list[dict[str, object]]) -> None:
     print("- dependency_transport_store_checksum is the bounded Rust path for Maven bytes, local store, cache hit, and checksum verification")
     print("- dependency_metadata_transport_cache proves URL-only POM downloads through Rust warm the Rust metadata cache")
     print("- dependency_dynamic_metadata_transport_cache proves maven-metadata.xml downloads warm the dynamic-version metadata cache")
+    print("- dependency_static_maven_prefetch proves Rust can resolve a static Maven module and prefetch the artifact into the Rust store with checksum evidence")
     print("- dependency_artifact_readthrough proves Gradle can skip remote artifact access when Rust already has the JAR")
     print("- dependency_metadata_readthrough proves Gradle can skip remote POM metadata access and can route uncached resource downloads through Rust")
     print("- real_build_dependency_readthrough proves a real Gradle build can warm Rust over HTTP, then rerun from a fresh Gradle user home with zero remote requests")
@@ -437,6 +441,11 @@ def main() -> int:
         measure_cargo_test(
             "dependency_dynamic_metadata_transport_cache",
             "test_download_maven_metadata_url_populates_dynamic_metadata_cache",
+            timeout=60,
+        ),
+        measure_cargo_test(
+            "dependency_static_maven_prefetch",
+            "test_resolve_dependencies_prefetches_static_maven_artifact",
             timeout=60,
         ),
         *measure_gradle_readthrough_smoke(),

@@ -1073,6 +1073,174 @@ impl DependencyResolutionServiceImpl {
         )
     }
 
+    fn artifact_file_parts_from_url(
+        artifact_url: &str,
+        name: &str,
+        version: &str,
+    ) -> Option<(String, String)> {
+        let path = reqwest::Url::parse(artifact_url)
+            .ok()
+            .and_then(|url| url.path_segments()?.last().map(str::to_string))
+            .or_else(|| artifact_url.rsplit('/').next().map(str::to_string))?;
+        let prefix = format!("{}-{}", name, version);
+        if !path.starts_with(&prefix) {
+            return None;
+        }
+        let dot = path.rfind('.')?;
+        let extension = path[dot + 1..].to_string();
+        if extension.is_empty() {
+            return None;
+        }
+        let suffix = &path[prefix.len()..dot];
+        if !suffix.is_empty() && !suffix.starts_with('-') {
+            return None;
+        }
+        let classifier = suffix.strip_prefix('-').unwrap_or("").to_string();
+        Some((classifier, extension))
+    }
+
+    async fn download_artifact_into_store(
+        &self,
+        group: &str,
+        name: &str,
+        version: &str,
+        classifier: &str,
+        extension: &str,
+        artifact_url: &str,
+    ) -> Result<(i64, String), String> {
+        if group.is_empty() || name.is_empty() || version.is_empty() || artifact_url.is_empty() {
+            return Err("Incomplete Maven artifact coordinate".to_string());
+        }
+        if version.ends_with("-SNAPSHOT") {
+            return Err(format!(
+                "SNAPSHOT artifact prefetch is not supported yet: {group}:{name}:{version}"
+            ));
+        }
+
+        let extension = Self::normalize_extension(extension);
+        let key = Self::artifact_cache_key(group, name, version, classifier, &extension);
+        let store_path = self.artifact_path(group, name, version, classifier, &extension);
+        if store_path.exists() {
+            let size = store_path.metadata().map(|m| m.len() as i64).unwrap_or(0);
+            let sha256 = Self::compute_file_sha256(&store_path)
+                .await
+                .unwrap_or_default();
+            self.artifact_cache.insert(
+                key,
+                CachedArtifact {
+                    group: group.to_string(),
+                    name: name.to_string(),
+                    version: version.to_string(),
+                    classifier: classifier.to_string(),
+                    extension,
+                    sha256: sha256.clone(),
+                    local_path: store_path.to_string_lossy().into_owned(),
+                    size,
+                    cached_at_ms: Self::now_ms(),
+                },
+            );
+            self.resolution_stats
+                .cache_hits
+                .fetch_add(1, Ordering::Relaxed);
+            return Ok((size, sha256));
+        }
+
+        let response = self
+            .http_client
+            .get(artifact_url)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to fetch artifact {artifact_url}: {e}"))?;
+        match response.status().as_u16() {
+            200..=299 => {
+                let bytes = response
+                    .bytes()
+                    .await
+                    .map_err(|e| format!("Failed to read artifact {artifact_url}: {e}"))?;
+                if let Some(parent) = store_path.parent() {
+                    tokio::fs::create_dir_all(parent)
+                        .await
+                        .map_err(|e| format!("Failed to create artifact store directory: {e}"))?;
+                }
+                let tmp_path = PathBuf::from(format!("{}.part", store_path.to_string_lossy()));
+                tokio::fs::write(&tmp_path, &bytes)
+                    .await
+                    .map_err(|e| format!("Failed to write artifact cache file: {e}"))?;
+                tokio::fs::rename(&tmp_path, &store_path)
+                    .await
+                    .map_err(|e| format!("Failed to commit artifact cache file: {e}"))?;
+
+                let sha256 = Self::compute_sha256(&bytes);
+                if let Err(e) = Self::write_sha256_sidecar(&store_path, &sha256).await {
+                    tracing::warn!(path = %store_path.display(), error = %e, "Failed to write prefetched artifact checksum sidecar");
+                }
+                let size = bytes.len() as i64;
+                self.artifact_cache.insert(
+                    key,
+                    CachedArtifact {
+                        group: group.to_string(),
+                        name: name.to_string(),
+                        version: version.to_string(),
+                        classifier: classifier.to_string(),
+                        extension,
+                        sha256: sha256.clone(),
+                        local_path: store_path.to_string_lossy().into_owned(),
+                        size,
+                        cached_at_ms: Self::now_ms(),
+                    },
+                );
+                Ok((size, sha256))
+            }
+            404 => Err(format!("Artifact not found: {artifact_url}")),
+            status => Err(format!("HTTP {status} for {artifact_url}")),
+        }
+    }
+
+    async fn prefetch_resolved_artifacts(
+        &self,
+        deps: &mut [ResolvedDependency],
+    ) -> Result<(i32, i64), String> {
+        let mut total_artifacts = 0;
+        let mut total_download_size = 0;
+
+        for dep in deps {
+            if dep.resolved && !dep.artifact_url.is_empty() {
+                let (classifier, extension) = Self::artifact_file_parts_from_url(
+                    &dep.artifact_url,
+                    &dep.name,
+                    &dep.selected_version,
+                )
+                .ok_or_else(|| {
+                    format!(
+                        "Unsupported Maven artifact URL for prefetch: {}",
+                        dep.artifact_url
+                    )
+                })?;
+                let (size, sha256) = self
+                    .download_artifact_into_store(
+                        &dep.group,
+                        &dep.name,
+                        &dep.selected_version,
+                        &classifier,
+                        &extension,
+                        &dep.artifact_url,
+                    )
+                    .await?;
+                dep.artifact_size = size;
+                dep.artifact_sha256 = sha256;
+                total_artifacts += 1;
+                total_download_size += size;
+            }
+
+            let (child_count, child_size) =
+                Box::pin(self.prefetch_resolved_artifacts(&mut dep.dependencies)).await?;
+            total_artifacts += child_count;
+            total_download_size += child_size;
+        }
+
+        Ok((total_artifacts, total_download_size))
+    }
+
     /// Parse a POM file and extract dependencies using a byte-level scanner.
     /// Handles property interpolation, version ranges, and excludes false matches
     /// like `<dependencyManagement>`.
@@ -2509,15 +2677,37 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
         Self::resolve_conflicts_with_strategy(&mut resolved, &strategy);
 
         // Filter by target scope if specified
-        let resolved = if !req.target_scope.is_empty() {
+        let mut resolved = if !req.target_scope.is_empty() {
             let target = DependencyScope::from_str_loose(&req.target_scope);
             Self::filter_by_scope(resolved, &target)
         } else {
             resolved
         };
 
+        let mut total_download_size = 0;
+        let total_artifacts = if req.prefetch_artifacts {
+            match self.prefetch_resolved_artifacts(&mut resolved).await {
+                Ok((prefetched, downloaded)) => {
+                    total_download_size = downloaded;
+                    prefetched
+                }
+                Err(e) => {
+                    let elapsed = start.elapsed().as_millis() as i64;
+                    return Ok(Response::new(ResolveDependenciesResponse {
+                        success: false,
+                        resolved_dependencies: resolved,
+                        error_message: e,
+                        resolution_time_ms: elapsed,
+                        total_artifacts: 0,
+                        total_download_size: 0,
+                    }));
+                }
+            }
+        } else {
+            resolved.len() as i32
+        };
+
         let elapsed = start.elapsed().as_millis() as i64;
-        let total_artifacts = resolved.len() as i32;
 
         self.resolution_stats
             .total_resolutions
@@ -2539,7 +2729,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             error_message: String::new(),
             resolution_time_ms: elapsed,
             total_artifacts,
-            total_download_size: 0,
+            total_download_size,
         }))
     }
 
@@ -3369,6 +3559,42 @@ mod tests {
     }
 
     #[test]
+    fn test_artifact_file_parts_from_url_extracts_classifier_and_extension() {
+        assert_eq!(
+            DependencyResolutionServiceImpl::artifact_file_parts_from_url(
+                "https://repo.example.test/maven/org/example/demo/1.2.3/demo-1.2.3-sources.jar",
+                "demo",
+                "1.2.3",
+            ),
+            Some(("sources".to_string(), "jar".to_string()))
+        );
+        assert_eq!(
+            DependencyResolutionServiceImpl::artifact_file_parts_from_url(
+                "https://repo.example.test/maven/org/example/demo/1.2.3/demo-1.2.3.zip",
+                "demo",
+                "1.2.3",
+            ),
+            Some((String::new(), "zip".to_string()))
+        );
+        assert_eq!(
+            DependencyResolutionServiceImpl::artifact_file_parts_from_url(
+                "https://repo.example.test/maven/org/example/demo/1.2.3/not-demo.jar",
+                "demo",
+                "1.2.3",
+            ),
+            None
+        );
+        assert_eq!(
+            DependencyResolutionServiceImpl::artifact_file_parts_from_url(
+                "https://repo.example.test/maven/org/example/demo/1.2.3/demo-1.2.3broken.jar",
+                "demo",
+                "1.2.3",
+            ),
+            None
+        );
+    }
+
+    #[test]
     fn test_metadata_extensions_include_maven_metadata() {
         assert!(DependencyResolutionServiceImpl::is_metadata_extension(
             "pom"
@@ -3880,6 +4106,111 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(second, first);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_dependencies_prefetches_static_maven_artifact() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::{Arc, Mutex};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let requested = Arc::new(Mutex::new(Vec::new()));
+        let requested_for_server = Arc::clone(&requested);
+        let pom = b"<project><modelVersion>4.0.0</modelVersion><groupId>org.example</groupId><artifactId>demo</artifactId><version>1.0</version></project>".to_vec();
+        let jar = b"prefetched static maven artifact".to_vec();
+        let expected_sha256 = DependencyResolutionServiceImpl::compute_sha256(&jar);
+        let server = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0u8; 2048];
+                let read = stream.read(&mut request).unwrap_or(0);
+                let request_text = String::from_utf8_lossy(&request[..read]);
+                let path = request_text
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("/")
+                    .to_string();
+                requested_for_server.lock().unwrap().push(path.clone());
+                let body = if path.ends_with("/demo-1.0.pom") {
+                    &pom
+                } else if path.ends_with("/demo-1.0.jar") {
+                    &jar
+                } else {
+                    let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+                    stream.write_all(response.as_bytes()).unwrap();
+                    continue;
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/octet-stream\r\n\r\n",
+                    body.len()
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+                stream.write_all(body).unwrap();
+            }
+        });
+
+        let store = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "compileClasspath".to_string(),
+                dependencies: vec![make_dep("org.example", "demo", "1.0")],
+                repositories: vec![make_repo("local", &format!("http://{}", addr))],
+                attributes: vec![],
+                lenient: false,
+                prefetch_artifacts: true,
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        server.join().unwrap();
+
+        assert!(response.success, "{}", response.error_message);
+        assert_eq!(response.total_artifacts, 1);
+        assert_eq!(
+            response.total_download_size,
+            b"prefetched static maven artifact".len() as i64
+        );
+        assert_eq!(response.resolved_dependencies.len(), 1);
+        assert_eq!(
+            response.resolved_dependencies[0].artifact_size,
+            response.total_download_size
+        );
+        assert_eq!(
+            response.resolved_dependencies[0].artifact_sha256,
+            expected_sha256
+        );
+        assert_eq!(
+            requested.lock().unwrap().as_slice(),
+            &[
+                "/org/example/demo/1.0/demo-1.0.pom".to_string(),
+                "/org/example/demo/1.0/demo-1.0.jar".to_string(),
+            ]
+        );
+
+        let stored = store.path().join("org/example/demo/1.0/demo-1.0.jar");
+        assert_eq!(
+            tokio::fs::read(&stored).await.unwrap(),
+            b"prefetched static maven artifact"
+        );
+        let cache_hit = svc
+            .check_artifact_cache(Request::new(CheckArtifactCacheRequest {
+                group: "org.example".to_string(),
+                name: "demo".to_string(),
+                version: "1.0".to_string(),
+                classifier: String::new(),
+                extension: "jar".to_string(),
+                sha256: expected_sha256,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(cache_hit.cached);
+        assert_eq!(cache_hit.local_path, stored.to_string_lossy().to_string());
     }
 
     #[test]
