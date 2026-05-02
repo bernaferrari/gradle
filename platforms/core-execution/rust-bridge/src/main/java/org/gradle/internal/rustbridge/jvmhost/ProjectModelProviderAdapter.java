@@ -496,9 +496,15 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         Object rootSpec = invokeOptional(task, "getRootSpec");
         boolean hasCustomActions = Boolean.TRUE.equals(invokeOptional(rootSpec, "hasCustomActions"));
         List<String> copyActionClasses = copyActionClassNames(rootSpec);
+        String copyFileMappings = nestedCopyFileMappings(rootSpec);
+        boolean staticEachFileRelativePathRewrite = false;
+        if (copyFileMappings.isEmpty()) {
+            copyFileMappings = staticEachFileRelativePathMappings(task);
+            staticEachFileRelativePathRewrite = !copyFileMappings.isEmpty();
+        }
         inputs.put("copy_has_custom_actions", Boolean.toString(hasCustomActions));
         putIfPresent(inputs, "copy_custom_action_types", String.join(",", copyActionClasses));
-        inputs.put("copy_unsupported_custom_actions", Boolean.toString(hasUnsupportedCopyActions(hasCustomActions, copyActionClasses, expandProperties)));
+        inputs.put("copy_unsupported_custom_actions", Boolean.toString(hasUnsupportedCopyActions(hasCustomActions, copyActionClasses, expandProperties, staticEachFileRelativePathRewrite)));
         putIfPresent(inputs, "duplicates_strategy", stringOrEmpty(invokeOptional(rootSpec, "getDuplicatesStrategy")));
         putIfPresent(inputs, "filtering_charset", stringOrEmpty(invokeOptional(rootSpec, "getFilteringCharset")));
         putIfPresent(inputs, "include_patterns", stringCollection(invokeOptional(rootSpec, "getIncludes")));
@@ -507,8 +513,92 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "include_empty_dirs", booleanString(invokeOptional(rootSpec, "isIncludeEmptyDirs")));
         putIfPresent(inputs, "file_permissions", permissionUnixMode(invokeOptional(rootSpec, "getFilePermissions")));
         putIfPresent(inputs, "dir_permissions", permissionUnixMode(invokeOptional(rootSpec, "getDirPermissions")));
-        putIfPresent(inputs, "copy_file_mappings", nestedCopyFileMappings(rootSpec));
+        putIfPresent(inputs, "copy_file_mappings", copyFileMappings);
         inputs.put("copy_contains_symlinks", Boolean.toString(containsSymbolicLinks(safeInputFiles(task)) || copySpecContainsSymbolicLinks(rootSpec)));
+    }
+
+    private static String staticEachFileRelativePathMappings(Task task) {
+        String prefix = staticEachFileRelativePathPrefix(task);
+        if (prefix.isEmpty()) {
+            return "";
+        }
+        FileCollection inputFiles = safeInputFiles(task);
+        if (inputFiles == null) {
+            return "";
+        }
+        List<File> files;
+        try {
+            files = new ArrayList<>(inputFiles.getFiles());
+        } catch (RuntimeException e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to capture static eachFile mappings", e);
+            return "";
+        }
+        files.sort(Comparator.comparing(File::getAbsolutePath));
+        List<String> mappings = new ArrayList<>();
+        for (File file : files) {
+            if (file.isDirectory()) {
+                return "";
+            }
+            String fileName = file.getName();
+            if (fileName.isEmpty()) {
+                return "";
+            }
+            mappings.add(encodeMapping(file.getAbsolutePath())
+                + ">"
+                + encodeMapping(prefix + "/" + fileName)
+                + ">F");
+        }
+        return mappings.isEmpty() ? "" : String.join(",", mappings);
+    }
+
+    private static String staticEachFileRelativePathPrefix(Task task) {
+        Object project = task.getProject();
+        Object buildFileValue = invokeOptional(project, "getBuildFile");
+        if (!(buildFileValue instanceof File)) {
+            return "";
+        }
+        File buildFile = (File) buildFileValue;
+        if (!buildFile.isFile()) {
+            return "";
+        }
+        String text;
+        try {
+            text = new String(Files.readAllBytes(buildFile.toPath()), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to inspect build script for static eachFile rewrite", e);
+            return "";
+        }
+        if (Pattern.compile("\\bfilter\\s*\\{").matcher(text).find() || countOccurrences(text, "eachFile") != 1) {
+            return "";
+        }
+        String taskName = Pattern.quote(task.getName());
+        Pattern pattern = Pattern.compile(
+            "tasks\\.register<Copy>\\(\\s*\"" + taskName + "\"\\s*\\)\\s*\\{(?<body>.*?)eachFile\\s*\\{\\s*relativePath\\s*=\\s*RelativePath\\(\\s*true\\s*,\\s*\"(?<prefix>[^\"]+)\"\\s*,\\s*name\\s*\\)\\s*}\\s*",
+            Pattern.DOTALL
+        );
+        Matcher matcher = pattern.matcher(text);
+        if (!matcher.find()) {
+            return "";
+        }
+        String bodyBeforeEachFile = matcher.group("body");
+        if (Pattern.compile("\\bfilter\\s*\\{").matcher(bodyBeforeEachFile).find()) {
+            return "";
+        }
+        String prefix = matcher.group("prefix").replace('\\', '/');
+        if (prefix.isEmpty() || prefix.startsWith("/") || prefix.contains("..")) {
+            return "";
+        }
+        return prefix;
+    }
+
+    private static int countOccurrences(String text, String needle) {
+        int count = 0;
+        int index = 0;
+        while ((index = text.indexOf(needle, index)) >= 0) {
+            count++;
+            index += needle.length();
+        }
+        return count;
     }
 
     private static boolean containsSymbolicLinks(@Nullable FileCollection files) {
@@ -571,7 +661,15 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         return classes;
     }
 
-    private static boolean hasUnsupportedCopyActions(boolean hasCustomActions, List<String> copyActionClasses, String expandProperties) {
+    private static boolean hasUnsupportedCopyActions(
+        boolean hasCustomActions,
+        List<String> copyActionClasses,
+        String expandProperties,
+        boolean staticEachFileRelativePathRewrite
+    ) {
+        if (staticEachFileRelativePathRewrite) {
+            return false;
+        }
         if (!hasCustomActions && copyActionClasses.isEmpty()) {
             return false;
         }

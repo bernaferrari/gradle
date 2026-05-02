@@ -225,7 +225,12 @@ def scan_project_contract(project_dir: str) -> dict:
         toolchains.update(re.findall(r"languageVersion\.set\(JavaLanguageVersion\.of\(([0-9]+)\)\)", text))
         if re.search(r"tasks\.register<Copy>\([^)]+\)\s*\{.*?\bfilter\s*\{", text, re.DOTALL):
             unsupported_features.add("copy-filter-action")
-        if re.search(r"tasks\.register<Copy>\([^)]+\)\s*\{.*?\beachFile\s*\{", text, re.DOTALL):
+        has_static_eachfile_relative_path = re.search(
+            r"tasks\.register<Copy>\([^)]+\)\s*\{.*?\beachFile\s*\{\s*relativePath\s*=\s*RelativePath\(\s*true\s*,\s*\"[^\"]+\"\s*,\s*name\s*\)",
+            text,
+            re.DOTALL,
+        )
+        if re.search(r"tasks\.register<Copy>\([^)]+\)\s*\{.*?\beachFile\s*\{", text, re.DOTALL) and not has_static_eachfile_relative_path:
             unsupported_features.add("copy-eachfile-action")
         if has_unsupported_test_filters:
             unsupported_features.add("unsupported-test-filters")
