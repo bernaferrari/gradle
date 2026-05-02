@@ -641,6 +641,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "executable", stringOrEmpty(invokeOptional(task, "getExecutable")));
         putIfPresent(inputs, "args", stringList(invokeOptional(task, "getArgs")));
         putIfPresent(inputs, "args_json", stringListJson(invokeOptional(task, "getArgs")));
+        putIfPresent(inputs, "environment", stringMap(invokeOptional(task, "getEnvironment")));
+        putIfPresent(inputs, "environment_json", stringMapJson(invokeOptional(task, "getEnvironment")));
         putIfPresent(inputs, "working_dir", filePath(invokeOptional(task, "getWorkingDir")));
         putIfPresent(inputs, "ignore_exit_value", booleanString(invokeOptional(task, "isIgnoreExitValue")));
     }
@@ -655,6 +657,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "jvm_args_json", stringListJson(invokeOptional(task, taskType, "getJvmArgs")));
         putIfPresent(inputs, "max_heap_size", stringOrEmpty(invokeOptional(task, taskType, "getMaxHeapSize")));
         putIfPresent(inputs, "system_properties", stringMap(invokeOptional(task, taskType, "getSystemProperties")));
+        putIfPresent(inputs, "environment", stringMap(invokeOptional(task, taskType, "getEnvironment")));
+        putIfPresent(inputs, "environment_json", stringMapJson(invokeOptional(task, taskType, "getEnvironment")));
         putIfPresent(inputs, "working_dir", filePath(invokeOptional(task, taskType, "getWorkingDir")));
         putIfPresent(inputs, "ignore_exit_value", booleanString(invokeOptional(task, taskType, "isIgnoreExitValue")));
     }
@@ -1116,6 +1120,35 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         }
         Collections.sort(entries);
         return String.join(",", entries);
+    }
+
+    private static String stringMapJson(@Nullable Object value) {
+        if (!(value instanceof Map)) {
+            return "";
+        }
+        List<String> keys = new ArrayList<>();
+        Map<String, String> entries = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+            if (entry.getKey() != null && entry.getValue() != null) {
+                String key = entry.getKey().toString();
+                keys.add(key);
+                entries.put(key, entry.getValue().toString());
+            }
+        }
+        if (entries.isEmpty()) {
+            return "";
+        }
+        Collections.sort(keys);
+        StringBuilder builder = new StringBuilder("{");
+        for (int i = 0; i < keys.size(); i++) {
+            if (i > 0) {
+                builder.append(',');
+            }
+            String key = keys.get(i);
+            builder.append('"').append(escapeJson(key)).append("\":\"")
+                .append(escapeJson(entries.get(key))).append('"');
+        }
+        return builder.append('}').toString();
     }
 
     private static String testXmlReportDirectory(Task task) {

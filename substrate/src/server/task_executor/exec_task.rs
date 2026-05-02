@@ -1,6 +1,8 @@
 use tokio::process::Command;
 
-use crate::server::task_executor::{option_string_list, TaskExecutor, TaskInput, TaskResult};
+use crate::server::task_executor::{
+    option_string_list, option_string_map, TaskExecutor, TaskInput, TaskResult,
+};
 
 /// Executes a simple external process task.
 ///
@@ -46,6 +48,11 @@ impl TaskExecutor for ExecTaskExecutor {
 
         let mut command = Command::new(executable);
         command.args(option_string_list(&input.options, "args_json", "args"));
+        command.envs(option_string_map(
+            &input.options,
+            "environment_json",
+            "environment",
+        ));
         if let Some(working_dir) = input.options.get("working_dir") {
             if !working_dir.trim().is_empty() {
                 command.current_dir(working_dir);
@@ -147,5 +154,34 @@ mod tests {
 
         assert!(result.success, "{}", result.error_message);
         assert!(target.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_exec_passes_environment_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("env.txt");
+        let executor = ExecTaskExecutor::new();
+        let mut input = TaskInput::new("Exec");
+        input
+            .options
+            .insert("executable".to_string(), "/bin/sh".to_string());
+        input.options.insert(
+            "args_json".to_string(),
+            serde_json::to_string(&vec![
+                "-c".to_string(),
+                format!("printf %s \"$NATIVE_EXEC_ENV\" > {}", target.display()),
+            ])
+            .unwrap(),
+        );
+        input.options.insert(
+            "environment_json".to_string(),
+            serde_json::json!({"NATIVE_EXEC_ENV": "from-rust"}).to_string(),
+        );
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert_eq!(std::fs::read_to_string(target).unwrap(), "from-rust");
     }
 }
