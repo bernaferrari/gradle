@@ -57,6 +57,11 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
 
     private static final Logger LOGGER = Logging.getLogger(RustBridgeCoreServices.class);
 
+    static boolean shouldEnableJvmHost(InternalOptions options) {
+        return RustSubstrateOptions.isSubstrateEnabled(options)
+            && options.getBoolean(RustSubstrateOptions.ENABLE_JVM_HOST);
+    }
+
     @Override
     public void registerGlobalServices(ServiceRegistration registration) {
     }
@@ -95,7 +100,7 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
             }
 
             File socketDirectory = resolveStateDirectory(options);
-            boolean enableJvmHost = RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_JVM_HOST);
+            boolean enableJvmHost = RustBridgeCoreServices.shouldEnableJvmHost(options);
             return enableJvmHost
                 ? DaemonLauncher.withJvmHost(daemonBinary, socketDirectory)
                 : DaemonLauncher.of(daemonBinary, socketDirectory);
