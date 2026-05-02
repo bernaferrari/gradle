@@ -2803,10 +2803,6 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
         );
 
         if let Some(cached) = self.artifact_cache.get(&key) {
-            self.resolution_stats
-                .cache_hits
-                .fetch_add(1, Ordering::Relaxed);
-
             let cached_group = cached.group.clone();
             let cached_name = cached.name.clone();
             let cached_version = cached.version.clone();
@@ -2817,6 +2813,24 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             let cached_size = cached.size;
             let cached_at_ms = cached.cached_at_ms;
             drop(cached);
+
+            if !Path::new(&cached_local_path).is_file() {
+                self.artifact_cache.remove(&key);
+                tracing::debug!(
+                    group = %cached_group,
+                    name = %cached_name,
+                    version = %cached_version,
+                    classifier = %cached_classifier,
+                    extension = %cached_extension,
+                    local_path = %cached_local_path,
+                    "Artifact cache warm entry points to a missing file"
+                );
+                return Ok(Response::new(CheckArtifactCacheResponse {
+                    cached: false,
+                    local_path: String::new(),
+                    cached_size: 0,
+                }));
+            }
 
             let actual_sha256 = if !req.sha256.is_empty() && cached_sha256.is_empty() {
                 Self::compute_file_sha256(Path::new(&cached_local_path))
@@ -2863,6 +2877,10 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                 age_ms,
                 "Artifact cache hit"
             );
+
+            self.resolution_stats
+                .cache_hits
+                .fetch_add(1, Ordering::Relaxed);
 
             return Ok(Response::new(CheckArtifactCacheResponse {
                 cached: true,
@@ -3439,7 +3457,17 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                 }
                 store_path.to_string_lossy().into_owned()
             } else {
-                req.local_path.clone()
+                tracing::warn!(
+                    group = %req.group,
+                    name = %req.name,
+                    version = %req.version,
+                    classifier = %req.classifier,
+                    local_path = %req.local_path,
+                    "Rejected artifact cache add with missing local file"
+                );
+                return Ok(Response::new(AddArtifactToCacheResponse {
+                    accepted: false,
+                }));
             }
         } else {
             String::new()
@@ -4488,7 +4516,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_and_check_artifact_cache() {
-        let svc = make_svc();
+        let dir = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(dir.path().to_path_buf());
+        let src = dir.path().join("my-lib-1.0.jar");
+        std::fs::write(&src, b"cached artifact").unwrap();
 
         // Not cached initially
         let miss = svc
@@ -4511,9 +4542,9 @@ mod tests {
             name: "my-lib".to_string(),
             version: "1.0".to_string(),
             classifier: String::new(),
-            local_path: "/tmp/my-lib-1.0.jar".to_string(),
-            size: 1024,
-            sha256: "abc123".to_string(),
+            local_path: src.to_string_lossy().into_owned(),
+            size: 15,
+            sha256: String::new(),
             extension: String::new(),
         }))
         .await
@@ -4533,8 +4564,83 @@ mod tests {
             .unwrap()
             .into_inner();
         assert!(hit.cached);
-        assert_eq!(hit.local_path, "/tmp/my-lib-1.0.jar");
-        assert_eq!(hit.cached_size, 1024);
+        assert!(Path::new(&hit.local_path).is_file());
+        assert_eq!(hit.cached_size, 15);
+    }
+
+    #[tokio::test]
+    async fn test_artifact_cache_rejects_missing_local_file() {
+        let svc = make_svc();
+
+        let response = svc
+            .add_artifact_to_cache(Request::new(AddArtifactToCacheRequest {
+                group: "com.example".to_string(),
+                name: "missing-lib".to_string(),
+                version: "1.0".to_string(),
+                classifier: String::new(),
+                local_path: "/tmp/definitely-missing-gradle-substrate-artifact.jar".to_string(),
+                size: 1024,
+                sha256: String::new(),
+                extension: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!response.accepted);
+        let hit = svc
+            .check_artifact_cache(Request::new(CheckArtifactCacheRequest {
+                group: "com.example".to_string(),
+                name: "missing-lib".to_string(),
+                version: "1.0".to_string(),
+                classifier: String::new(),
+                sha256: String::new(),
+                extension: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!hit.cached);
+    }
+
+    #[tokio::test]
+    async fn test_warm_artifact_cache_miss_when_file_disappears() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(dir.path().to_path_buf());
+        let src = dir.path().join("vanishing-lib-1.0.jar");
+        std::fs::write(&src, b"vanishing artifact").unwrap();
+
+        let added = svc
+            .add_artifact_to_cache(Request::new(AddArtifactToCacheRequest {
+                group: "com.example".to_string(),
+                name: "vanishing-lib".to_string(),
+                version: "1.0".to_string(),
+                classifier: String::new(),
+                local_path: src.to_string_lossy().into_owned(),
+                size: 18,
+                sha256: String::new(),
+                extension: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(added.accepted);
+
+        let stored = svc.artifact_path("com.example", "vanishing-lib", "1.0", "", "jar");
+        std::fs::remove_file(&stored).unwrap();
+        let hit = svc
+            .check_artifact_cache(Request::new(CheckArtifactCacheRequest {
+                group: "com.example".to_string(),
+                name: "vanishing-lib".to_string(),
+                version: "1.0".to_string(),
+                classifier: String::new(),
+                sha256: String::new(),
+                extension: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!hit.cached);
     }
 
     #[tokio::test]
