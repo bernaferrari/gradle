@@ -121,6 +121,11 @@
   instead of caching them. Warm artifact-cache entries fail closed and are
   evicted when the persisted file has disappeared; URL metadata warm-cache
   entries follow the same stale-file eviction behavior.
+- Rust dependency transport now serves `DownloadArtifact` requests from the
+  persisted Rust artifact/metadata stores before opening HTTP. This moves
+  repeated Gradle external-resource downloads onto the native store path even
+  when the JVM-side caller reaches the download seam instead of the explicit
+  read-through seam.
 - Native dependency resolution has an opt-in `prefetch_artifacts` mode for
   static Maven artifact URLs. When requested, Rust resolves the graph, fetches
   each supported resolved artifact into the Rust artifact store, writes
@@ -323,6 +328,7 @@
 - `cargo test -p gradle-substrate-daemon fetch_pom -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_download_metadata_url_populates_metadata_cache -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_download_maven_metadata_url_populates_dynamic_metadata_cache -- --nocapture`
+- `cargo test -p gradle-substrate-daemon test_download_ -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_fetch_maven_metadata_populates_store_and_reuses_persistent_cache -- --nocapture`
 - `cargo test -p gradle-substrate-daemon persistent_store_roundtrip -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_add_artifact_to_cache_preserves_extension`
@@ -344,6 +350,7 @@
 - `./gradlew :distributions-full:install -Pgradle_installPath=$PWD/build/gradle-under-test --no-daemon --console=plain`
 - `python3 tools/demo/first_60_seconds.py --output build/first60-listener-prefetch.json` passed with daemon socket ready=16.9ms, Rust dependency transport/store/checksum=636.3ms, metadata cache=260.0ms, dynamic metadata cache=257.8ms, static Maven prefetch=266.8ms, shared artifact/metadata read-through Gradle proof=15849.8ms, real-build read-through=8161.2ms with remote requests avoided=5/5 and deterministic dynamic/static output SHA-256 values `742d753d434f2e408762a9cbcc75621c441e0ed5dea5961d65b05ff3013575fc` / `88f9a4aa9c2579d0caa524dac61d45a114f381572629c6645fa28979d2501196`, file-watch first event=12ms.
 - `python3 tools/demo/first_60_seconds.py --output build/first60-transitive-prefetch.json` passed with daemon socket ready=639.5ms, Rust dependency transport/store/checksum=716.0ms, metadata cache=263.5ms, dynamic metadata cache=264.6ms, static Maven prefetch=269.5ms, shared artifact/metadata read-through Gradle proof=15586.8ms, real-build read-through=7964.4ms with remote requests avoided=7/7 and deterministic dynamic/direct-static/transitive-static output SHA-256 values `742d753d434f2e408762a9cbcc75621c441e0ed5dea5961d65b05ff3013575fc` / `88f9a4aa9c2579d0caa524dac61d45a114f381572629c6645fa28979d2501196` / `ecffccc8258a7d1647e4f911a8b9c6874d86f3ef8a88ddf0faad23d3e1cd148b`, file-watch first event=12ms.
+- `python3 tools/demo/first_60_seconds.py --output build/first60-cache-first-transport.json` passed with daemon socket ready=1397.8ms (daemon self-report 10ms), Rust dependency transport/store/checksum/cache-first reuse=21757.6ms, metadata cache=500.0ms, dynamic metadata cache=266.8ms, static Maven prefetch=272.9ms, shared artifact/metadata read-through Gradle proof=15497.8ms, real-build read-through=8854.7ms with remote requests avoided=7/7 and deterministic dynamic/direct-static/transitive-static output SHA-256 values `742d753d434f2e408762a9cbcc75621c441e0ed5dea5961d65b05ff3013575fc` / `88f9a4aa9c2579d0caa524dac61d45a114f381572629c6645fa28979d2501196` / `ecffccc8258a7d1647e4f911a8b9c6874d86f3ef8a88ddf0faad23d3e1cd148b`, file-watch first event=12ms.
 - `cargo test -p gradle-substrate-daemon test_no_checksum -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_cached_text_metadata_read_does_not_freeze_stale_sha -- --nocapture`
 - `cargo test -p gradle-substrate-daemon test_persistent_store_roundtrip -- --nocapture`
