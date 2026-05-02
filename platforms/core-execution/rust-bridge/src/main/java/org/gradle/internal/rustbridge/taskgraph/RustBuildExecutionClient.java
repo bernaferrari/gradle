@@ -43,6 +43,7 @@ public class RustBuildExecutionClient {
         private final int totalTasks;
         private final int tasksSucceeded;
         private final int tasksFailed;
+        private final int tasksSkipped;
         private final int tasksForwardedToJvm;
         private final int tasksUpToDate;
         private final int tasksFromCache;
@@ -57,6 +58,7 @@ public class RustBuildExecutionClient {
             int totalTasks,
             int tasksSucceeded,
             int tasksFailed,
+            int tasksSkipped,
             int tasksForwardedToJvm,
             int tasksUpToDate,
             int tasksFromCache,
@@ -70,6 +72,7 @@ public class RustBuildExecutionClient {
             this.totalTasks = totalTasks;
             this.tasksSucceeded = tasksSucceeded;
             this.tasksFailed = tasksFailed;
+            this.tasksSkipped = tasksSkipped;
             this.tasksForwardedToJvm = tasksForwardedToJvm;
             this.tasksUpToDate = tasksUpToDate;
             this.tasksFromCache = tasksFromCache;
@@ -87,6 +90,7 @@ public class RustBuildExecutionClient {
                 response.getTotalTasks(),
                 response.getTasksSucceeded(),
                 response.getTasksFailed(),
+                response.getTasksSkipped(),
                 response.getTasksForwardedToJvm(),
                 response.getTasksUpToDate(),
                 response.getTasksFromCache(),
@@ -103,6 +107,7 @@ public class RustBuildExecutionClient {
                 "COMPLETED",
                 totalTasks,
                 tasksSucceeded,
+                0,
                 0,
                 0,
                 0,
@@ -127,6 +132,7 @@ public class RustBuildExecutionClient {
                 totalTasks,
                 tasksSucceeded,
                 tasksFailed,
+                0,
                 tasksForwardedToJvm,
                 0,
                 0,
@@ -141,6 +147,7 @@ public class RustBuildExecutionClient {
             return new RunBuildResult(
                 false,
                 "FAILED",
+                0,
                 0,
                 0,
                 0,
@@ -172,6 +179,10 @@ public class RustBuildExecutionClient {
 
         public int getTasksFailed() {
             return tasksFailed;
+        }
+
+        public int getTasksSkipped() {
+            return tasksSkipped;
         }
 
         public int getTasksForwardedToJvm() {

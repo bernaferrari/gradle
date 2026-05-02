@@ -173,7 +173,7 @@ fn build_task_input(task_type: &str, context_json: Option<&String>) -> TaskInput
     input
 }
 
-fn declared_outputs_present(context_json: Option<&String>) -> bool {
+fn declared_outputs_present(task_type: &str, context_json: Option<&String>) -> bool {
     let Some(json) = context_json else {
         return true;
     };
@@ -186,11 +186,37 @@ fn declared_outputs_present(context_json: Option<&String>) -> bool {
     if outputs.is_empty() {
         return true;
     }
-    outputs
+    let output_paths: Vec<&str> = outputs
         .iter()
         .filter_map(|v| v.as_str())
         .filter(|path| !path.is_empty())
-        .all(|path| std::path::Path::new(path).exists())
+        .collect();
+    if output_paths.is_empty() {
+        return true;
+    }
+
+    let mut required_count = 0usize;
+    for path in output_paths {
+        if java_compile_optional_output(task_type, path) {
+            continue;
+        }
+        required_count += 1;
+        if !std::path::Path::new(path).exists() {
+            return false;
+        }
+    }
+
+    required_count > 0
+}
+
+fn java_compile_optional_output(task_type: &str, path: &str) -> bool {
+    if task_type != "JavaCompile" {
+        return false;
+    }
+    let normalized = path.replace('\\', "/");
+    normalized.contains("/build/generated/sources/annotationProcessor/java/")
+        || normalized.contains("/build/generated/sources/headers/java/")
+        || normalized.ends_with("/previous-compilation-data.bin")
 }
 
 fn context_allows_up_to_date(context_json: Option<&String>) -> bool {
@@ -205,6 +231,39 @@ fn context_allows_up_to_date(context_json: Option<&String>) -> bool {
                 .and_then(|flag| flag.as_bool())
         })
         .unwrap_or(false)
+}
+
+fn context_is_no_source(context_json: Option<&String>) -> bool {
+    let Some(json) = context_json else {
+        return false;
+    };
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|value| value.get("no_source").and_then(|flag| flag.as_bool()))
+        .unwrap_or(false)
+}
+
+fn refreshed_work_metadata(meta: &WorkMetadata, context_json: &str) -> WorkMetadata {
+    let mut refreshed = meta.clone();
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(context_json) else {
+        return refreshed;
+    };
+    let Some(source_files) = value.get("source_files").and_then(|files| files.as_array()) else {
+        return refreshed;
+    };
+    let paths = source_files
+        .iter()
+        .filter_map(|file| file.as_str())
+        .filter(|path| !path.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if paths.is_empty() {
+        return refreshed;
+    }
+    refreshed.input_file_fingerprints = super::task_graph::work_input_file_fingerprints(&paths)
+        .into_iter()
+        .collect();
+    refreshed
 }
 
 /// Result from a spawned task execution, sent back via channel.
@@ -746,7 +805,29 @@ impl DagExecutorService for DagExecutorServiceImpl {
                     .get(&task_path)
                     .cloned()
                     .or_else(|| self.task_execution_context(&build_id_str, &task_path));
-                let outputs_present = declared_outputs_present(context_json.as_ref());
+                if context_is_no_source(context_json.as_ref()) {
+                    self.notify_task_finished(Request::new(NotifyTaskFinishedRequest {
+                        build_id: build_id_str.clone(),
+                        task_path: task_path.clone(),
+                        success: true,
+                        outcome: "NO_SOURCE".to_string(),
+                        duration_ms: 0,
+                        failure_message: String::new(),
+                    }))
+                    .await?;
+
+                    tasks_completed += 1;
+                    task_details.push(TaskExecutionDetail {
+                        task_path,
+                        task_type,
+                        outcome: "NO_SOURCE".to_string(),
+                        duration_ms: 0,
+                        execution_mode: "skipped".to_string(),
+                        error_message: "No source files for Rust-native task".to_string(),
+                    });
+                    continue;
+                }
+                let outputs_present = declared_outputs_present(&task_type, context_json.as_ref());
                 let work_meta = context_json.as_ref().and_then(|json| {
                     serde_json::from_str::<serde_json::Value>(json)
                         .ok()
@@ -1082,7 +1163,13 @@ impl DagExecutorService for DagExecutorServiceImpl {
                     if let Some(execution) = self.builds.get(&BuildId::from(build_id_for_meta)) {
                         if let Some(slot) = execution.tasks.get(&task_path_for_meta) {
                             if let Some(ref meta) = slot.work_metadata {
+                                let refreshed_meta =
+                                    refreshed_work_metadata(meta, &slot.execution_context_json);
                                 let predicted = slot.predicted_outcome;
+                                let refreshed_fingerprint =
+                                    super::execution_plan::ExecutionPlanServiceImpl::compute_fingerprint(
+                                        &refreshed_meta,
+                                    );
                                 let prediction_correct = (predicted
                                     == PredictedOutcome::PredictedExecute as i32
                                     && actual_outcome == "EXECUTED")
@@ -1091,12 +1178,12 @@ impl DagExecutorService for DagExecutorServiceImpl {
                                 let _ = self
                                     .execution_plan
                                     .record_outcome(Request::new(RecordOutcomeRequest {
-                                        work_identity: meta.work_identity.clone(),
+                                        work_identity: refreshed_meta.work_identity.clone(),
                                         predicted_outcome: predicted,
                                         actual_outcome,
                                         prediction_correct,
                                         duration_ms: duration_for_record,
-                                        input_fingerprint: slot.input_fingerprint.clone(),
+                                        input_fingerprint: refreshed_fingerprint,
                                     }))
                                     .await;
                             }
@@ -1187,6 +1274,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                     d.outcome == "EXECUTED"
                         || d.outcome == "UP_TO_DATE"
                         || d.outcome == "FROM_CACHE"
+                        || d.outcome == "NO_SOURCE"
                 })
                 .count() as i32,
             tasks_failed: task_details
@@ -1195,7 +1283,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 .count() as i32,
             tasks_skipped: task_details
                 .iter()
-                .filter(|d| d.outcome == "SKIPPED")
+                .filter(|d| d.outcome == "SKIPPED" || d.outcome == "NO_SOURCE")
                 .count() as i32,
             tasks_forwarded_to_jvm: jvm_forward_count,
             total_duration_ms: total_duration,
@@ -1649,6 +1737,7 @@ mod tests {
     use crate::client::jvm_host_bridge::JvmHostBridge;
     use crate::proto::jvm_host_service_server::{JvmHostService, JvmHostServiceServer};
     use crate::proto::RegisterTaskRequest;
+    use crate::server::task_graph;
     use tokio::net::UnixListener;
     use tonic::transport::Server;
 
@@ -3753,6 +3842,48 @@ mod tests {
         assert_eq!(resp.tasks_succeeded, 2);
     }
 
+    #[tokio::test]
+    async fn test_run_build_skips_no_source_tasks_without_executor_work() {
+        let svc = make_svc();
+
+        register_chain(
+            &svc,
+            "build-no-source",
+            &[(":processResources", "Copy", &[])],
+        )
+        .await;
+
+        let context = serde_json::json!({
+            "no_source": true,
+            "source_files": ["/definitely/missing/src/main/resources"],
+            "target_dir": "/definitely/missing/build/resources/main",
+            "output_files": ["/definitely/missing/build/resources/main"],
+            "up_to_date_enabled": true
+        })
+        .to_string();
+        let mut contexts = HashMap::new();
+        contexts.insert(":processResources".to_string(), context);
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "build-no-source".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts,
+                allow_jvm_forwarding: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.total_tasks, 1);
+        assert_eq!(resp.tasks_failed, 0);
+        assert_eq!(resp.tasks_succeeded, 1);
+        assert_eq!(resp.tasks_skipped, 1);
+        assert_eq!(resp.task_details[0].outcome, "NO_SOURCE");
+        assert_eq!(resp.task_details[0].execution_mode, "skipped");
+    }
+
     /// Test that tasks without work_metadata in context always execute.
     #[tokio::test]
     async fn test_run_build_no_metadata_always_executes() {
@@ -3926,5 +4057,94 @@ mod tests {
             .into_inner();
 
         assert_eq!(resp2.tasks_up_to_date, 1, "second run should be UP-TO-DATE");
+    }
+
+    #[test]
+    fn test_refreshed_work_metadata_rehashes_source_files_after_execution() {
+        let dir = tempfile::tempdir().unwrap();
+        let generated = dir.path().join("generated.txt");
+        let before =
+            task_graph::work_input_file_fingerprints(&[generated.to_string_lossy().into_owned()]);
+
+        std::fs::write(&generated, "generated after task execution\n").unwrap();
+        let context = serde_json::json!({
+            "source_files": [generated.to_string_lossy()]
+        })
+        .to_string();
+        let meta = WorkMetadata {
+            work_identity: ":jar".to_string(),
+            display_name: ":jar".to_string(),
+            implementation_class: "org.gradle.api.tasks.bundling.Jar".to_string(),
+            input_properties: Default::default(),
+            input_file_fingerprints: before.into_iter().collect(),
+            caching_enabled: false,
+            can_load_from_cache: false,
+            has_previous_execution_state: false,
+            rebuild_reasons: Vec::new(),
+        };
+
+        let refreshed = refreshed_work_metadata(&meta, &context);
+
+        assert_ne!(
+            meta.input_file_fingerprints,
+            refreshed.input_file_fingerprints
+        );
+        assert_ne!(
+            refreshed
+                .input_file_fingerprints
+                .get(generated.to_string_lossy().as_ref())
+                .map(String::as_str),
+            Some("missing")
+        );
+    }
+
+    #[test]
+    fn test_declared_outputs_present_allows_java_compile_optional_outputs() {
+        let dir = tempfile::tempdir().unwrap();
+        let classes = dir.path().join("build/classes/java/main");
+        std::fs::create_dir_all(&classes).unwrap();
+        let context = serde_json::json!({
+            "output_files": [
+                classes.to_string_lossy(),
+                dir.path().join("build/generated/sources/annotationProcessor/java/main").to_string_lossy(),
+                dir.path().join("build/generated/sources/headers/java/main").to_string_lossy(),
+                dir.path().join("build/tmp/compileJava/previous-compilation-data.bin").to_string_lossy()
+            ]
+        })
+        .to_string();
+
+        assert!(declared_outputs_present("JavaCompile", Some(&context)));
+    }
+
+    #[test]
+    fn test_declared_outputs_present_requires_java_compile_real_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = serde_json::json!({
+            "output_files": [
+                dir.path().join("build/classes/java/main").to_string_lossy(),
+                dir.path().join("build/generated/sources/annotationProcessor/java/main").to_string_lossy()
+            ]
+        })
+        .to_string();
+
+        assert!(!declared_outputs_present("JavaCompile", Some(&context)));
+    }
+
+    #[test]
+    fn test_declared_outputs_present_keeps_non_java_compile_strict() {
+        let dir = tempfile::tempdir().unwrap();
+        let existing = dir.path().join("build/libs/app.jar");
+        let missing = dir.path().join("build/tmp/missing-marker");
+        std::fs::create_dir_all(existing.parent().unwrap()).unwrap();
+        std::fs::write(&existing, b"jar").unwrap();
+        let context = serde_json::json!({
+            "output_files": [
+                existing.to_string_lossy(),
+                missing.to_string_lossy()
+            ]
+        })
+        .to_string();
+
+        assert!(!declared_outputs_present("Jar", Some(&context)));
     }
 }
