@@ -805,17 +805,51 @@ mod tests {
     #[tokio::test]
     async fn test_sync_not_a_directory() {
         let tmp = tempfile::tempdir().unwrap();
-        let file = tmp.path().join("not_a_dir.txt");
-        tokio::fs::write(&file, b"data").await.unwrap();
+        let src_dir = tmp.path().join("src");
+        let dest_file = tmp.path().join("not_a_dir.txt");
+        tokio::fs::create_dir_all(&src_dir).await.unwrap();
+        tokio::fs::write(src_dir.join("file.txt"), b"data")
+            .await
+            .unwrap();
+        tokio::fs::write(&dest_file, b"not a directory")
+            .await
+            .unwrap();
 
         let executor = SyncTaskExecutor::new();
         let mut input = TaskInput::new("Sync");
-        input.source_files.push(file);
-        input.target_dir = tmp.path().join("dest");
+        input.source_files.push(src_dir);
+        input.target_dir = dest_file;
 
         let result = executor.execute(&input).await;
         assert!(!result.success);
-        assert!(result.error_message.contains("not a directory"));
+        assert!(result
+            .error_message
+            .contains("Failed to create target directory"));
+    }
+
+    #[tokio::test]
+    async fn test_sync_single_file_source() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source_file = tmp.path().join("single.txt");
+        let dest_dir = tmp.path().join("dest");
+        tokio::fs::write(&source_file, b"single source")
+            .await
+            .unwrap();
+
+        let executor = SyncTaskExecutor::new();
+        let mut input = TaskInput::new("Sync");
+        input.source_files.push(source_file);
+        input.target_dir = dest_dir.clone();
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert_eq!(
+            tokio::fs::read_to_string(dest_dir.join("single.txt"))
+                .await
+                .unwrap(),
+            "single source"
+        );
     }
 
     #[tokio::test]
