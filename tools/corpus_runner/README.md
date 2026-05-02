@@ -111,7 +111,8 @@ covering Java library, Java application, Java multi-project, Java resource
 expansion, JavaCompile options, standalone Copy/Sync resource transforms,
 CopySpec duplicate handling, nested Copy/Sync CopySpec `into(...)` mappings,
 Zip/Tar nested CopySpec mappings, Zip/Tar gzip+bzip2/War/Ear archive builds,
-simple Java launcher Exec and JavaExec tasks, and native Javadoc. The optional
+simple Java launcher Exec and JavaExec tasks, native Javadoc, and simple
+Copy/Zip file-symlink inputs that Gradle follows as target bytes. The optional
 offline corpus also includes an OSS-style Java library slice with sources
 JAR/Javadoc/static report outputs. The optional `testing/corpus/external-manifest.json`
 adds pinned external-dependency builds for real non-empty JUnit Platform test
@@ -121,8 +122,7 @@ cache.
 `testing/corpus/unsupported-manifest.json` tracks work that must not be
 approximated natively until a complete contract exists. It covers custom JVM
 task actions beyond static literal file writes, unsupported CopySpec
-filters/actions, Copy/archive symlink inputs, and unsupported Test filter
-combinations.
+filters/actions, and unsupported Test filter combinations.
 
 Reference-mode runs compare upstream Gradle and Rust substrate exit codes, task
 lists, and stable build output file inventories under `build/classes`,

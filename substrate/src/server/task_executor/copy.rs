@@ -20,10 +20,29 @@ impl CopyTaskExecutor {
         Self
     }
 
+    async fn is_symlink_to_dir(path: &Path) -> Result<bool, String> {
+        let metadata = tokio::fs::symlink_metadata(path)
+            .await
+            .map_err(|e| format!("Failed to inspect {}: {}", path.display(), e))?;
+        if !metadata.file_type().is_symlink() {
+            return Ok(false);
+        }
+        tokio::fs::metadata(path)
+            .await
+            .map(|target| target.is_dir())
+            .map_err(|e| format!("Failed to inspect symlink target {}: {}", path.display(), e))
+    }
+
     fn list_files(
         dir: &Path,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<PathBuf>, String>> + Send + '_>> {
         Box::pin(async move {
+            if Self::is_symlink_to_dir(dir).await? {
+                return Err(format!(
+                    "Directory symlink inputs are not supported by the Rust Copy executor: {}",
+                    dir.display()
+                ));
+            }
             let mut files = Vec::new();
             let mut entries = tokio::fs::read_dir(dir)
                 .await
@@ -34,9 +53,21 @@ impl CopyTaskExecutor {
                 .map_err(|e| format!("Failed to read directory {}: {}", dir.display(), e))?
             {
                 let path = entry.path();
-                if path.is_dir() {
+                let file_type = entry
+                    .file_type()
+                    .await
+                    .map_err(|e| format!("Failed to inspect {}: {}", path.display(), e))?;
+                if file_type.is_symlink() {
+                    if Self::is_symlink_to_dir(&path).await? {
+                        return Err(format!(
+                            "Directory symlink inputs are not supported by the Rust Copy executor: {}",
+                            path.display()
+                        ));
+                    }
+                    files.push(path);
+                } else if file_type.is_dir() {
                     files.extend(Self::list_files(&path).await?);
-                } else if path.is_file() {
+                } else if file_type.is_file() {
                     files.push(path);
                 }
             }
@@ -49,6 +80,12 @@ impl CopyTaskExecutor {
         dir: &Path,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<PathBuf>, String>> + Send + '_>> {
         Box::pin(async move {
+            if Self::is_symlink_to_dir(dir).await? {
+                return Err(format!(
+                    "Directory symlink inputs are not supported by the Rust Copy executor: {}",
+                    dir.display()
+                ));
+            }
             let mut dirs = Vec::new();
             let mut entries = tokio::fs::read_dir(dir)
                 .await
@@ -59,7 +96,18 @@ impl CopyTaskExecutor {
                 .map_err(|e| format!("Failed to read directory {}: {}", dir.display(), e))?
             {
                 let path = entry.path();
-                if path.is_dir() {
+                let file_type = entry
+                    .file_type()
+                    .await
+                    .map_err(|e| format!("Failed to inspect {}: {}", path.display(), e))?;
+                if file_type.is_symlink() {
+                    if Self::is_symlink_to_dir(&path).await? {
+                        return Err(format!(
+                            "Directory symlink inputs are not supported by the Rust Copy executor: {}",
+                            path.display()
+                        ));
+                    }
+                } else if file_type.is_dir() {
                     dirs.push(path.clone());
                     dirs.extend(Self::list_dirs(&path).await?);
                 }
@@ -765,6 +813,67 @@ mod tests {
                 .unwrap(),
             b"child"
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_copy_file_symlink_follows_target_bytes_like_gradle() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let dest_dir = tmp.path().join("dest");
+        tokio::fs::create_dir_all(&src_dir).await.unwrap();
+        tokio::fs::write(src_dir.join("real.txt"), b"real bytes")
+            .await
+            .unwrap();
+        tokio::fs::symlink("real.txt", src_dir.join("link.txt"))
+            .await
+            .unwrap();
+
+        let executor = CopyTaskExecutor::new();
+        let mut input = TaskInput::new("Copy");
+        input.source_files.push(src_dir);
+        input.target_dir = dest_dir.clone();
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert_eq!(result.files_processed, 2);
+        assert_eq!(
+            tokio::fs::read(dest_dir.join("link.txt")).await.unwrap(),
+            b"real bytes"
+        );
+        assert!(!tokio::fs::symlink_metadata(dest_dir.join("link.txt"))
+            .await
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_copy_directory_symlink_fails_closed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let target_dir = tmp.path().join("target");
+        let dest_dir = tmp.path().join("dest");
+        tokio::fs::create_dir_all(&src_dir).await.unwrap();
+        tokio::fs::create_dir_all(&target_dir).await.unwrap();
+        tokio::fs::write(target_dir.join("nested.txt"), b"nested")
+            .await
+            .unwrap();
+        tokio::fs::symlink(&target_dir, src_dir.join("linked-dir"))
+            .await
+            .unwrap();
+
+        let executor = CopyTaskExecutor::new();
+        let mut input = TaskInput::new("Copy");
+        input.source_files.push(src_dir);
+        input.target_dir = dest_dir;
+
+        let result = executor.execute(&input).await;
+
+        assert!(!result.success);
+        assert!(result.error_message.contains("Directory symlink inputs"));
     }
 
     #[tokio::test]

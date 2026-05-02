@@ -55,42 +55,6 @@
       }
     },
     {
-      "name": "copy-symlink-unsupported-kotlin-dsl",
-      "path": "copy-symlink-unsupported-kotlin-dsl",
-      "tasks": ["clean", "build"],
-      "expected_substrate_fail_closed": true,
-      "expected_contract": {
-        "build_file_count": 1,
-        "settings_file_count": 1,
-        "source_file_count": 0,
-        "plugins": ["base"],
-        "tasks": ["copySymlinkInput"],
-        "outputs": ["build/copied"],
-        "dependencies": [],
-        "project_dependencies": [],
-        "toolchains": [],
-        "unsupported_features": ["copy-symlink-input"]
-      }
-    },
-    {
-      "name": "archive-symlink-unsupported-kotlin-dsl",
-      "path": "archive-symlink-unsupported-kotlin-dsl",
-      "tasks": ["clean", "build"],
-      "expected_substrate_fail_closed": true,
-      "expected_contract": {
-        "build_file_count": 1,
-        "settings_file_count": 1,
-        "source_file_count": 0,
-        "plugins": ["base"],
-        "tasks": ["zipSymlinkInput"],
-        "outputs": ["build/distributions/symlink-input.zip"],
-        "dependencies": [],
-        "project_dependencies": [],
-        "toolchains": [],
-        "unsupported_features": ["archive-symlink-input"]
-      }
-    },
-    {
       "name": "test-filters-unsupported-kotlin-dsl",
       "path": "test-filters-unsupported-kotlin-dsl",
       "tasks": ["clean", "build"],

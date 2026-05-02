@@ -441,12 +441,6 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
         ("compile", "JavaCompile") | (_, "JavaCompile") => {
             compat_task_type(task, "org.gradle.api.tasks.compile.JavaCompile")
         }
-        ("archive", archive_type) | (_, archive_type)
-            if is_archive_logical_type(archive_type)
-                && has_input_value_equal(task, "copy_contains_symlinks", "true") =>
-        {
-            task.implementation_id.clone()
-        }
         ("archive", "Jar") | (_, "Jar") => "Jar".to_string(),
         ("archive", "Zip") | (_, "Zip") => "Zip".to_string(),
         ("archive", "War") | (_, "War") => "War".to_string(),
@@ -864,10 +858,6 @@ fn set_value_input(
             message: format!("Inferred {} from selected task graph dependencies", name),
             source: "rust-task-graph".to_string(),
         });
-}
-
-fn is_archive_logical_type(task_type: &str) -> bool {
-    matches!(task_type, "Jar" | "Zip" | "War" | "Ear" | "Tar")
 }
 
 fn execution_context_json(task: &CanonicalBuildPlanTask, task_type: &str) -> String {
@@ -1375,14 +1365,12 @@ fn copy_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
     has_input_paths(task)
         && has_outputs(task)
         && !has_input_value_equal(task, "copy_unsupported_custom_actions", "true")
-        && !has_input_value_equal(task, "copy_contains_symlinks", "true")
 }
 
 fn process_resources_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
     !process_resources_source_paths(task).is_empty()
         && has_outputs(task)
         && !has_input_value_equal(task, "copy_unsupported_custom_actions", "true")
-        && !has_input_value_equal(task, "copy_contains_symlinks", "true")
 }
 
 fn process_resources_no_source(task: &CanonicalBuildPlanTask) -> bool {
@@ -3908,7 +3896,7 @@ mod tests {
     }
 
     #[test]
-    fn test_copy_with_symlink_inputs_does_not_lower_to_native() {
+    fn test_copy_with_symlink_inputs_lowers_to_native_copy() {
         let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
             path: ":copySymlink".to_string(),
             project_path: ":".to_string(),
@@ -3952,7 +3940,7 @@ mod tests {
             diagnostics: Vec::new(),
         };
 
-        assert_eq!(executable_task_type(&task), "org.gradle.api.tasks.Copy");
+        assert_eq!(executable_task_type(&task), "Copy");
     }
 
     #[test]
@@ -4088,7 +4076,7 @@ mod tests {
     }
 
     #[test]
-    fn test_archive_with_symlink_inputs_does_not_lower_to_native() {
+    fn test_archive_with_symlink_inputs_lowers_to_native_archive() {
         let task = super::super::build_plan_ir::CanonicalBuildPlanTask {
             path: ":distZip".to_string(),
             project_path: ":".to_string(),
@@ -4132,10 +4120,7 @@ mod tests {
             diagnostics: Vec::new(),
         };
 
-        assert_eq!(
-            executable_task_type(&task),
-            "org.gradle.api.tasks.bundling.Zip"
-        );
+        assert_eq!(executable_task_type(&task), "Zip");
     }
 
     #[test]
