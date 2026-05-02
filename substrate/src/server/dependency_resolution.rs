@@ -350,6 +350,61 @@ impl DependencyResolutionServiceImpl {
         .map_err(|e| format!("Failed to write SHA-256 sidecar: {}", e))
     }
 
+    async fn copy_file_and_sha256(src: &Path, dest: &Path) -> Result<(i64, String), String> {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        if let Some(parent) = dest.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| format!("Failed to create artifact cache directory: {}", e))?;
+        }
+
+        let tmp_path = PathBuf::from(format!("{}.part", dest.to_string_lossy()));
+        let copy_result = async {
+            let mut input = tokio::fs::File::open(src)
+                .await
+                .map_err(|e| format!("Failed to open {}: {}", src.display(), e))?;
+            let mut output = tokio::fs::File::create(&tmp_path)
+                .await
+                .map_err(|e| format!("Failed to create {}: {}", tmp_path.display(), e))?;
+            let mut hasher = Sha256::new();
+            let mut buf = vec![0u8; 64 * 1024];
+            let mut written = 0i64;
+
+            loop {
+                let read = input
+                    .read(&mut buf)
+                    .await
+                    .map_err(|e| format!("Failed to read {}: {}", src.display(), e))?;
+                if read == 0 {
+                    break;
+                }
+                output
+                    .write_all(&buf[..read])
+                    .await
+                    .map_err(|e| format!("Failed to write {}: {}", tmp_path.display(), e))?;
+                hasher.update(&buf[..read]);
+                written += read as i64;
+            }
+            output
+                .flush()
+                .await
+                .map_err(|e| format!("Failed to flush {}: {}", tmp_path.display(), e))?;
+            drop(output);
+            tokio::fs::rename(&tmp_path, dest)
+                .await
+                .map_err(|e| format!("Failed to commit artifact cache file: {}", e))?;
+
+            Ok((written, format!("{:x}", hasher.finalize())))
+        }
+        .await;
+
+        if copy_result.is_err() {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+        }
+        copy_result
+    }
+
     /// Compute SHA-256 hex digest of data.
     fn compute_sha256(data: &[u8]) -> String {
         let mut hasher = Sha256::new();
@@ -3339,21 +3394,49 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
 
         // If a local file was provided, copy it to the persistent store
         let mut actual_sha256 = req.sha256.clone();
+        let mut actual_size = req.size;
         let resolved_path = if !req.local_path.is_empty() {
             let src = Path::new(&req.local_path);
             if src.exists() {
-                if let Some(parent) = store_path.parent() {
-                    let _ = tokio::fs::create_dir_all(parent).await;
+                let (copied_size, computed_sha256) =
+                    match Self::copy_file_and_sha256(src, &store_path).await {
+                        Ok(result) => result,
+                        Err(e) => {
+                            tracing::warn!(
+                                source = %src.display(),
+                                target = %store_path.display(),
+                                error = %e,
+                                "Failed to copy artifact into Rust cache"
+                            );
+                            return Ok(Response::new(AddArtifactToCacheResponse {
+                                accepted: false,
+                            }));
+                        }
+                    };
+                if !req.sha256.is_empty() && req.sha256 != computed_sha256 {
+                    let _ = tokio::fs::remove_file(&store_path).await;
+                    tracing::warn!(
+                        group = %req.group,
+                        name = %req.name,
+                        version = %req.version,
+                        classifier = %req.classifier,
+                        expected_sha256 = %req.sha256,
+                        actual_sha256 = %computed_sha256,
+                        "Rejected artifact cache add with mismatched SHA-256"
+                    );
+                    return Ok(Response::new(AddArtifactToCacheResponse {
+                        accepted: false,
+                    }));
                 }
-                let _ = tokio::fs::copy(src, &store_path).await;
-
-                // Write SHA-256 sidecar
-                if let Ok(data) = tokio::fs::read(&store_path).await {
-                    let sha256 = Self::compute_sha256(&data);
-                    actual_sha256 = sha256.clone();
-                    let _ = Self::write_sha256_sidecar(&store_path, &sha256).await;
+                actual_sha256 = computed_sha256;
+                actual_size = copied_size;
+                if let Err(e) = Self::write_sha256_sidecar(&store_path, &actual_sha256).await {
+                    tracing::warn!(
+                        path = %store_path.display(),
+                        error = %e,
+                        "Failed to write mirrored artifact checksum sidecar"
+                    );
                 }
-
                 store_path.to_string_lossy().into_owned()
             } else {
                 req.local_path.clone()
@@ -3370,7 +3453,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             extension,
             sha256: actual_sha256,
             local_path: resolved_path,
-            size: req.size,
+            size: actual_size,
             cached_at_ms: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -4975,6 +5058,8 @@ mod tests {
         // Create a test file
         let src = dir.path().join("test-input.jar");
         std::fs::write(&src, b"test artifact content").unwrap();
+        let expected_sha =
+            DependencyResolutionServiceImpl::compute_sha256(b"test artifact content");
 
         // Add to cache
         svc.add_artifact_to_cache(Request::new(AddArtifactToCacheRequest {
@@ -4984,7 +5069,7 @@ mod tests {
             classifier: String::new(),
             local_path: src.to_string_lossy().into_owned(),
             size: 20,
-            sha256: "abc123".to_string(),
+            sha256: expected_sha.clone(),
             extension: String::new(),
         }))
         .await
@@ -5004,10 +5089,37 @@ mod tests {
         assert!(sha_path.exists(), "SHA-256 sidecar should be written");
         assert_eq!(
             std::fs::read_to_string(&sha_path).unwrap(),
-            format!(
-                "{}  test-lib-1.0.jar\n",
-                DependencyResolutionServiceImpl::compute_sha256(b"test artifact content")
-            )
+            format!("{}  test-lib-1.0.jar\n", expected_sha)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_add_artifact_to_cache_rejects_sha_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(dir.path().to_path_buf());
+        let src = dir.path().join("bad-input.jar");
+        std::fs::write(&src, b"actual artifact content").unwrap();
+
+        let response = svc
+            .add_artifact_to_cache(Request::new(AddArtifactToCacheRequest {
+                group: "com.example".to_string(),
+                name: "bad-lib".to_string(),
+                version: "1.0".to_string(),
+                classifier: String::new(),
+                local_path: src.to_string_lossy().into_owned(),
+                size: 23,
+                sha256: "0000".to_string(),
+                extension: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!response.accepted);
+        assert!(
+            !svc.artifact_path("com.example", "bad-lib", "1.0", "", "jar")
+                .exists(),
+            "rejected artifacts must not leave a persisted cache entry"
         );
     }
 
