@@ -608,6 +608,17 @@ RunBuild admission. Repository capture, constraints, attributes, variants, and
 resolved-artifact ownership are still narrower than full Gradle solver parity, so
 dependency parity/read-through remain separate gates.
 
+Native task coverage push (execution-kernel coverage): common Gradle lifecycle
+aggregator `DefaultTask`s (`build`, `check`, `classes`, `testClasses`,
+`assemble`, `buildDependents`, `buildNeeded`, `archives`) now lower to the Rust
+`Lifecycle` executor only when their captured shape has no outputs, local state,
+destroyables, environment/system-property inputs, or static write-file contract.
+No-source `KotlinCompile`, `GroovyCompile`, and `ScalaCompile` tasks now also
+lower to `Lifecycle`; sourceful language compilation remains fail-closed until
+proper compiler worker contracts exist. Kernel dependency admission now represents
+Gradle project dependencies explicitly instead of treating `project(':lib')`
+style notation as unsupported Maven coordinates.
+
 | Gate | Result | Command |
 |------|--------|---------|
 | External corpus (expanded + declared graph parity) | 5/5 matched, 64/64 task parity, 5/5 no-fallback, graph diff files emitted under `/tmp/corpus-external-sh7-final/dependency-graphs` | `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --gradle-command /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/build/gradle-under-test/bin/gradle --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --dependency-graph-parity --output-dir /tmp/corpus-external-sh7-final` |
@@ -616,8 +627,9 @@ dependency parity/read-through remain separate gates.
 | First-60s proof mode | 6/6 dependency checks passed; metrics JSON at `/tmp/first60s-proof-sh7-final.json` | `python3 tools/demo/first_60_seconds.py --mode proof --skip-build --output /tmp/first60s-proof-sh7-final.json` |
 | Fail-closed dependency tests | 4/4 focused tests passed | `cargo test -p gradle-substrate-daemon --lib -- test_prefetch_rejects_snapshot_artifacts test_incomplete_maven_coordinate_rejected test_resolve_version_range_rejects_unsupported_patterns test_resolve_dependencies_fails_closed_for_unsupported_version_selector` |
 | Kernel dependency admission tests | 6/6 focused kernel tests passed | `cargo test -p gradle-substrate-daemon execution_kernel --lib` |
-| Kernel dependency graph bridge tests | 2/2 focused DAG conversion tests passed | `cargo test -p gradle-substrate-daemon kernel_dependency_graph --lib` |
-| Unit tests | 1588 passed, 0 failed, 3 ignored | `cargo test -p gradle-substrate-daemon --lib` |
+| Kernel dependency graph bridge tests | 3/3 focused DAG conversion tests passed | `cargo test -p gradle-substrate-daemon kernel_dependency_graph --lib` |
+| Task coverage tests | Focused lifecycle/default/KotlinCompile tests passed | `cargo test -p gradle-substrate-daemon lifecycle_task --lib`; `cargo test -p gradle-substrate-daemon default_task --lib`; `cargo test -p gradle-substrate-daemon kotlin_compile --lib` |
+| Unit tests | 1607 passed, 0 failed, 3 ignored | `cargo test -p gradle-substrate-daemon --lib` |
 
 ## Next Sync Actions
 
