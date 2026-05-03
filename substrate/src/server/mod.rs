@@ -33,6 +33,7 @@ pub mod control;
 pub mod corruption_detection;
 pub mod dag_executor;
 pub mod dependency_resolution;
+pub mod dependency_solver;
 pub mod deterministic_cache;
 pub mod event_dispatcher;
 pub mod exec;

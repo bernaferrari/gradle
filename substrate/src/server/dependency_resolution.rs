@@ -17,6 +17,8 @@ use crate::proto::{
     VerifyDependencyChecksumsResponse,
 };
 
+use super::dependency_solver::ivyresolve::strategy::compare_versions;
+
 // ---------------------------------------------------------------------------
 // Dependency scope
 // ---------------------------------------------------------------------------
@@ -2728,110 +2730,6 @@ fn extract_tag_text(bytes: &[u8], parent_start: usize, tag: &[u8]) -> Option<Str
         }
     }
     None
-}
-
-/// Compare two semver-like version strings.
-/// Returns negative if a < b, 0 if a == b, positive if a > b.
-/// Handles numeric segments (1.2.3) and suffixes (-beta, -SNAPSHOT).
-pub fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
-    let a_parts = gradle_version_parts(a);
-    let b_parts = gradle_version_parts(b);
-
-    for (pa, pb) in a_parts.iter().zip(b_parts.iter()) {
-        match (pa.parse::<u64>(), pb.parse::<u64>()) {
-            (Ok(na), Ok(nb)) => match na.cmp(&nb) {
-                std::cmp::Ordering::Equal => continue,
-                other => return other,
-            },
-            (Ok(_), Err(_)) => return std::cmp::Ordering::Greater,
-            (Err(_), Ok(_)) => return std::cmp::Ordering::Less,
-            (Err(_), Err(_)) => {
-                let a_special = gradle_special_version_part(pa);
-                let b_special = gradle_special_version_part(pb);
-                match (a_special, b_special) {
-                    (Some(a_meaning), Some(b_meaning)) => match a_meaning.cmp(&b_meaning) {
-                        std::cmp::Ordering::Equal => continue,
-                        other => return other,
-                    },
-                    (Some(a_meaning), None) => match a_meaning.cmp(&0) {
-                        std::cmp::Ordering::Equal => continue,
-                        other => return other,
-                    },
-                    (None, Some(b_meaning)) => match 0.cmp(&b_meaning) {
-                        std::cmp::Ordering::Equal => continue,
-                        other => return other,
-                    },
-                    (None, None) => match pa.cmp(pb) {
-                        std::cmp::Ordering::Equal => continue,
-                        other => return other,
-                    },
-                }
-            }
-        }
-    }
-
-    if a_parts.len() > b_parts.len() {
-        if a_parts[b_parts.len()].parse::<u64>().is_ok() {
-            std::cmp::Ordering::Greater
-        } else {
-            std::cmp::Ordering::Less
-        }
-    } else if b_parts.len() > a_parts.len() {
-        if b_parts[a_parts.len()].parse::<u64>().is_ok() {
-            std::cmp::Ordering::Less
-        } else {
-            std::cmp::Ordering::Greater
-        }
-    } else {
-        std::cmp::Ordering::Equal
-    }
-}
-
-fn gradle_special_version_part(part: &str) -> Option<i32> {
-    match part.to_ascii_lowercase().as_str() {
-        "dev" => Some(-1),
-        "rc" => Some(1),
-        "snapshot" => Some(2),
-        "final" => Some(3),
-        "ga" => Some(4),
-        "release" => Some(5),
-        "sp" => Some(6),
-        _ => None,
-    }
-}
-
-/// Split a version string the way Gradle's VersionParser does for comparator input:
-/// separators are `.`, `_`, `-`, and `+`, and digit/non-digit transitions create
-/// separate parts.
-fn gradle_version_parts(version: &str) -> Vec<&str> {
-    let mut parts = Vec::with_capacity(8); // typical version has <8 segments
-    let mut start = 0;
-    let mut digit = false;
-
-    for (i, ch) in version.char_indices() {
-        if matches!(ch, '.' | '_' | '-' | '+') {
-            parts.push(&version[start..i]);
-            start = i + ch.len_utf8();
-            digit = false;
-        } else if ch.is_ascii_digit() {
-            if !digit && i > start {
-                parts.push(&version[start..i]);
-                start = i;
-            }
-            digit = true;
-        } else {
-            if digit {
-                parts.push(&version[start..i]);
-                start = i;
-            }
-            digit = false;
-        }
-    }
-    if start < version.len() {
-        parts.push(&version[start..]);
-    }
-
-    parts
 }
 
 #[tonic::async_trait]
