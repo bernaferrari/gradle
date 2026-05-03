@@ -42,6 +42,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Replaces the JVM task executor with Rust DAG execution when explicitly enabled.
@@ -91,53 +92,128 @@ public class RustAuthoritativeBuildExecutionAction implements BuildWorkExecutor 
 
         bindAllReferencesOfProject(plan);
 
-        String activeBuildId = BuildIdHolder.getBuildId();
-        String buildId = activeBuildId.isEmpty() ? "build" : activeBuildId;
-        if (!refreshSelectedBuildPlanShadow(plan, buildId, expectedTasks)) {
+        BuildScope buildScope = ensureRegisteredBuildScope(gradle);
+        ExecutionResult<Void> executionResult = null;
+        try {
+            if (!refreshSelectedBuildPlanShadow(plan, buildScope.buildId, expectedTasks)) {
+                SubstrateException failure = new SubstrateException(
+                    "Rust authoritative run-build could not refresh the selected build-plan shadow for "
+                        + buildScope.buildId + ": expectedTasks=" + expectedTasks
+                );
+                if (failClosed) {
+                    executionResult = ExecutionResult.failed(failure);
+                } else {
+                    LOGGER.warn(
+                        "[substrate:run-build] Rust build-plan shadow refresh failed; delegating to JVM executor: {}",
+                        failure.getMessage()
+                    );
+                    executionResult = delegate.execute(gradle, plan);
+                }
+                return executionResult;
+            }
+
+            RunBuildResult result = buildExecutionClient.runBuild(
+                buildScope.buildId,
+                Runtime.getRuntime().availableProcessors(),
+                false
+            );
+
+            if (isCompleteNoFallbackRun(result, expectedTasks)) {
+                LOGGER.info(
+                    "[substrate:run-build] Rust executed {} Gradle tasks from {} with {} up-to-date, {} no-source/skipped and {} from-cache; JVM fallback disabled; JVM task executor skipped",
+                    result.getTotalTasks(),
+                    result.getPlanSource(),
+                    result.getTasksUpToDate(),
+                    result.getTasksSkipped(),
+                    result.getTasksFromCache()
+                );
+                executionResult = ExecutionResult.succeeded();
+                return executionResult;
+            }
+
             SubstrateException failure = new SubstrateException(
-                "Rust authoritative run-build could not refresh the selected build-plan shadow for "
-                    + buildId + ": expectedTasks=" + expectedTasks
+                "Rust authoritative run-build did not complete the scheduled Gradle work for "
+                    + buildScope.buildId + ": " + describeFailure(result, expectedTasks)
             );
             if (failClosed) {
-                return ExecutionResult.failed(failure);
+                executionResult = ExecutionResult.failed(failure);
+            } else {
+                LOGGER.warn(
+                    "[substrate:run-build] Rust run-build was incomplete; delegating to JVM executor: {}",
+                    failure.getMessage()
+                );
+                executionResult = delegate.execute(gradle, plan);
             }
-            LOGGER.warn(
-                "[substrate:run-build] Rust build-plan shadow refresh failed; delegating to JVM executor: {}",
-                failure.getMessage()
-            );
-            return delegate.execute(gradle, plan);
+            return executionResult;
+        } finally {
+            if (buildScope.initializedByThisAction && bootstrapClient != null) {
+                boolean failed = executionResult == null || !executionResult.getFailures().isEmpty();
+                bootstrapClient.completeBuild(
+                    buildScope.buildId,
+                    failed ? "FAILED" : "SUCCESS",
+                    System.currentTimeMillis() - buildScope.startTimeMs
+                );
+                BuildIdHolder.clear();
+            }
+        }
+    }
+
+    private BuildScope ensureRegisteredBuildScope(GradleInternal gradle) {
+        String activeBuildId = BuildIdHolder.getBuildId();
+        if (!activeBuildId.isEmpty()) {
+            return new BuildScope(activeBuildId, false, System.currentTimeMillis());
+        }
+        if (bootstrapClient == null) {
+            return new BuildScope("build", false, System.currentTimeMillis());
         }
 
-        RunBuildResult result = buildExecutionClient.runBuild(
+        long startTimeMs = System.currentTimeMillis();
+        String buildId = UUID.randomUUID().toString();
+        bootstrapClient.initBuild(
             buildId,
+            rootProjectDir(gradle),
+            startTimeMs,
             Runtime.getRuntime().availableProcessors(),
-            false
+            systemProperties(),
+            Collections.emptyList()
         );
+        BuildIdHolder.setBuildId(buildId);
+        LOGGER.info("[substrate:run-build] initialized scoped Rust build {} for authoritative execution", buildId);
+        return new BuildScope(buildId, true, startTimeMs);
+    }
 
-        if (isCompleteNoFallbackRun(result, expectedTasks)) {
-            LOGGER.info(
-                "[substrate:run-build] Rust executed {} Gradle tasks from {} with {} up-to-date, {} no-source/skipped and {} from-cache; JVM fallback disabled; JVM task executor skipped",
-                result.getTotalTasks(),
-                result.getPlanSource(),
-                result.getTasksUpToDate(),
-                result.getTasksSkipped(),
-                result.getTasksFromCache()
-            );
-            return ExecutionResult.succeeded();
+    private static String rootProjectDir(GradleInternal gradle) {
+        try {
+            Project rootProject = gradle.getRootProject();
+            if (rootProject != null && rootProject.getProjectDir() != null) {
+                return rootProject.getProjectDir().getAbsolutePath();
+            }
+        } catch (RuntimeException ignored) {
+            // Fall back below when the Gradle model cannot provide a root project.
         }
+        return System.getProperty("user.dir", ".");
+    }
 
-        SubstrateException failure = new SubstrateException(
-            "Rust authoritative run-build did not complete the scheduled Gradle work for "
-                + buildId + ": " + describeFailure(result, expectedTasks)
-        );
-        if (failClosed) {
-            return ExecutionResult.failed(failure);
+    private static Map<String, String> systemProperties() {
+        Map<String, String> properties = new LinkedHashMap<>();
+        for (Map.Entry<Object, Object> entry : System.getProperties().entrySet()) {
+            if (entry.getKey() instanceof String && entry.getValue() instanceof String) {
+                properties.put((String) entry.getKey(), (String) entry.getValue());
+            }
         }
-        LOGGER.warn(
-            "[substrate:run-build] Rust run-build was incomplete; delegating to JVM executor: {}",
-            failure.getMessage()
-        );
-        return delegate.execute(gradle, plan);
+        return properties;
+    }
+
+    private static final class BuildScope {
+        private final String buildId;
+        private final boolean initializedByThisAction;
+        private final long startTimeMs;
+
+        private BuildScope(String buildId, boolean initializedByThisAction, long startTimeMs) {
+            this.buildId = buildId;
+            this.initializedByThisAction = initializedByThisAction;
+            this.startTimeMs = startTimeMs;
+        }
     }
 
     private static boolean isCompleteNoFallbackRun(RunBuildResult result, int expectedTasks) {

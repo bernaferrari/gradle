@@ -4,7 +4,7 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
-use super::scopes::{BuildId, ScopeRegistry, SessionId};
+use super::scopes::{BuildId, ScopeRegistry};
 
 use crate::proto::{
     build_init_service_server::BuildInitService, BuildInitStatus, GetBuildInitStatusRequest,
@@ -348,16 +348,17 @@ impl BuildInitService for BuildInitServiceImpl {
 
         let build_key = BuildId::from(build_id.clone());
 
-        // Register build in scope registry if session_id is provided
+        // BuildInit records settings/init-script state only. It must not create
+        // DAG-visible scope entries because BootstrapService owns the
+        // registration guard and cleanup lifecycle.
         if let Some(ref registry) = self.scope_registry {
-            if !req.session_id.is_empty() {
-                registry.register_build(SessionId::from(req.session_id.clone()), build_key.clone());
-                tracing::debug!(
-                    build_id = %build_id,
-                    session_id = %req.session_id,
-                    "Registered build in scope registry (build-init)"
-                );
-            }
+            let registered_session = registry.session_for_build(&build_key);
+            tracing::debug!(
+                build_id = %build_id,
+                requested_session_id = %req.session_id,
+                registered_session_id = ?registered_session,
+                "Observed build scope registry state (build-init)"
+            );
         }
 
         self.builds.insert(
@@ -525,6 +526,32 @@ mod tests {
         let status = resp.status.unwrap();
         assert!(status.initialized);
         assert_eq!(status.root_dir, "/tmp/project");
+    }
+
+    #[tokio::test]
+    async fn test_build_init_does_not_register_scope_entries() {
+        let registry = Arc::new(ScopeRegistry::new());
+        let svc = BuildInitServiceImpl::with_scope_registry(Arc::clone(&registry));
+
+        svc.init_build_settings(Request::new(InitBuildSettingsRequest {
+            build_id: "build-init-only".to_string(),
+            root_dir: "/tmp/project".to_string(),
+            settings_file: String::new(),
+            gradle_user_home: "/tmp/gradle-home".to_string(),
+            init_scripts: vec![],
+            requested_build_features: vec![],
+            current_dir: "/tmp/project".to_string(),
+            session_id: String::new(),
+        }))
+        .await
+        .unwrap();
+
+        assert!(
+            registry
+                .session_for_build(&BuildId::from("build-init-only".to_string()))
+                .is_none(),
+            "BuildInitService must not synthesize scope registrations without owning cleanup"
+        );
     }
 
     #[tokio::test]

@@ -66,3 +66,9 @@ See [Rust substrate stabilization](rust-substrate-stabilization.md) for the requ
 
 For a repeatable, honest demo flow, see [Rust substrate demo](rust-substrate-demo.md).
 The upstream sync inventory is tracked in `architecture/upstream-map/modules.toml` with per-module `UPSTREAM.md` and `PARITY.md` metadata.
+
+### Native-ready contract policy
+
+The Rust substrate hot-path roadmap defines a clear compatibility boundary: Rust owns data-driven hot-path execution, JVM owns code-driven compatibility islands. Unsupported contracts fail closed instead of approximating behavior.
+
+See [Native-ready contract policy](native-ready-contract-policy.md) for the full boundary definition, fail-closed policy, native-ready task contract rules, and non-goals.

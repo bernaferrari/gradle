@@ -20,6 +20,7 @@ import org.gradle.api.internal.GradleInternal
 import org.gradle.execution.plan.FinalizedExecutionPlan
 import org.gradle.execution.plan.QueryableExecutionPlan
 import org.gradle.internal.build.ExecutionResult
+import org.gradle.internal.rustbridge.bootstrap.RustBootstrapClient
 import org.gradle.internal.rustbridge.eventstream.BuildIdHolder
 import org.gradle.internal.rustbridge.taskgraph.RustBuildExecutionClient
 import spock.lang.Specification
@@ -110,6 +111,29 @@ class RustAuthoritativeBuildExecutionActionTest extends Specification {
         then:
         1 * buildExecutionClient.runBuild("substrate-build-123", _ as Integer, false) >>
             RustBuildExecutionClient.RunBuildResult.success("build-plan-shadow", 1, 1)
+    }
+
+    def "lazily bootstraps scoped build id when lifecycle holder is empty"() {
+        given:
+        def bootstrapClient = Mock(RustBootstrapClient)
+        def action = new RustAuthoritativeBuildExecutionAction(delegate, buildExecutionClient, true, bootstrapClient, null)
+        def plan = planWithTaskCount(1)
+        String initializedBuildId = null
+
+        when:
+        def result = action.execute(gradle, plan)
+
+        then:
+        1 * bootstrapClient.initBuild({ it != "build" && !it.empty }, _ as String, _ as Long, _ as Integer, _ as Map, _ as List) >> { args ->
+            initializedBuildId = args[0]
+            null
+        }
+        1 * buildExecutionClient.runBuild({ it == initializedBuildId }, _ as Integer, false) >>
+            RustBuildExecutionClient.RunBuildResult.success("build-plan-shadow", 1, 1)
+        1 * bootstrapClient.completeBuild({ it == initializedBuildId }, "SUCCESS", _ as Long) >> true
+        0 * delegate._
+        result.successful
+        BuildIdHolder.getBuildId() == ""
     }
 
     private FinalizedExecutionPlan planWithTaskCount(int taskCount) {

@@ -6,7 +6,7 @@ use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
 use super::event_dispatcher::EventDispatcher;
-use super::scopes::BuildId;
+use super::scopes::{BuildId, ScopeRegistry};
 use super::work::WorkerScheduler;
 
 use crate::client::jvm_host_bridge::SharedJvmHostBridge;
@@ -299,6 +299,8 @@ pub struct DagExecutorServiceImpl {
     executor_registry: Arc<TaskExecutorRegistry>,
     /// JVM compatibility host bridge for explicit legacy task execution.
     jvm_host_bridge: Option<SharedJvmHostBridge>,
+    /// Scope registry for build-session membership validation.
+    scope_registry: Option<Arc<ScopeRegistry>>,
     request_counter: AtomicI64,
     builds_started: AtomicI64,
 }
@@ -313,6 +315,7 @@ impl Clone for DagExecutorServiceImpl {
             dispatchers: self.dispatchers.clone(),
             executor_registry: Arc::clone(&self.executor_registry),
             jvm_host_bridge: self.jvm_host_bridge.clone(),
+            scope_registry: self.scope_registry.clone(),
             request_counter: AtomicI64::new(self.request_counter.load(Ordering::Relaxed)),
             builds_started: AtomicI64::new(self.builds_started.load(Ordering::Relaxed)),
         }
@@ -345,6 +348,7 @@ impl DagExecutorServiceImpl {
             dispatchers,
             executor_registry: Arc::new(TaskExecutorRegistry::new()),
             jvm_host_bridge: None,
+            scope_registry: None,
             request_counter: AtomicI64::new(0),
             builds_started: AtomicI64::new(0),
         }
@@ -352,6 +356,11 @@ impl DagExecutorServiceImpl {
 
     pub fn with_jvm_host_bridge(mut self, bridge: SharedJvmHostBridge) -> Self {
         self.jvm_host_bridge = Some(bridge);
+        self
+    }
+
+    pub fn with_scope_registry(mut self, registry: Arc<ScopeRegistry>) -> Self {
+        self.scope_registry = Some(registry);
         self
     }
 
@@ -564,6 +573,18 @@ impl DagExecutorService for DagExecutorServiceImpl {
         self.request_counter.fetch_add(1, Ordering::Relaxed);
 
         let build_id = BuildId::from(req.build_id.clone());
+
+        // Ensure the build was registered by BootstrapService. This keeps the
+        // DAG executor inside an explicit build/session scope instead of
+        // silently creating untracked synthetic scopes.
+        if let Some(ref registry) = self.scope_registry {
+            if registry.session_for_build(&build_id).is_none() {
+                return Err(Status::not_found(format!(
+                    "Build '{}' is not registered in any session",
+                    req.build_id
+                )));
+            }
+        }
 
         // Resolve execution plan from TaskGraphService
         let plan_response = self
