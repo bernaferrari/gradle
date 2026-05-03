@@ -20,7 +20,10 @@ pub fn compare_versions(a: &str, b: &str) -> Ordering {
             (Ok(_), Err(_)) => return Ordering::Greater,
             (Err(_), Ok(_)) => return Ordering::Less,
             (Err(_), Err(_)) => {
-                match (gradle_special_version_part(pa), gradle_special_version_part(pb)) {
+                match (
+                    gradle_special_version_part(pa),
+                    gradle_special_version_part(pb),
+                ) {
                     (Some(a_meaning), Some(b_meaning)) => match a_meaning.cmp(&b_meaning) {
                         Ordering::Equal => continue,
                         other => return other,
@@ -117,7 +120,10 @@ mod tests {
         assert_eq!(compare_versions("1.2.3", "1.2.4"), Ordering::Less);
         assert_eq!(compare_versions("1.10.0", "1.9.0"), Ordering::Greater);
         assert_eq!(compare_versions("1.0-rc-1", "1.0"), Ordering::Less);
-        assert_eq!(compare_versions("1.0-snapshot", "1.0-rc-1"), Ordering::Greater);
+        assert_eq!(
+            compare_versions("1.0-snapshot", "1.0-rc-1"),
+            Ordering::Greater
+        );
         assert_eq!(compare_versions("1.0-ga", "1.0-final"), Ordering::Greater);
         assert_eq!(compare_versions("1.0-sp", "1.0-release"), Ordering::Greater);
         assert_eq!(compare_versions("1.0alpha1", "1.0alpha2"), Ordering::Less);

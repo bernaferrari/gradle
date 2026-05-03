@@ -561,6 +561,133 @@ impl DagExecutorServiceImpl {
             })
             .filter(|context| !context.is_empty())
     }
+
+    /// Admit a whole build into the Rust execution kernel.
+    ///
+    /// This is the high-level fail-closed boundary we want long term: after JVM
+    /// configuration has produced a task graph, Rust either owns the entire
+    /// execution plan or rejects it before dispatching any work. Per-task JVM
+    /// fallback remains available only when explicitly requested by the caller.
+    fn admit_rust_execution_kernel(
+        &self,
+        build_id: &str,
+        task_contexts: &HashMap<String, String>,
+    ) -> Result<(), String> {
+        let build_id_key = BuildId::from(build_id.to_string());
+        let execution = self
+            .builds
+            .get(&build_id_key)
+            .ok_or_else(|| format!("Build '{}' has no materialized Rust task graph", build_id))?;
+
+        let mut unsupported = Vec::new();
+        for slot in execution.tasks.values() {
+            if !self.executor_registry.has_executor(&slot.task_type) {
+                unsupported.push(format!(
+                    "{} ({}) has no Rust executor",
+                    slot.task_path, slot.task_type
+                ));
+                continue;
+            }
+
+            let context_json = task_contexts.get(&slot.task_path).cloned().or_else(|| {
+                if slot.execution_context_json.is_empty() {
+                    None
+                } else {
+                    Some(slot.execution_context_json.clone())
+                }
+            });
+
+            if let Some(reason) =
+                rust_kernel_contract_rejection(&slot.task_type, context_json.as_ref())
+            {
+                unsupported.push(format!(
+                    "{} ({}): {}",
+                    slot.task_path, slot.task_type, reason
+                ));
+            }
+        }
+
+        if unsupported.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "Rust execution kernel rejected build '{}' before execution: {}",
+                build_id,
+                unsupported.join("; ")
+            ))
+        }
+    }
+}
+
+fn rust_kernel_contract_rejection(
+    task_type: &str,
+    context_json: Option<&String>,
+) -> Option<String> {
+    let Some(json) = context_json else {
+        return None;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Some("execution context is not valid JSON".to_string());
+    };
+
+    let unsupported_keys = [
+        "copy_unsupported_custom_actions",
+        "test_unsupported_filters",
+        "unsupported_dependency_semantics",
+        "unsupported_archive_semantics",
+        "requires_jvm_task_execution",
+    ];
+    for key in unsupported_keys {
+        if value.get(key).and_then(|v| v.as_bool()).unwrap_or(false) {
+            return Some(format!("unsupported contract marker '{}'", key));
+        }
+        if value
+            .get("input_properties")
+            .and_then(|v| v.as_object())
+            .and_then(|props| props.get(key))
+            .and_then(|v| v.as_str())
+            == Some("true")
+        {
+            return Some(format!("unsupported contract marker '{}'", key));
+        }
+    }
+
+    match task_type {
+        "JavaExec" => {
+            let options = value.get("options").and_then(|v| v.as_object());
+            let has_main = options
+                .and_then(|o| o.get("main_class"))
+                .and_then(|v| v.as_str())
+                .map(|s| !s.is_empty())
+                .unwrap_or(false);
+            let has_classpath = options
+                .and_then(|o| o.get("classpath"))
+                .and_then(|v| v.as_str())
+                .map(|s| !s.is_empty())
+                .unwrap_or(false);
+            if !has_main {
+                return Some("JavaExec is missing main_class".to_string());
+            }
+            if !has_classpath {
+                return Some("JavaExec is missing classpath".to_string());
+            }
+        }
+        "Exec" => {
+            let has_executable = value
+                .get("options")
+                .and_then(|v| v.as_object())
+                .and_then(|o| o.get("executable"))
+                .and_then(|v| v.as_str())
+                .map(|s| !s.is_empty())
+                .unwrap_or(false);
+            if !has_executable {
+                return Some("Exec is missing executable".to_string());
+            }
+        }
+        _ => {}
+    }
+
+    None
 }
 
 #[tonic::async_trait]
@@ -783,6 +910,26 @@ impl DagExecutorService for DagExecutorServiceImpl {
         let max_parallelism = req.max_parallelism.max(1) as usize;
         let allow_jvm_forwarding = req.allow_jvm_forwarding;
         let task_contexts = req.task_contexts;
+
+        if !allow_jvm_forwarding {
+            if let Err(error) = self.admit_rust_execution_kernel(&build_id_str, &task_contexts) {
+                return Ok(Response::new(RunBuildResponse {
+                    build_id: build_id_str.clone(),
+                    final_status: "FAILED".to_string(),
+                    total_tasks,
+                    tasks_succeeded: 0,
+                    tasks_failed: total_tasks,
+                    tasks_skipped: 0,
+                    tasks_forwarded_to_jvm: 0,
+                    total_duration_ms: now_ms() - start_time,
+                    failure_message: error,
+                    task_details: vec![],
+                    tasks_up_to_date: 0,
+                    tasks_from_cache: 0,
+                    plan_source,
+                }));
+            }
+        }
 
         // Channel for task results (spawned tasks send back, main loop processes).
         let (result_tx, mut result_rx) =
@@ -3051,9 +3198,44 @@ mod tests {
         assert_eq!(resp.final_status, "FAILED");
         assert_eq!(resp.tasks_forwarded_to_jvm, 0);
         assert_eq!(resp.tasks_failed, 1);
-        assert_eq!(resp.task_details.len(), 1);
-        assert_eq!(resp.task_details[0].execution_mode, "missing_executor");
-        assert!(resp.failure_message.contains("JVM forwarding is disabled"));
+        assert_eq!(resp.task_details.len(), 0);
+        assert!(resp.failure_message.contains("rejected build"));
+        assert!(resp.failure_message.contains("has no Rust executor"));
+    }
+
+    #[tokio::test]
+    async fn test_run_build_rejects_unsupported_contract_before_dispatch() {
+        let svc = make_svc();
+        register_chain(&svc, "rb-kernel-admission", &[(":copy", "Copy", &[])]).await;
+        let mut task_contexts = HashMap::new();
+        task_contexts.insert(
+            ":copy".to_string(),
+            serde_json::json!({
+                "source_files": [],
+                "target_dir": "build/out",
+                "copy_unsupported_custom_actions": true
+            })
+            .to_string(),
+        );
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "rb-kernel-admission".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts,
+                allow_jvm_forwarding: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.final_status, "FAILED");
+        assert_eq!(resp.tasks_forwarded_to_jvm, 0);
+        assert_eq!(resp.task_details.len(), 0);
+        assert!(resp
+            .failure_message
+            .contains("unsupported contract marker 'copy_unsupported_custom_actions'"));
     }
 
     #[tokio::test]
