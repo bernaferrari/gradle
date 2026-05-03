@@ -396,7 +396,7 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
                 options,
                 RustSubstrateOptions.ENABLE_RUST_RUN_BUILD
             );
-            boolean runBuildAuthoritative = options.getBoolean(RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_RUN_BUILD);
+            boolean runBuildAuthoritative = RustSubstrateOptions.isExecutionKernelEnabled(options);
             TaskGraphShadowReporter reporter = new TaskGraphShadowReporter(
                 activeClient,
                 runBuildEnabled && !runBuildAuthoritative ? rustBuildExecutionClient : null,

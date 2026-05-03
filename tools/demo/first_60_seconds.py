@@ -515,7 +515,7 @@ def measure_authoritative_runbuild_fast(timeout: int = 90) -> dict[str, object]:
                     "-Dorg.gradle.rust.substrate.enabled=true",
                     "-Dorg.gradle.rust.substrate.taskgraph.enabled=true",
                     "-Dorg.gradle.rust.substrate.runbuild.enabled=true",
-                    "-Dorg.gradle.rust.substrate.runbuild.authoritative=true",
+                    "-Dorg.gradle.rust.substrate.execution.kernel=true",
                     f"-Dorg.gradle.rust.substrate.daemon.path={DAEMON}",
                     f"-Dorg.gradle.rust.substrate.state.dir={state_dir}",
                 ],

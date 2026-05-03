@@ -105,7 +105,7 @@ project-local working directories from accidentally turning a real RunBuild gate
 into no-op fallback.
 
 `--runbuild-authoritative` adds
-`-Dorg.gradle.rust.substrate.runbuild.authoritative=true`. This is stricter
+`-Dorg.gradle.rust.substrate.execution.kernel=true`. This is stricter
 than umbrella authoritative mode: Gradle skips its JVM task executor only when
 Rust `RunBuild` completes the selected plan with zero JVM forwards and the exact
 scheduled task count. Current authoritative runs use task contracts captured at

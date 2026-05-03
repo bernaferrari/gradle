@@ -30,10 +30,12 @@
   `--rust-substrate` strips the wrapper-only flag, injects the minimal Rust DAG
   flags plus safe dependency transport/read-through flags, locates
   `gradle-substrate-daemon`, and uses native-ready-default execution;
-  `--rust-substrate-authoritative` injects the stricter no-fallback RunBuild
-  gate for validation. `GRADLEW_DISTRIBUTION_DIR` can point the Rust wrapper at
-  a local install image from this fork, and launcher discovery now supports both
-  ZIP-extracted and direct install-image `lib/` layouts.
+  `--rust-substrate-authoritative` injects
+  `org.gradle.rust.substrate.execution.kernel=true`, the stricter no-fallback
+  Rust execution-kernel gate for validation. `GRADLEW_DISTRIBUTION_DIR` can
+  point the Rust wrapper at a local install image from this fork, and launcher
+  discovery now supports both ZIP-extracted and direct install-image `lib/`
+  layouts.
 - The Rust wrapper now enforces `validateDistributionUrl=true` before fetching,
   supports `http(s)://` and `file:/` distribution URLs, copies local file
   distributions into the wrapper ZIP store, and still applies SHA-256
@@ -449,7 +451,7 @@
 - `python3 tools/demo/first_60_seconds.py --mode fast --skip-build --output build/first60-no-jvm-host.json` passed with daemon socket ready=38.4ms (daemon self-report 22ms), authoritative Rust DAG=20413.1ms with cold 17664.2ms/11 Rust tasks, warm 2745.5ms/11 Rust tasks, Gradle configuration-cache reuse on the warm run, 7 Rust up-to-date skips, 4 Rust no-source/skipped tasks, 0 JVM forwards, authoritative output SHA-256 `92cf8132cd7364798a080c27ca6c160811e962cab18bb92f2872f061878a8490`, real-build dependency read-through=7510.9ms with remote requests avoided=7/7, and file-watch first event=12ms.
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-authoritative-no-implicit-jvm-host --verbose` passed 21/21, no fallback, 200/200 task parity, output inventory/hash/archive parity, observed wall time upstream=119248ms and substrate=168059ms.
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-external-no-implicit-jvm-host --verbose` passed 2/2, no fallback, 25/25 task parity, output inventory/hash/archive parity, observed wall time upstream=13085ms and substrate=17216ms.
-- `python3 -m unittest tools.corpus_runner.test_run && python3 -m py_compile tools/demo/first_60_seconds.py` passed after switching no-fallback RunBuild commands from umbrella `mode=shadow` to explicit minimal `enabled=true`, `taskgraph.enabled=true`, `runbuild.enabled=true`, and `runbuild.authoritative=true` flags.
+- `python3 -m unittest tools.corpus_runner.test_run && python3 -m py_compile tools/demo/first_60_seconds.py` passed after switching no-fallback RunBuild commands from umbrella `mode=shadow` to explicit minimal `enabled=true`, `taskgraph.enabled=true`, `runbuild.enabled=true`, and `execution.kernel=true` flags.
 - `python3 tools/demo/first_60_seconds.py --mode fast --skip-build --output build/first60-minimal-runbuild.json` passed with authoritative Rust DAG=18165.2ms, cold 15179.1ms/11 Rust tasks, warm 2983.1ms/11 Rust tasks, 7 Rust up-to-date skips, 4 Rust no-source/skipped tasks, 0 JVM forwards, authoritative output SHA-256 `92cf8132cd7364798a080c27ca6c160811e962cab18bb92f2872f061878a8490`, real-build dependency read-through=7875.8ms with remote requests avoided=7/7, and file-watch first event=11ms.
 - `python3 tools/corpus_runner/run.py --project "$PWD/testing/corpus/java-library-kotlin-dsl" --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-single-minimal-runbuild --verbose` passed 1/1, no fallback, 12/12 task parity, output inventory/hash/archive parity, observed wall time upstream=2854ms and substrate=3311ms.
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-authoritative-minimal-runbuild --verbose` passed 21/21, no fallback, 200/200 task parity, output inventory/hash/archive parity, observed wall time upstream=64023ms and substrate=68744ms.
