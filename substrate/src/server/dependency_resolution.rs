@@ -2734,8 +2734,8 @@ fn extract_tag_text(bytes: &[u8], parent_start: usize, tag: &[u8]) -> Option<Str
 /// Returns negative if a < b, 0 if a == b, positive if a > b.
 /// Handles numeric segments (1.2.3) and suffixes (-beta, -SNAPSHOT).
 pub fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
-    let a_parts = split_version(a);
-    let b_parts = split_version(b);
+    let a_parts = gradle_version_parts(a);
+    let b_parts = gradle_version_parts(b);
 
     for (pa, pb) in a_parts.iter().zip(b_parts.iter()) {
         match (pa.parse::<u64>(), pb.parse::<u64>()) {
@@ -2743,28 +2743,88 @@ pub fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
                 std::cmp::Ordering::Equal => continue,
                 other => return other,
             },
-            _ => match pa.cmp(pb) {
-                std::cmp::Ordering::Equal => continue,
-                other => return other,
-            },
+            (Ok(_), Err(_)) => return std::cmp::Ordering::Greater,
+            (Err(_), Ok(_)) => return std::cmp::Ordering::Less,
+            (Err(_), Err(_)) => {
+                let a_special = gradle_special_version_part(pa);
+                let b_special = gradle_special_version_part(pb);
+                match (a_special, b_special) {
+                    (Some(a_meaning), Some(b_meaning)) => match a_meaning.cmp(&b_meaning) {
+                        std::cmp::Ordering::Equal => continue,
+                        other => return other,
+                    },
+                    (Some(a_meaning), None) => match a_meaning.cmp(&0) {
+                        std::cmp::Ordering::Equal => continue,
+                        other => return other,
+                    },
+                    (None, Some(b_meaning)) => match 0.cmp(&b_meaning) {
+                        std::cmp::Ordering::Equal => continue,
+                        other => return other,
+                    },
+                    (None, None) => match pa.cmp(pb) {
+                        std::cmp::Ordering::Equal => continue,
+                        other => return other,
+                    },
+                }
+            }
         }
     }
 
-    a_parts.len().cmp(&b_parts.len())
+    if a_parts.len() > b_parts.len() {
+        if a_parts[b_parts.len()].parse::<u64>().is_ok() {
+            std::cmp::Ordering::Greater
+        } else {
+            std::cmp::Ordering::Less
+        }
+    } else if b_parts.len() > a_parts.len() {
+        if b_parts[a_parts.len()].parse::<u64>().is_ok() {
+            std::cmp::Ordering::Less
+        } else {
+            std::cmp::Ordering::Greater
+        }
+    } else {
+        std::cmp::Ordering::Equal
+    }
 }
 
-/// Split a version string into numeric/non-numeric segments.
-/// Returns slices into the original string — zero allocation.
-fn split_version(version: &str) -> Vec<&str> {
+fn gradle_special_version_part(part: &str) -> Option<i32> {
+    match part.to_ascii_lowercase().as_str() {
+        "dev" => Some(-1),
+        "rc" => Some(1),
+        "snapshot" => Some(2),
+        "final" => Some(3),
+        "ga" => Some(4),
+        "release" => Some(5),
+        "sp" => Some(6),
+        _ => None,
+    }
+}
+
+/// Split a version string the way Gradle's VersionParser does for comparator input:
+/// separators are `.`, `_`, `-`, and `+`, and digit/non-digit transitions create
+/// separate parts.
+fn gradle_version_parts(version: &str) -> Vec<&str> {
     let mut parts = Vec::with_capacity(8); // typical version has <8 segments
     let mut start = 0;
+    let mut digit = false;
 
     for (i, ch) in version.char_indices() {
-        if ch == '.' || ch == '-' {
-            if start < i {
-                parts.push(&version[start..i]);
-            }
+        if matches!(ch, '.' | '_' | '-' | '+') {
+            parts.push(&version[start..i]);
             start = i + ch.len_utf8();
+            digit = false;
+        } else if ch.is_ascii_digit() {
+            if !digit && i > start {
+                parts.push(&version[start..i]);
+                start = i;
+            }
+            digit = true;
+        } else {
+            if digit {
+                parts.push(&version[start..i]);
+                start = i;
+            }
+            digit = false;
         }
     }
     if start < version.len() {
@@ -5238,11 +5298,15 @@ mod tests {
         assert!(compare_versions("1.0.0", "2.0.0") == std::cmp::Ordering::Less);
         assert!(compare_versions("2.0.0", "1.0.0") == std::cmp::Ordering::Greater);
         assert!(compare_versions("1.0.0", "1.0.0") == std::cmp::Ordering::Equal);
-        // "1.0" has 2 segments, "1.0.0" has 3 — "1.0" is shorter, so Less
+        // Gradle's StaticVersionComparator treats a trailing numeric part as newer.
         assert!(compare_versions("1.0", "1.0.0") == std::cmp::Ordering::Less);
         assert!(compare_versions("1.2.3", "1.2.4") == std::cmp::Ordering::Less);
         assert!(compare_versions("1.10.0", "1.9.0") == std::cmp::Ordering::Greater);
-        // 10 > 9
+        assert!(compare_versions("1.0-rc-1", "1.0") == std::cmp::Ordering::Less);
+        assert!(compare_versions("1.0-snapshot", "1.0-rc-1") == std::cmp::Ordering::Greater);
+        assert!(compare_versions("1.0-ga", "1.0-final") == std::cmp::Ordering::Greater);
+        assert!(compare_versions("1.0-sp", "1.0-release") == std::cmp::Ordering::Greater);
+        assert!(compare_versions("1.0alpha1", "1.0alpha2") == std::cmp::Ordering::Less);
     }
 
     #[test]
@@ -6491,10 +6555,7 @@ mod tests {
         DependencyResolutionServiceImpl::resolve_conflicts(&mut deps);
 
         assert_eq!(deps.len(), 1);
-        // "1.0.0" (release) should win over "1.0.0-beta" (pre-release)
-        // because "beta" > "" lexicographically, but split_version sees "1.0.0.beta" vs "1.0.0"
-        // The numeric comparison of the 4th segment: "beta" vs nothing — beta is non-numeric so string compare
-        assert_eq!(deps[0].selected_version, "1.0.0-beta");
+        assert_eq!(deps[0].selected_version, "1.0.0");
     }
 
     // ---- matches_exclusion tests ----
