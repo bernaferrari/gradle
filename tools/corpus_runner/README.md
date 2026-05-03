@@ -137,6 +137,10 @@ declared dependency coordinates or unsupported feature markers drift. This is a
 guardrail for runner/corpus honesty, not full resolved Gradle solver parity: it
 does not prove repository selection, variant/capability selection, artifact
 files, checksums, or rich conflict-resolution semantics.
+The canonical build-plan dependency notation does preserve resolved artifact
+classifier and extension when the JVM host exposes them, so non-main or non-JAR
+artifacts are visible to Rust admission and classpath enrichment instead of being
+collapsed into plain `group:name:version` coordinates.
 
 `--resolved-dependency-graph-parity` emits Gradle public `ResolutionResult`
 artifacts for reference and substrate invocations under

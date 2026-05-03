@@ -10,12 +10,11 @@ use sha2::{Digest, Sha256};
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
-    BuildPlanDependency,
-    task_graph_service_server::TaskGraphService, ClearBuildTasksRequest, ClearBuildTasksResponse,
-    ExecutionNode, GetProgressRequest, GetProgressResponse, RegisterTaskRequest,
-    RegisterTaskResponse, ResolveExecutionPlanRequest, ResolveExecutionPlanResponse,
-    TaskFinishedRequest, TaskFinishedResponse, TaskProgress, TaskStartedRequest,
-    TaskStartedResponse,
+    task_graph_service_server::TaskGraphService, BuildPlanDependency, ClearBuildTasksRequest,
+    ClearBuildTasksResponse, ExecutionNode, GetProgressRequest, GetProgressResponse,
+    RegisterTaskRequest, RegisterTaskResponse, ResolveExecutionPlanRequest,
+    ResolveExecutionPlanResponse, TaskFinishedRequest, TaskFinishedResponse, TaskProgress,
+    TaskStartedRequest, TaskStartedResponse,
 };
 
 use super::build_plan_ir::{CanonicalBuildPlanDependency, CanonicalBuildPlanTask};
@@ -729,14 +728,17 @@ fn external_classpath_candidates(
         .filter(|dependency| {
             dependency_configuration_matches_task(&dependency.configuration, include_test_scope)
         })
-        .filter_map(|dependency| parse_coordinate(&dependency.notation))
+        .filter_map(|dependency| parse_artifact_coordinate(&dependency.notation))
+        .filter(|coordinate| coordinate.extension.eq_ignore_ascii_case("jar"))
         .collect::<Vec<_>>();
 
     let mut seen = HashSet::new();
     coordinates
         .into_iter()
         .filter(|coordinate| seen.insert(coordinate.clone()))
-        .flat_map(|(group, name, version)| gradle_module_cache_jars(&group, &name, &version))
+        .flat_map(|coordinate| {
+            gradle_module_cache_jars(&coordinate.group, &coordinate.name, &coordinate.version)
+        })
         .collect()
 }
 
@@ -808,15 +810,47 @@ fn is_test_scoped_task(task: &CanonicalBuildPlanTask) -> bool {
         || is_test_task(task)
 }
 
-fn parse_coordinate(value: &str) -> Option<(String, String, String)> {
-    let mut parts = value.split(':');
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct ArtifactCoordinate {
+    group: String,
+    name: String,
+    version: String,
+    extension: String,
+}
+
+fn parse_artifact_coordinate(value: &str) -> Option<ArtifactCoordinate> {
+    let (base, extension) = value
+        .split_once('@')
+        .map_or((value, "jar"), |(base, extension)| (base, extension.trim()));
+    if extension.is_empty() {
+        return None;
+    }
+    let mut parts = base.split(':');
     let group = parts.next()?.trim();
     let name = parts.next()?.trim();
     let version = parts.next()?.trim();
-    if group.is_empty() || name.is_empty() || version.is_empty() || parts.next().is_some() {
+    if group.is_empty() || name.is_empty() || version.is_empty() {
         return None;
     }
-    Some((group.to_string(), name.to_string(), version.to_string()))
+    if let Some(classifier) = parts.next() {
+        if classifier.trim().is_empty() || parts.next().is_some() {
+            return None;
+        }
+    }
+    Some(ArtifactCoordinate {
+        group: group.to_string(),
+        name: name.to_string(),
+        version: version.to_string(),
+        extension: extension.to_string(),
+    })
+}
+
+fn parse_coordinate(value: &str) -> Option<(String, String, String)> {
+    let coordinate = parse_artifact_coordinate(value)?;
+    if !coordinate.extension.eq_ignore_ascii_case("jar") {
+        return None;
+    }
+    Some((coordinate.group, coordinate.name, coordinate.version))
 }
 
 fn gradle_module_cache_jars(group: &str, name: &str, version: &str) -> Vec<String> {
@@ -2439,14 +2473,15 @@ mod tests {
             Vec::new(),
             vec!["/repo/build/classes/kotlin/main".to_string()],
         );
-        task.input_specs
-            .push(crate::server::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+        task.input_specs.push(
+            crate::server::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
                 name: "source0".to_string(),
                 kind: "source".to_string(),
                 value: "/repo/src/main/kotlin/App.kt".to_string(),
                 normalization: "relative".to_string(),
                 optional: false,
-            });
+            },
+        );
 
         assert_eq!(
             executable_task_type(&task),
@@ -2765,6 +2800,13 @@ mod tests {
             true
         ));
         assert!(parse_coordinate("com.google.guava:guava:33.2.1-jre").is_some());
+        assert!(parse_coordinate("com.google.guava:guava:33.2.1-jre:sources").is_some());
+        assert_eq!(
+            parse_artifact_coordinate("com.android:lib:1.0@aar")
+                .map(|coordinate| coordinate.extension),
+            Some("aar".to_string())
+        );
+        assert!(parse_coordinate("com.android:lib:1.0@aar").is_none());
     }
 
     #[test]

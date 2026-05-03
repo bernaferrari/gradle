@@ -198,7 +198,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
                     stringValue(id, "getGroup"),
                     stringValue(id, "getName"),
                     stringValue(id, "getVersion"),
-                    configurationName
+                    configurationName,
+                    stringValue(resolvedArtifact, "getClassifier"),
+                    artifactExtension(resolvedArtifact)
                 ));
             }
             return artifacts;
@@ -207,6 +209,15 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
                 projectPath, configurationName, e);
             return new ArrayList<>();
         }
+    }
+
+    private static String artifactExtension(Object resolvedArtifact) {
+        String extension = stringValue(resolvedArtifact, "getExtension");
+        if (!extension.isEmpty()) {
+            return extension;
+        }
+        String type = stringValue(resolvedArtifact, "getType");
+        return type.isEmpty() ? "jar" : type;
     }
 
     @Nullable
