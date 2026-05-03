@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package gradle.substrate.v1;
 
+import "v1/buildplan.proto";
+
 option java_multiple_files = true;
 option java_package = "gradle.substrate.v1";
 
@@ -44,6 +46,7 @@ message ResolveExecutionPlanResponse {
   int64 critical_path_ms = 4;
   bool has_cycles = 5;
   string plan_source = 6;
+  repeated BuildPlanDependency plan_dependencies = 7;
 }
 message TaskStartedRequest {
   string build_id = 3;

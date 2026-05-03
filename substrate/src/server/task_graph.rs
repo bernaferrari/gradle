@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
+    BuildPlanDependency,
     task_graph_service_server::TaskGraphService, ClearBuildTasksRequest, ClearBuildTasksResponse,
     ExecutionNode, GetProgressRequest, GetProgressResponse, RegisterTaskRequest,
     RegisterTaskResponse, ResolveExecutionPlanRequest, ResolveExecutionPlanResponse,
@@ -230,6 +231,41 @@ impl TaskGraphServiceImpl {
             );
         }
         loaded
+    }
+
+    fn load_shadow_plan_dependencies(
+        &self,
+        build_id_str: &str,
+        plan_source: &str,
+    ) -> Vec<BuildPlanDependency> {
+        if plan_source != "build-plan-shadow" {
+            return Vec::new();
+        }
+        let Some(store) = self.build_plan_shadow_store.as_ref() else {
+            return Vec::new();
+        };
+        let artifact = match store.load_plan(build_id_str) {
+            Ok(Some(artifact)) => artifact,
+            Ok(None) => return Vec::new(),
+            Err(error) => {
+                tracing::warn!(
+                    build_id = %build_id_str,
+                    error = %error,
+                    "Failed loading build-plan shadow dependencies for kernel admission"
+                );
+                return Vec::new();
+            }
+        };
+        artifact
+            .plan
+            .dependencies
+            .into_iter()
+            .map(|dependency| BuildPlanDependency {
+                project_path: dependency.project_path,
+                configuration: dependency.configuration,
+                notation: dependency.notation,
+            })
+            .collect()
     }
 
     /// Kahn's algorithm for topological sort with parallel scheduling.
@@ -1980,6 +2016,7 @@ impl TaskGraphService for TaskGraphServiceImpl {
         };
 
         let (execution_order, critical_path_ms, has_cycles) = self.resolve_plan(&build_id);
+        let plan_dependencies = self.load_shadow_plan_dependencies(&req.build_id, plan_source);
 
         let total = self.tasks.iter().filter(|e| e.key().0 == build_id).count() as i32;
         let skipped = self
@@ -2013,6 +2050,7 @@ impl TaskGraphService for TaskGraphServiceImpl {
             critical_path_ms,
             has_cycles,
             plan_source: plan_source.to_string(),
+            plan_dependencies,
         }))
     }
 
