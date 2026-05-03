@@ -881,7 +881,7 @@ public class BuildScopeServices implements ServiceRegistrationProvider {
         if (!gradle.getStartParameter().isDryRun()
             && !gradle.getStartParameter().isTaskGraph()
             && rustBuildExecutionClient != null
-            && options.getBoolean(RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_RUN_BUILD)) {
+            && RustSubstrateOptions.isExecutionKernelEnabled(options)) {
             executor = new RustAuthoritativeBuildExecutionAction(
                 executor,
                 rustBuildExecutionClient,
