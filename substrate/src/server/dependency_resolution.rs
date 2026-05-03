@@ -127,6 +127,13 @@ pub struct PomDependency {
     exclusions: Vec<(String, String)>,
 }
 
+/// Parsed dependency-management defaults for a Maven dependency.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ManagedDependency {
+    version: String,
+    scope: String,
+}
+
 /// Rust-native dependency resolution service.
 /// Resolves dependency graphs, fetches POMs from Maven repos, and manages artifact caching.
 pub struct DependencyResolutionServiceImpl {
@@ -1482,10 +1489,10 @@ impl DependencyResolutionServiceImpl {
     }
 
     /// Parse <dependencyManagement><dependencies> section from a POM.
-    /// Returns a map of (groupId, artifactId) -> version for managed dependencies.
+    /// Returns a map of (groupId, artifactId) -> managed defaults for dependencies.
     pub fn parse_dependency_management(
         pom_content: &str,
-    ) -> std::collections::HashMap<(String, String), String> {
+    ) -> std::collections::HashMap<(String, String), ManagedDependency> {
         let mut managed = std::collections::HashMap::new();
         let bytes = pom_content.as_bytes();
 
@@ -1528,15 +1535,38 @@ impl DependencyResolutionServiceImpl {
             let group = extract_tag_text(bytes, dep_pos, b"groupId").unwrap_or_default();
             let name = extract_tag_text(bytes, dep_pos, b"artifactId").unwrap_or_default();
             let version = extract_tag_text(bytes, dep_pos, b"version").unwrap_or_default();
+            let scope = extract_tag_text(bytes, dep_pos, b"scope").unwrap_or_default();
 
             if !group.is_empty() && !name.is_empty() && !version.is_empty() {
-                managed.insert((group, name), version);
+                managed.insert((group, name), ManagedDependency { version, scope });
             }
 
             i = dep_end_pos + b"</dependency>".len();
         }
 
         managed
+    }
+
+    fn managed_default_scope(dep: &PomDependency, managed: Option<&ManagedDependency>) -> String {
+        if !dep.scope.is_empty() {
+            if matches!(
+                dep.scope.as_str(),
+                "compile" | "runtime" | "test" | "provided" | "system" | "import"
+            ) {
+                return dep.scope.clone();
+            }
+            return "compile".to_string();
+        }
+
+        let managed_scope = managed.map(|dep| dep.scope.as_str()).unwrap_or_default();
+        if matches!(
+            managed_scope,
+            "compile" | "runtime" | "test" | "provided" | "system" | "import"
+        ) {
+            managed_scope.to_string()
+        } else {
+            "compile".to_string()
+        }
     }
 
     /// Deduplicate resolved dependencies by (group, name), keeping the highest version.
@@ -2117,7 +2147,7 @@ impl DependencyResolutionServiceImpl {
         repos: &[RepositoryDescriptor],
     ) -> (
         std::collections::HashMap<String, String>,
-        std::collections::HashMap<(String, String), String>,
+        std::collections::HashMap<(String, String), ManagedDependency>,
     ) {
         let mut properties = Self::parse_pom_properties(pom_content);
         let mut managed = Self::parse_dependency_management(pom_content);
@@ -2220,8 +2250,12 @@ impl DependencyResolutionServiceImpl {
                     let mut regular_deps = Vec::new();
 
                     for pom_dep in &pom_deps {
+                        let managed =
+                            managed_versions.get(&(pom_dep.group.clone(), pom_dep.name.clone()));
+                        let effective_scope = Self::managed_default_scope(pom_dep, managed);
+
                         // BOM import: scope=import, type=pom
-                        if pom_dep.scope == "import" && pom_dep.type_field == "pom" {
+                        if effective_scope == "import" && pom_dep.type_field == "pom" {
                             let bom_version =
                                 Self::interpolate_properties(&pom_dep.version, &properties);
                             if !bom_version.is_empty() {
@@ -2235,8 +2269,8 @@ impl DependencyResolutionServiceImpl {
                         }
 
                         // Skip test/provided scopes and optional deps
-                        if pom_dep.scope == "test"
-                            || pom_dep.scope == "provided"
+                        if effective_scope == "test"
+                            || effective_scope == "provided"
                             || pom_dep.optional
                         {
                             continue;
@@ -2270,9 +2304,8 @@ impl DependencyResolutionServiceImpl {
                             Self::interpolate_properties(&pom_dep.version, &properties);
                         let resolved_version =
                             if raw_dep_version.is_empty() || raw_dep_version.starts_with("${") {
-                                managed_versions
-                                    .get(&(pom_dep.group.clone(), pom_dep.name.clone()))
-                                    .cloned()
+                                managed
+                                    .map(|managed| managed.version.clone())
                                     .unwrap_or(raw_dep_version)
                             } else {
                                 raw_dep_version
@@ -2282,7 +2315,7 @@ impl DependencyResolutionServiceImpl {
                             continue;
                         }
 
-                        regular_deps.push((pom_dep.clone(), resolved_version));
+                        regular_deps.push((pom_dep.clone(), resolved_version, effective_scope));
                     }
 
                     // Merge BOM managed versions into our managed set
@@ -2293,10 +2326,12 @@ impl DependencyResolutionServiceImpl {
                         {
                             let bom_props = Self::parse_pom_properties(&bom_pom);
                             let bom_managed = Self::parse_dependency_management(&bom_pom);
-                            for ((g, n), v) in bom_managed {
-                                let interpolated = Self::interpolate_properties(&v, &bom_props);
+                            for ((g, n), mut managed) in bom_managed {
+                                let interpolated =
+                                    Self::interpolate_properties(&managed.version, &bom_props);
                                 if !interpolated.is_empty() {
-                                    merged_managed.entry((g, n)).or_insert(interpolated);
+                                    managed.version = interpolated;
+                                    merged_managed.entry((g, n)).or_insert(managed);
                                 }
                             }
                             tracing::debug!(
@@ -2310,12 +2345,14 @@ impl DependencyResolutionServiceImpl {
                     }
 
                     // Re-resolve versions with merged managed set
-                    for (pom_dep, resolved_version) in &mut regular_deps {
+                    for (pom_dep, resolved_version, effective_scope) in &mut regular_deps {
                         if resolved_version.starts_with("${") || resolved_version.is_empty() {
                             if let Some(managed) =
                                 merged_managed.get(&(pom_dep.group.clone(), pom_dep.name.clone()))
                             {
-                                *resolved_version = managed.clone();
+                                *resolved_version = managed.version.clone();
+                                *effective_scope =
+                                    Self::managed_default_scope(pom_dep, Some(managed));
                             }
                         }
                     }
@@ -2323,7 +2360,7 @@ impl DependencyResolutionServiceImpl {
                     // Resolve each regular dependency recursively
                     let mut transitive_deps = Vec::new();
 
-                    for (pom_dep, resolved_version) in &regular_deps {
+                    for (pom_dep, resolved_version, effective_scope) in &regular_deps {
                         if resolved_version.is_empty() {
                             continue;
                         }
@@ -2336,11 +2373,7 @@ impl DependencyResolutionServiceImpl {
                             classifier,
                             extension,
                             transitive: true,
-                            scope: if pom_dep.scope.is_empty() {
-                                "compile".to_string()
-                            } else {
-                                pom_dep.scope.clone()
-                            },
+                            scope: effective_scope.clone(),
                             changing: false,
                             optional: false,
                             ivy_conf: String::new(),
@@ -4718,6 +4751,72 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_dependency_management_scope_defaults_like_gradle() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let pom = br#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.example</groupId>
+  <artifactId>managed-scope</artifactId>
+  <version>1.0</version>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.example</groupId>
+        <artifactId>test-only</artifactId>
+        <version>1.0</version>
+        <scope>test</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>org.example</groupId>
+      <artifactId>test-only</artifactId>
+    </dependency>
+  </dependencies>
+</project>"#
+            .to_vec();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 2048];
+            let _ = stream.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/xml\r\n\r\n",
+                pom.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.write_all(&pom).unwrap();
+        });
+
+        let store = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "compileClasspath".to_string(),
+                dependencies: vec![make_dep("org.example", "managed-scope", "1.0")],
+                repositories: vec![make_repo("local", &format!("http://{}", addr))],
+                attributes: vec![],
+                lenient: false,
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        server.join().unwrap();
+
+        assert!(response.success, "{}", response.error_message);
+        assert_eq!(response.resolved_dependencies.len(), 1);
+        assert!(
+            response.resolved_dependencies[0].dependencies.is_empty(),
+            "dependencyManagement test scope should be used as the missing dependency scope"
+        );
+    }
+
     #[test]
     fn test_filter_by_compile_scope_excludes_runtime_and_test_recursively() {
         let mut compile = resolved_dep("org.example", "compile-lib", "compile");
@@ -6106,13 +6205,15 @@ mod tests {
         assert_eq!(
             managed
                 .get(&("org.springframework".to_string(), "spring-core".to_string()))
-                .unwrap(),
+                .unwrap()
+                .version,
             "5.3.30"
         );
         assert_eq!(
             managed
                 .get(&("org.slf4j".to_string(), "slf4j-api".to_string()))
-                .unwrap(),
+                .unwrap()
+                .version,
             "2.0.9"
         );
 
@@ -6171,7 +6272,8 @@ mod tests {
         assert_eq!(
             managed
                 .get(&("org.springframework".to_string(), "spring-core".to_string()))
-                .unwrap(),
+                .unwrap()
+                .version,
             "${spring.version}"
         );
     }
@@ -6550,7 +6652,8 @@ mod tests {
         assert_eq!(
             managed
                 .get(&("org.slf4j".to_string(), "slf4j-api".to_string()))
-                .unwrap(),
+                .unwrap()
+                .version,
             "2.0.9"
         );
 
@@ -6579,7 +6682,7 @@ mod tests {
         // Verify managed version can be looked up for slf4j
         let slf4j_version = managed
             .get(&(deps[1].group.clone(), deps[1].name.clone()))
-            .cloned()
+            .map(|managed| managed.version.as_str())
             .unwrap_or_default();
         assert_eq!(slf4j_version, "2.0.9");
     }
@@ -6642,7 +6745,8 @@ mod tests {
         assert_eq!(
             managed
                 .get(&("org.example".to_string(), "lib".to_string()))
-                .unwrap(),
+                .unwrap()
+                .version,
             "2.0"
         );
     }
@@ -6671,7 +6775,8 @@ mod tests {
                     "org.springframework".to_string(),
                     "spring-beans".to_string()
                 ))
-                .unwrap(),
+                .unwrap()
+                .version,
             "${spring.version}"
         );
     }
@@ -6794,20 +6899,66 @@ mod tests {
         assert_eq!(
             managed
                 .get(&("org.example".to_string(), "test-lib".to_string()))
-                .unwrap(),
+                .unwrap()
+                .version,
             "1.0"
         );
         assert_eq!(
             managed
                 .get(&("org.example".to_string(), "optional-lib".to_string()))
-                .unwrap(),
+                .unwrap()
+                .version,
             "2.0"
         );
         assert_eq!(
             managed
                 .get(&("org.example".to_string(), "compile-lib".to_string()))
-                .unwrap(),
+                .unwrap()
+                .version,
             "3.0"
+        );
+        assert_eq!(
+            managed
+                .get(&("org.example".to_string(), "test-lib".to_string()))
+                .unwrap()
+                .scope,
+            "test"
+        );
+    }
+
+    #[test]
+    fn test_managed_default_scope_matches_gradle_rules() {
+        let managed = ManagedDependency {
+            version: "1.0".to_string(),
+            scope: "test".to_string(),
+        };
+        let mut dep = PomDependency {
+            group: "org.example".to_string(),
+            name: "lib".to_string(),
+            version: String::new(),
+            scope: String::new(),
+            optional: false,
+            classifier: String::new(),
+            type_field: String::new(),
+            exclusions: vec![],
+        };
+
+        assert_eq!(
+            DependencyResolutionServiceImpl::managed_default_scope(&dep, Some(&managed)),
+            "test"
+        );
+
+        dep.scope = "unknown".to_string();
+        assert_eq!(
+            DependencyResolutionServiceImpl::managed_default_scope(&dep, Some(&managed)),
+            "compile",
+            "Gradle only consults dependencyManagement scope when dependency scope is missing"
+        );
+
+        dep.scope = "runtime".to_string();
+        assert_eq!(
+            DependencyResolutionServiceImpl::managed_default_scope(&dep, Some(&managed)),
+            "runtime"
         );
     }
 
@@ -7119,7 +7270,8 @@ mod tests {
         assert_eq!(
             managed
                 .get(&("org.slf4j".to_string(), "slf4j-api".to_string()))
-                .unwrap(),
+                .unwrap()
+                .version,
             "2.0.9"
         );
     }
@@ -7168,7 +7320,7 @@ mod tests {
         let managed_version =
             parent_managed.get(&("org.slf4j".to_string(), "slf4j-api".to_string()));
         assert!(managed_version.is_some());
-        assert_eq!(managed_version.unwrap(), "2.0.9");
+        assert_eq!(managed_version.unwrap().version, "2.0.9");
     }
 
     // ---- SNAPSHOT version resolution tests ----
