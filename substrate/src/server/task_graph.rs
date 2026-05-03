@@ -526,6 +526,9 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
         {
             "WriteFile".to_string()
         }
+        (_, "DefaultTask") if known_lifecycle_task_path(&task.path) && lifecycle_shape(task) => {
+            "Lifecycle".to_string()
+        }
         ("lifecycle", _) | (_, "Lifecycle") if no_task_actions(task) => "Lifecycle".to_string(),
         _ => task.implementation_id.clone(),
     }
@@ -1812,6 +1815,32 @@ fn no_task_actions(task: &CanonicalBuildPlanTask) -> bool {
         })
 }
 
+fn known_lifecycle_task_path(path: &str) -> bool {
+    let name = path.rsplit(':').next().unwrap_or(path);
+    matches!(
+        name,
+        "assemble"
+            | "build"
+            | "buildDependents"
+            | "buildNeeded"
+            | "check"
+            | "classes"
+            | "testClasses"
+            | "jar"
+            | "archives"
+    )
+}
+
+fn lifecycle_shape(task: &CanonicalBuildPlanTask) -> bool {
+    task.outputs.is_empty()
+        && task.output_specs.is_empty()
+        && task.local_state.is_empty()
+        && task.destroyables.is_empty()
+        && task.environment_inputs.is_empty()
+        && task.system_property_inputs.is_empty()
+        && !static_write_file_contract_complete(task)
+}
+
 fn destroyable_paths(task: &CanonicalBuildPlanTask) -> Vec<String> {
     task.destroyables
         .iter()
@@ -2337,6 +2366,30 @@ mod tests {
                 .len()
                 >= 32
         );
+    }
+
+    #[test]
+    fn test_known_default_lifecycle_task_lowers_to_native_lifecycle() {
+        let task = canonical_task(
+            ":build",
+            "org.gradle.api.DefaultTask",
+            vec![":check".to_string(), ":assemble".to_string()],
+            Vec::new(),
+        );
+
+        assert_eq!(executable_task_type(&task), "Lifecycle");
+    }
+
+    #[test]
+    fn test_custom_default_task_with_outputs_does_not_lower_to_lifecycle() {
+        let task = canonical_task(
+            ":generateThing",
+            "org.gradle.api.DefaultTask",
+            Vec::new(),
+            vec!["/repo/build/generated/thing.txt".to_string()],
+        );
+
+        assert_eq!(executable_task_type(&task), "org.gradle.api.DefaultTask");
     }
 
     #[test]
