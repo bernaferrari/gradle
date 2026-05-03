@@ -623,11 +623,14 @@ fn kernel_dependency_graph_from_plan_dependencies(
                 name: configuration_name,
                 repositories: Vec::new(),
                 dependencies: Vec::new(),
+                project_dependencies: Vec::new(),
                 constraints: Vec::new(),
                 unsupported_features: Vec::new(),
             });
         if let Some(request) = kernel_dependency_request_from_notation(&dependency.notation) {
             configuration.dependencies.push(request);
+        } else if let Some(project_path) = project_dependency_path_from_notation(&dependency.notation) {
+            configuration.project_dependencies.push(project_path);
         } else {
             configuration.unsupported_features.push(format!(
                 "unsupported dependency notation '{}'",
@@ -638,6 +641,33 @@ fn kernel_dependency_graph_from_plan_dependencies(
     let mut configurations = configurations.into_values().collect::<Vec<_>>();
     configurations.sort_by(|a, b| a.name.cmp(&b.name));
     Some(KernelDependencyGraph { configurations })
+}
+
+fn project_dependency_path_from_notation(notation: &str) -> Option<String> {
+    let trimmed = notation.trim();
+    if let Some(rest) = trimmed.strip_prefix("project ") {
+        return normalize_project_dependency_path(rest);
+    }
+    if let Some(rest) = trimmed
+        .strip_prefix("project(")
+        .and_then(|value| value.strip_suffix(')'))
+    {
+        return normalize_project_dependency_path(rest);
+    }
+    None
+}
+
+fn normalize_project_dependency_path(value: &str) -> Option<String> {
+    let trimmed = value
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim();
+    if trimmed.starts_with(':') {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
 }
 
 fn kernel_dependency_request_from_notation(notation: &str) -> Option<KernelDependencyRequest> {
@@ -2036,6 +2066,21 @@ mod tests {
         assert!(graph.configurations[0].dependencies.is_empty());
         assert!(graph.configurations[0].unsupported_features[0]
             .contains("unsupported dependency notation"));
+    }
+
+    #[test]
+    fn kernel_dependency_graph_preserves_project_dependencies() {
+        let graph =
+            kernel_dependency_graph_from_plan_dependencies(&[crate::proto::BuildPlanDependency {
+                project_path: ":app".to_string(),
+                configuration: "implementation".to_string(),
+                notation: "project(':lib')".to_string(),
+            }])
+            .expect("dependency graph");
+
+        assert_eq!(graph.configurations[0].name, ":app:implementation");
+        assert_eq!(graph.configurations[0].project_dependencies, vec![":lib"]);
+        assert!(graph.configurations[0].unsupported_features.is_empty());
     }
 
     fn make_svc() -> DagExecutorServiceImpl {
