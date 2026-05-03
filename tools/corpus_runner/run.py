@@ -478,6 +478,7 @@ def run_resolved_graph_export(
     runbuild_native_ready_default: bool = False,
     gradle_command: str | None = None,
 ) -> RunResult:
+    output_dir = str(Path(output_dir).resolve())
     cmd = build_gradle_command(
         project_dir,
         substrate=substrate,

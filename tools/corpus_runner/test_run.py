@@ -159,6 +159,42 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         }
         self.assertEqual({}, failures)
 
+    def test_resolved_graph_export_uses_absolute_output_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            captured = {}
+
+            def fake_run(cmd, cwd, capture_output, text, timeout):
+                captured["cmd"] = cmd
+                captured["cwd"] = cwd
+
+                class Result:
+                    returncode = 0
+                    stdout = "BUILD SUCCESSFUL\n"
+                    stderr = ""
+
+                return Result()
+
+            original_run = corpus_run.subprocess.run
+            try:
+                corpus_run.subprocess.run = fake_run
+                corpus_run.run_resolved_graph_export(
+                    project_dir=tmp,
+                    output_dir="relative/resolved-graphs",
+                    substrate=False,
+                    init_script="/tmp/init.gradle",
+                    timeout=10,
+                )
+            finally:
+                corpus_run.subprocess.run = original_run
+
+        output_args = [
+            arg for arg in captured["cmd"]
+            if arg.startswith("-Dorg.gradle.rust.substrate.resolvedGraphOutputDir=")
+        ]
+        self.assertEqual(1, len(output_args))
+        output_dir = output_args[0].split("=", 1)[1]
+        self.assertTrue(Path(output_dir).is_absolute())
+
     def test_unsupported_corpus_manifest_contracts_pass(self):
         repo_root = Path(__file__).resolve().parents[2]
         manifest = repo_root / "testing" / "corpus" / "unsupported-manifest.json"
