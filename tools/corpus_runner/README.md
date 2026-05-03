@@ -175,8 +175,9 @@ optional offline corpus also includes an OSS-style Java library slice with
 sources JAR/Javadoc/static report outputs. The optional `testing/corpus/external-manifest.json`
 adds pinned external-dependency builds for real non-empty JUnit Platform test
 execution with include/exclude tag filtering and class-name Test filters, plus
-a richer dependency constraints/exclusion sample, and requires network or a warm
-Gradle dependency cache.
+a richer dependency constraints/exclusion sample and a classified artifact
+coordinate (`sources@jar`), and requires network or a warm Gradle dependency
+cache.
 `testing/corpus/unsupported-manifest.json` tracks work that must not be
 approximated natively until a complete contract exists. It covers custom JVM
 task actions beyond static literal file writes, unsupported CopySpec actions
