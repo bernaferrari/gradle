@@ -543,7 +543,7 @@ Authoritative parity gates after fix (2026-05-03):
 | Supported corpus | 26/26 matched, 232/232 task parity | `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command $GRADLE_UNDER_TEST/bin/gradle --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --output-dir build/corpus-authoritative-scope-contract-2` |
 | External corpus | 2/2 matched, 25/25 task parity | `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --gradle-command $GRADLE_UNDER_TEST/bin/gradle --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --output-dir build/corpus-external-scope-contract-2` |
 | Unsupported contract | 2/2 passed | `python3 tools/corpus_runner/run.py --manifest testing/corpus/unsupported-manifest.json --contract-only --output-dir build/corpus-contract-unsupported-scope-contract-2` |
-| Unit tests | 1588 passed, 0 failed, 3 ignored | `cargo test -p gradle-substrate-daemon --lib` |
+| Unit tests | 1600 passed, 0 failed, 3 ignored | `cargo test -p gradle-substrate-daemon --lib` |
 | Focused JVM tests | Passed | `./gradlew :core:test --tests org.gradle.execution.RustAuthoritativeBuildExecutionActionTest :rust-bridge:test --tests org.gradle.internal.rustbridge.taskgraph.TaskGraphShadowListenerTest --no-daemon --console=plain` |
 | Integration tests | 49 passed, 2 pre-existing failures | `cargo test --test integration_test` |
 
@@ -601,10 +601,12 @@ an optional `KernelDependencyGraph` with configurations, repositories, dependenc
 requests, constraints, and explicit unsupported-feature markers. Admission rejects
 empty coordinates, unsupported repository URLs, dynamic `+`/`latest.*` selectors,
 SNAPSHOT selectors, duplicate/unnamed configurations, and unsupported feature
-markers before task scheduling. This is the intended Rust-owned dependency graph
-boundary, but the Java bridge does not feed it yet; current production RunBuild
-still admits `dependency_graph=None` while dependency parity/read-through remain
-separate gates.
+markers before task scheduling. Task-graph resolution now carries canonical
+`BuildPlanDependency` entries from the build-plan shadow into `StartBuildResponse`,
+and `DagExecutor` groups them into the kernel dependency graph before no-fallback
+RunBuild admission. Repository capture, constraints, attributes, variants, and
+resolved-artifact ownership are still narrower than full Gradle solver parity, so
+dependency parity/read-through remain separate gates.
 
 | Gate | Result | Command |
 |------|--------|---------|
@@ -614,6 +616,7 @@ separate gates.
 | First-60s proof mode | 6/6 dependency checks passed; metrics JSON at `/tmp/first60s-proof-sh7-final.json` | `python3 tools/demo/first_60_seconds.py --mode proof --skip-build --output /tmp/first60s-proof-sh7-final.json` |
 | Fail-closed dependency tests | 4/4 focused tests passed | `cargo test -p gradle-substrate-daemon --lib -- test_prefetch_rejects_snapshot_artifacts test_incomplete_maven_coordinate_rejected test_resolve_version_range_rejects_unsupported_patterns test_resolve_dependencies_fails_closed_for_unsupported_version_selector` |
 | Kernel dependency admission tests | 5/5 focused kernel tests passed | `cargo test -p gradle-substrate-daemon execution_kernel --lib` |
+| Kernel dependency graph bridge tests | 2/2 focused DAG conversion tests passed | `cargo test -p gradle-substrate-daemon kernel_dependency_graph --lib` |
 | Unit tests | 1588 passed, 0 failed, 3 ignored | `cargo test -p gradle-substrate-daemon --lib` |
 
 ## Next Sync Actions

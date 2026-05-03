@@ -6,7 +6,10 @@ use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
 use super::event_dispatcher::EventDispatcher;
-use super::execution_kernel::{admit_build_plan, KernelAdmission, KernelBuildPlan, KernelTaskPlan};
+use super::execution_kernel::{
+    admit_build_plan, KernelAdmission, KernelBuildPlan, KernelDependencyConfiguration,
+    KernelDependencyGraph, KernelDependencyRequest, KernelTaskPlan,
+};
 use super::scopes::{BuildId, ScopeRegistry};
 use super::work::WorkerScheduler;
 
@@ -567,6 +570,7 @@ impl DagExecutorServiceImpl {
         &self,
         build_id: &str,
         task_contexts: &HashMap<String, String>,
+        plan_dependencies: &[crate::proto::BuildPlanDependency],
     ) -> Result<KernelBuildPlan, String> {
         let build_id_key = BuildId::from(build_id.to_string());
         let execution = self
@@ -599,9 +603,56 @@ impl DagExecutorServiceImpl {
         Ok(KernelBuildPlan {
             build_id: build_id.to_string(),
             tasks,
-            dependency_graph: None,
+            dependency_graph: kernel_dependency_graph_from_plan_dependencies(plan_dependencies),
         })
     }
+}
+
+fn kernel_dependency_graph_from_plan_dependencies(
+    plan_dependencies: &[crate::proto::BuildPlanDependency],
+) -> Option<KernelDependencyGraph> {
+    if plan_dependencies.is_empty() {
+        return None;
+    }
+    let mut configurations = HashMap::<String, KernelDependencyConfiguration>::new();
+    for dependency in plan_dependencies {
+        let configuration_name = format!("{}:{}", dependency.project_path, dependency.configuration);
+        let configuration = configurations
+            .entry(configuration_name.clone())
+            .or_insert_with(|| KernelDependencyConfiguration {
+                name: configuration_name,
+                repositories: Vec::new(),
+                dependencies: Vec::new(),
+                constraints: Vec::new(),
+                unsupported_features: Vec::new(),
+            });
+        if let Some(request) = kernel_dependency_request_from_notation(&dependency.notation) {
+            configuration.dependencies.push(request);
+        } else {
+            configuration.unsupported_features.push(format!(
+                "unsupported dependency notation '{}'",
+                dependency.notation
+            ));
+        }
+    }
+    let mut configurations = configurations.into_values().collect::<Vec<_>>();
+    configurations.sort_by(|a, b| a.name.cmp(&b.name));
+    Some(KernelDependencyGraph { configurations })
+}
+
+fn kernel_dependency_request_from_notation(notation: &str) -> Option<KernelDependencyRequest> {
+    let mut parts = notation.split(':');
+    let group = parts.next()?.trim();
+    let name = parts.next()?.trim();
+    let version = parts.next()?.trim();
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(KernelDependencyRequest {
+        group: group.to_string(),
+        name: name.to_string(),
+        version: version.to_string(),
+    })
 }
 
 #[tonic::async_trait]
@@ -645,6 +696,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 total_tasks: 0,
                 critical_path_ms: 0,
                 plan_source: plan_response.plan_source,
+                plan_dependencies: plan_response.plan_dependencies,
             }));
         }
 
@@ -714,6 +766,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 total_tasks: 0,
                 critical_path_ms: 0,
                 plan_source: plan_response.plan_source,
+                plan_dependencies: plan_response.plan_dependencies,
             }));
         }
 
@@ -780,6 +833,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
             total_tasks,
             critical_path_ms: plan_response.critical_path_ms,
             plan_source: plan_response.plan_source,
+            plan_dependencies: plan_response.plan_dependencies,
         }))
     }
 
@@ -821,12 +875,17 @@ impl DagExecutorService for DagExecutorServiceImpl {
 
         let total_tasks = start_resp.get_ref().total_tasks;
         let plan_source = start_resp.get_ref().plan_source.clone();
+        let plan_dependencies = start_resp.get_ref().plan_dependencies.clone();
         let max_parallelism = req.max_parallelism.max(1) as usize;
         let allow_jvm_forwarding = req.allow_jvm_forwarding;
         let task_contexts = req.task_contexts;
 
         if !allow_jvm_forwarding {
-            let kernel_plan = match self.build_kernel_plan(&build_id_str, &task_contexts) {
+            let kernel_plan = match self.build_kernel_plan(
+                &build_id_str,
+                &task_contexts,
+                &plan_dependencies,
+            ) {
                 Ok(plan) => plan,
                 Err(error) => {
                     return Ok(Response::new(RunBuildResponse {
@@ -1940,6 +1999,43 @@ mod tests {
                 execution_mode,
             }))
         }
+    }
+
+    #[test]
+    fn kernel_dependency_graph_groups_build_plan_dependencies() {
+        let graph = kernel_dependency_graph_from_plan_dependencies(&[
+            crate::proto::BuildPlanDependency {
+                project_path: ":".to_string(),
+                configuration: "implementation".to_string(),
+                notation: "org.example:demo:1.2.3".to_string(),
+            },
+            crate::proto::BuildPlanDependency {
+                project_path: ":".to_string(),
+                configuration: "testImplementation".to_string(),
+                notation: "org.example:test:4.5.6".to_string(),
+            },
+        ])
+        .expect("dependency graph");
+
+        assert_eq!(graph.configurations.len(), 2);
+        assert_eq!(graph.configurations[0].name, "::implementation");
+        assert_eq!(graph.configurations[0].dependencies[0].group, "org.example");
+        assert_eq!(graph.configurations[0].dependencies[0].name, "demo");
+        assert_eq!(graph.configurations[0].dependencies[0].version, "1.2.3");
+    }
+
+    #[test]
+    fn kernel_dependency_graph_marks_unrepresentable_notation_unsupported() {
+        let graph = kernel_dependency_graph_from_plan_dependencies(&[crate::proto::BuildPlanDependency {
+            project_path: ":".to_string(),
+            configuration: "implementation".to_string(),
+            notation: "files('libs/demo.jar')".to_string(),
+        }])
+        .expect("dependency graph");
+
+        assert!(graph.configurations[0].dependencies.is_empty());
+        assert!(graph.configurations[0].unsupported_features[0]
+            .contains("unsupported dependency notation"));
     }
 
     fn make_svc() -> DagExecutorServiceImpl {
