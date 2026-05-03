@@ -201,12 +201,19 @@ fn admit_dependency_request(
         || version.eq_ignore_ascii_case("latest.integration")
         || version.eq_ignore_ascii_case("latest.release")
         || version.ends_with("-SNAPSHOT")
+        || looks_like_version_range(version)
     {
         reasons.push(format!(
             "dependency configuration '{}' contains unsupported dynamic version '{}:{}:{}'",
             configuration_name, request.group, request.name, request.version
         ));
     }
+}
+
+fn looks_like_version_range(version: &str) -> bool {
+    (version.starts_with('[') || version.starts_with('('))
+        && (version.ends_with(']') || version.ends_with(')'))
+        && version.contains(',')
 }
 
 fn kernel_task_contract_rejection(
@@ -415,5 +422,48 @@ mod tests {
         let message = rejection.message();
         assert!(message.contains("component-metadata-rule"));
         assert!(message.contains("unsupported dynamic version"));
+    }
+
+    #[test]
+    fn rejects_dependency_graph_range_latest_and_snapshot_versions() {
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            tasks: vec![task(":classes", "Lifecycle", None)],
+            dependency_graph: Some(KernelDependencyGraph {
+                configurations: vec![KernelDependencyConfiguration {
+                    name: "runtimeClasspath".to_string(),
+                    repositories: Vec::new(),
+                    dependencies: vec![
+                        KernelDependencyRequest {
+                            group: "org.example".to_string(),
+                            name: "range".to_string(),
+                            version: "[1.0,2.0)".to_string(),
+                        },
+                        KernelDependencyRequest {
+                            group: "org.example".to_string(),
+                            name: "latest".to_string(),
+                            version: "latest.release".to_string(),
+                        },
+                        KernelDependencyRequest {
+                            group: "org.example".to_string(),
+                            name: "snapshot".to_string(),
+                            version: "1.0-SNAPSHOT".to_string(),
+                        },
+                    ],
+                    constraints: Vec::new(),
+                    unsupported_features: Vec::new(),
+                }],
+            }),
+        };
+
+        let KernelAdmission::Rejected(rejection) =
+            admit_build_plan(&plan, &native_types(&["Lifecycle"]))
+        else {
+            panic!("expected rejection");
+        };
+        let message = rejection.message();
+        assert!(message.contains("org.example:range:[1.0,2.0)"));
+        assert!(message.contains("org.example:latest:latest.release"));
+        assert!(message.contains("org.example:snapshot:1.0-SNAPSHOT"));
     }
 }
