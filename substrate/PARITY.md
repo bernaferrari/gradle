@@ -627,6 +627,9 @@ version, and transitive traversal uses that scope only when the dependency omits
 its own scope. This matches Gradle's `getDefaultScope` path: missing scope can
 come from dependency management, while unknown explicit scopes still default to
 `compile`.
+Rust dependency-management parsing also preserves managed exclusions and applies
+them when the concrete dependency has no exclusions. This matches Gradle's
+`getDependencyMgtExclusions` path, including the direct-exclusions-win rule.
 
 Native task coverage push (execution-kernel coverage): common Gradle lifecycle
 aggregator `DefaultTask`s (`build`, `check`, `classes`, `testClasses`,
@@ -655,12 +658,13 @@ style notation as unsupported Maven coordinates.
 | Maven type artifact-shape parity | Focused helper and resolver tests passed; local Maven-layout POM with `<type>test-jar</type>` resolves child artifact URL as `child-1.0-tests.jar` | `cargo test -p gradle-substrate-daemon test_maven_artifact_shape_matches_gradle_special_types --lib`; `cargo test -p gradle-substrate-daemon test_transitive_maven_test_jar_type_uses_gradle_artifact_shape --lib -- --nocapture` |
 | Maven self-dependency parity | Focused resolver test passed; local POM declaring a dependency on its own `group:name` resolves without retaining the self edge | `cargo test -p gradle-substrate-daemon test_pom_self_dependency_is_skipped_like_gradle --lib -- --nocapture` |
 | Maven dependency-management scope parity | Focused helper and resolver tests passed; missing dependency scope inherits managed `test` scope and explicit unknown scope still defaults to `compile` | `cargo test -p gradle-substrate-daemon managed_default_scope --lib`; `cargo test -p gradle-substrate-daemon test_dependency_management_scope_defaults_like_gradle --lib -- --nocapture` |
+| Maven dependency-management exclusions parity | Focused helper and resolver tests passed; missing dependency exclusions inherit managed exclusions and direct exclusions override them | `cargo test -p gradle-substrate-daemon effective_exclusions --lib`; `cargo test -p gradle-substrate-daemon test_dependency_management_exclusions_default_like_gradle --lib -- --nocapture` |
 | Kernel dependency admission tests | 6/6 focused kernel tests passed | `cargo test -p gradle-substrate-daemon execution_kernel --lib` |
 | Kernel dependency graph bridge tests | 3/3 focused DAG conversion tests passed | `cargo test -p gradle-substrate-daemon kernel_dependency_graph --lib` |
 | Task coverage tests | Focused lifecycle/default/KotlinCompile tests passed | `cargo test -p gradle-substrate-daemon lifecycle_task --lib`; `cargo test -p gradle-substrate-daemon default_task --lib`; `cargo test -p gradle-substrate-daemon kotlin_compile --lib` |
 | Corpus runner tests | 26 passed | `python3 -m unittest tools.corpus_runner.test_run` |
 | Artifact classifier/extension bridge tests | Focused JVM-host protocol, build-plan notation, kernel graph, and task graph parser tests passed | `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.jvmhost.JvmHostServiceImplTest --tests org.gradle.internal.rustbridge.jvmhost.ProjectModelProviderAdapterTest --no-daemon --console=plain`; `cargo test -p gradle-substrate-daemon dependency_notation_preserves_classifier_and_extension --lib`; `cargo test -p gradle-substrate-daemon kernel_dependency_graph_groups_build_plan_dependencies --lib`; `cargo test -p gradle-substrate-daemon dependency_configuration_matching_respects_test_scope --lib` |
-| Unit tests | 1613 passed, 0 failed, 3 ignored | `cargo test -p gradle-substrate-daemon --lib` |
+| Unit tests | 1615 passed, 0 failed, 3 ignored | `cargo test -p gradle-substrate-daemon --lib` |
 
 ## Next Sync Actions
 

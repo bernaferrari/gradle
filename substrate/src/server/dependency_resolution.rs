@@ -132,6 +132,7 @@ pub struct PomDependency {
 pub struct ManagedDependency {
     version: String,
     scope: String,
+    exclusions: Vec<(String, String)>,
 }
 
 /// Rust-native dependency resolution service.
@@ -1536,9 +1537,17 @@ impl DependencyResolutionServiceImpl {
             let name = extract_tag_text(bytes, dep_pos, b"artifactId").unwrap_or_default();
             let version = extract_tag_text(bytes, dep_pos, b"version").unwrap_or_default();
             let scope = extract_tag_text(bytes, dep_pos, b"scope").unwrap_or_default();
+            let exclusions = Self::parse_pom_exclusions(bytes, dep_pos, dep_end_pos);
 
             if !group.is_empty() && !name.is_empty() && !version.is_empty() {
-                managed.insert((group, name), ManagedDependency { version, scope });
+                managed.insert(
+                    (group, name),
+                    ManagedDependency {
+                        version,
+                        scope,
+                        exclusions,
+                    },
+                );
             }
 
             i = dep_end_pos + b"</dependency>".len();
@@ -1567,6 +1576,19 @@ impl DependencyResolutionServiceImpl {
         } else {
             "compile".to_string()
         }
+    }
+
+    fn effective_exclusions(
+        dep: &PomDependency,
+        managed: Option<&ManagedDependency>,
+    ) -> Vec<(String, String)> {
+        if !dep.exclusions.is_empty() {
+            return dep.exclusions.clone();
+        }
+
+        managed
+            .map(|managed| managed.exclusions.clone())
+            .unwrap_or_default()
     }
 
     /// Deduplicate resolved dependencies by (group, name), keeping the highest version.
@@ -2315,7 +2337,13 @@ impl DependencyResolutionServiceImpl {
                             continue;
                         }
 
-                        regular_deps.push((pom_dep.clone(), resolved_version, effective_scope));
+                        let effective_exclusions = Self::effective_exclusions(pom_dep, managed);
+                        regular_deps.push((
+                            pom_dep.clone(),
+                            resolved_version,
+                            effective_scope,
+                            effective_exclusions,
+                        ));
                     }
 
                     // Merge BOM managed versions into our managed set
@@ -2345,7 +2373,9 @@ impl DependencyResolutionServiceImpl {
                     }
 
                     // Re-resolve versions with merged managed set
-                    for (pom_dep, resolved_version, effective_scope) in &mut regular_deps {
+                    for (pom_dep, resolved_version, effective_scope, effective_exclusions) in
+                        &mut regular_deps
+                    {
                         if resolved_version.starts_with("${") || resolved_version.is_empty() {
                             if let Some(managed) =
                                 merged_managed.get(&(pom_dep.group.clone(), pom_dep.name.clone()))
@@ -2353,6 +2383,8 @@ impl DependencyResolutionServiceImpl {
                                 *resolved_version = managed.version.clone();
                                 *effective_scope =
                                     Self::managed_default_scope(pom_dep, Some(managed));
+                                *effective_exclusions =
+                                    Self::effective_exclusions(pom_dep, Some(managed));
                             }
                         }
                     }
@@ -2360,7 +2392,9 @@ impl DependencyResolutionServiceImpl {
                     // Resolve each regular dependency recursively
                     let mut transitive_deps = Vec::new();
 
-                    for (pom_dep, resolved_version, effective_scope) in &regular_deps {
+                    for (pom_dep, resolved_version, effective_scope, effective_exclusions) in
+                        &regular_deps
+                    {
                         if resolved_version.is_empty() {
                             continue;
                         }
@@ -2383,7 +2417,7 @@ impl DependencyResolutionServiceImpl {
                             repos,
                             visited,
                             depth + 1,
-                            &pom_dep.exclusions,
+                            effective_exclusions,
                         ))
                         .await;
                         transitive_deps.push(resolved);
@@ -4817,6 +4851,102 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_dependency_management_exclusions_default_like_gradle() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let root_pom = br#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.example</groupId>
+  <artifactId>root</artifactId>
+  <version>1.0</version>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.example</groupId>
+        <artifactId>child</artifactId>
+        <version>1.0</version>
+        <exclusions>
+          <exclusion>
+            <groupId>org.unwanted</groupId>
+            <artifactId>leaf</artifactId>
+          </exclusion>
+        </exclusions>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>org.example</groupId>
+      <artifactId>child</artifactId>
+    </dependency>
+  </dependencies>
+</project>"#
+            .to_vec();
+        let child_pom = br#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.example</groupId>
+  <artifactId>child</artifactId>
+  <version>1.0</version>
+  <dependencies>
+    <dependency>
+      <groupId>org.unwanted</groupId>
+      <artifactId>leaf</artifactId>
+      <version>1.0</version>
+    </dependency>
+  </dependencies>
+</project>"#
+            .to_vec();
+        let server = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0u8; 2048];
+                let read = stream.read(&mut request).unwrap_or(0);
+                let request = String::from_utf8_lossy(&request[..read]);
+                let body = if request.contains("/org/example/root/1.0/root-1.0.pom") {
+                    &root_pom
+                } else if request.contains("/org/example/child/1.0/child-1.0.pom") {
+                    &child_pom
+                } else {
+                    panic!("unexpected POM request: {}", request);
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/xml\r\n\r\n",
+                    body.len()
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+                stream.write_all(body).unwrap();
+            }
+        });
+
+        let store = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "compileClasspath".to_string(),
+                dependencies: vec![make_dep("org.example", "root", "1.0")],
+                repositories: vec![make_repo("local", &format!("http://{}", addr))],
+                attributes: vec![],
+                lenient: false,
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        server.join().unwrap();
+
+        assert!(response.success, "{}", response.error_message);
+        let root = &response.resolved_dependencies[0];
+        assert_eq!(root.dependencies.len(), 1);
+        assert!(
+            root.dependencies[0].dependencies.is_empty(),
+            "dependencyManagement exclusions should apply when the dependency has no exclusions"
+        );
+    }
+
     #[test]
     fn test_filter_by_compile_scope_excludes_runtime_and_test_recursively() {
         let mut compile = resolved_dep("org.example", "compile-lib", "compile");
@@ -6931,6 +7061,7 @@ mod tests {
         let managed = ManagedDependency {
             version: "1.0".to_string(),
             scope: "test".to_string(),
+            exclusions: vec![("org.blocked".to_string(), "leaf".to_string())],
         };
         let mut dep = PomDependency {
             group: "org.example".to_string(),
@@ -6959,6 +7090,37 @@ mod tests {
         assert_eq!(
             DependencyResolutionServiceImpl::managed_default_scope(&dep, Some(&managed)),
             "runtime"
+        );
+    }
+
+    #[test]
+    fn test_effective_exclusions_match_gradle_dependency_management_rules() {
+        let managed = ManagedDependency {
+            version: "1.0".to_string(),
+            scope: String::new(),
+            exclusions: vec![("org.managed".to_string(), "blocked".to_string())],
+        };
+        let mut dep = PomDependency {
+            group: "org.example".to_string(),
+            name: "lib".to_string(),
+            version: String::new(),
+            scope: String::new(),
+            optional: false,
+            classifier: String::new(),
+            type_field: String::new(),
+            exclusions: vec![],
+        };
+
+        assert_eq!(
+            DependencyResolutionServiceImpl::effective_exclusions(&dep, Some(&managed)),
+            vec![("org.managed".to_string(), "blocked".to_string())]
+        );
+
+        dep.exclusions = vec![("org.direct".to_string(), "blocked".to_string())];
+        assert_eq!(
+            DependencyResolutionServiceImpl::effective_exclusions(&dep, Some(&managed)),
+            vec![("org.direct".to_string(), "blocked".to_string())],
+            "direct exclusions override dependencyManagement exclusions"
         );
     }
 
