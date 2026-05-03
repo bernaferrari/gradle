@@ -132,6 +132,28 @@ public class SubstrateLifecycleTest {
     }
 
     @Test
+    public void executionKernelFlagEnablesNoFallbackRunBuildContractCapture() {
+        Map<String, String> values = new HashMap<>();
+        values.put(RustSubstrateOptions.ENABLE_SUBSTRATE.getPropertyName(), "true");
+        values.put(RustSubstrateOptions.ENABLE_RUST_EXECUTION_KERNEL.getPropertyName(), "true");
+
+        DefaultInternalOptions options = new DefaultInternalOptions(values);
+        assertTrue(RustSubstrateOptions.isExecutionKernelEnabled(options));
+        assertFalse(RustBridgeCoreServices.shouldEnableBootstrapLifecycle(options));
+        assertFalse(RustBridgeCoreServices.shouldEnableBuildResultLifecycle(options));
+        assertTrue(RustBridgeCoreServices.shouldCaptureSelectedTaskContracts(options));
+    }
+
+    @Test
+    public void oldAuthoritativeRunBuildFlagRemainsExecutionKernelAlias() {
+        Map<String, String> values = new HashMap<>();
+        values.put(RustSubstrateOptions.ENABLE_SUBSTRATE.getPropertyName(), "true");
+        values.put(RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_RUN_BUILD.getPropertyName(), "true");
+
+        assertTrue(RustSubstrateOptions.isExecutionKernelEnabled(new DefaultInternalOptions(values)));
+    }
+
+    @Test
     public void umbrellaShadowModeStillEnablesLifecycleListenersForBroadShadowing() {
         Map<String, String> values = new HashMap<>();
         values.put(RustSubstrateOptions.SUBSTRATE_MODE.getPropertyName(), "shadow");

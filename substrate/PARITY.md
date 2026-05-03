@@ -15,9 +15,12 @@
   lifecycle with JVM fallback disabled: `JavaCompile`, `ProcessResources`
   lowered to `Copy`, no-action `classes` lowered to `Lifecycle`, and `Jar`.
 - Real Gradle task execution has an opt-in authoritative gate:
-  `org.gradle.rust.substrate.runbuild.authoritative=true` executes the selected
-  build-plan shadow through Rust `RunBuild` and skips Gradle's JVM task executor
-  only when Rust reports exactly the scheduled task count with zero JVM forwards.
+  `org.gradle.rust.substrate.execution.kernel=true` executes the selected
+  build-plan shadow through Rust `RunBuild`, admits the whole selected plan into
+  the Rust execution kernel, and skips Gradle's JVM task executor only when Rust
+  reports exactly the scheduled task count with zero JVM forwards. The older
+  `org.gradle.rust.substrate.runbuild.authoritative=true` flag remains a
+  compatibility alias for this strict no-fallback mode.
 - The explicit Rust `RunBuild` path no longer enables unrelated Java-side
   bootstrap, build-result, metrics, history, or JVM-host lifecycle services.
   It keeps only the early selected-task contract capture needed to execute the

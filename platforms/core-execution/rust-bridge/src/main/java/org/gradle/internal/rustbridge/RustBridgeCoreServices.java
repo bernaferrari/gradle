@@ -63,10 +63,7 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
     }
 
     static boolean shouldEnableBootstrapLifecycle(InternalOptions options) {
-        return RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_BOOTSTRAP)
-            || RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_RUN_BUILD)
-            || options.getBoolean(RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_RUN_BUILD)
-            || options.getBoolean(RustSubstrateOptions.ENABLE_RUST_NATIVE_READY_DEFAULT_RUN_BUILD);
+        return RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_BOOTSTRAP);
     }
 
     static boolean shouldEnableBuildResultLifecycle(InternalOptions options) {
@@ -78,6 +75,7 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
     static boolean shouldCaptureSelectedTaskContracts(InternalOptions options) {
         return shouldEnableJvmHost(options)
             || RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_RUN_BUILD)
+            || options.getBoolean(RustSubstrateOptions.ENABLE_RUST_EXECUTION_KERNEL)
             || options.getBoolean(RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_RUN_BUILD)
             || options.getBoolean(RustSubstrateOptions.ENABLE_RUST_NATIVE_READY_DEFAULT_RUN_BUILD);
     }

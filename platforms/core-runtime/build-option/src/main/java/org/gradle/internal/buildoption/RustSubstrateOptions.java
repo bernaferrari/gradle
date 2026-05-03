@@ -440,6 +440,17 @@ public class RustSubstrateOptions {
         InternalOptions.ofBoolean("org.gradle.rust.substrate.runbuild.native-ready-default", false);
 
     /**
+     * Enable the Rust execution kernel as the post-configuration owner of the
+     * selected build. The JVM still configures/evaluates the build, but Rust must
+     * admit and execute the whole selected task graph with JVM task forwarding
+     * disabled.
+     * Property: org.gradle.rust.substrate.execution.kernel
+     * Default: false
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_EXECUTION_KERNEL =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.execution.kernel", false);
+
+    /**
      * Enable authoritative mode for Rust-backed execution plan advisory subsystem.
      * Property: org.gradle.rust.substrate.executionplan.authoritative
      * Default: false
@@ -587,6 +598,19 @@ public class RustSubstrateOptions {
             return mode != SubstrateMode.OFF;
         }
         return options.getBoolean(ENABLE_SUBSTRATE);
+    }
+
+    /**
+     * Check whether the high-level Rust execution kernel is enabled.
+     *
+     * <p>The old no-fallback RunBuild flag remains a compatibility alias while
+     * the user-facing model moves from per-leaf authoritative flags to one
+     * post-configuration Rust execution boundary.</p>
+     */
+    public static boolean isExecutionKernelEnabled(InternalOptions options) {
+        return isSubstrateEnabled(options)
+            && (options.getBoolean(ENABLE_RUST_EXECUTION_KERNEL)
+            || options.getBoolean(ENABLE_RUST_AUTHORITATIVE_RUN_BUILD));
     }
 
     private RustSubstrateOptions() {
