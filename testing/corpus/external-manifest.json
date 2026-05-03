@@ -39,6 +39,64 @@
         "project_dependencies": [],
         "toolchains": ["17"]
       }
+    },
+    {
+      "name": "dependency-version-conflict-kotlin-dsl",
+      "path": "dependency-version-conflict-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 1,
+        "plugins": ["java-library"],
+        "tasks": ["dependencyContractReport"],
+        "outputs": ["build/reports/dependency-contract.txt"],
+        "dependencies": [
+          "org.slf4j:slf4j-api:2.0.13",
+          "ch.qos.logback:logback-classic:1.5.6"
+        ],
+        "project_dependencies": [],
+        "toolchains": ["17"]
+      }
+    },
+    {
+      "name": "dependency-transitive-chain-kotlin-dsl",
+      "path": "dependency-transitive-chain-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 1,
+        "plugins": ["java-library"],
+        "tasks": ["dependencyContractReport"],
+        "outputs": ["build/reports/dependency-contract.txt"],
+        "dependencies": [
+          "org.apache.commons:commons-compress:1.26.1",
+          "com.google.code.gson:gson:2.11.0"
+        ],
+        "project_dependencies": [],
+        "toolchains": ["17"]
+      }
+    },
+    {
+      "name": "dependency-platform-bom-kotlin-dsl",
+      "path": "dependency-platform-bom-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 1,
+        "plugins": ["java-library"],
+        "tasks": ["dependencyContractReport"],
+        "outputs": ["build/reports/dependency-contract.txt"],
+        "dependencies": [
+          "com.squareup.okhttp3:okhttp-bom:4.12.0",
+          "com.squareup.okhttp3:okhttp",
+          "com.squareup.okhttp3:logging-interceptor"
+        ],
+        "project_dependencies": [],
+        "toolchains": ["17"]
+      }
     }
   ]
 }

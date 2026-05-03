@@ -532,7 +532,7 @@ Authoritative parity gates after fix (2026-05-03):
 | Supported corpus | 26/26 matched, 232/232 task parity | `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command $GRADLE_UNDER_TEST/bin/gradle --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --output-dir build/corpus-authoritative-scope-contract-2` |
 | External corpus | 2/2 matched, 25/25 task parity | `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --gradle-command $GRADLE_UNDER_TEST/bin/gradle --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --output-dir build/corpus-external-scope-contract-2` |
 | Unsupported contract | 2/2 passed | `python3 tools/corpus_runner/run.py --manifest testing/corpus/unsupported-manifest.json --contract-only --output-dir build/corpus-contract-unsupported-scope-contract-2` |
-| Unit tests | 1584 passed, 0 failed, 3 ignored | `cargo test -p gradle-substrate-daemon --lib` |
+| Unit tests | 1588 passed, 0 failed, 3 ignored | `cargo test -p gradle-substrate-daemon --lib` |
 | Focused JVM tests | Passed | `./gradlew :core:test --tests org.gradle.execution.RustAuthoritativeBuildExecutionActionTest :rust-bridge:test --tests org.gradle.internal.rustbridge.taskgraph.TaskGraphShadowListenerTest --no-daemon --console=plain` |
 | Integration tests | 49 passed, 2 pre-existing failures | `cargo test --test integration_test` |
 
@@ -540,6 +540,48 @@ Audit of closed roadmap (dyy.1–dyy.20): 18/21 verified against committed code 
 corpus parity, 3/21 partially verified (dependency solver complex scenarios,
 publication/signing completeness, Tooling API/IDE shim). No critical overclaims.
 Partially verified areas are documented as non-hot-path in the native-ready contract policy.
+
+## Dependency Resolution Hardening (sh7)
+
+Dependency resolution audit (sh7.1): the Rust daemon has executable support for
+static Maven metadata/artifact transport, persistent artifact/metadata cache,
+checksum verification, cache-first/read-through transport, static prefetch, selected
+dynamic metadata lookups, and a growing POM transitive-resolution model. Full Gradle
+solver parity is not claimed. Version conflict behavior, exclusions, dependency
+constraints, BOM/platform semantics, rich versions, SNAPSHOTs, repository/auth/proxy
+edge cases, dependency substitution, component metadata rules, capabilities, and
+variants remain partially verified or unsupported unless covered by a checked-in gate.
+
+External dependency corpus expanded from 2 to 5 projects (sh7.2): added
+`dependency-version-conflict-kotlin-dsl` (slf4j-api+logback-classic version conflict),
+`dependency-transitive-chain-kotlin-dsl` (commons-compress+gson deep transitive chains),
+`dependency-platform-bom-kotlin-dsl` (okhttp-bom platform version management).
+These projects are now checked into the manifest; their final no-fallback task/output
+parity is recorded below.
+
+Dependency transport cache proof (sh7.3): `first_60_seconds.py --mode proof`
+remains the required proof command for transport/store/checksum, metadata cache,
+dynamic metadata cache, static Maven prefetch, and read-through behavior.
+
+Fail-closed dependency feature gates (sh7.4): Rust now rejects SNAPSHOT artifact
+prefetch, incomplete Maven artifact coordinates, empty version selectors, malformed
+range selectors, and unsupported `+` wildcard selectors instead of treating them as
+exact versions. Broader unsupported Gradle semantics remain gated by follow-up tests
+before native-ready coverage may expand.
+
+Dependency graph observability (sh7.5): the corpus runner can emit a lightweight
+declared dependency graph for upstream/substrate runs and fail on declared-graph drift
+with `--dependency-graph-parity`. This is intentionally not full resolved solver graph
+parity; it records requested coordinates, selected static versions when declared,
+opaque managed-version entries, unsupported feature markers, and explicit limitations.
+
+| Gate | Result | Command |
+|------|--------|---------|
+| External corpus (expanded + declared graph parity) | 5/5 matched, 64/64 task parity, 5/5 no-fallback, graph diff files emitted under `/tmp/corpus-external-sh7-final/dependency-graphs` | `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --gradle-command /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/build/gradle-under-test/bin/gradle --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --dependency-graph-parity --output-dir /tmp/corpus-external-sh7-final` |
+| First-60s fast mode | 4/4 checks passed: daemon socket ready 622.0ms, authoritative Rust DAG 17093.4ms with 0 JVM forwards, real-build remote requests avoided 7/7, file-watch first event 13ms | `python3 tools/demo/first_60_seconds.py --mode fast --skip-build --output /tmp/first60s-fast-sh7-final.json` |
+| First-60s proof mode | 6/6 dependency checks passed; metrics JSON at `/tmp/first60s-proof-sh7-final.json` | `python3 tools/demo/first_60_seconds.py --mode proof --skip-build --output /tmp/first60s-proof-sh7-final.json` |
+| Fail-closed dependency tests | 4/4 focused tests passed | `cargo test -p gradle-substrate-daemon --lib -- test_prefetch_rejects_snapshot_artifacts test_incomplete_maven_coordinate_rejected test_resolve_version_range_rejects_unsupported_patterns test_resolve_dependencies_fails_closed_for_unsupported_version_selector` |
+| Unit tests | 1588 passed, 0 failed, 3 ignored | `cargo test -p gradle-substrate-daemon --lib` |
 
 ## Next Sync Actions
 
