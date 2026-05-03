@@ -306,7 +306,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             .putAllInputs(inputs);
 
         List<String> inputPaths = fileCollectionPaths(safeInputFiles(task));
-        List<String> sourcePaths = ("JavaCompile".equals(shortTaskTypeName) || "Javadoc".equals(shortTaskTypeName))
+        List<String> sourcePaths = (isJvmSourceCompileTask(shortTaskTypeName) || "Javadoc".equals(shortTaskTypeName))
             ? fileCollectionPaths(safeTaskSource(task))
             : new ArrayList<>();
         List<String> outputPaths = fileCollectionPaths(safeOutputFiles(task));
@@ -354,6 +354,13 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             putIfPresent(inputs, "compiler_args", stringList(invokeOptional(options, "getCompilerArgs")));
             putIfPresent(inputs, "compiler_args_json", stringListJson(invokeOptional(options, "getCompilerArgs")));
         }
+    }
+
+    private static boolean isJvmSourceCompileTask(String shortTaskTypeName) {
+        return "JavaCompile".equals(shortTaskTypeName)
+            || "KotlinCompile".equals(shortTaskTypeName)
+            || "GroovyCompile".equals(shortTaskTypeName)
+            || "ScalaCompile".equals(shortTaskTypeName);
     }
 
     private static void captureJarInputs(Task task, Map<String, String> inputs) {
