@@ -6,6 +6,7 @@ use std::collections::HashSet;
 pub struct KernelBuildPlan {
     pub build_id: String,
     pub tasks: Vec<KernelTaskPlan>,
+    pub dependency_graph: Option<KernelDependencyGraph>,
 }
 
 /// Task-level execution contract used for build-level admission only.
@@ -15,6 +16,38 @@ pub struct KernelTaskPlan {
     pub task_type: String,
     pub dependencies: Vec<String>,
     pub execution_context_json: Option<String>,
+}
+
+/// Dependency graph contract that the Rust execution kernel can admit.
+///
+/// This is intentionally configuration-level data, not Gradle implementation
+/// objects. JVM configuration may still produce it, but Rust owns the
+/// accept/reject decision before execution.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KernelDependencyGraph {
+    pub configurations: Vec<KernelDependencyConfiguration>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KernelDependencyConfiguration {
+    pub name: String,
+    pub repositories: Vec<KernelRepository>,
+    pub dependencies: Vec<KernelDependencyRequest>,
+    pub constraints: Vec<KernelDependencyRequest>,
+    pub unsupported_features: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KernelRepository {
+    pub id: String,
+    pub url: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KernelDependencyRequest {
+    pub group: String,
+    pub name: String,
+    pub version: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -83,6 +116,10 @@ pub fn admit_build_plan(
         }
     }
 
+    if let Some(graph) = &plan.dependency_graph {
+        admit_dependency_graph(graph, &mut reasons);
+    }
+
     if reasons.is_empty() {
         KernelAdmission::Accepted {
             task_count: plan.tasks.len(),
@@ -92,6 +129,83 @@ pub fn admit_build_plan(
             build_id: plan.build_id.clone(),
             reasons,
         })
+    }
+}
+
+fn admit_dependency_graph(graph: &KernelDependencyGraph, reasons: &mut Vec<String>) {
+    let mut seen_configurations = HashSet::new();
+
+    for configuration in &graph.configurations {
+        if configuration.name.trim().is_empty() {
+            reasons.push("dependency graph contains a configuration without a name".to_string());
+            continue;
+        }
+        if !seen_configurations.insert(configuration.name.as_str()) {
+            reasons.push(format!(
+                "dependency graph contains duplicate configuration '{}'",
+                configuration.name
+            ));
+        }
+        for feature in &configuration.unsupported_features {
+            reasons.push(format!(
+                "dependency configuration '{}' uses unsupported feature '{}'",
+                configuration.name, feature
+            ));
+        }
+        for repository in &configuration.repositories {
+            if repository.url.trim().is_empty() {
+                reasons.push(format!(
+                    "dependency configuration '{}' has repository '{}' without a URL",
+                    configuration.name, repository.id
+                ));
+            }
+            if repository.url.starts_with("file:") {
+                continue;
+            }
+            if !(repository.url.starts_with("https://") || repository.url.starts_with("http://")) {
+                reasons.push(format!(
+                    "dependency configuration '{}' has unsupported repository URL '{}'",
+                    configuration.name, repository.url
+                ));
+            }
+        }
+        for request in configuration
+            .dependencies
+            .iter()
+            .chain(configuration.constraints.iter())
+        {
+            admit_dependency_request(&configuration.name, request, reasons);
+        }
+    }
+}
+
+fn admit_dependency_request(
+    configuration_name: &str,
+    request: &KernelDependencyRequest,
+    reasons: &mut Vec<String>,
+) {
+    if request.group.trim().is_empty() || request.name.trim().is_empty() {
+        reasons.push(format!(
+            "dependency configuration '{}' contains dependency with empty group or name",
+            configuration_name
+        ));
+    }
+    let version = request.version.trim();
+    if version.is_empty() {
+        reasons.push(format!(
+            "dependency configuration '{}' contains {}:{} without a version",
+            configuration_name, request.group, request.name
+        ));
+    }
+    if version.contains('+')
+        || version.eq_ignore_ascii_case("latest.integration")
+        || version.eq_ignore_ascii_case("latest.release")
+        || version.ends_with("-SNAPSHOT")
+    {
+        reasons.push(format!(
+            "dependency configuration '{}' contains unsupported dynamic version '{}:{}:{}'",
+            configuration_name, request.group, request.name, request.version
+        ));
     }
 }
 
@@ -165,7 +279,10 @@ fn string_option_present(
 mod tests {
     use std::collections::HashSet;
 
-    use super::{admit_build_plan, KernelAdmission, KernelBuildPlan, KernelTaskPlan};
+    use super::{
+        admit_build_plan, KernelAdmission, KernelBuildPlan, KernelDependencyConfiguration,
+        KernelDependencyGraph, KernelDependencyRequest, KernelRepository, KernelTaskPlan,
+    };
 
     fn native_types(types: &[&str]) -> HashSet<String> {
         types.iter().map(|ty| ty.to_string()).collect()
@@ -193,6 +310,7 @@ mod tests {
     fn admits_build_when_all_tasks_are_native_ready() {
         let plan = KernelBuildPlan {
             build_id: "build".to_string(),
+            dependency_graph: None,
             tasks: vec![
                 task(":copy", "Copy", None),
                 task(":classes", "Lifecycle", None),
@@ -209,6 +327,7 @@ mod tests {
     fn rejects_missing_native_executor_before_execution() {
         let plan = KernelBuildPlan {
             build_id: "build".to_string(),
+            dependency_graph: None,
             tasks: vec![task(":legacy", "UnknownTask", None)],
         };
 
@@ -224,6 +343,7 @@ mod tests {
     fn rejects_explicit_unsupported_contract_marker() {
         let plan = KernelBuildPlan {
             build_id: "build".to_string(),
+            dependency_graph: None,
             tasks: vec![task(
                 ":copy",
                 "Copy",
@@ -250,6 +370,7 @@ mod tests {
     fn rejects_dangling_dependency_before_scheduler_dispatch() {
         let plan = KernelBuildPlan {
             build_id: "build".to_string(),
+            dependency_graph: None,
             tasks: vec![task_with_deps(":classes", "Lifecycle", &[":compileJava"], None)],
         };
 
@@ -261,5 +382,38 @@ mod tests {
         assert!(rejection
             .message()
             .contains("depends on ':compileJava' which is not in the admitted Rust DAG"));
+    }
+
+    #[test]
+    fn rejects_dependency_graph_unsupported_features_before_execution() {
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            tasks: vec![task(":classes", "Lifecycle", None)],
+            dependency_graph: Some(KernelDependencyGraph {
+                configurations: vec![KernelDependencyConfiguration {
+                    name: "runtimeClasspath".to_string(),
+                    repositories: vec![KernelRepository {
+                        id: "mavenCentral".to_string(),
+                        url: "https://repo.maven.apache.org/maven2".to_string(),
+                    }],
+                    dependencies: vec![KernelDependencyRequest {
+                        group: "org.example".to_string(),
+                        name: "demo".to_string(),
+                        version: "1.+".to_string(),
+                    }],
+                    constraints: Vec::new(),
+                    unsupported_features: vec!["component-metadata-rule".to_string()],
+                }],
+            }),
+        };
+
+        let KernelAdmission::Rejected(rejection) =
+            admit_build_plan(&plan, &native_types(&["Lifecycle"]))
+        else {
+            panic!("expected rejection");
+        };
+        let message = rejection.message();
+        assert!(message.contains("component-metadata-rule"));
+        assert!(message.contains("unsupported dynamic version"));
     }
 }

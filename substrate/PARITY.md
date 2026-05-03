@@ -596,6 +596,16 @@ bounded semantics into Rust. It still does not prove direct Rust solver parity b
 the substrate graph is exported from Gradle's public resolution API during the
 substrate invocation; repository source/checksum policy are not exposed by that API.
 
+Execution-kernel dependency admission (kernel roadmap): `KernelBuildPlan` now has
+an optional `KernelDependencyGraph` with configurations, repositories, dependency
+requests, constraints, and explicit unsupported-feature markers. Admission rejects
+empty coordinates, unsupported repository URLs, dynamic `+`/`latest.*` selectors,
+SNAPSHOT selectors, duplicate/unnamed configurations, and unsupported feature
+markers before task scheduling. This is the intended Rust-owned dependency graph
+boundary, but the Java bridge does not feed it yet; current production RunBuild
+still admits `dependency_graph=None` while dependency parity/read-through remain
+separate gates.
+
 | Gate | Result | Command |
 |------|--------|---------|
 | External corpus (expanded + declared graph parity) | 5/5 matched, 64/64 task parity, 5/5 no-fallback, graph diff files emitted under `/tmp/corpus-external-sh7-final/dependency-graphs` | `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --gradle-command /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/build/gradle-under-test/bin/gradle --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --dependency-graph-parity --output-dir /tmp/corpus-external-sh7-final` |
@@ -603,6 +613,7 @@ substrate invocation; repository source/checksum policy are not exposed by that 
 | First-60s fast mode | 4/4 checks passed: daemon socket ready 622.0ms, authoritative Rust DAG 17093.4ms with 0 JVM forwards, real-build remote requests avoided 7/7, file-watch first event 13ms | `python3 tools/demo/first_60_seconds.py --mode fast --skip-build --output /tmp/first60s-fast-sh7-final.json` |
 | First-60s proof mode | 6/6 dependency checks passed; metrics JSON at `/tmp/first60s-proof-sh7-final.json` | `python3 tools/demo/first_60_seconds.py --mode proof --skip-build --output /tmp/first60s-proof-sh7-final.json` |
 | Fail-closed dependency tests | 4/4 focused tests passed | `cargo test -p gradle-substrate-daemon --lib -- test_prefetch_rejects_snapshot_artifacts test_incomplete_maven_coordinate_rejected test_resolve_version_range_rejects_unsupported_patterns test_resolve_dependencies_fails_closed_for_unsupported_version_selector` |
+| Kernel dependency admission tests | 5/5 focused kernel tests passed | `cargo test -p gradle-substrate-daemon execution_kernel --lib` |
 | Unit tests | 1588 passed, 0 failed, 3 ignored | `cargo test -p gradle-substrate-daemon --lib` |
 
 ## Next Sync Actions

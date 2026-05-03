@@ -599,6 +599,7 @@ impl DagExecutorServiceImpl {
         Ok(KernelBuildPlan {
             build_id: build_id.to_string(),
             tasks,
+            dependency_graph: None,
         })
     }
 }
