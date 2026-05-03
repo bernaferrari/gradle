@@ -140,7 +140,8 @@ files, checksums, or rich conflict-resolution semantics.
 The canonical build-plan dependency notation does preserve resolved artifact
 classifier and extension when the JVM host exposes them, so non-main or non-JAR
 artifacts are visible to Rust admission and classpath enrichment instead of being
-collapsed into plain `group:name:version` coordinates.
+collapsed into plain `group:name:version` coordinates. Declared graph artifacts
+also split `classifier` and `extension` into explicit fields for drift checks.
 
 `--resolved-dependency-graph-parity` emits Gradle public `ResolutionResult`
 artifacts for reference and substrate invocations under

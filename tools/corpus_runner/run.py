@@ -621,21 +621,20 @@ def declared_dependency_graph(project_name: str, project_dir: str) -> dict:
     contract = scan_project_contract(project_dir)
     nodes = []
     for coordinate in contract["dependencies"]:
-        parts = coordinate.split(":", 2)
-        group = parts[0] if len(parts) > 0 else ""
-        name = parts[1] if len(parts) > 1 else ""
-        version = parts[2] if len(parts) > 2 else ""
+        parsed = parse_declared_artifact_coordinate(coordinate)
         nodes.append({
             "requested": coordinate,
-            "group": group,
-            "name": name,
-            "requested_version": version,
-            "selected_version": version,
-            "selection_reason": "declared-static" if version else "managed-by-gradle-platform-or-bom",
+            "group": parsed["group"],
+            "name": parsed["name"],
+            "requested_version": parsed["version"],
+            "selected_version": parsed["version"],
+            "classifier": parsed["classifier"],
+            "extension": parsed["extension"],
+            "selection_reason": "declared-static" if parsed["version"] else "managed-by-gradle-platform-or-bom",
             "repository": "declared-in-build-script",
             "artifact_path": "",
             "checksum": "",
-            "opaque": not bool(version),
+            "opaque": not bool(parsed["version"]),
         })
     return {
         "schema": "gradle-substrate.declared-dependency-graph.v1",
@@ -650,6 +649,24 @@ def declared_dependency_graph(project_name: str, project_dir: str) -> dict:
         "opaque_sections": [
             "resolved variants, capabilities, artifact files, checksums, and repository selection are not represented by this declared graph gate"
         ],
+    }
+
+
+def parse_declared_artifact_coordinate(coordinate: str) -> dict[str, str]:
+    base, sep, extension = coordinate.partition("@")
+    parts = base.split(":")
+    group = parts[0] if len(parts) > 0 else ""
+    name = parts[1] if len(parts) > 1 else ""
+    version = parts[2] if len(parts) > 2 else ""
+    classifier = parts[3] if len(parts) > 3 else ""
+    if len(parts) > 4:
+        classifier = ":".join(parts[3:])
+    return {
+        "group": group,
+        "name": name,
+        "version": version,
+        "classifier": classifier,
+        "extension": extension if sep else "jar",
     }
 
 
