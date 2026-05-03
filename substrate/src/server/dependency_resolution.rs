@@ -258,6 +258,42 @@ impl DependencyResolutionServiceImpl {
         )
     }
 
+    fn maven_artifact_shape(classifier: &str, type_field: &str) -> (String, String) {
+        let classifier = classifier.trim();
+        let type_field = type_field.trim();
+        let effective_type = if type_field.is_empty() {
+            "jar"
+        } else {
+            type_field
+        };
+        let extension = if Self::maven_type_has_jar_extension(effective_type) {
+            "jar"
+        } else {
+            effective_type
+        };
+        let effective_classifier = if !classifier.is_empty() {
+            classifier
+        } else {
+            Self::implicit_classifier_for_maven_type(effective_type).unwrap_or("")
+        };
+        (effective_classifier.to_string(), extension.to_string())
+    }
+
+    fn maven_type_has_jar_extension(type_field: &str) -> bool {
+        matches!(
+            type_field,
+            "test-jar" | "ejb-client" | "ejb" | "bundle" | "maven-plugin" | "eclipse-plugin"
+        )
+    }
+
+    fn implicit_classifier_for_maven_type(type_field: &str) -> Option<&'static str> {
+        match type_field {
+            "test-jar" => Some("tests"),
+            "ejb-client" => Some("client"),
+            _ => None,
+        }
+    }
+
     fn now_ms() -> i64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -2282,16 +2318,14 @@ impl DependencyResolutionServiceImpl {
                         if resolved_version.is_empty() {
                             continue;
                         }
+                        let (classifier, extension) =
+                            Self::maven_artifact_shape(&pom_dep.classifier, &pom_dep.type_field);
                         let child_dep = DependencyDescriptor {
                             group: pom_dep.group.clone(),
                             name: pom_dep.name.clone(),
                             version: resolved_version.clone(),
-                            classifier: pom_dep.classifier.clone(),
-                            extension: if pom_dep.type_field.is_empty() {
-                                "jar".to_string()
-                            } else {
-                                pom_dep.type_field.clone()
-                            },
+                            classifier,
+                            extension,
                             transitive: true,
                             scope: if pom_dep.scope.is_empty() {
                                 "compile".to_string()
@@ -4521,6 +4555,103 @@ mod tests {
         assert_eq!(cache_hit.local_path, stored.to_string_lossy().to_string());
     }
 
+    #[tokio::test]
+    async fn test_transitive_maven_test_jar_type_uses_gradle_artifact_shape() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::{Arc, Mutex};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let requested = Arc::new(Mutex::new(Vec::new()));
+        let requested_for_server = Arc::clone(&requested);
+        let root_pom = br#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.example</groupId>
+  <artifactId>root</artifactId>
+  <version>1.0</version>
+  <dependencies>
+    <dependency>
+      <groupId>org.example</groupId>
+      <artifactId>child</artifactId>
+      <version>1.0</version>
+      <type>test-jar</type>
+    </dependency>
+  </dependencies>
+</project>"#
+            .to_vec();
+        let child_pom = br#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.example</groupId>
+  <artifactId>child</artifactId>
+  <version>1.0</version>
+</project>"#
+            .to_vec();
+        let server = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0u8; 2048];
+                let read = stream.read(&mut request).unwrap_or(0);
+                let request_text = String::from_utf8_lossy(&request[..read]);
+                let path = request_text
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("/")
+                    .to_string();
+                requested_for_server.lock().unwrap().push(path.clone());
+                let body = if path.ends_with("/root-1.0.pom") {
+                    &root_pom
+                } else if path.ends_with("/child-1.0.pom") {
+                    &child_pom
+                } else {
+                    let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+                    stream.write_all(response.as_bytes()).unwrap();
+                    continue;
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/xml\r\n\r\n",
+                    body.len()
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+                stream.write_all(body).unwrap();
+            }
+        });
+
+        let store = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "compileClasspath".to_string(),
+                dependencies: vec![make_dep("org.example", "root", "1.0")],
+                repositories: vec![make_repo("local", &format!("http://{}", addr))],
+                attributes: vec![],
+                lenient: false,
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        server.join().unwrap();
+
+        assert!(response.success, "{}", response.error_message);
+        let child = &response.resolved_dependencies[0].dependencies[0];
+        assert!(
+            child
+                .artifact_url
+                .ends_with("/org/example/child/1.0/child-1.0-tests.jar"),
+            "{}",
+            child.artifact_url
+        );
+        assert_eq!(
+            requested.lock().unwrap().as_slice(),
+            &[
+                "/org/example/root/1.0/root-1.0.pom".to_string(),
+                "/org/example/child/1.0/child-1.0.pom".to_string(),
+            ]
+        );
+    }
+
     #[test]
     fn test_filter_by_compile_scope_excludes_runtime_and_test_recursively() {
         let mut compile = resolved_dep("org.example", "compile-lib", "compile");
@@ -6530,6 +6661,38 @@ mod tests {
         assert_eq!(deps[0].classifier, "jdk11");
         assert_eq!(deps[0].type_field, "jar");
         assert_eq!(deps[0].exclusions.len(), 1);
+    }
+
+    #[test]
+    fn test_maven_artifact_shape_matches_gradle_special_types() {
+        assert_eq!(
+            DependencyResolutionServiceImpl::maven_artifact_shape("", ""),
+            ("".to_string(), "jar".to_string())
+        );
+        assert_eq!(
+            DependencyResolutionServiceImpl::maven_artifact_shape("jdk11", "jar"),
+            ("jdk11".to_string(), "jar".to_string())
+        );
+        assert_eq!(
+            DependencyResolutionServiceImpl::maven_artifact_shape("", "test-jar"),
+            ("tests".to_string(), "jar".to_string())
+        );
+        assert_eq!(
+            DependencyResolutionServiceImpl::maven_artifact_shape("", "ejb-client"),
+            ("client".to_string(), "jar".to_string())
+        );
+        assert_eq!(
+            DependencyResolutionServiceImpl::maven_artifact_shape("", "bundle"),
+            ("".to_string(), "jar".to_string())
+        );
+        assert_eq!(
+            DependencyResolutionServiceImpl::maven_artifact_shape("", "aar"),
+            ("".to_string(), "aar".to_string())
+        );
+        assert_eq!(
+            DependencyResolutionServiceImpl::maven_artifact_shape("custom", "test-jar"),
+            ("custom".to_string(), "jar".to_string())
+        );
     }
 
     #[test]
