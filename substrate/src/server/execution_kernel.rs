@@ -13,6 +13,7 @@ pub struct KernelBuildPlan {
 pub struct KernelTaskPlan {
     pub task_path: String,
     pub task_type: String,
+    pub dependencies: Vec<String>,
     pub execution_context_json: Option<String>,
 }
 
@@ -48,8 +49,22 @@ pub fn admit_build_plan(
     native_executor_types: &HashSet<String>,
 ) -> KernelAdmission {
     let mut reasons = Vec::new();
+    let task_paths = plan
+        .tasks
+        .iter()
+        .map(|task| task.task_path.as_str())
+        .collect::<HashSet<_>>();
 
     for task in &plan.tasks {
+        for dependency in &task.dependencies {
+            if !task_paths.contains(dependency.as_str()) {
+                reasons.push(format!(
+                    "{} depends on '{}' which is not in the admitted Rust DAG",
+                    task.task_path, dependency
+                ));
+            }
+        }
+
         if !native_executor_types.contains(&task.task_type) {
             reasons.push(format!(
                 "{} ({}) has no Rust executor",
@@ -157,9 +172,19 @@ mod tests {
     }
 
     fn task(task_path: &str, task_type: &str, context: Option<String>) -> KernelTaskPlan {
+        task_with_deps(task_path, task_type, &[], context)
+    }
+
+    fn task_with_deps(
+        task_path: &str,
+        task_type: &str,
+        dependencies: &[&str],
+        context: Option<String>,
+    ) -> KernelTaskPlan {
         KernelTaskPlan {
             task_path: task_path.to_string(),
             task_type: task_type.to_string(),
+            dependencies: dependencies.iter().map(|dep| dep.to_string()).collect(),
             execution_context_json: context,
         }
     }
@@ -219,5 +244,22 @@ mod tests {
         assert!(rejection
             .message()
             .contains("copy_unsupported_custom_actions"));
+    }
+
+    #[test]
+    fn rejects_dangling_dependency_before_scheduler_dispatch() {
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            tasks: vec![task_with_deps(":classes", "Lifecycle", &[":compileJava"], None)],
+        };
+
+        let KernelAdmission::Rejected(rejection) =
+            admit_build_plan(&plan, &native_types(&["Lifecycle"]))
+        else {
+            panic!("expected rejection");
+        };
+        assert!(rejection
+            .message()
+            .contains("depends on ':compileJava' which is not in the admitted Rust DAG"));
     }
 }
