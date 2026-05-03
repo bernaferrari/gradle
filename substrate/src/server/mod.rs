@@ -38,6 +38,7 @@ pub mod deterministic_cache;
 pub mod event_dispatcher;
 pub mod exec;
 pub mod execution_history;
+pub mod execution_kernel;
 pub mod execution_plan;
 pub mod file_fingerprint;
 pub mod file_tree;
