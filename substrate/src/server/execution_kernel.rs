@@ -33,6 +33,7 @@ pub struct KernelDependencyConfiguration {
     pub name: String,
     pub repositories: Vec<KernelRepository>,
     pub dependencies: Vec<KernelDependencyRequest>,
+    pub project_dependencies: Vec<String>,
     pub constraints: Vec<KernelDependencyRequest>,
     pub unsupported_features: Vec<String>,
 }
@@ -175,6 +176,14 @@ fn admit_dependency_graph(graph: &KernelDependencyGraph, reasons: &mut Vec<Strin
             .chain(configuration.constraints.iter())
         {
             admit_dependency_request(&configuration.name, request, reasons);
+        }
+        for project_path in &configuration.project_dependencies {
+            if project_path.trim().is_empty() || !project_path.trim().starts_with(':') {
+                reasons.push(format!(
+                    "dependency configuration '{}' contains invalid project dependency '{}'",
+                    configuration.name, project_path
+                ));
+            }
         }
     }
 }
@@ -408,6 +417,7 @@ mod tests {
                         name: "demo".to_string(),
                         version: "1.+".to_string(),
                     }],
+                    project_dependencies: Vec::new(),
                     constraints: Vec::new(),
                     unsupported_features: vec!["component-metadata-rule".to_string()],
                 }],
@@ -450,6 +460,7 @@ mod tests {
                             version: "1.0-SNAPSHOT".to_string(),
                         },
                     ],
+                    project_dependencies: Vec::new(),
                     constraints: Vec::new(),
                     unsupported_features: Vec::new(),
                 }],
@@ -465,5 +476,28 @@ mod tests {
         assert!(message.contains("org.example:range:[1.0,2.0)"));
         assert!(message.contains("org.example:latest:latest.release"));
         assert!(message.contains("org.example:snapshot:1.0-SNAPSHOT"));
+    }
+
+    #[test]
+    fn admits_valid_project_dependency_notation() {
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            tasks: vec![task(":classes", "Lifecycle", None)],
+            dependency_graph: Some(KernelDependencyGraph {
+                configurations: vec![KernelDependencyConfiguration {
+                    name: "runtimeClasspath".to_string(),
+                    repositories: Vec::new(),
+                    dependencies: Vec::new(),
+                    project_dependencies: vec![":lib".to_string()],
+                    constraints: Vec::new(),
+                    unsupported_features: Vec::new(),
+                }],
+            }),
+        };
+
+        assert_eq!(
+            admit_build_plan(&plan, &native_types(&["Lifecycle"])),
+            KernelAdmission::Accepted { task_count: 1 }
+        );
     }
 }
