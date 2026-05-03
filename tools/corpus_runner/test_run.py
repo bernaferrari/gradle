@@ -178,6 +178,116 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         self.assertEqual(2, len(mismatches))
         self.assertTrue(any("plugins" in mismatch for mismatch in mismatches))
 
+    def test_declared_dependency_graph_records_static_and_managed_dependencies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "settings.gradle.kts").write_text(
+                'rootProject.name = "graph-test"\n',
+                encoding="utf-8",
+            )
+            (root / "build.gradle.kts").write_text(
+                """
+plugins {
+    `java-library`
+}
+
+dependencies {
+    implementation("com.squareup.okhttp3:okhttp-bom:4.12.0")
+    implementation("com.squareup.okhttp3:okhttp")
+    implementation("com.google.code.gson:gson:2.11.0")
+}
+""",
+                encoding="utf-8",
+            )
+
+            graph = corpus_run.declared_dependency_graph("graph-test", tmp)
+
+        deps = graph["configurations"][0]["dependencies"]
+        by_requested = {dep["requested"]: dep for dep in deps}
+        self.assertEqual("gradle-substrate.declared-dependency-graph.v1", graph["schema"])
+        self.assertEqual("2.11.0", by_requested["com.google.code.gson:gson:2.11.0"]["selected_version"])
+        self.assertFalse(by_requested["com.google.code.gson:gson:2.11.0"]["opaque"])
+        self.assertEqual("", by_requested["com.squareup.okhttp3:okhttp"]["selected_version"])
+        self.assertTrue(by_requested["com.squareup.okhttp3:okhttp"]["opaque"])
+        self.assertEqual(
+            "managed-by-gradle-platform-or-bom",
+            by_requested["com.squareup.okhttp3:okhttp"]["selection_reason"],
+        )
+
+    def test_declared_dependency_graph_diff_accepts_equal_graphs(self):
+        upstream = {
+            "configurations": [
+                {
+                    "name": "declared",
+                    "dependencies": [
+                        {"requested": "org.example:demo:1.0", "selected_version": "1.0"}
+                    ],
+                }
+            ],
+            "unsupported_features": [],
+        }
+        substrate = {
+            "configurations": [
+                {
+                    "name": "declared",
+                    "dependencies": [
+                        {"requested": "org.example:demo:1.0", "selected_version": "1.0"}
+                    ],
+                }
+            ],
+            "unsupported_features": [],
+        }
+
+        diff = corpus_run.diff_declared_dependency_graphs(upstream, substrate)
+
+        self.assertTrue(diff["match"])
+        self.assertEqual([], diff["mismatches"])
+        self.assertIn("does not prove full Gradle solver parity", diff["limitations"][0])
+
+    def test_declared_dependency_graph_diff_rejects_dependency_drift(self):
+        upstream = {
+            "configurations": [
+                {
+                    "name": "declared",
+                    "dependencies": [
+                        {"requested": "org.example:demo:1.0", "selected_version": "1.0"}
+                    ],
+                }
+            ],
+            "unsupported_features": [],
+        }
+        substrate = {
+            "configurations": [
+                {
+                    "name": "declared",
+                    "dependencies": [
+                        {"requested": "org.example:demo:2.0", "selected_version": "2.0"}
+                    ],
+                }
+            ],
+            "unsupported_features": [],
+        }
+
+        diff = corpus_run.diff_declared_dependency_graphs(upstream, substrate)
+
+        self.assertFalse(diff["match"])
+        self.assertEqual("declared-dependencies", diff["mismatches"][0]["category"])
+
+    def test_declared_dependency_graph_diff_rejects_unsupported_feature_drift(self):
+        upstream = {
+            "configurations": [{"name": "declared", "dependencies": []}],
+            "unsupported_features": ["unsupported-test-filters"],
+        }
+        substrate = {
+            "configurations": [{"name": "declared", "dependencies": []}],
+            "unsupported_features": [],
+        }
+
+        diff = corpus_run.diff_declared_dependency_graphs(upstream, substrate)
+
+        self.assertFalse(diff["match"])
+        self.assertEqual("unsupported-features", diff["mismatches"][0]["category"])
+
     def test_archive_entry_snapshot_reads_zip_inventory(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
