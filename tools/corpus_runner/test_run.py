@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import importlib.util
+import json
 import tempfile
 import unittest
 import zipfile
@@ -12,6 +13,10 @@ SPEC = importlib.util.spec_from_file_location("corpus_runner_run", MODULE_PATH)
 corpus_run = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(corpus_run)
+
+
+def json_roundtrip(value):
+    return json.loads(json.dumps(value))
 
 
 class CorpusRunnerCommandTest(unittest.TestCase):
@@ -287,6 +292,88 @@ dependencies {
 
         self.assertFalse(diff["match"])
         self.assertEqual("unsupported-features", diff["mismatches"][0]["category"])
+
+    def test_resolved_dependency_graph_diff_accepts_equal_graphs(self):
+        upstream = {
+            "schema": "gradle-substrate.resolved-dependency-graph.v1",
+            "configurations": [
+                {
+                    "projectPath": ":",
+                    "configuration": "runtimeClasspath",
+                    "components": [
+                        {
+                            "id": "org.example:demo:1.0",
+                            "module": {"group": "org.example", "name": "demo", "version": "1.0"},
+                            "selectionReason": "requested",
+                            "variants": [],
+                            "artifacts": [{"file": "/tmp/demo.jar", "fileName": "demo.jar", "id": "demo.jar"}],
+                        }
+                    ],
+                    "dependencies": [
+                        {
+                            "from": "root project :",
+                            "requested": "org.example:demo:1.0",
+                            "selected": "org.example:demo:1.0",
+                            "constraint": False,
+                            "resolved": True,
+                            "failure": "",
+                        }
+                    ],
+                }
+            ],
+        }
+        substrate = json_roundtrip(upstream)
+
+        diff = corpus_run.diff_resolved_dependency_graphs(upstream, substrate)
+
+        self.assertTrue(diff["match"])
+        self.assertEqual([], diff["mismatches"])
+        self.assertIn("does not yet compare against a direct Rust", diff["limitations"][1])
+
+    def test_resolved_dependency_graph_diff_rejects_selected_version_drift(self):
+        upstream = {
+            "configurations": [
+                {
+                    "projectPath": ":",
+                    "configuration": "runtimeClasspath",
+                    "components": [],
+                    "dependencies": [
+                        {
+                            "from": "root project :",
+                            "requested": "org.example:demo",
+                            "selected": "org.example:demo:1.0",
+                            "constraint": False,
+                            "resolved": True,
+                            "failure": "",
+                        }
+                    ],
+                }
+            ],
+        }
+        substrate = {
+            "configurations": [
+                {
+                    "projectPath": ":",
+                    "configuration": "runtimeClasspath",
+                    "components": [],
+                    "dependencies": [
+                        {
+                            "from": "root project :",
+                            "requested": "org.example:demo",
+                            "selected": "org.example:demo:2.0",
+                            "constraint": False,
+                            "resolved": True,
+                            "failure": "",
+                        }
+                    ],
+                }
+            ],
+        }
+
+        diff = corpus_run.diff_resolved_dependency_graphs(upstream, substrate)
+
+        self.assertFalse(diff["match"])
+        self.assertEqual("resolved-graph", diff["mismatches"][0]["category"])
 
     def test_archive_entry_snapshot_reads_zip_inventory(self):
         with tempfile.TemporaryDirectory() as tmp:
