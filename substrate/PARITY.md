@@ -619,6 +619,9 @@ Rust POM transitives now mirror Gradle's special Maven type mapping from
 `GradlePomModuleDescriptorBuilder`: `test-jar` and `ejb-client` use JAR
 extension with implicit `tests`/`client` classifiers, while `ejb`, `bundle`,
 `maven-plugin`, and `eclipse-plugin` also remain JAR-extension artifact types.
+Rust POM transitive traversal also skips module self-dependencies by `group:name`,
+matching Gradle's `GradlePomModuleDescriptorBuilder` guard for Ivy's unsupported
+self-edge case instead of retaining a synthetic cycle leaf.
 
 Native task coverage push (execution-kernel coverage): common Gradle lifecycle
 aggregator `DefaultTask`s (`build`, `check`, `classes`, `testClasses`,
@@ -645,12 +648,13 @@ style notation as unsupported Maven coordinates.
 | First-60s proof mode | 6/6 dependency checks passed; metrics JSON at `/tmp/first60s-proof-sh7-final.json` | `python3 tools/demo/first_60_seconds.py --mode proof --skip-build --output /tmp/first60s-proof-sh7-final.json` |
 | Fail-closed dependency tests | 4/4 focused tests passed | `cargo test -p gradle-substrate-daemon --lib -- test_prefetch_rejects_snapshot_artifacts test_incomplete_maven_coordinate_rejected test_resolve_version_range_rejects_unsupported_patterns test_resolve_dependencies_fails_closed_for_unsupported_version_selector` |
 | Maven type artifact-shape parity | Focused helper and resolver tests passed; local Maven-layout POM with `<type>test-jar</type>` resolves child artifact URL as `child-1.0-tests.jar` | `cargo test -p gradle-substrate-daemon test_maven_artifact_shape_matches_gradle_special_types --lib`; `cargo test -p gradle-substrate-daemon test_transitive_maven_test_jar_type_uses_gradle_artifact_shape --lib -- --nocapture` |
+| Maven self-dependency parity | Focused resolver test passed; local POM declaring a dependency on its own `group:name` resolves without retaining the self edge | `cargo test -p gradle-substrate-daemon test_pom_self_dependency_is_skipped_like_gradle --lib -- --nocapture` |
 | Kernel dependency admission tests | 6/6 focused kernel tests passed | `cargo test -p gradle-substrate-daemon execution_kernel --lib` |
 | Kernel dependency graph bridge tests | 3/3 focused DAG conversion tests passed | `cargo test -p gradle-substrate-daemon kernel_dependency_graph --lib` |
 | Task coverage tests | Focused lifecycle/default/KotlinCompile tests passed | `cargo test -p gradle-substrate-daemon lifecycle_task --lib`; `cargo test -p gradle-substrate-daemon default_task --lib`; `cargo test -p gradle-substrate-daemon kotlin_compile --lib` |
 | Corpus runner tests | 26 passed | `python3 -m unittest tools.corpus_runner.test_run` |
 | Artifact classifier/extension bridge tests | Focused JVM-host protocol, build-plan notation, kernel graph, and task graph parser tests passed | `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.jvmhost.JvmHostServiceImplTest --tests org.gradle.internal.rustbridge.jvmhost.ProjectModelProviderAdapterTest --no-daemon --console=plain`; `cargo test -p gradle-substrate-daemon dependency_notation_preserves_classifier_and_extension --lib`; `cargo test -p gradle-substrate-daemon kernel_dependency_graph_groups_build_plan_dependencies --lib`; `cargo test -p gradle-substrate-daemon dependency_configuration_matching_respects_test_scope --lib` |
-| Unit tests | 1610 passed, 0 failed, 3 ignored | `cargo test -p gradle-substrate-daemon --lib` |
+| Unit tests | 1611 passed, 0 failed, 3 ignored | `cargo test -p gradle-substrate-daemon --lib` |
 
 ## Next Sync Actions
 

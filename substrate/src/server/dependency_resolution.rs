@@ -2242,6 +2242,15 @@ impl DependencyResolutionServiceImpl {
                             continue;
                         }
 
+                        if pom_dep.group == group && pom_dep.name == name {
+                            tracing::debug!(
+                                group = %pom_dep.group,
+                                name = %pom_dep.name,
+                                "Skipping self dependency from POM"
+                            );
+                            continue;
+                        }
+
                         // Exclusions declared on the edge from the parent apply to this
                         // artifact's direct dependencies. A sibling dependency's own
                         // exclusions must not remove other siblings.
@@ -4649,6 +4658,63 @@ mod tests {
                 "/org/example/root/1.0/root-1.0.pom".to_string(),
                 "/org/example/child/1.0/child-1.0.pom".to_string(),
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_pom_self_dependency_is_skipped_like_gradle() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let pom = br#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.example</groupId>
+  <artifactId>self</artifactId>
+  <version>1.0</version>
+  <dependencies>
+    <dependency>
+      <groupId>org.example</groupId>
+      <artifactId>self</artifactId>
+      <version>1.0</version>
+    </dependency>
+  </dependencies>
+</project>"#
+            .to_vec();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 2048];
+            let _ = stream.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/xml\r\n\r\n",
+                pom.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.write_all(&pom).unwrap();
+        });
+
+        let store = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "compileClasspath".to_string(),
+                dependencies: vec![make_dep("org.example", "self", "1.0")],
+                repositories: vec![make_repo("local", &format!("http://{}", addr))],
+                attributes: vec![],
+                lenient: false,
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        server.join().unwrap();
+
+        assert!(response.success, "{}", response.error_message);
+        assert_eq!(response.resolved_dependencies.len(), 1);
+        assert!(
+            response.resolved_dependencies[0].dependencies.is_empty(),
+            "self dependency should not be retained as a cycle leaf"
         );
     }
 
