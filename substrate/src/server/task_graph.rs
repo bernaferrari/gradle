@@ -471,6 +471,21 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
         ("compile", "JavaCompile") | (_, "JavaCompile") if java_compile_no_source(task) => {
             "Lifecycle".to_string()
         }
+        ("compile", "KotlinCompile") | (_, "KotlinCompile")
+            if language_compile_no_source(task, &[".kt", ".kts"]) =>
+        {
+            "Lifecycle".to_string()
+        }
+        ("compile", "GroovyCompile") | (_, "GroovyCompile")
+            if language_compile_no_source(task, &[".groovy"]) =>
+        {
+            "Lifecycle".to_string()
+        }
+        ("compile", "ScalaCompile") | (_, "ScalaCompile")
+            if language_compile_no_source(task, &[".scala"]) =>
+        {
+            "Lifecycle".to_string()
+        }
         ("compile", "JavaCompile") | (_, "JavaCompile") if java_compile_contract_complete(task) => {
             "JavaCompile".to_string()
         }
@@ -535,8 +550,11 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
 }
 
 fn logical_gradle_task_type(simple: &str) -> String {
-    const KNOWN_TASK_TYPES: [&str; 20] = [
+    const KNOWN_TASK_TYPES: [&str; 23] = [
         "JavaCompile",
+        "KotlinCompile",
+        "GroovyCompile",
+        "ScalaCompile",
         "Jar",
         "Zip",
         "War",
@@ -1382,6 +1400,15 @@ fn java_compile_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
 
 fn java_compile_no_source(task: &CanonicalBuildPlanTask) -> bool {
     java_source_paths(task).is_empty() && has_outputs(task)
+}
+
+fn language_compile_no_source(task: &CanonicalBuildPlanTask, extensions: &[&str]) -> bool {
+    input_paths(task)
+        .into_iter()
+        .filter(|path| extensions.iter().any(|extension| path.ends_with(extension)))
+        .count()
+        == 0
+        && has_outputs(task)
 }
 
 fn test_exec_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
@@ -2390,6 +2417,41 @@ mod tests {
         );
 
         assert_eq!(executable_task_type(&task), "org.gradle.api.DefaultTask");
+    }
+
+    #[test]
+    fn test_no_source_kotlin_compile_lowers_to_native_lifecycle() {
+        let task = canonical_task(
+            ":compileKotlin",
+            "org.jetbrains.kotlin.gradle.tasks.KotlinCompile_Decorated",
+            Vec::new(),
+            vec!["/repo/build/classes/kotlin/main".to_string()],
+        );
+
+        assert_eq!(executable_task_type(&task), "Lifecycle");
+    }
+
+    #[test]
+    fn test_sourceful_kotlin_compile_remains_unsupported() {
+        let mut task = canonical_task(
+            ":compileKotlin",
+            "org.jetbrains.kotlin.gradle.tasks.KotlinCompile_Decorated",
+            Vec::new(),
+            vec!["/repo/build/classes/kotlin/main".to_string()],
+        );
+        task.input_specs
+            .push(crate::server::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                name: "source0".to_string(),
+                kind: "source".to_string(),
+                value: "/repo/src/main/kotlin/App.kt".to_string(),
+                normalization: "relative".to_string(),
+                optional: false,
+            });
+
+        assert_eq!(
+            executable_task_type(&task),
+            "org.jetbrains.kotlin.gradle.tasks.KotlinCompile_Decorated"
+        );
     }
 
     #[test]
