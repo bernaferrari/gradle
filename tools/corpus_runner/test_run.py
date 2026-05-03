@@ -255,6 +255,40 @@ dependencies {
             by_requested["com.squareup.okhttp3:okhttp"]["selection_reason"],
         )
 
+    def test_declared_dependency_graph_splits_classifier_and_extension(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "settings.gradle.kts").write_text(
+                'rootProject.name = "classifier-test"\n',
+                encoding="utf-8",
+            )
+            (root / "build.gradle.kts").write_text(
+                """
+plugins {
+    `java-library`
+}
+
+dependencies {
+    compileOnly("org.apache.commons:commons-lang3:3.14.0:sources@jar")
+    runtimeOnly("com.example:native-lib:1.0.0:linux@so")
+}
+""",
+                encoding="utf-8",
+            )
+
+            graph = corpus_run.declared_dependency_graph("classifier-test", tmp)
+
+        deps = graph["configurations"][0]["dependencies"]
+        by_requested = {dep["requested"]: dep for dep in deps}
+        sources = by_requested["org.apache.commons:commons-lang3:3.14.0:sources@jar"]
+        native = by_requested["com.example:native-lib:1.0.0:linux@so"]
+        self.assertEqual("3.14.0", sources["selected_version"])
+        self.assertEqual("sources", sources["classifier"])
+        self.assertEqual("jar", sources["extension"])
+        self.assertEqual("1.0.0", native["selected_version"])
+        self.assertEqual("linux", native["classifier"])
+        self.assertEqual("so", native["extension"])
+
     def test_declared_dependency_graph_diff_accepts_equal_graphs(self):
         upstream = {
             "configurations": [
