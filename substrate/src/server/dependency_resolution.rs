@@ -18,6 +18,10 @@ use crate::proto::{
 };
 
 use super::dependency_solver::ivyresolve::strategy::compare_versions;
+pub use super::dependency_solver::resolveengine::graph::conflicts::ResolutionStrategy;
+use super::dependency_solver::resolveengine::graph::conflicts::{
+    resolve_conflicts, resolve_conflicts_with_strategy,
+};
 
 // ---------------------------------------------------------------------------
 // Dependency scope
@@ -86,59 +90,6 @@ impl DependencyScope {
             DependencyScope::Test => vec![DependencyScope::Compile, DependencyScope::Runtime],
             DependencyScope::Provided => vec![],
             DependencyScope::System => vec![],
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Resolution strategy
-// ---------------------------------------------------------------------------
-
-/// Resolution strategy for version conflicts.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ResolutionStrategy {
-    /// Pick the highest version (existing default behavior).
-    HighestVersion,
-    /// Force specific versions for given "group:name" coordinates.
-    Force(std::collections::HashMap<String, String>),
-    /// Prefer specific versions but don't force them.
-    Prefer(std::collections::HashMap<String, String>),
-    /// Fail if any version conflict exists.
-    FailOnConflict,
-    /// Use the nearest definition in the dependency tree.
-    NearestDefinition,
-}
-
-#[allow(clippy::derivable_impls)]
-impl Default for ResolutionStrategy {
-    fn default() -> Self {
-        ResolutionStrategy::HighestVersion
-    }
-}
-
-impl ResolutionStrategy {
-    /// Parse strategy from proto config.
-    pub fn from_proto(config: &crate::proto::ResolutionStrategyConfig) -> Self {
-        match config.strategy.as_str() {
-            "force" => {
-                let mut map =
-                    std::collections::HashMap::with_capacity(config.forced_versions.len());
-                for entry in &config.forced_versions {
-                    map.insert(entry.key.clone(), entry.value.clone());
-                }
-                ResolutionStrategy::Force(map)
-            }
-            "prefer" => {
-                let mut map =
-                    std::collections::HashMap::with_capacity(config.preferred_versions.len());
-                for entry in &config.preferred_versions {
-                    map.insert(entry.key.clone(), entry.value.clone());
-                }
-                ResolutionStrategy::Prefer(map)
-            }
-            "fail_on_conflict" => ResolutionStrategy::FailOnConflict,
-            "nearest" => ResolutionStrategy::NearestDefinition,
-            _ => ResolutionStrategy::HighestVersion,
         }
     }
 }
@@ -1555,7 +1506,7 @@ impl DependencyResolutionServiceImpl {
     /// Deduplicate resolved dependencies by (group, name), keeping the highest version.
     /// This implements Gradle's default conflict resolution strategy.
     pub fn resolve_conflicts(deps: &mut Vec<ResolvedDependency>) {
-        Self::resolve_conflicts_with_strategy(deps, &ResolutionStrategy::HighestVersion);
+        resolve_conflicts(deps);
     }
 
     /// Deduplicate resolved dependencies using the given resolution strategy.
@@ -1563,206 +1514,7 @@ impl DependencyResolutionServiceImpl {
         deps: &mut Vec<ResolvedDependency>,
         strategy: &ResolutionStrategy,
     ) {
-        match strategy {
-            ResolutionStrategy::HighestVersion => {
-                // Existing behavior: keep highest version
-                let mut best: std::collections::HashMap<(String, String), usize> =
-                    std::collections::HashMap::with_capacity(deps.len());
-
-                for (idx, dep) in deps.iter().enumerate() {
-                    let key = (dep.group.clone(), dep.name.clone());
-                    if let Some(&prev_idx) = best.get(&key) {
-                        if compare_versions(&dep.selected_version, &deps[prev_idx].selected_version)
-                            == std::cmp::Ordering::Greater
-                        {
-                            best.insert(key, idx);
-                        }
-                    } else {
-                        best.insert(key, idx);
-                    }
-                }
-
-                let mut winning_indices: Vec<usize> = best.values().copied().collect();
-                winning_indices.sort_unstable();
-
-                let original_len = deps.len();
-                *deps = winning_indices
-                    .into_iter()
-                    .map(|idx| deps[idx].clone())
-                    .collect();
-
-                tracing::debug!(
-                    original_count = original_len,
-                    deduplicated_count = deps.len(),
-                    "Conflict resolution (highest_version): deduplicated {} -> {}",
-                    original_len,
-                    deps.len()
-                );
-            }
-            ResolutionStrategy::Force(forced) => {
-                // Apply forced versions, then fall back to highest for the rest
-                let mut best: std::collections::HashMap<(String, String), usize> =
-                    std::collections::HashMap::with_capacity(deps.len());
-
-                for (idx, dep) in deps.iter().enumerate() {
-                    let key = (dep.group.clone(), dep.name.clone());
-                    // Check if a forced version exists (key is "group:name" -> version)
-                    let mut forced_key =
-                        String::with_capacity(dep.group.len() + dep.name.len() + 1);
-                    forced_key.push_str(&dep.group);
-                    forced_key.push(':');
-                    forced_key.push_str(&dep.name);
-                    if let Some(forced_ver) = forced.get(&forced_key) {
-                        if dep.selected_version == *forced_ver {
-                            best.insert(key, idx);
-                        }
-                    } else if let Some(&prev_idx) = best.get(&key) {
-                        if compare_versions(&dep.selected_version, &deps[prev_idx].selected_version)
-                            == std::cmp::Ordering::Greater
-                        {
-                            best.insert(key, idx);
-                        }
-                    } else {
-                        best.insert(key, idx);
-                    }
-                }
-
-                let mut winning_indices: Vec<usize> = best.values().copied().collect();
-                winning_indices.sort_unstable();
-
-                let original_len = deps.len();
-                *deps = winning_indices
-                    .into_iter()
-                    .map(|idx| deps[idx].clone())
-                    .collect();
-
-                tracing::debug!(
-                    original_count = original_len,
-                    deduplicated_count = deps.len(),
-                    forced_count = forced.len(),
-                    "Conflict resolution (force): deduplicated {} -> {}",
-                    original_len,
-                    deps.len()
-                );
-            }
-            ResolutionStrategy::FailOnConflict => {
-                // Check for any version conflicts; fail if found
-                let mut versions: std::collections::HashMap<(String, String), Vec<String>> =
-                    std::collections::HashMap::with_capacity(deps.len());
-
-                for dep in deps.iter() {
-                    let key = (dep.group.clone(), dep.name.clone());
-                    versions
-                        .entry(key)
-                        .or_default()
-                        .push(dep.selected_version.clone());
-                }
-
-                let conflicts: Vec<((String, String), Vec<String>)> =
-                    versions.into_iter().filter(|(_, v)| v.len() > 1).collect();
-
-                if !conflicts.is_empty() {
-                    let conflict_str: Vec<String> = conflicts
-                        .iter()
-                        .map(|((g, n), v)| format!("{}:{} has versions {}", g, n, v.join(", ")))
-                        .collect();
-                    tracing::warn!(
-                        conflicts = conflict_str.join("; "),
-                        "Version conflict detected (fail_on_conflict)"
-                    );
-                    // Still deduplicate using highest version for non-conflicting deps
-                    Self::resolve_conflicts_with_strategy(
-                        deps,
-                        &ResolutionStrategy::HighestVersion,
-                    );
-                }
-            }
-            ResolutionStrategy::Prefer(preferred) => {
-                // Prefer specific versions but allow overrides by higher transitive versions
-                let mut best: std::collections::HashMap<(String, String), usize> =
-                    std::collections::HashMap::with_capacity(deps.len());
-
-                for (idx, dep) in deps.iter().enumerate() {
-                    let key = (dep.group.clone(), dep.name.clone());
-                    let mut pref_key = String::with_capacity(dep.group.len() + dep.name.len() + 1);
-                    pref_key.push_str(&dep.group);
-                    pref_key.push(':');
-                    pref_key.push_str(&dep.name);
-                    let is_preferred = preferred
-                        .get(&pref_key)
-                        .map(|v| dep.selected_version == *v)
-                        .unwrap_or(false);
-
-                    if is_preferred {
-                        // Preferred version always wins over non-preferred
-                        best.insert(key, idx);
-                    } else if let Some(&prev_idx) = best.get(&key) {
-                        // Check if previous was preferred — if so, keep it
-                        let mut prev_key = String::with_capacity(
-                            deps[prev_idx].group.len() + deps[prev_idx].name.len() + 1,
-                        );
-                        prev_key.push_str(&deps[prev_idx].group);
-                        prev_key.push(':');
-                        prev_key.push_str(&deps[prev_idx].name);
-                        let prev_preferred = preferred
-                            .get(&prev_key)
-                            .map(|v| deps[prev_idx].selected_version == *v)
-                            .unwrap_or(false);
-                        if !prev_preferred
-                            && compare_versions(
-                                &dep.selected_version,
-                                &deps[prev_idx].selected_version,
-                            ) == std::cmp::Ordering::Greater
-                        {
-                            best.insert(key, idx);
-                        }
-                    } else {
-                        best.insert(key, idx);
-                    }
-                }
-
-                let mut winning_indices: Vec<usize> = best.values().copied().collect();
-                winning_indices.sort_unstable();
-
-                let original_len = deps.len();
-                *deps = winning_indices
-                    .into_iter()
-                    .map(|idx| deps[idx].clone())
-                    .collect();
-
-                tracing::debug!(
-                    original_count = original_len,
-                    deduplicated_count = deps.len(),
-                    "Conflict resolution (prefer): deduplicated {} -> {}",
-                    original_len,
-                    deps.len()
-                );
-            }
-            ResolutionStrategy::NearestDefinition => {
-                // Nearest wins — keep the first occurrence (shallowest in the tree)
-                let mut seen: std::collections::HashSet<(String, String)> =
-                    std::collections::HashSet::with_capacity(deps.len());
-                let mut kept = Vec::with_capacity(deps.len());
-
-                for dep in deps.iter() {
-                    let key = (dep.group.clone(), dep.name.clone());
-                    if seen.insert(key) {
-                        kept.push(dep.clone());
-                    }
-                }
-
-                let original_len = deps.len();
-                *deps = kept;
-
-                tracing::debug!(
-                    original_count = original_len,
-                    deduplicated_count = deps.len(),
-                    "Conflict resolution (nearest): deduplicated {} -> {}",
-                    original_len,
-                    deps.len()
-                );
-            }
-        }
+        resolve_conflicts_with_strategy(deps, strategy);
     }
 
     /// Filter resolved dependencies by scope.
