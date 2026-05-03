@@ -645,6 +645,7 @@ impl DependencyResolutionServiceImpl {
             )
             .await
         {
+            tracing::info!(group = %group, name = %name, source = "rust_cache", "Metadata cache hit");
             return Self::parse_maven_metadata(&cached);
         }
         if let Some(cached) = self
@@ -659,6 +660,7 @@ impl DependencyResolutionServiceImpl {
             )
             .await
         {
+            tracing::info!(group = %group, name = %name, source = "url_cache", "Metadata cache hit");
             return Self::parse_maven_metadata(&cached);
         }
 
@@ -697,6 +699,7 @@ impl DependencyResolutionServiceImpl {
                     &body,
                 )
                 .await?;
+                tracing::info!(group = %group, name = %name, source = "remote_fetch", url = %url, "Metadata fetched from remote");
                 Self::parse_maven_metadata(&body)
             }
             404 => Err("maven-metadata.xml not found".to_string()),
@@ -1054,6 +1057,7 @@ impl DependencyResolutionServiceImpl {
             )
             .await
         {
+            tracing::info!(group = %group, name = %name, version = %version, source = "rust_cache", "POM cache hit");
             return Ok(cached);
         }
         if let Some(cached) = self
@@ -1068,6 +1072,7 @@ impl DependencyResolutionServiceImpl {
             )
             .await
         {
+            tracing::info!(group = %group, name = %name, version = %version, source = "url_cache", "POM cache hit");
             return Ok(cached);
         }
 
@@ -1106,6 +1111,7 @@ impl DependencyResolutionServiceImpl {
                     &content,
                 )
                 .await?;
+                tracing::info!(group = %group, name = %name, version = %version, source = "remote_fetch", url = %url, "POM fetched from remote");
                 Ok(content)
             }
             404 => Err(format!("POM not found: {}-{}.pom", name, version)),
@@ -1188,6 +1194,8 @@ impl DependencyResolutionServiceImpl {
             ));
         }
 
+        let dl_start = std::time::Instant::now();
+
         let extension = Self::normalize_extension(extension);
         let key = Self::artifact_cache_key(group, name, version, classifier, &extension);
         let store_path = self.artifact_path(group, name, version, classifier, &extension);
@@ -1213,6 +1221,12 @@ impl DependencyResolutionServiceImpl {
             self.resolution_stats
                 .cache_hits
                 .fetch_add(1, Ordering::Relaxed);
+            tracing::info!(
+                artifact = %format!("{}:{}:{}", group, name, version),
+                cache_hit = true,
+                duration_ms = dl_start.elapsed().as_millis() as u64,
+                "Artifact resolved"
+            );
             return Ok((size, sha256));
         }
 
@@ -1259,6 +1273,12 @@ impl DependencyResolutionServiceImpl {
                         size,
                         cached_at_ms: Self::now_ms(),
                     },
+                );
+                tracing::info!(
+                    artifact = %format!("{}:{}:{}", group, name, version),
+                    cache_hit = false,
+                    duration_ms = dl_start.elapsed().as_millis() as u64,
+                    "Artifact resolved"
                 );
                 Ok((size, sha256))
             }
@@ -1917,6 +1937,9 @@ impl DependencyResolutionServiceImpl {
         metadata: Option<&MavenMetadata>,
     ) -> Option<String> {
         let range = range.trim();
+        if range.is_empty() || range.contains('+') {
+            return None;
+        }
 
         // Special versions: try metadata first, then fall back to available list
         if range == "latest.release" || range == "latest.integration" {
@@ -1948,12 +1971,15 @@ impl DependencyResolutionServiceImpl {
         if !range.starts_with('[') && !range.starts_with('(') {
             return Some(range.to_string());
         }
+        if !(range.ends_with(']') || range.ends_with(')')) || range.len() < 2 {
+            return None;
+        }
 
         // Parse range: [start,end) or (start,end]
         let inner: &str = &range[1..range.len() - 1];
         let parts: Vec<&str> = inner.split(',').collect();
         if parts.len() != 2 {
-            return Some(range.to_string()); // Can't parse, return as-is
+            return None;
         }
 
         let start = parts[0].trim();
@@ -1990,6 +2016,26 @@ impl DependencyResolutionServiceImpl {
 
         // Return the highest matching version
         matching.last().map(|v| (*v).clone())
+    }
+
+    fn unsupported_version_selector_reason(version: &str) -> Option<String> {
+        let trimmed = version.trim();
+        if trimmed.is_empty() {
+            return Some("Empty Maven version selector is not supported".to_string());
+        }
+        if trimmed.contains('+') {
+            return Some(format!(
+                "Unsupported Maven/Ivy version selector '{trimmed}': wildcard '+' selectors are not native-ready"
+            ));
+        }
+        if (trimmed.starts_with('[') || trimmed.starts_with('('))
+            && !(trimmed.ends_with(']') || trimmed.ends_with(')'))
+        {
+            return Some(format!(
+                "Unsupported Maven version range '{trimmed}': range must end with ']' or ')'"
+            ));
+        }
+        None
     }
 
     /// Fetch available versions for a dependency from maven-metadata.xml.
@@ -2130,6 +2176,22 @@ impl DependencyResolutionServiceImpl {
             dep.scope.clone()
         };
 
+        if let Some(reason) = Self::unsupported_version_selector_reason(&raw_version) {
+            return ResolvedDependency {
+                group,
+                name,
+                version: raw_version.clone(),
+                selected_version: raw_version,
+                dependencies: Vec::new(),
+                resolved: false,
+                failure_reason: reason,
+                artifact_url: String::new(),
+                artifact_size: 0,
+                artifact_sha256: String::new(),
+                scope,
+            };
+        }
+
         // Resolve version ranges, LATEST, RELEASE, and SNAPSHOT
         let selected_version = if raw_version.contains(',')
             || raw_version.starts_with('[')
@@ -2151,6 +2213,26 @@ impl DependencyResolutionServiceImpl {
         } else {
             raw_version.clone()
         };
+
+        if selected_version != raw_version {
+            let strategy = if raw_version.contains(',')
+                || raw_version.starts_with('[')
+                || raw_version.starts_with('(')
+            {
+                "range"
+            } else if raw_version.ends_with("-SNAPSHOT") {
+                "snapshot"
+            } else {
+                "latest"
+            };
+            tracing::info!(
+                group = %group,
+                name = %name,
+                resolved_version = %selected_version,
+                strategy = strategy,
+                "Version resolved"
+            );
+        }
 
         // Cycle detection: if we've already visited this group:name, return a leaf node.
         let coord = (group.clone(), name.clone());
@@ -2701,6 +2783,12 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
         let req = request.into_inner();
         let start = std::time::Instant::now();
 
+        tracing::info!(
+            configuration = %req.configuration_name,
+            artifact_count = req.dependencies.len(),
+            "Resolving dependencies"
+        );
+
         let repo_urls: Vec<RepositoryDescriptor> = req
             .repositories
             .iter()
@@ -2739,6 +2827,22 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             resolved.push(result);
         }
 
+        if let Some(error_message) = resolved
+            .iter()
+            .find(|dep| !dep.resolved)
+            .map(|dep| dep.failure_reason.clone())
+        {
+            let elapsed = start.elapsed().as_millis() as i64;
+            return Ok(Response::new(ResolveDependenciesResponse {
+                success: false,
+                resolved_dependencies: resolved,
+                error_message,
+                resolution_time_ms: elapsed,
+                total_artifacts: 0,
+                total_download_size: 0,
+            }));
+        }
+
         // Apply resolution strategy if configured
         let strategy = req
             .resolution_strategy
@@ -2757,6 +2861,10 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
 
         let mut total_download_size = 0;
         let total_artifacts = if req.prefetch_artifacts {
+            tracing::info!(
+                prefetch_count = resolved.len(),
+                "Prefetching resolved artifacts"
+            );
             match self.prefetch_resolved_artifacts(&mut resolved).await {
                 Ok((prefetched, downloaded)) => {
                     total_download_size = downloaded;
@@ -7245,5 +7353,178 @@ mod tests {
         let v = "1.0-SNAPSHOT";
         let base = &v[..v.len() - "-SNAPSHOT".len()];
         assert_eq!(base, "1.0");
+    }
+
+    // ---- Fail-closed dependency feature gate tests ----
+
+    #[tokio::test]
+    async fn test_prefetch_rejects_snapshot_artifacts() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(dir.path().to_path_buf());
+
+        let mut deps = vec![ResolvedDependency {
+            group: "com.example".to_string(),
+            name: "my-lib".to_string(),
+            version: "1.0-SNAPSHOT".to_string(),
+            selected_version: "1.0-SNAPSHOT".to_string(),
+            dependencies: Vec::new(),
+            resolved: true,
+            failure_reason: String::new(),
+            artifact_url:
+                "https://repo.example.test/maven/com/example/my-lib/1.0-SNAPSHOT/my-lib-1.0-SNAPSHOT.jar"
+                    .to_string(),
+            artifact_size: 0,
+            artifact_sha256: String::new(),
+            scope: "compile".to_string(),
+        }];
+
+        let result = svc.prefetch_resolved_artifacts(&mut deps).await;
+        assert!(result.is_err(), "SNAPSHOT prefetch should be rejected");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("SNAPSHOT artifact prefetch is not supported yet"),
+            "Error should mention SNAPSHOT gate, got: {err}"
+        );
+        assert!(
+            err.contains("my-lib"),
+            "Error should include artifact name, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_incomplete_maven_coordinate_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(dir.path().to_path_buf());
+
+        // Empty group
+        let result = svc
+            .download_artifact_into_store(
+                "",
+                "my-lib",
+                "1.0",
+                "",
+                "jar",
+                "https://repo.example.test/maven/my-lib-1.0.jar",
+            )
+            .await;
+        assert!(result.is_err(), "Empty group should be rejected");
+        assert!(
+            result
+                .unwrap_err()
+                .contains("Incomplete Maven artifact coordinate"),
+        );
+
+        // Empty name
+        let result = svc
+            .download_artifact_into_store(
+                "com.example",
+                "",
+                "1.0",
+                "",
+                "jar",
+                "https://repo.example.test/maven/com/example/1.0.jar",
+            )
+            .await;
+        assert!(result.is_err(), "Empty name should be rejected");
+        assert!(
+            result
+                .unwrap_err()
+                .contains("Incomplete Maven artifact coordinate"),
+        );
+
+        // Empty version
+        let result = svc
+            .download_artifact_into_store(
+                "com.example",
+                "my-lib",
+                "",
+                "",
+                "jar",
+                "https://repo.example.test/maven/com/example/my-lib.jar",
+            )
+            .await;
+        assert!(result.is_err(), "Empty version should be rejected");
+        assert!(
+            result
+                .unwrap_err()
+                .contains("Incomplete Maven artifact coordinate"),
+        );
+
+        // Empty artifact URL
+        let result = svc
+            .download_artifact_into_store("com.example", "my-lib", "1.0", "", "jar", "")
+            .await;
+        assert!(result.is_err(), "Empty artifact URL should be rejected");
+        assert!(
+            result
+                .unwrap_err()
+                .contains("Incomplete Maven artifact coordinate"),
+        );
+    }
+
+    #[test]
+    fn test_resolve_version_range_rejects_unsupported_patterns() {
+        let available = vec![
+            "1.0.0".to_string(),
+            "1.2.0".to_string(),
+            "2.0.0".to_string(),
+        ];
+
+        let ivy_result =
+            DependencyResolutionServiceImpl::resolve_version_range("1.+", &available, None);
+        assert_eq!(
+            ivy_result, None,
+            "Ivy '1.+' must fail closed, not fall through as an exact version"
+        );
+
+        let empty_result =
+            DependencyResolutionServiceImpl::resolve_version_range("", &available, None);
+        assert_eq!(
+            empty_result, None,
+            "Empty version string must fail closed"
+        );
+
+        let ws_result =
+            DependencyResolutionServiceImpl::resolve_version_range("  ", &available, None);
+        assert_eq!(
+            ws_result, None,
+            "Whitespace-only version must fail closed"
+        );
+
+        // Verify normal patterns still work
+        let normal =
+            DependencyResolutionServiceImpl::resolve_version_range("1.2.0", &available, None);
+        assert_eq!(normal, Some("1.2.0".to_string()));
+
+        let latest = DependencyResolutionServiceImpl::resolve_version_range(
+            "latest.release",
+            &available,
+            None,
+        );
+        assert_eq!(latest, Some("2.0.0".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_dependencies_fails_closed_for_unsupported_version_selector() {
+        let svc = make_svc();
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "runtimeClasspath".to_string(),
+                dependencies: vec![make_dep("org.example", "demo", "1.+")],
+                repositories: vec![make_repo("central", "https://repo.example.test/maven2")],
+                attributes: Vec::new(),
+                lenient: false,
+                resolution_strategy: None,
+                target_scope: String::new(),
+                prefetch_artifacts: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!response.success);
+        assert!(response.error_message.contains("wildcard '+' selectors"));
+        assert_eq!(response.resolved_dependencies.len(), 1);
+        assert!(!response.resolved_dependencies[0].resolved);
     }
 }

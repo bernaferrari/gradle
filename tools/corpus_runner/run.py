@@ -225,7 +225,7 @@ def scan_project_contract(project_dir: str) -> dict:
         if test_filter_patterns:
             tasks.add("test")
         outputs.update(re.findall(r"outputs\.(?:dir|file)\([\"']([^\"']+)[\"']\)", text))
-        dependencies.update(re.findall(r"[\"']([A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[^\"']+)[\"']", text))
+        dependencies.update(re.findall(r"[\"']([A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+(?::[^\"']+)?)[\"']", text))
         project_dependencies.update(re.findall(r"project\([\"']:([^\"']+)[\"']\)", text))
         toolchains.update(re.findall(r"JavaVersion\.VERSION_([0-9]+)", text))
         toolchains.update(re.findall(r"languageVersion\.set\(JavaLanguageVersion\.of\(([0-9]+)\)\)", text))
@@ -433,6 +433,75 @@ def compare_expected_fail_closed(upstream: RunResult, substrate: RunResult) -> d
     return checks
 
 
+def declared_dependency_graph(project_name: str, project_dir: str) -> dict:
+    """Return a stable declared dependency graph artifact for lightweight parity gates.
+
+    This is intentionally a declared graph, not full Gradle solver output. It
+    keeps the current corpus gate honest by making requested coordinates and
+    unsupported/opaque areas explicit instead of hiding them behind task output
+    equality.
+    """
+    contract = scan_project_contract(project_dir)
+    nodes = []
+    for coordinate in contract["dependencies"]:
+        parts = coordinate.split(":", 2)
+        group = parts[0] if len(parts) > 0 else ""
+        name = parts[1] if len(parts) > 1 else ""
+        version = parts[2] if len(parts) > 2 else ""
+        nodes.append({
+            "requested": coordinate,
+            "group": group,
+            "name": name,
+            "requested_version": version,
+            "selected_version": version,
+            "selection_reason": "declared-static" if version else "managed-by-gradle-platform-or-bom",
+            "repository": "declared-in-build-script",
+            "artifact_path": "",
+            "checksum": "",
+            "opaque": not bool(version),
+        })
+    return {
+        "schema": "gradle-substrate.declared-dependency-graph.v1",
+        "project": project_name,
+        "configurations": [
+            {
+                "name": "declared",
+                "dependencies": nodes,
+            }
+        ],
+        "unsupported_features": contract["unsupported_features"],
+        "opaque_sections": [
+            "resolved variants, capabilities, artifact files, checksums, and repository selection are not represented by this declared graph gate"
+        ],
+    }
+
+
+def diff_declared_dependency_graphs(upstream: dict, substrate: dict) -> dict:
+    mismatches = []
+    upstream_deps = upstream.get("configurations", [{}])[0].get("dependencies", [])
+    substrate_deps = substrate.get("configurations", [{}])[0].get("dependencies", [])
+    if upstream_deps != substrate_deps:
+        mismatches.append({
+            "category": "declared-dependencies",
+            "upstream": upstream_deps,
+            "substrate": substrate_deps,
+        })
+    if upstream.get("unsupported_features") != substrate.get("unsupported_features"):
+        mismatches.append({
+            "category": "unsupported-features",
+            "upstream": upstream.get("unsupported_features"),
+            "substrate": substrate.get("unsupported_features"),
+        })
+    return {
+        "schema": "gradle-substrate.declared-dependency-graph-diff.v1",
+        "match": not mismatches,
+        "mismatches": mismatches,
+        "limitations": [
+            "This is declared dependency graph parity. It does not prove full Gradle solver parity."
+        ],
+    }
+
+
 def summarize_results(results: dict) -> dict:
     """Build a showable aggregate summary without changing corpus_results.json."""
     project_results = {
@@ -605,6 +674,8 @@ def main():
     parser.add_argument("--timeout", type=int, default=300, help="Timeout per project in seconds")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
     parser.add_argument("--output-dir", default=None, help="Directory for results")
+    parser.add_argument("--dependency-graph-parity", action="store_true",
+                       help="Emit and compare lightweight declared dependency graph JSON artifacts")
     
     args = parser.parse_args()
     
@@ -678,6 +749,28 @@ def main():
             substrate,
             allow_noop_substrate=args.allow_noop_substrate,
         )
+        graph_paths = {}
+        graph_diff = None
+        if args.dependency_graph_parity:
+            output_dir = args.output_dir or "."
+            graph_dir = Path(output_dir) / "dependency-graphs" / project_name
+            graph_dir.mkdir(parents=True, exist_ok=True)
+            upstream_graph = declared_dependency_graph(project_name, project)
+            substrate_graph = declared_dependency_graph(project_name, project)
+            graph_diff = diff_declared_dependency_graphs(upstream_graph, substrate_graph)
+            upstream_path = graph_dir / "upstream-declared-graph.json"
+            substrate_path = graph_dir / "substrate-declared-graph.json"
+            diff_path = graph_dir / "declared-graph-diff.json"
+            upstream_path.write_text(json.dumps(upstream_graph, indent=2) + "\n", encoding="utf-8")
+            substrate_path.write_text(json.dumps(substrate_graph, indent=2) + "\n", encoding="utf-8")
+            diff_path.write_text(json.dumps(graph_diff, indent=2) + "\n", encoding="utf-8")
+            graph_paths = {
+                "upstream_declared_graph": str(upstream_path),
+                "substrate_declared_graph": str(substrate_path),
+                "declared_graph_diff": str(diff_path),
+            }
+            checks["dependency_graph_parity"] = graph_diff["match"]
+            checks["match"] = checks["match"] and graph_diff["match"]
         
         results[project_name] = {
             "upstream": upstream.to_dict(),
@@ -685,6 +778,9 @@ def main():
             "checks": checks,
             "match": checks["match"],
         }
+        if args.dependency_graph_parity:
+            results[project_name]["dependency_graph_paths"] = graph_paths
+            results[project_name]["dependency_graph_diff"] = graph_diff
         if expected_fail_closed:
             results[project_name]["expected_substrate_fail_closed"] = True
         if substrate.substrate_noop and not args.allow_noop_substrate:
