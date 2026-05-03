@@ -48,7 +48,7 @@ class CorpusRunnerCommandTest(unittest.TestCase):
             )
 
         self.assertIn(
-            "-Dorg.gradle.rust.substrate.runbuild.authoritative=true",
+            "-Dorg.gradle.rust.substrate.execution.kernel=true",
             command,
         )
         self.assertIn("-Dorg.gradle.rust.substrate.taskgraph.enabled=true", command)

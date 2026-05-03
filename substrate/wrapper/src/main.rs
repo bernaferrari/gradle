@@ -521,7 +521,7 @@ fn substrate_gradle_flags(
                 .push("-Dorg.gradle.rust.substrate.runbuild.native-ready-default=true".to_string());
         }
         SubstrateCliMode::Authoritative => {
-            flags.push("-Dorg.gradle.rust.substrate.runbuild.authoritative=true".to_string());
+            flags.push("-Dorg.gradle.rust.substrate.execution.kernel=true".to_string());
         }
     }
 
@@ -1132,7 +1132,7 @@ distributionSha256Sum=abc123
             &"-Dorg.gradle.rust.substrate.runbuild.native-ready-default=true".to_string()
         ));
         assert!(
-            !flags.contains(&"-Dorg.gradle.rust.substrate.runbuild.authoritative=true".to_string())
+            !flags.contains(&"-Dorg.gradle.rust.substrate.execution.kernel=true".to_string())
         );
     }
 
@@ -1143,7 +1143,7 @@ distributionSha256Sum=abc123
         let flags = substrate_gradle_flags(SubstrateCliMode::Authoritative, &daemon, &state_dir);
 
         assert!(
-            flags.contains(&"-Dorg.gradle.rust.substrate.runbuild.authoritative=true".to_string())
+            flags.contains(&"-Dorg.gradle.rust.substrate.execution.kernel=true".to_string())
         );
         assert!(!flags.contains(
             &"-Dorg.gradle.rust.substrate.runbuild.native-ready-default=true".to_string()

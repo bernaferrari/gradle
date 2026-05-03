@@ -451,7 +451,7 @@ def build_gradle_command(
                 daemon_path = Path.cwd() / daemon_path
             cmd.append(f"-Dorg.gradle.rust.substrate.daemon.path={daemon_path}")
         if runbuild_authoritative:
-            cmd.append("-Dorg.gradle.rust.substrate.runbuild.authoritative=true")
+            cmd.append("-Dorg.gradle.rust.substrate.execution.kernel=true")
         if runbuild_native_ready_default:
             cmd.append("-Dorg.gradle.rust.substrate.runbuild.native-ready-default=true")
         if runbuild_authoritative or runbuild_native_ready_default:
