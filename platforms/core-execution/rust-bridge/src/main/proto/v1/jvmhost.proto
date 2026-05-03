@@ -55,6 +55,8 @@ message ResolvedArtifact {
   string name = 2;
   string version = 3;
   string configuration = 4;
+  string classifier = 5;
+  string extension = 6;
 }
 message GetBuildEnvironmentRequest {}
 message GetBuildEnvironmentResponse {

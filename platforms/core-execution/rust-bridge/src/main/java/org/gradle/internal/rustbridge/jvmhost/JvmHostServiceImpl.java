@@ -230,18 +230,28 @@ public class JvmHostServiceImpl {
         private final String name;
         private final String version;
         private final String configuration;
+        private final String classifier;
+        private final String extension;
 
         public ResolvedArtifactEntry(String group, String name, String version, String configuration) {
+            this(group, name, version, configuration, "", "jar");
+        }
+
+        public ResolvedArtifactEntry(String group, String name, String version, String configuration, String classifier, String extension) {
             this.group = group;
             this.name = name;
             this.version = version;
             this.configuration = configuration;
+            this.classifier = classifier == null ? "" : classifier;
+            this.extension = extension == null || extension.isEmpty() ? "jar" : extension;
         }
 
         public String getGroup() { return group; }
         public String getName() { return name; }
         public String getVersion() { return version; }
         public String getConfiguration() { return configuration; }
+        public String getClassifier() { return classifier; }
+        public String getExtension() { return extension; }
     }
 
     private static String projectDirFromBuildFile(String buildFile) {

@@ -607,6 +607,12 @@ and `DagExecutor` groups them into the kernel dependency graph before no-fallbac
 RunBuild admission. Repository capture, constraints, attributes, variants, and
 resolved-artifact ownership are still narrower than full Gradle solver parity, so
 dependency parity/read-through remain separate gates.
+Resolved artifact capture now preserves classifier and extension in the JVM-host
+protocol and canonical build-plan notation (`g:n:v`, `g:n:v:classifier`,
+`g:n:v@extension`, `g:n:v:classifier@extension`). Rust admission strips artifact
+shape only for module identity checks, while task graph classpath enrichment uses
+only JAR-shaped coordinates instead of assuming every resolved artifact is a main
+JAR.
 
 Native task coverage push (execution-kernel coverage): common Gradle lifecycle
 aggregator `DefaultTask`s (`build`, `check`, `classes`, `testClasses`,
@@ -632,7 +638,8 @@ style notation as unsupported Maven coordinates.
 | Kernel dependency admission tests | 6/6 focused kernel tests passed | `cargo test -p gradle-substrate-daemon execution_kernel --lib` |
 | Kernel dependency graph bridge tests | 3/3 focused DAG conversion tests passed | `cargo test -p gradle-substrate-daemon kernel_dependency_graph --lib` |
 | Task coverage tests | Focused lifecycle/default/KotlinCompile tests passed | `cargo test -p gradle-substrate-daemon lifecycle_task --lib`; `cargo test -p gradle-substrate-daemon default_task --lib`; `cargo test -p gradle-substrate-daemon kotlin_compile --lib` |
-| Unit tests | 1607 passed, 0 failed, 3 ignored | `cargo test -p gradle-substrate-daemon --lib` |
+| Artifact classifier/extension bridge tests | Focused JVM-host protocol, build-plan notation, kernel graph, and task graph parser tests passed | `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.jvmhost.JvmHostServiceImplTest --tests org.gradle.internal.rustbridge.jvmhost.ProjectModelProviderAdapterTest --no-daemon --console=plain`; `cargo test -p gradle-substrate-daemon dependency_notation_preserves_classifier_and_extension --lib`; `cargo test -p gradle-substrate-daemon kernel_dependency_graph_groups_build_plan_dependencies --lib`; `cargo test -p gradle-substrate-daemon dependency_configuration_matching_respects_test_scope --lib` |
+| Unit tests | 1608 passed, 0 failed, 3 ignored | `cargo test -p gradle-substrate-daemon --lib` |
 
 ## Next Sync Actions
 

@@ -616,7 +616,8 @@ fn kernel_dependency_graph_from_plan_dependencies(
     }
     let mut configurations = HashMap::<String, KernelDependencyConfiguration>::new();
     for dependency in plan_dependencies {
-        let configuration_name = format!("{}:{}", dependency.project_path, dependency.configuration);
+        let configuration_name =
+            format!("{}:{}", dependency.project_path, dependency.configuration);
         let configuration = configurations
             .entry(configuration_name.clone())
             .or_insert_with(|| KernelDependencyConfiguration {
@@ -629,7 +630,9 @@ fn kernel_dependency_graph_from_plan_dependencies(
             });
         if let Some(request) = kernel_dependency_request_from_notation(&dependency.notation) {
             configuration.dependencies.push(request);
-        } else if let Some(project_path) = project_dependency_path_from_notation(&dependency.notation) {
+        } else if let Some(project_path) =
+            project_dependency_path_from_notation(&dependency.notation)
+        {
             configuration.project_dependencies.push(project_path);
         } else {
             configuration.unsupported_features.push(format!(
@@ -658,11 +661,7 @@ fn project_dependency_path_from_notation(notation: &str) -> Option<String> {
 }
 
 fn normalize_project_dependency_path(value: &str) -> Option<String> {
-    let trimmed = value
-        .trim()
-        .trim_matches('"')
-        .trim_matches('\'')
-        .trim();
+    let trimmed = value.trim().trim_matches('"').trim_matches('\'').trim();
     if trimmed.starts_with(':') {
         Some(trimmed.to_string())
     } else {
@@ -671,10 +670,19 @@ fn normalize_project_dependency_path(value: &str) -> Option<String> {
 }
 
 fn kernel_dependency_request_from_notation(notation: &str) -> Option<KernelDependencyRequest> {
+    let notation = notation.split_once('@').map_or(notation, |(base, _)| base);
     let mut parts = notation.split(':');
     let group = parts.next()?.trim();
     let name = parts.next()?.trim();
     let version = parts.next()?.trim();
+    if group.is_empty() || name.is_empty() || version.is_empty() {
+        return None;
+    }
+    if let Some(classifier) = parts.next() {
+        if classifier.trim().is_empty() || parts.next().is_some() {
+            return None;
+        }
+    }
     if parts.next().is_some() {
         return None;
     }
@@ -911,30 +919,27 @@ impl DagExecutorService for DagExecutorServiceImpl {
         let task_contexts = req.task_contexts;
 
         if !allow_jvm_forwarding {
-            let kernel_plan = match self.build_kernel_plan(
-                &build_id_str,
-                &task_contexts,
-                &plan_dependencies,
-            ) {
-                Ok(plan) => plan,
-                Err(error) => {
-                    return Ok(Response::new(RunBuildResponse {
-                        build_id: build_id_str.clone(),
-                        final_status: "FAILED".to_string(),
-                        total_tasks,
-                        tasks_succeeded: 0,
-                        tasks_failed: total_tasks,
-                        tasks_skipped: 0,
-                        tasks_forwarded_to_jvm: 0,
-                        total_duration_ms: now_ms() - start_time,
-                        failure_message: error,
-                        task_details: vec![],
-                        tasks_up_to_date: 0,
-                        tasks_from_cache: 0,
-                        plan_source,
-                    }));
-                }
-            };
+            let kernel_plan =
+                match self.build_kernel_plan(&build_id_str, &task_contexts, &plan_dependencies) {
+                    Ok(plan) => plan,
+                    Err(error) => {
+                        return Ok(Response::new(RunBuildResponse {
+                            build_id: build_id_str.clone(),
+                            final_status: "FAILED".to_string(),
+                            total_tasks,
+                            tasks_succeeded: 0,
+                            tasks_failed: total_tasks,
+                            tasks_skipped: 0,
+                            tasks_forwarded_to_jvm: 0,
+                            total_duration_ms: now_ms() - start_time,
+                            failure_message: error,
+                            task_details: vec![],
+                            tasks_up_to_date: 0,
+                            tasks_from_cache: 0,
+                            plan_source,
+                        }));
+                    }
+                };
             let native_executor_types = self
                 .executor_registry
                 .registered_types()
@@ -2044,24 +2049,34 @@ mod tests {
                 configuration: "testImplementation".to_string(),
                 notation: "org.example:test:4.5.6".to_string(),
             },
+            crate::proto::BuildPlanDependency {
+                project_path: ":".to_string(),
+                configuration: "runtimeClasspath".to_string(),
+                notation: "org.example:native:7.8.9:linux@so".to_string(),
+            },
         ])
         .expect("dependency graph");
 
-        assert_eq!(graph.configurations.len(), 2);
+        assert_eq!(graph.configurations.len(), 3);
         assert_eq!(graph.configurations[0].name, "::implementation");
         assert_eq!(graph.configurations[0].dependencies[0].group, "org.example");
         assert_eq!(graph.configurations[0].dependencies[0].name, "demo");
         assert_eq!(graph.configurations[0].dependencies[0].version, "1.2.3");
+        assert_eq!(graph.configurations[1].name, "::runtimeClasspath");
+        assert_eq!(graph.configurations[1].dependencies[0].group, "org.example");
+        assert_eq!(graph.configurations[1].dependencies[0].name, "native");
+        assert_eq!(graph.configurations[1].dependencies[0].version, "7.8.9");
     }
 
     #[test]
     fn kernel_dependency_graph_marks_unrepresentable_notation_unsupported() {
-        let graph = kernel_dependency_graph_from_plan_dependencies(&[crate::proto::BuildPlanDependency {
-            project_path: ":".to_string(),
-            configuration: "implementation".to_string(),
-            notation: "files('libs/demo.jar')".to_string(),
-        }])
-        .expect("dependency graph");
+        let graph =
+            kernel_dependency_graph_from_plan_dependencies(&[crate::proto::BuildPlanDependency {
+                project_path: ":".to_string(),
+                configuration: "implementation".to_string(),
+                notation: "files('libs/demo.jar')".to_string(),
+            }])
+            .expect("dependency graph");
 
         assert!(graph.configurations[0].dependencies.is_empty());
         assert!(graph.configurations[0].unsupported_features[0]

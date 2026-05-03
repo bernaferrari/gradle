@@ -576,8 +576,13 @@ async fn collect_shadow_dependencies(
             }
 
             for artifact in response.artifacts {
-                let notation =
-                    dependency_notation(&artifact.group, &artifact.name, &artifact.version);
+                let notation = dependency_notation(
+                    &artifact.group,
+                    &artifact.name,
+                    &artifact.version,
+                    &artifact.classifier,
+                    &artifact.extension,
+                );
                 if notation.is_empty() {
                     continue;
                 }
@@ -603,10 +608,27 @@ async fn collect_shadow_dependencies(
         .collect())
 }
 
-fn dependency_notation(group: &str, name: &str, version: &str) -> String {
+fn dependency_notation(
+    group: &str,
+    name: &str,
+    version: &str,
+    classifier: &str,
+    extension: &str,
+) -> String {
+    let classifier = classifier.trim();
+    let extension = extension.trim();
+    let artifact_suffix = match (
+        classifier.is_empty(),
+        extension.is_empty() || extension == "jar",
+    ) {
+        (true, true) => String::new(),
+        (true, false) => format!("@{extension}"),
+        (false, true) => format!(":{classifier}"),
+        (false, false) => format!(":{classifier}@{extension}"),
+    };
     match (group.is_empty(), name.is_empty(), version.is_empty()) {
         (_, true, _) => String::new(),
-        (false, false, false) => format!("{group}:{name}:{version}"),
+        (false, false, false) => format!("{group}:{name}:{version}{artifact_suffix}"),
         (false, false, true) => format!("{group}:{name}"),
         (true, false, false) => format!("{name}:{version}"),
         (true, false, true) => name.to_string(),
@@ -1403,6 +1425,26 @@ mod tests {
         assert_eq!(loaded.plan.build_id, "build:1");
         assert_eq!(loaded.source, "test");
         assert!(!loaded.fingerprint_sha256.is_empty());
+    }
+
+    #[test]
+    fn dependency_notation_preserves_classifier_and_extension() {
+        assert_eq!(
+            dependency_notation("org.example", "demo", "1.2.3", "", "jar"),
+            "org.example:demo:1.2.3"
+        );
+        assert_eq!(
+            dependency_notation("org.example", "demo", "1.2.3", "sources", "jar"),
+            "org.example:demo:1.2.3:sources"
+        );
+        assert_eq!(
+            dependency_notation("org.example", "demo", "1.2.3", "", "aar"),
+            "org.example:demo:1.2.3@aar"
+        );
+        assert_eq!(
+            dependency_notation("org.example", "demo", "1.2.3", "debug", "aar"),
+            "org.example:demo:1.2.3:debug@aar"
+        );
     }
 
     #[test]
