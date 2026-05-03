@@ -46,6 +46,12 @@
   tasks on the longest path are claimed first. Filtered task selections also
   treat dependencies outside the selected graph as absent when deciding initial
   readiness.
+- Rust `RunBuild` with JVM forwarding disabled now has a build-level execution
+  kernel admission gate. After the task graph is materialized, Rust validates
+  that every selected task has a native executor and that captured task
+  contracts do not carry explicit unsupported markers before dispatching any
+  work. Unsupported no-fallback builds now fail closed at admission time instead
+  of discovering fallback requirements mid-DAG.
 - Rust `RunBuild` now materializes transitive downstream skips in its response
   task details after a task failure, so authoritative graph results expose
   failed and skipped work consistently instead of hiding skipped nodes only in

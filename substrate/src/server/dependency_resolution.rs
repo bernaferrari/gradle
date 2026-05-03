@@ -7119,11 +7119,9 @@ mod tests {
             )
             .await;
         assert!(result.is_err(), "Empty group should be rejected");
-        assert!(
-            result
-                .unwrap_err()
-                .contains("Incomplete Maven artifact coordinate"),
-        );
+        assert!(result
+            .unwrap_err()
+            .contains("Incomplete Maven artifact coordinate"),);
 
         // Empty name
         let result = svc
@@ -7137,11 +7135,9 @@ mod tests {
             )
             .await;
         assert!(result.is_err(), "Empty name should be rejected");
-        assert!(
-            result
-                .unwrap_err()
-                .contains("Incomplete Maven artifact coordinate"),
-        );
+        assert!(result
+            .unwrap_err()
+            .contains("Incomplete Maven artifact coordinate"),);
 
         // Empty version
         let result = svc
@@ -7155,22 +7151,18 @@ mod tests {
             )
             .await;
         assert!(result.is_err(), "Empty version should be rejected");
-        assert!(
-            result
-                .unwrap_err()
-                .contains("Incomplete Maven artifact coordinate"),
-        );
+        assert!(result
+            .unwrap_err()
+            .contains("Incomplete Maven artifact coordinate"),);
 
         // Empty artifact URL
         let result = svc
             .download_artifact_into_store("com.example", "my-lib", "1.0", "", "jar", "")
             .await;
         assert!(result.is_err(), "Empty artifact URL should be rejected");
-        assert!(
-            result
-                .unwrap_err()
-                .contains("Incomplete Maven artifact coordinate"),
-        );
+        assert!(result
+            .unwrap_err()
+            .contains("Incomplete Maven artifact coordinate"),);
     }
 
     #[test]
@@ -7190,17 +7182,11 @@ mod tests {
 
         let empty_result =
             DependencyResolutionServiceImpl::resolve_version_range("", &available, None);
-        assert_eq!(
-            empty_result, None,
-            "Empty version string must fail closed"
-        );
+        assert_eq!(empty_result, None, "Empty version string must fail closed");
 
         let ws_result =
             DependencyResolutionServiceImpl::resolve_version_range("  ", &available, None);
-        assert_eq!(
-            ws_result, None,
-            "Whitespace-only version must fail closed"
-        );
+        assert_eq!(ws_result, None, "Whitespace-only version must fail closed");
 
         // Verify normal patterns still work
         let normal =
