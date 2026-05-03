@@ -105,6 +105,25 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
+    public void capturesSourceFilesForJvmLanguageCompileTasks() throws IOException {
+        File sourceDir = temporaryFolder.newFolder("src", "main", "kotlin");
+        File sourceFile = new File(sourceDir, "App.kt");
+        assertTrue(sourceFile.createNewFile());
+        File outputDir = temporaryFolder.newFolder("build/classes/kotlin/main");
+        File classpathEntry = temporaryFolder.newFolder("build/classes/java/main");
+        File javaHome = temporaryFolder.newFolder("jdks", "jdk-17");
+
+        Task compileKotlin = javaCompileTask(":compileKotlin", "compileKotlin", sourceFile, outputDir, fileCollection(classpathEntry), javaHome, null);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(compileKotlin, KotlinCompile.class);
+
+        assertEquals("compile", task.getActionKind());
+        assertTrue(task.getInputSpecsList().stream()
+            .anyMatch(input -> input.getKind().equals("source") && input.getValue().equals(sourceFile.getAbsolutePath())));
+    }
+
+
+    @org.junit.Test
     public void capturesNativeReadyJarContractFromTaskModel() throws IOException {
         File classesDir = temporaryFolder.newFolder("build/classes/java/main");
         File classFile = new File(classesDir, "App.class");
@@ -1772,6 +1791,9 @@ public class ProjectModelProviderAdapterTest {
     }
 
     public static class JavaCompile {
+    }
+
+    public static class KotlinCompile {
     }
 
     public static class Jar {
