@@ -56,6 +56,15 @@ python3 tools/corpus_runner/run.py \
   --dependency-graph-parity \
   --output-dir build/corpus-external-with-graphs
 
+# Run the networked corpus with Gradle ResolutionResult graph parity artifacts
+python3 tools/corpus_runner/run.py \
+  --manifest testing/corpus/external-manifest.json \
+  --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" \
+  --daemon-binary target/debug/gradle-substrate-daemon \
+  --runbuild-authoritative \
+  --resolved-dependency-graph-parity \
+  --output-dir build/corpus-external-with-resolved-graphs
+
 # Run with verbose output
 python3 tools/corpus_runner/run.py --project /path/to/project --verbose
 ```
@@ -75,6 +84,7 @@ It then compares:
 - Archive entry inventories
 - No-fallback substrate execution
 - Optional declared dependency graph parity
+- Optional Gradle `ResolutionResult` graph parity
 - Build duration (informational only)
 
 The substrate candidate is considered invalid if Gradle reports that it used
@@ -127,6 +137,23 @@ declared dependency coordinates or unsupported feature markers drift. This is a
 guardrail for runner/corpus honesty, not full resolved Gradle solver parity: it
 does not prove repository selection, variant/capability selection, artifact
 files, checksums, or rich conflict-resolution semantics.
+
+`--resolved-dependency-graph-parity` emits Gradle public `ResolutionResult`
+artifacts for reference and substrate invocations under
+`<output-dir>/resolved-dependency-graphs/<project-name>/`:
+
+- `upstream-resolved-graph.json`
+- `substrate-resolved-graph.json`
+- `resolved-graph-diff.json`
+
+The resolved graph includes configurations, components, selected module
+coordinates, transitive edges, selection reasons, variant attributes, and
+artifact file names/IDs where Gradle exposes them. The diff participates in the
+project match result and fails the run on drift. This is the right gate for
+reading Gradle semantics and porting them into Rust one slice at a time. It
+still does not prove direct Rust solver parity by itself: the substrate graph is
+currently exported from Gradle's public `ResolutionResult` during the substrate
+invocation, and repository source/checksum policy are not exposed by this API.
 
 ## Corpus Structure
 

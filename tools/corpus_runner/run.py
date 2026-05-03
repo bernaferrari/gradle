@@ -88,6 +88,116 @@ RUNBUILD_OUTPUT_MARKERS = (
     "Rust run-build was incomplete",
 )
 
+RESOLVED_GRAPH_EXPORT_TASK = "rustSubstrateResolvedGraphExport"
+
+RESOLVED_GRAPH_INIT_SCRIPT = r'''
+import groovy.json.JsonOutput
+import org.gradle.api.artifacts.result.ResolvedDependencyResult
+import org.gradle.api.artifacts.result.UnresolvedDependencyResult
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+
+gradle.projectsLoaded {
+    allprojects { project ->
+        project.tasks.register("rustSubstrateResolvedGraphExport") {
+            group = "verification"
+            description = "Exports selected resolved dependency graphs for Rust substrate parity checks."
+            doLast {
+                def outputRoot = System.getProperty("org.gradle.rust.substrate.resolvedGraphOutputDir")
+                if (!outputRoot) {
+                    throw new GradleException("Missing org.gradle.rust.substrate.resolvedGraphOutputDir")
+                }
+                def selected = ["compileClasspath", "runtimeClasspath", "testCompileClasspath", "testRuntimeClasspath"] as Set
+                def configs = []
+                project.configurations.findAll { it.canBeResolved && selected.contains(it.name) }.sort { it.name }.each { cfg ->
+                    def resolution = cfg.incoming.resolutionResult
+                    def artifactsByComponent = [:].withDefault { [] }
+                    try {
+                        cfg.incoming.artifacts.artifacts.each { artifact ->
+                            def componentId = artifact.id.componentIdentifier.displayName
+                            artifactsByComponent[componentId] << [
+                                file: artifact.file.absolutePath,
+                                fileName: artifact.file.name,
+                                id: artifact.id.displayName
+                            ]
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                    def components = resolution.allComponents.collect { component ->
+                        def id = component.id
+                        def module = null
+                        if (id instanceof ModuleComponentIdentifier) {
+                            module = [group: id.group, name: id.module, version: id.version]
+                        }
+                        [
+                            id: id.displayName,
+                            module: module,
+                            selectionReason: component.selectionReason?.descriptions?.collect { it.description }?.join("; ") ?: String.valueOf(component.selectionReason),
+                            variants: component.variants.collect { variant ->
+                                [
+                                    displayName: variant.displayName,
+                                    attributes: variant.attributes.keySet().collectEntries { key ->
+                                        [(key.name): String.valueOf(variant.attributes.getAttribute(key))]
+                                    }
+                                ]
+                            },
+                            artifacts: artifactsByComponent[id.displayName].sort { it.fileName }
+                        ]
+                    }.sort { it.id }
+                    def dependencies = resolution.allDependencies.collect { dep ->
+                        if (dep instanceof ResolvedDependencyResult) {
+                            return [
+                                from: dep.from.id.displayName,
+                                requested: dep.requested.displayName,
+                                selected: dep.selected.id.displayName,
+                                constraint: dep.constraint,
+                                resolved: true,
+                                failure: ""
+                            ]
+                        }
+                        if (dep instanceof UnresolvedDependencyResult) {
+                            return [
+                                from: dep.from.id.displayName,
+                                requested: dep.requested.displayName,
+                                selected: "",
+                                constraint: false,
+                                resolved: false,
+                                failure: dep.failure?.message ?: "unresolved"
+                            ]
+                        }
+                        return [
+                            from: "",
+                            requested: dep.requested.displayName,
+                            selected: "",
+                            constraint: false,
+                            resolved: false,
+                            failure: "unknown dependency result type ${dep.class.name}"
+                        ]
+                    }.sort { "${it.from}|${it.requested}|${it.selected}" }
+                    configs << [
+                        projectPath: project.path,
+                        configuration: cfg.name,
+                        components: components,
+                        dependencies: dependencies
+                    ]
+                }
+                def payload = [
+                    schema: "gradle-substrate.resolved-dependency-graph.v1",
+                    project: project.path,
+                    configurations: configs,
+                    opaqueSections: [
+                        "Repository source and checksum policy are not exposed by this Gradle public ResolutionResult export."
+                    ]
+                ]
+                def safeProject = project.path == ":" ? "root" : project.path.replaceAll("[^A-Za-z0-9_.-]+", "_")
+                def outFile = new File(outputRoot, "${safeProject}.json")
+                outFile.parentFile.mkdirs()
+                outFile.text = JsonOutput.prettyPrint(JsonOutput.toJson(payload))
+            }
+        }
+    }
+}
+'''
+
 
 def default_gradle_command() -> str | None:
     """Return an explicit Gradle-under-test command from the environment."""
@@ -350,6 +460,72 @@ def build_gradle_command(
     return cmd
 
 
+def write_resolved_graph_init_script(directory: str) -> str:
+    path = Path(directory) / "rust-substrate-resolved-graph.init.gradle"
+    path.write_text(RESOLVED_GRAPH_INIT_SCRIPT, encoding="utf-8")
+    return str(path)
+
+
+def run_resolved_graph_export(
+    project_dir: str,
+    output_dir: str,
+    substrate: bool,
+    init_script: str,
+    timeout: int,
+    substrate_mode: str = "shadow",
+    daemon_binary: str | None = None,
+    runbuild_authoritative: bool = False,
+    runbuild_native_ready_default: bool = False,
+    gradle_command: str | None = None,
+) -> RunResult:
+    cmd = build_gradle_command(
+        project_dir,
+        substrate=substrate,
+        tasks=[RESOLVED_GRAPH_EXPORT_TASK],
+        substrate_mode=substrate_mode,
+        daemon_binary=daemon_binary,
+        runbuild_authoritative=False,
+        runbuild_native_ready_default=False,
+        gradle_command=gradle_command,
+    )
+    cmd.extend([
+        "-I",
+        init_script,
+        f"-Dorg.gradle.rust.substrate.resolvedGraphOutputDir={output_dir}",
+    ])
+    start = time.monotonic()
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        output = result.stdout + result.stderr
+        return RunResult(
+            exit_code=result.returncode,
+            output=output,
+            tasks=parse_tasks_from_output(result.stdout, output),
+            substrate_noop=substrate and detect_substrate_noop(output),
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
+    except subprocess.TimeoutExpired:
+        return RunResult(
+            exit_code=-1,
+            output="TIMEOUT",
+            tasks=[],
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
+    except Exception as exc:
+        return RunResult(
+            exit_code=-2,
+            output=f"EXCEPTION: {exc}",
+            tasks=[],
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
+
+
 def detect_substrate_noop(output: str) -> bool:
     """Detect when a substrate run fell back to Java/no-op instead of exercising Rust."""
     markers = (
@@ -498,6 +674,114 @@ def diff_declared_dependency_graphs(upstream: dict, substrate: dict) -> dict:
         "mismatches": mismatches,
         "limitations": [
             "This is declared dependency graph parity. It does not prove full Gradle solver parity."
+        ],
+    }
+
+
+def load_single_resolved_graph(graph_dir: str) -> dict:
+    files = sorted(Path(graph_dir).glob("*.json"))
+    if not files:
+        return {
+            "schema": "gradle-substrate.resolved-dependency-graph.v1",
+            "project": "",
+            "configurations": [],
+            "opaqueSections": ["No resolved graph file was emitted."],
+        }
+    if len(files) == 1:
+        return json.loads(files[0].read_text(encoding="utf-8"))
+    return {
+        "schema": "gradle-substrate.resolved-dependency-graph.v1",
+        "project": "multi-project",
+        "configurations": [
+            config
+            for file in files
+            for config in json.loads(file.read_text(encoding="utf-8")).get("configurations", [])
+        ],
+        "opaqueSections": ["Merged multiple project graph export files."],
+    }
+
+
+def normalize_resolved_graph_for_diff(graph: dict) -> dict:
+    configs = []
+    for config in graph.get("configurations", []):
+        components = []
+        for component in config.get("components", []):
+            components.append({
+                "id": component.get("id", ""),
+                "module": component.get("module"),
+                "selectionReason": component.get("selectionReason", ""),
+                "variants": sorted(
+                    [
+                        {
+                            "displayName": variant.get("displayName", ""),
+                            "attributes": dict(sorted((variant.get("attributes") or {}).items())),
+                        }
+                        for variant in component.get("variants", [])
+                    ],
+                    key=lambda item: (item["displayName"], json.dumps(item["attributes"], sort_keys=True)),
+                ),
+                "artifacts": sorted(
+                    [
+                        {
+                            "fileName": artifact.get("fileName", ""),
+                            "id": artifact.get("id", ""),
+                        }
+                        for artifact in component.get("artifacts", [])
+                    ],
+                    key=lambda item: (item["fileName"], item["id"]),
+                ),
+            })
+        dependencies = []
+        for dep in config.get("dependencies", []):
+            dependencies.append({
+                "from": dep.get("from", ""),
+                "requested": dep.get("requested", ""),
+                "selected": dep.get("selected", ""),
+                "constraint": bool(dep.get("constraint", False)),
+                "resolved": bool(dep.get("resolved", False)),
+                "failure": dep.get("failure", ""),
+            })
+        configs.append({
+            "projectPath": config.get("projectPath", ""),
+            "configuration": config.get("configuration", ""),
+            "components": sorted(components, key=lambda item: item["id"]),
+            "dependencies": sorted(
+                dependencies,
+                key=lambda item: (
+                    item["from"],
+                    item["requested"],
+                    item["selected"],
+                    item["failure"],
+                ),
+            ),
+        })
+    return {
+        "schema": graph.get("schema", "gradle-substrate.resolved-dependency-graph.v1"),
+        "configurations": sorted(
+            configs,
+            key=lambda item: (item["projectPath"], item["configuration"]),
+        ),
+    }
+
+
+def diff_resolved_dependency_graphs(upstream: dict, substrate: dict) -> dict:
+    upstream_normalized = normalize_resolved_graph_for_diff(upstream)
+    substrate_normalized = normalize_resolved_graph_for_diff(substrate)
+    mismatches = []
+    if upstream_normalized["configurations"] != substrate_normalized["configurations"]:
+        mismatches.append({
+            "category": "resolved-graph",
+            "upstream": upstream_normalized["configurations"],
+            "substrate": substrate_normalized["configurations"],
+        })
+    return {
+        "schema": "gradle-substrate.resolved-dependency-graph-diff.v1",
+        "match": not mismatches,
+        "mismatches": mismatches,
+        "limitations": [
+            "This compares Gradle public ResolutionResult exports from reference and substrate invocations.",
+            "It does not yet compare against a direct Rust dependency solver export.",
+            "Repository source and checksum policy are not exposed by this graph export.",
         ],
     }
 
@@ -676,6 +960,8 @@ def main():
     parser.add_argument("--output-dir", default=None, help="Directory for results")
     parser.add_argument("--dependency-graph-parity", action="store_true",
                        help="Emit and compare lightweight declared dependency graph JSON artifacts")
+    parser.add_argument("--resolved-dependency-graph-parity", action="store_true",
+                       help="Emit and compare Gradle public ResolutionResult graph JSON artifacts")
     
     args = parser.parse_args()
     
@@ -707,6 +993,12 @@ def main():
         sys.exit(1)
     
     results = {}
+    temp_context = tempfile.TemporaryDirectory() if args.resolved_dependency_graph_parity else None
+    resolved_graph_init_script = (
+        write_resolved_graph_init_script(temp_context.name)
+        if temp_context is not None
+        else None
+    )
     
     for project_entry in projects:
         project = project_entry["resolved_path"]
@@ -771,6 +1063,65 @@ def main():
             }
             checks["dependency_graph_parity"] = graph_diff["match"]
             checks["match"] = checks["match"] and graph_diff["match"]
+        resolved_graph_paths = {}
+        resolved_graph_diff = None
+        resolved_graph_runs = None
+        if args.resolved_dependency_graph_parity:
+            output_dir = args.output_dir or "."
+            graph_dir = Path(output_dir) / "resolved-dependency-graphs" / project_name
+            upstream_dir = graph_dir / "upstream"
+            substrate_dir = graph_dir / "substrate"
+            upstream_dir.mkdir(parents=True, exist_ok=True)
+            substrate_dir.mkdir(parents=True, exist_ok=True)
+            upstream_graph_run = run_resolved_graph_export(
+                project,
+                str(upstream_dir),
+                substrate=False,
+                init_script=resolved_graph_init_script,
+                timeout=args.timeout,
+                gradle_command=args.gradle_command,
+            )
+            substrate_graph_run = run_resolved_graph_export(
+                project,
+                str(substrate_dir),
+                substrate=True,
+                init_script=resolved_graph_init_script,
+                timeout=args.timeout,
+                substrate_mode=args.substrate_mode,
+                daemon_binary=args.daemon_binary,
+                runbuild_authoritative=args.runbuild_authoritative,
+                runbuild_native_ready_default=args.runbuild_native_ready_default,
+                gradle_command=args.gradle_command,
+            )
+            upstream_resolved_graph = load_single_resolved_graph(str(upstream_dir))
+            substrate_resolved_graph = load_single_resolved_graph(str(substrate_dir))
+            resolved_graph_diff = diff_resolved_dependency_graphs(
+                upstream_resolved_graph,
+                substrate_resolved_graph,
+            )
+            upstream_path = graph_dir / "upstream-resolved-graph.json"
+            substrate_path = graph_dir / "substrate-resolved-graph.json"
+            diff_path = graph_dir / "resolved-graph-diff.json"
+            upstream_path.write_text(json.dumps(upstream_resolved_graph, indent=2) + "\n", encoding="utf-8")
+            substrate_path.write_text(json.dumps(substrate_resolved_graph, indent=2) + "\n", encoding="utf-8")
+            diff_path.write_text(json.dumps(resolved_graph_diff, indent=2) + "\n", encoding="utf-8")
+            resolved_graph_paths = {
+                "upstream_resolved_graph": str(upstream_path),
+                "substrate_resolved_graph": str(substrate_path),
+                "resolved_graph_diff": str(diff_path),
+            }
+            resolved_graph_runs = {
+                "upstream": upstream_graph_run.to_dict(),
+                "substrate": substrate_graph_run.to_dict(),
+            }
+            resolved_graph_ok = (
+                upstream_graph_run.exit_code == 0
+                and substrate_graph_run.exit_code == 0
+                and not substrate_graph_run.substrate_noop
+                and resolved_graph_diff["match"]
+            )
+            checks["resolved_dependency_graph_parity"] = resolved_graph_ok
+            checks["match"] = checks["match"] and resolved_graph_ok
         
         results[project_name] = {
             "upstream": upstream.to_dict(),
@@ -781,6 +1132,10 @@ def main():
         if args.dependency_graph_parity:
             results[project_name]["dependency_graph_paths"] = graph_paths
             results[project_name]["dependency_graph_diff"] = graph_diff
+        if args.resolved_dependency_graph_parity:
+            results[project_name]["resolved_dependency_graph_paths"] = resolved_graph_paths
+            results[project_name]["resolved_dependency_graph_diff"] = resolved_graph_diff
+            results[project_name]["resolved_dependency_graph_runs"] = resolved_graph_runs
         if expected_fail_closed:
             results[project_name]["expected_substrate_fail_closed"] = True
         if substrate.substrate_noop and not args.allow_noop_substrate:
@@ -840,6 +1195,9 @@ def main():
     print()
     print_summary(summary)
     
+    if temp_context is not None:
+        temp_context.cleanup()
+
     sys.exit(0 if failed == 0 else 1)
 
 if __name__ == "__main__":
