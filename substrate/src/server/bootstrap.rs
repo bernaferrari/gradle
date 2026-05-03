@@ -9,6 +9,7 @@ use super::build_event_stream::BuildEventStreamServiceImpl;
 use super::build_plan_ir::from_proto;
 use super::build_plan_shadow::{capture_and_persist_shadow_from_jvm, BuildPlanShadowStore};
 use super::scopes::{BuildId, ScopeRegistry, SessionId};
+use super::typed_scopes::ScopeGuard;
 use crate::client::jvm_host_bridge::JvmHostBridge;
 use crate::proto::{
     bootstrap_service_server::BootstrapService, BuildEventMessage, CompleteBuildRequest,
@@ -32,6 +33,10 @@ struct BuildSession {
 /// Coordinates Gradle initialization and provides the final JVM-Rust handoff.
 pub struct BootstrapServiceImpl {
     sessions: DashMap<BuildId, BuildSession>,
+    /// RAII guards for active builds. When a guard is dropped (removed from this map),
+    /// it automatically calls `ScopeRegistry::cleanup_build()` to release all
+    /// scope-tracked state for that build.
+    scope_guards: DashMap<BuildId, ScopeGuard>,
     request_counts: DashMap<String, AtomicI64>,
     start_time: Instant,
     health_status: std::sync::atomic::AtomicBool,
@@ -51,6 +56,7 @@ impl BootstrapServiceImpl {
     pub fn new() -> Self {
         Self {
             sessions: DashMap::new(),
+            scope_guards: DashMap::new(),
             request_counts: DashMap::new(),
             start_time: Instant::now(),
             health_status: std::sync::atomic::AtomicBool::new(true),
@@ -64,6 +70,7 @@ impl BootstrapServiceImpl {
     pub fn with_scope_registry(scope_registry: Arc<ScopeRegistry>) -> Self {
         Self {
             sessions: DashMap::new(),
+            scope_guards: DashMap::new(),
             request_counts: DashMap::new(),
             start_time: Instant::now(),
             health_status: std::sync::atomic::AtomicBool::new(true),
@@ -81,6 +88,7 @@ impl BootstrapServiceImpl {
     ) -> Self {
         Self {
             sessions: DashMap::new(),
+            scope_guards: DashMap::new(),
             request_counts: DashMap::new(),
             start_time: Instant::now(),
             health_status: std::sync::atomic::AtomicBool::new(true),
@@ -154,16 +162,26 @@ impl BootstrapService for BootstrapServiceImpl {
             },
         );
 
-        // Register build in scope registry if session_id is provided
+        // Register build in scope registry. When the caller provides a session_id
+        // (e.g., from a Gradle session), use it directly. When session_id is empty
+        // (e.g., RustBootstrapClient which does not send one), synthesize a session
+        // from the build_id so the build is always registered and downstream services
+        // like DagExecutorServiceImpl can validate scope membership.
         if let Some(ref registry) = self.scope_registry {
-            if !req.session_id.is_empty() {
-                registry.register_build(SessionId::from(req.session_id.clone()), build_id.clone());
-                tracing::debug!(
-                    build_id = %build_id_str,
-                    session_id = %req.session_id,
-                    "Registered build in scope registry"
-                );
-            }
+            let session_id = if req.session_id.is_empty() {
+                SessionId::from(format!("__synth__{}", build_id_str))
+            } else {
+                SessionId::from(req.session_id.clone())
+            };
+            registry.register_build(session_id.clone(), build_id.clone());
+            let guard = ScopeGuard::new(Arc::clone(registry), build_id.clone());
+            self.scope_guards.insert(build_id.clone(), guard);
+            tracing::debug!(
+                build_id = %build_id_str,
+                session_id = %session_id,
+                synthetic = req.session_id.is_empty(),
+                "Registered build in scope registry with RAII guard"
+            );
         }
 
         // Shadow capture path: once a build is initialized and the JVM host is connected,
@@ -302,8 +320,12 @@ impl BootstrapService for BootstrapServiceImpl {
             event_stream.cleanup_build(&build_id);
         }
 
-        // Clean up scope registry
-        if let Some(ref registry) = self.scope_registry {
+        // Clean up scope registry: dropping the ScopeGuard triggers RAII cleanup
+        // via ScopeRegistry::cleanup_build(). This also cleans up tree associations.
+        if let Some((_id, _guard)) = self.scope_guards.remove(&build_id) {
+            tracing::debug!(build_id = %req.build_id, "Dropped scope guard, build cleaned up");
+        } else if let Some(ref registry) = self.scope_registry {
+            // Fallback: no guard was created (e.g., no session_id was provided)
             registry.cleanup_build(&build_id);
         }
 
@@ -986,5 +1008,229 @@ mod tests {
             .unwrap()
             .into_inner();
         assert_eq!(health_final.active_builds, 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Scope registration tests (nki.2): production-path bootstrap→DAG flow
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_scope_registration_with_explicit_session_id() {
+        let registry = Arc::new(ScopeRegistry::new());
+        let svc = BootstrapServiceImpl::with_scope_registry(Arc::clone(&registry));
+
+        svc.init_build(Request::new(InitBuildRequest {
+            build_id: "build-explicit".to_string(),
+            project_dir: "/tmp".to_string(),
+            start_time_ms: 0,
+            requested_parallelism: 4,
+            system_properties: Default::default(),
+            requested_features: vec![],
+            session_id: "session-42".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        assert_eq!(
+            registry.session_for_build(&BuildId::from("build-explicit".to_string())),
+            Some(SessionId::from("session-42".to_string()))
+        );
+        assert!(svc
+            .scope_guards
+            .contains_key(&BuildId::from("build-explicit".to_string())));
+    }
+
+    #[tokio::test]
+    async fn test_scope_registration_synthesizes_session_when_empty() {
+        let registry = Arc::new(ScopeRegistry::new());
+        let svc = BootstrapServiceImpl::with_scope_registry(Arc::clone(&registry));
+
+        svc.init_build(Request::new(InitBuildRequest {
+            build_id: "build-synth".to_string(),
+            project_dir: "/tmp".to_string(),
+            start_time_ms: 0,
+            requested_parallelism: 4,
+            system_properties: Default::default(),
+            requested_features: vec![],
+            session_id: String::new(),
+        }))
+        .await
+        .unwrap();
+
+        let session = registry
+            .session_for_build(&BuildId::from("build-synth".to_string()))
+            .expect("build should be registered even with empty session_id");
+        assert!(
+            session.0.starts_with("__synth__"),
+            "synthesized session should have __synth__ prefix, got: {}",
+            session.0
+        );
+        assert!(svc
+            .scope_guards
+            .contains_key(&BuildId::from("build-synth".to_string())));
+    }
+
+    #[tokio::test]
+    async fn test_scope_cleanup_on_complete_build() {
+        let registry = Arc::new(ScopeRegistry::new());
+        let svc = BootstrapServiceImpl::with_scope_registry(Arc::clone(&registry));
+
+        svc.init_build(Request::new(InitBuildRequest {
+            build_id: "build-cleanup".to_string(),
+            project_dir: "/tmp".to_string(),
+            start_time_ms: 0,
+            requested_parallelism: 4,
+            system_properties: Default::default(),
+            requested_features: vec![],
+            session_id: "session-cleanup".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        assert!(registry
+            .session_for_build(&BuildId::from("build-cleanup".to_string()))
+            .is_some());
+
+        svc.complete_build(Request::new(CompleteBuildRequest {
+            build_id: "build-cleanup".to_string(),
+            outcome: "SUCCESS".to_string(),
+            duration_ms: 100,
+        }))
+        .await
+        .unwrap();
+
+        assert!(
+            registry
+                .session_for_build(&BuildId::from("build-cleanup".to_string()))
+                .is_none(),
+            "scope should be cleaned up after complete_build"
+        );
+        assert!(
+            !svc.scope_guards
+                .contains_key(&BuildId::from("build-cleanup".to_string())),
+            "scope guard should be removed after complete_build"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_no_scope_registration_without_scope_registry() {
+        let svc = BootstrapServiceImpl::new();
+
+        let resp = svc
+            .init_build(Request::new(InitBuildRequest {
+                build_id: "build-no-reg".to_string(),
+                project_dir: "/tmp".to_string(),
+                start_time_ms: 0,
+                requested_parallelism: 4,
+                system_properties: Default::default(),
+                requested_features: vec![],
+                session_id: "session-irrelevant".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.build_id, "build-no-reg");
+        assert!(svc.scope_guards.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_dag_rejects_unregistered_build_with_scope_registry() {
+        use crate::proto::dag_executor_service_server::DagExecutorService;
+        use crate::proto::StartBuildRequest;
+        use crate::server::dag_executor::DagExecutorServiceImpl;
+        use crate::server::execution_plan::ExecutionPlanServiceImpl;
+        use crate::server::task_graph::TaskGraphServiceImpl;
+        use crate::server::work::WorkerScheduler;
+
+        let registry = Arc::new(ScopeRegistry::new());
+        let dag = DagExecutorServiceImpl::new(
+            Arc::new(WorkerScheduler::new(4)),
+            Arc::new(TaskGraphServiceImpl::new()),
+            Arc::new(ExecutionPlanServiceImpl::default()),
+            Vec::new(),
+        )
+        .with_scope_registry(Arc::clone(&registry));
+
+        assert!(registry
+            .session_for_build(&BuildId::from("never-registered".to_string()))
+            .is_none());
+
+        let result: Result<Response<crate::proto::StartBuildResponse>, Status> = dag
+            .start_build(Request::new(StartBuildRequest {
+                build_id: "never-registered".to_string(),
+                ..Default::default()
+            }))
+            .await;
+
+        let err = result.expect_err("start_build should reject unregistered scoped builds");
+        assert_eq!(err.code(), tonic::Code::NotFound);
+        assert!(registry
+            .session_for_build(&BuildId::from("never-registered".to_string()))
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn test_dag_accepts_registered_build_after_bootstrap_init() {
+        use crate::proto::dag_executor_service_server::DagExecutorService;
+        use crate::proto::StartBuildRequest;
+        use crate::server::dag_executor::DagExecutorServiceImpl;
+        use crate::server::execution_plan::ExecutionPlanServiceImpl;
+        use crate::server::task_graph::TaskGraphServiceImpl;
+        use crate::server::work::WorkerScheduler;
+
+        let registry = Arc::new(ScopeRegistry::new());
+
+        let bootstrap = BootstrapServiceImpl::with_scope_registry(Arc::clone(&registry));
+        let dag = DagExecutorServiceImpl::new(
+            Arc::new(WorkerScheduler::new(4)),
+            Arc::new(TaskGraphServiceImpl::new()),
+            Arc::new(ExecutionPlanServiceImpl::default()),
+            Vec::new(),
+        )
+        .with_scope_registry(Arc::clone(&registry));
+
+        bootstrap
+            .init_build(Request::new(InitBuildRequest {
+                build_id: "build-integrated".to_string(),
+                project_dir: "/tmp".to_string(),
+                start_time_ms: 0,
+                requested_parallelism: 4,
+                system_properties: Default::default(),
+                requested_features: vec![],
+                session_id: String::new(),
+            }))
+            .await
+            .unwrap();
+
+        assert!(registry
+            .session_for_build(&BuildId::from("build-integrated".to_string()))
+            .is_some());
+
+        let result: Result<Response<crate::proto::StartBuildResponse>, Status> = dag
+            .start_build(Request::new(StartBuildRequest {
+                build_id: "build-integrated".to_string(),
+                ..Default::default()
+            }))
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "start_build should accept a build registered by bootstrap, got: {:?}",
+            result
+        );
+
+        bootstrap
+            .complete_build(Request::new(CompleteBuildRequest {
+                build_id: "build-integrated".to_string(),
+                outcome: "SUCCESS".to_string(),
+                duration_ms: 100,
+            }))
+            .await
+            .unwrap();
+
+        assert!(registry
+            .session_for_build(&BuildId::from("build-integrated".to_string()))
+            .is_none());
     }
 }

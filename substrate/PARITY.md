@@ -511,6 +511,36 @@
 - `./tools/stabilization/run_strict_stabilization.sh quick`
 - `./tools/demo/rust_substrate_demo.sh --quick`
 
+## Post-Roadmap Hardening (nki)
+
+Scope-registry regression fixed: `BootstrapServiceImpl.init_build` now owns
+build registration in `ScopeRegistry` and its `ScopeGuard` cleanup lifecycle,
+synthesizing a `__synth__{build_id}` session only for Java clients that do not
+provide one. RunBuild modes now enable the bootstrap lifecycle automatically so
+`BuildIdHolder` is populated before task-graph capture when that lifecycle is
+available; the authoritative `BuildWorkExecutor` also lazily initializes a
+scoped Rust build id when the lifecycle holder is empty, refreshes the finalized
+plan under that id, and completes the scope after Rust execution. `DagExecutorServiceImpl.start_build`
+rejects unregistered builds when scope validation is enabled, rather than
+auto-registering synthetic scopes, and `BuildInitServiceImpl` no longer creates
+DAG-visible scope entries without a completion guard.
+
+Authoritative parity gates after fix (2026-05-03):
+
+| Gate | Result | Command |
+|------|--------|---------|
+| Supported corpus | 26/26 matched, 232/232 task parity | `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command $GRADLE_UNDER_TEST/bin/gradle --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --output-dir build/corpus-authoritative-scope-contract-2` |
+| External corpus | 2/2 matched, 25/25 task parity | `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --gradle-command $GRADLE_UNDER_TEST/bin/gradle --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --output-dir build/corpus-external-scope-contract-2` |
+| Unsupported contract | 2/2 passed | `python3 tools/corpus_runner/run.py --manifest testing/corpus/unsupported-manifest.json --contract-only --output-dir build/corpus-contract-unsupported-scope-contract-2` |
+| Unit tests | 1584 passed, 0 failed, 3 ignored | `cargo test -p gradle-substrate-daemon --lib` |
+| Focused JVM tests | Passed | `./gradlew :core:test --tests org.gradle.execution.RustAuthoritativeBuildExecutionActionTest :rust-bridge:test --tests org.gradle.internal.rustbridge.taskgraph.TaskGraphShadowListenerTest --no-daemon --console=plain` |
+| Integration tests | 49 passed, 2 pre-existing failures | `cargo test --test integration_test` |
+
+Audit of closed roadmap (dyy.1–dyy.20): 18/21 verified against committed code and
+corpus parity, 3/21 partially verified (dependency solver complex scenarios,
+publication/signing completeness, Tooling API/IDE shim). No critical overclaims.
+Partially verified areas are documented as non-hot-path in the native-ready contract policy.
+
 ## Next Sync Actions
 
 1. Execute Beads roadmap `gradle-fork-dyy`: Rust owns CLI launch, daemon state,

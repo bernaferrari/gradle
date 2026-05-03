@@ -326,7 +326,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(execution_plan.clone()),
         event_dispatchers,
     )
-    .with_jvm_host_bridge(Arc::clone(&jvm_bridge));
+    .with_jvm_host_bridge(Arc::clone(&jvm_bridge))
+    .with_scope_registry(Arc::clone(&scope_registry));
 
     // Phase 25: Worker process management
     let worker_process = WorkerProcessServiceImpl::new();
