@@ -47,6 +47,15 @@ python3 tools/corpus_runner/run.py \
   --daemon-binary target/debug/gradle-substrate-daemon \
   --runbuild-authoritative
 
+# Run the networked corpus with declared dependency graph parity artifacts
+python3 tools/corpus_runner/run.py \
+  --manifest testing/corpus/external-manifest.json \
+  --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" \
+  --daemon-binary target/debug/gradle-substrate-daemon \
+  --runbuild-authoritative \
+  --dependency-graph-parity \
+  --output-dir build/corpus-external-with-graphs
+
 # Run with verbose output
 python3 tools/corpus_runner/run.py --project /path/to/project --verbose
 ```
@@ -65,6 +74,7 @@ It then compares:
 - Non-archive output hashes
 - Archive entry inventories
 - No-fallback substrate execution
+- Optional declared dependency graph parity
 - Build duration (informational only)
 
 The substrate candidate is considered invalid if Gradle reports that it used
@@ -103,6 +113,20 @@ and validates deterministic build-plan signals such as plugins, declared tasks,
 declared outputs, source files, external dependencies, project dependencies, and
 Java toolchain declarations. This is suitable for quick CI gates and keeps the
 corpus useful without network access.
+
+`--dependency-graph-parity` emits lightweight declared dependency graph
+artifacts for each project under
+`<output-dir>/dependency-graphs/<project-name>/`:
+
+- `upstream-declared-graph.json`
+- `substrate-declared-graph.json`
+- `declared-graph-diff.json`
+
+The diff participates in the project match result and fails the run when
+declared dependency coordinates or unsupported feature markers drift. This is a
+guardrail for runner/corpus honesty, not full resolved Gradle solver parity: it
+does not prove repository selection, variant/capability selection, artifact
+files, checksums, or rich conflict-resolution semantics.
 
 ## Corpus Structure
 
