@@ -589,6 +589,7 @@ impl DagExecutorServiceImpl {
                 KernelTaskPlan {
                     task_path: slot.task_path.clone(),
                     task_type: slot.task_type.clone(),
+                    dependencies: slot.dependencies.clone(),
                     execution_context_json,
                 }
             })
