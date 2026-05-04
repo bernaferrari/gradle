@@ -1926,9 +1926,10 @@ impl DependencyResolutionServiceImpl {
         &self,
         dep: &DependencyDescriptor,
         repos: &[RepositoryDescriptor],
+        lenient: bool,
     ) -> ResolvedDependency {
         let mut visited = std::collections::HashSet::with_capacity(64);
-        self.resolve_recursive(dep, repos, &mut visited, 0, &[])
+        self.resolve_recursive(dep, repos, &mut visited, 0, &[], lenient)
             .await
     }
 
@@ -1944,6 +1945,7 @@ impl DependencyResolutionServiceImpl {
         visited: &mut std::collections::HashSet<(String, String)>,
         depth: u32,
         inherited_exclusions: &[(String, String)],
+        lenient: bool,
     ) -> ResolvedDependency {
         const MAX_DEPTH: u32 = 50;
 
@@ -2062,6 +2064,7 @@ impl DependencyResolutionServiceImpl {
                     visited,
                     depth,
                     inherited_exclusions,
+                    lenient,
                 )
                 .await
             {
@@ -2246,6 +2249,7 @@ impl DependencyResolutionServiceImpl {
         visited: &mut std::collections::HashSet<(String, String)>,
         depth: u32,
         inherited_exclusions: &[(String, String)],
+        lenient: bool,
     ) -> Result<TransitiveResolution, String> {
         for repo in repos
             .iter()
@@ -2286,6 +2290,7 @@ impl DependencyResolutionServiceImpl {
                                     visited,
                                     depth + 1,
                                     inherited_exclusions,
+                                    lenient,
                                 ))
                                 .await;
                                 transitive_deps.push(resolved);
@@ -2482,6 +2487,7 @@ impl DependencyResolutionServiceImpl {
                             visited,
                             depth + 1,
                             effective_exclusions,
+                            lenient,
                         ))
                         .await;
                         transitive_deps.push(resolved);
@@ -2516,22 +2522,22 @@ impl DependencyResolutionServiceImpl {
                 }
             }
         }
-        if depth == 0 {
-            Err(format!(
-                "No Gradle Module Metadata or Maven POM found for {group}:{name}:{version} in configured repositories"
-            ))
-        } else {
+        if lenient {
             tracing::debug!(
                 group = %group,
                 name = %name,
                 version = %version,
                 depth,
-                "No module metadata found for transitive dependency; preserving existing artifact-only tolerance"
+                "No module metadata found; preserving lenient artifact-only tolerance"
             );
             Ok(TransitiveResolution {
                 dependencies: Vec::new(),
                 source_repo_url: None,
             })
+        } else {
+            Err(format!(
+                "No Gradle Module Metadata or Maven POM found for {group}:{name}:{version} in configured repositories"
+            ))
         }
     }
 
@@ -2732,7 +2738,9 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             } else {
                 dep
             };
-            let mut result = self.resolve_descriptor(effective_dep, &repos).await;
+            let mut result = self
+                .resolve_descriptor(effective_dep, &repos, req.lenient)
+                .await;
             // Propagate scope from the request descriptor
             if !dep.scope.is_empty() {
                 result.scope = dep.scope.clone();
@@ -5056,6 +5064,123 @@ mod tests {
         assert_eq!(response.resolved_dependencies.len(), 1);
         assert!(!response.resolved_dependencies[0].resolved);
         assert_eq!(requests.lock().unwrap().len(), 1);
+    }
+
+    async fn resolve_missing_transitive_metadata(
+        lenient: bool,
+    ) -> (ResolveDependenciesResponse, Vec<String>) {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::{Arc, Mutex};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let requests_for_server = Arc::clone(&requests);
+        let root_pom = br#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.example</groupId>
+  <artifactId>root</artifactId>
+  <version>1.0</version>
+  <dependencies>
+    <dependency>
+      <groupId>org.example</groupId>
+      <artifactId>missing-child</artifactId>
+      <version>1.0</version>
+    </dependency>
+  </dependencies>
+</project>"#
+            .to_vec();
+        let server = std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            while requests_for_server.lock().unwrap().len() < 2
+                && started.elapsed() < std::time::Duration::from_secs(5)
+            {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(stream) => stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                    Err(error) => panic!("repo accept failed: {error}"),
+                };
+                let mut request = [0u8; 2048];
+                let read = stream.read(&mut request).unwrap_or(0);
+                let request_text = String::from_utf8_lossy(&request[..read]);
+                let path = request_text
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("/")
+                    .to_string();
+                let request_index = {
+                    let mut requests = requests_for_server.lock().unwrap();
+                    let request_index = requests.len();
+                    requests.push(path);
+                    request_index
+                };
+                if request_index == 0 {
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/xml\r\n\r\n",
+                        root_pom.len()
+                    );
+                    stream.write_all(response.as_bytes()).unwrap();
+                    stream.write_all(&root_pom).unwrap();
+                } else {
+                    stream
+                        .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
+                        .unwrap();
+                }
+            }
+        });
+
+        let svc = make_svc();
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "runtimeClasspath".to_string(),
+                dependencies: vec![make_dep("org.example", "root", "1.0")],
+                repositories: vec![make_repo("repo", &format!("http://{}", addr))],
+                attributes: vec![],
+                lenient,
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        server.join().unwrap();
+
+        let requests = requests.lock().unwrap().clone();
+        (response, requests)
+    }
+
+    #[tokio::test]
+    async fn test_missing_transitive_module_metadata_fails_closed_in_strict_mode() {
+        let (response, requests) = resolve_missing_transitive_metadata(false).await;
+
+        assert!(!response.success);
+        assert!(
+            response.error_message.contains(
+                "No Gradle Module Metadata or Maven POM found for org.example:missing-child:1.0"
+            ),
+            "{}",
+            response.error_message
+        );
+        assert_eq!(requests.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_missing_transitive_module_metadata_is_tolerated_only_when_lenient() {
+        let (response, requests) = resolve_missing_transitive_metadata(true).await;
+
+        assert!(response.success, "{}", response.error_message);
+        assert_eq!(response.resolved_dependencies.len(), 1);
+        assert_eq!(response.resolved_dependencies[0].dependencies.len(), 1);
+        assert_eq!(
+            response.resolved_dependencies[0].dependencies[0].name,
+            "missing-child"
+        );
+        assert_eq!(requests.len(), 2);
     }
 
     #[tokio::test]
