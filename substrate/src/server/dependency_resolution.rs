@@ -17,6 +17,7 @@ use crate::proto::{
     VerifyDependencyChecksumsResponse,
 };
 
+use super::dependency_solver::gradle_module_metadata::{self, ModuleMetadataSelection};
 use super::dependency_solver::ivyresolve::strategy::compare_versions;
 use super::dependency_solver::maven_pom;
 pub use super::dependency_solver::maven_pom::{ManagedDependency, PomDependency};
@@ -245,6 +246,22 @@ impl DependencyResolutionServiceImpl {
             Self::normalize_extension(extension).as_str(),
             "pom" | "module" | "ivy" | "maven-metadata.xml"
         )
+    }
+
+    fn supports_gradle_module_metadata(repo: &RepositoryDescriptor) -> bool {
+        matches!(repo.layout.as_str(), "gradle-module-metadata" | "gradle")
+    }
+
+    fn first_unresolved_reason(dependencies: &[ResolvedDependency]) -> Option<String> {
+        for dep in dependencies {
+            if !dep.resolved {
+                return Some(dep.failure_reason.clone());
+            }
+            if let Some(reason) = Self::first_unresolved_reason(&dep.dependencies) {
+                return Some(reason);
+            }
+        }
+        None
     }
 
     fn maven_artifact_shape(classifier: &str, type_field: &str) -> (String, String) {
@@ -1097,6 +1114,104 @@ impl DependencyResolutionServiceImpl {
         }
     }
 
+    async fn fetch_gradle_module_metadata(
+        &self,
+        group: &str,
+        name: &str,
+        version: &str,
+        repo: &RepositoryDescriptor,
+    ) -> Result<Option<String>, String> {
+        let extension = "module";
+        let classifier = "";
+        let key = Self::metadata_cache_key(repo, group, name, version, extension);
+        let cache_path = self.metadata_path(repo, group, name, version, extension);
+        let group_path = Self::group_to_path(group);
+        let path = format!(
+            "{}/{}/{}/{}-{}.module",
+            group_path, name, version, name, version
+        );
+        let url = self
+            .build_request(repo, &path)
+            .build()
+            .map_err(|e| format!("Failed to build Gradle Module Metadata request: {e}"))?
+            .url()
+            .to_string();
+        let url_key = Self::metadata_url_cache_key(&url, extension);
+        let url_cache_path = self.metadata_url_path(&url, extension);
+        if let Some(cached) = self
+            .read_cached_text_artifact(
+                &key,
+                &cache_path,
+                group,
+                name,
+                version,
+                classifier,
+                extension,
+            )
+            .await
+        {
+            tracing::info!(group = %group, name = %name, version = %version, source = "rust_cache", "Gradle Module Metadata cache hit");
+            return Ok(Some(cached));
+        }
+        if let Some(cached) = self
+            .read_cached_text_artifact(
+                &url_key,
+                &url_cache_path,
+                group,
+                name,
+                version,
+                classifier,
+                extension,
+            )
+            .await
+        {
+            tracing::info!(group = %group, name = %name, version = %version, source = "url_cache", "Gradle Module Metadata cache hit");
+            return Ok(Some(cached));
+        }
+
+        let response = self
+            .build_request(repo, &path)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to fetch Gradle Module Metadata: {e}"))?;
+
+        match response.status().as_u16() {
+            200 => {
+                let content = response
+                    .text()
+                    .await
+                    .map_err(|e| format!("Failed to read Gradle Module Metadata response: {e}"))?;
+                self.persist_text_artifact(
+                    &key,
+                    &cache_path,
+                    group,
+                    name,
+                    version,
+                    classifier,
+                    extension,
+                    &content,
+                )
+                .await?;
+                self.persist_text_artifact_alias(
+                    &url_key,
+                    &url_cache_path,
+                    &cache_path,
+                    group,
+                    name,
+                    version,
+                    classifier,
+                    extension,
+                    &content,
+                )
+                .await?;
+                tracing::info!(group = %group, name = %name, version = %version, source = "remote_fetch", url = %url, "Gradle Module Metadata fetched from remote");
+                Ok(Some(content))
+            }
+            404 => Ok(None),
+            status => Err(format!("HTTP {status} for Gradle Module Metadata")),
+        }
+    }
+
     fn artifact_url_for_descriptor(
         repo_base: &str,
         group: &str,
@@ -1854,16 +1969,37 @@ impl DependencyResolutionServiceImpl {
 
         // Fetch POM and resolve transitive dependencies
         let transitive_deps = if dep.transitive && depth < MAX_DEPTH {
-            self.fetch_and_resolve_transitive(
-                &group,
-                &name,
-                &selected_version,
-                repos,
-                visited,
-                depth,
-                inherited_exclusions,
-            )
-            .await
+            match self
+                .fetch_and_resolve_transitive(
+                    &group,
+                    &name,
+                    &selected_version,
+                    &scope,
+                    repos,
+                    visited,
+                    depth,
+                    inherited_exclusions,
+                )
+                .await
+            {
+                Ok(dependencies) => dependencies,
+                Err(reason) => {
+                    visited.remove(&coord);
+                    return ResolvedDependency {
+                        group,
+                        name,
+                        version: raw_version.clone(),
+                        selected_version,
+                        dependencies: Vec::new(),
+                        resolved: false,
+                        failure_reason: reason,
+                        artifact_url: String::new(),
+                        artifact_size: 0,
+                        artifact_sha256: String::new(),
+                        scope,
+                    };
+                }
+            }
         } else {
             Vec::new()
         };
@@ -1994,11 +2130,75 @@ impl DependencyResolutionServiceImpl {
         group: &str,
         name: &str,
         version: &str,
+        scope: &str,
         repos: &[RepositoryDescriptor],
         visited: &mut std::collections::HashSet<(String, String)>,
         depth: u32,
         inherited_exclusions: &[(String, String)],
-    ) -> Vec<ResolvedDependency> {
+    ) -> Result<Vec<ResolvedDependency>, String> {
+        for repo in repos
+            .iter()
+            .filter(|repo| Self::supports_gradle_module_metadata(repo))
+        {
+            match self
+                .fetch_gradle_module_metadata(group, name, version, repo)
+                .await
+            {
+                Ok(Some(module_metadata)) => {
+                    let selection = gradle_module_metadata::select_jvm_variant(
+                        &module_metadata,
+                        scope,
+                        group,
+                        name,
+                        version,
+                    )?;
+                    match selection {
+                        Some(ModuleMetadataSelection::Selected(variant)) => {
+                            let mut transitive_deps =
+                                Vec::with_capacity(variant.dependencies.len());
+                            for module_dep in &variant.dependencies {
+                                let child_dep = DependencyDescriptor {
+                                    group: module_dep.group.clone(),
+                                    name: module_dep.module.clone(),
+                                    version: module_dep.version.clone(),
+                                    classifier: String::new(),
+                                    extension: "jar".to_string(),
+                                    transitive: true,
+                                    scope: scope.to_string(),
+                                    changing: false,
+                                    optional: false,
+                                    ivy_conf: String::new(),
+                                };
+                                let resolved = Box::pin(self.resolve_recursive(
+                                    &child_dep,
+                                    repos,
+                                    visited,
+                                    depth + 1,
+                                    inherited_exclusions,
+                                ))
+                                .await;
+                                transitive_deps.push(resolved);
+                            }
+                            Self::resolve_conflicts(&mut transitive_deps);
+                            tracing::debug!(
+                                group = %group,
+                                name = %name,
+                                version = %version,
+                                variant = %variant.name,
+                                transitive = transitive_deps.len(),
+                                "Resolved transitive dependencies from Gradle Module Metadata"
+                            );
+                            return Ok(transitive_deps);
+                        }
+                        Some(ModuleMetadataSelection::Unsupported(reason)) => return Err(reason),
+                        None => {}
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => return Err(error),
+            }
+        }
+
         for repo in repos {
             match self.fetch_pom(group, name, version, repo).await {
                 Ok(pom_content) => {
@@ -2186,7 +2386,7 @@ impl DependencyResolutionServiceImpl {
                         depth
                     );
 
-                    return transitive_deps;
+                    return Ok(transitive_deps);
                 }
                 Err(e) => {
                     tracing::debug!(
@@ -2199,7 +2399,7 @@ impl DependencyResolutionServiceImpl {
                 }
             }
         }
-        Vec::new()
+        Ok(Vec::new())
     }
 
     /// Download an artifact with retry logic.
@@ -2389,7 +2589,17 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
 
         let mut resolved = Vec::with_capacity(req.dependencies.len());
         for dep in &req.dependencies {
-            let mut result = self.resolve_descriptor(dep, &repos).await;
+            let dep_for_resolution;
+            let effective_dep = if dep.scope.is_empty() && !req.target_scope.is_empty() {
+                dep_for_resolution = DependencyDescriptor {
+                    scope: req.target_scope.clone(),
+                    ..dep.clone()
+                };
+                &dep_for_resolution
+            } else {
+                dep
+            };
+            let mut result = self.resolve_descriptor(effective_dep, &repos).await;
             // Propagate scope from the request descriptor
             if !dep.scope.is_empty() {
                 result.scope = dep.scope.clone();
@@ -2397,11 +2607,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             resolved.push(result);
         }
 
-        if let Some(error_message) = resolved
-            .iter()
-            .find(|dep| !dep.resolved)
-            .map(|dep| dep.failure_reason.clone())
-        {
+        if let Some(error_message) = Self::first_unresolved_reason(&resolved) {
             let elapsed = start.elapsed().as_millis() as i64;
             return Ok(Response::new(ResolveDependenciesResponse {
                 success: false,
@@ -3404,6 +3610,20 @@ mod tests {
             artifact_sha256: String::new(),
             scope: scope.to_string(),
         }
+    }
+
+    #[test]
+    fn test_first_unresolved_reason_searches_transitive_dependencies() {
+        let mut root = resolved_dep("org.example", "root", "runtime");
+        let mut child = resolved_dep("org.example", "child", "runtime");
+        child.resolved = false;
+        child.failure_reason = "unsupported transitive metadata".to_string();
+        root.dependencies.push(child);
+
+        assert_eq!(
+            DependencyResolutionServiceImpl::first_unresolved_reason(&[root]).as_deref(),
+            Some("unsupported transitive metadata")
+        );
     }
 
     #[test]
@@ -4532,6 +4752,178 @@ mod tests {
         assert!(
             response.resolved_dependencies[0].dependencies.is_empty(),
             "self dependency should not be retained as a cycle leaf"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_gradle_module_metadata_runtime_variant_drives_transitive_resolution() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::{Arc, Mutex};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let requested = Arc::new(Mutex::new(Vec::new()));
+        let requested_for_server = Arc::clone(&requested);
+        let root_module = br#"{
+          "formatVersion": "1.1",
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"apiElements","attributes":{"org.gradle.usage":"java-api"},"dependencies":[]},
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "dependencies":[{"group":"org.example","module":"runtime-child","version":{"requires":"2.0"}}],
+             "files":[{"name":"root-1.0.jar","url":"root-1.0.jar"}]}
+          ]
+        }"#
+        .to_vec();
+        let child_pom = br#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.example</groupId>
+  <artifactId>runtime-child</artifactId>
+  <version>2.0</version>
+</project>"#
+            .to_vec();
+        let server = std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            while requested_for_server.lock().unwrap().len() < 3
+                && started.elapsed() < std::time::Duration::from_secs(5)
+            {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(stream) => stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                    Err(error) => panic!("test server accept failed: {error}"),
+                };
+                let mut request = [0u8; 2048];
+                let read = stream.read(&mut request).unwrap_or(0);
+                let request_text = String::from_utf8_lossy(&request[..read]);
+                let path = request_text
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("/")
+                    .to_string();
+                requested_for_server.lock().unwrap().push(path.clone());
+                let body = if path.ends_with("/root-1.0.module") {
+                    Some(&root_module)
+                } else if path.ends_with("/runtime-child-2.0.pom") {
+                    Some(&child_pom)
+                } else {
+                    None
+                };
+                match body {
+                    Some(body) => {
+                        let response = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n",
+                            body.len()
+                        );
+                        stream.write_all(response.as_bytes()).unwrap();
+                        stream.write_all(body).unwrap();
+                    }
+                    None => {
+                        let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+                        stream.write_all(response.as_bytes()).unwrap();
+                    }
+                }
+            }
+        });
+
+        let store = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "runtimeClasspath".to_string(),
+                dependencies: vec![make_dep("org.example", "root", "1.0")],
+                repositories: vec![{
+                    let mut repo = make_repo("local", &format!("http://{}", addr));
+                    repo.layout = "gradle-module-metadata".to_string();
+                    repo
+                }],
+                target_scope: "runtime".to_string(),
+                attributes: vec![],
+                lenient: false,
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        server.join().unwrap();
+
+        assert!(response.success, "{}", response.error_message);
+        let root = &response.resolved_dependencies[0];
+        assert_eq!(root.dependencies.len(), 1);
+        assert_eq!(root.dependencies[0].name, "runtime-child");
+        assert_eq!(root.dependencies[0].selected_version, "2.0");
+        assert_eq!(
+            requested.lock().unwrap().as_slice(),
+            &[
+                "/org/example/root/1.0/root-1.0.module".to_string(),
+                "/org/example/runtime-child/2.0/runtime-child-2.0.module".to_string(),
+                "/org/example/runtime-child/2.0/runtime-child-2.0.pom".to_string(),
+            ],
+            "Rust should consume .module metadata and not fetch root POM"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_gradle_module_metadata_custom_capability_fails_closed() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let root_module = br#"{
+          "formatVersion": "1.1",
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "capabilities":[{"group":"org.example","name":"feature","version":"1.0"}]}
+          ]
+        }"#
+        .to_vec();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 2048];
+            let _ = stream.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n",
+                root_module.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.write_all(&root_module).unwrap();
+        });
+
+        let store = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "runtimeClasspath".to_string(),
+                dependencies: vec![make_dep("org.example", "root", "1.0")],
+                repositories: vec![{
+                    let mut repo = make_repo("local", &format!("http://{}", addr));
+                    repo.layout = "gradle-module-metadata".to_string();
+                    repo
+                }],
+                target_scope: "runtime".to_string(),
+                attributes: vec![],
+                lenient: false,
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        server.join().unwrap();
+
+        assert!(!response.success);
+        assert!(
+            response
+                .error_message
+                .contains("unsupported Gradle Module Metadata capability"),
+            "{}",
+            response.error_message
         );
     }
 
