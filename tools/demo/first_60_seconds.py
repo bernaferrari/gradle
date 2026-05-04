@@ -142,18 +142,13 @@ def measure_daemon_readiness() -> dict[str, object]:
 
 def measure_cargo_test(label: str, test_filter: str, timeout: int) -> dict[str, object]:
     started = time.perf_counter()
-    completed = run(
-        [
-            "cargo",
-            "test",
-            "-p",
-            "gradle-substrate-daemon",
-            test_filter,
-            "--",
-            "--nocapture",
-        ],
-        timeout=timeout,
-    )
+    cmd = ["cargo", "test", "-p", "gradle-substrate-daemon"]
+    if label == "file_watch_first_event":
+        # Keep this headline first-60s metric focused on file-watch latency.
+        # Without --lib Cargo also builds/enumerates every integration test.
+        cmd.append("--lib")
+    cmd.extend([test_filter, "--", "--nocapture"])
+    completed = run(cmd, timeout=timeout)
     elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
     output = completed.stdout + completed.stderr
     metric_ms = None
