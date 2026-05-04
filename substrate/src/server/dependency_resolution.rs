@@ -2516,10 +2516,23 @@ impl DependencyResolutionServiceImpl {
                 }
             }
         }
-        Ok(TransitiveResolution {
-            dependencies: Vec::new(),
-            source_repo_url: None,
-        })
+        if depth == 0 {
+            Err(format!(
+                "No Gradle Module Metadata or Maven POM found for {group}:{name}:{version} in configured repositories"
+            ))
+        } else {
+            tracing::debug!(
+                group = %group,
+                name = %name,
+                version = %version,
+                depth,
+                "No module metadata found for transitive dependency; preserving existing artifact-only tolerance"
+            );
+            Ok(TransitiveResolution {
+                dependencies: Vec::new(),
+                source_repo_url: None,
+            })
+        }
     }
 
     /// Download an artifact with retry logic.
@@ -4978,6 +4991,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_missing_direct_module_metadata_fails_closed() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::{Arc, Mutex};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let requests_for_server = Arc::clone(&requests);
+        let server = std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            while requests_for_server.lock().unwrap().len() < 1
+                && started.elapsed() < std::time::Duration::from_secs(5)
+            {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(stream) => stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                    Err(error) => panic!("repo accept failed: {error}"),
+                };
+                let mut request = [0u8; 2048];
+                let read = stream.read(&mut request).unwrap_or(0);
+                let request_text = String::from_utf8_lossy(&request[..read]);
+                let path = request_text
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("/")
+                    .to_string();
+                requests_for_server.lock().unwrap().push(path);
+                stream
+                    .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
+                    .unwrap();
+            }
+        });
+
+        let svc = make_svc();
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "runtimeClasspath".to_string(),
+                dependencies: vec![make_dep("org.example", "missing", "1.0")],
+                repositories: vec![make_repo("missing", &format!("http://{}", addr))],
+                attributes: vec![],
+                lenient: false,
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        server.join().unwrap();
+
+        assert!(!response.success);
+        assert!(
+            response.error_message.contains(
+                "No Gradle Module Metadata or Maven POM found for org.example:missing:1.0"
+            ),
+            "{}",
+            response.error_message
+        );
+        assert_eq!(response.resolved_dependencies.len(), 1);
+        assert!(!response.resolved_dependencies[0].resolved);
+        assert_eq!(requests.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
     async fn test_gradle_module_metadata_runtime_variant_drives_transitive_resolution() {
         use std::io::{Read, Write};
         use std::net::TcpListener;
@@ -5463,6 +5544,76 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_dependencies() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::{Arc, Mutex};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let requests_for_server = Arc::clone(&requests);
+        let server = std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            while requests_for_server.lock().unwrap().len() < 2
+                && started.elapsed() < std::time::Duration::from_secs(5)
+            {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(stream) => stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                    Err(error) => panic!("repo accept failed: {error}"),
+                };
+                let mut request = [0u8; 2048];
+                let read = stream.read(&mut request).unwrap_or(0);
+                let request_text = String::from_utf8_lossy(&request[..read]);
+                let path = request_text
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("/")
+                    .to_string();
+                requests_for_server.lock().unwrap().push(path.clone());
+                let pom = if path.ends_with("/spring-core-5.3.30.pom") {
+                    Some(
+                        br#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.springframework</groupId>
+  <artifactId>spring-core</artifactId>
+  <version>5.3.30</version>
+</project>"#
+                            .as_slice(),
+                    )
+                } else if path.ends_with("/guava-32.1.3.pom") {
+                    Some(
+                        br#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.google.guava</groupId>
+  <artifactId>guava</artifactId>
+  <version>32.1.3</version>
+</project>"#
+                            .as_slice(),
+                    )
+                } else {
+                    None
+                };
+                if let Some(pom) = pom {
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/xml\r\n\r\n",
+                        pom.len()
+                    );
+                    stream.write_all(response.as_bytes()).unwrap();
+                    stream.write_all(pom).unwrap();
+                } else {
+                    stream
+                        .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
+                        .unwrap();
+                }
+            }
+        });
+
         let svc = make_svc();
 
         let resp = svc
@@ -5472,10 +5623,7 @@ mod tests {
                     make_dep("org.springframework", "spring-core", "5.3.30"),
                     make_dep("com.google.guava", "guava", "32.1.3"),
                 ],
-                repositories: vec![make_repo(
-                    "central",
-                    "https://repo.maven.apache.org/maven2/",
-                )],
+                repositories: vec![make_repo("local", &format!("http://{}", addr))],
                 attributes: vec![],
                 lenient: false,
                 ..Default::default()
@@ -5483,11 +5631,13 @@ mod tests {
             .await
             .unwrap()
             .into_inner();
+        server.join().unwrap();
 
-        assert!(resp.success);
+        assert!(resp.success, "{}", resp.error_message);
         assert_eq!(resp.resolved_dependencies.len(), 2);
         assert_eq!(resp.resolved_dependencies[0].group, "org.springframework");
         assert_eq!(resp.resolved_dependencies[1].name, "guava");
+        assert_eq!(requests.lock().unwrap().len(), 2);
     }
 
     #[tokio::test]
