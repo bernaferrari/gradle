@@ -591,11 +591,16 @@ async fn collect_shadow_dependencies(
                 } else {
                     artifact.configuration
                 };
+                let kind = if artifact.kind.trim().is_empty() {
+                    "dependency".to_string()
+                } else {
+                    artifact.kind
+                };
                 unique.insert((
                     project.path.clone(),
                     configuration_name,
                     notation,
-                    "dependency".to_string(),
+                    kind,
                 ));
             }
         }

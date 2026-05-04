@@ -617,6 +617,14 @@ and any other kind is marked unsupported so execution admission rejects it befor
 scheduling. This is a protocol/admission foundation for Gradle dependency
 constraints; declared constraint capture from Gradle configurations and full
 constraint solving are still tracked as separate solver-parity work.
+The JVM host `ResolveConfiguration` bridge now forwards the same dependency
+kind from Gradle model capture: resolved artifacts remain `kind=dependency`,
+and declared external `DependencyConstraint` entries on the configuration are
+emitted as `kind=constraint` when group, name, and version are concrete. The
+Rust build-plan shadow preserves that kind, so real Gradle-declared constraints
+can reach kernel admission. This still does not claim full constraint solving:
+rich constraints, platform/enforced-platform behavior, and resolved graph parity
+need dedicated corpus gates before expanding native-ready coverage.
 Resolved artifact capture now preserves classifier and extension in the JVM-host
 protocol and canonical build-plan notation (`g:n:v`, `g:n:v:classifier`,
 `g:n:v@extension`, `g:n:v:classifier@extension`). Rust admission strips artifact

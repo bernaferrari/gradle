@@ -276,6 +276,7 @@ mod tests {
                         configuration: req.configuration_name.clone(),
                         classifier: String::new(),
                         extension: "jar".to_string(),
+                        kind: "dependency".to_string(),
                     },
                     crate::proto::ResolvedArtifact {
                         group: "org.slf4j".to_string(),
@@ -284,6 +285,7 @@ mod tests {
                         configuration: req.configuration_name.clone(),
                         classifier: String::new(),
                         extension: "jar".to_string(),
+                        kind: "dependency".to_string(),
                     },
                 ],
                 error_message: String::new(),

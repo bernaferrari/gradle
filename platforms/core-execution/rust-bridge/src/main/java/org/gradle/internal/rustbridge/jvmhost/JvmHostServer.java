@@ -199,6 +199,7 @@ public class JvmHostServer implements Closeable {
                                 .setConfiguration(entry.getConfiguration())
                                 .setClassifier(entry.getClassifier())
                                 .setExtension(entry.getExtension())
+                                .setKind(entry.getKind())
                                 .build();
                             responseBuilder.addArtifacts(artifact);
                         }

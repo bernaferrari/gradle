@@ -55,6 +55,17 @@ public class JvmHostServiceImplTest {
         assertEquals("fresh-classpath", plan.getTasks(0).getInputsOrThrow("classpath"));
     }
 
+    @Test
+    public void resolvedArtifactEntryDefaultsKindAndPreservesConstraints() {
+        JvmHostServiceImpl.ResolvedArtifactEntry dependency =
+            new JvmHostServiceImpl.ResolvedArtifactEntry("org.example", "demo", "1.0", "runtimeClasspath");
+        JvmHostServiceImpl.ResolvedArtifactEntry constraint =
+            new JvmHostServiceImpl.ResolvedArtifactEntry("org.example", "api", "2.0", "implementation", "", "jar", "constraint");
+
+        assertEquals("dependency", dependency.getKind());
+        assertEquals("constraint", constraint.getKind());
+    }
+
     private static BuildPlanTask task(String path, String classpath) {
         return BuildPlanTask.newBuilder()
             .setPath(path)
