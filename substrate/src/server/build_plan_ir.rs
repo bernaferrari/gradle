@@ -93,6 +93,7 @@ pub struct CanonicalBuildPlanDependency {
     pub project_path: String,
     pub configuration: String,
     pub notation: String,
+    pub kind: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,9 +157,10 @@ impl CanonicalBuildPlan {
         });
 
         self.dependencies.sort_unstable_by(|a, b| {
-            (&a.project_path, &a.configuration, &a.notation).cmp(&(
+            (&a.project_path, &a.configuration, &a.kind, &a.notation).cmp(&(
                 &b.project_path,
                 &b.configuration,
+                &b.kind,
                 &b.notation,
             ))
         });
@@ -276,6 +278,7 @@ pub fn to_proto(plan: &CanonicalBuildPlan) -> BuildPlan {
                 project_path: d.project_path,
                 configuration: d.configuration,
                 notation: d.notation,
+                kind: normalize_dependency_kind(d.kind),
             })
             .collect(),
         toolchains: normalized
@@ -364,6 +367,7 @@ pub fn from_proto(plan: &BuildPlan) -> CanonicalBuildPlan {
                 project_path: d.project_path.clone(),
                 configuration: d.configuration.clone(),
                 notation: d.notation.clone(),
+                kind: normalize_dependency_kind(d.kind.clone()),
             })
             .collect(),
         toolchains: plan
@@ -398,6 +402,14 @@ fn btree_to_hashmap(map: BTreeMap<String, String>) -> HashMap<String, String> {
 
 fn hashmap_to_btree(map: &HashMap<String, String>) -> BTreeMap<String, String> {
     map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+}
+
+fn normalize_dependency_kind(kind: String) -> String {
+    if kind.trim().is_empty() {
+        "dependency".to_string()
+    } else {
+        kind
+    }
 }
 
 #[cfg(test)]
@@ -482,6 +494,7 @@ mod tests {
                 project_path: ":app".to_string(),
                 configuration: "testRuntimeClasspath".to_string(),
                 notation: "org.junit.jupiter:junit-jupiter:5.10.2".to_string(),
+                kind: "dependency".to_string(),
             }],
             toolchains: vec![CanonicalBuildPlanToolchainRequest {
                 language: "java".to_string(),

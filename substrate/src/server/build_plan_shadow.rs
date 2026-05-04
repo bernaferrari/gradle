@@ -591,7 +591,12 @@ async fn collect_shadow_dependencies(
                 } else {
                     artifact.configuration
                 };
-                unique.insert((project.path.clone(), configuration_name, notation));
+                unique.insert((
+                    project.path.clone(),
+                    configuration_name,
+                    notation,
+                    "dependency".to_string(),
+                ));
             }
         }
     }
@@ -599,10 +604,11 @@ async fn collect_shadow_dependencies(
     Ok(unique
         .into_iter()
         .map(
-            |(project_path, configuration, notation)| CanonicalBuildPlanDependency {
+            |(project_path, configuration, notation, kind)| CanonicalBuildPlanDependency {
                 project_path,
                 configuration,
                 notation,
+                kind,
             },
         )
         .collect())

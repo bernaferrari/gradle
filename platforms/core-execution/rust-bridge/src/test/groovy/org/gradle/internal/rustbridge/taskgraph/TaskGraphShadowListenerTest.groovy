@@ -11,6 +11,14 @@ import spock.lang.Specification
 
 class TaskGraphShadowListenerTest extends Specification {
 
+    def setup() {
+        BuildIdHolder.clear()
+    }
+
+    def cleanup() {
+        BuildIdHolder.clear()
+    }
+
     def "graphPopulated extracts task paths and dependencies and delegates to reporter"() {
         given:
         def reporter = Mock(TaskGraphShadowReporter)

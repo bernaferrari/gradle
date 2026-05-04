@@ -263,6 +263,7 @@ impl TaskGraphServiceImpl {
                 project_path: dependency.project_path,
                 configuration: dependency.configuration,
                 notation: dependency.notation,
+                kind: dependency.kind,
             })
             .collect()
     }

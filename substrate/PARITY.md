@@ -609,6 +609,14 @@ and `DagExecutor` groups them into the kernel dependency graph before no-fallbac
 RunBuild admission. Repository capture, constraints, attributes, variants, and
 resolved-artifact ownership are still narrower than full Gradle solver parity, so
 dependency parity/read-through remain separate gates.
+Build-plan dependency entries now carry an explicit `kind` across the Rust and
+JVM bridge proto files, canonical IR, task-graph response, and DAG kernel
+lowering. `kind=dependency` is admitted as a normal module request,
+`kind=constraint` is admitted into `KernelDependencyConfiguration.constraints`,
+and any other kind is marked unsupported so execution admission rejects it before
+scheduling. This is a protocol/admission foundation for Gradle dependency
+constraints; declared constraint capture from Gradle configurations and full
+constraint solving are still tracked as separate solver-parity work.
 Resolved artifact capture now preserves classifier and extension in the JVM-host
 protocol and canonical build-plan notation (`g:n:v`, `g:n:v:classifier`,
 `g:n:v@extension`, `g:n:v:classifier@extension`). Rust admission strips artifact
