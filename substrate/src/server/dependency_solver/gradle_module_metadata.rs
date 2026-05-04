@@ -129,11 +129,13 @@ pub fn select_jvm_variant(
         "java-api"
     };
 
-    let candidates: Vec<&Variant> = metadata
+    let usage_candidates: Vec<&Variant> = metadata
         .variants
         .iter()
         .filter(|variant| variant_usage(variant).as_deref() == Some(usage))
         .collect();
+
+    let candidates = preferred_jvm_candidates(&usage_candidates);
 
     let candidates = if candidates.is_empty() && usage == "java-api" {
         metadata
@@ -223,6 +225,45 @@ fn variant_usage(variant: &Variant) -> Option<String> {
         .map(str::to_string)
 }
 
+fn preferred_jvm_candidates<'a>(candidates: &[&'a Variant]) -> Vec<&'a Variant> {
+    let jar_candidates: Vec<&Variant> = candidates
+        .iter()
+        .copied()
+        .filter(|variant| {
+            variant_attribute(variant, "org.gradle.libraryelements").as_deref() == Some("jar")
+        })
+        .collect();
+    let candidates = if jar_candidates.is_empty() {
+        candidates.to_vec()
+    } else {
+        jar_candidates
+    };
+
+    let standard_jvm_candidates: Vec<&Variant> = candidates
+        .iter()
+        .copied()
+        .filter(|variant| {
+            variant_attribute(variant, "org.gradle.jvm.environment")
+                .as_deref()
+                .map(|value| value == "standard-jvm")
+                .unwrap_or(true)
+        })
+        .collect();
+    if standard_jvm_candidates.is_empty() {
+        candidates
+    } else {
+        standard_jvm_candidates
+    }
+}
+
+fn variant_attribute(variant: &Variant, name: &str) -> Option<String> {
+    variant
+        .attributes
+        .get(name)
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,5 +313,50 @@ mod tests {
             selected,
             ModuleMetadataSelection::Unsupported(reason) if reason.contains("capability")
         ));
+    }
+
+    #[test]
+    fn prefers_jar_runtime_variant_over_sources_variant() {
+        let json = r#"{
+          "component": {"group":"com.squareup.okio","module":"okio","version":"3.6.0"},
+          "variants": [
+            {"name":"jvmRuntimeElements-published","attributes":{"org.gradle.usage":"java-runtime","org.gradle.libraryelements":"jar","org.gradle.jvm.environment":"standard-jvm"}},
+            {"name":"jvmSourcesElements-published","attributes":{"org.gradle.usage":"java-runtime","org.gradle.libraryelements":"sources","org.gradle.jvm.environment":"standard-jvm"}}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "com.squareup.okio", "okio", "3.6.0")
+            .unwrap()
+            .unwrap();
+
+        match selected {
+            ModuleMetadataSelection::Selected(variant) => {
+                assert_eq!(variant.name, "jvmRuntimeElements-published");
+            }
+            ModuleMetadataSelection::Unsupported(reason) => panic!("{reason}"),
+        }
+    }
+
+    #[test]
+    fn prefers_standard_jvm_runtime_variant_over_android_variant() {
+        let json = r#"{
+          "component": {"group":"com.google.guava","module":"guava","version":"33.2.1-jre"},
+          "variants": [
+            {"name":"jreRuntimeElements","attributes":{"org.gradle.usage":"java-runtime","org.gradle.libraryelements":"jar","org.gradle.jvm.environment":"standard-jvm"}},
+            {"name":"androidRuntimeElements","attributes":{"org.gradle.usage":"java-runtime","org.gradle.libraryelements":"jar","org.gradle.jvm.environment":"android"}}
+          ]
+        }"#;
+
+        let selected =
+            select_jvm_variant(json, "runtime", "com.google.guava", "guava", "33.2.1-jre")
+                .unwrap()
+                .unwrap();
+
+        match selected {
+            ModuleMetadataSelection::Selected(variant) => {
+                assert_eq!(variant.name, "jreRuntimeElements");
+            }
+            ModuleMetadataSelection::Unsupported(reason) => panic!("{reason}"),
+        }
     }
 }

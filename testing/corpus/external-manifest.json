@@ -115,6 +115,22 @@
         "project_dependencies": [],
         "toolchains": ["17"]
       }
+    },
+    {
+      "name": "dependency-gradle-metadata-kotlin-dsl",
+      "path": "dependency-gradle-metadata-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 1,
+        "plugins": ["java-library"],
+        "tasks": [],
+        "outputs": [],
+        "dependencies": ["com.squareup.okhttp3:okhttp:4.12.0"],
+        "project_dependencies": [],
+        "toolchains": ["17"]
+      }
     }
   ]
 }
