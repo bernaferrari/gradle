@@ -121,6 +121,7 @@ struct ResolutionStats {
 /// Resolves dependency graphs, fetches POMs from Maven repos, and manages artifact caching.
 pub struct DependencyResolutionServiceImpl {
     artifact_cache: Arc<DashMap<String, CachedArtifact>>,
+    module_metadata_misses: Arc<DashMap<String, ()>>,
     resolution_stats: ResolutionStats,
     http_client: reqwest::Client,
     artifact_store_dir: PathBuf,
@@ -182,6 +183,7 @@ impl DependencyResolutionServiceImpl {
         std::fs::create_dir_all(&artifact_store_dir).ok();
         Self {
             artifact_cache: Arc::new(DashMap::new()),
+            module_metadata_misses: Arc::new(DashMap::new()),
             resolution_stats: ResolutionStats {
                 total_resolutions: AtomicI64::new(0),
                 cache_hits: AtomicI64::new(0),
@@ -1138,6 +1140,12 @@ impl DependencyResolutionServiceImpl {
             .to_string();
         let url_key = Self::metadata_url_cache_key(&url, extension);
         let url_cache_path = self.metadata_url_path(&url, extension);
+        if self.module_metadata_misses.contains_key(&key)
+            || self.module_metadata_misses.contains_key(&url_key)
+        {
+            tracing::debug!(group = %group, name = %name, version = %version, "Gradle Module Metadata negative cache hit");
+            return Ok(None);
+        }
         if let Some(cached) = self
             .read_cached_text_artifact(
                 &key,
@@ -1207,9 +1215,79 @@ impl DependencyResolutionServiceImpl {
                 tracing::info!(group = %group, name = %name, version = %version, source = "remote_fetch", url = %url, "Gradle Module Metadata fetched from remote");
                 Ok(Some(content))
             }
-            404 => Ok(None),
+            404 => {
+                self.module_metadata_misses.insert(key, ());
+                self.module_metadata_misses.insert(url_key, ());
+                Ok(None)
+            }
             status => Err(format!("HTTP {status} for Gradle Module Metadata")),
         }
+    }
+
+    async fn gradle_module_metadata_artifact_url(
+        &self,
+        group: &str,
+        name: &str,
+        version: &str,
+        scope: &str,
+        repos: &[RepositoryDescriptor],
+    ) -> Result<Option<String>, String> {
+        for repo in repos
+            .iter()
+            .filter(|repo| Self::supports_gradle_module_metadata(repo))
+        {
+            let Some(module_metadata) = self
+                .fetch_gradle_module_metadata(group, name, version, repo)
+                .await?
+            else {
+                continue;
+            };
+            let selection = gradle_module_metadata::select_jvm_variant(
+                &module_metadata,
+                scope,
+                group,
+                name,
+                version,
+            )?;
+            match selection {
+                Some(ModuleMetadataSelection::Selected(variant)) => {
+                    let Some(artifact) = variant.artifacts.first() else {
+                        return Ok(None);
+                    };
+                    return self
+                        .module_artifact_url(repo, group, name, version, &artifact.url)
+                        .map(Some);
+                }
+                Some(ModuleMetadataSelection::Unsupported(reason)) => return Err(reason),
+                None => {}
+            }
+        }
+        Ok(None)
+    }
+
+    fn module_artifact_url(
+        &self,
+        repo: &RepositoryDescriptor,
+        group: &str,
+        name: &str,
+        version: &str,
+        artifact_path: &str,
+    ) -> Result<String, String> {
+        if reqwest::Url::parse(artifact_path).is_ok() {
+            return Ok(artifact_path.to_string());
+        }
+        let group_path = Self::group_to_path(group);
+        let path = format!(
+            "{}/{}/{}/{}",
+            group_path,
+            name,
+            version,
+            artifact_path.trim_start_matches('/')
+        );
+        self.build_request(repo, &path)
+            .build()
+            .map(|request| request.url().to_string())
+            .map_err(|e| format!("Failed to build Gradle Module Metadata artifact URL: {e}"))
     }
 
     fn artifact_url_for_descriptor(
@@ -2007,19 +2085,43 @@ impl DependencyResolutionServiceImpl {
         // Remove from visited set so sibling branches can resolve the same dep
         visited.remove(&coord);
 
+        let module_metadata_artifact_url = match self
+            .gradle_module_metadata_artifact_url(&group, &name, &selected_version, &scope, repos)
+            .await
+        {
+            Ok(url) => url,
+            Err(reason) => {
+                return ResolvedDependency {
+                    group,
+                    name,
+                    version: raw_version.clone(),
+                    selected_version,
+                    dependencies: Vec::new(),
+                    resolved: false,
+                    failure_reason: reason,
+                    artifact_url: String::new(),
+                    artifact_size: 0,
+                    artifact_sha256: String::new(),
+                    scope,
+                };
+            }
+        };
+
         // Compute artifact URL
         let repo_base = repos
             .first()
             .map(|r| r.url.as_str())
             .unwrap_or("https://repo.maven.apache.org/maven2");
-        let artifact_url = Self::artifact_url_for_descriptor(
-            repo_base,
-            &group,
-            &name,
-            &selected_version,
-            &dep.classifier,
-            &dep.extension,
-        );
+        let artifact_url = module_metadata_artifact_url.unwrap_or_else(|| {
+            Self::artifact_url_for_descriptor(
+                repo_base,
+                &group,
+                &name,
+                &selected_version,
+                &dep.classifier,
+                &dep.extension,
+            )
+        });
 
         ResolvedDependency {
             group,
@@ -4773,7 +4875,7 @@ mod tests {
             {"name":"apiElements","attributes":{"org.gradle.usage":"java-api"},"dependencies":[]},
             {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
              "dependencies":[{"group":"org.example","module":"runtime-child","version":{"requires":"2.0"}}],
-             "files":[{"name":"root-1.0.jar","url":"root-1.0.jar"}]}
+             "files":[{"name":"root-runtime.jar","url":"custom/root-runtime.jar"}]}
           ]
         }"#
         .to_vec();
@@ -4855,6 +4957,12 @@ mod tests {
         assert!(response.success, "{}", response.error_message);
         let root = &response.resolved_dependencies[0];
         assert_eq!(root.dependencies.len(), 1);
+        assert!(
+            root.artifact_url
+                .ends_with("/org/example/root/1.0/custom/root-runtime.jar"),
+            "{}",
+            root.artifact_url
+        );
         assert_eq!(root.dependencies[0].name, "runtime-child");
         assert_eq!(root.dependencies[0].selected_version, "2.0");
         assert_eq!(
@@ -4864,7 +4972,7 @@ mod tests {
                 "/org/example/runtime-child/2.0/runtime-child-2.0.module".to_string(),
                 "/org/example/runtime-child/2.0/runtime-child-2.0.pom".to_string(),
             ],
-            "Rust should consume .module metadata and not fetch root POM"
+            "Rust should consume .module metadata, not fetch root POM, and not repeat child .module misses"
         );
     }
 
