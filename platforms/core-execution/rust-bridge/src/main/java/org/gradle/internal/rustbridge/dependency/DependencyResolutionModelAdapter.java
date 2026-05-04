@@ -77,14 +77,35 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
             if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
                 return Collections.emptyList();
             }
-            repositories.add(RepositoryDescriptor.newBuilder()
+            String layout = metadataLayoutFor(maven.getMetadataSources());
+            if (layout == null) {
+                return Collections.emptyList();
+            }
+            RepositoryDescriptor.Builder builder = RepositoryDescriptor.newBuilder()
                 .setId(maven.getName())
                 .setUrl(url.toString())
                 .setM2Compatible(true)
-                .setAllowInsecureProtocol(maven.isAllowInsecureProtocol())
-                .build());
+                .setAllowInsecureProtocol(maven.isAllowInsecureProtocol());
+            if (!layout.isEmpty()) {
+                builder.setLayout(layout);
+            }
+            repositories.add(builder.build());
         }
         return Collections.unmodifiableList(repositories);
+    }
+
+    @Nullable
+    static String metadataLayoutFor(MavenArtifactRepository.MetadataSources metadataSources) {
+        if (metadataSources.isArtifactEnabled()) {
+            return null;
+        }
+        if (metadataSources.isGradleMetadataEnabled()) {
+            return "gradle-module-metadata";
+        }
+        if (metadataSources.isMavenPomEnabled()) {
+            return "";
+        }
+        return null;
     }
 
     static String projectPathFor(String resolvablePath, String configurationName) {
