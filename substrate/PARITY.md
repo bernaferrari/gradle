@@ -625,6 +625,13 @@ Rust build-plan shadow preserves that kind, so real Gradle-declared constraints
 can reach kernel admission. This still does not claim full constraint solving:
 rich constraints, platform/enforced-platform behavior, and resolved graph parity
 need dedicated corpus gates before expanding native-ready coverage.
+The Rust dependency resolver also has bounded exact-static constraint selection:
+`ResolveDependenciesRequest` now accepts explicit constraint descriptors,
+constraints can upgrade a matching requested `group:name` to a higher concrete
+version before Maven resolution, and constraints alone do not create resolved
+artifacts. Unsupported constraint selectors fail closed with a diagnostic
+instead of being treated as exact versions. This is intentionally a narrow
+solver slice, not full Gradle constraint/rich-version/platform semantics.
 Resolved artifact capture now preserves classifier and extension in the JVM-host
 protocol and canonical build-plan notation (`g:n:v`, `g:n:v:classifier`,
 `g:n:v@extension`, `g:n:v:classifier@extension`). Rust admission strips artifact

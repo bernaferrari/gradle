@@ -173,8 +173,22 @@ public class RustDependencyResolutionClient {
         boolean lenient,
         boolean prefetchArtifacts
     ) {
+        return resolveDependencies(configurationName, dependencies, new ArrayList<>(), repositories, lenient, prefetchArtifacts);
+    }
+
+    /**
+     * Resolve a dependency graph via the Rust substrate daemon with declared constraints.
+     */
+    public ResolutionResult resolveDependencies(
+        String configurationName,
+        List<DependencyDescriptor> dependencies,
+        List<DependencyDescriptor> constraints,
+        List<RepositoryDescriptor> repositories,
+        boolean lenient,
+        boolean prefetchArtifacts
+    ) {
         try {
-            return resolveDependenciesStrict(configurationName, dependencies, repositories, lenient, prefetchArtifacts);
+            return resolveDependenciesStrict(configurationName, dependencies, constraints, repositories, lenient, prefetchArtifacts);
         } catch (Exception e) {
             LOGGER.debug("[substrate:dep-resolve] gRPC call failed", e);
             return new ResolutionResult(false, new ArrayList<>(), e.getMessage(), 0, 0, 0);
@@ -207,6 +221,22 @@ public class RustDependencyResolutionClient {
         boolean lenient,
         boolean prefetchArtifacts
     ) {
+        return resolveDependenciesStrict(configurationName, dependencies, new ArrayList<>(), repositories, lenient, prefetchArtifacts);
+    }
+
+    /**
+     * Resolve a dependency graph via the Rust substrate daemon with declared constraints.
+     *
+     * @throws RuntimeException when substrate is unavailable or the RPC fails.
+     */
+    public ResolutionResult resolveDependenciesStrict(
+        String configurationName,
+        List<DependencyDescriptor> dependencies,
+        List<DependencyDescriptor> constraints,
+        List<RepositoryDescriptor> repositories,
+        boolean lenient,
+        boolean prefetchArtifacts
+    ) {
         if (client.isNoop()) {
             throw new IllegalStateException("Substrate not available");
         }
@@ -215,6 +245,7 @@ public class RustDependencyResolutionClient {
             .resolveDependencies(ResolveDependenciesRequest.newBuilder()
                 .setConfigurationName(configurationName)
                 .addAllDependencies(dependencies)
+                .addAllConstraints(constraints)
                 .addAllRepositories(repositories)
                 .setLenient(lenient)
                 .setPrefetchArtifacts(prefetchArtifacts)

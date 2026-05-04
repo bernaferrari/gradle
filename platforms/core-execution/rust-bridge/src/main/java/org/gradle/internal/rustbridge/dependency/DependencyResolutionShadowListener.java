@@ -5,10 +5,12 @@ import gradle.substrate.v1.RepositoryDescriptor;
 import org.gradle.api.artifacts.ArtifactCollection;
 import org.gradle.api.artifacts.Dependency;
 import org.gradle.api.artifacts.DependencyArtifact;
+import org.gradle.api.artifacts.DependencyConstraint;
 import org.gradle.api.artifacts.DependencyResolutionListener;
 import org.gradle.api.artifacts.ExternalModuleDependency;
 import org.gradle.api.artifacts.ModuleDependency;
 import org.gradle.api.artifacts.ResolvableDependencies;
+import org.gradle.api.artifacts.VersionConstraint;
 import org.gradle.api.artifacts.component.ComponentArtifactIdentifier;
 import org.gradle.api.artifacts.component.ComponentIdentifier;
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
@@ -222,6 +224,7 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
         if (declaredDescriptors.isEmpty()) {
             return 0;
         }
+        List<DependencyDescriptor> constraintDescriptors = staticMavenDependencyConstraintDescriptors(dependencies);
         if (!resolvedGraphContainsAll(declaredDescriptors, result)) {
             return 0;
         }
@@ -233,6 +236,7 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
         RustDependencyResolutionClient.ResolutionResult rustResult = client.resolveDependencies(
             dependencies.getName(),
             descriptors,
+            constraintDescriptors,
             repositories,
             false,
             true
@@ -315,6 +319,59 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
             return Collections.emptyList();
         }
         return Collections.unmodifiableList(descriptors);
+    }
+
+    private List<DependencyDescriptor> staticMavenDependencyConstraintDescriptors(ResolvableDependencies dependencies) {
+        List<DependencyDescriptor> descriptors = new ArrayList<>();
+        try {
+            for (DependencyConstraint constraint : dependencies.getDependencyConstraints()) {
+                DependencyDescriptor descriptor = staticMavenDependencyConstraintDescriptor(constraint);
+                if (descriptor == null) {
+                    return Collections.emptyList();
+                }
+                descriptors.add(descriptor);
+            }
+        } catch (Exception e) {
+            LOGGER.debug("[substrate:dep-resolve] dependency constraint capture failed", e);
+            return Collections.emptyList();
+        }
+        return Collections.unmodifiableList(descriptors);
+    }
+
+    private DependencyDescriptor staticMavenDependencyConstraintDescriptor(DependencyConstraint constraint) {
+        String group = constraint.getGroup();
+        String name = constraint.getName();
+        String version = staticMavenConstraintVersion(constraint.getVersionConstraint());
+        if (isBlank(group) || isBlank(name) || isBlank(version) || !isStaticVersion(version)) {
+            return null;
+        }
+        return DependencyDescriptor.newBuilder()
+            .setGroup(group)
+            .setName(name)
+            .setVersion(version)
+            .setClassifier("")
+            .setExtension("jar")
+            .setTransitive(false)
+            .build();
+    }
+
+    private String staticMavenConstraintVersion(VersionConstraint versionConstraint) {
+        if (versionConstraint == null || versionConstraint.getBranch() != null || !versionConstraint.getRejectedVersions().isEmpty()) {
+            return null;
+        }
+        String strictVersion = versionConstraint.getStrictVersion();
+        if (!isBlank(strictVersion)) {
+            return strictVersion;
+        }
+        String requiredVersion = versionConstraint.getRequiredVersion();
+        if (!isBlank(requiredVersion)) {
+            return requiredVersion;
+        }
+        String preferredVersion = versionConstraint.getPreferredVersion();
+        if (!isBlank(preferredVersion)) {
+            return preferredVersion;
+        }
+        return null;
     }
 
     private DependencyDescriptor staticMavenDependencyDescriptor(Dependency dependency) {

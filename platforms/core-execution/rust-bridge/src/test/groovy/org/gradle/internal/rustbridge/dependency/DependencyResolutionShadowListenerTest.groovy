@@ -2,9 +2,12 @@ package org.gradle.internal.rustbridge.dependency
 
 import gradle.substrate.v1.RepositoryDescriptor
 import org.gradle.api.artifacts.ArtifactCollection
+import org.gradle.api.artifacts.DependencyConstraint
+import org.gradle.api.artifacts.DependencyConstraintSet
 import org.gradle.api.artifacts.DependencySet
 import org.gradle.api.artifacts.ExternalModuleDependency
 import org.gradle.api.artifacts.ResolvableDependencies
+import org.gradle.api.artifacts.VersionConstraint
 import org.gradle.api.artifacts.component.ComponentArtifactIdentifier
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.result.ResolvedArtifactResult
@@ -302,7 +305,92 @@ class DependencyResolutionShadowListenerTest extends Specification {
                 requested[0].version == "1.2.3" &&
                 requested[0].extension == "jar" &&
                 !requested[0].transitive
-        }, [repository], false, true) >> new RustDependencyResolutionClient.ResolutionResult(true, [], "", 7, 2, 42)
+        }, { constraints -> constraints.empty }, [repository], false, true) >> new RustDependencyResolutionClient.ResolutionResult(true, [], "", 7, 2, 42)
+        1 * client.recordResolution("runtimeClasspath", _, 1, true, 0)
+        1 * reporter.reportMatch()
+        0 * reporter.reportRustError(_, _)
+    }
+
+    def "prefetch mode forwards concrete dependency constraints to rust resolver"() {
+        given:
+        def client = Mock(RustDependencyResolutionClient)
+        def reporter = Mock(HashMismatchReporter)
+        def repository = RepositoryDescriptor.newBuilder()
+            .setId("local")
+            .setUrl("http://repo.test/maven2")
+            .setM2Compatible(true)
+            .build()
+        def listener = new DependencyResolutionShadowListener(
+            client,
+            reporter,
+            false,
+            false,
+            true,
+            { deps -> [repository] } as DependencyResolutionShadowListener.RepositoryProvider
+        )
+        def dependency = Mock(ExternalModuleDependency) {
+            getGroup() >> "org.example"
+            getName() >> "demo"
+            getVersion() >> "1.0"
+            isChanging() >> false
+            isTransitive() >> true
+            getTargetConfiguration() >> null
+            getExcludeRules() >> ([] as Set)
+            getArtifacts() >> ([] as Set)
+        }
+        def constraint = Mock(DependencyConstraint) {
+            getGroup() >> "org.example"
+            getName() >> "demo"
+            getVersionConstraint() >> Mock(VersionConstraint) {
+                getBranch() >> null
+                getRejectedVersions() >> []
+                getStrictVersion() >> ""
+                getRequiredVersion() >> "2.0"
+                getPreferredVersion() >> ""
+            }
+        }
+        def dependencySet = Mock(DependencySet) {
+            iterator() >> ([dependency].iterator())
+        }
+        def constraintSet = Mock(DependencyConstraintSet) {
+            iterator() >> ([constraint].iterator())
+        }
+        def moduleId = Mock(ModuleComponentIdentifier) {
+            getGroup() >> "org.example"
+            getModule() >> "demo"
+            getVersion() >> "1.0"
+        }
+        def component = Mock(ResolvedComponentResult) {
+            getId() >> moduleId
+        }
+        def resolutionResult = Mock(ResolutionResult) {
+            getAllComponents() >> ([component] as Set)
+            getAllDependencies() >> ([] as Set)
+        }
+        def dependencies = Mock(ResolvableDependencies) {
+            getName() >> "runtimeClasspath"
+            getPath() >> ":runtimeClasspath"
+            getDependencies() >> dependencySet
+            getDependencyConstraints() >> constraintSet
+            getResolutionResult() >> resolutionResult
+        }
+        def capturedConstraints = null
+        listener.beforeResolve(dependencies)
+
+        when:
+        listener.afterResolve(dependencies)
+
+        then:
+        listener.prefetchedArtifactCount == 1
+        1 * client.resolveDependencies("runtimeClasspath", _, _, [repository], false, true) >> { args ->
+            capturedConstraints = args[2]
+            new RustDependencyResolutionClient.ResolutionResult(true, [], "", 7, 1, 42)
+        }
+        capturedConstraints.size() == 1
+        capturedConstraints[0].group == "org.example"
+        capturedConstraints[0].name == "demo"
+        capturedConstraints[0].version == "2.0"
+        capturedConstraints[0].extension == "jar"
         1 * client.recordResolution("runtimeClasspath", _, 1, true, 0)
         1 * reporter.reportMatch()
         0 * reporter.reportRustError(_, _)
@@ -362,7 +450,7 @@ class DependencyResolutionShadowListenerTest extends Specification {
 
         then:
         listener.prefetchedArtifactCount == 1
-        1 * client.resolveDependencies("runtimeClasspath", _, [repository], false, true) >> new RustDependencyResolutionClient.ResolutionResult(true, [], "", 7, 1, 42)
+        1 * client.resolveDependencies("runtimeClasspath", _, { constraints -> constraints.empty }, [repository], false, true) >> new RustDependencyResolutionClient.ResolutionResult(true, [], "", 7, 1, 42)
         1 * client.recordResolution("runtimeClasspath", _, 1, true, 1)
         1 * reporter.reportMatch()
         0 * reporter.reportRustError(_, _)
@@ -435,7 +523,7 @@ class DependencyResolutionShadowListenerTest extends Specification {
                 "org.example:child:4.5.6:jar",
                 "org.example:demo:1.2.3:jar"
             ]
-        }, [repository], false, true) >> new RustDependencyResolutionClient.ResolutionResult(true, [], "", 14, 2, 84)
+        }, { constraints -> constraints.empty }, [repository], false, true) >> new RustDependencyResolutionClient.ResolutionResult(true, [], "", 14, 2, 84)
         1 * client.recordResolution("runtimeClasspath", _, 2, true, 0)
         1 * reporter.reportMatch()
         0 * reporter.reportRustError(_, _)
@@ -487,7 +575,7 @@ class DependencyResolutionShadowListenerTest extends Specification {
 
         then:
         listener.prefetchedArtifactCount == 0
-        0 * client.resolveDependencies(_, _, _, _, _)
+        0 * client.resolveDependencies(_, _, _, _, _, _)
         1 * client.recordResolution("runtimeClasspath", _, 0, true, 1)
         1 * reporter.reportMatch()
     }
@@ -538,7 +626,7 @@ class DependencyResolutionShadowListenerTest extends Specification {
 
         then:
         listener.prefetchedArtifactCount == 0
-        0 * client.resolveDependencies(_, _, _, _, _)
+        0 * client.resolveDependencies(_, _, _, _, _, _)
         1 * client.recordResolution("runtimeClasspath", _, 0, true, 0)
         1 * reporter.reportMatch()
     }

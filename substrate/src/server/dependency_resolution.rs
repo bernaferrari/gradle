@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
@@ -1967,6 +1968,53 @@ impl DependencyResolutionServiceImpl {
             .await
     }
 
+    fn constraint_versions(
+        constraints: &[DependencyDescriptor],
+    ) -> Result<HashMap<(String, String), String>, String> {
+        let mut versions = HashMap::<(String, String), String>::with_capacity(constraints.len());
+        for constraint in constraints {
+            if constraint.group.trim().is_empty() || constraint.name.trim().is_empty() {
+                return Err("Dependency constraint contains empty group or name".to_string());
+            }
+            if let Some(reason) = Self::unsupported_version_selector_reason(&constraint.version) {
+                return Err(format!(
+                    "Unsupported dependency constraint {}:{}:{}: {}",
+                    constraint.group, constraint.name, constraint.version, reason
+                ));
+            }
+            let key = (constraint.group.clone(), constraint.name.clone());
+            match versions.get(&key) {
+                Some(existing)
+                    if compare_versions(&constraint.version, existing)
+                        != std::cmp::Ordering::Greater => {}
+                _ => {
+                    versions.insert(key, constraint.version.clone());
+                }
+            }
+        }
+        Ok(versions)
+    }
+
+    fn select_version_with_constraint(
+        requested_version: &str,
+        constrained_version: Option<&String>,
+    ) -> Option<String> {
+        let Some(constrained_version) = constrained_version else {
+            return Some(requested_version.to_string());
+        };
+        if requested_version.trim().is_empty() {
+            return Some(constrained_version.clone());
+        }
+        if Self::unsupported_version_selector_reason(requested_version).is_some() {
+            return Some(requested_version.to_string());
+        }
+        if compare_versions(constrained_version, requested_version) == std::cmp::Ordering::Greater {
+            Some(constrained_version.clone())
+        } else {
+            Some(requested_version.to_string())
+        }
+    }
+
     /// Recursively resolve a dependency and its transitive dependencies.
     ///
     /// Uses BFS-style resolution: fetches the POM for the current artifact,
@@ -2759,18 +2807,45 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
         } else {
             repo_urls
         };
+        let constraints = match Self::constraint_versions(&req.constraints) {
+            Ok(constraints) => constraints,
+            Err(error_message) => {
+                let elapsed = start.elapsed().as_millis() as i64;
+                return Ok(Response::new(ResolveDependenciesResponse {
+                    success: false,
+                    resolved_dependencies: Vec::new(),
+                    error_message,
+                    resolution_time_ms: elapsed,
+                    total_artifacts: 0,
+                    total_download_size: 0,
+                }));
+            }
+        };
 
         let mut resolved = Vec::with_capacity(req.dependencies.len());
         for dep in &req.dependencies {
             let dep_for_resolution;
-            let effective_dep = if dep.scope.is_empty() && !req.target_scope.is_empty() {
+            let constrained_dep;
+            let constrained_version = constraints.get(&(dep.group.clone(), dep.name.clone()));
+            let version_from_constraint =
+                Self::select_version_with_constraint(&dep.version, constrained_version);
+            let base_dep = if version_from_constraint.as_deref() != Some(dep.version.as_str()) {
+                constrained_dep = DependencyDescriptor {
+                    version: version_from_constraint.unwrap_or_else(|| dep.version.clone()),
+                    ..dep.clone()
+                };
+                &constrained_dep
+            } else {
+                dep
+            };
+            let effective_dep = if base_dep.scope.is_empty() && !req.target_scope.is_empty() {
                 dep_for_resolution = DependencyDescriptor {
                     scope: req.target_scope.clone(),
-                    ..dep.clone()
+                    ..base_dep.clone()
                 };
                 &dep_for_resolution
             } else {
-                dep
+                base_dep
             };
             let mut result = self
                 .resolve_descriptor(effective_dep, &repos, req.lenient)
@@ -4738,6 +4813,7 @@ mod tests {
                 attributes: vec![],
                 lenient: false,
                 prefetch_artifacts: true,
+                constraints: Vec::new(),
                 ..Default::default()
             }))
             .await
@@ -8597,6 +8673,7 @@ mod tests {
                 resolution_strategy: None,
                 target_scope: String::new(),
                 prefetch_artifacts: false,
+                constraints: Vec::new(),
             }))
             .await
             .unwrap()
@@ -8606,5 +8683,119 @@ mod tests {
         assert!(response.error_message.contains("wildcard '+' selectors"));
         assert_eq!(response.resolved_dependencies.len(), 1);
         assert!(!response.resolved_dependencies[0].resolved);
+    }
+
+    #[tokio::test]
+    async fn test_dependency_constraint_upgrades_matching_dependency_version() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::{Arc, Mutex};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let requested = Arc::new(Mutex::new(Vec::new()));
+        let requested_for_server = Arc::clone(&requested);
+        let server = std::thread::spawn(move || {
+            for _ in 0..1 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0u8; 2048];
+                let read = stream.read(&mut request).unwrap_or(0);
+                let request_text = String::from_utf8_lossy(&request[..read]);
+                let path = request_text
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("/")
+                    .to_string();
+                requested_for_server.lock().unwrap().push(path.clone());
+                let body = if path.ends_with("/demo-2.0.pom") {
+                    b"<project><modelVersion>4.0.0</modelVersion><groupId>org.example</groupId><artifactId>demo</artifactId><version>2.0</version></project>".as_slice()
+                } else {
+                    let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+                    stream.write_all(response.as_bytes()).unwrap();
+                    continue;
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/xml\r\n\r\n",
+                    body.len()
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+                stream.write_all(body).unwrap();
+            }
+        });
+
+        let svc = make_svc();
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "runtimeClasspath".to_string(),
+                dependencies: vec![make_dep("org.example", "demo", "1.0")],
+                constraints: vec![make_dep("org.example", "demo", "2.0")],
+                repositories: vec![make_repo("local", &format!("http://{}", addr))],
+                attributes: Vec::new(),
+                lenient: false,
+                resolution_strategy: None,
+                target_scope: String::new(),
+                prefetch_artifacts: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        server.join().unwrap();
+
+        assert!(response.success, "{}", response.error_message);
+        assert_eq!(response.resolved_dependencies.len(), 1);
+        assert_eq!(response.resolved_dependencies[0].version, "2.0");
+        assert_eq!(response.resolved_dependencies[0].selected_version, "2.0");
+        let paths = requested.lock().unwrap();
+        assert!(paths.iter().any(|path| path.ends_with("/demo-2.0.pom")));
+        assert!(!paths.iter().any(|path| path.ends_with("/demo-1.0.pom")));
+    }
+
+    #[tokio::test]
+    async fn test_dependency_constraint_does_not_create_artifact_without_dependency() {
+        let svc = make_svc();
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "runtimeClasspath".to_string(),
+                dependencies: Vec::new(),
+                constraints: vec![make_dep("org.example", "demo", "2.0")],
+                repositories: vec![make_repo("central", "https://repo.example.test/maven2")],
+                attributes: Vec::new(),
+                lenient: false,
+                resolution_strategy: None,
+                target_scope: String::new(),
+                prefetch_artifacts: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(response.success, "{}", response.error_message);
+        assert!(response.resolved_dependencies.is_empty());
+        assert_eq!(response.total_artifacts, 0);
+    }
+
+    #[tokio::test]
+    async fn test_dependency_constraint_unsupported_selector_fails_closed() {
+        let svc = make_svc();
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "runtimeClasspath".to_string(),
+                dependencies: vec![make_dep("org.example", "demo", "1.0")],
+                constraints: vec![make_dep("org.example", "demo", "2.+")],
+                repositories: vec![make_repo("central", "https://repo.example.test/maven2")],
+                attributes: Vec::new(),
+                lenient: false,
+                resolution_strategy: None,
+                target_scope: String::new(),
+                prefetch_artifacts: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!response.success);
+        assert!(response.error_message.contains("Unsupported dependency constraint"));
+        assert!(response.error_message.contains("wildcard '+' selectors"));
     }
 }
