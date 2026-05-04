@@ -143,6 +143,11 @@ struct MavenVersioning {
     versions: Vec<String>,
 }
 
+struct TransitiveResolution {
+    dependencies: Vec<ResolvedDependency>,
+    source_repo_url: Option<String>,
+}
+
 /// Snapshot info from maven-metadata.xml.
 #[derive(Clone)]
 struct MavenSnapshot {
@@ -2046,7 +2051,7 @@ impl DependencyResolutionServiceImpl {
         }
 
         // Fetch POM and resolve transitive dependencies
-        let transitive_deps = if dep.transitive && depth < MAX_DEPTH {
+        let transitive_resolution = if dep.transitive && depth < MAX_DEPTH {
             match self
                 .fetch_and_resolve_transitive(
                     &group,
@@ -2060,7 +2065,7 @@ impl DependencyResolutionServiceImpl {
                 )
                 .await
             {
-                Ok(dependencies) => dependencies,
+                Ok(resolution) => resolution,
                 Err(reason) => {
                     visited.remove(&coord);
                     return ResolvedDependency {
@@ -2079,7 +2084,10 @@ impl DependencyResolutionServiceImpl {
                 }
             }
         } else {
-            Vec::new()
+            TransitiveResolution {
+                dependencies: Vec::new(),
+                source_repo_url: None,
+            }
         };
 
         // Remove from visited set so sibling branches can resolve the same dep
@@ -2108,9 +2116,10 @@ impl DependencyResolutionServiceImpl {
         };
 
         // Compute artifact URL
-        let repo_base = repos
-            .first()
-            .map(|r| r.url.as_str())
+        let repo_base = transitive_resolution
+            .source_repo_url
+            .as_deref()
+            .or_else(|| repos.first().map(|r| r.url.as_str()))
             .unwrap_or("https://repo.maven.apache.org/maven2");
         let artifact_url = module_metadata_artifact_url.unwrap_or_else(|| {
             Self::artifact_url_for_descriptor(
@@ -2128,7 +2137,7 @@ impl DependencyResolutionServiceImpl {
             name,
             version: raw_version,
             selected_version,
-            dependencies: transitive_deps,
+            dependencies: transitive_resolution.dependencies,
             resolved: true,
             failure_reason: String::new(),
             artifact_url,
@@ -2237,7 +2246,7 @@ impl DependencyResolutionServiceImpl {
         visited: &mut std::collections::HashSet<(String, String)>,
         depth: u32,
         inherited_exclusions: &[(String, String)],
-    ) -> Result<Vec<ResolvedDependency>, String> {
+    ) -> Result<TransitiveResolution, String> {
         for repo in repos
             .iter()
             .filter(|repo| Self::supports_gradle_module_metadata(repo))
@@ -2290,7 +2299,10 @@ impl DependencyResolutionServiceImpl {
                                 transitive = transitive_deps.len(),
                                 "Resolved transitive dependencies from Gradle Module Metadata"
                             );
-                            return Ok(transitive_deps);
+                            return Ok(TransitiveResolution {
+                                dependencies: transitive_deps,
+                                source_repo_url: Some(repo.url.clone()),
+                            });
                         }
                         Some(ModuleMetadataSelection::Unsupported(reason)) => return Err(reason),
                         None => {}
@@ -2488,7 +2500,10 @@ impl DependencyResolutionServiceImpl {
                         depth
                     );
 
-                    return Ok(transitive_deps);
+                    return Ok(TransitiveResolution {
+                        dependencies: transitive_deps,
+                        source_repo_url: Some(repo.url.clone()),
+                    });
                 }
                 Err(e) => {
                     tracing::debug!(
@@ -2501,7 +2516,10 @@ impl DependencyResolutionServiceImpl {
                 }
             }
         }
-        Ok(Vec::new())
+        Ok(TransitiveResolution {
+            dependencies: Vec::new(),
+            source_repo_url: None,
+        })
     }
 
     /// Download an artifact with retry logic.
@@ -4854,6 +4872,108 @@ mod tests {
         assert!(
             response.resolved_dependencies[0].dependencies.is_empty(),
             "self dependency should not be retained as a cycle leaf"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_maven_artifact_url_uses_repository_that_supplied_pom() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::{Arc, Mutex};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let requests_for_server = Arc::clone(&requests);
+        let pom = br#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.example</groupId>
+  <artifactId>owned</artifactId>
+  <version>1.0</version>
+</project>"#
+            .to_vec();
+        let server = std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            while requests_for_server.lock().unwrap().len() < 2
+                && started.elapsed() < std::time::Duration::from_secs(5)
+            {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(stream) => stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                    Err(error) => panic!("repo accept failed: {error}"),
+                };
+                let mut request = [0u8; 2048];
+                let read = stream.read(&mut request).unwrap_or(0);
+                let request_text = String::from_utf8_lossy(&request[..read]);
+                let path = request_text
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("/")
+                    .to_string();
+                requests_for_server.lock().unwrap().push(path.clone());
+                if path.starts_with("/owning/") {
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/xml\r\n\r\n",
+                        pom.len()
+                    );
+                    stream.write_all(response.as_bytes()).unwrap();
+                    stream.write_all(&pom).unwrap();
+                } else {
+                    stream
+                        .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
+                        .unwrap();
+                }
+            }
+        });
+
+        let svc = make_svc();
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "runtimeClasspath".to_string(),
+                dependencies: vec![DependencyDescriptor {
+                    group: "org.example".to_string(),
+                    name: "owned".to_string(),
+                    version: "1.0".to_string(),
+                    classifier: String::new(),
+                    extension: "jar".to_string(),
+                    transitive: true,
+                    scope: "runtime".to_string(),
+                    changing: false,
+                    optional: false,
+                    ivy_conf: String::new(),
+                }],
+                repositories: vec![
+                    make_repo("missing", &format!("http://{}/missing", addr)),
+                    make_repo("owning", &format!("http://{}/owning", addr)),
+                ],
+                attributes: vec![],
+                lenient: false,
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        server.join().unwrap();
+
+        assert!(response.success, "{}", response.error_message);
+        let artifact_url = &response.resolved_dependencies[0].artifact_url;
+        assert!(
+            artifact_url.starts_with(&format!("http://{}/owning/", addr)),
+            "{}",
+            artifact_url
+        );
+        assert_eq!(
+            *requests.lock().unwrap(),
+            vec![
+                "/missing/org/example/owned/1.0/owned-1.0.pom".to_string(),
+                "/owning/org/example/owned/1.0/owned-1.0.pom".to_string(),
+            ]
         );
     }
 
