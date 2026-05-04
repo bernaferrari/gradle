@@ -630,6 +630,11 @@ come from dependency management, while unknown explicit scopes still default to
 Rust dependency-management parsing also preserves managed exclusions and applies
 them when the concrete dependency has no exclusions. This matches Gradle's
 `getDependencyMgtExclusions` path, including the direct-exclusions-win rule.
+The POM parsing/defaulting code has been split into
+`dependency_solver::maven_pom`, keeping the service API wrappers while matching
+Gradle's parser/builder separation more closely. Rust now also imports Maven
+BOMs declared in `dependencyManagement` with `<type>pom</type><scope>import</scope>`
+before re-resolving dependencies whose versions come from the imported BOM.
 
 Native task coverage push (execution-kernel coverage): common Gradle lifecycle
 aggregator `DefaultTask`s (`build`, `check`, `classes`, `testClasses`,
@@ -659,12 +664,13 @@ style notation as unsupported Maven coordinates.
 | Maven self-dependency parity | Focused resolver test passed; local POM declaring a dependency on its own `group:name` resolves without retaining the self edge | `cargo test -p gradle-substrate-daemon test_pom_self_dependency_is_skipped_like_gradle --lib -- --nocapture` |
 | Maven dependency-management scope parity | Focused helper and resolver tests passed; missing dependency scope inherits managed `test` scope and explicit unknown scope still defaults to `compile` | `cargo test -p gradle-substrate-daemon managed_default_scope --lib`; `cargo test -p gradle-substrate-daemon test_dependency_management_scope_defaults_like_gradle --lib -- --nocapture` |
 | Maven dependency-management exclusions parity | Focused helper and resolver tests passed; missing dependency exclusions inherit managed exclusions and direct exclusions override them | `cargo test -p gradle-substrate-daemon effective_exclusions --lib`; `cargo test -p gradle-substrate-daemon test_dependency_management_exclusions_default_like_gradle --lib -- --nocapture` |
+| Maven POM parser extraction and BOM import parity | Focused parser/defaulting tests passed; local POM importing a dependency-management BOM resolves an unversioned child to the BOM-managed version | `cargo test -p gradle-substrate-daemon parse_pom --lib`; `cargo test -p gradle-substrate-daemon parse_dependency_management --lib`; `cargo test -p gradle-substrate-daemon test_dependency_management_import_bom_defaults_versions_like_gradle --lib -- --nocapture` |
 | Kernel dependency admission tests | 6/6 focused kernel tests passed | `cargo test -p gradle-substrate-daemon execution_kernel --lib` |
 | Kernel dependency graph bridge tests | 3/3 focused DAG conversion tests passed | `cargo test -p gradle-substrate-daemon kernel_dependency_graph --lib` |
 | Task coverage tests | Focused lifecycle/default/KotlinCompile tests passed | `cargo test -p gradle-substrate-daemon lifecycle_task --lib`; `cargo test -p gradle-substrate-daemon default_task --lib`; `cargo test -p gradle-substrate-daemon kotlin_compile --lib` |
 | Corpus runner tests | 26 passed | `python3 -m unittest tools.corpus_runner.test_run` |
 | Artifact classifier/extension bridge tests | Focused JVM-host protocol, build-plan notation, kernel graph, and task graph parser tests passed | `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.jvmhost.JvmHostServiceImplTest --tests org.gradle.internal.rustbridge.jvmhost.ProjectModelProviderAdapterTest --no-daemon --console=plain`; `cargo test -p gradle-substrate-daemon dependency_notation_preserves_classifier_and_extension --lib`; `cargo test -p gradle-substrate-daemon kernel_dependency_graph_groups_build_plan_dependencies --lib`; `cargo test -p gradle-substrate-daemon dependency_configuration_matching_respects_test_scope --lib` |
-| Unit tests | 1615 passed, 0 failed, 3 ignored | `cargo test -p gradle-substrate-daemon --lib` |
+| Unit tests | 1616 passed, 0 failed, 3 ignored | `cargo test -p gradle-substrate-daemon --lib` |
 
 ## Next Sync Actions
 
