@@ -18,6 +18,8 @@ use crate::proto::{
 };
 
 use super::dependency_solver::ivyresolve::strategy::compare_versions;
+use super::dependency_solver::maven_pom;
+pub use super::dependency_solver::maven_pom::{ManagedDependency, PomDependency};
 pub use super::dependency_solver::resolveengine::graph::conflicts::ResolutionStrategy;
 use super::dependency_solver::resolveengine::graph::conflicts::{
     resolve_conflicts, resolve_conflicts_with_strategy,
@@ -112,27 +114,6 @@ struct ResolutionStats {
     total_resolutions: AtomicI64,
     cache_hits: AtomicI64,
     total_time_ms: AtomicI64,
-}
-
-/// Parsed dependency from a POM file.
-#[derive(Clone)]
-pub struct PomDependency {
-    group: String,
-    name: String,
-    version: String,
-    scope: String,
-    optional: bool,
-    classifier: String,
-    type_field: String,
-    exclusions: Vec<(String, String)>,
-}
-
-/// Parsed dependency-management defaults for a Maven dependency.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ManagedDependency {
-    version: String,
-    scope: String,
-    exclusions: Vec<(String, String)>,
 }
 
 /// Rust-native dependency resolution service.
@@ -1329,266 +1310,25 @@ impl DependencyResolutionServiceImpl {
         Ok((total_artifacts, total_download_size))
     }
 
-    /// Parse a POM file and extract dependencies using a byte-level scanner.
-    /// Handles property interpolation, version ranges, and excludes false matches
-    /// like `<dependencyManagement>`.
     pub fn parse_pom_dependencies(pom_content: &str) -> Vec<PomDependency> {
-        let mut dependencies = Vec::new();
-        let bytes = pom_content.as_bytes();
-        let len = bytes.len();
-        let mut i = 0;
-
-        // Track whether we're inside a <dependencyManagement> block
-        let dep_mgmt_open = b"<dependencyManagement";
-        let dep_mgmt_close = b"</dependencyManagement>";
-
-        while i < len {
-            // Look for <dependency> (not <dependencyManagement, not </dependency>)
-            let pos = match find_open_tag_exact(bytes, i, b"dependency") {
-                Some(p) => p,
-                None => break,
-            };
-
-            // Skip if this <dependency> is inside a <dependencyManagement> block
-            // Check if there's a <dependencyManagement> before this position without a closing tag
-            let mut in_dep_mgmt = false;
-            let mut scan = 0usize;
-            while scan < pos {
-                if let Some(dm_start) = bytes[scan..pos]
-                    .windows(dep_mgmt_open.len())
-                    .position(|w| w == dep_mgmt_open)
-                    .map(|p| scan + p)
-                {
-                    // Check if there's a closing tag between dm_start and pos
-                    let after_dm = dm_start + dep_mgmt_open.len();
-                    if bytes[after_dm..pos]
-                        .windows(dep_mgmt_close.len())
-                        .any(|w| w == dep_mgmt_close)
-                    {
-                        scan = after_dm;
-                        continue;
-                    }
-                    in_dep_mgmt = true;
-                    break;
-                }
-                break;
-            }
-
-            if in_dep_mgmt {
-                i = pos + b"<dependency".len();
-                continue;
-            }
-
-            // Extract fields within this <dependency> block
-            let end_pos = match find_end_tag(bytes, pos, b"dependency") {
-                Some(p) => p,
-                None => break,
-            };
-
-            let group = extract_tag_text(bytes, pos, b"groupId").unwrap_or_default();
-            let name = extract_tag_text(bytes, pos, b"artifactId").unwrap_or_default();
-            let version = extract_tag_text(bytes, pos, b"version").unwrap_or_default();
-            let scope = extract_tag_text(bytes, pos, b"scope").unwrap_or_default();
-            let optional = extract_tag_text(bytes, pos, b"optional")
-                .map(|v| v == "true")
-                .unwrap_or(false);
-            let _classifier = extract_tag_text(bytes, pos, b"classifier").unwrap_or_default();
-            let _type_field = extract_tag_text(bytes, pos, b"type").unwrap_or_default();
-            let exclusions = Self::parse_pom_exclusions(bytes, pos, end_pos);
-
-            if !group.is_empty() && !name.is_empty() {
-                dependencies.push(PomDependency {
-                    group,
-                    name,
-                    version,
-                    scope,
-                    optional,
-                    classifier: _classifier,
-                    type_field: _type_field,
-                    exclusions,
-                });
-            }
-
-            i = end_pos + b"</dependency>".len();
-        }
-
-        dependencies
+        maven_pom::parse_pom_dependencies(pom_content)
     }
 
-    /// Parse <exclusions> block within a single <dependency> element.
-    /// Returns a list of (groupId, artifactId) pairs.
-    fn parse_pom_exclusions(
-        bytes: &[u8],
-        dep_start: usize,
-        dep_end: usize,
-    ) -> Vec<(String, String)> {
-        let mut exclusions = Vec::new();
-
-        // Find <exclusions> within this dependency block
-        let exclusions_open = b"<exclusions>";
-        let exclusions_close = b"</exclusions>";
-        let exclusion_open = b"<exclusion>";
-        let exclusion_close = b"</exclusion>";
-
-        // Locate the <exclusions> container
-        let container_start = bytes[dep_start..dep_end]
-            .windows(exclusions_open.len())
-            .position(|w| w == exclusions_open)
-            .map(|p| dep_start + p);
-
-        let container_start = match container_start {
-            Some(s) => s,
-            None => return exclusions,
-        };
-
-        let content_start = container_start + exclusions_open.len();
-
-        // Find </exclusions> to bound our search
-        let container_end = bytes[content_start..dep_end]
-            .windows(exclusions_close.len())
-            .position(|w| w == exclusions_close)
-            .map(|p| content_start + p)
-            .unwrap_or(dep_end);
-
-        // Now iterate over <exclusion> blocks within the container
-        let mut i = content_start;
-        while i < container_end {
-            let pos = bytes[i..container_end]
-                .windows(exclusion_open.len())
-                .position(|w| w == exclusion_open)
-                .map(|p| i + p);
-
-            let pos = match pos {
-                Some(p) => p,
-                None => break,
-            };
-
-            let excl_content_start = pos + exclusion_open.len();
-
-            // Find </exclusion>
-            let excl_end = bytes[excl_content_start..container_end]
-                .windows(exclusion_close.len())
-                .position(|w| w == exclusion_close)
-                .map(|p| excl_content_start + p);
-
-            let excl_end = match excl_end {
-                Some(e) => e,
-                None => break,
-            };
-
-            let excl_group = extract_tag_text(bytes, pos, b"groupId").unwrap_or_default();
-            let excl_name = extract_tag_text(bytes, pos, b"artifactId").unwrap_or_default();
-
-            if !excl_group.is_empty() && !excl_name.is_empty() {
-                exclusions.push((excl_group, excl_name));
-            }
-
-            i = excl_end + exclusion_close.len();
-        }
-
-        exclusions
-    }
-
-    /// Parse <dependencyManagement><dependencies> section from a POM.
-    /// Returns a map of (groupId, artifactId) -> managed defaults for dependencies.
     pub fn parse_dependency_management(
         pom_content: &str,
     ) -> std::collections::HashMap<(String, String), ManagedDependency> {
-        let mut managed = std::collections::HashMap::new();
-        let bytes = pom_content.as_bytes();
-
-        // Find <dependencyManagement>
-        let dm_open = b"<dependencyManagement>";
-        let dm_close = b"</dependencyManagement>";
-
-        let dm_start = bytes
-            .windows(dm_open.len())
-            .position(|w| w == dm_open)
-            .map(|p| p + dm_open.len());
-
-        let dm_start = match dm_start {
-            Some(s) => s,
-            None => return managed,
-        };
-
-        let dm_end = bytes[dm_start..]
-            .windows(dm_close.len())
-            .position(|w| w == dm_close)
-            .map(|p| dm_start + p)
-            .unwrap_or(bytes.len());
-
-        // Within the dependencyManagement block, find <dependency> elements
-        let mut i = dm_start;
-        while i < dm_end {
-            let dep_pos = match find_open_tag_exact(bytes, i, b"dependency") {
-                Some(p) if p < dm_end => p,
-                _ => break,
-            };
-
-            let dep_end_pos = match find_end_tag(bytes, dep_pos, b"dependency") {
-                Some(p) if p < dm_end => p,
-                _ => {
-                    i = dep_pos + b"<dependency".len();
-                    continue;
-                }
-            };
-
-            let group = extract_tag_text(bytes, dep_pos, b"groupId").unwrap_or_default();
-            let name = extract_tag_text(bytes, dep_pos, b"artifactId").unwrap_or_default();
-            let version = extract_tag_text(bytes, dep_pos, b"version").unwrap_or_default();
-            let scope = extract_tag_text(bytes, dep_pos, b"scope").unwrap_or_default();
-            let exclusions = Self::parse_pom_exclusions(bytes, dep_pos, dep_end_pos);
-
-            if !group.is_empty() && !name.is_empty() && !version.is_empty() {
-                managed.insert(
-                    (group, name),
-                    ManagedDependency {
-                        version,
-                        scope,
-                        exclusions,
-                    },
-                );
-            }
-
-            i = dep_end_pos + b"</dependency>".len();
-        }
-
-        managed
+        maven_pom::parse_dependency_management(pom_content)
     }
 
     fn managed_default_scope(dep: &PomDependency, managed: Option<&ManagedDependency>) -> String {
-        if !dep.scope.is_empty() {
-            if matches!(
-                dep.scope.as_str(),
-                "compile" | "runtime" | "test" | "provided" | "system" | "import"
-            ) {
-                return dep.scope.clone();
-            }
-            return "compile".to_string();
-        }
-
-        let managed_scope = managed.map(|dep| dep.scope.as_str()).unwrap_or_default();
-        if matches!(
-            managed_scope,
-            "compile" | "runtime" | "test" | "provided" | "system" | "import"
-        ) {
-            managed_scope.to_string()
-        } else {
-            "compile".to_string()
-        }
+        maven_pom::managed_default_scope(dep, managed)
     }
 
     fn effective_exclusions(
         dep: &PomDependency,
         managed: Option<&ManagedDependency>,
     ) -> Vec<(String, String)> {
-        if !dep.exclusions.is_empty() {
-            return dep.exclusions.clone();
-        }
-
-        managed
-            .map(|managed| managed.exclusions.clone())
-            .unwrap_or_default()
+        maven_pom::effective_exclusions(dep, managed)
     }
 
     /// Deduplicate resolved dependencies by (group, name), keeping the highest version.
@@ -2271,6 +2011,20 @@ impl DependencyResolutionServiceImpl {
                     let mut bom_imports = Vec::new();
                     let mut regular_deps = Vec::new();
 
+                    for ((bom_group, bom_name), managed) in &managed_versions {
+                        if managed.scope == "import" && managed.type_field == "pom" {
+                            let bom_version =
+                                Self::interpolate_properties(&managed.version, &properties);
+                            if !bom_version.is_empty() {
+                                bom_imports.push((
+                                    bom_group.clone(),
+                                    bom_name.clone(),
+                                    bom_version,
+                                ));
+                            }
+                        }
+                    }
+
                     for pom_dep in &pom_deps {
                         let managed =
                             managed_versions.get(&(pom_dep.group.clone(), pom_dep.name.clone()));
@@ -2332,10 +2086,6 @@ impl DependencyResolutionServiceImpl {
                             } else {
                                 raw_dep_version
                             };
-
-                        if resolved_version.is_empty() {
-                            continue;
-                        }
 
                         let effective_exclusions = Self::effective_exclusions(pom_dep, managed);
                         regular_deps.push((
@@ -4947,6 +4697,107 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_dependency_management_import_bom_defaults_versions_like_gradle() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let root_pom = br#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.example</groupId>
+  <artifactId>root</artifactId>
+  <version>1.0</version>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.example</groupId>
+        <artifactId>bom</artifactId>
+        <version>1.0</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>org.example</groupId>
+      <artifactId>child</artifactId>
+    </dependency>
+  </dependencies>
+</project>"#
+            .to_vec();
+        let bom_pom = br#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.example</groupId>
+  <artifactId>bom</artifactId>
+  <version>1.0</version>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.example</groupId>
+        <artifactId>child</artifactId>
+        <version>1.2.3</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+</project>"#
+            .to_vec();
+        let child_pom = br#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.example</groupId>
+  <artifactId>child</artifactId>
+  <version>1.2.3</version>
+</project>"#
+            .to_vec();
+        let server = std::thread::spawn(move || {
+            for _ in 0..3 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0u8; 2048];
+                let read = stream.read(&mut request).unwrap_or(0);
+                let request = String::from_utf8_lossy(&request[..read]);
+                let body = if request.contains("/org/example/root/1.0/root-1.0.pom") {
+                    &root_pom
+                } else if request.contains("/org/example/bom/1.0/bom-1.0.pom") {
+                    &bom_pom
+                } else if request.contains("/org/example/child/1.2.3/child-1.2.3.pom") {
+                    &child_pom
+                } else {
+                    panic!("unexpected POM request: {}", request);
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/xml\r\n\r\n",
+                    body.len()
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+                stream.write_all(body).unwrap();
+            }
+        });
+
+        let store = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "compileClasspath".to_string(),
+                dependencies: vec![make_dep("org.example", "root", "1.0")],
+                repositories: vec![make_repo("local", &format!("http://{}", addr))],
+                attributes: vec![],
+                lenient: false,
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        server.join().unwrap();
+
+        assert!(response.success, "{}", response.error_message);
+        let root = &response.resolved_dependencies[0];
+        assert_eq!(root.dependencies.len(), 1);
+        assert_eq!(root.dependencies[0].name, "child");
+        assert_eq!(root.dependencies[0].selected_version, "1.2.3");
+    }
+
     #[test]
     fn test_filter_by_compile_scope_excludes_runtime_and_test_recursively() {
         let mut compile = resolved_dep("org.example", "compile-lib", "compile");
@@ -7061,6 +6912,7 @@ mod tests {
         let managed = ManagedDependency {
             version: "1.0".to_string(),
             scope: "test".to_string(),
+            type_field: String::new(),
             exclusions: vec![("org.blocked".to_string(), "leaf".to_string())],
         };
         let mut dep = PomDependency {
@@ -7098,6 +6950,7 @@ mod tests {
         let managed = ManagedDependency {
             version: "1.0".to_string(),
             scope: String::new(),
+            type_field: String::new(),
             exclusions: vec![("org.managed".to_string(), "blocked".to_string())],
         };
         let mut dep = PomDependency {
