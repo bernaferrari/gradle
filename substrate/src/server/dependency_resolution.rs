@@ -1543,6 +1543,40 @@ impl DependencyResolutionServiceImpl {
         resolve_conflicts_with_strategy(deps, strategy);
     }
 
+    fn fail_on_conflict_message(deps: &[ResolvedDependency]) -> Option<String> {
+        let mut versions = std::collections::HashMap::<(&str, &str), Vec<&str>>::new();
+        for dep in deps {
+            versions
+                .entry((dep.group.as_str(), dep.name.as_str()))
+                .or_default()
+                .push(dep.selected_version.as_str());
+        }
+        let mut conflicts = versions
+            .into_iter()
+            .filter_map(|((group, name), mut versions)| {
+                versions.sort_unstable();
+                versions.dedup();
+                if versions.len() > 1 {
+                    Some(format!(
+                        "{group}:{name} has versions {}",
+                        versions.join(", ")
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if conflicts.is_empty() {
+            None
+        } else {
+            conflicts.sort_unstable();
+            Some(format!(
+                "Version conflict detected with fail_on_conflict: {}",
+                conflicts.join("; ")
+            ))
+        }
+    }
+
     /// Filter resolved dependencies by scope.
     pub fn filter_by_scope(
         deps: Vec<ResolvedDependency>,
@@ -2766,6 +2800,19 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             .as_ref()
             .map(ResolutionStrategy::from_proto)
             .unwrap_or_default();
+        if matches!(strategy, ResolutionStrategy::FailOnConflict) {
+            if let Some(error_message) = Self::fail_on_conflict_message(&resolved) {
+                let elapsed = start.elapsed().as_millis() as i64;
+                return Ok(Response::new(ResolveDependenciesResponse {
+                    success: false,
+                    resolved_dependencies: resolved,
+                    error_message,
+                    resolution_time_ms: elapsed,
+                    total_artifacts: 0,
+                    total_download_size: 0,
+                }));
+            }
+        }
         Self::resolve_conflicts_with_strategy(&mut resolved, &strategy);
 
         // Filter by target scope if specified
@@ -7155,6 +7202,51 @@ mod tests {
     }
 
     // ---- Conflict resolution tests ----
+
+    #[tokio::test]
+    async fn test_fail_on_conflict_strategy_fails_closed() {
+        let svc = make_svc();
+        let conflicting = |version: &str| DependencyDescriptor {
+            group: "com.example".to_string(),
+            name: "lib".to_string(),
+            version: version.to_string(),
+            classifier: String::new(),
+            extension: "jar".to_string(),
+            transitive: false,
+            scope: "runtime".to_string(),
+            changing: false,
+            optional: false,
+            ivy_conf: String::new(),
+        };
+
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "runtimeClasspath".to_string(),
+                dependencies: vec![conflicting("1.0.0"), conflicting("2.0.0")],
+                repositories: Vec::new(),
+                attributes: Vec::new(),
+                lenient: false,
+                resolution_strategy: Some(crate::proto::ResolutionStrategyConfig {
+                    strategy: "fail_on_conflict".to_string(),
+                    forced_versions: Vec::new(),
+                    preferred_versions: Vec::new(),
+                }),
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!response.success);
+        assert!(
+            response
+                .error_message
+                .contains("com.example:lib has versions 1.0.0, 2.0.0"),
+            "{}",
+            response.error_message
+        );
+        assert_eq!(response.resolved_dependencies.len(), 2);
+    }
 
     #[test]
     fn test_resolve_conflicts_keeps_highest_version() {
