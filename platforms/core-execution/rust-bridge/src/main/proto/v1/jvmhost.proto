@@ -57,6 +57,8 @@ message ResolvedArtifact {
   string configuration = 4;
   string classifier = 5;
   string extension = 6;
+  // "dependency" by default, or "constraint" for declared dependency constraints.
+  string kind = 7;
 }
 message GetBuildEnvironmentRequest {}
 message GetBuildEnvironmentResponse {

@@ -232,18 +232,24 @@ public class JvmHostServiceImpl {
         private final String configuration;
         private final String classifier;
         private final String extension;
+        private final String kind;
 
         public ResolvedArtifactEntry(String group, String name, String version, String configuration) {
-            this(group, name, version, configuration, "", "jar");
+            this(group, name, version, configuration, "", "jar", "dependency");
         }
 
         public ResolvedArtifactEntry(String group, String name, String version, String configuration, String classifier, String extension) {
+            this(group, name, version, configuration, classifier, extension, "dependency");
+        }
+
+        public ResolvedArtifactEntry(String group, String name, String version, String configuration, String classifier, String extension, String kind) {
             this.group = group;
             this.name = name;
             this.version = version;
             this.configuration = configuration;
             this.classifier = classifier == null ? "" : classifier;
             this.extension = extension == null || extension.isEmpty() ? "jar" : extension;
+            this.kind = kind == null || kind.trim().isEmpty() ? "dependency" : kind;
         }
 
         public String getGroup() { return group; }
@@ -252,6 +258,7 @@ public class JvmHostServiceImpl {
         public String getConfiguration() { return configuration; }
         public String getClassifier() { return classifier; }
         public String getExtension() { return extension; }
+        public String getKind() { return kind; }
     }
 
     private static String projectDirFromBuildFile(String buildFile) {

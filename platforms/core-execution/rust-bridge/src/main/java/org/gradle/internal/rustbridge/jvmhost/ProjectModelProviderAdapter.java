@@ -10,6 +10,7 @@ import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.ConfigurationContainer;
+import org.gradle.api.artifacts.DependencyConstraint;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.file.FileTree;
 import org.gradle.api.file.RelativePath;
@@ -176,7 +177,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             Object project = invoke(targetProject, "getMutableModel");
 
             Object configurations = invoke(project, "getConfigurations");
-            Object configuration = invoke(configurations, "findByName", String.class, configurationName);
+            Configuration configuration = (Configuration) invoke(configurations, "findByName", String.class, configurationName);
             if (configuration == null) {
                 LOGGER.debug("[substrate-jvmhost] Configuration not found: {} in project {}",
                     configurationName, projectPath);
@@ -203,12 +204,33 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
                     artifactExtension(resolvedArtifact)
                 ));
             }
+            for (DependencyConstraint constraint : configuration.getDependencyConstraints()) {
+                String group = nullToEmpty(constraint.getGroup());
+                String name = nullToEmpty(constraint.getName());
+                String version = nullToEmpty(constraint.getVersion());
+                if (group.isEmpty() || name.isEmpty() || version.isEmpty()) {
+                    continue;
+                }
+                artifacts.add(new JvmHostServiceImpl.ResolvedArtifactEntry(
+                    group,
+                    name,
+                    version,
+                    configurationName,
+                    "",
+                    "jar",
+                    "constraint"
+                ));
+            }
             return artifacts;
         } catch (Exception e) {
             LOGGER.debug("[substrate-jvmhost] Failed to resolve artifacts for {}:{}",
                 projectPath, configurationName, e);
             return new ArrayList<>();
         }
+    }
+
+    private static String nullToEmpty(@Nullable String value) {
+        return value == null ? "" : value;
     }
 
     private static String artifactExtension(Object resolvedArtifact) {
