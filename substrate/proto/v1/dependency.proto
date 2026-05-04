@@ -59,6 +59,10 @@ message ResolveDependenciesRequest {
   // This is intentionally opt-in; callers that only need graph metadata should
   // not pay artifact download cost.
   bool prefetch_artifacts = 8;
+  // Declared dependency constraints. Constraints participate in version
+  // selection for matching dependencies but do not create artifacts by
+  // themselves.
+  repeated DependencyDescriptor constraints = 9;
 }
 
 message ResolvedDependency {
