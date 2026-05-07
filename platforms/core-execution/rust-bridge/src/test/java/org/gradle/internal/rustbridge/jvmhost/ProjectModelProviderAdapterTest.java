@@ -8,6 +8,7 @@ import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.ConfigurationContainer;
+import org.gradle.api.artifacts.VersionConstraint;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.tasks.TaskDependency;
 import org.junit.Rule;
@@ -295,6 +296,34 @@ public class ProjectModelProviderAdapterTest {
         assertEquals(
             fileCollectionPathStringForTest(fileCollection(testClassesDir, runtimeJar, engineJar)),
             inputs.get("classpath")
+        );
+    }
+
+    @org.junit.Test
+    public void extractsOnlyStaticMavenConstraintVersionsForBuildPlanConstraints() {
+        assertEquals(
+            "3.14.0",
+            ProjectModelProviderAdapter.staticMavenConstraintVersion(versionConstraint("", "3.14.0", "", null, Collections.emptyList()))
+        );
+        assertEquals(
+            "3.14.0",
+            ProjectModelProviderAdapter.staticMavenConstraintVersion(versionConstraint("3.14.0", "", "", null, Collections.emptyList()))
+        );
+        assertEquals(
+            "3.14.0",
+            ProjectModelProviderAdapter.staticMavenConstraintVersion(versionConstraint("", "", "3.14.0", null, Collections.emptyList()))
+        );
+        assertEquals(
+            null,
+            ProjectModelProviderAdapter.staticMavenConstraintVersion(versionConstraint("", "3.+", "", null, Collections.emptyList()))
+        );
+        assertEquals(
+            null,
+            ProjectModelProviderAdapter.staticMavenConstraintVersion(versionConstraint("", "3.14.0", "", "main", Collections.emptyList()))
+        );
+        assertEquals(
+            null,
+            ProjectModelProviderAdapter.staticMavenConstraintVersion(versionConstraint("", "3.14.0", "", null, Collections.singletonList("3.13.0")))
         );
     }
 
@@ -1426,6 +1455,31 @@ public class ProjectModelProviderAdapterTest {
                 return configuration;
             }
             return defaultValue(method.getReturnType());
+        });
+    }
+
+    private static VersionConstraint versionConstraint(
+        String strict,
+        String required,
+        String preferred,
+        String branch,
+        java.util.List<String> rejected
+    ) {
+        return proxy(VersionConstraint.class, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "getStrictVersion":
+                    return strict;
+                case "getRequiredVersion":
+                    return required;
+                case "getPreferredVersion":
+                    return preferred;
+                case "getBranch":
+                    return branch;
+                case "getRejectedVersions":
+                    return rejected;
+                default:
+                    return defaultValue(method.getReturnType());
+            }
         });
     }
 
