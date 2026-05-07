@@ -632,6 +632,10 @@ version before Maven resolution, and constraints alone do not create resolved
 artifacts. Unsupported constraint selectors fail closed with a diagnostic
 instead of being treated as exact versions. This is intentionally a narrow
 solver slice, not full Gradle constraint/rich-version/platform semantics.
+The external dependency-constraints corpus now proves the concrete upgrade shape:
+it declares `org.apache.commons:commons-lang3:3.12.0`, constrains the same module
+to `3.14.0`, and the declared graph gate records the constraint separately from
+ordinary dependencies so constraint capture cannot be hidden as a fake dependency.
 Resolved artifact capture now preserves classifier and extension in the JVM-host
 protocol and canonical build-plan notation (`g:n:v`, `g:n:v:classifier`,
 `g:n:v@extension`, `g:n:v:classifier@extension`). Rust admission strips artifact
@@ -717,6 +721,7 @@ style notation as unsupported Maven coordinates.
 | Maven dependency-management scope parity | Focused helper and resolver tests passed; missing dependency scope inherits managed `test` scope and explicit unknown scope still defaults to `compile` | `cargo test -p gradle-substrate-daemon managed_default_scope --lib`; `cargo test -p gradle-substrate-daemon test_dependency_management_scope_defaults_like_gradle --lib -- --nocapture` |
 | Maven dependency-management exclusions parity | Focused helper and resolver tests passed; missing dependency exclusions inherit managed exclusions and direct exclusions override them | `cargo test -p gradle-substrate-daemon effective_exclusions --lib`; `cargo test -p gradle-substrate-daemon test_dependency_management_exclusions_default_like_gradle --lib -- --nocapture` |
 | Maven POM parser extraction and BOM import parity | Focused parser/defaulting tests passed; local POM importing a dependency-management BOM resolves an unversioned child to the BOM-managed version | `cargo test -p gradle-substrate-daemon parse_pom --lib`; `cargo test -p gradle-substrate-daemon parse_dependency_management --lib`; `cargo test -p gradle-substrate-daemon test_dependency_management_import_bom_defaults_versions_like_gradle --lib -- --nocapture` |
+| Dependency constraints corpus upgrade proof | 1/1 matched, 13/13 task parity, no-fallback, declared and resolved graph parity passed. The fixture requests `commons-lang3:3.12.0`, constrains `commons-lang3:3.14.0`, and both upstream/substrate resolved graphs select `3.14.0` with a constraint selection reason. Observed wall time upstream=8401ms and substrate=3416ms. Corpus-runner tests 27 passed. | `python3 tools/corpus_runner/run.py --project "$PWD/testing/corpus/dependency-constraints-kotlin-dsl" --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --dependency-graph-parity --resolved-dependency-graph-parity --tasks clean build --timeout 300 --output-dir build/corpus-dependency-constraints-upgrade-proof --verbose`; `python3 -m unittest tools.corpus_runner.test_run`; `cargo test -p gradle-substrate-daemon dependency_constraint --lib` |
 | Kernel dependency admission tests | 6/6 focused kernel tests passed | `cargo test -p gradle-substrate-daemon execution_kernel --lib` |
 | Kernel dependency graph bridge tests | 3/3 focused DAG conversion tests passed | `cargo test -p gradle-substrate-daemon kernel_dependency_graph --lib` |
 | Task coverage tests | Focused lifecycle/default/KotlinCompile tests passed | `cargo test -p gradle-substrate-daemon lifecycle_task --lib`; `cargo test -p gradle-substrate-daemon default_task --lib`; `cargo test -p gradle-substrate-daemon kotlin_compile --lib` |

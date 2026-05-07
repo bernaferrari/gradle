@@ -234,7 +234,11 @@ plugins {
 
 dependencies {
     implementation("com.squareup.okhttp3:okhttp-bom:4.12.0")
+    constraints {
+        implementation("org.apache.commons:commons-lang3:3.14.0")
+    }
     implementation("com.squareup.okhttp3:okhttp")
+    implementation("org.apache.commons:commons-lang3:3.12.0")
     implementation("com.google.code.gson:gson:2.11.0")
 }
 """,
@@ -248,11 +252,27 @@ dependencies {
         self.assertEqual("gradle-substrate.declared-dependency-graph.v1", graph["schema"])
         self.assertEqual("2.11.0", by_requested["com.google.code.gson:gson:2.11.0"]["selected_version"])
         self.assertFalse(by_requested["com.google.code.gson:gson:2.11.0"]["opaque"])
+        self.assertEqual("3.12.0", by_requested["org.apache.commons:commons-lang3:3.12.0"]["selected_version"])
         self.assertEqual("", by_requested["com.squareup.okhttp3:okhttp"]["selected_version"])
         self.assertTrue(by_requested["com.squareup.okhttp3:okhttp"]["opaque"])
         self.assertEqual(
             "managed-by-gradle-platform-or-bom",
             by_requested["com.squareup.okhttp3:okhttp"]["selection_reason"],
+        )
+        constraints = graph["configurations"][0]["dependency_constraints"]
+        self.assertEqual(
+            [
+                {
+                    "requested": "org.apache.commons:commons-lang3:3.14.0",
+                    "group": "org.apache.commons",
+                    "name": "commons-lang3",
+                    "version": "3.14.0",
+                    "classifier": "",
+                    "extension": "jar",
+                    "selection_reason": "dependency-constraint",
+                }
+            ],
+            constraints,
         )
 
     def test_declared_dependency_graph_splits_classifier_and_extension(self):
@@ -297,6 +317,9 @@ dependencies {
                     "dependencies": [
                         {"requested": "org.example:demo:1.0", "selected_version": "1.0"}
                     ],
+                    "dependency_constraints": [
+                        {"requested": "org.example:demo:2.0", "version": "2.0"}
+                    ],
                 }
             ],
             "unsupported_features": [],
@@ -307,6 +330,9 @@ dependencies {
                     "name": "declared",
                     "dependencies": [
                         {"requested": "org.example:demo:1.0", "selected_version": "1.0"}
+                    ],
+                    "dependency_constraints": [
+                        {"requested": "org.example:demo:2.0", "version": "2.0"}
                     ],
                 }
             ],
@@ -347,6 +373,37 @@ dependencies {
 
         self.assertFalse(diff["match"])
         self.assertEqual("declared-dependencies", diff["mismatches"][0]["category"])
+
+    def test_declared_dependency_graph_diff_rejects_constraint_drift(self):
+        upstream = {
+            "configurations": [
+                {
+                    "name": "declared",
+                    "dependencies": [],
+                    "dependency_constraints": [
+                        {"requested": "org.example:demo:1.0", "version": "1.0"}
+                    ],
+                }
+            ],
+            "unsupported_features": [],
+        }
+        substrate = {
+            "configurations": [
+                {
+                    "name": "declared",
+                    "dependencies": [],
+                    "dependency_constraints": [
+                        {"requested": "org.example:demo:2.0", "version": "2.0"}
+                    ],
+                }
+            ],
+            "unsupported_features": [],
+        }
+
+        diff = corpus_run.diff_declared_dependency_graphs(upstream, substrate)
+
+        self.assertFalse(diff["match"])
+        self.assertEqual("dependency-constraints", diff["mismatches"][0]["category"])
 
     def test_declared_dependency_graph_diff_rejects_unsupported_feature_drift(self):
         upstream = {
