@@ -11,6 +11,7 @@ import org.gradle.api.Task;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.ConfigurationContainer;
 import org.gradle.api.artifacts.DependencyConstraint;
+import org.gradle.api.artifacts.VersionConstraint;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.file.FileTree;
 import org.gradle.api.file.RelativePath;
@@ -207,7 +208,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             for (DependencyConstraint constraint : configuration.getDependencyConstraints()) {
                 String group = nullToEmpty(constraint.getGroup());
                 String name = nullToEmpty(constraint.getName());
-                String version = nullToEmpty(constraint.getVersion());
+                String version = nullToEmpty(staticMavenConstraintVersion(constraint.getVersionConstraint()));
                 if (group.isEmpty() || name.isEmpty() || version.isEmpty()) {
                     continue;
                 }
@@ -231,6 +232,41 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
 
     private static String nullToEmpty(@Nullable String value) {
         return value == null ? "" : value;
+    }
+
+    @Nullable
+    static String staticMavenConstraintVersion(@Nullable VersionConstraint versionConstraint) {
+        if (versionConstraint == null || versionConstraint.getBranch() != null || !versionConstraint.getRejectedVersions().isEmpty()) {
+            return null;
+        }
+        String strictVersion = versionConstraint.getStrictVersion();
+        if (isStaticVersion(strictVersion)) {
+            return strictVersion;
+        }
+        String requiredVersion = versionConstraint.getRequiredVersion();
+        if (isStaticVersion(requiredVersion)) {
+            return requiredVersion;
+        }
+        String preferredVersion = versionConstraint.getPreferredVersion();
+        if (isStaticVersion(preferredVersion)) {
+            return preferredVersion;
+        }
+        return null;
+    }
+
+    private static boolean isStaticVersion(@Nullable String version) {
+        return version != null
+            && !version.isEmpty()
+            && version.indexOf('+') < 0
+            && version.indexOf('[') < 0
+            && version.indexOf(']') < 0
+            && version.indexOf('(') < 0
+            && version.indexOf(')') < 0
+            && !"latest.release".equalsIgnoreCase(version)
+            && !"latest.integration".equalsIgnoreCase(version)
+            && !"release".equalsIgnoreCase(version)
+            && !"latest".equalsIgnoreCase(version)
+            && !version.endsWith("-SNAPSHOT");
     }
 
     private static String artifactExtension(Object resolvedArtifact) {

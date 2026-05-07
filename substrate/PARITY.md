@@ -625,6 +625,11 @@ Rust build-plan shadow preserves that kind, so real Gradle-declared constraints
 can reach kernel admission. This still does not claim full constraint solving:
 rich constraints, platform/enforced-platform behavior, and resolved graph parity
 need dedicated corpus gates before expanding native-ready coverage.
+Build-plan constraint capture now uses Gradle `VersionConstraint` rather than
+the raw legacy version string, matching the dependency prefetch bridge: strict,
+required, and preferred static versions can be represented, while branch,
+rejected-version, wildcard, dynamic, range, latest, and SNAPSHOT selectors are
+not emitted as native-ready constraints.
 The Rust dependency resolver also has bounded exact-static constraint selection:
 `ResolveDependenciesRequest` now accepts explicit constraint descriptors,
 constraints can upgrade a matching requested `group:name` to a higher concrete
@@ -727,6 +732,7 @@ style notation as unsupported Maven coordinates.
 | Task coverage tests | Focused lifecycle/default/KotlinCompile tests passed | `cargo test -p gradle-substrate-daemon lifecycle_task --lib`; `cargo test -p gradle-substrate-daemon default_task --lib`; `cargo test -p gradle-substrate-daemon kotlin_compile --lib` |
 | Corpus runner tests | 26 passed | `python3 -m unittest tools.corpus_runner.test_run` |
 | Artifact classifier/extension bridge tests | Focused JVM-host protocol, build-plan notation, kernel graph, and task graph parser tests passed | `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.jvmhost.JvmHostServiceImplTest --tests org.gradle.internal.rustbridge.jvmhost.ProjectModelProviderAdapterTest --no-daemon --console=plain`; `cargo test -p gradle-substrate-daemon dependency_notation_preserves_classifier_and_extension --lib`; `cargo test -p gradle-substrate-daemon kernel_dependency_graph_groups_build_plan_dependencies --lib`; `cargo test -p gradle-substrate-daemon dependency_configuration_matching_respects_test_scope --lib` |
+| Build-plan constraint static-version gate | Focused JVM-host adapter test passed; build-plan constraint capture now mirrors the prefetch bridge by accepting static strict/required/preferred versions and rejecting branch/rejected/dynamic selectors. | `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.jvmhost.ProjectModelProviderAdapterTest --no-daemon --console=plain` |
 | Unit tests | 1616 passed, 0 failed, 3 ignored | `cargo test -p gradle-substrate-daemon --lib` |
 
 ## Next Sync Actions
