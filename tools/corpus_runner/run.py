@@ -305,6 +305,7 @@ def scan_project_contract(project_dir: str) -> dict:
     tasks: set[str] = set()
     outputs: set[str] = set()
     dependencies: set[str] = set()
+    dependency_constraints: set[str] = set()
     project_dependencies: set[str] = set()
     toolchains: set[str] = set()
     unsupported_features: set[str] = set()
@@ -335,7 +336,9 @@ def scan_project_contract(project_dir: str) -> dict:
         if test_filter_patterns:
             tasks.add("test")
         outputs.update(re.findall(r"outputs\.(?:dir|file)\([\"']([^\"']+)[\"']\)", text))
-        dependencies.update(re.findall(r"[\"']([A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+(?::[^\"']+)?)[\"']", text))
+        dependency_constraints.update(scan_dependency_constraints(text))
+        dependencies_text = strip_balanced_blocks(text, "constraints")
+        dependencies.update(re.findall(r"[\"']([A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+(?::[^\"']+)?)[\"']", dependencies_text))
         project_dependencies.update(re.findall(r"project\([\"']:([^\"']+)[\"']\)", text))
         toolchains.update(re.findall(r"JavaVersion\.VERSION_([0-9]+)", text))
         toolchains.update(re.findall(r"languageVersion\.set\(JavaLanguageVersion\.of\(([0-9]+)\)\)", text))
@@ -364,10 +367,49 @@ def scan_project_contract(project_dir: str) -> dict:
         "tasks": sorted(tasks),
         "outputs": sorted(outputs),
         "dependencies": sorted(dependencies),
+        "dependency_constraints": sorted(dependency_constraints),
         "project_dependencies": sorted(project_dependencies),
         "toolchains": sorted(toolchains),
         "unsupported_features": sorted(unsupported_features),
     }
+
+
+def scan_dependency_constraints(build_text: str) -> set[str]:
+    """Return coordinates declared inside Gradle dependencies { constraints { ... } } blocks."""
+    constraints: set[str] = set()
+    for block in extract_balanced_blocks(build_text, "constraints"):
+        constraints.update(re.findall(r"[\"']([A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+(?::[^\"']+)?)[\"']", block))
+    return constraints
+
+
+def extract_balanced_blocks(text: str, block_name: str) -> list[str]:
+    return [text[start:end] for start, end in extract_balanced_block_spans(text, block_name)]
+
+
+def strip_balanced_blocks(text: str, block_name: str) -> str:
+    stripped = text
+    for start, end in reversed(extract_balanced_block_spans(text, block_name, include_header=True)):
+        stripped = stripped[:start] + stripped[end:]
+    return stripped
+
+
+def extract_balanced_block_spans(text: str, block_name: str, include_header: bool = False) -> list[tuple[int, int]]:
+    pattern = re.compile(rf"\b{re.escape(block_name)}\s*\{{")
+    spans: list[tuple[int, int]] = []
+    for match in pattern.finditer(text):
+        start = match.end()
+        depth = 1
+        pos = start
+        while pos < len(text) and depth > 0:
+            char = text[pos]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+            pos += 1
+        if depth == 0:
+            spans.append((match.start() if include_header else start, pos if include_header else pos - 1))
+    return spans
 
 
 def looks_like_class_test_filter(pattern: str) -> bool:
@@ -636,6 +678,18 @@ def declared_dependency_graph(project_name: str, project_dir: str) -> dict:
             "checksum": "",
             "opaque": not bool(parsed["version"]),
         })
+    constraints = []
+    for coordinate in contract["dependency_constraints"]:
+        parsed = parse_declared_artifact_coordinate(coordinate)
+        constraints.append({
+            "requested": coordinate,
+            "group": parsed["group"],
+            "name": parsed["name"],
+            "version": parsed["version"],
+            "classifier": parsed["classifier"],
+            "extension": parsed["extension"],
+            "selection_reason": "dependency-constraint",
+        })
     return {
         "schema": "gradle-substrate.declared-dependency-graph.v1",
         "project": project_name,
@@ -643,6 +697,7 @@ def declared_dependency_graph(project_name: str, project_dir: str) -> dict:
             {
                 "name": "declared",
                 "dependencies": nodes,
+                "dependency_constraints": constraints,
             }
         ],
         "unsupported_features": contract["unsupported_features"],
@@ -674,11 +729,19 @@ def diff_declared_dependency_graphs(upstream: dict, substrate: dict) -> dict:
     mismatches = []
     upstream_deps = upstream.get("configurations", [{}])[0].get("dependencies", [])
     substrate_deps = substrate.get("configurations", [{}])[0].get("dependencies", [])
+    upstream_constraints = upstream.get("configurations", [{}])[0].get("dependency_constraints", [])
+    substrate_constraints = substrate.get("configurations", [{}])[0].get("dependency_constraints", [])
     if upstream_deps != substrate_deps:
         mismatches.append({
             "category": "declared-dependencies",
             "upstream": upstream_deps,
             "substrate": substrate_deps,
+        })
+    if upstream_constraints != substrate_constraints:
+        mismatches.append({
+            "category": "dependency-constraints",
+            "upstream": upstream_constraints,
+            "substrate": substrate_constraints,
         })
     if upstream.get("unsupported_features") != substrate.get("unsupported_features"):
         mismatches.append({

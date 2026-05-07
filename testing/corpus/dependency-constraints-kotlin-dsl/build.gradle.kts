@@ -12,6 +12,7 @@ dependencies {
     constraints {
         implementation("org.apache.commons:commons-lang3:3.14.0")
     }
+    implementation("org.apache.commons:commons-lang3:3.12.0")
     implementation("com.google.guava:guava:33.2.1-jre") {
         exclude(group = "com.google.code.findbugs", module = "jsr305")
     }

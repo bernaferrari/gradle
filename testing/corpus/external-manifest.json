@@ -33,8 +33,11 @@
         "outputs": ["build/reports/dependency-contract.txt"],
         "dependencies": [
           "com.google.guava:guava:33.2.1-jre",
-          "org.apache.commons:commons-lang3:3.14.0",
+          "org.apache.commons:commons-lang3:3.12.0",
           "org.junit.jupiter:junit-jupiter:5.10.2"
+        ],
+        "dependency_constraints": [
+          "org.apache.commons:commons-lang3:3.14.0"
         ],
         "project_dependencies": [],
         "toolchains": ["17"]
