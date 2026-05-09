@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
@@ -19,6 +18,7 @@ use crate::proto::{
 };
 
 use super::dependency_solver::gradle_module_metadata::{self, ModuleMetadataSelection};
+use super::dependency_solver::graph_builder;
 use super::dependency_solver::ivyresolve::strategy::compare_versions;
 use super::dependency_solver::maven_pom;
 pub use super::dependency_solver::maven_pom::{ManagedDependency, PomDependency};
@@ -1834,23 +1834,7 @@ impl DependencyResolutionServiceImpl {
     }
 
     fn unsupported_version_selector_reason(version: &str) -> Option<String> {
-        let trimmed = version.trim();
-        if trimmed.is_empty() {
-            return Some("Empty Maven version selector is not supported".to_string());
-        }
-        if trimmed.contains('+') {
-            return Some(format!(
-                "Unsupported Maven/Ivy version selector '{trimmed}': wildcard '+' selectors are not native-ready"
-            ));
-        }
-        if (trimmed.starts_with('[') || trimmed.starts_with('('))
-            && !(trimmed.ends_with(']') || trimmed.ends_with(')'))
-        {
-            return Some(format!(
-                "Unsupported Maven version range '{trimmed}': range must end with ']' or ')'"
-            ));
-        }
-        None
+        graph_builder::unsupported_version_selector_reason(version)
     }
 
     /// Fetch available versions for a dependency from maven-metadata.xml.
@@ -1966,53 +1950,6 @@ impl DependencyResolutionServiceImpl {
         let mut visited = std::collections::HashSet::with_capacity(64);
         self.resolve_recursive(dep, repos, &mut visited, 0, &[], lenient)
             .await
-    }
-
-    fn constraint_versions(
-        constraints: &[DependencyDescriptor],
-    ) -> Result<HashMap<(String, String), String>, String> {
-        let mut versions = HashMap::<(String, String), String>::with_capacity(constraints.len());
-        for constraint in constraints {
-            if constraint.group.trim().is_empty() || constraint.name.trim().is_empty() {
-                return Err("Dependency constraint contains empty group or name".to_string());
-            }
-            if let Some(reason) = Self::unsupported_version_selector_reason(&constraint.version) {
-                return Err(format!(
-                    "Unsupported dependency constraint {}:{}:{}: {}",
-                    constraint.group, constraint.name, constraint.version, reason
-                ));
-            }
-            let key = (constraint.group.clone(), constraint.name.clone());
-            match versions.get(&key) {
-                Some(existing)
-                    if compare_versions(&constraint.version, existing)
-                        != std::cmp::Ordering::Greater => {}
-                _ => {
-                    versions.insert(key, constraint.version.clone());
-                }
-            }
-        }
-        Ok(versions)
-    }
-
-    fn select_version_with_constraint(
-        requested_version: &str,
-        constrained_version: Option<&String>,
-    ) -> Option<String> {
-        let Some(constrained_version) = constrained_version else {
-            return Some(requested_version.to_string());
-        };
-        if requested_version.trim().is_empty() {
-            return Some(constrained_version.clone());
-        }
-        if Self::unsupported_version_selector_reason(requested_version).is_some() {
-            return Some(requested_version.to_string());
-        }
-        if compare_versions(constrained_version, requested_version) == std::cmp::Ordering::Greater {
-            Some(constrained_version.clone())
-        } else {
-            Some(requested_version.to_string())
-        }
     }
 
     /// Recursively resolve a dependency and its transitive dependencies.
@@ -2780,35 +2717,13 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             "Resolving dependencies"
         );
 
-        let repo_urls: Vec<RepositoryDescriptor> = req
-            .repositories
-            .iter()
-            .map(|r| RepositoryDescriptor {
-                id: r.id.clone(),
-                url: r.url.clone(),
-                m2compatible: r.m2compatible,
-                allow_insecure_protocol: r.allow_insecure_protocol,
-                credentials: r.credentials.clone(),
-                layout: r.layout.clone(),
-                ivy_pattern: r.ivy_pattern.clone(),
-            })
-            .collect();
-        let default_repo = RepositoryDescriptor {
-            id: "central".to_string(),
-            url: "https://repo.maven.apache.org/maven2/".to_string(),
-            m2compatible: true,
-            allow_insecure_protocol: false,
-            credentials: Default::default(),
-            layout: String::new(),
-            ivy_pattern: String::new(),
-        };
-        let repos = if repo_urls.is_empty() {
-            vec![default_repo]
-        } else {
-            repo_urls
-        };
-        let constraints = match Self::constraint_versions(&req.constraints) {
-            Ok(constraints) => constraints,
+        let graph_request = match graph_builder::build_dependency_graph_request(
+            &req.dependencies,
+            &req.constraints,
+            &req.repositories,
+            &req.target_scope,
+        ) {
+            Ok(graph_request) => graph_request,
             Err(error_message) => {
                 let elapsed = start.elapsed().as_millis() as i64;
                 return Ok(Response::new(ResolveDependenciesResponse {
@@ -2822,33 +2737,10 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             }
         };
 
-        let mut resolved = Vec::with_capacity(req.dependencies.len());
-        for dep in &req.dependencies {
-            let dep_for_resolution;
-            let constrained_dep;
-            let constrained_version = constraints.get(&(dep.group.clone(), dep.name.clone()));
-            let version_from_constraint =
-                Self::select_version_with_constraint(&dep.version, constrained_version);
-            let base_dep = if version_from_constraint.as_deref() != Some(dep.version.as_str()) {
-                constrained_dep = DependencyDescriptor {
-                    version: version_from_constraint.unwrap_or_else(|| dep.version.clone()),
-                    ..dep.clone()
-                };
-                &constrained_dep
-            } else {
-                dep
-            };
-            let effective_dep = if base_dep.scope.is_empty() && !req.target_scope.is_empty() {
-                dep_for_resolution = DependencyDescriptor {
-                    scope: req.target_scope.clone(),
-                    ..base_dep.clone()
-                };
-                &dep_for_resolution
-            } else {
-                base_dep
-            };
+        let mut resolved = Vec::with_capacity(graph_request.dependencies.len());
+        for dep in &graph_request.dependencies {
             let mut result = self
-                .resolve_descriptor(effective_dep, &repos, req.lenient)
+                .resolve_descriptor(dep, &graph_request.repositories, req.lenient)
                 .await;
             // Propagate scope from the request descriptor
             if !dep.scope.is_empty() {

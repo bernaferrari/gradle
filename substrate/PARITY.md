@@ -46,6 +46,11 @@
   file, and injects the matching `org.gradle.rust.substrate.state.dir`. The JVM
   bridge can then connect to the existing Rust daemon instead of owning sidecar
   startup.
+- Native build-plan shadow artifacts are now treated as durable Rust plan-cache
+  entries rather than best-effort JSON files. Writes use atomic temp-file rename,
+  and loads validate build id, schema version, and canonical fingerprint before
+  hydrating the Rust DAG. Corrupted or mismatched plan artifacts are quarantined
+  under the shadow store instead of being allowed to schedule work.
 - Rust `RunBuild` dispatch now uses a native ready-task priority queue keyed by
   remaining critical-path duration instead of FIFO order, so independent ready
   tasks on the longest path are claimed first. Filtered task selections also
@@ -669,6 +674,13 @@ The POM parsing/defaulting code has been split into
 Gradle's parser/builder separation more closely. Rust now also imports Maven
 BOMs declared in `dependencyManagement` with `<type>pom</type><scope>import</scope>`
 before re-resolving dependencies whose versions come from the imported BOM.
+Dependency request normalization has started moving behind a Gradle-shaped
+`dependency_solver::graph_builder` boundary. The gRPC service now delegates
+default repository selection, static constraint application, unsupported
+constraint selector rejection, and target-scope defaulting to that module before
+repository traversal. This is still not a full resolver graph builder, but it
+reduces service-level solver logic and gives the next conflict/platform/variant
+slices a cleaner Rust-owned entry point.
 For multi-repository Maven chains, Rust now records which repository supplied
 the selected POM and uses that repository when synthesizing the resolved
 artifact URL, instead of defaulting artifacts back to the first repository.
@@ -727,6 +739,8 @@ style notation as unsupported Maven coordinates.
 | Maven dependency-management exclusions parity | Focused helper and resolver tests passed; missing dependency exclusions inherit managed exclusions and direct exclusions override them | `cargo test -p gradle-substrate-daemon effective_exclusions --lib`; `cargo test -p gradle-substrate-daemon test_dependency_management_exclusions_default_like_gradle --lib -- --nocapture` |
 | Maven POM parser extraction and BOM import parity | Focused parser/defaulting tests passed; local POM importing a dependency-management BOM resolves an unversioned child to the BOM-managed version | `cargo test -p gradle-substrate-daemon parse_pom --lib`; `cargo test -p gradle-substrate-daemon parse_dependency_management --lib`; `cargo test -p gradle-substrate-daemon test_dependency_management_import_bom_defaults_versions_like_gradle --lib -- --nocapture` |
 | Dependency constraints corpus upgrade proof | 1/1 matched, 13/13 task parity, no-fallback, declared and resolved graph parity passed. The fixture requests `commons-lang3:3.12.0`, constrains `commons-lang3:3.14.0`, and both upstream/substrate resolved graphs select `3.14.0` with a constraint selection reason. Observed wall time upstream=8401ms and substrate=3416ms. Corpus-runner tests 27 passed. | `python3 tools/corpus_runner/run.py --project "$PWD/testing/corpus/dependency-constraints-kotlin-dsl" --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --dependency-graph-parity --resolved-dependency-graph-parity --tasks clean build --timeout 300 --output-dir build/corpus-dependency-constraints-upgrade-proof --verbose`; `python3 -m unittest tools.corpus_runner.test_run`; `cargo test -p gradle-substrate-daemon dependency_constraint --lib` |
+| Native plan-cache durability | Focused tests prove build-plan shadow artifacts load only when build id/schema/fingerprint validate; corrupted or wrong-build artifacts are quarantined before task-graph hydration. | `cargo test -p gradle-substrate-daemon build_plan_shadow --lib` |
+| Rust dependency graph-builder boundary | Focused tests prove graph-builder request normalization applies static constraints, target scope defaulting, default Maven Central repository selection, and fail-closed unsupported constraint selectors before the service traverses repositories. | `cargo test -p gradle-substrate-daemon graph_request --lib`; `cargo test -p gradle-substrate-daemon dependency_constraint --lib` |
 | Kernel dependency admission tests | 6/6 focused kernel tests passed | `cargo test -p gradle-substrate-daemon execution_kernel --lib` |
 | Kernel dependency graph bridge tests | 3/3 focused DAG conversion tests passed | `cargo test -p gradle-substrate-daemon kernel_dependency_graph --lib` |
 | Task coverage tests | Focused lifecycle/default/KotlinCompile tests passed | `cargo test -p gradle-substrate-daemon lifecycle_task --lib`; `cargo test -p gradle-substrate-daemon default_task --lib`; `cargo test -p gradle-substrate-daemon kotlin_compile --lib` |

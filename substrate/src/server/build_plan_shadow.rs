@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 use crate::client::jvm_host_bridge::JvmHostBridge;
 use crate::proto::{GetBuildEnvironmentResponse, GetBuildModelResponse};
 
+use super::atomic_write::AtomicWriter;
 use super::build_plan_ir::{
     fingerprint_normalized, from_proto, validate_schema_version, CanonicalBuildPlan,
     CanonicalBuildPlanDependency, CanonicalBuildPlanProject, CanonicalBuildPlanTask,
@@ -106,7 +107,9 @@ impl BuildPlanShadowStore {
         };
 
         let payload = serde_json::to_vec_pretty(&artifact)?;
-        std::fs::write(&path, payload)?;
+        let mut writer = AtomicWriter::new(path.clone());
+        writer.write_all(&payload)?;
+        writer.commit()?;
         Ok(path)
     }
 
@@ -120,6 +123,7 @@ impl BuildPlanShadowStore {
         }
         let bytes = std::fs::read(&path)?;
         let artifact: BuildPlanShadowArtifact = serde_json::from_slice(&bytes)?;
+        self.validate_loaded_artifact(build_id, &path, &artifact)?;
         Ok(Some(artifact))
     }
 
@@ -129,6 +133,60 @@ impl BuildPlanShadowStore {
 
     fn artifact_path(&self, build_id: &str) -> PathBuf {
         self.artifact_path_for_build_id(build_id)
+    }
+
+    fn validate_loaded_artifact(
+        &self,
+        build_id: &str,
+        path: &Path,
+        artifact: &BuildPlanShadowArtifact,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if artifact.plan.build_id != build_id {
+            let reason = format!(
+                "build plan shadow artifact build id mismatch: requested '{}' but artifact contains '{}'",
+                build_id, artifact.plan.build_id
+            );
+            self.quarantine_artifact(path, &reason)?;
+            return Err(reason.into());
+        }
+        if let Err(error) = validate_schema_version(&artifact.plan) {
+            let reason = format!("build plan shadow artifact schema validation failed: {}", error);
+            self.quarantine_artifact(path, &reason)?;
+            return Err(reason.into());
+        }
+        let mut normalized = artifact.plan.clone();
+        normalized.normalize_mut();
+        let actual_fingerprint = fingerprint_normalized(&normalized)?;
+        if actual_fingerprint != artifact.fingerprint_sha256 {
+            let reason = format!(
+                "build plan shadow artifact fingerprint mismatch: computed '{}' but artifact stores '{}'",
+                actual_fingerprint, artifact.fingerprint_sha256
+            );
+            self.quarantine_artifact(path, &reason)?;
+            return Err(reason.into());
+        }
+        Ok(())
+    }
+
+    fn quarantine_artifact(
+        &self,
+        path: &Path,
+        reason: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if !path.exists() {
+            return Ok(());
+        }
+        let quarantine_dir = self.root.join("quarantine");
+        std::fs::create_dir_all(&quarantine_dir)?;
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("shadow-artifact");
+        let quarantine_path = quarantine_dir.join(format!("{}-{}.corrupt", now_ms(), file_name));
+        std::fs::rename(path, &quarantine_path)?;
+        let reason_path = quarantine_path.with_extension("reason.txt");
+        std::fs::write(reason_path, reason)?;
+        Ok(())
     }
 }
 
@@ -1436,6 +1494,67 @@ mod tests {
         assert_eq!(loaded.plan.build_id, "build:1");
         assert_eq!(loaded.source, "test");
         assert!(!loaded.fingerprint_sha256.is_empty());
+    }
+
+    #[test]
+    fn load_plan_quarantines_corrupt_shadow_artifact() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = BuildPlanShadowStore::new(temp.path().to_path_buf());
+        let mut plan = CanonicalBuildPlan {
+            schema_version: BUILD_PLAN_SCHEMA_VERSION,
+            build_id: "build:corrupt".to_string(),
+            projects: vec![CanonicalBuildPlanProject {
+                path: ":".to_string(),
+                name: "root".to_string(),
+                project_dir: "/repo".to_string(),
+            }],
+            tasks: Vec::new(),
+            dependencies: Vec::new(),
+            toolchains: Vec::new(),
+            metadata: std::collections::BTreeMap::new(),
+        };
+
+        let path = store.persist_plan(&plan, "test").unwrap();
+        let mut artifact: BuildPlanShadowArtifact =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        plan.projects[0].name = "mutated".to_string();
+        artifact.plan = plan;
+        std::fs::write(&path, serde_json::to_vec_pretty(&artifact).unwrap()).unwrap();
+
+        let error = store.load_plan("build:corrupt").unwrap_err();
+
+        assert!(
+            error.to_string().contains("fingerprint mismatch"),
+            "unexpected error: {}",
+            error
+        );
+        assert!(!path.exists(), "corrupt artifact should be moved away");
+        let quarantine_dir = store.root().join("quarantine");
+        assert!(quarantine_dir.exists());
+        assert_eq!(std::fs::read_dir(quarantine_dir).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn load_plan_quarantines_wrong_build_id_shadow_artifact() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = BuildPlanShadowStore::new(temp.path().to_path_buf());
+        let plan = CanonicalBuildPlan {
+            schema_version: BUILD_PLAN_SCHEMA_VERSION,
+            build_id: "build:a".to_string(),
+            projects: Vec::new(),
+            tasks: Vec::new(),
+            dependencies: Vec::new(),
+            toolchains: Vec::new(),
+            metadata: std::collections::BTreeMap::new(),
+        };
+        let path = store.persist_plan(&plan, "test").unwrap();
+        let wrong_path = store.artifact_path_for_build_id("build:b");
+        std::fs::rename(&path, &wrong_path).unwrap();
+
+        let error = store.load_plan("build:b").unwrap_err();
+
+        assert!(error.to_string().contains("build id mismatch"));
+        assert!(!wrong_path.exists());
     }
 
     #[test]
