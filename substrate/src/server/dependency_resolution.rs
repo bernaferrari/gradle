@@ -7427,6 +7427,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_resolve_dependencies_uses_repository_basic_auth() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::{Arc, Mutex};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let saw_auth = Arc::new(Mutex::new(false));
+        let saw_auth_for_server = Arc::clone(&saw_auth);
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 2048];
+            let read = stream.read(&mut request).unwrap();
+            let request_text = String::from_utf8_lossy(&request[..read]);
+            let normalized_request = request_text.to_ascii_lowercase();
+            if normalized_request.contains("authorization: basic dxnlcjpwyxnz") {
+                *saw_auth_for_server.lock().unwrap() = true;
+                let body = br#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.example</groupId>
+  <artifactId>lib</artifactId>
+  <version>1.0</version>
+</project>"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/xml\r\n\r\n",
+                    body.len()
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+                stream.write_all(body).unwrap();
+            } else {
+                stream
+                    .write_all(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n")
+                    .unwrap();
+            }
+        });
+
+        let svc = make_svc();
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "runtimeClasspath".to_string(),
+                dependencies: vec![make_dep("com.example", "lib", "1.0")],
+                repositories: vec![{
+                    let mut repo = make_repo("private", &format!("http://{}", addr));
+                    repo.credentials
+                        .insert("username".to_string(), "user".to_string());
+                    repo.credentials
+                        .insert("password".to_string(), "pass".to_string());
+                    repo
+                }],
+                target_scope: "runtime".to_string(),
+                lenient: false,
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        server.join().unwrap();
+
+        assert!(response.success, "{}", response.error_message);
+        assert!(*saw_auth.lock().unwrap());
+    }
+
+    #[tokio::test]
     async fn test_verify_checksum_no_sidecar() {
         let dir = tempfile::tempdir().unwrap();
         let svc = DependencyResolutionServiceImpl::new(dir.path().to_path_buf());

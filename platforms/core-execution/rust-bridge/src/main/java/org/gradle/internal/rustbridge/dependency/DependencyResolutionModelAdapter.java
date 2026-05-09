@@ -54,7 +54,7 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
                 if (!(mutableModel instanceof Project)) {
                     return Collections.emptyList();
                 }
-                RepositoryCapture capture = repositoriesForProject((Project) mutableModel);
+                RepositoryCapture capture = repositoriesForProject((Project) mutableModel, true);
                 return capture.getRepositories();
             }
         } catch (Exception e) {
@@ -65,6 +65,11 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
 
     @SuppressWarnings("deprecation")
     public static RepositoryCapture repositoriesForProject(Project project) {
+        return repositoriesForProject(project, false);
+    }
+
+    @SuppressWarnings("deprecation")
+    static RepositoryCapture repositoriesForProject(Project project, boolean includeSessionCredentials) {
         List<RepositoryDescriptor> repositories = new ArrayList<>();
         List<String> unsupportedFeatures = new ArrayList<>();
         for (ArtifactRepository repository : project.getRepositories()) {
@@ -78,8 +83,10 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
                 continue;
             }
             if (hasConfiguredCredentials(maven.getCredentials())) {
-                unsupportedFeatures.add("repository-credentials:" + maven.getName());
-                continue;
+                if (!includeSessionCredentials) {
+                    unsupportedFeatures.add("repository-credentials:" + maven.getName());
+                    continue;
+                }
             }
             URI url = maven.getUrl();
             String scheme = url == null ? "" : url.getScheme();
@@ -97,6 +104,10 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
                 .setUrl(url.toString())
                 .setM2Compatible(true)
                 .setAllowInsecureProtocol(maven.isAllowInsecureProtocol());
+            if (includeSessionCredentials && hasConfiguredCredentials(maven.getCredentials())) {
+                builder.putCredentials("username", nullToEmpty(maven.getCredentials().getUsername()));
+                builder.putCredentials("password", nullToEmpty(maven.getCredentials().getPassword()));
+            }
             if (!layout.isEmpty()) {
                 builder.setLayout(layout);
             }
@@ -111,6 +122,10 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
 
     private static boolean hasText(@Nullable String value) {
         return value != null && !value.trim().isEmpty();
+    }
+
+    private static String nullToEmpty(@Nullable String value) {
+        return value == null ? "" : value;
     }
 
     public static final class RepositoryCapture {
