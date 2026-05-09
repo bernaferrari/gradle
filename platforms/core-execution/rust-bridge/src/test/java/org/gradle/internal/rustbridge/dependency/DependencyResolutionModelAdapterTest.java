@@ -1,14 +1,19 @@
 package org.gradle.internal.rustbridge.dependency;
 
 import gradle.substrate.v1.DependencyDescriptor;
+import gradle.substrate.v1.RepositoryDescriptor;
 
+import org.gradle.api.Project;
 import org.gradle.api.artifacts.DependencyConstraint;
 import org.gradle.api.artifacts.VersionConstraint;
+import org.gradle.api.artifacts.dsl.RepositoryHandler;
+import org.gradle.api.artifacts.repositories.ArtifactRepository;
 import org.gradle.api.artifacts.repositories.MavenArtifactRepository;
-import org.gradle.api.credentials.PasswordCredentials;
+import org.gradle.api.artifacts.repositories.PasswordCredentials;
 import org.junit.Test;
 
 import java.lang.reflect.Proxy;
+import java.net.URI;
 import java.util.Collections;
 import java.util.List;
 
@@ -51,6 +56,33 @@ public class DependencyResolutionModelAdapterTest {
     public void configuredUsernameOrPasswordRequiresUnsupportedMarker() {
         assertTrue(DependencyResolutionModelAdapter.hasConfiguredCredentials(credentials("user", null)));
         assertTrue(DependencyResolutionModelAdapter.hasConfiguredCredentials(credentials(null, "secret")));
+    }
+
+    @Test
+    public void durableRepositoryCaptureStillRejectsCredentials() {
+        DependencyResolutionModelAdapter.RepositoryCapture capture =
+            DependencyResolutionModelAdapter.repositoriesForProject(
+                projectWithRepository(mavenRepository("private", "https://repo.example.test/maven", credentials("user", "secret"))),
+                false
+            );
+
+        assertTrue(capture.getRepositories().isEmpty());
+        assertEquals(Collections.singletonList("repository-credentials:private"), capture.getUnsupportedFeatures());
+    }
+
+    @Test
+    public void sessionRepositoryCaptureCarriesCredentialsForNativeTransportOnly() {
+        DependencyResolutionModelAdapter.RepositoryCapture capture =
+            DependencyResolutionModelAdapter.repositoriesForProject(
+                projectWithRepository(mavenRepository("private", "https://repo.example.test/maven", credentials("user", "secret"))),
+                true
+            );
+
+        assertTrue(capture.getUnsupportedFeatures().isEmpty());
+        RepositoryDescriptor repository = capture.getRepositories().get(0);
+        assertEquals("private", repository.getId());
+        assertEquals("user", repository.getCredentialsMap().get("username"));
+        assertEquals("secret", repository.getCredentialsMap().get("password"));
     }
 
     @Test
@@ -143,6 +175,42 @@ public class DependencyResolutionModelAdapterTest {
         };
     }
 
+    private static Project projectWithRepository(ArtifactRepository repository) {
+        RepositoryHandler repositories = proxy(RepositoryHandler.class, (proxy, method, args) -> {
+            if (method.getName().equals("iterator")) {
+                return Collections.singletonList(repository).iterator();
+            }
+            return defaultValue(method.getReturnType());
+        });
+        return proxy(Project.class, (proxy, method, args) -> {
+            if (method.getName().equals("getRepositories")) {
+                return repositories;
+            }
+            return defaultValue(method.getReturnType());
+        });
+    }
+
+    private static MavenArtifactRepository mavenRepository(String name, String url, PasswordCredentials credentials) {
+        return proxy(MavenArtifactRepository.class, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "getName":
+                    return name;
+                case "getUrl":
+                    return URI.create(url);
+                case "getArtifactUrls":
+                    return Collections.emptySet();
+                case "getCredentials":
+                    return credentials;
+                case "getMetadataSources":
+                    return sources(false, true, false);
+                case "isAllowInsecureProtocol":
+                    return false;
+                default:
+                    return defaultValue(method.getReturnType());
+            }
+        });
+    }
+
     private static DependencyConstraint dependencyConstraint(String group, String name, VersionConstraint versionConstraint) {
         return proxy(DependencyConstraint.class, (proxy, method, args) -> {
             switch (method.getName()) {
@@ -211,6 +279,9 @@ public class DependencyResolutionModelAdapterTest {
             return "";
         }
         if (List.class.isAssignableFrom(type)) {
+            return Collections.emptyList();
+        }
+        if (Iterable.class.isAssignableFrom(type)) {
             return Collections.emptyList();
         }
         return null;
