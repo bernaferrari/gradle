@@ -670,6 +670,8 @@ async fn collect_shadow_dependencies(
                 configuration,
                 notation,
                 kind,
+                repositories: Vec::new(),
+                unsupported_features: Vec::new(),
             },
         )
         .collect())

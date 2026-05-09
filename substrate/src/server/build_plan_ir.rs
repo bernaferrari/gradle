@@ -6,10 +6,10 @@ use sha2::{Digest, Sha256};
 use crate::proto::{
     BuildPlan, BuildPlanDependency, BuildPlanEnvelope, BuildPlanProject, BuildPlanTask,
     BuildPlanTaskDiagnostic, BuildPlanTaskInputSpec, BuildPlanTaskOutputSpec,
-    BuildPlanToolchainRequest,
+    BuildPlanToolchainRequest, RepositoryDescriptor,
 };
 
-pub const BUILD_PLAN_SCHEMA_VERSION: u32 = 2;
+pub const BUILD_PLAN_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CanonicalBuildPlan {
@@ -94,6 +94,19 @@ pub struct CanonicalBuildPlanDependency {
     pub configuration: String,
     pub notation: String,
     pub kind: String,
+    pub repositories: Vec<CanonicalBuildPlanRepository>,
+    pub unsupported_features: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CanonicalBuildPlanRepository {
+    pub id: String,
+    pub url: String,
+    pub m2compatible: bool,
+    pub allow_insecure_protocol: bool,
+    pub credentials: BTreeMap<String, String>,
+    pub layout: String,
+    pub ivy_pattern: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -279,6 +292,12 @@ pub fn to_proto(plan: &CanonicalBuildPlan) -> BuildPlan {
                 configuration: d.configuration,
                 notation: d.notation,
                 kind: normalize_dependency_kind(d.kind),
+                repositories: d
+                    .repositories
+                    .into_iter()
+                    .map(canonical_repository_to_proto)
+                    .collect(),
+                unsupported_features: d.unsupported_features,
             })
             .collect(),
         toolchains: normalized
@@ -368,6 +387,12 @@ pub fn from_proto(plan: &BuildPlan) -> CanonicalBuildPlan {
                 configuration: d.configuration.clone(),
                 notation: d.notation.clone(),
                 kind: normalize_dependency_kind(d.kind.clone()),
+                repositories: d
+                    .repositories
+                    .iter()
+                    .map(canonical_repository_from_proto)
+                    .collect(),
+                unsupported_features: d.unsupported_features.clone(),
             })
             .collect(),
         toolchains: plan
@@ -402,6 +427,32 @@ fn btree_to_hashmap(map: BTreeMap<String, String>) -> HashMap<String, String> {
 
 fn hashmap_to_btree(map: &HashMap<String, String>) -> BTreeMap<String, String> {
     map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+}
+
+fn canonical_repository_to_proto(repository: CanonicalBuildPlanRepository) -> RepositoryDescriptor {
+    RepositoryDescriptor {
+        id: repository.id,
+        url: repository.url,
+        m2compatible: repository.m2compatible,
+        allow_insecure_protocol: repository.allow_insecure_protocol,
+        credentials: btree_to_hashmap(repository.credentials),
+        layout: repository.layout,
+        ivy_pattern: repository.ivy_pattern,
+    }
+}
+
+fn canonical_repository_from_proto(
+    repository: &RepositoryDescriptor,
+) -> CanonicalBuildPlanRepository {
+    CanonicalBuildPlanRepository {
+        id: repository.id.clone(),
+        url: repository.url.clone(),
+        m2compatible: repository.m2compatible,
+        allow_insecure_protocol: repository.allow_insecure_protocol,
+        credentials: hashmap_to_btree(&repository.credentials),
+        layout: repository.layout.clone(),
+        ivy_pattern: repository.ivy_pattern.clone(),
+    }
 }
 
 fn normalize_dependency_kind(kind: String) -> String {
@@ -495,6 +546,8 @@ mod tests {
                 configuration: "testRuntimeClasspath".to_string(),
                 notation: "org.junit.jupiter:junit-jupiter:5.10.2".to_string(),
                 kind: "dependency".to_string(),
+                repositories: Vec::new(),
+                unsupported_features: Vec::new(),
             }],
             toolchains: vec![CanonicalBuildPlanToolchainRequest {
                 language: "java".to_string(),
