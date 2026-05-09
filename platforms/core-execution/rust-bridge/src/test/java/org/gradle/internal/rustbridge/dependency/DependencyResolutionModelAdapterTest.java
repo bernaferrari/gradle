@@ -131,6 +131,20 @@ public class DependencyResolutionModelAdapterTest {
     }
 
     @Test
+    public void repositoryMetadataSupplierAndVersionListerFieldsFailClosed() {
+        assertEquals(
+            Arrays.asList("repository-metadata-supplier:custom", "repository-version-lister:custom"),
+            DependencyResolutionModelAdapter.unsupportedMetadataRuleMarkers(new RepositoryWithMetadataRules(), "custom")
+        );
+    }
+
+    @Test
+    public void absentRepositoryMetadataRuleFieldsAreSupported() {
+        assertTrue(DependencyResolutionModelAdapter.unsupportedMetadataRuleMarkers(new Object(), "plain").isEmpty());
+        assertFalse(DependencyResolutionModelAdapter.hasNonNullFieldInHierarchy(new RepositoryWithoutMetadataRules(), "componentMetadataSupplierRuleClass"));
+    }
+
+    @Test
     public void dependencyConstraintDescriptorPreservesStaticRichVersionFields() {
         DependencyDescriptor descriptor = DependencyResolutionShadowListener.staticMavenDependencyConstraintDescriptor(
             dependencyConstraint("org.example", "demo", versionConstraint("2.0", "1.5", "1.4", null, Collections.singletonList("1.3")))
@@ -305,6 +319,19 @@ public class DependencyResolutionModelAdapterTest {
         Set<String> getExcludedConfigurations();
 
         Map<?, ?> getRequiredAttributes();
+    }
+
+    private static class RepositoryWithoutMetadataRules {
+        @SuppressWarnings("unused")
+        private Object componentMetadataSupplierRuleClass;
+    }
+
+    private static class RepositoryWithMetadataRules extends RepositoryWithoutMetadataRules {
+        @SuppressWarnings("unused")
+        private final Object componentMetadataSupplierRuleClass = Object.class;
+
+        @SuppressWarnings("unused")
+        private final Object componentMetadataListerRuleClass = Object.class;
     }
 
     private static DependencyConstraint dependencyConstraint(String group, String name, VersionConstraint versionConstraint) {
