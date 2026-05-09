@@ -229,6 +229,36 @@ fn constraint_versions(
         if constraint.group.trim().is_empty() || constraint.name.trim().is_empty() {
             return Err("Dependency constraint contains empty group or name".to_string());
         }
+        if constraint.changing {
+            return Err(format!(
+                "Unsupported dependency constraint {}:{}:{}: changing constraints are not native-ready",
+                constraint.group, constraint.name, constraint.version
+            ));
+        }
+        if constraint.optional {
+            return Err(format!(
+                "Unsupported dependency constraint {}:{}:{}: optional constraints are not native-ready",
+                constraint.group, constraint.name, constraint.version
+            ));
+        }
+        if !constraint.ivy_conf.trim().is_empty() {
+            return Err(format!(
+                "Unsupported dependency constraint {}:{}:{}: Ivy conf mapping '{}' is not native-ready",
+                constraint.group, constraint.name, constraint.version, constraint.ivy_conf
+            ));
+        }
+        if !constraint.classifier.trim().is_empty() {
+            return Err(format!(
+                "Unsupported dependency constraint {}:{}:{}: classifier '{}' is not native-ready",
+                constraint.group, constraint.name, constraint.version, constraint.classifier
+            ));
+        }
+        if !constraint.extension.trim().is_empty() && constraint.extension.trim() != "jar" {
+            return Err(format!(
+                "Unsupported dependency constraint {}:{}:{}: extension '{}' is not native-ready",
+                constraint.group, constraint.name, constraint.version, constraint.extension
+            ));
+        }
         if let Some(reason) = unsupported_version_selector_reason(&constraint.version) {
             return Err(format!(
                 "Unsupported dependency constraint {}:{}:{}: {}",
@@ -346,6 +376,38 @@ mod tests {
         .unwrap_err();
 
         assert!(error.contains("Unsupported dependency constraint"));
+    }
+
+    #[test]
+    fn graph_request_rejects_unsupported_constraint_features() {
+        let mut changing = dep("org.example", "changing", "1.0");
+        changing.changing = true;
+        let error =
+            build_dependency_graph_request(&[dep("org.example", "demo", "1.0")], &[changing], &[], "")
+                .unwrap_err();
+        assert!(error.contains("changing constraints are not native-ready"));
+
+        let mut classifier = dep("org.example", "classifier", "1.0");
+        classifier.classifier = "sources".to_string();
+        let error = build_dependency_graph_request(
+            &[dep("org.example", "demo", "1.0")],
+            &[classifier],
+            &[],
+            "",
+        )
+        .unwrap_err();
+        assert!(error.contains("classifier 'sources'"));
+
+        let mut extension = dep("org.example", "extension", "1.0");
+        extension.extension = "pom".to_string();
+        let error = build_dependency_graph_request(
+            &[dep("org.example", "demo", "1.0")],
+            &[extension],
+            &[],
+            "",
+        )
+        .unwrap_err();
+        assert!(error.contains("extension 'pom'"));
     }
 
     #[test]
