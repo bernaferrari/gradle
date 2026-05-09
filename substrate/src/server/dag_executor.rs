@@ -635,6 +635,16 @@ fn kernel_dependency_graph_from_plan_dependencies(
             dependency.kind.trim()
         };
         for repository in &dependency.repositories {
+            if !repository.credentials.is_empty() {
+                let feature = format!("repository-credentials:{}", repository.id);
+                if !configuration
+                    .unsupported_features
+                    .iter()
+                    .any(|existing| existing == &feature)
+                {
+                    configuration.unsupported_features.push(feature);
+                }
+            }
             let kernel_repository = KernelRepository {
                 id: repository.id.clone(),
                 url: repository.url.clone(),
@@ -2203,6 +2213,36 @@ mod tests {
         assert_eq!(
             graph.configurations[0].unsupported_features,
             vec!["repository-content-filter".to_string()]
+        );
+    }
+
+    #[test]
+    fn kernel_dependency_graph_marks_credentialed_repositories_unsupported() {
+        let mut dependency = plan_dependency(
+            ":",
+            "implementation",
+            "org.example:demo:1.2.3",
+            "dependency",
+        );
+        dependency
+            .repositories
+            .push(crate::proto::RepositoryDescriptor {
+                id: "private".to_string(),
+                url: "https://repo.example.test/maven".to_string(),
+                m2compatible: true,
+                allow_insecure_protocol: false,
+                credentials: [("username".to_string(), "user".to_string())].into(),
+                layout: String::new(),
+                ivy_pattern: String::new(),
+            });
+
+        let graph = kernel_dependency_graph_from_plan_dependencies(&[dependency])
+            .expect("dependency graph");
+
+        assert_eq!(graph.configurations[0].repositories.len(), 1);
+        assert_eq!(
+            graph.configurations[0].unsupported_features,
+            vec!["repository-credentials:private".to_string()]
         );
     }
 

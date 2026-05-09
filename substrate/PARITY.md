@@ -636,7 +636,10 @@ repositories, extra Maven artifact URLs, unsupported repository URL schemes, and
 unsupported metadata-source shapes. Credentialed Maven repositories are marked
 as `repository-credentials:<name>` instead of serializing secrets into the
 durable build-plan contract; a future native credentials path needs explicit
-secret handles before these repos can be admitted. Resolution-strategy force is
+secret handles before these repos can be admitted. DAG lowering also treats any
+credential map already present in a canonical repository descriptor as the same
+unsupported marker, so credentials cannot be silently dropped when building the
+kernel dependency graph. Resolution-strategy force is
 marked as `resolution-strategy-force` so Rust authoritative admission fails
 closed until that Gradle solver semantic is represented exactly. If the
 resolution strategy cannot be inspected, the bridge marks
