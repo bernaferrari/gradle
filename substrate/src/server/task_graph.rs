@@ -275,6 +275,8 @@ impl TaskGraphServiceImpl {
                         credentials: repository.credentials.into_iter().collect(),
                         layout: repository.layout,
                         ivy_pattern: repository.ivy_pattern,
+                        include_groups: repository.include_groups,
+                        exclude_groups: repository.exclude_groups,
                     })
                     .collect(),
                 unsupported_features: dependency.unsupported_features,

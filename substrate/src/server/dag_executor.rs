@@ -2200,6 +2200,8 @@ mod tests {
                 credentials: Default::default(),
                 layout: String::new(),
                 ivy_pattern: String::new(),
+                include_groups: Vec::new(),
+                exclude_groups: Vec::new(),
             });
         dependency
             .unsupported_features
@@ -2234,6 +2236,8 @@ mod tests {
                 credentials: [("username".to_string(), "user".to_string())].into(),
                 layout: String::new(),
                 ivy_pattern: String::new(),
+                include_groups: Vec::new(),
+                exclude_groups: Vec::new(),
             });
 
         let graph = kernel_dependency_graph_from_plan_dependencies(&[dependency])

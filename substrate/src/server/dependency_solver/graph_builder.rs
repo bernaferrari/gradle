@@ -103,6 +103,8 @@ pub fn normalized_repositories(repositories: &[RepositoryDescriptor]) -> Vec<Rep
             credentials: Default::default(),
             layout: String::new(),
             ivy_pattern: String::new(),
+            include_groups: Vec::new(),
+            exclude_groups: Vec::new(),
         }];
     }
     repositories
@@ -115,6 +117,8 @@ pub fn normalized_repositories(repositories: &[RepositoryDescriptor]) -> Vec<Rep
             credentials: repo.credentials.clone(),
             layout: repo.layout.clone(),
             ivy_pattern: repo.ivy_pattern.clone(),
+            include_groups: repo.include_groups.clone(),
+            exclude_groups: repo.exclude_groups.clone(),
         })
         .collect()
 }
@@ -421,6 +425,8 @@ mod tests {
             credentials: Default::default(),
             layout: String::new(),
             ivy_pattern: String::new(),
+            include_groups: Vec::new(),
+            exclude_groups: Vec::new(),
         }
     }
 

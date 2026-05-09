@@ -107,6 +107,10 @@ pub struct CanonicalBuildPlanRepository {
     pub credentials: BTreeMap<String, String>,
     pub layout: String,
     pub ivy_pattern: String,
+    #[serde(default)]
+    pub include_groups: Vec<String>,
+    #[serde(default)]
+    pub exclude_groups: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -438,6 +442,8 @@ fn canonical_repository_to_proto(repository: CanonicalBuildPlanRepository) -> Re
         credentials: btree_to_hashmap(repository.credentials),
         layout: repository.layout,
         ivy_pattern: repository.ivy_pattern,
+        include_groups: repository.include_groups,
+        exclude_groups: repository.exclude_groups,
     }
 }
 
@@ -452,6 +458,8 @@ fn canonical_repository_from_proto(
         credentials: hashmap_to_btree(&repository.credentials),
         layout: repository.layout.clone(),
         ivy_pattern: repository.ivy_pattern.clone(),
+        include_groups: repository.include_groups.clone(),
+        exclude_groups: repository.exclude_groups.clone(),
     }
 }
 
