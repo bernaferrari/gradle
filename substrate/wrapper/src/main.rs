@@ -1131,9 +1131,7 @@ distributionSha256Sum=abc123
         assert!(flags.contains(
             &"-Dorg.gradle.rust.substrate.runbuild.native-ready-default=true".to_string()
         ));
-        assert!(
-            !flags.contains(&"-Dorg.gradle.rust.substrate.execution.kernel=true".to_string())
-        );
+        assert!(!flags.contains(&"-Dorg.gradle.rust.substrate.execution.kernel=true".to_string()));
     }
 
     #[test]
@@ -1142,9 +1140,7 @@ distributionSha256Sum=abc123
         let state_dir = PathBuf::from("/tmp/gradle-substrate-state");
         let flags = substrate_gradle_flags(SubstrateCliMode::Authoritative, &daemon, &state_dir);
 
-        assert!(
-            flags.contains(&"-Dorg.gradle.rust.substrate.execution.kernel=true".to_string())
-        );
+        assert!(flags.contains(&"-Dorg.gradle.rust.substrate.execution.kernel=true".to_string()));
         assert!(!flags.contains(
             &"-Dorg.gradle.rust.substrate.runbuild.native-ready-default=true".to_string()
         ));

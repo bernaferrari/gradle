@@ -382,9 +382,13 @@ mod tests {
     fn graph_request_rejects_unsupported_constraint_features() {
         let mut changing = dep("org.example", "changing", "1.0");
         changing.changing = true;
-        let error =
-            build_dependency_graph_request(&[dep("org.example", "demo", "1.0")], &[changing], &[], "")
-                .unwrap_err();
+        let error = build_dependency_graph_request(
+            &[dep("org.example", "demo", "1.0")],
+            &[changing],
+            &[],
+            "",
+        )
+        .unwrap_err();
         assert!(error.contains("changing constraints are not native-ready"));
 
         let mut classifier = dep("org.example", "classifier", "1.0");
@@ -475,7 +479,10 @@ mod tests {
             build_dependency_graph_request(&[dep("org.example", "demo", "1.0")], &[], &[plain], "")
                 .unwrap();
 
-        assert_eq!(request.repositories[0].url, "http://repo.example.test/maven");
+        assert_eq!(
+            request.repositories[0].url,
+            "http://repo.example.test/maven"
+        );
         assert!(request.repositories[0].allow_insecure_protocol);
     }
 
