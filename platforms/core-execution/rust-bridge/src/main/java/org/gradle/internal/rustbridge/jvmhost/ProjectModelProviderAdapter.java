@@ -195,6 +195,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
 
             DependencyResolutionModelAdapter.RepositoryCapture repositoryCapture =
                 DependencyResolutionModelAdapter.repositoriesForProject((Project) project);
+            List<String> unsupportedFeatures = new ArrayList<>(repositoryCapture.getUnsupportedFeatures());
+            unsupportedFeatures.addAll(unsupportedResolutionFeatures(configuration));
             List<JvmHostServiceImpl.ResolvedArtifactEntry> artifacts = new ArrayList<>();
             Object resolvedConfiguration = invoke(configuration, "getResolvedConfiguration");
             for (Object resolvedArtifact : asCollection(invoke(resolvedConfiguration, "getResolvedArtifacts"))) {
@@ -209,7 +211,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
                     artifactExtension(resolvedArtifact),
                     "dependency",
                     repositoryCapture.getRepositories(),
-                    repositoryCapture.getUnsupportedFeatures()
+                    unsupportedFeatures
                 ));
             }
             for (DependencyConstraint constraint : configuration.getDependencyConstraints()) {
@@ -228,7 +230,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
                     "jar",
                     "constraint",
                     repositoryCapture.getRepositories(),
-                    repositoryCapture.getUnsupportedFeatures()
+                    unsupportedFeatures
                 ));
             }
             return artifacts;
@@ -241,6 +243,22 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
 
     private static String nullToEmpty(@Nullable String value) {
         return value == null ? "" : value;
+    }
+
+    private static List<String> unsupportedResolutionFeatures(Configuration configuration) {
+        List<String> unsupported = new ArrayList<>();
+        try {
+            Object strategy = invoke(configuration, "getResolutionStrategy");
+            Collection<Object> forcedModules = asCollection(invoke(strategy, "getForcedModules"));
+            if (!forcedModules.isEmpty()) {
+                unsupported.add("resolution-strategy-force");
+            }
+        } catch (Exception e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to inspect resolution strategy for {}",
+                configuration.getName(), e);
+            unsupported.add("resolution-strategy-inspection");
+        }
+        return unsupported;
     }
 
     @Nullable

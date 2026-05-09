@@ -2,6 +2,7 @@ package org.gradle.internal.rustbridge.jvmhost;
 
 import gradle.substrate.v1.BuildPlan;
 import gradle.substrate.v1.BuildPlanTask;
+import gradle.substrate.v1.RepositoryDescriptor;
 
 import org.junit.Test;
 
@@ -64,6 +65,32 @@ public class JvmHostServiceImplTest {
 
         assertEquals("dependency", dependency.getKind());
         assertEquals("constraint", constraint.getKind());
+    }
+
+    @Test
+    public void resolvedArtifactEntryPreservesRepositoriesAndUnsupportedFeatures() {
+        RepositoryDescriptor repository = RepositoryDescriptor.newBuilder()
+            .setId("repo")
+            .setUrl("https://repo.example.test/maven")
+            .setM2Compatible(true)
+            .build();
+
+        JvmHostServiceImpl.ResolvedArtifactEntry entry =
+            new JvmHostServiceImpl.ResolvedArtifactEntry(
+                "org.example",
+                "demo",
+                "1.0",
+                "runtimeClasspath",
+                "",
+                "jar",
+                "dependency",
+                Collections.singletonList(repository),
+                Collections.singletonList("resolution-strategy-force")
+            );
+
+        assertEquals(1, entry.getRepositories().size());
+        assertEquals("repo", entry.getRepositories().get(0).getId());
+        assertEquals(Collections.singletonList("resolution-strategy-force"), entry.getUnsupportedFeatures());
     }
 
     private static BuildPlanTask task(String path, String classpath) {
