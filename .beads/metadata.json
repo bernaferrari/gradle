@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "gradle_fork",
+  "project_id": "f9372c83-ad46-4e09-a2e3-72a4a97e5527"
+}
