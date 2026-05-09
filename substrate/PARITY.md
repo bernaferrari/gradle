@@ -630,6 +630,14 @@ Rust build-plan shadow preserves that kind, so real Gradle-declared constraints
 can reach kernel admission. This still does not claim full constraint solving:
 rich constraints, platform/enforced-platform behavior, and resolved graph parity
 need dedicated corpus gates before expanding native-ready coverage.
+The JVM host also attaches conservative unsupported-feature markers from the
+captured Gradle configuration contract. Repository markers cover non-Maven
+repositories, extra Maven artifact URLs, unsupported repository URL schemes, and
+unsupported metadata-source shapes; resolution-strategy force is now marked as
+`resolution-strategy-force` so Rust authoritative admission fails closed until
+that Gradle solver semantic is represented exactly. If the resolution strategy
+cannot be inspected, the bridge marks `resolution-strategy-inspection` rather
+than silently admitting the build.
 Build-plan constraint capture now uses Gradle `VersionConstraint` rather than
 the raw legacy version string, matching the dependency prefetch bridge: strict,
 required, and preferred static versions can be represented, while branch,
