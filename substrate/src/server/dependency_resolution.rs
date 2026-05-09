@@ -2264,6 +2264,21 @@ impl DependencyResolutionServiceImpl {
                             let mut transitive_deps =
                                 Vec::with_capacity(variant.dependencies.len());
                             for module_dep in &variant.dependencies {
+                                if inherited_exclusions.iter().any(|(excl_group, excl_name)| {
+                                    Self::matches_exclusion(
+                                        &module_dep.group,
+                                        &module_dep.module,
+                                        excl_group,
+                                        excl_name,
+                                    )
+                                }) {
+                                    tracing::debug!(
+                                        group = %module_dep.group,
+                                        name = %module_dep.module,
+                                        "Gradle Module Metadata dependency excluded"
+                                    );
+                                    continue;
+                                }
                                 let child_dep = DependencyDescriptor {
                                     group: module_dep.group.clone(),
                                     name: module_dep.module.clone(),
@@ -2281,7 +2296,7 @@ impl DependencyResolutionServiceImpl {
                                     repos,
                                     visited,
                                     depth + 1,
-                                    inherited_exclusions,
+                                    &module_dep.exclusions,
                                     lenient,
                                 ))
                                 .await;
@@ -5292,6 +5307,145 @@ mod tests {
                 "/org/example/runtime-child/2.0/runtime-child-2.0.pom".to_string(),
             ],
             "Rust should consume .module metadata, not fetch root POM, and not repeat child .module misses"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_gradle_module_metadata_dependency_exclusion_prunes_child_transitive() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::{Arc, Mutex};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let requested = Arc::new(Mutex::new(Vec::new()));
+        let requested_for_server = Arc::clone(&requested);
+        let root_module = br#"{
+          "formatVersion": "1.1",
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "dependencies":[{"group":"org.example","module":"runtime-child","version":{"requires":"1.0"},
+               "excludes":[{"group":"org.bad","module":"bad"}]}]}
+          ]
+        }"#
+        .to_vec();
+        let child_pom = br#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.example</groupId>
+  <artifactId>runtime-child</artifactId>
+  <version>1.0</version>
+  <dependencies>
+    <dependency>
+      <groupId>org.bad</groupId>
+      <artifactId>bad</artifactId>
+      <version>1.0</version>
+    </dependency>
+    <dependency>
+      <groupId>org.good</groupId>
+      <artifactId>good</artifactId>
+      <version>1.0</version>
+    </dependency>
+  </dependencies>
+</project>"#
+            .to_vec();
+        let good_pom = br#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.good</groupId>
+  <artifactId>good</artifactId>
+  <version>1.0</version>
+</project>"#
+            .to_vec();
+        let server = std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            while requested_for_server.lock().unwrap().len() < 5
+                && started.elapsed() < std::time::Duration::from_secs(5)
+            {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(stream) => stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                    Err(error) => panic!("test server accept failed: {error}"),
+                };
+                let mut request = [0u8; 2048];
+                let read = stream.read(&mut request).unwrap_or(0);
+                let request_text = String::from_utf8_lossy(&request[..read]);
+                let path = request_text
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("/")
+                    .to_string();
+                requested_for_server.lock().unwrap().push(path.clone());
+                let body = if path.ends_with("/root-1.0.module") {
+                    Some((&root_module, "application/json"))
+                } else if path.ends_with("/runtime-child-1.0.pom") {
+                    Some((&child_pom, "application/xml"))
+                } else if path.ends_with("/good-1.0.pom") {
+                    Some((&good_pom, "application/xml"))
+                } else {
+                    None
+                };
+                match body {
+                    Some((body, content_type)) => {
+                        let response = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: {}\r\n\r\n",
+                            body.len(),
+                            content_type
+                        );
+                        stream.write_all(response.as_bytes()).unwrap();
+                        stream.write_all(body).unwrap();
+                    }
+                    None => {
+                        let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+                        stream.write_all(response.as_bytes()).unwrap();
+                    }
+                }
+            }
+        });
+
+        let store = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "runtimeClasspath".to_string(),
+                dependencies: vec![make_dep("org.example", "root", "1.0")],
+                repositories: vec![{
+                    let mut repo = make_repo("local", &format!("http://{}", addr));
+                    repo.layout = "gradle-module-metadata".to_string();
+                    repo
+                }],
+                target_scope: "runtime".to_string(),
+                attributes: vec![],
+                lenient: false,
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        server.join().unwrap();
+
+        assert!(
+            response.success,
+            "{}; requested={:?}",
+            response.error_message,
+            requested.lock().unwrap().as_slice()
+        );
+        let runtime_child = &response.resolved_dependencies[0].dependencies[0];
+        assert_eq!(runtime_child.name, "runtime-child");
+        assert_eq!(runtime_child.dependencies.len(), 1);
+        assert_eq!(runtime_child.dependencies[0].group, "org.good");
+        assert_eq!(runtime_child.dependencies[0].name, "good");
+        assert!(
+            !requested
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|path| path.contains("/org/bad/")),
+            "excluded dependency should not be fetched"
         );
     }
 
