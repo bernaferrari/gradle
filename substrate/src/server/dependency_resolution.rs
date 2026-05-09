@@ -8687,7 +8687,9 @@ mod tests {
             .into_inner();
 
         assert!(!response.success);
-        assert!(response.error_message.contains("Unsupported dependency constraint"));
+        assert!(response
+            .error_message
+            .contains("Unsupported dependency constraint"));
         assert!(response.error_message.contains("wildcard '+' selectors"));
     }
 }

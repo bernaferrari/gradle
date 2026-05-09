@@ -95,7 +95,8 @@ fn constraint_versions(
         let key = (constraint.group.clone(), constraint.name.clone());
         match versions.get(&key) {
             Some(existing)
-                if compare_versions(&constraint.version, existing) != std::cmp::Ordering::Greater => {}
+                if compare_versions(&constraint.version, existing)
+                    != std::cmp::Ordering::Greater => {}
             _ => {
                 versions.insert(key, constraint.version.clone());
             }
