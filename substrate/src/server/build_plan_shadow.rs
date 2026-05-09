@@ -679,6 +679,8 @@ async fn collect_shadow_dependencies(
                                         .collect(),
                                     layout: repository.layout.clone(),
                                     ivy_pattern: repository.ivy_pattern.clone(),
+                                    include_groups: repository.include_groups.clone(),
+                                    exclude_groups: repository.exclude_groups.clone(),
                                 })
                                 .collect(),
                             artifact.unsupported_features.clone(),

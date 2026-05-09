@@ -49,6 +49,8 @@ message RepositoryDescriptor {
   string layout = 6;
   // Ivy artifact pattern (e.g., "[organisation]/[module]/[revision]/[type]s/[artifact]-[revision].[ext]").
   string ivy_pattern = 7;
+  repeated string include_groups = 8;
+  repeated string exclude_groups = 9;
 }
 
 message ResolveDependenciesRequest {

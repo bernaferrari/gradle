@@ -18,6 +18,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Captures the narrow repository contract that Rust static artifact prefetch can represent.
@@ -83,7 +84,8 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
                 unsupportedFeatures.add("maven-artifact-urls:" + maven.getName());
                 continue;
             }
-            List<String> contentMarkers = unsupportedRepositoryContentMarkers(maven);
+            RepositoryContentCapture contentCapture = repositoryContentCapture(maven);
+            List<String> contentMarkers = contentCapture.getUnsupportedFeatures();
             if (!contentMarkers.isEmpty()) {
                 unsupportedFeatures.addAll(contentMarkers);
                 continue;
@@ -115,6 +117,8 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
                 .setUrl(url.toString())
                 .setM2Compatible(true)
                 .setAllowInsecureProtocol(maven.isAllowInsecureProtocol());
+            builder.addAllIncludeGroups(contentCapture.getIncludeGroups());
+            builder.addAllExcludeGroups(contentCapture.getExcludeGroups());
             if (includeSessionCredentials && hasConfiguredCredentials(maven.getCredentials())) {
                 builder.putCredentials("username", nullToEmpty(maven.getCredentials().getUsername()));
                 builder.putCredentials("password", nullToEmpty(maven.getCredentials().getPassword()));
@@ -139,21 +143,68 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
         return value == null ? "" : value;
     }
 
-    private static List<String> unsupportedRepositoryContentMarkers(MavenArtifactRepository repository) {
-        String name = repository.getName();
-        List<String> markers = new ArrayList<>();
+    static RepositoryContentCapture repositoryContentCapture(Object repository, String name) {
+        List<String> unsupported = new ArrayList<>();
+        List<String> includeGroups = new ArrayList<>();
+        List<String> excludeGroups = new ArrayList<>();
+        if (!extractGroupSpecs(readFieldInHierarchy(repository, "includeSpecs"), true, includeGroups)) {
+            unsupported.add("repository-content-filter:" + name);
+        }
+        if (!extractGroupSpecs(readFieldInHierarchy(repository, "excludeSpecs"), false, excludeGroups)) {
+            unsupported.add("repository-content-filter:" + name);
+        }
         if (nonEmptyCollection(invokeIfPresent(repository, "getIncludedConfigurations"))
             || nonEmptyCollection(invokeIfPresent(repository, "getExcludedConfigurations"))) {
-            markers.add("repository-content-configurations:" + name);
+            unsupported.add("repository-content-configurations:" + name);
         }
         if (nonEmptyMap(invokeIfPresent(repository, "getRequiredAttributes"))) {
-            markers.add("repository-content-attributes:" + name);
+            unsupported.add("repository-content-attributes:" + name);
         }
         Object contentFilter = invokeIfPresent(repository, "getContentFilter");
-        if (contentFilter != null && !isGradleDoNothingAction(contentFilter)) {
-            markers.add("repository-content-filter:" + name);
+        if (contentFilter != null
+            && !isGradleDoNothingAction(contentFilter)
+            && includeGroups.isEmpty()
+            && excludeGroups.isEmpty()
+            && unsupported.isEmpty()) {
+            unsupported.add("repository-content-filter:" + name);
         }
-        return markers;
+        return new RepositoryContentCapture(includeGroups, excludeGroups, unsupported);
+    }
+
+    private static RepositoryContentCapture repositoryContentCapture(MavenArtifactRepository repository) {
+        return repositoryContentCapture(repository, repository.getName());
+    }
+
+    private static boolean extractGroupSpecs(@Nullable Object specs, boolean expectedInclusive, List<String> groups) {
+        if (specs == null) {
+            return true;
+        }
+        if (!(specs instanceof Set)) {
+            return false;
+        }
+        for (Object spec : (Set<?>) specs) {
+            if (!isSimpleGroupSpec(spec, expectedInclusive)) {
+                return false;
+            }
+            Object group = readFieldInHierarchy(spec, "group");
+            groups.add(group.toString());
+        }
+        Collections.sort(groups);
+        return true;
+    }
+
+    private static boolean isSimpleGroupSpec(Object spec, boolean expectedInclusive) {
+        Object matcherKind = readFieldInHierarchy(spec, "matcherKind");
+        Object group = readFieldInHierarchy(spec, "group");
+        Object module = readFieldInHierarchy(spec, "module");
+        Object version = readFieldInHierarchy(spec, "version");
+        Object inclusive = readFieldInHierarchy(spec, "inclusive");
+        return matcherKind != null
+            && "SIMPLE".equals(matcherKind.toString())
+            && group != null
+            && module == null
+            && version == null
+            && Boolean.valueOf(expectedInclusive).equals(inclusive);
     }
 
     private static boolean nonEmptyCollection(@Nullable Object value) {
@@ -180,19 +231,48 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
     }
 
     static boolean hasNonNullFieldInHierarchy(Object target, String fieldName) {
+        return readFieldInHierarchy(target, fieldName) != null;
+    }
+
+    @Nullable
+    private static Object readFieldInHierarchy(Object target, String fieldName) {
         Class<?> type = target.getClass();
         while (type != null) {
             try {
                 java.lang.reflect.Field field = type.getDeclaredField(fieldName);
                 field.setAccessible(true);
-                return field.get(target) != null;
+                return field.get(target);
             } catch (NoSuchFieldException e) {
                 type = type.getSuperclass();
             } catch (Exception e) {
                 throw new IllegalStateException("Could not read " + fieldName + " on " + target.getClass().getName(), e);
             }
         }
-        return false;
+        return null;
+    }
+
+    static final class RepositoryContentCapture {
+        private final List<String> includeGroups;
+        private final List<String> excludeGroups;
+        private final List<String> unsupportedFeatures;
+
+        RepositoryContentCapture(List<String> includeGroups, List<String> excludeGroups, List<String> unsupportedFeatures) {
+            this.includeGroups = Collections.unmodifiableList(new ArrayList<>(includeGroups));
+            this.excludeGroups = Collections.unmodifiableList(new ArrayList<>(excludeGroups));
+            this.unsupportedFeatures = Collections.unmodifiableList(new ArrayList<>(unsupportedFeatures));
+        }
+
+        List<String> getIncludeGroups() {
+            return includeGroups;
+        }
+
+        List<String> getExcludeGroups() {
+            return excludeGroups;
+        }
+
+        List<String> getUnsupportedFeatures() {
+            return unsupportedFeatures;
+        }
     }
 
     public static final class RepositoryCapture {

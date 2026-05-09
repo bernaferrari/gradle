@@ -17,6 +17,7 @@ import java.lang.reflect.Proxy;
 import java.net.URI;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -128,6 +129,40 @@ public class DependencyResolutionModelAdapterTest {
             Arrays.asList("repository-content-configurations:filtered", "repository-content-attributes:filtered"),
             capture.getUnsupportedFeatures()
         );
+    }
+
+    @Test
+    public void staticRepositoryGroupFiltersAreCapturedAsNativeContract() {
+        DependencyResolutionModelAdapter.RepositoryContentCapture content =
+            DependencyResolutionModelAdapter.repositoryContentCapture(
+                new RepositoryWithContentSpecs(
+                    setOf(
+                        new ContentSpec("SIMPLE", "com.acme", null, null, true),
+                        new ContentSpec("SIMPLE", "org.example", null, null, true)
+                    ),
+                    setOf(new ContentSpec("SIMPLE", "com.acme.internal", null, null, false))
+                ),
+                "filtered"
+            );
+
+        assertEquals(Arrays.asList("com.acme", "org.example"), content.getIncludeGroups());
+        assertEquals(Collections.singletonList("com.acme.internal"), content.getExcludeGroups());
+        assertTrue(content.getUnsupportedFeatures().isEmpty());
+    }
+
+    @Test
+    public void nonGroupRepositoryContentSpecsRemainUnsupported() {
+        DependencyResolutionModelAdapter.RepositoryContentCapture content =
+            DependencyResolutionModelAdapter.repositoryContentCapture(
+                new RepositoryWithContentSpecs(
+                    setOf(new ContentSpec("REGEX", "com\\..*", null, null, true)),
+                    Collections.emptySet()
+                ),
+                "filtered"
+            );
+
+        assertTrue(content.getIncludeGroups().isEmpty());
+        assertTrue(content.getUnsupportedFeatures().contains("repository-content-filter:filtered"));
     }
 
     @Test
@@ -321,6 +356,44 @@ public class DependencyResolutionModelAdapterTest {
         Map<?, ?> getRequiredAttributes();
     }
 
+    private static class RepositoryWithContentSpecs {
+        @SuppressWarnings("unused")
+        private final Set<ContentSpec> includeSpecs;
+
+        @SuppressWarnings("unused")
+        private final Set<ContentSpec> excludeSpecs;
+
+        RepositoryWithContentSpecs(Set<ContentSpec> includeSpecs, Set<ContentSpec> excludeSpecs) {
+            this.includeSpecs = includeSpecs;
+            this.excludeSpecs = excludeSpecs;
+        }
+    }
+
+    private static class ContentSpec {
+        @SuppressWarnings("unused")
+        private final Object matcherKind;
+
+        @SuppressWarnings("unused")
+        private final String group;
+
+        @SuppressWarnings("unused")
+        private final String module;
+
+        @SuppressWarnings("unused")
+        private final String version;
+
+        @SuppressWarnings("unused")
+        private final boolean inclusive;
+
+        ContentSpec(Object matcherKind, String group, String module, String version, boolean inclusive) {
+            this.matcherKind = matcherKind;
+            this.group = group;
+            this.module = module;
+            this.version = version;
+            this.inclusive = inclusive;
+        }
+    }
+
     private static class RepositoryWithoutMetadataRules {
         @SuppressWarnings("unused")
         private Object componentMetadataSupplierRuleClass;
@@ -413,5 +486,11 @@ public class DependencyResolutionModelAdapterTest {
             return Collections.emptyList();
         }
         return null;
+    }
+
+    private static Set<ContentSpec> setOf(ContentSpec... values) {
+        Set<ContentSpec> result = new HashSet<>();
+        Collections.addAll(result, values);
+        return result;
     }
 }
