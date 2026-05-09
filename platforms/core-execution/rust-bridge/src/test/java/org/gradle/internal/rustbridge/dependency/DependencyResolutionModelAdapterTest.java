@@ -4,6 +4,7 @@ import gradle.substrate.v1.DependencyDescriptor;
 import gradle.substrate.v1.RepositoryDescriptor;
 
 import org.gradle.api.Project;
+import org.gradle.api.Action;
 import org.gradle.api.artifacts.DependencyConstraint;
 import org.gradle.api.artifacts.VersionConstraint;
 import org.gradle.api.artifacts.dsl.RepositoryHandler;
@@ -14,8 +15,11 @@ import org.junit.Test;
 
 import java.lang.reflect.Proxy;
 import java.net.URI;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -83,6 +87,47 @@ public class DependencyResolutionModelAdapterTest {
         assertEquals("private", repository.getId());
         assertEquals("user", repository.getCredentialsMap().get("username"));
         assertEquals("secret", repository.getCredentialsMap().get("password"));
+    }
+
+    @Test
+    public void repositoryContentFilterFailsClosedForDurableCapture() {
+        DependencyResolutionModelAdapter.RepositoryCapture capture =
+            DependencyResolutionModelAdapter.repositoriesForProject(
+                projectWithRepository(filteredMavenRepository(
+                    "filtered",
+                    "https://repo.example.test/maven",
+                    repositoryContentFilter(),
+                    Collections.emptySet(),
+                    Collections.emptySet(),
+                    Collections.emptyMap()
+                )),
+                false
+            );
+
+        assertTrue(capture.getRepositories().isEmpty());
+        assertEquals(Collections.singletonList("repository-content-filter:filtered"), capture.getUnsupportedFeatures());
+    }
+
+    @Test
+    public void repositoryContentConfigurationsAndAttributesFailClosedForSessionCaptureToo() {
+        DependencyResolutionModelAdapter.RepositoryCapture capture =
+            DependencyResolutionModelAdapter.repositoriesForProject(
+                projectWithRepository(filteredMavenRepository(
+                    "filtered",
+                    "https://repo.example.test/maven",
+                    null,
+                    Collections.singleton("runtimeClasspath"),
+                    Collections.singleton("compileClasspath"),
+                    Collections.singletonMap("usage", Collections.singleton("java-runtime"))
+                )),
+                true
+            );
+
+        assertTrue(capture.getRepositories().isEmpty());
+        assertEquals(
+            Arrays.asList("repository-content-configurations:filtered", "repository-content-attributes:filtered"),
+            capture.getUnsupportedFeatures()
+        );
     }
 
     @Test
@@ -211,6 +256,57 @@ public class DependencyResolutionModelAdapterTest {
         });
     }
 
+    private static MavenArtifactRepository filteredMavenRepository(
+        String name,
+        String url,
+        Action<Object> contentFilter,
+        Set<String> includedConfigurations,
+        Set<String> excludedConfigurations,
+        Map<?, ?> requiredAttributes
+    ) {
+        return proxy(new Class<?>[]{MavenArtifactRepository.class, TestContentFilteringRepository.class}, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "getName":
+                    return name;
+                case "getUrl":
+                    return URI.create(url);
+                case "getArtifactUrls":
+                    return Collections.emptySet();
+                case "getCredentials":
+                    return credentials(null, null);
+                case "getMetadataSources":
+                    return sources(false, true, false);
+                case "isAllowInsecureProtocol":
+                    return false;
+                case "getContentFilter":
+                    return contentFilter;
+                case "getIncludedConfigurations":
+                    return includedConfigurations;
+                case "getExcludedConfigurations":
+                    return excludedConfigurations;
+                case "getRequiredAttributes":
+                    return requiredAttributes;
+                default:
+                    return defaultValue(method.getReturnType());
+            }
+        });
+    }
+
+    private static Action<Object> repositoryContentFilter() {
+        return details -> {
+        };
+    }
+
+    private interface TestContentFilteringRepository {
+        Action<Object> getContentFilter();
+
+        Set<String> getIncludedConfigurations();
+
+        Set<String> getExcludedConfigurations();
+
+        Map<?, ?> getRequiredAttributes();
+    }
+
     private static DependencyConstraint dependencyConstraint(String group, String name, VersionConstraint versionConstraint) {
         return proxy(DependencyConstraint.class, (proxy, method, args) -> {
             switch (method.getName()) {
@@ -254,6 +350,11 @@ public class DependencyResolutionModelAdapterTest {
     @SuppressWarnings("unchecked")
     private static <T> T proxy(Class<T> type, java.lang.reflect.InvocationHandler handler) {
         return (T) Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[]{type}, handler);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T proxy(Class<?>[] types, java.lang.reflect.InvocationHandler handler) {
+        return (T) Proxy.newProxyInstance(types[0].getClassLoader(), types, handler);
     }
 
     private static Object defaultValue(Class<?> type) {
