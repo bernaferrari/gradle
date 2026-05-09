@@ -3744,7 +3744,7 @@ mod tests {
             id: id.to_string(),
             url: url.to_string(),
             m2compatible: true,
-            allow_insecure_protocol: false,
+            allow_insecure_protocol: url.starts_with("http://"),
             credentials: Default::default(),
             layout: String::new(),
             ivy_pattern: String::new(),
