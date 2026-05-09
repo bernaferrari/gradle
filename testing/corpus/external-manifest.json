@@ -134,6 +134,22 @@
         "project_dependencies": [],
         "toolchains": ["17"]
       }
+    },
+    {
+      "name": "dependency-gradle-metadata-constraints-excludes-kotlin-dsl",
+      "path": "dependency-gradle-metadata-constraints-excludes-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 0,
+        "plugins": ["base"],
+        "tasks": [],
+        "outputs": [],
+        "dependencies": ["org.example:root:1.0"],
+        "project_dependencies": [],
+        "toolchains": []
+      }
     }
   ]
 }
