@@ -2356,6 +2356,10 @@ impl DependencyResolutionServiceImpl {
                         changing: false,
                         optional: false,
                         ivy_conf: String::new(),
+                        strict_version: String::new(),
+                        required_version: String::new(),
+                        preferred_version: String::new(),
+                        rejected_versions: Vec::new(),
                     };
                     let resolved = Box::pin(self.resolve_recursive(
                         &child_dep,
@@ -2611,6 +2615,10 @@ impl DependencyResolutionServiceImpl {
                             changing: false,
                             optional: false,
                             ivy_conf: String::new(),
+                            strict_version: String::new(),
+                            required_version: String::new(),
+                            preferred_version: String::new(),
+                            rejected_versions: Vec::new(),
                         };
                         let resolved = Box::pin(self.resolve_recursive(
                             &child_dep,
@@ -3847,6 +3855,10 @@ mod tests {
             changing: false,
             optional: false,
             ivy_conf: String::new(),
+            strict_version: String::new(),
+            required_version: String::new(),
+            preferred_version: String::new(),
+            rejected_versions: Vec::new(),
         }
     }
 
@@ -5107,6 +5119,10 @@ mod tests {
                     changing: false,
                     optional: false,
                     ivy_conf: String::new(),
+                    strict_version: String::new(),
+                    required_version: String::new(),
+                    preferred_version: String::new(),
+                    rejected_versions: Vec::new(),
                 }],
                 repositories: vec![
                     make_repo("missing", &format!("http://{}/missing", addr)),
@@ -7700,6 +7716,10 @@ mod tests {
             changing: false,
             optional: false,
             ivy_conf: String::new(),
+            strict_version: String::new(),
+            required_version: String::new(),
+            preferred_version: String::new(),
+            rejected_versions: Vec::new(),
         };
 
         let response = svc
@@ -7745,6 +7765,10 @@ mod tests {
             changing: false,
             optional: false,
             ivy_conf: String::new(),
+            strict_version: String::new(),
+            required_version: String::new(),
+            preferred_version: String::new(),
+            rejected_versions: Vec::new(),
         };
 
         let response = svc

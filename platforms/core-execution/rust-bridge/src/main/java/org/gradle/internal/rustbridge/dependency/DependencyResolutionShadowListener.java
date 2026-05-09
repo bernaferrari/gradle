@@ -338,40 +338,64 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
         return Collections.unmodifiableList(descriptors);
     }
 
-    private DependencyDescriptor staticMavenDependencyConstraintDescriptor(DependencyConstraint constraint) {
+    static DependencyDescriptor staticMavenDependencyConstraintDescriptor(DependencyConstraint constraint) {
         String group = constraint.getGroup();
         String name = constraint.getName();
-        String version = staticMavenConstraintVersion(constraint.getVersionConstraint());
-        if (isBlank(group) || isBlank(name) || isBlank(version) || !isStaticVersion(version)) {
+        RichVersionFields version = staticMavenVersionFields(constraint.getVersionConstraint());
+        if (isBlank(group) || isBlank(name) || version == null) {
             return null;
         }
-        return DependencyDescriptor.newBuilder()
+        DependencyDescriptor.Builder builder = DependencyDescriptor.newBuilder()
             .setGroup(group)
             .setName(name)
-            .setVersion(version)
+            .setVersion(version.selectedVersion)
             .setClassifier("")
             .setExtension("jar")
-            .setTransitive(false)
-            .build();
+            .setTransitive(false);
+        version.applyTo(builder);
+        return builder.build();
     }
 
-    private String staticMavenConstraintVersion(VersionConstraint versionConstraint) {
-        if (versionConstraint == null || versionConstraint.getBranch() != null || !versionConstraint.getRejectedVersions().isEmpty()) {
+    private static RichVersionFields staticMavenVersionFields(VersionConstraint versionConstraint) {
+        if (versionConstraint == null || versionConstraint.getBranch() != null) {
             return null;
         }
         String strictVersion = versionConstraint.getStrictVersion();
-        if (!isBlank(strictVersion)) {
-            return strictVersion;
+        if (!isBlank(strictVersion) && !isStaticVersion(strictVersion)) {
+            return null;
         }
         String requiredVersion = versionConstraint.getRequiredVersion();
-        if (!isBlank(requiredVersion)) {
-            return requiredVersion;
+        if (!isBlank(requiredVersion) && !isStaticVersion(requiredVersion)) {
+            return null;
         }
         String preferredVersion = versionConstraint.getPreferredVersion();
-        if (!isBlank(preferredVersion)) {
-            return preferredVersion;
+        if (!isBlank(preferredVersion) && !isStaticVersion(preferredVersion)) {
+            return null;
         }
-        return null;
+        List<String> rejectedVersions = new ArrayList<>();
+        for (String rejected : versionConstraint.getRejectedVersions()) {
+            if (isBlank(rejected) || !isStaticVersion(rejected)) {
+                return null;
+            }
+            rejectedVersions.add(rejected);
+        }
+        String selectedVersion = !isBlank(strictVersion)
+            ? strictVersion
+            : !isBlank(requiredVersion)
+                ? requiredVersion
+                : !isBlank(preferredVersion)
+                    ? preferredVersion
+                    : null;
+        if (isBlank(selectedVersion)) {
+            return null;
+        }
+        return new RichVersionFields(
+            selectedVersion,
+            nullToEmpty(strictVersion),
+            nullToEmpty(requiredVersion),
+            nullToEmpty(preferredVersion),
+            rejectedVersions
+        );
     }
 
     private DependencyDescriptor staticMavenDependencyDescriptor(Dependency dependency) {
@@ -382,6 +406,10 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
         if (external.isChanging()) {
             return null;
         }
+        RichVersionFields version = staticMavenVersionFields(external.getVersionConstraint());
+        if (version == null) {
+            return null;
+        }
         ModuleDependency module = (ModuleDependency) external;
         if (module.getTargetConfiguration() != null || !module.getExcludeRules().isEmpty()) {
             return null;
@@ -389,8 +417,7 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
 
         String group = dependency.getGroup();
         String name = dependency.getName();
-        String version = dependency.getVersion();
-        if (isBlank(group) || isBlank(name) || isBlank(version) || !isStaticVersion(version)) {
+        if (isBlank(group) || isBlank(name)) {
             return null;
         }
 
@@ -411,14 +438,15 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
             }
         }
 
-        return DependencyDescriptor.newBuilder()
+        DependencyDescriptor.Builder builder = DependencyDescriptor.newBuilder()
             .setGroup(group)
             .setName(name)
-            .setVersion(version)
+            .setVersion(version.selectedVersion)
             .setClassifier(classifier)
             .setExtension(extension)
-            .setTransitive(false)
-            .build();
+            .setTransitive(false);
+        version.applyTo(builder);
+        return builder.build();
     }
 
     private DependencyDescriptor staticMavenDependencyDescriptor(ModuleComponentIdentifier id) {
@@ -529,6 +557,10 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
         return value == null || value.isEmpty();
     }
 
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
     private static boolean isStaticVersion(String version) {
         return version.indexOf('+') < 0
             && version.indexOf('[') < 0
@@ -540,6 +572,36 @@ public class DependencyResolutionShadowListener implements DependencyResolutionL
             && !"release".equalsIgnoreCase(version)
             && !"latest".equalsIgnoreCase(version)
             && !version.endsWith("-SNAPSHOT");
+    }
+
+    private static final class RichVersionFields {
+        private final String selectedVersion;
+        private final String strictVersion;
+        private final String requiredVersion;
+        private final String preferredVersion;
+        private final List<String> rejectedVersions;
+
+        private RichVersionFields(
+            String selectedVersion,
+            String strictVersion,
+            String requiredVersion,
+            String preferredVersion,
+            List<String> rejectedVersions
+        ) {
+            this.selectedVersion = selectedVersion;
+            this.strictVersion = strictVersion;
+            this.requiredVersion = requiredVersion;
+            this.preferredVersion = preferredVersion;
+            this.rejectedVersions = rejectedVersions;
+        }
+
+        private void applyTo(DependencyDescriptor.Builder builder) {
+            builder
+                .setStrictVersion(strictVersion)
+                .setRequiredVersion(requiredVersion)
+                .setPreferredVersion(preferredVersion)
+                .addAllRejectedVersions(rejectedVersions);
+        }
     }
 
     private String recordResolutionInMode(

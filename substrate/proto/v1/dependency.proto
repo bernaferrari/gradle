@@ -31,6 +31,12 @@ message DependencyDescriptor {
   bool optional = 9;
   // Ivy conf mapping (e.g., "compile->default(compile)").
   string ivy_conf = 10;
+  // Static Gradle rich-version fields captured from VersionConstraint.
+  // `version` remains the selected static selector used by older clients.
+  string strict_version = 11;
+  string required_version = 12;
+  string preferred_version = 13;
+  repeated string rejected_versions = 14;
 }
 
 message RepositoryDescriptor {
