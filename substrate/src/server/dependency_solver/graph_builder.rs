@@ -23,6 +23,12 @@ pub struct ModuleSelector {
     pub version: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StaticVersionConstraint {
+    version: String,
+    rejected_versions: Vec<String>,
+}
+
 pub fn build_dependency_graph_request(
     dependencies: &[DependencyDescriptor],
     constraints: &[DependencyDescriptor],
@@ -61,12 +67,19 @@ fn validate_dependency_selectors(dependencies: &[DependencyDescriptor]) -> Resul
                 dependency.group, dependency.name, dependency.version, dependency.ivy_conf
             ));
         }
-        if let Some(reason) = unsupported_version_selector_reason(&dependency.version) {
+        let version = selected_static_version(dependency).ok_or_else(|| {
+            format!(
+                "Unsupported dependency selector {}:{}:{}: no static version selector is native-ready",
+                dependency.group, dependency.name, dependency.version
+            )
+        })?;
+        if let Some(reason) = unsupported_version_selector_reason(&version) {
             return Err(format!(
                 "Unsupported dependency selector {}:{}:{}: {}",
-                dependency.group, dependency.name, dependency.version, reason
+                dependency.group, dependency.name, version, reason
             ));
         }
+        validate_rejected_versions("dependency selector", dependency, &version)?;
     }
     Ok(())
 }
@@ -223,8 +236,9 @@ fn looks_like_version_range(version: &str) -> bool {
 
 fn constraint_versions(
     constraints: &[DependencyDescriptor],
-) -> Result<HashMap<(String, String), String>, String> {
-    let mut versions = HashMap::<(String, String), String>::with_capacity(constraints.len());
+) -> Result<HashMap<(String, String), StaticVersionConstraint>, String> {
+    let mut versions =
+        HashMap::<(String, String), StaticVersionConstraint>::with_capacity(constraints.len());
     for constraint in constraints {
         if constraint.group.trim().is_empty() || constraint.name.trim().is_empty() {
             return Err("Dependency constraint contains empty group or name".to_string());
@@ -259,19 +273,32 @@ fn constraint_versions(
                 constraint.group, constraint.name, constraint.version, constraint.extension
             ));
         }
-        if let Some(reason) = unsupported_version_selector_reason(&constraint.version) {
+        let version = selected_static_version(constraint).ok_or_else(|| {
+            format!(
+                "Unsupported dependency constraint {}:{}:{}: no static version selector is native-ready",
+                constraint.group, constraint.name, constraint.version
+            )
+        })?;
+        if let Some(reason) = unsupported_version_selector_reason(&version) {
             return Err(format!(
                 "Unsupported dependency constraint {}:{}:{}: {}",
-                constraint.group, constraint.name, constraint.version, reason
+                constraint.group, constraint.name, version, reason
             ));
         }
+        validate_rejected_versions("dependency constraint", constraint, &version)?;
         let key = (constraint.group.clone(), constraint.name.clone());
         match versions.get(&key) {
             Some(existing)
-                if compare_versions(&constraint.version, existing)
-                    != std::cmp::Ordering::Greater => {}
+                if compare_versions(&version, &existing.version) != std::cmp::Ordering::Greater => {
+            }
             _ => {
-                versions.insert(key, constraint.version.clone());
+                versions.insert(
+                    key,
+                    StaticVersionConstraint {
+                        version,
+                        rejected_versions: constraint.rejected_versions.clone(),
+                    },
+                );
             }
         }
     }
@@ -280,12 +307,12 @@ fn constraint_versions(
 
 fn effective_dependency(
     dep: &DependencyDescriptor,
-    constraints: &HashMap<(String, String), String>,
+    constraints: &HashMap<(String, String), StaticVersionConstraint>,
     target_scope: &str,
 ) -> DependencyDescriptor {
     let constrained_version = constraints.get(&(dep.group.clone(), dep.name.clone()));
-    let version = select_version_with_constraint(&dep.version, constrained_version)
-        .unwrap_or_else(|| dep.version.clone());
+    let requested_version = selected_static_version(dep).unwrap_or_else(|| dep.version.clone());
+    let version = select_version_with_constraint(&requested_version, constrained_version);
     let scope = if dep.scope.is_empty() && !target_scope.is_empty() {
         target_scope.to_string()
     } else {
@@ -300,22 +327,66 @@ fn effective_dependency(
 
 fn select_version_with_constraint(
     requested_version: &str,
-    constrained_version: Option<&String>,
-) -> Option<String> {
+    constrained_version: Option<&StaticVersionConstraint>,
+) -> String {
     let Some(constrained_version) = constrained_version else {
-        return Some(requested_version.to_string());
+        return requested_version.to_string();
     };
     if requested_version.trim().is_empty() {
-        return Some(constrained_version.clone());
+        return constrained_version.version.clone();
     }
     if unsupported_version_selector_reason(requested_version).is_some() {
-        return Some(requested_version.to_string());
+        return requested_version.to_string();
     }
-    if compare_versions(constrained_version, requested_version) == std::cmp::Ordering::Greater {
-        Some(constrained_version.clone())
+    if compare_versions(&constrained_version.version, requested_version)
+        == std::cmp::Ordering::Greater
+    {
+        constrained_version.version.clone()
     } else {
-        Some(requested_version.to_string())
+        requested_version.to_string()
     }
+}
+
+fn selected_static_version(descriptor: &DependencyDescriptor) -> Option<String> {
+    [
+        descriptor.strict_version.as_str(),
+        descriptor.required_version.as_str(),
+        descriptor.version.as_str(),
+        descriptor.preferred_version.as_str(),
+    ]
+    .into_iter()
+    .map(str::trim)
+    .find(|version| !version.is_empty())
+    .map(ToString::to_string)
+}
+
+fn validate_rejected_versions(
+    role: &str,
+    descriptor: &DependencyDescriptor,
+    selected_version: &str,
+) -> Result<(), String> {
+    for rejected in &descriptor.rejected_versions {
+        let rejected = rejected.trim();
+        if rejected.is_empty() {
+            return Err(format!(
+                "Unsupported {role} {}:{}:{}: empty rejected version is not native-ready",
+                descriptor.group, descriptor.name, selected_version
+            ));
+        }
+        if let Some(reason) = unsupported_version_selector_reason(rejected) {
+            return Err(format!(
+                "Unsupported {role} {}:{}:{}: rejected version {rejected}: {reason}",
+                descriptor.group, descriptor.name, selected_version
+            ));
+        }
+        if rejected == selected_version {
+            return Err(format!(
+                "Unsupported {role} {}:{}:{}: selected version is rejected",
+                descriptor.group, descriptor.name, selected_version
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -334,6 +405,10 @@ mod tests {
             changing: false,
             optional: false,
             ivy_conf: String::new(),
+            strict_version: String::new(),
+            required_version: String::new(),
+            preferred_version: String::new(),
+            rejected_versions: Vec::new(),
         }
     }
 
@@ -363,6 +438,48 @@ mod tests {
         assert_eq!(request.repositories[0].id, "central");
         assert_eq!(request.dependencies[0].version, "2.0");
         assert_eq!(request.dependencies[0].scope, "runtime");
+    }
+
+    #[test]
+    fn graph_request_applies_direct_rich_version_constraint_fields() {
+        let mut dependency = dep("org.example", "demo", "");
+        dependency.preferred_version = "1.5".to_string();
+        let mut constraint = dep("org.example", "demo", "");
+        constraint.strict_version = "2.0".to_string();
+
+        let request =
+            build_dependency_graph_request(&[dependency], &[constraint], &[], "runtime").unwrap();
+
+        assert_eq!(request.dependencies[0].version, "2.0");
+    }
+
+    #[test]
+    fn graph_request_rejects_direct_rich_version_rejecting_selected_version() {
+        let mut dependency = dep("org.example", "demo", "");
+        dependency.required_version = "1.5".to_string();
+        dependency.rejected_versions = vec!["1.5".to_string()];
+
+        let error = build_dependency_graph_request(&[dependency], &[], &[], "").unwrap_err();
+
+        assert!(error.contains("selected version is rejected"));
+    }
+
+    #[test]
+    fn graph_request_rejects_direct_rich_version_dynamic_rejects() {
+        let mut constraint = dep("org.example", "demo", "");
+        constraint.strict_version = "2.0".to_string();
+        constraint.rejected_versions = vec!["1.+".to_string()];
+
+        let error = build_dependency_graph_request(
+            &[dep("org.example", "demo", "1.0")],
+            &[constraint],
+            &[],
+            "",
+        )
+        .unwrap_err();
+
+        assert!(error.contains("rejected version 1.+"));
+        assert!(error.contains("wildcard '+' selectors"));
     }
 
     #[test]
