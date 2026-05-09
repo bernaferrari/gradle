@@ -88,6 +88,11 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
                 unsupportedFeatures.addAll(contentMarkers);
                 continue;
             }
+            List<String> metadataRuleMarkers = unsupportedMetadataRuleMarkers(maven, maven.getName());
+            if (!metadataRuleMarkers.isEmpty()) {
+                unsupportedFeatures.addAll(metadataRuleMarkers);
+                continue;
+            }
             if (hasConfiguredCredentials(maven.getCredentials())) {
                 if (!includeSessionCredentials) {
                     unsupportedFeatures.add("repository-credentials:" + maven.getName());
@@ -161,6 +166,33 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
 
     private static boolean isGradleDoNothingAction(Object action) {
         return "org.gradle.internal.Actions$NullAction".equals(action.getClass().getName());
+    }
+
+    static List<String> unsupportedMetadataRuleMarkers(Object repository, String name) {
+        List<String> markers = new ArrayList<>();
+        if (hasNonNullFieldInHierarchy(repository, "componentMetadataSupplierRuleClass")) {
+            markers.add("repository-metadata-supplier:" + name);
+        }
+        if (hasNonNullFieldInHierarchy(repository, "componentMetadataListerRuleClass")) {
+            markers.add("repository-version-lister:" + name);
+        }
+        return markers;
+    }
+
+    static boolean hasNonNullFieldInHierarchy(Object target, String fieldName) {
+        Class<?> type = target.getClass();
+        while (type != null) {
+            try {
+                java.lang.reflect.Field field = type.getDeclaredField(fieldName);
+                field.setAccessible(true);
+                return field.get(target) != null;
+            } catch (NoSuchFieldException e) {
+                type = type.getSuperclass();
+            } catch (Exception e) {
+                throw new IllegalStateException("Could not read " + fieldName + " on " + target.getClass().getName(), e);
+            }
+        }
+        return false;
     }
 
     public static final class RepositoryCapture {
