@@ -262,15 +262,31 @@ impl DependencyResolutionServiceImpl {
 
     fn repository_allows_group(repo: &RepositoryDescriptor, group: &str) -> bool {
         let group = group.trim();
-        (repo.include_groups.is_empty()
+        (repo.include_groups.is_empty() && repo.include_group_prefixes.is_empty()
             || repo
                 .include_groups
                 .iter()
-                .any(|candidate| candidate == group))
+                .any(|candidate| candidate == group)
+            || repo
+                .include_group_prefixes
+                .iter()
+                .any(|candidate| Self::group_matches_prefix(group, candidate)))
             && !repo
                 .exclude_groups
                 .iter()
                 .any(|candidate| candidate == group)
+            && !repo
+                .exclude_group_prefixes
+                .iter()
+                .any(|candidate| Self::group_matches_prefix(group, candidate))
+    }
+
+    fn group_matches_prefix(group: &str, prefix: &str) -> bool {
+        let prefix = prefix.trim();
+        group == prefix
+            || group
+                .strip_prefix(prefix)
+                .is_some_and(|suffix| suffix.starts_with('.'))
     }
 
     fn repositories_for_group(
@@ -3928,6 +3944,8 @@ mod tests {
             ivy_pattern: String::new(),
             include_groups: Vec::new(),
             exclude_groups: Vec::new(),
+            include_group_prefixes: Vec::new(),
+            exclude_group_prefixes: Vec::new(),
         }
     }
 
@@ -5287,6 +5305,83 @@ mod tests {
         assert!(response.resolved_dependencies[0]
             .artifact_url
             .starts_with(&format!("http://{}/selected/", addr)));
+    }
+
+    #[tokio::test]
+    async fn test_repository_subgroup_content_filter_matches_dotted_children_only() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::{Arc, Mutex};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let requests_for_server = Arc::clone(&requests);
+        let pom = br#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.example.child</groupId>
+  <artifactId>filtered</artifactId>
+  <version>1.0</version>
+</project>"#
+            .to_vec();
+        let server = std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            while requests_for_server.lock().unwrap().is_empty()
+                && started.elapsed() < std::time::Duration::from_secs(5)
+            {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(stream) => stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                    Err(error) => panic!("repo accept failed: {error}"),
+                };
+                let mut request = [0u8; 2048];
+                let read = stream.read(&mut request).unwrap_or(0);
+                let path = String::from_utf8_lossy(&request[..read])
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("/")
+                    .to_string();
+                requests_for_server.lock().unwrap().push(path);
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/xml\r\n\r\n",
+                    pom.len()
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+                stream.write_all(&pom).unwrap();
+            }
+        });
+
+        let mut skipped = make_repo("skipped", &format!("http://{}/skipped", addr));
+        skipped.include_group_prefixes = vec!["org.examples".to_string()];
+        let mut selected = make_repo("selected", &format!("http://{}/selected", addr));
+        selected.include_group_prefixes = vec!["org.example".to_string()];
+        selected.exclude_group_prefixes = vec!["org.example.internal".to_string()];
+
+        let svc = make_svc();
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "runtimeClasspath".to_string(),
+                dependencies: vec![make_dep("org.example.child", "filtered", "1.0")],
+                repositories: vec![skipped, selected],
+                target_scope: "runtime".to_string(),
+                lenient: false,
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        server.join().unwrap();
+
+        assert!(response.success, "{}", response.error_message);
+        assert_eq!(
+            *requests.lock().unwrap(),
+            vec!["/selected/org/example/child/filtered/1.0/filtered-1.0.pom".to_string()]
+        );
     }
 
     #[tokio::test]
@@ -7557,6 +7652,8 @@ mod tests {
             ivy_pattern: String::new(),
             include_groups: Vec::new(),
             exclude_groups: Vec::new(),
+            include_group_prefixes: Vec::new(),
+            exclude_group_prefixes: Vec::new(),
         };
 
         // The build_request method returns a RequestBuilder — we can't easily inspect it,

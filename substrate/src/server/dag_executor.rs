@@ -2202,6 +2202,8 @@ mod tests {
                 ivy_pattern: String::new(),
                 include_groups: Vec::new(),
                 exclude_groups: Vec::new(),
+                include_group_prefixes: Vec::new(),
+                exclude_group_prefixes: Vec::new(),
             });
         dependency
             .unsupported_features
@@ -2238,6 +2240,8 @@ mod tests {
                 ivy_pattern: String::new(),
                 include_groups: Vec::new(),
                 exclude_groups: Vec::new(),
+                include_group_prefixes: Vec::new(),
+                exclude_group_prefixes: Vec::new(),
             });
 
         let graph = kernel_dependency_graph_from_plan_dependencies(&[dependency])

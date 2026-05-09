@@ -51,6 +51,8 @@ message RepositoryDescriptor {
   string ivy_pattern = 7;
   repeated string include_groups = 8;
   repeated string exclude_groups = 9;
+  repeated string include_group_prefixes = 10;
+  repeated string exclude_group_prefixes = 11;
 }
 
 message ResolveDependenciesRequest {

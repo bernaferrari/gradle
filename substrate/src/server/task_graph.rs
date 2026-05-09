@@ -277,6 +277,8 @@ impl TaskGraphServiceImpl {
                         ivy_pattern: repository.ivy_pattern,
                         include_groups: repository.include_groups,
                         exclude_groups: repository.exclude_groups,
+                        include_group_prefixes: repository.include_group_prefixes,
+                        exclude_group_prefixes: repository.exclude_group_prefixes,
                     })
                     .collect(),
                 unsupported_features: dependency.unsupported_features,
