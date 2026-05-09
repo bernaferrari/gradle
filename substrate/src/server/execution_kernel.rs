@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use super::dependency_solver::graph_builder;
+
 /// Whole-build plan admitted into the Rust execution kernel after JVM
 /// configuration has produced a concrete task graph.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -154,19 +156,12 @@ fn admit_dependency_graph(graph: &KernelDependencyGraph, reasons: &mut Vec<Strin
             ));
         }
         for repository in &configuration.repositories {
-            if repository.url.trim().is_empty() {
+            if let Some(reason) =
+                graph_builder::unsupported_repository_url_reason(&repository.id, &repository.url)
+            {
                 reasons.push(format!(
-                    "dependency configuration '{}' has repository '{}' without a URL",
-                    configuration.name, repository.id
-                ));
-            }
-            if repository.url.starts_with("file:") {
-                continue;
-            }
-            if !(repository.url.starts_with("https://") || repository.url.starts_with("http://")) {
-                reasons.push(format!(
-                    "dependency configuration '{}' has unsupported repository URL '{}'",
-                    configuration.name, repository.url
+                    "dependency configuration '{}': {}",
+                    configuration.name, reason
                 ));
             }
         }
@@ -206,23 +201,12 @@ fn admit_dependency_request(
             configuration_name, request.group, request.name
         ));
     }
-    if version.contains('+')
-        || version.eq_ignore_ascii_case("latest.integration")
-        || version.eq_ignore_ascii_case("latest.release")
-        || version.ends_with("-SNAPSHOT")
-        || looks_like_version_range(version)
-    {
+    if graph_builder::unsupported_native_version_selector_reason(version).is_some() {
         reasons.push(format!(
             "dependency configuration '{}' contains unsupported dynamic version '{}:{}:{}'",
             configuration_name, request.group, request.name, request.version
         ));
     }
-}
-
-fn looks_like_version_range(version: &str) -> bool {
-    (version.starts_with('[') || version.starts_with('('))
-        && (version.ends_with(']') || version.ends_with(')'))
-        && version.contains(',')
 }
 
 fn kernel_task_contract_rejection(
@@ -387,7 +371,12 @@ mod tests {
         let plan = KernelBuildPlan {
             build_id: "build".to_string(),
             dependency_graph: None,
-            tasks: vec![task_with_deps(":classes", "Lifecycle", &[":compileJava"], None)],
+            tasks: vec![task_with_deps(
+                ":classes",
+                "Lifecycle",
+                &[":compileJava"],
+                None,
+            )],
         };
 
         let KernelAdmission::Rejected(rejection) =
