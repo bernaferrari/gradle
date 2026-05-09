@@ -138,15 +138,21 @@ public class DependencyResolutionModelAdapterTest {
                 new RepositoryWithContentSpecs(
                     setOf(
                         new ContentSpec("SIMPLE", "com.acme", null, null, true),
-                        new ContentSpec("SIMPLE", "org.example", null, null, true)
+                        new ContentSpec("SIMPLE", "org.example", null, null, true),
+                        new ContentSpec("SUB_GROUP", "net.demo", null, null, true)
                     ),
-                    setOf(new ContentSpec("SIMPLE", "com.acme.internal", null, null, false))
+                    setOf(
+                        new ContentSpec("SIMPLE", "com.acme.internal", null, null, false),
+                        new ContentSpec("SUB_GROUP", "net.demo.internal", null, null, false)
+                    )
                 ),
                 "filtered"
             );
 
         assertEquals(Arrays.asList("com.acme", "org.example"), content.getIncludeGroups());
         assertEquals(Collections.singletonList("com.acme.internal"), content.getExcludeGroups());
+        assertEquals(Collections.singletonList("net.demo"), content.getIncludeGroupPrefixes());
+        assertEquals(Collections.singletonList("net.demo.internal"), content.getExcludeGroupPrefixes());
         assertTrue(content.getUnsupportedFeatures().isEmpty());
     }
 

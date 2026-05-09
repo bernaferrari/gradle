@@ -119,6 +119,8 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
                 .setAllowInsecureProtocol(maven.isAllowInsecureProtocol());
             builder.addAllIncludeGroups(contentCapture.getIncludeGroups());
             builder.addAllExcludeGroups(contentCapture.getExcludeGroups());
+            builder.addAllIncludeGroupPrefixes(contentCapture.getIncludeGroupPrefixes());
+            builder.addAllExcludeGroupPrefixes(contentCapture.getExcludeGroupPrefixes());
             if (includeSessionCredentials && hasConfiguredCredentials(maven.getCredentials())) {
                 builder.putCredentials("username", nullToEmpty(maven.getCredentials().getUsername()));
                 builder.putCredentials("password", nullToEmpty(maven.getCredentials().getPassword()));
@@ -147,10 +149,12 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
         List<String> unsupported = new ArrayList<>();
         List<String> includeGroups = new ArrayList<>();
         List<String> excludeGroups = new ArrayList<>();
-        if (!extractGroupSpecs(readFieldInHierarchy(repository, "includeSpecs"), true, includeGroups)) {
+        List<String> includeGroupPrefixes = new ArrayList<>();
+        List<String> excludeGroupPrefixes = new ArrayList<>();
+        if (!extractGroupSpecs(readFieldInHierarchy(repository, "includeSpecs"), true, includeGroups, includeGroupPrefixes)) {
             unsupported.add("repository-content-filter:" + name);
         }
-        if (!extractGroupSpecs(readFieldInHierarchy(repository, "excludeSpecs"), false, excludeGroups)) {
+        if (!extractGroupSpecs(readFieldInHierarchy(repository, "excludeSpecs"), false, excludeGroups, excludeGroupPrefixes)) {
             unsupported.add("repository-content-filter:" + name);
         }
         if (nonEmptyCollection(invokeIfPresent(repository, "getIncludedConfigurations"))
@@ -165,17 +169,24 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
             && !isGradleDoNothingAction(contentFilter)
             && includeGroups.isEmpty()
             && excludeGroups.isEmpty()
+            && includeGroupPrefixes.isEmpty()
+            && excludeGroupPrefixes.isEmpty()
             && unsupported.isEmpty()) {
             unsupported.add("repository-content-filter:" + name);
         }
-        return new RepositoryContentCapture(includeGroups, excludeGroups, unsupported);
+        return new RepositoryContentCapture(includeGroups, excludeGroups, includeGroupPrefixes, excludeGroupPrefixes, unsupported);
     }
 
     private static RepositoryContentCapture repositoryContentCapture(MavenArtifactRepository repository) {
         return repositoryContentCapture(repository, repository.getName());
     }
 
-    private static boolean extractGroupSpecs(@Nullable Object specs, boolean expectedInclusive, List<String> groups) {
+    private static boolean extractGroupSpecs(
+        @Nullable Object specs,
+        boolean expectedInclusive,
+        List<String> groups,
+        List<String> groupPrefixes
+    ) {
         if (specs == null) {
             return true;
         }
@@ -183,24 +194,29 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
             return false;
         }
         for (Object spec : (Set<?>) specs) {
-            if (!isSimpleGroupSpec(spec, expectedInclusive)) {
+            if (isGroupSpec(spec, expectedInclusive, "SIMPLE")) {
+                Object group = readFieldInHierarchy(spec, "group");
+                groups.add(group.toString());
+            } else if (isGroupSpec(spec, expectedInclusive, "SUB_GROUP")) {
+                Object group = readFieldInHierarchy(spec, "group");
+                groupPrefixes.add(group.toString());
+            } else {
                 return false;
             }
-            Object group = readFieldInHierarchy(spec, "group");
-            groups.add(group.toString());
         }
         Collections.sort(groups);
+        Collections.sort(groupPrefixes);
         return true;
     }
 
-    private static boolean isSimpleGroupSpec(Object spec, boolean expectedInclusive) {
+    private static boolean isGroupSpec(Object spec, boolean expectedInclusive, String expectedMatcherKind) {
         Object matcherKind = readFieldInHierarchy(spec, "matcherKind");
         Object group = readFieldInHierarchy(spec, "group");
         Object module = readFieldInHierarchy(spec, "module");
         Object version = readFieldInHierarchy(spec, "version");
         Object inclusive = readFieldInHierarchy(spec, "inclusive");
         return matcherKind != null
-            && "SIMPLE".equals(matcherKind.toString())
+            && expectedMatcherKind.equals(matcherKind.toString())
             && group != null
             && module == null
             && version == null
@@ -254,11 +270,21 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
     static final class RepositoryContentCapture {
         private final List<String> includeGroups;
         private final List<String> excludeGroups;
+        private final List<String> includeGroupPrefixes;
+        private final List<String> excludeGroupPrefixes;
         private final List<String> unsupportedFeatures;
 
-        RepositoryContentCapture(List<String> includeGroups, List<String> excludeGroups, List<String> unsupportedFeatures) {
+        RepositoryContentCapture(
+            List<String> includeGroups,
+            List<String> excludeGroups,
+            List<String> includeGroupPrefixes,
+            List<String> excludeGroupPrefixes,
+            List<String> unsupportedFeatures
+        ) {
             this.includeGroups = Collections.unmodifiableList(new ArrayList<>(includeGroups));
             this.excludeGroups = Collections.unmodifiableList(new ArrayList<>(excludeGroups));
+            this.includeGroupPrefixes = Collections.unmodifiableList(new ArrayList<>(includeGroupPrefixes));
+            this.excludeGroupPrefixes = Collections.unmodifiableList(new ArrayList<>(excludeGroupPrefixes));
             this.unsupportedFeatures = Collections.unmodifiableList(new ArrayList<>(unsupportedFeatures));
         }
 
@@ -268,6 +294,14 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
 
         List<String> getExcludeGroups() {
             return excludeGroups;
+        }
+
+        List<String> getIncludeGroupPrefixes() {
+            return includeGroupPrefixes;
+        }
+
+        List<String> getExcludeGroupPrefixes() {
+            return excludeGroupPrefixes;
         }
 
         List<String> getUnsupportedFeatures() {

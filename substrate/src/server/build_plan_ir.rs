@@ -111,6 +111,10 @@ pub struct CanonicalBuildPlanRepository {
     pub include_groups: Vec<String>,
     #[serde(default)]
     pub exclude_groups: Vec<String>,
+    #[serde(default)]
+    pub include_group_prefixes: Vec<String>,
+    #[serde(default)]
+    pub exclude_group_prefixes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -444,6 +448,8 @@ fn canonical_repository_to_proto(repository: CanonicalBuildPlanRepository) -> Re
         ivy_pattern: repository.ivy_pattern,
         include_groups: repository.include_groups,
         exclude_groups: repository.exclude_groups,
+        include_group_prefixes: repository.include_group_prefixes,
+        exclude_group_prefixes: repository.exclude_group_prefixes,
     }
 }
 
@@ -460,6 +466,8 @@ fn canonical_repository_from_proto(
         ivy_pattern: repository.ivy_pattern.clone(),
         include_groups: repository.include_groups.clone(),
         exclude_groups: repository.exclude_groups.clone(),
+        include_group_prefixes: repository.include_group_prefixes.clone(),
+        exclude_group_prefixes: repository.exclude_group_prefixes.clone(),
     }
 }
 
