@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package gradle.substrate.v1;
 
+import "v1/dependency.proto";
+
 option java_multiple_files = true;
 option java_package = "gradle.substrate.v1";
 option java_outer_classname = "BuildPlanProto";
@@ -73,6 +75,8 @@ message BuildPlanDependency {
   string notation = 3;
   // "dependency" by default, or "constraint" for Gradle dependency constraints.
   string kind = 4;
+  repeated RepositoryDescriptor repositories = 5;
+  repeated string unsupported_features = 6;
 }
 
 message BuildPlanToolchainRequest {

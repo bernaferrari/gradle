@@ -203,7 +203,7 @@ public class RustBootstrapClient {
         String taskSource
     ) {
         BuildPlan.Builder plan = BuildPlan.newBuilder()
-            .setSchemaVersion(2)
+            .setSchemaVersion(3)
             .setBuildId(buildId != null ? buildId : "")
             .addAllTasks(taskContracts)
             .putMetadata("source", source)

@@ -1145,6 +1145,9 @@ async fn bootstrap_refresh_build_plan_shadow_persists_inline_selected_plan_witho
                     project_path: ":".to_string(),
                     configuration: "compileClasspath".to_string(),
                     notation: "com.google.guava:guava:33.0.0-jre".to_string(),
+                    kind: "dependency".to_string(),
+                    repositories: Vec::new(),
+                    unsupported_features: Vec::new(),
                 }],
                 toolchains: Vec::new(),
                 metadata: HashMap::from([(

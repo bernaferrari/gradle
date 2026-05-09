@@ -264,6 +264,20 @@ impl TaskGraphServiceImpl {
                 configuration: dependency.configuration,
                 notation: dependency.notation,
                 kind: dependency.kind,
+                repositories: dependency
+                    .repositories
+                    .into_iter()
+                    .map(|repository| crate::proto::RepositoryDescriptor {
+                        id: repository.id,
+                        url: repository.url,
+                        m2compatible: repository.m2compatible,
+                        allow_insecure_protocol: repository.allow_insecure_protocol,
+                        credentials: repository.credentials.into_iter().collect(),
+                        layout: repository.layout,
+                        ivy_pattern: repository.ivy_pattern,
+                    })
+                    .collect(),
+                unsupported_features: dependency.unsupported_features,
             })
             .collect()
     }

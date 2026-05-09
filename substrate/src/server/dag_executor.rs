@@ -9,7 +9,7 @@ use super::dependency_solver::graph_builder;
 use super::event_dispatcher::EventDispatcher;
 use super::execution_kernel::{
     admit_build_plan, KernelAdmission, KernelBuildPlan, KernelDependencyConfiguration,
-    KernelDependencyGraph, KernelDependencyRequest, KernelTaskPlan,
+    KernelDependencyGraph, KernelDependencyRequest, KernelRepository, KernelTaskPlan,
 };
 use super::scopes::{BuildId, ScopeRegistry};
 use super::work::WorkerScheduler;
@@ -634,6 +634,26 @@ fn kernel_dependency_graph_from_plan_dependencies(
         } else {
             dependency.kind.trim()
         };
+        for repository in &dependency.repositories {
+            let kernel_repository = KernelRepository {
+                id: repository.id.clone(),
+                url: repository.url.clone(),
+            };
+            if !configuration.repositories.contains(&kernel_repository) {
+                configuration.repositories.push(kernel_repository);
+            }
+        }
+        for feature in &dependency.unsupported_features {
+            let feature = feature.trim();
+            if !feature.is_empty()
+                && !configuration
+                    .unsupported_features
+                    .iter()
+                    .any(|existing| existing == feature)
+            {
+                configuration.unsupported_features.push(feature.to_string());
+            }
+        }
         if dependency_kind != "dependency" && dependency_kind != "constraint" {
             configuration.unsupported_features.push(format!(
                 "unsupported dependency kind '{}' for '{}'",
@@ -2041,24 +2061,24 @@ mod tests {
     #[test]
     fn kernel_dependency_graph_groups_build_plan_dependencies() {
         let graph = kernel_dependency_graph_from_plan_dependencies(&[
-            crate::proto::BuildPlanDependency {
-                project_path: ":".to_string(),
-                configuration: "implementation".to_string(),
-                notation: "org.example:demo:1.2.3".to_string(),
-                kind: "dependency".to_string(),
-            },
-            crate::proto::BuildPlanDependency {
-                project_path: ":".to_string(),
-                configuration: "testImplementation".to_string(),
-                notation: "org.example:test:4.5.6".to_string(),
-                kind: "dependency".to_string(),
-            },
-            crate::proto::BuildPlanDependency {
-                project_path: ":".to_string(),
-                configuration: "runtimeClasspath".to_string(),
-                notation: "org.example:native:7.8.9:linux@so".to_string(),
-                kind: "dependency".to_string(),
-            },
+            plan_dependency(
+                ":",
+                "implementation",
+                "org.example:demo:1.2.3",
+                "dependency",
+            ),
+            plan_dependency(
+                ":",
+                "testImplementation",
+                "org.example:test:4.5.6",
+                "dependency",
+            ),
+            plan_dependency(
+                ":",
+                "runtimeClasspath",
+                "org.example:native:7.8.9:linux@so",
+                "dependency",
+            ),
         ])
         .expect("dependency graph");
 
@@ -2075,14 +2095,13 @@ mod tests {
 
     #[test]
     fn kernel_dependency_graph_marks_unrepresentable_notation_unsupported() {
-        let graph =
-            kernel_dependency_graph_from_plan_dependencies(&[crate::proto::BuildPlanDependency {
-                project_path: ":".to_string(),
-                configuration: "implementation".to_string(),
-                notation: "files('libs/demo.jar')".to_string(),
-                kind: "dependency".to_string(),
-            }])
-            .expect("dependency graph");
+        let graph = kernel_dependency_graph_from_plan_dependencies(&[plan_dependency(
+            ":",
+            "implementation",
+            "files('libs/demo.jar')",
+            "dependency",
+        )])
+        .expect("dependency graph");
 
         assert!(graph.configurations[0].dependencies.is_empty());
         assert!(graph.configurations[0].unsupported_features[0]
@@ -2091,14 +2110,13 @@ mod tests {
 
     #[test]
     fn kernel_dependency_graph_preserves_project_dependencies() {
-        let graph =
-            kernel_dependency_graph_from_plan_dependencies(&[crate::proto::BuildPlanDependency {
-                project_path: ":app".to_string(),
-                configuration: "implementation".to_string(),
-                notation: "project(':lib')".to_string(),
-                kind: "dependency".to_string(),
-            }])
-            .expect("dependency graph");
+        let graph = kernel_dependency_graph_from_plan_dependencies(&[plan_dependency(
+            ":app",
+            "implementation",
+            "project(':lib')",
+            "dependency",
+        )])
+        .expect("dependency graph");
 
         assert_eq!(graph.configurations[0].name, ":app:implementation");
         assert_eq!(graph.configurations[0].project_dependencies, vec![":lib"]);
@@ -2107,14 +2125,13 @@ mod tests {
 
     #[test]
     fn kernel_dependency_graph_preserves_dependency_constraints() {
-        let graph =
-            kernel_dependency_graph_from_plan_dependencies(&[crate::proto::BuildPlanDependency {
-                project_path: ":".to_string(),
-                configuration: "implementation".to_string(),
-                notation: "org.example:constrained:1.2.3".to_string(),
-                kind: "constraint".to_string(),
-            }])
-            .expect("dependency graph");
+        let graph = kernel_dependency_graph_from_plan_dependencies(&[plan_dependency(
+            ":",
+            "implementation",
+            "org.example:constrained:1.2.3",
+            "constraint",
+        )])
+        .expect("dependency graph");
 
         assert!(graph.configurations[0].dependencies.is_empty());
         assert_eq!(graph.configurations[0].constraints.len(), 1);
@@ -2125,14 +2142,13 @@ mod tests {
 
     #[test]
     fn kernel_dependency_graph_rejects_unknown_dependency_kind() {
-        let graph =
-            kernel_dependency_graph_from_plan_dependencies(&[crate::proto::BuildPlanDependency {
-                project_path: ":".to_string(),
-                configuration: "implementation".to_string(),
-                notation: "org.example:demo:1.2.3".to_string(),
-                kind: "platform".to_string(),
-            }])
-            .expect("dependency graph");
+        let graph = kernel_dependency_graph_from_plan_dependencies(&[plan_dependency(
+            ":",
+            "implementation",
+            "org.example:demo:1.2.3",
+            "platform",
+        )])
+        .expect("dependency graph");
 
         assert!(graph.configurations[0].dependencies.is_empty());
         assert!(graph.configurations[0].constraints.is_empty());
@@ -2142,18 +2158,67 @@ mod tests {
 
     #[test]
     fn kernel_dependency_graph_defaults_empty_dependency_kind_to_dependency() {
-        let graph =
-            kernel_dependency_graph_from_plan_dependencies(&[crate::proto::BuildPlanDependency {
-                project_path: ":".to_string(),
-                configuration: "implementation".to_string(),
-                notation: "org.example:demo:1.2.3".to_string(),
-                kind: String::new(),
-            }])
-            .expect("dependency graph");
+        let graph = kernel_dependency_graph_from_plan_dependencies(&[plan_dependency(
+            ":",
+            "implementation",
+            "org.example:demo:1.2.3",
+            "",
+        )])
+        .expect("dependency graph");
 
         assert_eq!(graph.configurations[0].dependencies.len(), 1);
         assert!(graph.configurations[0].constraints.is_empty());
         assert!(graph.configurations[0].unsupported_features.is_empty());
+    }
+
+    #[test]
+    fn kernel_dependency_graph_preserves_repositories_and_unsupported_markers() {
+        let mut dependency = plan_dependency(
+            ":",
+            "implementation",
+            "org.example:demo:1.2.3",
+            "dependency",
+        );
+        dependency
+            .repositories
+            .push(crate::proto::RepositoryDescriptor {
+                id: "unsupported".to_string(),
+                url: "sftp://repo.example.test/maven".to_string(),
+                m2compatible: true,
+                allow_insecure_protocol: false,
+                credentials: Default::default(),
+                layout: String::new(),
+                ivy_pattern: String::new(),
+            });
+        dependency
+            .unsupported_features
+            .push("repository-content-filter".to_string());
+
+        let graph = kernel_dependency_graph_from_plan_dependencies(&[dependency])
+            .expect("dependency graph");
+
+        assert_eq!(graph.configurations[0].repositories.len(), 1);
+        assert_eq!(graph.configurations[0].repositories[0].id, "unsupported");
+        assert_eq!(
+            graph.configurations[0].unsupported_features,
+            vec!["repository-content-filter".to_string()]
+        );
+    }
+
+    fn plan_dependency(
+        project_path: &str,
+        configuration: &str,
+        notation: &str,
+        kind: &str,
+    ) -> crate::proto::BuildPlanDependency {
+        crate::proto::BuildPlanDependency {
+            project_path: project_path.to_string(),
+            configuration: configuration.to_string(),
+            notation: notation.to_string(),
+            kind: kind.to_string(),
+            repositories: Vec::new(),
+            unsupported_features: Vec::new(),
+        }
     }
 
     fn make_svc() -> DagExecutorServiceImpl {
