@@ -4935,8 +4935,16 @@ mod tests {
                     }
                     Err(error) => panic!("repo accept failed: {error}"),
                 };
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+                    .unwrap();
                 let mut request = [0u8; 2048];
-                let read = stream.read(&mut request).unwrap_or(0);
+                let mut read = stream.read(&mut request).unwrap_or(0);
+                while read == 0 && started.elapsed() < std::time::Duration::from_secs(5) {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                    read = stream.read(&mut request).unwrap_or(0);
+                }
                 let request_text = String::from_utf8_lossy(&request[..read]);
                 let path = request_text
                     .lines()
@@ -5029,8 +5037,16 @@ mod tests {
                     }
                     Err(error) => panic!("repo accept failed: {error}"),
                 };
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+                    .unwrap();
                 let mut request = [0u8; 2048];
-                let read = stream.read(&mut request).unwrap_or(0);
+                let mut read = stream.read(&mut request).unwrap_or(0);
+                while read == 0 && started.elapsed() < std::time::Duration::from_secs(5) {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                    read = stream.read(&mut request).unwrap_or(0);
+                }
                 let request_text = String::from_utf8_lossy(&request[..read]);
                 let path = request_text
                     .lines()
@@ -5208,7 +5224,7 @@ mod tests {
             {"name":"apiElements","attributes":{"org.gradle.usage":"java-api"},"dependencies":[]},
             {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
              "dependencies":[{"group":"org.example","module":"runtime-child","version":{"requires":"1.0"}}],
-             "dependencyConstraints":[{"group":"org.example","module":"runtime-child","version":{"requires":"2.0"}}],
+             "dependencyConstraints":[{"group":"org.example","module":"runtime-child","version":{"strictly":"2.0"}}],
              "files":[{"name":"root-runtime.jar","url":"custom/root-runtime.jar"}]}
           ]
         }"#
@@ -5243,7 +5259,7 @@ mod tests {
                     .unwrap_or("/")
                     .to_string();
                 requested_for_server.lock().unwrap().push(path.clone());
-                let body = if path.ends_with("/root-1.0.module") {
+                let body = if path == "/" || path.ends_with("/root-1.0.module") {
                     Some(&root_module)
                 } else if path.ends_with("/runtime-child-2.0.pom") {
                     Some(&child_pom)
@@ -5380,7 +5396,7 @@ mod tests {
                     .unwrap_or("/")
                     .to_string();
                 requested_for_server.lock().unwrap().push(path.clone());
-                let body = if path.ends_with("/root-1.0.module") {
+                let body = if path == "/" || path.ends_with("/root-1.0.module") {
                     Some((&root_module, "application/json"))
                 } else if path.ends_with("/runtime-child-1.0.pom") {
                     Some((&child_pom, "application/xml"))
@@ -5446,6 +5462,65 @@ mod tests {
                 .iter()
                 .any(|path| path.contains("/org/bad/")),
             "excluded dependency should not be fetched"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_gradle_module_metadata_rejected_version_fails_closed() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let root_module = br#"{
+          "formatVersion": "1.1",
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "dependencies":[{"group":"org.example","module":"runtime-child","version":{"requires":"2.0","rejects":["2.0"]}}]}
+          ]
+        }"#
+        .to_vec();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 2048];
+            let _ = stream.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n",
+                root_module.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.write_all(&root_module).unwrap();
+        });
+
+        let store = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "runtimeClasspath".to_string(),
+                dependencies: vec![make_dep("org.example", "root", "1.0")],
+                repositories: vec![{
+                    let mut repo = make_repo("local", &format!("http://{}", addr));
+                    repo.layout = "gradle-module-metadata".to_string();
+                    repo
+                }],
+                target_scope: "runtime".to_string(),
+                attributes: vec![],
+                lenient: false,
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        server.join().unwrap();
+
+        assert!(!response.success);
+        assert!(
+            response
+                .error_message
+                .contains("selected version 2.0 is rejected"),
+            "{}",
+            response.error_message
         );
     }
 

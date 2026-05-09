@@ -4,6 +4,12 @@ use std::collections::BTreeMap;
 use super::ivyresolve::strategy::compare_versions;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct StaticVersionRequirement {
+    version: String,
+    rejects: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModuleDependency {
     pub group: String,
     pub module: String,
@@ -216,27 +222,20 @@ pub fn select_jvm_variant(
 
     let mut dependencies = Vec::with_capacity(variant.dependencies.len());
     for dep in &variant.dependencies {
-        if !dep.version.strictly.is_empty()
-            || !dep.version.prefers.is_empty()
-            || !dep.version.rejects.is_empty()
-        {
-            return Ok(Some(ModuleMetadataSelection::Unsupported(format!(
-                "unsupported Gradle Module Metadata rich version for {}:{}",
-                dep.group, dep.module
-            ))));
-        }
-        if dep.version.requires.trim().is_empty() {
-            return Ok(Some(ModuleMetadataSelection::Unsupported(format!(
-                "unsupported Gradle Module Metadata dependency without required version for {}:{}",
-                dep.group, dep.module
-            ))));
-        }
-        let required_version = apply_dependency_constraint(
+        let dependency_version =
+            match static_version_requirement(&dep.version, &dep.group, &dep.module, "dependency") {
+                Ok(version) => version,
+                Err(selection) => return Ok(Some(selection)),
+            };
+        let required_version = match apply_dependency_constraint(
             &dep.group,
             &dep.module,
-            &dep.version.requires,
+            &dependency_version,
             &dependency_constraints,
-        );
+        ) {
+            Ok(version) => version,
+            Err(selection) => return Ok(Some(selection)),
+        };
         let exclusions = match static_dependency_exclusions(dep) {
             Ok(exclusions) => exclusions,
             Err(selection) => return Ok(Some(selection)),
@@ -314,8 +313,8 @@ fn variant_attribute(variant: &Variant, name: &str) -> Option<String> {
 
 fn static_dependency_constraints(
     variant: &Variant,
-) -> Result<BTreeMap<(String, String), String>, ModuleMetadataSelection> {
-    let mut constraints: BTreeMap<(String, String), String> = BTreeMap::new();
+) -> Result<BTreeMap<(String, String), StaticVersionRequirement>, ModuleMetadataSelection> {
+    let mut constraints: BTreeMap<(String, String), StaticVersionRequirement> = BTreeMap::new();
     for constraint in &variant.dependency_constraints {
         if !constraint.excludes.is_empty() {
             return Err(ModuleMetadataSelection::Unsupported(format!(
@@ -323,49 +322,101 @@ fn static_dependency_constraints(
                 constraint.group, constraint.module
             )));
         }
-        if !constraint.version.strictly.is_empty()
-            || !constraint.version.prefers.is_empty()
-            || !constraint.version.rejects.is_empty()
-        {
-            return Err(ModuleMetadataSelection::Unsupported(format!(
-                "unsupported Gradle Module Metadata rich dependency constraint for {}:{}",
-                constraint.group, constraint.module
-            )));
-        }
-        if constraint.version.requires.trim().is_empty() {
-            return Err(ModuleMetadataSelection::Unsupported(format!(
-                "unsupported Gradle Module Metadata dependency constraint without required version for {}:{}",
-                constraint.group, constraint.module
-            )));
-        }
+        let version = static_version_requirement(
+            &constraint.version,
+            &constraint.group,
+            &constraint.module,
+            "dependency constraint",
+        )?;
         let key = (constraint.group.clone(), constraint.module.clone());
         match constraints.get(&key) {
             Some(existing)
-                if compare_versions(&constraint.version.requires, existing)
+                if compare_versions(&version.version, &existing.version)
                     != std::cmp::Ordering::Greater => {}
             _ => {
-                constraints.insert(key, constraint.version.requires.clone());
+                constraints.insert(key, version);
             }
         }
     }
     Ok(constraints)
 }
 
+fn static_version_requirement(
+    version: &VersionRequirement,
+    group: &str,
+    module: &str,
+    role: &str,
+) -> Result<StaticVersionRequirement, ModuleMetadataSelection> {
+    let selected = if !version.strictly.trim().is_empty() {
+        version.strictly.trim()
+    } else if !version.requires.trim().is_empty() {
+        version.requires.trim()
+    } else if !version.prefers.trim().is_empty() {
+        version.prefers.trim()
+    } else {
+        return Err(ModuleMetadataSelection::Unsupported(format!(
+            "unsupported Gradle Module Metadata {role} without required version for {group}:{module}"
+        )));
+    };
+    if let Some(reason) = super::graph_builder::unsupported_version_selector_reason(selected) {
+        return Err(ModuleMetadataSelection::Unsupported(format!(
+            "unsupported Gradle Module Metadata {role} version for {group}:{module}: {reason}"
+        )));
+    }
+    let mut rejects = Vec::with_capacity(version.rejects.len());
+    for rejected in &version.rejects {
+        let rejected = rejected.trim();
+        if rejected.is_empty() {
+            return Err(ModuleMetadataSelection::Unsupported(format!(
+                "unsupported Gradle Module Metadata empty rejected version for {role} {group}:{module}"
+            )));
+        }
+        if let Some(reason) = super::graph_builder::unsupported_version_selector_reason(rejected) {
+            return Err(ModuleMetadataSelection::Unsupported(format!(
+                "unsupported Gradle Module Metadata rejected version for {role} {group}:{module}: {reason}"
+            )));
+        }
+        rejects.push(rejected.to_string());
+    }
+    if rejects.iter().any(|rejected| rejected == selected) {
+        return Err(ModuleMetadataSelection::Unsupported(format!(
+            "unsupported Gradle Module Metadata {role} for {group}:{module}: selected version {selected} is rejected"
+        )));
+    }
+    Ok(StaticVersionRequirement {
+        version: selected.to_string(),
+        rejects,
+    })
+}
+
 fn apply_dependency_constraint(
     group: &str,
     module: &str,
-    required_version: &str,
-    constraints: &BTreeMap<(String, String), String>,
-) -> String {
+    required_version: &StaticVersionRequirement,
+    constraints: &BTreeMap<(String, String), StaticVersionRequirement>,
+) -> Result<String, ModuleMetadataSelection> {
     let Some(constrained_version) = constraints.get(&(group.to_string(), module.to_string()))
     else {
-        return required_version.to_string();
+        return Ok(required_version.version.clone());
     };
-    if compare_versions(constrained_version, required_version) == std::cmp::Ordering::Greater {
-        constrained_version.clone()
+    let selected = if compare_versions(&constrained_version.version, &required_version.version)
+        == std::cmp::Ordering::Greater
+    {
+        constrained_version.version.clone()
     } else {
-        required_version.to_string()
+        required_version.version.clone()
+    };
+    if required_version
+        .rejects
+        .iter()
+        .chain(constrained_version.rejects.iter())
+        .any(|rejected| rejected == &selected)
+    {
+        return Err(ModuleMetadataSelection::Unsupported(format!(
+            "unsupported Gradle Module Metadata dependency for {group}:{module}: selected version {selected} is rejected"
+        )));
     }
+    Ok(selected)
 }
 
 fn static_dependency_exclusions(
@@ -509,7 +560,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_rich_dependency_constraints() {
+    fn applies_static_strict_dependency_constraints() {
         let json = r#"{
           "component": {"group":"org.example","module":"root","version":"1.0"},
           "variants": [
@@ -523,9 +574,73 @@ mod tests {
             .unwrap()
             .unwrap();
 
+        match selected {
+            ModuleMetadataSelection::Selected(variant) => {
+                assert_eq!(variant.dependencies[0].version, "2.0");
+            }
+            ModuleMetadataSelection::Unsupported(reason) => panic!("{reason}"),
+        }
+    }
+
+    #[test]
+    fn applies_static_preferred_dependency_version_without_requires() {
+        let json = r#"{
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "dependencies":[{"group":"org.example","module":"child","version":{"prefers":"2.0"}}]}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "org.example", "root", "1.0")
+            .unwrap()
+            .unwrap();
+
+        match selected {
+            ModuleMetadataSelection::Selected(variant) => {
+                assert_eq!(variant.dependencies[0].version, "2.0");
+            }
+            ModuleMetadataSelection::Unsupported(reason) => panic!("{reason}"),
+        }
+    }
+
+    #[test]
+    fn rejects_selected_rejected_dependency_version() {
+        let json = r#"{
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "dependencies":[{"group":"org.example","module":"child","version":{"requires":"2.0","rejects":["2.0"]}}]}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "org.example", "root", "1.0")
+            .unwrap()
+            .unwrap();
+
         assert!(matches!(
             selected,
-            ModuleMetadataSelection::Unsupported(reason) if reason.contains("rich dependency constraint")
+            ModuleMetadataSelection::Unsupported(reason) if reason.contains("selected version 2.0 is rejected")
+        ));
+    }
+
+    #[test]
+    fn rejects_dynamic_rejected_dependency_version() {
+        let json = r#"{
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "dependencies":[{"group":"org.example","module":"child","version":{"requires":"2.0","rejects":["2.+"]}}]}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "org.example", "root", "1.0")
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(
+            selected,
+            ModuleMetadataSelection::Unsupported(reason) if reason.contains("rejected version")
         ));
     }
 
