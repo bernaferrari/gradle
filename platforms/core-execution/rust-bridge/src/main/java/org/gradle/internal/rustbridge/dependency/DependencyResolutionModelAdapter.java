@@ -5,6 +5,7 @@ import org.gradle.api.Project;
 import org.gradle.api.artifacts.ResolvableDependencies;
 import org.gradle.api.artifacts.repositories.ArtifactRepository;
 import org.gradle.api.artifacts.repositories.MavenArtifactRepository;
+import org.gradle.api.credentials.PasswordCredentials;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.service.ServiceRegistry;
 import org.jspecify.annotations.Nullable;
@@ -76,6 +77,10 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
                 unsupportedFeatures.add("maven-artifact-urls:" + maven.getName());
                 continue;
             }
+            if (hasConfiguredCredentials(maven.getCredentials())) {
+                unsupportedFeatures.add("repository-credentials:" + maven.getName());
+                continue;
+            }
             URI url = maven.getUrl();
             String scheme = url == null ? "" : url.getScheme();
             if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
@@ -98,6 +103,14 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
             repositories.add(builder.build());
         }
         return new RepositoryCapture(repositories, unsupportedFeatures);
+    }
+
+    static boolean hasConfiguredCredentials(PasswordCredentials credentials) {
+        return hasText(credentials.getUsername()) || hasText(credentials.getPassword());
+    }
+
+    private static boolean hasText(@Nullable String value) {
+        return value != null && !value.trim().isEmpty();
     }
 
     public static final class RepositoryCapture {
