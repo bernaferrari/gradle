@@ -48,20 +48,9 @@ fn validate_dependency_selectors(dependencies: &[DependencyDescriptor]) -> Resul
 
 fn validate_repositories(repositories: &[RepositoryDescriptor]) -> Result<(), String> {
     for repository in repositories {
-        let url = repository.url.trim();
-        if url.is_empty() {
-            return Err(format!(
-                "Repository '{}' has no URL",
-                repository.id
-            ));
+        if let Some(reason) = unsupported_repository_url_reason(&repository.id, &repository.url) {
+            return Err(reason);
         }
-        if url.starts_with("file:") || url.starts_with("https://") || url.starts_with("http://") {
-            continue;
-        }
-        return Err(format!(
-            "Repository '{}' has unsupported URL '{}'",
-            repository.id, repository.url
-        ));
     }
     Ok(())
 }
@@ -110,6 +99,53 @@ pub fn unsupported_version_selector_reason(version: &str) -> Option<String> {
         ));
     }
     None
+}
+
+pub fn unsupported_native_version_selector_reason(version: &str) -> Option<String> {
+    if let Some(reason) = unsupported_version_selector_reason(version) {
+        return Some(reason);
+    }
+    let trimmed = version.trim();
+    if trimmed.eq_ignore_ascii_case("latest.integration")
+        || trimmed.eq_ignore_ascii_case("latest.release")
+    {
+        return Some(format!(
+            "Unsupported native dependency selector '{trimmed}': latest selectors require Gradle metadata resolution"
+        ));
+    }
+    if trimmed.ends_with("-SNAPSHOT") {
+        return Some(format!(
+            "Unsupported native dependency selector '{trimmed}': changing SNAPSHOT modules are not native-ready"
+        ));
+    }
+    if looks_like_version_range(trimmed) {
+        return Some(format!(
+            "Unsupported native dependency selector '{trimmed}': Maven version ranges are not native-ready"
+        ));
+    }
+    None
+}
+
+pub fn unsupported_repository_url_reason(repository_id: &str, url: &str) -> Option<String> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Some(format!("Repository '{repository_id}' has no URL"));
+    }
+    if trimmed.starts_with("file:")
+        || trimmed.starts_with("https://")
+        || trimmed.starts_with("http://")
+    {
+        return None;
+    }
+    Some(format!(
+        "Repository '{repository_id}' has unsupported URL '{url}'"
+    ))
+}
+
+fn looks_like_version_range(version: &str) -> bool {
+    (version.starts_with('[') || version.starts_with('('))
+        && (version.ends_with(']') || version.ends_with(')'))
+        && version.contains(',')
 }
 
 fn constraint_versions(
@@ -241,13 +277,9 @@ mod tests {
 
     #[test]
     fn graph_request_rejects_unsupported_dependency_selector_before_resolution() {
-        let error = build_dependency_graph_request(
-            &[dep("org.example", "demo", "1.+")],
-            &[],
-            &[],
-            "",
-        )
-        .unwrap_err();
+        let error =
+            build_dependency_graph_request(&[dep("org.example", "demo", "1.+")], &[], &[], "")
+                .unwrap_err();
 
         assert!(error.contains("Unsupported dependency selector"));
         assert!(error.contains("wildcard '+' selectors"));
@@ -265,5 +297,19 @@ mod tests {
 
         assert!(error.contains("unsupported URL"));
         assert!(error.contains("sftp://repo.example.test/maven"));
+    }
+
+    #[test]
+    fn native_selector_policy_rejects_gradle_dynamic_forms() {
+        assert!(unsupported_native_version_selector_reason("latest.release")
+            .unwrap()
+            .contains("latest selectors"));
+        assert!(unsupported_native_version_selector_reason("1.0-SNAPSHOT")
+            .unwrap()
+            .contains("SNAPSHOT"));
+        assert!(unsupported_native_version_selector_reason("[1.0,2.0)")
+            .unwrap()
+            .contains("version ranges"));
+        assert!(unsupported_native_version_selector_reason("1.2.3").is_none());
     }
 }
