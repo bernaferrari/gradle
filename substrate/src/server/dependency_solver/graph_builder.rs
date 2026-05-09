@@ -23,6 +23,8 @@ pub fn build_dependency_graph_request(
     target_scope: &str,
 ) -> Result<DependencyGraphRequest, String> {
     let constraint_versions = constraint_versions(constraints)?;
+    validate_dependency_selectors(dependencies)?;
+    validate_repositories(repositories)?;
     Ok(DependencyGraphRequest {
         repositories: normalized_repositories(repositories),
         dependencies: dependencies
@@ -30,6 +32,38 @@ pub fn build_dependency_graph_request(
             .map(|dep| effective_dependency(dep, &constraint_versions, target_scope))
             .collect(),
     })
+}
+
+fn validate_dependency_selectors(dependencies: &[DependencyDescriptor]) -> Result<(), String> {
+    for dependency in dependencies {
+        if let Some(reason) = unsupported_version_selector_reason(&dependency.version) {
+            return Err(format!(
+                "Unsupported dependency selector {}:{}:{}: {}",
+                dependency.group, dependency.name, dependency.version, reason
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_repositories(repositories: &[RepositoryDescriptor]) -> Result<(), String> {
+    for repository in repositories {
+        let url = repository.url.trim();
+        if url.is_empty() {
+            return Err(format!(
+                "Repository '{}' has no URL",
+                repository.id
+            ));
+        }
+        if url.starts_with("file:") || url.starts_with("https://") || url.starts_with("http://") {
+            continue;
+        }
+        return Err(format!(
+            "Repository '{}' has unsupported URL '{}'",
+            repository.id, repository.url
+        ));
+    }
+    Ok(())
 }
 
 pub fn normalized_repositories(repositories: &[RepositoryDescriptor]) -> Vec<RepositoryDescriptor> {
@@ -164,6 +198,18 @@ mod tests {
         }
     }
 
+    fn repo(id: &str, url: &str) -> RepositoryDescriptor {
+        RepositoryDescriptor {
+            id: id.to_string(),
+            url: url.to_string(),
+            m2compatible: true,
+            allow_insecure_protocol: false,
+            credentials: Default::default(),
+            layout: String::new(),
+            ivy_pattern: String::new(),
+        }
+    }
+
     #[test]
     fn graph_request_applies_static_constraints_and_target_scope() {
         let request = build_dependency_graph_request(
@@ -191,5 +237,33 @@ mod tests {
         .unwrap_err();
 
         assert!(error.contains("Unsupported dependency constraint"));
+    }
+
+    #[test]
+    fn graph_request_rejects_unsupported_dependency_selector_before_resolution() {
+        let error = build_dependency_graph_request(
+            &[dep("org.example", "demo", "1.+")],
+            &[],
+            &[],
+            "",
+        )
+        .unwrap_err();
+
+        assert!(error.contains("Unsupported dependency selector"));
+        assert!(error.contains("wildcard '+' selectors"));
+    }
+
+    #[test]
+    fn graph_request_rejects_unsupported_repository_before_transport() {
+        let error = build_dependency_graph_request(
+            &[dep("org.example", "demo", "1.0")],
+            &[],
+            &[repo("legacy", "sftp://repo.example.test/maven")],
+            "",
+        )
+        .unwrap_err();
+
+        assert!(error.contains("unsupported URL"));
+        assert!(error.contains("sftp://repo.example.test/maven"));
     }
 }
