@@ -43,6 +43,24 @@ pub fn build_dependency_graph_request(
 
 fn validate_dependency_selectors(dependencies: &[DependencyDescriptor]) -> Result<(), String> {
     for dependency in dependencies {
+        if dependency.changing {
+            return Err(format!(
+                "Unsupported dependency feature {}:{}:{}: changing modules are not native-ready",
+                dependency.group, dependency.name, dependency.version
+            ));
+        }
+        if dependency.optional {
+            return Err(format!(
+                "Unsupported dependency feature {}:{}:{}: direct optional dependencies are not native-ready",
+                dependency.group, dependency.name, dependency.version
+            ));
+        }
+        if !dependency.ivy_conf.trim().is_empty() {
+            return Err(format!(
+                "Unsupported dependency feature {}:{}:{}: Ivy conf mapping '{}' is not native-ready",
+                dependency.group, dependency.name, dependency.version, dependency.ivy_conf
+            ));
+        }
         if let Some(reason) = unsupported_version_selector_reason(&dependency.version) {
             return Err(format!(
                 "Unsupported dependency selector {}:{}:{}: {}",
@@ -338,6 +356,24 @@ mod tests {
 
         assert!(error.contains("Unsupported dependency selector"));
         assert!(error.contains("wildcard '+' selectors"));
+    }
+
+    #[test]
+    fn graph_request_rejects_unsupported_dependency_features() {
+        let mut changing = dep("org.example", "changing", "1.0");
+        changing.changing = true;
+        let error = build_dependency_graph_request(&[changing], &[], &[], "").unwrap_err();
+        assert!(error.contains("changing modules are not native-ready"));
+
+        let mut optional = dep("org.example", "optional", "1.0");
+        optional.optional = true;
+        let error = build_dependency_graph_request(&[optional], &[], &[], "").unwrap_err();
+        assert!(error.contains("direct optional dependencies are not native-ready"));
+
+        let mut ivy = dep("org.example", "ivy", "1.0");
+        ivy.ivy_conf = "compile->default".to_string();
+        let error = build_dependency_graph_request(&[ivy], &[], &[], "").unwrap_err();
+        assert!(error.contains("Ivy conf mapping"));
     }
 
     #[test]
