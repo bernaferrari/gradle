@@ -8572,9 +8572,14 @@ mod tests {
             .into_inner();
 
         assert!(!response.success);
+        assert!(response
+            .error_message
+            .contains("Unsupported dependency selector"));
         assert!(response.error_message.contains("wildcard '+' selectors"));
-        assert_eq!(response.resolved_dependencies.len(), 1);
-        assert!(!response.resolved_dependencies[0].resolved);
+        assert!(
+            response.resolved_dependencies.is_empty(),
+            "unsupported dependency selectors should fail before repository traversal"
+        );
     }
 
     #[tokio::test]
