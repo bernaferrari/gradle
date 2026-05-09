@@ -64,6 +64,25 @@ pub fn resolve_conflicts_with_strategy(
     deps: &mut Vec<ResolvedDependency>,
     strategy: &ResolutionStrategy,
 ) {
+    if let Err(error) = try_resolve_conflicts_with_strategy(deps, strategy) {
+        tracing::warn!(
+            error,
+            "Conflict resolution failed in legacy mutating API; falling back to highest-version resolution"
+        );
+        if !matches!(strategy, ResolutionStrategy::HighestVersion) {
+            let _ = try_resolve_conflicts_with_strategy(deps, &ResolutionStrategy::HighestVersion);
+        }
+    }
+}
+
+/// Deduplicate resolved dependencies using the given resolution strategy.
+///
+/// This is the authoritative solver API. It fails closed for Gradle hard
+/// constraints rather than silently approximating them.
+pub fn try_resolve_conflicts_with_strategy(
+    deps: &mut Vec<ResolvedDependency>,
+    strategy: &ResolutionStrategy,
+) -> Result<(), String> {
     match strategy {
         ResolutionStrategy::HighestVersion => {
             let mut best: HashMap<(String, String), usize> = HashMap::with_capacity(deps.len());
@@ -82,6 +101,7 @@ pub fn resolve_conflicts_with_strategy(
             }
 
             retain_winners(deps, best, "highest_version", None);
+            Ok(())
         }
         ResolutionStrategy::Force(forced) => {
             let mut best: HashMap<(String, String), usize> = HashMap::with_capacity(deps.len());
@@ -104,7 +124,27 @@ pub fn resolve_conflicts_with_strategy(
                 }
             }
 
+            let mut missing_forced = forced
+                .keys()
+                .filter(|forced_key| {
+                    deps.iter()
+                        .any(|dep| module_key(dep).as_str() == forced_key.as_str())
+                        && !best
+                            .keys()
+                            .any(|(group, name)| format!("{group}:{name}") == **forced_key)
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            if !missing_forced.is_empty() {
+                missing_forced.sort_unstable();
+                return Err(format!(
+                    "Forced dependency versions were not present in resolved candidates: {}",
+                    missing_forced.join(", ")
+                ));
+            }
+
             retain_winners(deps, best, "force", Some(forced.len()));
+            Ok(())
         }
         ResolutionStrategy::FailOnConflict => {
             let mut versions: HashMap<(String, String), Vec<String>> =
@@ -122,16 +162,22 @@ pub fn resolve_conflicts_with_strategy(
                 versions.into_iter().filter(|(_, v)| v.len() > 1).collect();
 
             if !conflicts.is_empty() {
-                let conflict_str: Vec<String> = conflicts
+                let mut conflict_str: Vec<String> = conflicts
                     .iter()
-                    .map(|((g, n), v)| format!("{}:{} has versions {}", g, n, v.join(", ")))
+                    .map(|((g, n), v)| {
+                        let mut versions = v.clone();
+                        versions.sort_unstable();
+                        versions.dedup();
+                        format!("{}:{} has versions {}", g, n, versions.join(", "))
+                    })
                     .collect();
-                tracing::warn!(
-                    conflicts = conflict_str.join("; "),
-                    "Version conflict detected (fail_on_conflict)"
-                );
-                resolve_conflicts_with_strategy(deps, &ResolutionStrategy::HighestVersion);
+                conflict_str.sort_unstable();
+                return Err(format!(
+                    "Version conflict detected with fail_on_conflict: {}",
+                    conflict_str.join("; ")
+                ));
             }
+            Ok(())
         }
         ResolutionStrategy::Prefer(preferred) => {
             let mut best: HashMap<(String, String), usize> = HashMap::with_capacity(deps.len());
@@ -162,6 +208,7 @@ pub fn resolve_conflicts_with_strategy(
             }
 
             retain_winners(deps, best, "prefer", None);
+            Ok(())
         }
         ResolutionStrategy::NearestDefinition => {
             let mut seen: HashSet<(String, String)> = HashSet::with_capacity(deps.len());
@@ -184,6 +231,7 @@ pub fn resolve_conflicts_with_strategy(
                 original_len,
                 deps.len()
             );
+            Ok(())
         }
     }
 }
@@ -239,7 +287,10 @@ mod tests {
 
     use crate::proto::ResolvedDependency;
 
-    use super::{resolve_conflicts, resolve_conflicts_with_strategy, ResolutionStrategy};
+    use super::{
+        resolve_conflicts, resolve_conflicts_with_strategy, try_resolve_conflicts_with_strategy,
+        ResolutionStrategy,
+    };
 
     fn dep(group: &str, name: &str, version: &str) -> ResolvedDependency {
         ResolvedDependency {
@@ -279,6 +330,40 @@ mod tests {
 
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0].selected_version, "1.0.0");
+    }
+
+    #[test]
+    fn forced_version_missing_fails_closed_in_try_api() {
+        let mut forced = HashMap::new();
+        forced.insert("org.example:lib".to_string(), "3.0.0".to_string());
+        let mut deps = vec![
+            dep("org.example", "lib", "2.0.0"),
+            dep("org.example", "lib", "1.0.0"),
+        ];
+
+        let error =
+            try_resolve_conflicts_with_strategy(&mut deps, &ResolutionStrategy::Force(forced))
+                .unwrap_err();
+
+        assert!(error.contains("Forced dependency versions were not present"));
+        assert!(error.contains("org.example:lib"));
+        assert_eq!(deps.len(), 2);
+    }
+
+    #[test]
+    fn fail_on_conflict_fails_closed_in_try_api() {
+        let mut deps = vec![
+            dep("org.example", "lib", "2.0.0"),
+            dep("org.example", "lib", "1.0.0"),
+        ];
+
+        let error =
+            try_resolve_conflicts_with_strategy(&mut deps, &ResolutionStrategy::FailOnConflict)
+                .unwrap_err();
+
+        assert!(error.contains("Version conflict detected with fail_on_conflict"));
+        assert!(error.contains("org.example:lib has versions 1.0.0, 2.0.0"));
+        assert_eq!(deps.len(), 2);
     }
 
     #[test]
