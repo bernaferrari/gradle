@@ -1,0 +1,66 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "org.example",
+    "module": "root",
+    "version": "1.0"
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.gradle.jvm.environment": "standard-jvm"
+      },
+      "files": [
+        {
+          "name": "root-1.0.jar",
+          "url": "root-1.0.jar"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.gradle.jvm.environment": "standard-jvm"
+      },
+      "dependencies": [
+        {
+          "group": "org.example",
+          "module": "runtime-child",
+          "version": {
+            "requires": "1.0"
+          },
+          "excludes": [
+            {
+              "group": "org.bad",
+              "module": "bad"
+            }
+          ]
+        }
+      ],
+      "dependencyConstraints": [
+        {
+          "group": "org.example",
+          "module": "runtime-child",
+          "version": {
+            "requires": "2.0"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "root-1.0.jar",
+          "url": "root-1.0.jar"
+        }
+      ]
+    }
+  ]
+}

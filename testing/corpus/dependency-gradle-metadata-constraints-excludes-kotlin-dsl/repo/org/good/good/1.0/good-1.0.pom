@@ -1,0 +1,6 @@
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.good</groupId>
+  <artifactId>good</artifactId>
+  <version>1.0</version>
+</project>
