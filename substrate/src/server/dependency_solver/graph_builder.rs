@@ -16,6 +16,13 @@ pub struct DependencyGraphRequest {
     pub dependencies: Vec<DependencyDescriptor>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleSelector {
+    pub group: String,
+    pub name: String,
+    pub version: String,
+}
+
 pub fn build_dependency_graph_request(
     dependencies: &[DependencyDescriptor],
     constraints: &[DependencyDescriptor],
@@ -140,6 +147,30 @@ pub fn unsupported_repository_url_reason(repository_id: &str, url: &str) -> Opti
     Some(format!(
         "Repository '{repository_id}' has unsupported URL '{url}'"
     ))
+}
+
+pub fn parse_module_selector_notation(notation: &str) -> Option<ModuleSelector> {
+    let notation = notation.split_once('@').map_or(notation, |(base, _)| base);
+    let mut parts = notation.split(':');
+    let group = parts.next()?.trim();
+    let name = parts.next()?.trim();
+    let version = parts.next()?.trim();
+    if group.is_empty() || name.is_empty() || version.is_empty() {
+        return None;
+    }
+    if let Some(classifier) = parts.next() {
+        if classifier.trim().is_empty() || parts.next().is_some() {
+            return None;
+        }
+    }
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(ModuleSelector {
+        group: group.to_string(),
+        name: name.to_string(),
+        version: version.to_string(),
+    })
 }
 
 fn looks_like_version_range(version: &str) -> bool {
@@ -311,5 +342,27 @@ mod tests {
             .unwrap()
             .contains("version ranges"));
         assert!(unsupported_native_version_selector_reason("1.2.3").is_none());
+    }
+
+    #[test]
+    fn parses_gradle_module_selector_notation() {
+        assert_eq!(
+            parse_module_selector_notation("org.example:demo:1.2.3"),
+            Some(ModuleSelector {
+                group: "org.example".to_string(),
+                name: "demo".to_string(),
+                version: "1.2.3".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_module_selector_notation("org.example:demo:1.2.3:tests@jar"),
+            Some(ModuleSelector {
+                group: "org.example".to_string(),
+                name: "demo".to_string(),
+                version: "1.2.3".to_string(),
+            })
+        );
+        assert!(parse_module_selector_notation("org.example:demo").is_none());
+        assert!(parse_module_selector_notation("org.example:demo:1.0::jar").is_none());
     }
 }

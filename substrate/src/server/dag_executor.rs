@@ -5,6 +5,7 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
+use super::dependency_solver::graph_builder;
 use super::event_dispatcher::EventDispatcher;
 use super::execution_kernel::{
     admit_build_plan, KernelAdmission, KernelBuildPlan, KernelDependencyConfiguration,
@@ -686,26 +687,11 @@ fn normalize_project_dependency_path(value: &str) -> Option<String> {
 }
 
 fn kernel_dependency_request_from_notation(notation: &str) -> Option<KernelDependencyRequest> {
-    let notation = notation.split_once('@').map_or(notation, |(base, _)| base);
-    let mut parts = notation.split(':');
-    let group = parts.next()?.trim();
-    let name = parts.next()?.trim();
-    let version = parts.next()?.trim();
-    if group.is_empty() || name.is_empty() || version.is_empty() {
-        return None;
-    }
-    if let Some(classifier) = parts.next() {
-        if classifier.trim().is_empty() || parts.next().is_some() {
-            return None;
-        }
-    }
-    if parts.next().is_some() {
-        return None;
-    }
+    let selector = graph_builder::parse_module_selector_notation(notation)?;
     Some(KernelDependencyRequest {
-        group: group.to_string(),
-        name: name.to_string(),
-        version: version.to_string(),
+        group: selector.group,
+        name: selector.name,
+        version: selector.version,
     })
 }
 
