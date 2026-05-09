@@ -5,6 +5,8 @@ import gradle.substrate.v1.BuildPlanTaskDiagnostic;
 import gradle.substrate.v1.BuildPlanTaskInputSpec;
 import gradle.substrate.v1.BuildPlanTaskOutputSpec;
 
+import org.gradle.internal.rustbridge.dependency.DependencyResolutionModelAdapter;
+
 import org.gradle.api.Action;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
@@ -191,6 +193,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
                 return new ArrayList<>();
             }
 
+            DependencyResolutionModelAdapter.RepositoryCapture repositoryCapture =
+                DependencyResolutionModelAdapter.repositoriesForProject((Project) project);
             List<JvmHostServiceImpl.ResolvedArtifactEntry> artifacts = new ArrayList<>();
             Object resolvedConfiguration = invoke(configuration, "getResolvedConfiguration");
             for (Object resolvedArtifact : asCollection(invoke(resolvedConfiguration, "getResolvedArtifacts"))) {
@@ -202,7 +206,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
                     stringValue(id, "getVersion"),
                     configurationName,
                     stringValue(resolvedArtifact, "getClassifier"),
-                    artifactExtension(resolvedArtifact)
+                    artifactExtension(resolvedArtifact),
+                    "dependency",
+                    repositoryCapture.getRepositories(),
+                    repositoryCapture.getUnsupportedFeatures()
                 ));
             }
             for (DependencyConstraint constraint : configuration.getDependencyConstraints()) {
@@ -219,7 +226,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
                     configurationName,
                     "",
                     "jar",
-                    "constraint"
+                    "constraint",
+                    repositoryCapture.getRepositories(),
+                    repositoryCapture.getUnsupportedFeatures()
                 ));
             }
             return artifacts;

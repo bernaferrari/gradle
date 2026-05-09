@@ -3,6 +3,7 @@ syntax = "proto3";
 package gradle.substrate.v1;
 
 import "v1/buildplan.proto";
+import "v1/dependency.proto";
 
 option java_multiple_files = true;
 option java_package = "gradle.substrate.v1";
@@ -59,6 +60,8 @@ message ResolvedArtifact {
   string extension = 6;
   // "dependency" by default, or "constraint" for declared dependency constraints.
   string kind = 7;
+  repeated RepositoryDescriptor repositories = 8;
+  repeated string unsupported_features = 9;
 }
 message GetBuildEnvironmentRequest {}
 message GetBuildEnvironmentResponse {

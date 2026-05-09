@@ -5,6 +5,7 @@ import gradle.substrate.v1.BuildPlanProject;
 import gradle.substrate.v1.BuildPlanTask;
 import gradle.substrate.v1.ExecuteTaskRequest;
 import gradle.substrate.v1.ExecuteTaskResponse;
+import gradle.substrate.v1.RepositoryDescriptor;
 
 import org.gradle.api.logging.Logging;
 import org.jspecify.annotations.Nullable;
@@ -233,6 +234,8 @@ public class JvmHostServiceImpl {
         private final String classifier;
         private final String extension;
         private final String kind;
+        private final List<RepositoryDescriptor> repositories;
+        private final List<String> unsupportedFeatures;
 
         public ResolvedArtifactEntry(String group, String name, String version, String configuration) {
             this(group, name, version, configuration, "", "jar", "dependency");
@@ -243,6 +246,20 @@ public class JvmHostServiceImpl {
         }
 
         public ResolvedArtifactEntry(String group, String name, String version, String configuration, String classifier, String extension, String kind) {
+            this(group, name, version, configuration, classifier, extension, kind, java.util.Collections.emptyList(), java.util.Collections.emptyList());
+        }
+
+        public ResolvedArtifactEntry(
+                String group,
+                String name,
+                String version,
+                String configuration,
+                String classifier,
+                String extension,
+                String kind,
+                List<RepositoryDescriptor> repositories,
+                List<String> unsupportedFeatures
+        ) {
             this.group = group;
             this.name = name;
             this.version = version;
@@ -250,6 +267,8 @@ public class JvmHostServiceImpl {
             this.classifier = classifier == null ? "" : classifier;
             this.extension = extension == null || extension.isEmpty() ? "jar" : extension;
             this.kind = kind == null || kind.trim().isEmpty() ? "dependency" : kind;
+            this.repositories = java.util.Collections.unmodifiableList(new java.util.ArrayList<>(repositories));
+            this.unsupportedFeatures = java.util.Collections.unmodifiableList(new java.util.ArrayList<>(unsupportedFeatures));
         }
 
         public String getGroup() { return group; }
@@ -259,6 +278,8 @@ public class JvmHostServiceImpl {
         public String getClassifier() { return classifier; }
         public String getExtension() { return extension; }
         public String getKind() { return kind; }
+        public List<RepositoryDescriptor> getRepositories() { return repositories; }
+        public List<String> getUnsupportedFeatures() { return unsupportedFeatures; }
     }
 
     private static String projectDirFromBuildFile(String buildFile) {
