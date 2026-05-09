@@ -8,6 +8,7 @@ pub struct ModuleDependency {
     pub group: String,
     pub module: String,
     pub version: String,
+    pub exclusions: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,9 +95,7 @@ struct VariantFile {
 
 #[derive(Debug, Deserialize)]
 struct DependencyExclude {
-    #[allow(dead_code)]
     group: String,
-    #[allow(dead_code)]
     module: String,
 }
 
@@ -217,12 +216,6 @@ pub fn select_jvm_variant(
 
     let mut dependencies = Vec::with_capacity(variant.dependencies.len());
     for dep in &variant.dependencies {
-        if !dep.excludes.is_empty() {
-            return Ok(Some(ModuleMetadataSelection::Unsupported(format!(
-                "unsupported Gradle Module Metadata dependency exclusions for {}:{}",
-                dep.group, dep.module
-            ))));
-        }
         if !dep.version.strictly.is_empty()
             || !dep.version.prefers.is_empty()
             || !dep.version.rejects.is_empty()
@@ -244,10 +237,15 @@ pub fn select_jvm_variant(
             &dep.version.requires,
             &dependency_constraints,
         );
+        let exclusions = match static_dependency_exclusions(dep) {
+            Ok(exclusions) => exclusions,
+            Err(selection) => return Ok(Some(selection)),
+        };
         dependencies.push(ModuleDependency {
             group: dep.group.clone(),
             module: dep.module.clone(),
             version: required_version,
+            exclusions,
         });
     }
 
@@ -368,6 +366,22 @@ fn apply_dependency_constraint(
     } else {
         required_version.to_string()
     }
+}
+
+fn static_dependency_exclusions(
+    dependency: &VariantDependency,
+) -> Result<Vec<(String, String)>, ModuleMetadataSelection> {
+    let mut exclusions = Vec::with_capacity(dependency.excludes.len());
+    for exclusion in &dependency.excludes {
+        if exclusion.group.trim().is_empty() || exclusion.module.trim().is_empty() {
+            return Err(ModuleMetadataSelection::Unsupported(format!(
+                "unsupported Gradle Module Metadata malformed dependency exclusion for {}:{}",
+                dependency.group, dependency.module
+            )));
+        }
+        exclusions.push((exclusion.group.clone(), exclusion.module.clone()));
+    }
+    Ok(exclusions)
 }
 
 #[cfg(test)]
@@ -559,7 +573,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_dependency_exclusions() {
+    fn captures_static_dependency_exclusions() {
         let json = r#"{
           "component": {"group":"org.example","module":"root","version":"1.0"},
           "variants": [
@@ -573,9 +587,35 @@ mod tests {
             .unwrap()
             .unwrap();
 
+        match selected {
+            ModuleMetadataSelection::Selected(variant) => {
+                assert_eq!(
+                    variant.dependencies[0].exclusions,
+                    vec![("org.bad".to_string(), "bad".to_string())]
+                );
+            }
+            ModuleMetadataSelection::Unsupported(reason) => panic!("{reason}"),
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_dependency_exclusions() {
+        let json = r#"{
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "dependencies":[{"group":"org.example","module":"child","version":{"requires":"2.0"},
+               "excludes":[{"group":"","module":"bad"}]}]}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "org.example", "root", "1.0")
+            .unwrap()
+            .unwrap();
+
         assert!(matches!(
             selected,
-            ModuleMetadataSelection::Unsupported(reason) if reason.contains("dependency exclusions")
+            ModuleMetadataSelection::Unsupported(reason) if reason.contains("malformed dependency exclusion")
         ));
     }
 
