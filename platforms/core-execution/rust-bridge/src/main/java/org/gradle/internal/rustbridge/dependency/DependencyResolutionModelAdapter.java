@@ -53,7 +53,8 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
                 if (!(mutableModel instanceof Project)) {
                     return Collections.emptyList();
                 }
-                return repositoriesForProject((Project) mutableModel);
+                RepositoryCapture capture = repositoriesForProject((Project) mutableModel);
+                return capture.getRepositories();
             }
         } catch (Exception e) {
             LOGGER.debug("[substrate:dep-resolve] failed to capture repositories for {}", dependencies.getPath(), e);
@@ -62,24 +63,29 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
     }
 
     @SuppressWarnings("deprecation")
-    private static List<RepositoryDescriptor> repositoriesForProject(Project project) {
+    public static RepositoryCapture repositoriesForProject(Project project) {
         List<RepositoryDescriptor> repositories = new ArrayList<>();
+        List<String> unsupportedFeatures = new ArrayList<>();
         for (ArtifactRepository repository : project.getRepositories()) {
             if (!(repository instanceof MavenArtifactRepository)) {
-                return Collections.emptyList();
+                unsupportedFeatures.add("repository-type:" + repository.getClass().getName());
+                continue;
             }
             MavenArtifactRepository maven = (MavenArtifactRepository) repository;
             if (!maven.getArtifactUrls().isEmpty()) {
-                return Collections.emptyList();
+                unsupportedFeatures.add("maven-artifact-urls:" + maven.getName());
+                continue;
             }
             URI url = maven.getUrl();
             String scheme = url == null ? "" : url.getScheme();
             if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
-                return Collections.emptyList();
+                unsupportedFeatures.add("repository-url-scheme:" + maven.getName() + ":" + scheme);
+                continue;
             }
             String layout = metadataLayoutFor(maven.getMetadataSources());
             if (layout == null) {
-                return Collections.emptyList();
+                unsupportedFeatures.add("repository-metadata-sources:" + maven.getName());
+                continue;
             }
             RepositoryDescriptor.Builder builder = RepositoryDescriptor.newBuilder()
                 .setId(maven.getName())
@@ -91,7 +97,25 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
             }
             repositories.add(builder.build());
         }
-        return Collections.unmodifiableList(repositories);
+        return new RepositoryCapture(repositories, unsupportedFeatures);
+    }
+
+    public static final class RepositoryCapture {
+        private final List<RepositoryDescriptor> repositories;
+        private final List<String> unsupportedFeatures;
+
+        RepositoryCapture(List<RepositoryDescriptor> repositories, List<String> unsupportedFeatures) {
+            this.repositories = Collections.unmodifiableList(new ArrayList<>(repositories));
+            this.unsupportedFeatures = Collections.unmodifiableList(new ArrayList<>(unsupportedFeatures));
+        }
+
+        public List<RepositoryDescriptor> getRepositories() {
+            return repositories;
+        }
+
+        public List<String> getUnsupportedFeatures() {
+            return unsupportedFeatures;
+        }
     }
 
     @Nullable

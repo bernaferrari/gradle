@@ -277,6 +277,8 @@ mod tests {
                         classifier: String::new(),
                         extension: "jar".to_string(),
                         kind: "dependency".to_string(),
+                        repositories: Vec::new(),
+                        unsupported_features: Vec::new(),
                     },
                     crate::proto::ResolvedArtifact {
                         group: "org.slf4j".to_string(),
@@ -286,6 +288,8 @@ mod tests {
                         classifier: String::new(),
                         extension: "jar".to_string(),
                         kind: "dependency".to_string(),
+                        repositories: Vec::new(),
+                        unsupported_features: Vec::new(),
                     },
                 ],
                 error_message: String::new(),

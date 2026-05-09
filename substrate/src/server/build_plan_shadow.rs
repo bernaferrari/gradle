@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -10,8 +10,8 @@ use crate::proto::{GetBuildEnvironmentResponse, GetBuildModelResponse};
 use super::atomic_write::AtomicWriter;
 use super::build_plan_ir::{
     fingerprint_normalized, from_proto, validate_schema_version, CanonicalBuildPlan,
-    CanonicalBuildPlanDependency, CanonicalBuildPlanProject, CanonicalBuildPlanTask,
-    CanonicalBuildPlanTaskDiagnostic, CanonicalBuildPlanTaskInputSpec,
+    CanonicalBuildPlanDependency, CanonicalBuildPlanProject, CanonicalBuildPlanRepository,
+    CanonicalBuildPlanTask, CanonicalBuildPlanTaskDiagnostic, CanonicalBuildPlanTaskInputSpec,
     CanonicalBuildPlanTaskOutputSpec, CanonicalBuildPlanToolchainRequest,
     BUILD_PLAN_SCHEMA_VERSION,
 };
@@ -621,7 +621,10 @@ async fn collect_shadow_dependencies(
     build_id: &str,
     model: &GetBuildModelResponse,
 ) -> Result<Vec<CanonicalBuildPlanDependency>, Box<dyn std::error::Error + Send + Sync>> {
-    let mut unique = BTreeSet::new();
+    let mut unique = BTreeMap::<
+        (String, String, String, String),
+        (Vec<CanonicalBuildPlanRepository>, Vec<String>),
+    >::new();
 
     for project in &model.projects {
         for configuration in SHADOWED_CONFIGURATIONS {
@@ -657,7 +660,30 @@ async fn collect_shadow_dependencies(
                 } else {
                     artifact.kind
                 };
-                unique.insert((project.path.clone(), configuration_name, notation, kind));
+                unique
+                    .entry((project.path.clone(), configuration_name, notation, kind))
+                    .or_insert_with(|| {
+                        (
+                            artifact
+                                .repositories
+                                .iter()
+                                .map(|repository| CanonicalBuildPlanRepository {
+                                    id: repository.id.clone(),
+                                    url: repository.url.clone(),
+                                    m2compatible: repository.m2compatible,
+                                    allow_insecure_protocol: repository.allow_insecure_protocol,
+                                    credentials: repository
+                                        .credentials
+                                        .iter()
+                                        .map(|(k, v)| (k.clone(), v.clone()))
+                                        .collect(),
+                                    layout: repository.layout.clone(),
+                                    ivy_pattern: repository.ivy_pattern.clone(),
+                                })
+                                .collect(),
+                            artifact.unsupported_features.clone(),
+                        )
+                    });
             }
         }
     }
@@ -665,13 +691,18 @@ async fn collect_shadow_dependencies(
     Ok(unique
         .into_iter()
         .map(
-            |(project_path, configuration, notation, kind)| CanonicalBuildPlanDependency {
-                project_path,
-                configuration,
-                notation,
-                kind,
-                repositories: Vec::new(),
-                unsupported_features: Vec::new(),
+            |(
+                (project_path, configuration, notation, kind),
+                (repositories, unsupported_features),
+            )| {
+                CanonicalBuildPlanDependency {
+                    project_path,
+                    configuration,
+                    notation,
+                    kind,
+                    repositories,
+                    unsupported_features,
+                }
             },
         )
         .collect())
@@ -912,7 +943,7 @@ fn collect_shadow_toolchains(
     parsed_scripts: &[ParsedProjectBuildScript],
     env: Option<&GetBuildEnvironmentResponse>,
 ) -> Vec<CanonicalBuildPlanToolchainRequest> {
-    let mut versions = BTreeSet::new();
+    let mut versions = BTreeSet::<String>::new();
     for script in parsed_scripts {
         if let Some(version) = script.parsed.source_compatibility.as_deref() {
             versions.insert(normalize_java_version(version));
