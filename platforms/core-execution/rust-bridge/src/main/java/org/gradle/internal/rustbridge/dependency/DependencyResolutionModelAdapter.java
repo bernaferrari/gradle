@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Captures the narrow repository contract that Rust static artifact prefetch can represent.
@@ -82,6 +83,11 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
                 unsupportedFeatures.add("maven-artifact-urls:" + maven.getName());
                 continue;
             }
+            List<String> contentMarkers = unsupportedRepositoryContentMarkers(maven);
+            if (!contentMarkers.isEmpty()) {
+                unsupportedFeatures.addAll(contentMarkers);
+                continue;
+            }
             if (hasConfiguredCredentials(maven.getCredentials())) {
                 if (!includeSessionCredentials) {
                     unsupportedFeatures.add("repository-credentials:" + maven.getName());
@@ -126,6 +132,35 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
 
     private static String nullToEmpty(@Nullable String value) {
         return value == null ? "" : value;
+    }
+
+    private static List<String> unsupportedRepositoryContentMarkers(MavenArtifactRepository repository) {
+        String name = repository.getName();
+        List<String> markers = new ArrayList<>();
+        if (nonEmptyCollection(invokeIfPresent(repository, "getIncludedConfigurations"))
+            || nonEmptyCollection(invokeIfPresent(repository, "getExcludedConfigurations"))) {
+            markers.add("repository-content-configurations:" + name);
+        }
+        if (nonEmptyMap(invokeIfPresent(repository, "getRequiredAttributes"))) {
+            markers.add("repository-content-attributes:" + name);
+        }
+        Object contentFilter = invokeIfPresent(repository, "getContentFilter");
+        if (contentFilter != null && !isGradleDoNothingAction(contentFilter)) {
+            markers.add("repository-content-filter:" + name);
+        }
+        return markers;
+    }
+
+    private static boolean nonEmptyCollection(@Nullable Object value) {
+        return value instanceof Collection && !((Collection<?>) value).isEmpty();
+    }
+
+    private static boolean nonEmptyMap(@Nullable Object value) {
+        return value instanceof Map && !((Map<?, ?>) value).isEmpty();
+    }
+
+    private static boolean isGradleDoNothingAction(Object action) {
+        return "org.gradle.internal.Actions$NullAction".equals(action.getClass().getName());
     }
 
     public static final class RepositoryCapture {
@@ -204,6 +239,19 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
             Method m = target.getClass().getMethod(method);
             m.setAccessible(true);
             return m.invoke(target);
+        } catch (Exception e) {
+            throw new IllegalStateException("Could not invoke " + method + " on " + target.getClass().getName(), e);
+        }
+    }
+
+    @Nullable
+    private static Object invokeIfPresent(Object target, String method) {
+        try {
+            Method m = target.getClass().getMethod(method);
+            m.setAccessible(true);
+            return m.invoke(target);
+        } catch (NoSuchMethodException e) {
+            return null;
         } catch (Exception e) {
             throw new IllegalStateException("Could not invoke " + method + " on " + target.getClass().getName(), e);
         }
