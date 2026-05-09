@@ -150,7 +150,10 @@ impl BuildPlanShadowStore {
             return Err(reason.into());
         }
         if let Err(error) = validate_schema_version(&artifact.plan) {
-            let reason = format!("build plan shadow artifact schema validation failed: {}", error);
+            let reason = format!(
+                "build plan shadow artifact schema validation failed: {}",
+                error
+            );
             self.quarantine_artifact(path, &reason)?;
             return Err(reason.into());
         }
@@ -654,12 +657,7 @@ async fn collect_shadow_dependencies(
                 } else {
                     artifact.kind
                 };
-                unique.insert((
-                    project.path.clone(),
-                    configuration_name,
-                    notation,
-                    kind,
-                ));
+                unique.insert((project.path.clone(), configuration_name, notation, kind));
             }
         }
     }
