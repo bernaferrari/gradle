@@ -31,8 +31,16 @@ pub struct SelectedVariant {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleMetadataRedirect {
+    pub group: String,
+    pub module: String,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModuleMetadataSelection {
     Selected(SelectedVariant),
+    Redirect(ModuleMetadataRedirect),
     Unsupported(String),
 }
 
@@ -107,13 +115,9 @@ struct DependencyExclude {
 
 #[derive(Debug, Deserialize)]
 struct AvailableAt {
-    #[allow(dead_code)]
     url: String,
-    #[allow(dead_code)]
     group: String,
-    #[allow(dead_code)]
     module: String,
-    #[allow(dead_code)]
     version: String,
 }
 
@@ -198,11 +202,8 @@ pub fn select_jvm_variant(
     }
 
     let variant = candidates[0];
-    if variant.available_at.is_some() {
-        return Ok(Some(ModuleMetadataSelection::Unsupported(format!(
-            "unsupported Gradle Module Metadata available-at redirect on variant {}",
-            variant.name
-        ))));
+    if let Some(redirect) = &variant.available_at {
+        return Ok(Some(available_at_redirect(redirect, &variant.name)));
     }
     let dependency_constraints = match static_dependency_constraints(variant) {
         Ok(constraints) => constraints,
@@ -262,6 +263,36 @@ pub fn select_jvm_variant(
         dependencies,
         artifacts,
     })))
+}
+
+fn available_at_redirect(redirect: &AvailableAt, variant_name: &str) -> ModuleMetadataSelection {
+    if redirect.group.trim().is_empty()
+        || redirect.module.trim().is_empty()
+        || redirect.version.trim().is_empty()
+        || redirect.url.trim().is_empty()
+    {
+        return ModuleMetadataSelection::Unsupported(format!(
+            "unsupported Gradle Module Metadata malformed available-at redirect on variant {variant_name}"
+        ));
+    }
+    if reqwest::Url::parse(redirect.url.trim()).is_ok() {
+        return ModuleMetadataSelection::Unsupported(format!(
+            "unsupported Gradle Module Metadata cross-repository available-at redirect on variant {variant_name}"
+        ));
+    }
+    if let Some(reason) =
+        super::graph_builder::unsupported_version_selector_reason(&redirect.version)
+    {
+        return ModuleMetadataSelection::Unsupported(format!(
+            "unsupported Gradle Module Metadata available-at redirect version for {}:{}: {reason}",
+            redirect.group, redirect.module
+        ));
+    }
+    ModuleMetadataSelection::Redirect(ModuleMetadataRedirect {
+        group: redirect.group.clone(),
+        module: redirect.module.clone(),
+        version: redirect.version.clone(),
+    })
 }
 
 fn variant_usage(variant: &Variant) -> Option<String> {
@@ -462,7 +493,7 @@ mod tests {
                 assert_eq!(variant.dependencies[0].module, "runtime");
                 assert_eq!(variant.artifacts[0].url, "root-1.0.jar");
             }
-            ModuleMetadataSelection::Unsupported(reason) => panic!("{reason}"),
+            other => panic!("expected selected variant, got {other:?}"),
         }
     }
 
@@ -487,7 +518,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_available_at_redirect() {
+    fn captures_available_at_redirect() {
         let json = r#"{
           "component": {"group":"org.example","module":"root","version":"1.0"},
           "variants": [
@@ -500,9 +531,33 @@ mod tests {
             .unwrap()
             .unwrap();
 
+        match selected {
+            ModuleMetadataSelection::Redirect(redirect) => {
+                assert_eq!(redirect.group, "org.example");
+                assert_eq!(redirect.module, "root-jvm");
+                assert_eq!(redirect.version, "1.0");
+            }
+            other => panic!("expected redirect, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_cross_repository_available_at_redirect() {
+        let json = r#"{
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "available-at":{"url":"https://repo.example.test/root-1.0.module","group":"org.example","module":"root-jvm","version":"1.0"}}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "org.example", "root", "1.0")
+            .unwrap()
+            .unwrap();
+
         assert!(matches!(
             selected,
-            ModuleMetadataSelection::Unsupported(reason) if reason.contains("available-at")
+            ModuleMetadataSelection::Unsupported(reason) if reason.contains("cross-repository available-at")
         ));
     }
 
@@ -532,7 +587,7 @@ mod tests {
                 assert_eq!(variant.dependencies[1].module, "other");
                 assert_eq!(variant.dependencies[1].version, "1.0");
             }
-            ModuleMetadataSelection::Unsupported(reason) => panic!("{reason}"),
+            other => panic!("expected selected variant, got {other:?}"),
         }
     }
 
@@ -555,7 +610,7 @@ mod tests {
             ModuleMetadataSelection::Selected(variant) => {
                 assert!(variant.dependencies.is_empty());
             }
-            ModuleMetadataSelection::Unsupported(reason) => panic!("{reason}"),
+            other => panic!("expected selected variant, got {other:?}"),
         }
     }
 
@@ -578,7 +633,7 @@ mod tests {
             ModuleMetadataSelection::Selected(variant) => {
                 assert_eq!(variant.dependencies[0].version, "2.0");
             }
-            ModuleMetadataSelection::Unsupported(reason) => panic!("{reason}"),
+            other => panic!("expected selected variant, got {other:?}"),
         }
     }
 
@@ -600,7 +655,7 @@ mod tests {
             ModuleMetadataSelection::Selected(variant) => {
                 assert_eq!(variant.dependencies[0].version, "2.0");
             }
-            ModuleMetadataSelection::Unsupported(reason) => panic!("{reason}"),
+            other => panic!("expected selected variant, got {other:?}"),
         }
     }
 
@@ -709,7 +764,7 @@ mod tests {
                     vec![("org.bad".to_string(), "bad".to_string())]
                 );
             }
-            ModuleMetadataSelection::Unsupported(reason) => panic!("{reason}"),
+            other => panic!("expected selected variant, got {other:?}"),
         }
     }
 
@@ -752,7 +807,7 @@ mod tests {
             ModuleMetadataSelection::Selected(variant) => {
                 assert_eq!(variant.name, "jvmRuntimeElements-published");
             }
-            ModuleMetadataSelection::Unsupported(reason) => panic!("{reason}"),
+            other => panic!("expected selected variant, got {other:?}"),
         }
     }
 
@@ -775,7 +830,7 @@ mod tests {
             ModuleMetadataSelection::Selected(variant) => {
                 assert_eq!(variant.name, "jreRuntimeElements");
             }
-            ModuleMetadataSelection::Unsupported(reason) => panic!("{reason}"),
+            other => panic!("expected selected variant, got {other:?}"),
         }
     }
 }
