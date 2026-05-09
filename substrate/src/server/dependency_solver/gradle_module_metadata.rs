@@ -1,6 +1,8 @@
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
+use super::ivyresolve::strategy::compare_versions;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModuleDependency {
     pub group: String,
@@ -197,12 +199,10 @@ pub fn select_jvm_variant(
             variant.name
         ))));
     }
-    if !variant.dependency_constraints.is_empty() {
-        return Ok(Some(ModuleMetadataSelection::Unsupported(format!(
-            "unsupported Gradle Module Metadata dependency constraints on variant {}",
-            variant.name
-        ))));
-    }
+    let dependency_constraints = match static_dependency_constraints(variant) {
+        Ok(constraints) => constraints,
+        Err(selection) => return Ok(Some(selection)),
+    };
     for capability in &variant.capabilities {
         if capability.group != component_group
             || capability.name != component_module
@@ -238,10 +238,16 @@ pub fn select_jvm_variant(
                 dep.group, dep.module
             ))));
         }
+        let required_version = apply_dependency_constraint(
+            &dep.group,
+            &dep.module,
+            &dep.version.requires,
+            &dependency_constraints,
+        );
         dependencies.push(ModuleDependency {
             group: dep.group.clone(),
             module: dep.module.clone(),
-            version: dep.version.requires.clone(),
+            version: required_version,
         });
     }
 
@@ -306,6 +312,62 @@ fn variant_attribute(variant: &Variant, name: &str) -> Option<String> {
         .get(name)
         .and_then(|value| value.as_str())
         .map(str::to_string)
+}
+
+fn static_dependency_constraints(
+    variant: &Variant,
+) -> Result<BTreeMap<(String, String), String>, ModuleMetadataSelection> {
+    let mut constraints: BTreeMap<(String, String), String> = BTreeMap::new();
+    for constraint in &variant.dependency_constraints {
+        if !constraint.excludes.is_empty() {
+            return Err(ModuleMetadataSelection::Unsupported(format!(
+                "unsupported Gradle Module Metadata dependency constraint exclusions for {}:{}",
+                constraint.group, constraint.module
+            )));
+        }
+        if !constraint.version.strictly.is_empty()
+            || !constraint.version.prefers.is_empty()
+            || !constraint.version.rejects.is_empty()
+        {
+            return Err(ModuleMetadataSelection::Unsupported(format!(
+                "unsupported Gradle Module Metadata rich dependency constraint for {}:{}",
+                constraint.group, constraint.module
+            )));
+        }
+        if constraint.version.requires.trim().is_empty() {
+            return Err(ModuleMetadataSelection::Unsupported(format!(
+                "unsupported Gradle Module Metadata dependency constraint without required version for {}:{}",
+                constraint.group, constraint.module
+            )));
+        }
+        let key = (constraint.group.clone(), constraint.module.clone());
+        match constraints.get(&key) {
+            Some(existing)
+                if compare_versions(&constraint.version.requires, existing)
+                    != std::cmp::Ordering::Greater => {}
+            _ => {
+                constraints.insert(key, constraint.version.requires.clone());
+            }
+        }
+    }
+    Ok(constraints)
+}
+
+fn apply_dependency_constraint(
+    group: &str,
+    module: &str,
+    required_version: &str,
+    constraints: &BTreeMap<(String, String), String>,
+) -> String {
+    let Some(constrained_version) = constraints.get(&(group.to_string(), module.to_string()))
+    else {
+        return required_version.to_string();
+    };
+    if compare_versions(constrained_version, required_version) == std::cmp::Ordering::Greater {
+        constrained_version.clone()
+    } else {
+        required_version.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -380,12 +442,66 @@ mod tests {
     }
 
     #[test]
-    fn rejects_variant_dependency_constraints() {
+    fn applies_static_dependency_constraints_to_matching_dependencies() {
         let json = r#"{
           "component": {"group":"org.example","module":"root","version":"1.0"},
           "variants": [
             {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "dependencies":[
+               {"group":"org.example","module":"child","version":{"requires":"1.0"}},
+               {"group":"org.example","module":"other","version":{"requires":"1.0"}}
+             ],
+             "dependencyConstraints":[{"group":"org.example","module":"child","version":{"requires":"2.0"}}]}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "org.example", "root", "1.0")
+            .unwrap()
+            .unwrap();
+
+        match selected {
+            ModuleMetadataSelection::Selected(variant) => {
+                assert_eq!(variant.dependencies.len(), 2);
+                assert_eq!(variant.dependencies[0].module, "child");
+                assert_eq!(variant.dependencies[0].version, "2.0");
+                assert_eq!(variant.dependencies[1].module, "other");
+                assert_eq!(variant.dependencies[1].version, "1.0");
+            }
+            ModuleMetadataSelection::Unsupported(reason) => panic!("{reason}"),
+        }
+    }
+
+    #[test]
+    fn dependency_constraints_do_not_create_dependencies() {
+        let json = r#"{
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "dependencies":[],
              "dependencyConstraints":[{"group":"org.example","module":"constrained","version":{"requires":"2.0"}}]}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "org.example", "root", "1.0")
+            .unwrap()
+            .unwrap();
+
+        match selected {
+            ModuleMetadataSelection::Selected(variant) => {
+                assert!(variant.dependencies.is_empty());
+            }
+            ModuleMetadataSelection::Unsupported(reason) => panic!("{reason}"),
+        }
+    }
+
+    #[test]
+    fn rejects_rich_dependency_constraints() {
+        let json = r#"{
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "dependencies":[{"group":"org.example","module":"child","version":{"requires":"1.0"}}],
+             "dependencyConstraints":[{"group":"org.example","module":"child","version":{"strictly":"2.0"}}]}
           ]
         }"#;
 
@@ -395,7 +511,50 @@ mod tests {
 
         assert!(matches!(
             selected,
-            ModuleMetadataSelection::Unsupported(reason) if reason.contains("dependency constraints")
+            ModuleMetadataSelection::Unsupported(reason) if reason.contains("rich dependency constraint")
+        ));
+    }
+
+    #[test]
+    fn rejects_dependency_constraints_without_required_version() {
+        let json = r#"{
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "dependencies":[{"group":"org.example","module":"child","version":{"requires":"1.0"}}],
+             "dependencyConstraints":[{"group":"org.example","module":"child","version":{}}]}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "org.example", "root", "1.0")
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(
+            selected,
+            ModuleMetadataSelection::Unsupported(reason) if reason.contains("constraint without required version")
+        ));
+    }
+
+    #[test]
+    fn rejects_dependency_constraint_exclusions() {
+        let json = r#"{
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "dependencies":[{"group":"org.example","module":"child","version":{"requires":"1.0"}}],
+             "dependencyConstraints":[{"group":"org.example","module":"child","version":{"requires":"2.0"},
+               "excludes":[{"group":"org.bad","module":"bad"}]}]}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "org.example", "root", "1.0")
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(
+            selected,
+            ModuleMetadataSelection::Unsupported(reason) if reason.contains("constraint exclusions")
         ));
     }
 

@@ -4685,7 +4685,12 @@ mod tests {
             .into_inner();
         server.join().unwrap();
 
-        assert!(response.success, "{}", response.error_message);
+        assert!(
+            response.success,
+            "{}; requested={:?}",
+            response.error_message,
+            requested.lock().unwrap().as_slice()
+        );
         assert_eq!(response.total_artifacts, 1);
         assert_eq!(
             response.total_download_size,
@@ -5187,7 +5192,8 @@ mod tests {
           "variants": [
             {"name":"apiElements","attributes":{"org.gradle.usage":"java-api"},"dependencies":[]},
             {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
-             "dependencies":[{"group":"org.example","module":"runtime-child","version":{"requires":"2.0"}}],
+             "dependencies":[{"group":"org.example","module":"runtime-child","version":{"requires":"1.0"}}],
+             "dependencyConstraints":[{"group":"org.example","module":"runtime-child","version":{"requires":"2.0"}}],
              "files":[{"name":"root-runtime.jar","url":"custom/root-runtime.jar"}]}
           ]
         }"#
