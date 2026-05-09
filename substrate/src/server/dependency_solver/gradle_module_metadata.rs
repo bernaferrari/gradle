@@ -52,10 +52,14 @@ struct Variant {
     attributes: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     dependencies: Vec<VariantDependency>,
+    #[serde(default, rename = "dependencyConstraints")]
+    dependency_constraints: Vec<VariantDependency>,
     #[serde(default)]
     files: Vec<VariantFile>,
     #[serde(default)]
     capabilities: Vec<Capability>,
+    #[serde(default, rename = "available-at")]
+    available_at: Option<AvailableAt>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,6 +68,8 @@ struct VariantDependency {
     module: String,
     #[serde(default)]
     version: VersionRequirement,
+    #[serde(default)]
+    excludes: Vec<DependencyExclude>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -82,6 +88,26 @@ struct VersionRequirement {
 struct VariantFile {
     name: String,
     url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DependencyExclude {
+    #[allow(dead_code)]
+    group: String,
+    #[allow(dead_code)]
+    module: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AvailableAt {
+    #[allow(dead_code)]
+    url: String,
+    #[allow(dead_code)]
+    group: String,
+    #[allow(dead_code)]
+    module: String,
+    #[allow(dead_code)]
+    version: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,6 +191,18 @@ pub fn select_jvm_variant(
     }
 
     let variant = candidates[0];
+    if variant.available_at.is_some() {
+        return Ok(Some(ModuleMetadataSelection::Unsupported(format!(
+            "unsupported Gradle Module Metadata available-at redirect on variant {}",
+            variant.name
+        ))));
+    }
+    if !variant.dependency_constraints.is_empty() {
+        return Ok(Some(ModuleMetadataSelection::Unsupported(format!(
+            "unsupported Gradle Module Metadata dependency constraints on variant {}",
+            variant.name
+        ))));
+    }
     for capability in &variant.capabilities {
         if capability.group != component_group
             || capability.name != component_module
@@ -179,6 +217,12 @@ pub fn select_jvm_variant(
 
     let mut dependencies = Vec::with_capacity(variant.dependencies.len());
     for dep in &variant.dependencies {
+        if !dep.excludes.is_empty() {
+            return Ok(Some(ModuleMetadataSelection::Unsupported(format!(
+                "unsupported Gradle Module Metadata dependency exclusions for {}:{}",
+                dep.group, dep.module
+            ))));
+        }
         if !dep.version.strictly.is_empty()
             || !dep.version.prefers.is_empty()
             || !dep.version.rejects.is_empty()
@@ -312,6 +356,67 @@ mod tests {
         assert!(matches!(
             selected,
             ModuleMetadataSelection::Unsupported(reason) if reason.contains("capability")
+        ));
+    }
+
+    #[test]
+    fn rejects_available_at_redirect() {
+        let json = r#"{
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "available-at":{"url":"root-1.0.module","group":"org.example","module":"root-jvm","version":"1.0"}}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "org.example", "root", "1.0")
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(
+            selected,
+            ModuleMetadataSelection::Unsupported(reason) if reason.contains("available-at")
+        ));
+    }
+
+    #[test]
+    fn rejects_variant_dependency_constraints() {
+        let json = r#"{
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "dependencyConstraints":[{"group":"org.example","module":"constrained","version":{"requires":"2.0"}}]}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "org.example", "root", "1.0")
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(
+            selected,
+            ModuleMetadataSelection::Unsupported(reason) if reason.contains("dependency constraints")
+        ));
+    }
+
+    #[test]
+    fn rejects_dependency_exclusions() {
+        let json = r#"{
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "dependencies":[{"group":"org.example","module":"child","version":{"requires":"2.0"},
+               "excludes":[{"group":"org.bad","module":"bad"}]}]}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "org.example", "root", "1.0")
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(
+            selected,
+            ModuleMetadataSelection::Unsupported(reason) if reason.contains("dependency exclusions")
         ));
     }
 
