@@ -641,6 +641,11 @@ marked as `resolution-strategy-force` so Rust authoritative admission fails
 closed until that Gradle solver semantic is represented exactly. If the
 resolution strategy cannot be inspected, the bridge marks
 `resolution-strategy-inspection` rather than silently admitting the build.
+The Rust graph builder and execution-kernel admission also enforce Gradle's
+plain-HTTP repository contract: `http://` repositories are rejected unless the
+captured repository descriptor has `allowInsecureProtocol=true`; that flag is
+preserved from JVM capture through canonical build-plan lowering into the kernel
+repository model.
 Build-plan constraint capture now uses Gradle `VersionConstraint` rather than
 the raw legacy version string, matching the dependency prefetch bridge: strict,
 required, and preferred static versions can be represented, while branch,

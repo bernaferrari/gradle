@@ -55,7 +55,7 @@ fn validate_dependency_selectors(dependencies: &[DependencyDescriptor]) -> Resul
 
 fn validate_repositories(repositories: &[RepositoryDescriptor]) -> Result<(), String> {
     for repository in repositories {
-        if let Some(reason) = unsupported_repository_url_reason(&repository.id, &repository.url) {
+        if let Some(reason) = unsupported_repository_reason(repository) {
             return Err(reason);
         }
     }
@@ -147,6 +147,30 @@ pub fn unsupported_repository_url_reason(repository_id: &str, url: &str) -> Opti
     Some(format!(
         "Repository '{repository_id}' has unsupported URL '{url}'"
     ))
+}
+
+pub fn unsupported_repository_reason(repository: &RepositoryDescriptor) -> Option<String> {
+    unsupported_repository_reason_parts(
+        &repository.id,
+        &repository.url,
+        repository.allow_insecure_protocol,
+    )
+}
+
+pub fn unsupported_repository_reason_parts(
+    repository_id: &str,
+    url: &str,
+    allow_insecure_protocol: bool,
+) -> Option<String> {
+    if let Some(reason) = unsupported_repository_url_reason(repository_id, url) {
+        return Some(reason);
+    }
+    if url.trim().starts_with("http://") && !allow_insecure_protocol {
+        return Some(format!(
+            "Repository '{repository_id}' uses insecure HTTP without allowInsecureProtocol"
+        ));
+    }
+    None
 }
 
 pub fn parse_module_selector_notation(notation: &str) -> Option<ModuleSelector> {
@@ -328,6 +352,33 @@ mod tests {
 
         assert!(error.contains("unsupported URL"));
         assert!(error.contains("sftp://repo.example.test/maven"));
+    }
+
+    #[test]
+    fn graph_request_rejects_insecure_http_without_explicit_allow() {
+        let error = build_dependency_graph_request(
+            &[dep("org.example", "demo", "1.0")],
+            &[],
+            &[repo("plain", "http://repo.example.test/maven")],
+            "",
+        )
+        .unwrap_err();
+
+        assert!(error.contains("insecure HTTP"));
+        assert!(error.contains("allowInsecureProtocol"));
+    }
+
+    #[test]
+    fn graph_request_accepts_insecure_http_with_explicit_allow() {
+        let mut plain = repo("plain", "http://repo.example.test/maven");
+        plain.allow_insecure_protocol = true;
+
+        let request =
+            build_dependency_graph_request(&[dep("org.example", "demo", "1.0")], &[], &[plain], "")
+                .unwrap();
+
+        assert_eq!(request.repositories[0].url, "http://repo.example.test/maven");
+        assert!(request.repositories[0].allow_insecure_protocol);
     }
 
     #[test]

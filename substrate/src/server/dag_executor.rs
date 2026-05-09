@@ -638,6 +638,7 @@ fn kernel_dependency_graph_from_plan_dependencies(
             let kernel_repository = KernelRepository {
                 id: repository.id.clone(),
                 url: repository.url.clone(),
+                allow_insecure_protocol: repository.allow_insecure_protocol,
             };
             if !configuration.repositories.contains(&kernel_repository) {
                 configuration.repositories.push(kernel_repository);

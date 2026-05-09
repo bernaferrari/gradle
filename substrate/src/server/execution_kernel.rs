@@ -44,6 +44,7 @@ pub struct KernelDependencyConfiguration {
 pub struct KernelRepository {
     pub id: String,
     pub url: String,
+    pub allow_insecure_protocol: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -156,9 +157,11 @@ fn admit_dependency_graph(graph: &KernelDependencyGraph, reasons: &mut Vec<Strin
             ));
         }
         for repository in &configuration.repositories {
-            if let Some(reason) =
-                graph_builder::unsupported_repository_url_reason(&repository.id, &repository.url)
-            {
+            if let Some(reason) = graph_builder::unsupported_repository_reason_parts(
+                &repository.id,
+                &repository.url,
+                repository.allow_insecure_protocol,
+            ) {
                 reasons.push(format!(
                     "dependency configuration '{}': {}",
                     configuration.name, reason
@@ -400,6 +403,7 @@ mod tests {
                     repositories: vec![KernelRepository {
                         id: "mavenCentral".to_string(),
                         url: "https://repo.maven.apache.org/maven2".to_string(),
+                        allow_insecure_protocol: false,
                     }],
                     dependencies: vec![KernelDependencyRequest {
                         group: "org.example".to_string(),
@@ -465,6 +469,36 @@ mod tests {
         assert!(message.contains("org.example:range:[1.0,2.0)"));
         assert!(message.contains("org.example:latest:latest.release"));
         assert!(message.contains("org.example:snapshot:1.0-SNAPSHOT"));
+    }
+
+    #[test]
+    fn rejects_insecure_http_repository_without_explicit_allow() {
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            tasks: vec![task(":classes", "Lifecycle", None)],
+            dependency_graph: Some(KernelDependencyGraph {
+                configurations: vec![KernelDependencyConfiguration {
+                    name: "runtimeClasspath".to_string(),
+                    repositories: vec![KernelRepository {
+                        id: "plain".to_string(),
+                        url: "http://repo.example.test/maven".to_string(),
+                        allow_insecure_protocol: false,
+                    }],
+                    dependencies: Vec::new(),
+                    project_dependencies: Vec::new(),
+                    constraints: Vec::new(),
+                    unsupported_features: Vec::new(),
+                }],
+            }),
+        };
+
+        let KernelAdmission::Rejected(rejection) =
+            admit_build_plan(&plan, &native_types(&["Lifecycle"]))
+        else {
+            panic!("expected rejection");
+        };
+
+        assert!(rejection.message().contains("insecure HTTP"));
     }
 
     #[test]
