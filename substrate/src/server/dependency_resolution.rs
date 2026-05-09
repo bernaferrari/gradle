@@ -1565,40 +1565,62 @@ impl DependencyResolutionServiceImpl {
         let mut total_artifacts = 0;
         let mut total_download_size = 0;
 
-        for dep in deps {
-            if dep.resolved && !dep.artifact_url.is_empty() {
-                let (classifier, extension) = Self::artifact_file_parts_from_url(
-                    &dep.artifact_url,
-                    &dep.name,
-                    &dep.selected_version,
-                )
-                .ok_or_else(|| {
-                    format!(
-                        "Unsupported Maven artifact URL for prefetch: {}",
-                        dep.artifact_url
-                    )
-                })?;
-                let (size, sha256) = self
-                    .download_artifact_into_store(
-                        &dep.group,
-                        &dep.name,
-                        &dep.selected_version,
-                        &classifier,
-                        &extension,
-                        &dep.artifact_url,
-                    )
-                    .await?;
-                dep.artifact_size = size;
-                dep.artifact_sha256 = sha256;
-                total_artifacts += 1;
+        for chunk in deps.chunks_mut(8) {
+            let results = futures_util::future::join_all(
+                chunk
+                    .iter_mut()
+                    .map(|dep| self.prefetch_resolved_artifact_node(dep)),
+            )
+            .await;
+            for result in results {
+                let (count, size) = result?;
+                total_artifacts += count;
                 total_download_size += size;
             }
-
-            let (child_count, child_size) =
-                Box::pin(self.prefetch_resolved_artifacts(&mut dep.dependencies)).await?;
-            total_artifacts += child_count;
-            total_download_size += child_size;
         }
+
+        Ok((total_artifacts, total_download_size))
+    }
+
+    async fn prefetch_resolved_artifact_node(
+        &self,
+        dep: &mut ResolvedDependency,
+    ) -> Result<(i32, i64), String> {
+        let mut total_artifacts = 0;
+        let mut total_download_size = 0;
+
+        if dep.resolved && !dep.artifact_url.is_empty() {
+            let (classifier, extension) = Self::artifact_file_parts_from_url(
+                &dep.artifact_url,
+                &dep.name,
+                &dep.selected_version,
+            )
+            .ok_or_else(|| {
+                format!(
+                    "Unsupported Maven artifact URL for prefetch: {}",
+                    dep.artifact_url
+                )
+            })?;
+            let (size, sha256) = self
+                .download_artifact_into_store(
+                    &dep.group,
+                    &dep.name,
+                    &dep.selected_version,
+                    &classifier,
+                    &extension,
+                    &dep.artifact_url,
+                )
+                .await?;
+            dep.artifact_size = size;
+            dep.artifact_sha256 = sha256;
+            total_artifacts += 1;
+            total_download_size += size;
+        }
+
+        let (child_count, child_size) =
+            Box::pin(self.prefetch_resolved_artifacts(&mut dep.dependencies)).await?;
+        total_artifacts += child_count;
+        total_download_size += child_size;
 
         Ok((total_artifacts, total_download_size))
     }
@@ -4958,6 +4980,118 @@ mod tests {
             .into_inner();
         assert!(cache_hit.cached);
         assert_eq!(cache_hit.local_path, stored.to_string_lossy().to_string());
+    }
+
+    #[tokio::test]
+    async fn test_prefetch_resolved_artifacts_overlaps_independent_downloads() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+        use std::sync::{Arc, Mutex};
+        use std::time::Duration;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let requested = Arc::new(Mutex::new(Vec::new()));
+        let active_artifacts = Arc::new(AtomicUsize::new(0));
+        let max_active_artifacts = Arc::new(AtomicUsize::new(0));
+        let artifact_requests = Arc::new(AtomicUsize::new(0));
+
+        let requested_for_server = Arc::clone(&requested);
+        let active_for_server = Arc::clone(&active_artifacts);
+        let max_active_for_server = Arc::clone(&max_active_artifacts);
+        let artifact_requests_for_server = Arc::clone(&artifact_requests);
+        let server = std::thread::spawn(move || {
+            let mut handlers = Vec::new();
+            for _ in 0..4 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let requested = Arc::clone(&requested_for_server);
+                let active_artifacts = Arc::clone(&active_for_server);
+                let max_active_artifacts = Arc::clone(&max_active_for_server);
+                let artifact_requests = Arc::clone(&artifact_requests_for_server);
+                handlers.push(std::thread::spawn(move || {
+                    let mut request = [0u8; 2048];
+                    let read = stream.read(&mut request).unwrap_or(0);
+                    let request_text = String::from_utf8_lossy(&request[..read]);
+                    let path = request_text
+                        .lines()
+                        .next()
+                        .and_then(|line| line.split_whitespace().nth(1))
+                        .unwrap_or("/")
+                        .to_string();
+                    requested.lock().unwrap().push(path.clone());
+
+                    let body = if path.ends_with("/one-1.0.pom") {
+                        b"<project><modelVersion>4.0.0</modelVersion><groupId>org.example</groupId><artifactId>one</artifactId><version>1.0</version></project>".to_vec()
+                    } else if path.ends_with("/two-1.0.pom") {
+                        b"<project><modelVersion>4.0.0</modelVersion><groupId>org.example</groupId><artifactId>two</artifactId><version>1.0</version></project>".to_vec()
+                    } else if path.ends_with("/one-1.0.jar") || path.ends_with("/two-1.0.jar") {
+                        artifact_requests.fetch_add(1, AtomicOrdering::SeqCst);
+                        let current = active_artifacts.fetch_add(1, AtomicOrdering::SeqCst) + 1;
+                        max_active_artifacts.fetch_max(current, AtomicOrdering::SeqCst);
+                        std::thread::sleep(Duration::from_millis(200));
+                        active_artifacts.fetch_sub(1, AtomicOrdering::SeqCst);
+                        format!("artifact:{}", path).into_bytes()
+                    } else {
+                        let response =
+                            "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_string();
+                        stream.write_all(response.as_bytes()).unwrap();
+                        return;
+                    };
+
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/octet-stream\r\n\r\n",
+                        body.len()
+                    );
+                    stream.write_all(response.as_bytes()).unwrap();
+                    stream.write_all(&body).unwrap();
+                }));
+            }
+
+            for handler in handlers {
+                handler.join().unwrap();
+            }
+        });
+
+        let store = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "runtimeClasspath".to_string(),
+                dependencies: vec![
+                    make_dep("org.example", "one", "1.0"),
+                    make_dep("org.example", "two", "1.0"),
+                ],
+                repositories: vec![make_repo("local", &format!("http://{}", addr))],
+                attributes: vec![],
+                lenient: false,
+                prefetch_artifacts: true,
+                constraints: Vec::new(),
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        server.join().unwrap();
+
+        assert!(
+            response.success,
+            "{}; requested={:?}",
+            response.error_message,
+            requested.lock().unwrap().as_slice()
+        );
+        assert_eq!(response.total_artifacts, 2);
+        assert_eq!(artifact_requests.load(AtomicOrdering::SeqCst), 2);
+        assert_eq!(response.resolved_dependencies.len(), 2);
+        for dep in &response.resolved_dependencies {
+            assert!(dep.artifact_size > 0, "{dep:?}");
+            assert!(!dep.artifact_sha256.is_empty(), "{dep:?}");
+        }
+        assert!(
+            max_active_artifacts.load(AtomicOrdering::SeqCst) >= 2,
+            "artifact prefetch should overlap independent downloads; requested={:?}",
+            requested.lock().unwrap().as_slice()
+        );
     }
 
     #[tokio::test]
