@@ -260,12 +260,21 @@ impl DependencyResolutionServiceImpl {
         matches!(repo.layout.as_str(), "gradle-module-metadata" | "gradle")
     }
 
-    fn repository_allows_module(repo: &RepositoryDescriptor, group: &str, module: &str) -> bool {
+    fn repository_allows_dependency(
+        repo: &RepositoryDescriptor,
+        group: &str,
+        module: &str,
+        version: &str,
+    ) -> bool {
         let group = group.trim();
-        let module_key = format!("{group}:{}", module.trim());
+        let module = module.trim();
+        let version = version.trim();
+        let module_key = format!("{group}:{module}");
+        let module_version_key = format!("{module_key}:{version}");
         (repo.include_groups.is_empty()
             && repo.include_group_prefixes.is_empty()
             && repo.include_modules.is_empty()
+            && repo.include_module_versions.is_empty()
             || repo
                 .include_groups
                 .iter()
@@ -277,7 +286,11 @@ impl DependencyResolutionServiceImpl {
             || repo
                 .include_modules
                 .iter()
-                .any(|candidate| candidate == &module_key))
+                .any(|candidate| candidate == &module_key)
+            || repo
+                .include_module_versions
+                .iter()
+                .any(|candidate| candidate == &module_version_key))
             && !repo
                 .exclude_groups
                 .iter()
@@ -290,6 +303,10 @@ impl DependencyResolutionServiceImpl {
                 .exclude_modules
                 .iter()
                 .any(|candidate| candidate == &module_key)
+            && !repo
+                .exclude_module_versions
+                .iter()
+                .any(|candidate| candidate == &module_version_key)
     }
 
     fn group_matches_prefix(group: &str, prefix: &str) -> bool {
@@ -300,14 +317,46 @@ impl DependencyResolutionServiceImpl {
                 .is_some_and(|suffix| suffix.starts_with('.'))
     }
 
-    fn repositories_for_module(
+    fn repository_has_version_filters(repo: &RepositoryDescriptor) -> bool {
+        !repo.include_module_versions.is_empty() || !repo.exclude_module_versions.is_empty()
+    }
+
+    fn repositories_have_version_filters(repos: &[RepositoryDescriptor]) -> bool {
+        repos.iter().any(Self::repository_has_version_filters)
+    }
+
+    fn version_selector_is_dynamic_for_repository_filter(version: &str) -> bool {
+        let trimmed = version.trim();
+        trimmed.contains(',')
+            || trimmed.starts_with('[')
+            || trimmed.starts_with('(')
+            || trimmed == "LATEST"
+            || trimmed == "RELEASE"
+    }
+
+    fn unsupported_repository_version_filter_reason(
+        repos: &[RepositoryDescriptor],
+        version: &str,
+    ) -> Option<String> {
+        if Self::repositories_have_version_filters(repos)
+            && Self::version_selector_is_dynamic_for_repository_filter(version)
+        {
+            return Some(format!(
+                "Repository version content filters require a static version selector, got '{version}'"
+            ));
+        }
+        None
+    }
+
+    fn repositories_for_dependency(
         repos: &[RepositoryDescriptor],
         group: &str,
         module: &str,
+        version: &str,
     ) -> Vec<RepositoryDescriptor> {
         repos
             .iter()
-            .filter(|repo| Self::repository_allows_module(repo, group, module))
+            .filter(|repo| Self::repository_allows_dependency(repo, group, module, version))
             .cloned()
             .collect()
     }
@@ -1291,7 +1340,7 @@ impl DependencyResolutionServiceImpl {
         repos: &[RepositoryDescriptor],
     ) -> Result<Option<String>, String> {
         let mut redirects = std::collections::HashSet::new();
-        let allowed_repos = Self::repositories_for_module(repos, group, name);
+        let allowed_repos = Self::repositories_for_dependency(repos, group, name, version);
         for repo in allowed_repos
             .iter()
             .filter(|repo| Self::supports_gradle_module_metadata(repo))
@@ -1969,7 +2018,7 @@ impl DependencyResolutionServiceImpl {
         name: &str,
         repos: &[RepositoryDescriptor],
     ) -> (Vec<String>, Option<MavenMetadata>) {
-        let allowed_repos = Self::repositories_for_module(repos, group, name);
+        let allowed_repos = Self::repositories_for_dependency(repos, group, name, "");
         for repo in &allowed_repos {
             match self.fetch_maven_metadata(group, name, repo).await {
                 Ok(meta) => {
@@ -1997,7 +2046,7 @@ impl DependencyResolutionServiceImpl {
         raw_version: &str,
         repos: &[RepositoryDescriptor],
     ) -> String {
-        let allowed_repos = Self::repositories_for_module(repos, group, name);
+        let allowed_repos = Self::repositories_for_dependency(repos, group, name, raw_version);
         for repo in &allowed_repos {
             match self.fetch_maven_metadata(group, name, repo).await {
                 Ok(meta) => {
@@ -2098,12 +2147,31 @@ impl DependencyResolutionServiceImpl {
         let group = dep.group.clone();
         let name = dep.name.clone();
         let raw_version = dep.version.clone();
-        let allowed_repos = Self::repositories_for_module(repos, &group, &name);
         let scope = if dep.scope.is_empty() {
             "compile".to_string()
         } else {
             dep.scope.clone()
         };
+
+        if let Some(reason) =
+            Self::unsupported_repository_version_filter_reason(repos, &raw_version)
+        {
+            return ResolvedDependency {
+                group,
+                name,
+                version: raw_version.clone(),
+                selected_version: raw_version,
+                dependencies: Vec::new(),
+                resolved: false,
+                failure_reason: reason,
+                artifact_url: String::new(),
+                artifact_size: 0,
+                artifact_sha256: String::new(),
+                scope,
+            };
+        }
+
+        let allowed_repos = Self::repositories_for_dependency(repos, &group, &name, &raw_version);
 
         if allowed_repos.is_empty() {
             return ResolvedDependency {
@@ -2357,8 +2425,12 @@ impl DependencyResolutionServiceImpl {
 
             // Fetch parent POM from repos
             let mut parent_content = None;
-            let parent_repos =
-                Self::repositories_for_module(repos, &parent.group_id, &parent.artifact_id);
+            let parent_repos = Self::repositories_for_dependency(
+                repos,
+                &parent.group_id,
+                &parent.artifact_id,
+                &parent.version,
+            );
             for repo in &parent_repos {
                 match self
                     .fetch_pom(&parent.group_id, &parent.artifact_id, &parent.version, repo)
@@ -2554,7 +2626,7 @@ impl DependencyResolutionServiceImpl {
         lenient: bool,
     ) -> Result<TransitiveResolution, String> {
         let mut redirects = std::collections::HashSet::new();
-        let allowed_repos = Self::repositories_for_module(repos, group, name);
+        let allowed_repos = Self::repositories_for_dependency(repos, group, name, version);
         for repo in allowed_repos
             .iter()
             .filter(|repo| Self::supports_gradle_module_metadata(repo))
@@ -4003,6 +4075,8 @@ mod tests {
             exclude_group_prefixes: Vec::new(),
             include_modules: Vec::new(),
             exclude_modules: Vec::new(),
+            include_module_versions: Vec::new(),
+            exclude_module_versions: Vec::new(),
         }
     }
 
@@ -5814,6 +5888,186 @@ mod tests {
             *requests.lock().unwrap(),
             vec!["/selected/org/example/filtered/1.0/filtered-1.0.pom".to_string()]
         );
+    }
+
+    #[tokio::test]
+    async fn test_repository_version_content_filter_skips_non_matching_repo() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::{Arc, Mutex};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let requests_for_server = Arc::clone(&requests);
+        let pom = br#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.example</groupId>
+  <artifactId>filtered</artifactId>
+  <version>1.0</version>
+</project>"#
+            .to_vec();
+        let server = std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            while requests_for_server.lock().unwrap().is_empty()
+                && started.elapsed() < std::time::Duration::from_secs(5)
+            {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(stream) => stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                    Err(error) => panic!("repo accept failed: {error}"),
+                };
+                let mut request = [0u8; 2048];
+                let read = stream.read(&mut request).unwrap_or(0);
+                let path = String::from_utf8_lossy(&request[..read])
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("/")
+                    .to_string();
+                requests_for_server.lock().unwrap().push(path);
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/xml\r\n\r\n",
+                    pom.len()
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+                stream.write_all(&pom).unwrap();
+            }
+        });
+
+        let mut skipped = make_repo("skipped", &format!("http://{}/skipped", addr));
+        skipped.include_module_versions = vec!["org.example:filtered:2.0".to_string()];
+        let mut selected = make_repo("selected", &format!("http://{}/selected", addr));
+        selected.include_module_versions = vec!["org.example:filtered:1.0".to_string()];
+        selected.exclude_module_versions = vec!["org.example:filtered:0.9".to_string()];
+
+        let svc = make_svc();
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "runtimeClasspath".to_string(),
+                dependencies: vec![make_dep("org.example", "filtered", "1.0")],
+                repositories: vec![skipped, selected],
+                target_scope: "runtime".to_string(),
+                lenient: false,
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        server.join().unwrap();
+
+        assert!(response.success, "{}", response.error_message);
+        assert_eq!(
+            *requests.lock().unwrap(),
+            vec!["/selected/org/example/filtered/1.0/filtered-1.0.pom".to_string()]
+        );
+        assert!(response.resolved_dependencies[0]
+            .artifact_url
+            .starts_with(&format!("http://{}/selected/", addr)));
+    }
+
+    #[tokio::test]
+    async fn test_repository_exclude_version_content_filter_skips_repo() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::{Arc, Mutex};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let requests_for_server = Arc::clone(&requests);
+        let pom = br#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.example</groupId>
+  <artifactId>filtered</artifactId>
+  <version>1.0</version>
+</project>"#
+            .to_vec();
+        let server = std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            while requests_for_server.lock().unwrap().is_empty()
+                && started.elapsed() < std::time::Duration::from_secs(5)
+            {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(stream) => stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                    Err(error) => panic!("repo accept failed: {error}"),
+                };
+                let mut request = [0u8; 2048];
+                let read = stream.read(&mut request).unwrap_or(0);
+                let path = String::from_utf8_lossy(&request[..read])
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("/")
+                    .to_string();
+                requests_for_server.lock().unwrap().push(path);
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/xml\r\n\r\n",
+                    pom.len()
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+                stream.write_all(&pom).unwrap();
+            }
+        });
+
+        let mut excluded = make_repo("excluded", &format!("http://{}/excluded", addr));
+        excluded.exclude_module_versions = vec!["org.example:filtered:1.0".to_string()];
+        let selected = make_repo("selected", &format!("http://{}/selected", addr));
+
+        let svc = make_svc();
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "runtimeClasspath".to_string(),
+                dependencies: vec![make_dep("org.example", "filtered", "1.0")],
+                repositories: vec![excluded, selected],
+                target_scope: "runtime".to_string(),
+                lenient: false,
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        server.join().unwrap();
+
+        assert!(response.success, "{}", response.error_message);
+        assert_eq!(
+            *requests.lock().unwrap(),
+            vec!["/selected/org/example/filtered/1.0/filtered-1.0.pom".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_repository_version_content_filter_rejects_dynamic_selector() {
+        let mut repo = make_repo("filtered", "https://repo.example.test/maven");
+        repo.include_module_versions = vec!["org.example:filtered:1.0".to_string()];
+
+        let svc = make_svc();
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "runtimeClasspath".to_string(),
+                dependencies: vec![make_dep("org.example", "filtered", "[1.0,2.0)")],
+                repositories: vec![repo],
+                target_scope: "runtime".to_string(),
+                lenient: false,
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!response.success);
+        assert!(response
+            .error_message
+            .contains("Repository version content filters require a static version selector"));
     }
 
     #[tokio::test]
@@ -8088,6 +8342,8 @@ mod tests {
             exclude_group_prefixes: Vec::new(),
             include_modules: Vec::new(),
             exclude_modules: Vec::new(),
+            include_module_versions: Vec::new(),
+            exclude_module_versions: Vec::new(),
         };
 
         // The build_request method returns a RequestBuilder — we can't easily inspect it,

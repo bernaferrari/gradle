@@ -56,6 +56,9 @@ message RepositoryDescriptor {
   // Exact "group:module" repository content filters.
   repeated string include_modules = 12;
   repeated string exclude_modules = 13;
+  // Exact "group:module:version" repository content filters.
+  repeated string include_module_versions = 14;
+  repeated string exclude_module_versions = 15;
 }
 
 message ResolveDependenciesRequest {

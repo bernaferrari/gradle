@@ -689,6 +689,12 @@ async fn collect_shadow_dependencies(
                                         .clone(),
                                     include_modules: repository.include_modules.clone(),
                                     exclude_modules: repository.exclude_modules.clone(),
+                                    include_module_versions: repository
+                                        .include_module_versions
+                                        .clone(),
+                                    exclude_module_versions: repository
+                                        .exclude_module_versions
+                                        .clone(),
                                 })
                                 .collect(),
                             artifact.unsupported_features.clone(),

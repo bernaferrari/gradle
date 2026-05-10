@@ -281,6 +281,8 @@ impl TaskGraphServiceImpl {
                         exclude_group_prefixes: repository.exclude_group_prefixes,
                         include_modules: repository.include_modules,
                         exclude_modules: repository.exclude_modules,
+                        include_module_versions: repository.include_module_versions,
+                        exclude_module_versions: repository.exclude_module_versions,
                     })
                     .collect(),
                 unsupported_features: dependency.unsupported_features,

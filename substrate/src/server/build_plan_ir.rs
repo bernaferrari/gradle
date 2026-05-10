@@ -119,6 +119,10 @@ pub struct CanonicalBuildPlanRepository {
     pub include_modules: Vec<String>,
     #[serde(default)]
     pub exclude_modules: Vec<String>,
+    #[serde(default)]
+    pub include_module_versions: Vec<String>,
+    #[serde(default)]
+    pub exclude_module_versions: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -456,6 +460,8 @@ fn canonical_repository_to_proto(repository: CanonicalBuildPlanRepository) -> Re
         exclude_group_prefixes: repository.exclude_group_prefixes,
         include_modules: repository.include_modules,
         exclude_modules: repository.exclude_modules,
+        include_module_versions: repository.include_module_versions,
+        exclude_module_versions: repository.exclude_module_versions,
     }
 }
 
@@ -476,6 +482,8 @@ fn canonical_repository_from_proto(
         exclude_group_prefixes: repository.exclude_group_prefixes.clone(),
         include_modules: repository.include_modules.clone(),
         exclude_modules: repository.exclude_modules.clone(),
+        include_module_versions: repository.include_module_versions.clone(),
+        exclude_module_versions: repository.exclude_module_versions.clone(),
     }
 }
 
