@@ -2206,6 +2206,8 @@ mod tests {
                 exclude_group_prefixes: Vec::new(),
                 include_modules: Vec::new(),
                 exclude_modules: Vec::new(),
+                include_module_versions: Vec::new(),
+                exclude_module_versions: Vec::new(),
             });
         dependency
             .unsupported_features
@@ -2246,6 +2248,8 @@ mod tests {
                 exclude_group_prefixes: Vec::new(),
                 include_modules: Vec::new(),
                 exclude_modules: Vec::new(),
+                include_module_versions: Vec::new(),
+                exclude_module_versions: Vec::new(),
             });
 
         let graph = kernel_dependency_graph_from_plan_dependencies(&[dependency])
