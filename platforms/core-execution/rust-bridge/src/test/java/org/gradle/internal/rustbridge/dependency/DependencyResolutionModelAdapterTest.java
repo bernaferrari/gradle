@@ -138,11 +138,13 @@ public class DependencyResolutionModelAdapterTest {
                 new RepositoryWithContentSpecs(
                     setOf(
                         new ContentSpec("SIMPLE", "com.acme", null, null, true),
+                        new ContentSpec("SIMPLE", "com.acme", "api", null, true),
                         new ContentSpec("SIMPLE", "org.example", null, null, true),
                         new ContentSpec("SUB_GROUP", "net.demo", null, null, true)
                     ),
                     setOf(
                         new ContentSpec("SIMPLE", "com.acme.internal", null, null, false),
+                        new ContentSpec("SIMPLE", "com.acme", "secret", null, false),
                         new ContentSpec("SUB_GROUP", "net.demo.internal", null, null, false)
                     )
                 ),
@@ -153,6 +155,8 @@ public class DependencyResolutionModelAdapterTest {
         assertEquals(Collections.singletonList("com.acme.internal"), content.getExcludeGroups());
         assertEquals(Collections.singletonList("net.demo"), content.getIncludeGroupPrefixes());
         assertEquals(Collections.singletonList("net.demo.internal"), content.getExcludeGroupPrefixes());
+        assertEquals(Collections.singletonList("com.acme:api"), content.getIncludeModules());
+        assertEquals(Collections.singletonList("com.acme:secret"), content.getExcludeModules());
         assertTrue(content.getUnsupportedFeatures().isEmpty());
     }
 
@@ -168,6 +172,21 @@ public class DependencyResolutionModelAdapterTest {
             );
 
         assertTrue(content.getIncludeGroups().isEmpty());
+        assertTrue(content.getUnsupportedFeatures().contains("repository-content-filter:filtered"));
+    }
+
+    @Test
+    public void repositoryContentSpecsWithVersionRemainUnsupported() {
+        DependencyResolutionModelAdapter.RepositoryContentCapture content =
+            DependencyResolutionModelAdapter.repositoryContentCapture(
+                new RepositoryWithContentSpecs(
+                    setOf(new ContentSpec("SIMPLE", "com.acme", "api", "1.0", true)),
+                    Collections.emptySet()
+                ),
+                "filtered"
+            );
+
+        assertTrue(content.getIncludeModules().isEmpty());
         assertTrue(content.getUnsupportedFeatures().contains("repository-content-filter:filtered"));
     }
 

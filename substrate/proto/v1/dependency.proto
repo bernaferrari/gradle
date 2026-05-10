@@ -53,6 +53,9 @@ message RepositoryDescriptor {
   repeated string exclude_groups = 9;
   repeated string include_group_prefixes = 10;
   repeated string exclude_group_prefixes = 11;
+  // Exact "group:module" repository content filters.
+  repeated string include_modules = 12;
+  repeated string exclude_modules = 13;
 }
 
 message ResolveDependenciesRequest {

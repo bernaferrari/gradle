@@ -107,6 +107,8 @@ pub fn normalized_repositories(repositories: &[RepositoryDescriptor]) -> Vec<Rep
             exclude_groups: Vec::new(),
             include_group_prefixes: Vec::new(),
             exclude_group_prefixes: Vec::new(),
+            include_modules: Vec::new(),
+            exclude_modules: Vec::new(),
         }];
     }
     repositories
@@ -123,6 +125,8 @@ pub fn normalized_repositories(repositories: &[RepositoryDescriptor]) -> Vec<Rep
             exclude_groups: repo.exclude_groups.clone(),
             include_group_prefixes: repo.include_group_prefixes.clone(),
             exclude_group_prefixes: repo.exclude_group_prefixes.clone(),
+            include_modules: repo.include_modules.clone(),
+            exclude_modules: repo.exclude_modules.clone(),
         })
         .collect()
 }
@@ -433,6 +437,8 @@ mod tests {
             exclude_groups: Vec::new(),
             include_group_prefixes: Vec::new(),
             exclude_group_prefixes: Vec::new(),
+            include_modules: Vec::new(),
+            exclude_modules: Vec::new(),
         }
     }
 

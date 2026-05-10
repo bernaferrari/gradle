@@ -687,6 +687,8 @@ async fn collect_shadow_dependencies(
                                     exclude_group_prefixes: repository
                                         .exclude_group_prefixes
                                         .clone(),
+                                    include_modules: repository.include_modules.clone(),
+                                    exclude_modules: repository.exclude_modules.clone(),
                                 })
                                 .collect(),
                             artifact.unsupported_features.clone(),
