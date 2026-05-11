@@ -360,6 +360,8 @@ def scan_project_contract(project_dir: str) -> dict:
             unsupported_features.add("unsupported-test-filters")
         if re.search(r"\b(?:include|exclude)(?:Group|Module|Version)ByRegex\s*\(", text):
             unsupported_features.add("repository-content-filter")
+        if re.search(r"\bdependencySubstitution\s*\{", text):
+            unsupported_features.add("dependency-substitution")
 
     return {
         "build_file_count": len(build_files),
