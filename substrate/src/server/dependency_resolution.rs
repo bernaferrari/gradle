@@ -240,7 +240,7 @@ impl DependencyResolutionServiceImpl {
     }
 
     fn supports_gradle_module_metadata(repo: &RepositoryDescriptor) -> bool {
-        matches!(repo.layout.as_str(), "gradle-module-metadata" | "gradle")
+        crate::server::dependency_solver::metadata_source::supports_gradle_module_metadata(repo)
     }
 
     fn unsupported_repository_version_filter_reason(
