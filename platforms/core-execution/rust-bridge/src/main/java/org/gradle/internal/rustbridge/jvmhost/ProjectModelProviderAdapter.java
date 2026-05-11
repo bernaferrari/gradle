@@ -197,6 +197,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
                 DependencyResolutionModelAdapter.repositoriesForProject((Project) project);
             List<String> unsupportedFeatures = new ArrayList<>(repositoryCapture.getUnsupportedFeatures());
             unsupportedFeatures.addAll(unsupportedResolutionFeatures(configuration));
+            if (projectBuildScriptHasUnsupportedRepositoryContentFilter((Project) project)) {
+                unsupportedFeatures.add("repository-content-filter:build-script");
+            }
             List<JvmHostServiceImpl.ResolvedArtifactEntry> artifacts = new ArrayList<>();
             Object resolvedConfiguration = invoke(configuration, "getResolvedConfiguration");
             for (Object resolvedArtifact : asCollection(invoke(resolvedConfiguration, "getResolvedArtifacts"))) {
@@ -364,6 +367,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if (description != null && !description.isEmpty()) {
             inputs.put("description", description);
         }
+        captureUnsupportedRepositoryContract(task, inputs);
         if ("JavaCompile".equals(shortTaskTypeName)) {
             captureJavaCompileInputs(task, taskType, inputs);
         }
@@ -428,6 +432,39 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             .build());
 
         return builder.build();
+    }
+
+    private static void captureUnsupportedRepositoryContract(Task task, Map<String, String> inputs) {
+        try {
+            List<String> unsupportedFeatures =
+                DependencyResolutionModelAdapter.repositoriesForProject(task.getProject()).getUnsupportedFeatures();
+            if (projectBuildScriptHasUnsupportedRepositoryContentFilter(task.getProject())) {
+                unsupportedFeatures = new ArrayList<>(unsupportedFeatures);
+                unsupportedFeatures.add("repository-content-filter:build-script");
+            }
+            if (!unsupportedFeatures.isEmpty()) {
+                inputs.put("unsupported_dependency_semantics", "true");
+                inputs.put("unsupported_repository_features", String.join(",", unsupportedFeatures));
+            }
+        } catch (RuntimeException e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to inspect project repositories for unsupported native dependency semantics", e);
+        }
+    }
+
+    private static boolean projectBuildScriptHasUnsupportedRepositoryContentFilter(Project project) {
+        File buildFile = project.getBuildFile();
+        if (buildFile == null || !buildFile.isFile()) {
+            return false;
+        }
+        try {
+            String text = new String(Files.readAllBytes(buildFile.toPath()), StandardCharsets.UTF_8);
+            return Pattern.compile("\\b(?:include|exclude)(?:Group|Module|Version)ByRegex\\s*\\(")
+                .matcher(text)
+                .find();
+        } catch (Exception e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to inspect build script repository content filters", e);
+            return false;
+        }
     }
 
     private static void captureJavaCompileInputs(Task task, Class<?> taskType, Map<String, String> inputs) {

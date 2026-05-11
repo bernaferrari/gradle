@@ -234,12 +234,19 @@ fn kernel_task_contract_rejection(
         if value.get(key).and_then(|v| v.as_bool()).unwrap_or(false) {
             return Some(format!("unsupported contract marker '{}'", key));
         }
-        if value
-            .get("input_properties")
-            .and_then(|v| v.as_object())
+        let input_properties = value.get("input_properties").and_then(|v| v.as_object());
+        if input_properties
             .and_then(|props| props.get(key))
             .and_then(|v| v.as_str())
             == Some("true")
+            || input_properties
+                .and_then(|props| props.get(&format!("input.{key}")))
+                .and_then(|v| v.as_str())
+                == Some("true")
+            || input_properties
+                .and_then(|props| props.get(&format!("input_value.{key}")))
+                .and_then(|v| v.as_str())
+                == Some("true")
         {
             return Some(format!("unsupported contract marker '{}'", key));
         }
@@ -367,6 +374,36 @@ mod tests {
         assert!(rejection
             .message()
             .contains("copy_unsupported_custom_actions"));
+    }
+
+    #[test]
+    fn rejects_prefixed_unsupported_contract_marker_from_shadow_inputs() {
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![task(
+                ":classes",
+                "Lifecycle",
+                Some(
+                    serde_json::json!({
+                        "input_properties": {
+                            "input.unsupported_dependency_semantics": "true",
+                            "input.unsupported_repository_features": "repository-content-filter:maven"
+                        }
+                    })
+                    .to_string(),
+                ),
+            )],
+        };
+
+        let KernelAdmission::Rejected(rejection) =
+            admit_build_plan(&plan, &native_types(&["Lifecycle"]))
+        else {
+            panic!("expected rejection");
+        };
+        assert!(rejection
+            .message()
+            .contains("unsupported_dependency_semantics"));
     }
 
     #[test]

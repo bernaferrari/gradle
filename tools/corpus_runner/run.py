@@ -358,6 +358,8 @@ def scan_project_contract(project_dir: str) -> dict:
             unsupported_features.add("copy-eachfile-action")
         if has_unsupported_test_filters:
             unsupported_features.add("unsupported-test-filters")
+        if re.search(r"\b(?:include|exclude)(?:Group|Module|Version)ByRegex\s*\(", text):
+            unsupported_features.add("repository-content-filter")
 
     return {
         "build_file_count": len(build_files),
