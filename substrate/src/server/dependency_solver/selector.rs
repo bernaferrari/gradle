@@ -1,5 +1,8 @@
 use crate::proto::DependencyDescriptor;
 
+use super::ivyresolve::strategy::compare_versions;
+use super::maven_metadata::MavenMetadata;
+
 pub fn unsupported_version_selector_reason(version: &str) -> Option<String> {
     let trimmed = version.trim();
     if trimmed.is_empty() {
@@ -87,6 +90,93 @@ pub(crate) fn validate_rejected_versions(
     Ok(())
 }
 
+/// Resolve a supported Maven version selector to a concrete version.
+///
+/// Unsupported dynamic selectors such as empty strings and Ivy-style wildcard
+/// selectors return `None` so callers can fail closed instead of treating them
+/// as exact versions.
+pub(crate) fn resolve_version_range(
+    range: &str,
+    available: &[String],
+    metadata: Option<&MavenMetadata>,
+) -> Option<String> {
+    let range = range.trim();
+    if range.is_empty() || range.contains('+') {
+        return None;
+    }
+
+    if range == "latest.release" || range == "latest.integration" {
+        if let Some(meta) = metadata {
+            if let Some(release) = &meta.versioning.release {
+                return Some(release.clone());
+            }
+        }
+        return available.last().cloned();
+    }
+    if range == "LATEST" {
+        if let Some(meta) = metadata {
+            if let Some(latest) = &meta.versioning.latest {
+                return Some(latest.clone());
+            }
+        }
+        return available.last().cloned();
+    }
+    if range == "RELEASE" {
+        if let Some(meta) = metadata {
+            if let Some(release) = &meta.versioning.release {
+                return Some(release.clone());
+            }
+        }
+        return available.last().cloned();
+    }
+
+    if !range.starts_with('[') && !range.starts_with('(') {
+        return Some(range.to_string());
+    }
+    if !(range.ends_with(']') || range.ends_with(')')) || range.len() < 2 {
+        return None;
+    }
+
+    let inner: &str = &range[1..range.len() - 1];
+    let parts: Vec<&str> = inner.split(',').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+
+    let start = parts[0].trim();
+    let end = parts[1].trim();
+    let start_inclusive = range.starts_with('[');
+    let end_inclusive = range.ends_with(']');
+
+    use std::cmp::Ordering;
+    let matching: Vec<&String> = available
+        .iter()
+        .filter(|v| {
+            if !start.is_empty() {
+                let cmp = compare_versions(v, start);
+                if start_inclusive && cmp == Ordering::Less {
+                    return false;
+                }
+                if !start_inclusive && cmp != Ordering::Greater {
+                    return false;
+                }
+            }
+            if !end.is_empty() {
+                let cmp = compare_versions(v, end);
+                if end_inclusive && cmp == Ordering::Greater {
+                    return false;
+                }
+                if !end_inclusive && cmp != Ordering::Less {
+                    return false;
+                }
+            }
+            true
+        })
+        .collect();
+
+    matching.last().map(|v| (*v).clone())
+}
+
 fn looks_like_version_range(version: &str) -> bool {
     (version.starts_with('[') || version.starts_with('('))
         && (version.ends_with(']') || version.ends_with(')'))
@@ -96,6 +186,7 @@ fn looks_like_version_range(version: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::dependency_solver::maven_metadata::MavenVersioning;
 
     #[test]
     fn native_selector_policy_rejects_gradle_dynamic_forms() {
@@ -109,5 +200,66 @@ mod tests {
             .unwrap()
             .contains("version ranges"));
         assert!(unsupported_native_version_selector_reason("1.2.3").is_none());
+    }
+
+    #[test]
+    fn resolves_exact_and_range_selectors() {
+        let available = vec![
+            "1.0.0".to_string(),
+            "1.5.0".to_string(),
+            "2.0.0".to_string(),
+            "2.5.0".to_string(),
+        ];
+
+        assert_eq!(
+            resolve_version_range("1.0.0", &available, None),
+            Some("1.0.0".to_string())
+        );
+        assert_eq!(
+            resolve_version_range("[1.0.0,2.0.0)", &available, None),
+            Some("1.5.0".to_string())
+        );
+        assert_eq!(
+            resolve_version_range("(1.0,)", &available, None),
+            Some("2.5.0".to_string())
+        );
+    }
+
+    #[test]
+    fn resolves_latest_and_release_from_metadata() {
+        let available = vec!["1.0.0".to_string(), "2.0.0".to_string()];
+        let metadata = MavenMetadata {
+            group_id: String::new(),
+            artifact_id: String::new(),
+            versioning: MavenVersioning {
+                latest: Some("2.0.0".to_string()),
+                release: Some("1.5.0".to_string()),
+                last_updated: None,
+                snapshot: None,
+                versions: available.clone(),
+            },
+        };
+
+        assert_eq!(
+            resolve_version_range("RELEASE", &available, Some(&metadata)),
+            Some("1.5.0".to_string())
+        );
+        assert_eq!(
+            resolve_version_range("LATEST", &available, Some(&metadata)),
+            Some("2.0.0".to_string())
+        );
+        assert_eq!(
+            resolve_version_range("latest.release", &available, Some(&metadata)),
+            Some("1.5.0".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_range_patterns() {
+        let available = vec!["1.0.0".to_string(), "1.2.0".to_string()];
+
+        assert_eq!(resolve_version_range("1.+", &available, None), None);
+        assert_eq!(resolve_version_range("", &available, None), None);
+        assert_eq!(resolve_version_range("  ", &available, None), None);
     }
 }
