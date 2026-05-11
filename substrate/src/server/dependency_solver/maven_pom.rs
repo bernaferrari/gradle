@@ -212,6 +212,27 @@ pub fn effective_exclusions(
         .unwrap_or_default()
 }
 
+/// Check if a dependency matches an exclusion pattern.
+///
+/// An exclusion with group `*` matches any group; artifactId `*` matches any
+/// artifact. Both dimensions must match for the exclusion to apply.
+pub(crate) fn matches_exclusion(
+    dep_group: &str,
+    dep_name: &str,
+    excl_group: &str,
+    excl_name: &str,
+) -> bool {
+    let group_matches = excl_group == "*" || excl_group == dep_group;
+    let name_matches = excl_name == "*" || excl_name == dep_name;
+    group_matches && name_matches
+}
+
+pub(crate) fn is_dependency_excluded(dep: &PomDependency, exclusions: &[(String, String)]) -> bool {
+    exclusions.iter().any(|(excl_group, excl_name)| {
+        matches_exclusion(&dep.group, &dep.name, excl_group, excl_name)
+    })
+}
+
 /// Parse the `<parent>` section from a POM file.
 pub(crate) fn parse_parent_pom(pom_content: &str) -> Option<ParentPom> {
     let bytes = pom_content.as_bytes();
@@ -524,5 +545,28 @@ mod tests {
             interpolate_properties("${project.version}", &props),
             "0.0.0-unknown"
         );
+    }
+
+    #[test]
+    fn matches_exact_and_wildcard_exclusions() {
+        assert!(matches_exclusion(
+            "org.example",
+            "child",
+            "org.example",
+            "child"
+        ));
+        assert!(matches_exclusion("*", "child", "*", "child"));
+        assert!(matches_exclusion(
+            "org.example",
+            "child",
+            "org.example",
+            "*"
+        ));
+        assert!(!matches_exclusion(
+            "org.example",
+            "child",
+            "org.other",
+            "child"
+        ));
     }
 }
