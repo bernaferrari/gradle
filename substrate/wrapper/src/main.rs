@@ -419,7 +419,9 @@ fn env_truthy(name: &str) -> bool {
 
 fn parse_wrapper_cli(args: impl IntoIterator<Item = String>) -> WrapperCli {
     let mut gradle_args = Vec::new();
-    let mut substrate_mode = if env_truthy("GRADLEW_RUST_SUBSTRATE_AUTHORITATIVE") {
+    let mut substrate_mode = if env_truthy("GRADLEW_RUST_SUBSTRATE_KERNEL")
+        || env_truthy("GRADLEW_RUST_SUBSTRATE_AUTHORITATIVE")
+    {
         SubstrateCliMode::Authoritative
     } else if env_truthy("GRADLEW_RUST_SUBSTRATE") {
         SubstrateCliMode::NativeReadyDefault
@@ -430,6 +432,7 @@ fn parse_wrapper_cli(args: impl IntoIterator<Item = String>) -> WrapperCli {
     for arg in args {
         match arg.as_str() {
             "--rust-substrate" => substrate_mode = SubstrateCliMode::NativeReadyDefault,
+            "--rust-substrate-kernel" => substrate_mode = SubstrateCliMode::Authoritative,
             "--rust-substrate-authoritative" => substrate_mode = SubstrateCliMode::Authoritative,
             "--no-rust-substrate" => substrate_mode = SubstrateCliMode::Off,
             _ => gradle_args.push(arg),
@@ -812,7 +815,8 @@ fn print_usage() {
     eprintln!(
         "  --rust-substrate                 Try Rust RunBuild first, delegate if unsupported"
     );
-    eprintln!("  --rust-substrate-authoritative   Require Rust RunBuild with no JVM task fallback");
+    eprintln!("  --rust-substrate-kernel          Require Rust execution-kernel admission with no JVM task fallback");
+    eprintln!("  --rust-substrate-authoritative   Compatibility alias for --rust-substrate-kernel");
     eprintln!("  --no-rust-substrate              Disable GRADLEW_RUST_SUBSTRATE env opt-in");
 }
 
@@ -1083,6 +1087,18 @@ distributionSha256Sum=abc123
     fn test_parse_wrapper_cli_strips_authoritative_flag() {
         let cli = parse_wrapper_cli(vec![
             "--rust-substrate-authoritative".to_string(),
+            "clean".to_string(),
+            "build".to_string(),
+        ]);
+
+        assert_eq!(cli.substrate_mode, SubstrateCliMode::Authoritative);
+        assert_eq!(cli.gradle_args, vec!["clean", "build"]);
+    }
+
+    #[test]
+    fn test_parse_wrapper_cli_strips_kernel_flag() {
+        let cli = parse_wrapper_cli(vec![
+            "--rust-substrate-kernel".to_string(),
             "clean".to_string(),
             "build".to_string(),
         ]);

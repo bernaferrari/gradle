@@ -93,8 +93,8 @@ cargo test -p gradle-substrate-daemon --test hash_compatibility_test
 cargo test -p gradle-substrate-daemon --test build_plan_ir_golden_test
 cargo test -p gradle-substrate-daemon --test build_plan_shadow_test refreshed_native_ready_shadow_plan_runs_java_lifecycle_without_jvm_fallback -- --exact
 ./gradlew :core:test --tests org.gradle.execution.RustAuthoritativeBuildExecutionActionTest -x :distributions-core:generateLicenseFile
-python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --verbose
-python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --verbose
+python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --daemon-binary target/debug/gradle-substrate-daemon --execution-kernel --tasks clean build --timeout 300 --verbose
+python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --daemon-binary target/debug/gradle-substrate-daemon --execution-kernel --tasks clean build --timeout 300 --verbose
 ./tools/stabilization/run_strict_stabilization.sh quick
 ./tools/demo/rust_substrate_demo.sh --quick
 ```
@@ -105,7 +105,9 @@ admits or rejects the whole selected build plan before task dispatch, and
 Gradle skips its JVM task executor only after Rust `RunBuild` completes exactly
 the scheduled task count with zero JVM forwards; otherwise the build fails
 closed. The older `runbuild.authoritative` property is a compatibility alias for
-this strict kernel mode, not the primary product contract. Selected native-ready
+this strict kernel mode, not the primary product contract. The Rust wrapper's
+strict user-facing flag is `--rust-substrate-kernel`; the older
+`--rust-substrate-authoritative` flag remains an alias. Selected native-ready
 task contracts are captured eagerly at Gradle task-graph population and reused
 when they exactly match the finalized execution plan, so Rust controls the
 scheduled DAG without a build-script parser classpath fallback. The offline
