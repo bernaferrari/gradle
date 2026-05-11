@@ -124,6 +124,41 @@ pub(crate) fn parse_maven_metadata(xml: &str) -> Result<MavenMetadata, String> {
     Ok(metadata)
 }
 
+/// Resolve a Maven `-SNAPSHOT` selector from parsed metadata.
+///
+/// Returns `Some(raw_version)` for `<localCopy>true</localCopy>` because Maven
+/// keeps local-copy snapshots under the base SNAPSHOT coordinate. Returns
+/// `None` when the metadata does not contain enough information.
+pub(crate) fn resolve_snapshot_version_from_metadata(
+    raw_version: &str,
+    metadata: &MavenMetadata,
+) -> Option<String> {
+    if !raw_version.ends_with("-SNAPSHOT") {
+        return None;
+    }
+
+    if let Some(snapshot) = &metadata.versioning.snapshot {
+        if snapshot.local_copy {
+            return Some(raw_version.to_string());
+        }
+
+        let timestamp = snapshot.timestamp.as_deref().unwrap_or("");
+        let build_number = snapshot.build_number.as_deref().unwrap_or("");
+        if !timestamp.is_empty() && !build_number.is_empty() {
+            let base = &raw_version[..raw_version.len() - "-SNAPSHOT".len()];
+            return Some(format!("{base}-{timestamp}-{build_number}"));
+        }
+    }
+
+    let base = &raw_version[..raw_version.len() - "-SNAPSHOT".len()];
+    metadata
+        .versioning
+        .versions
+        .iter()
+        .rfind(|version| !version.ends_with("-SNAPSHOT") && version.starts_with(base))
+        .cloned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,5 +231,70 @@ mod tests {
         assert!(meta.group_id.is_empty());
         assert!(meta.artifact_id.is_empty());
         assert!(meta.versioning.versions.is_empty());
+    }
+
+    #[test]
+    fn resolves_timestamped_snapshot_from_snapshot_section() {
+        let meta = parse_maven_metadata(
+            r#"<metadata>
+  <versioning>
+    <snapshot>
+      <timestamp>20240101.120000</timestamp>
+      <buildNumber>1</buildNumber>
+    </snapshot>
+  </versioning>
+</metadata>"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolve_snapshot_version_from_metadata("1.0-SNAPSHOT", &meta),
+            Some("1.0-20240101.120000-1".to_string())
+        );
+    }
+
+    #[test]
+    fn preserves_local_copy_snapshot_version() {
+        let meta = parse_maven_metadata(
+            r#"<metadata>
+  <versioning>
+    <snapshot>
+      <timestamp>20240101.120000</timestamp>
+      <buildNumber>1</buildNumber>
+      <localCopy>true</localCopy>
+    </snapshot>
+  </versioning>
+</metadata>"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolve_snapshot_version_from_metadata("1.0-SNAPSHOT", &meta),
+            Some("1.0-SNAPSHOT".to_string())
+        );
+    }
+
+    #[test]
+    fn resolves_snapshot_from_versions_list_when_snapshot_section_missing() {
+        let meta = MavenMetadata {
+            group_id: "com.example".to_string(),
+            artifact_id: "my-lib".to_string(),
+            versioning: MavenVersioning {
+                latest: None,
+                release: None,
+                last_updated: None,
+                snapshot: None,
+                versions: vec![
+                    "1.0-SNAPSHOT".to_string(),
+                    "1.0-20240101.120000-1".to_string(),
+                    "1.0-20240215.090000-2".to_string(),
+                ],
+            },
+        };
+
+        assert_eq!(
+            resolve_snapshot_version_from_metadata("1.0-SNAPSHOT", &meta),
+            Some("1.0-20240215.090000-2".to_string())
+        );
     }
 }
