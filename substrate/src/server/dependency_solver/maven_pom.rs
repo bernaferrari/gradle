@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::proto::DependencyDescriptor;
 
@@ -44,6 +44,13 @@ pub(crate) struct PomRegularDependency {
 pub(crate) enum PomDependencyPlan {
     BomImport(BomImport),
     Regular(PomRegularDependency),
+}
+
+pub(crate) struct PomInheritanceState {
+    current_pom: String,
+    visited_parents: HashSet<(String, String, String)>,
+    pub(crate) properties: HashMap<String, String>,
+    pub(crate) managed: HashMap<(String, String), ManagedDependency>,
 }
 
 /// Parsed `<parent>` section from a POM file.
@@ -328,6 +335,53 @@ pub(crate) fn child_descriptor_from_regular_dependency(
         },
         plan.effective_exclusions.clone(),
     ))
+}
+
+impl PomInheritanceState {
+    pub(crate) fn new(child_pom: &str) -> Self {
+        Self {
+            current_pom: child_pom.to_string(),
+            visited_parents: HashSet::with_capacity(8),
+            properties: parse_pom_properties(child_pom),
+            managed: parse_dependency_management(child_pom),
+        }
+    }
+
+    pub(crate) fn next_parent(&mut self) -> Option<ParentPom> {
+        let parent = parse_parent_pom(&self.current_pom)?;
+        let parent_key = (
+            parent.group_id.clone(),
+            parent.artifact_id.clone(),
+            parent.version.clone(),
+        );
+        if !self.visited_parents.insert(parent_key) {
+            return None;
+        }
+        Some(parent)
+    }
+
+    pub(crate) fn merge_parent_pom(&mut self, parent_pom: String) {
+        let parent_props = parse_pom_properties(&parent_pom);
+        for (key, value) in parent_props {
+            self.properties.entry(key).or_insert(value);
+        }
+
+        let parent_managed = parse_dependency_management(&parent_pom);
+        for (key, value) in parent_managed {
+            self.managed.entry(key).or_insert(value);
+        }
+
+        self.current_pom = parent_pom;
+    }
+
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        HashMap<String, String>,
+        HashMap<(String, String), ManagedDependency>,
+    ) {
+        (self.properties, self.managed)
+    }
 }
 
 /// Check if a dependency matches an exclusion pattern.
@@ -833,5 +887,75 @@ mod tests {
             &[("org.bad".to_string(), "*".to_string())],
         )
         .is_none());
+    }
+
+    #[test]
+    fn inheritance_state_merges_parent_properties_and_managed_defaults() {
+        let child_pom = r#"<project>
+  <parent>
+    <groupId>org.example</groupId>
+    <artifactId>parent</artifactId>
+    <version>1.0</version>
+  </parent>
+  <properties>
+    <child.only>true</child.only>
+    <shared>child</shared>
+  </properties>
+</project>"#;
+        let parent_pom = r#"<project>
+  <properties>
+    <parent.only>true</parent.only>
+    <shared>parent</shared>
+  </properties>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-api</artifactId>
+        <version>2.0.9</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+</project>"#;
+
+        let mut state = PomInheritanceState::new(child_pom);
+        let parent = state.next_parent().unwrap();
+        assert_eq!(parent.group_id, "org.example");
+        assert_eq!(parent.artifact_id, "parent");
+
+        state.merge_parent_pom(parent_pom.to_string());
+        let (properties, managed) = state.into_parts();
+
+        assert_eq!(
+            properties.get("child.only").map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            properties.get("parent.only").map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(properties.get("shared").map(String::as_str), Some("child"));
+        assert_eq!(
+            managed
+                .get(&("org.slf4j".to_string(), "slf4j-api".to_string()))
+                .map(|dep| dep.version.as_str()),
+            Some("2.0.9")
+        );
+    }
+
+    #[test]
+    fn inheritance_state_stops_on_parent_cycle() {
+        let pom = r#"<project>
+  <parent>
+    <groupId>org.example</groupId>
+    <artifactId>parent</artifactId>
+    <version>1.0</version>
+  </parent>
+</project>"#;
+
+        let mut state = PomInheritanceState::new(pom);
+        assert!(state.next_parent().is_some());
+        state.merge_parent_pom(pom.to_string());
+        assert!(state.next_parent().is_none());
     }
 }

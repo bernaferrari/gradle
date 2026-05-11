@@ -21,7 +21,9 @@ use super::dependency_solver::gradle_module_metadata::{self, ModuleMetadataSelec
 use super::dependency_solver::graph_builder;
 use super::dependency_solver::ivyresolve::strategy::compare_versions;
 use super::dependency_solver::maven_metadata::{self, MavenMetadata, MavenVersioning};
-use super::dependency_solver::maven_pom::{self, ParentPom, PomDependencyPlan};
+use super::dependency_solver::maven_pom::{
+    self, ParentPom, PomDependencyPlan, PomInheritanceState,
+};
 pub use super::dependency_solver::maven_pom::{ManagedDependency, PomDependency};
 use super::dependency_solver::resolved_graph::TransitiveResolution;
 pub use super::dependency_solver::resolveengine::graph::conflicts::ResolutionStrategy;
@@ -1731,27 +1733,13 @@ impl DependencyResolutionServiceImpl {
         std::collections::HashMap<String, String>,
         std::collections::HashMap<(String, String), ManagedDependency>,
     ) {
-        let mut properties = Self::parse_pom_properties(pom_content);
-        let mut managed = Self::parse_dependency_management(pom_content);
-
-        let mut current_pom = pom_content.to_string();
-        let mut visited_parents = std::collections::HashSet::with_capacity(8);
+        let mut inheritance = PomInheritanceState::new(pom_content);
 
         for _ in 0..MAX_PARENT_DEPTH {
-            let parent = match Self::parse_parent_pom(&current_pom) {
+            let parent = match inheritance.next_parent() {
                 Some(p) => p,
                 None => break,
             };
-
-            let parent_key = (
-                parent.group_id.clone(),
-                parent.artifact_id.clone(),
-                parent.version.clone(),
-            );
-            if !visited_parents.insert(parent_key) {
-                tracing::debug!("Parent cycle detected, stopping inheritance chain");
-                break;
-            }
 
             // Fetch parent POM from repos
             let mut parent_content = None;
@@ -1788,17 +1776,7 @@ impl DependencyResolutionServiceImpl {
                 None => break,
             };
 
-            // Merge: child properties override parent, parent fills gaps
-            let parent_props = Self::parse_pom_properties(&parent_pom);
-            for (k, v) in parent_props {
-                properties.entry(k).or_insert(v);
-            }
-
-            // Merge: child managed deps override parent, parent fills gaps
-            let parent_managed = Self::parse_dependency_management(&parent_pom);
-            for (k, v) in parent_managed {
-                managed.entry(k).or_insert(v);
-            }
+            inheritance.merge_parent_pom(parent_pom);
 
             tracing::debug!(
                 parent_group = %parent.group_id,
@@ -1806,11 +1784,9 @@ impl DependencyResolutionServiceImpl {
                 parent_version = %parent.version,
                 "Inherited properties and managed deps from parent POM"
             );
-
-            current_pom = parent_pom;
         }
 
-        (properties, managed)
+        inheritance.into_parts()
     }
 
     /// Fetch a POM from repositories and recursively resolve its transitive dependencies.
