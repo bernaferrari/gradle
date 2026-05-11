@@ -1549,40 +1549,28 @@ impl DependencyResolutionServiceImpl {
         }
 
         // Resolve version ranges, LATEST, RELEASE, and SNAPSHOT
-        let selected_version = if raw_version.contains(',')
-            || raw_version.starts_with('[')
-            || raw_version.starts_with('(')
-            || raw_version == "LATEST"
-            || raw_version == "RELEASE"
-        {
-            let (available, metadata) = self
-                .fetch_available_versions(&group, &name, &allowed_repos)
-                .await;
-            if !available.is_empty() {
-                Self::resolve_version_range(&raw_version, &available, metadata.as_ref())
-                    .unwrap_or(raw_version.clone())
+        let selected_version =
+            if crate::server::dependency_solver::selector::requires_version_metadata(&raw_version) {
+                let (available, metadata) = self
+                    .fetch_available_versions(&group, &name, &allowed_repos)
+                    .await;
+                if !available.is_empty() {
+                    Self::resolve_version_range(&raw_version, &available, metadata.as_ref())
+                        .unwrap_or(raw_version.clone())
+                } else {
+                    raw_version.clone()
+                }
+            } else if raw_version.ends_with("-SNAPSHOT") {
+                // SNAPSHOT version — resolve to timestamped version via maven-metadata.xml
+                self.resolve_snapshot_version(&group, &name, &raw_version, &allowed_repos)
+                    .await
             } else {
                 raw_version.clone()
-            }
-        } else if raw_version.ends_with("-SNAPSHOT") {
-            // SNAPSHOT version — resolve to timestamped version via maven-metadata.xml
-            self.resolve_snapshot_version(&group, &name, &raw_version, &allowed_repos)
-                .await
-        } else {
-            raw_version.clone()
-        };
+            };
 
         if selected_version != raw_version {
-            let strategy = if raw_version.contains(',')
-                || raw_version.starts_with('[')
-                || raw_version.starts_with('(')
-            {
-                "range"
-            } else if raw_version.ends_with("-SNAPSHOT") {
-                "snapshot"
-            } else {
-                "latest"
-            };
+            let strategy =
+                crate::server::dependency_solver::selector::resolution_strategy_label(&raw_version);
             tracing::info!(
                 group = %group,
                 name = %name,
