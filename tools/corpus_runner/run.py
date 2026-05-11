@@ -368,6 +368,8 @@ def scan_project_contract(project_dir: str) -> dict:
             unsupported_features.add("detached-configuration")
         if re.search(r"\bartifactView\s*\{", text):
             unsupported_features.add("artifact-view")
+        if re.search(r"\bregisterTransform(?:\s*<[^>]+>)?\s*\(", text):
+            unsupported_features.add("artifact-transform")
         if re.search(r"\bincludeBuild\s*\(", text):
             unsupported_features.add("composite-substitution")
 
