@@ -172,20 +172,6 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
         if (nonEmptyMap(invokeIfPresent(repository, "getRequiredAttributes"))) {
             unsupported.add("repository-content-attributes:" + name);
         }
-        Object contentFilter = invokeIfPresent(repository, "getContentFilter");
-        if (contentFilter != null
-            && !isGradleDoNothingAction(contentFilter)
-            && includeGroups.isEmpty()
-            && excludeGroups.isEmpty()
-            && includeGroupPrefixes.isEmpty()
-            && excludeGroupPrefixes.isEmpty()
-            && includeModules.isEmpty()
-            && excludeModules.isEmpty()
-            && includeModuleVersions.isEmpty()
-            && excludeModuleVersions.isEmpty()
-            && unsupported.isEmpty()) {
-            unsupported.add("repository-content-filter:" + name);
-        }
         return new RepositoryContentCapture(includeGroups, excludeGroups, includeGroupPrefixes, excludeGroupPrefixes, includeModules, excludeModules, includeModuleVersions, excludeModuleVersions, unsupported);
     }
 
@@ -282,10 +268,6 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
 
     private static boolean nonEmptyMap(@Nullable Object value) {
         return value instanceof Map && !((Map<?, ?>) value).isEmpty();
-    }
-
-    private static boolean isGradleDoNothingAction(Object action) {
-        return "org.gradle.internal.Actions$NullAction".equals(action.getClass().getName());
     }
 
     static List<String> unsupportedMetadataRuleMarkers(Object repository, String name) {
