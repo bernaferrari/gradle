@@ -129,6 +129,24 @@
         "toolchains": ["17"],
         "unsupported_features": ["artifact-view"]
       }
+    },
+    {
+      "name": "composite-substitution-unsupported-kotlin-dsl",
+      "path": "composite-substitution-unsupported-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_substrate_fail_closed": true,
+      "expected_contract": {
+        "build_file_count": 2,
+        "settings_file_count": 1,
+        "source_file_count": 2,
+        "plugins": ["java-library"],
+        "tasks": [],
+        "outputs": [],
+        "dependencies": ["org.gradle.substrate:included-lib:1.0"],
+        "project_dependencies": [],
+        "toolchains": ["17"],
+        "unsupported_features": ["composite-substitution"]
+      }
     }
   ]
 }

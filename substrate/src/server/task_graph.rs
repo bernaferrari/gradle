@@ -17,7 +17,9 @@ use crate::proto::{
     TaskStartedRequest, TaskStartedResponse,
 };
 
-use super::build_plan_ir::{CanonicalBuildPlanDependency, CanonicalBuildPlanTask};
+use super::build_plan_ir::{
+    CanonicalBuildPlanDependency, CanonicalBuildPlanProject, CanonicalBuildPlanTask,
+};
 use super::build_plan_shadow::BuildPlanShadowStore;
 use super::execution_history::ExecutionHistoryServiceImpl;
 use super::scopes::BuildId;
@@ -152,6 +154,13 @@ impl TaskGraphServiceImpl {
         self.tasks.iter().any(|entry| entry.key().0 == *build_id)
     }
 
+    fn contexts_declare_composite_build(&self, build_id: &BuildId) -> bool {
+        self.tasks
+            .iter()
+            .filter(|entry| entry.key().0 == *build_id)
+            .any(|entry| execution_context_declares_composite_build(&entry.execution_context_json))
+    }
+
     fn hydrate_from_shadow_plan(
         &self,
         build_id: &BuildId,
@@ -179,6 +188,7 @@ impl TaskGraphServiceImpl {
         }
 
         let plan_dependencies = artifact.plan.dependencies.clone();
+        let composite_build_project_paths = composite_build_project_paths(&artifact.plan.projects);
         let mut plan_tasks = artifact.plan.tasks;
         let task_outputs: HashMap<String, Vec<String>> = plan_tasks
             .iter()
@@ -193,6 +203,16 @@ impl TaskGraphServiceImpl {
 
         let mut loaded = 0usize;
         for mut task in plan_tasks.drain(..) {
+            if composite_build_project_paths.contains(&task.project_path) {
+                task.inputs.insert(
+                    "unsupported_dependency_semantics".to_string(),
+                    "true".to_string(),
+                );
+                task.inputs.insert(
+                    "unsupported_repository_features".to_string(),
+                    "composite-substitution:settings".to_string(),
+                );
+            }
             enrich_task_contract_from_graph(&mut task, &task_outputs, &plan_dependencies);
             if !clean_tasks.is_empty() && !is_clean_task_path(&task.path) {
                 for clean_task in &clean_tasks {
@@ -255,7 +275,9 @@ impl TaskGraphServiceImpl {
                 return Vec::new();
             }
         };
-        artifact
+        let has_composite_substitution =
+            !composite_build_project_paths(&artifact.plan.projects).is_empty();
+        let mut dependencies = artifact
             .plan
             .dependencies
             .into_iter()
@@ -287,7 +309,21 @@ impl TaskGraphServiceImpl {
                     .collect(),
                 unsupported_features: dependency.unsupported_features,
             })
-            .collect()
+            .collect::<Vec<_>>();
+        if has_composite_substitution {
+            for dependency in &mut dependencies {
+                if !dependency
+                    .unsupported_features
+                    .iter()
+                    .any(|feature| feature == "composite-substitution:settings")
+                {
+                    dependency
+                        .unsupported_features
+                        .push("composite-substitution:settings".to_string());
+                }
+            }
+        }
+        dependencies
     }
 
     /// Kahn's algorithm for topological sort with parallel scheduling.
@@ -569,6 +605,64 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
         ("lifecycle", _) | (_, "Lifecycle") if no_task_actions(task) => "Lifecycle".to_string(),
         _ => task.implementation_id.clone(),
     }
+}
+
+fn composite_build_project_paths(projects: &[CanonicalBuildPlanProject]) -> HashSet<String> {
+    let composite_roots = projects
+        .iter()
+        .filter(|project| settings_declares_included_build(&project.project_dir))
+        .map(|project| project.path.as_str())
+        .collect::<HashSet<_>>();
+    if composite_roots.is_empty() {
+        return HashSet::new();
+    }
+
+    projects
+        .iter()
+        .filter(|project| {
+            composite_roots.iter().any(|root_path| {
+                project.path == *root_path
+                    || (*root_path == ":" && !project.path.starts_with(":included"))
+                    || (root_path != &":" && project.path.starts_with(&format!("{}:", root_path)))
+            })
+        })
+        .map(|project| project.path.clone())
+        .collect()
+}
+
+fn settings_declares_included_build(project_dir: &str) -> bool {
+    let dir = Path::new(project_dir);
+    ["settings.gradle.kts", "settings.gradle"]
+        .iter()
+        .map(|name| dir.join(name))
+        .any(|path| {
+            std::fs::read_to_string(path)
+                .map(|text| text.contains("includeBuild(") || text.contains("includeBuild ("))
+                .unwrap_or(false)
+        })
+}
+
+fn execution_context_declares_composite_build(context_json: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(context_json) else {
+        return false;
+    };
+    ["source_files", "output_files"]
+        .iter()
+        .filter_map(|key| value.get(*key))
+        .filter_map(|paths| paths.as_array())
+        .flat_map(|paths| paths.iter())
+        .filter_map(|path| path.as_str())
+        .filter_map(project_dir_from_build_path)
+        .any(|project_dir| settings_declares_included_build(&project_dir))
+}
+
+fn project_dir_from_build_path(path: &str) -> Option<String> {
+    let parts = path.split('/').collect::<Vec<_>>();
+    let build_index = parts.iter().position(|part| *part == "build")?;
+    if build_index == 0 {
+        return None;
+    }
+    Some(parts[..build_index].join("/"))
 }
 
 fn logical_gradle_task_type(simple: &str) -> String {
@@ -2129,7 +2223,24 @@ impl TaskGraphService for TaskGraphServiceImpl {
         };
 
         let (execution_order, critical_path_ms, has_cycles) = self.resolve_plan(&build_id);
-        let plan_dependencies = self.load_shadow_plan_dependencies(&req.build_id, plan_source);
+        let mut plan_dependencies = self.load_shadow_plan_dependencies(&req.build_id, plan_source);
+        if self.contexts_declare_composite_build(&build_id)
+            && !plan_dependencies.iter().any(|dependency| {
+                dependency
+                    .unsupported_features
+                    .iter()
+                    .any(|feature| feature == "composite-substitution:settings")
+            })
+        {
+            plan_dependencies.push(BuildPlanDependency {
+                project_path: ":".to_string(),
+                configuration: "composite-build".to_string(),
+                notation: "includeBuild".to_string(),
+                kind: "dependency".to_string(),
+                repositories: Vec::new(),
+                unsupported_features: vec!["composite-substitution:settings".to_string()],
+            });
+        }
 
         let total = self.tasks.iter().filter(|e| e.key().0 == build_id).count() as i32;
         let skipped = self
@@ -2401,6 +2512,27 @@ mod tests {
             system_property_inputs: Vec::new(),
             diagnostics: Vec::new(),
         }
+    }
+
+    #[test]
+    fn test_execution_context_detects_composite_build_settings() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("settings.gradle.kts"),
+            "includeBuild(\"included\")",
+        )
+        .unwrap();
+        let output = temp
+            .path()
+            .join("build/classes/java/main/App.class")
+            .to_string_lossy()
+            .into_owned();
+        let context = serde_json::json!({
+            "output_files": [output]
+        })
+        .to_string();
+
+        assert!(execution_context_declares_composite_build(&context));
     }
 
     #[test]
