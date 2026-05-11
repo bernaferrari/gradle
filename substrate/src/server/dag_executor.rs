@@ -694,6 +694,25 @@ fn kernel_dependency_graph_from_plan_dependencies(
     Some(KernelDependencyGraph { configurations })
 }
 
+fn unsupported_plan_dependency_reason(
+    plan_dependencies: &[crate::proto::BuildPlanDependency],
+) -> Option<String> {
+    for dependency in plan_dependencies {
+        for feature in &dependency.unsupported_features {
+            let feature = feature.trim();
+            if !feature.is_empty() {
+                let configuration =
+                    format!("{}:{}", dependency.project_path, dependency.configuration);
+                return Some(format!(
+                    "dependency configuration '{}' uses unsupported feature '{}'",
+                    configuration, feature
+                ));
+            }
+        }
+    }
+    None
+}
+
 fn project_dependency_path_from_notation(notation: &str) -> Option<String> {
     let trimmed = notation.trim();
     if let Some(rest) = trimmed.strip_prefix("project ") {
@@ -759,6 +778,20 @@ impl DagExecutorService for DagExecutorServiceImpl {
             .await
             .map_err(|e| Status::internal(format!("Failed to resolve execution plan: {}", e)))?
             .into_inner();
+
+        if let Some(reason) = unsupported_plan_dependency_reason(&plan_response.plan_dependencies) {
+            return Ok(Response::new(StartBuildResponse {
+                accepted: false,
+                error_message: format!(
+                    "Rust execution kernel rejected build '{}' before execution: {}",
+                    req.build_id, reason
+                ),
+                total_tasks: 0,
+                critical_path_ms: 0,
+                plan_source: plan_response.plan_source,
+                plan_dependencies: plan_response.plan_dependencies,
+            }));
+        }
 
         if plan_response.has_cycles {
             return Ok(Response::new(StartBuildResponse {

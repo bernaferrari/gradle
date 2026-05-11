@@ -223,6 +223,13 @@ fn kernel_task_contract_rejection(
         return Some("execution context is not valid JSON".to_string());
     };
 
+    if context_declares_composite_build(&value) {
+        return Some(
+            "unsupported contract marker 'unsupported_dependency_semantics' (composite-substitution:settings)"
+                .to_string(),
+        );
+    }
+
     let unsupported_keys = [
         "copy_unsupported_custom_actions",
         "test_unsupported_filters",
@@ -271,6 +278,45 @@ fn kernel_task_contract_rejection(
     }
 
     None
+}
+
+fn context_declares_composite_build(value: &serde_json::Value) -> bool {
+    context_paths(value)
+        .into_iter()
+        .filter_map(|path| project_dir_from_build_path(&path))
+        .any(|project_dir| settings_declares_included_build(&project_dir))
+}
+
+fn context_paths(value: &serde_json::Value) -> Vec<String> {
+    ["source_files", "output_files"]
+        .iter()
+        .filter_map(|key| value.get(*key))
+        .filter_map(|paths| paths.as_array())
+        .flat_map(|paths| paths.iter())
+        .filter_map(|path| path.as_str())
+        .map(|path| path.to_string())
+        .collect()
+}
+
+fn project_dir_from_build_path(path: &str) -> Option<String> {
+    let parts = path.split('/').collect::<Vec<_>>();
+    let build_index = parts.iter().position(|part| *part == "build")?;
+    if build_index == 0 {
+        return None;
+    }
+    Some(parts[..build_index].join("/"))
+}
+
+fn settings_declares_included_build(project_dir: &str) -> bool {
+    let dir = std::path::Path::new(project_dir);
+    ["settings.gradle.kts", "settings.gradle"]
+        .iter()
+        .map(|name| dir.join(name))
+        .any(|path| {
+            std::fs::read_to_string(path)
+                .map(|text| text.contains("includeBuild(") || text.contains("includeBuild ("))
+                .unwrap_or(false)
+        })
 }
 
 fn unsupported_contract_marker_reason(
@@ -429,7 +475,47 @@ mod tests {
         assert!(rejection
             .message()
             .contains("unsupported_dependency_semantics"));
-        assert!(rejection.message().contains("repository-content-filter:maven"));
+        assert!(rejection
+            .message()
+            .contains("repository-content-filter:maven"));
+    }
+
+    #[test]
+    fn rejects_composite_build_settings_from_task_context_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("settings.gradle.kts"),
+            "includeBuild(\"included\")",
+        )
+        .unwrap();
+        let output = dir
+            .path()
+            .join("build/classes/java/main/Example.class")
+            .to_string_lossy()
+            .into_owned();
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![task(
+                ":classes",
+                "Lifecycle",
+                Some(
+                    serde_json::json!({
+                        "output_files": [output]
+                    })
+                    .to_string(),
+                ),
+            )],
+        };
+
+        let KernelAdmission::Rejected(rejection) =
+            admit_build_plan(&plan, &native_types(&["Lifecycle"]))
+        else {
+            panic!("expected rejection");
+        };
+        assert!(rejection
+            .message()
+            .contains("composite-substitution:settings"));
     }
 
     #[test]

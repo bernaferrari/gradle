@@ -208,6 +208,7 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         self.assertIn("component-metadata-rule-unsupported-kotlin-dsl", results)
         self.assertIn("detached-configuration-unsupported-kotlin-dsl", results)
         self.assertIn("artifact-view-unsupported-kotlin-dsl", results)
+        self.assertIn("composite-substitution-unsupported-kotlin-dsl", results)
         failures = {
             name: result["mismatches"]
             for name, result in results.items()

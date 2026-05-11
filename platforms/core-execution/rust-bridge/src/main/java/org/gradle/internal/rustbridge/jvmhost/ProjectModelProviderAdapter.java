@@ -194,25 +194,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
                 return new ArrayList<>();
             }
 
+            Project gradleProject = (Project) project;
             DependencyResolutionModelAdapter.RepositoryCapture repositoryCapture =
-                DependencyResolutionModelAdapter.repositoriesForProject((Project) project);
-            List<String> unsupportedFeatures = new ArrayList<>(repositoryCapture.getUnsupportedFeatures());
-            unsupportedFeatures.addAll(unsupportedResolutionFeatures(configuration));
-            if (projectBuildScriptHasUnsupportedRepositoryContentFilter((Project) project)) {
-                unsupportedFeatures.add("repository-content-filter:build-script");
-            }
-            if (projectBuildScriptHasDependencySubstitution((Project) project)) {
-                unsupportedFeatures.add("dependency-substitution:build-script");
-            }
-            if (projectBuildScriptHasComponentMetadataRule((Project) project)) {
-                unsupportedFeatures.add("component-metadata-rule:build-script");
-            }
-            if (projectBuildScriptHasDetachedConfiguration((Project) project)) {
-                unsupportedFeatures.add("detached-configuration:build-script");
-            }
-            if (projectBuildScriptHasArtifactView((Project) project)) {
-                unsupportedFeatures.add("artifact-view:build-script");
-            }
+                DependencyResolutionModelAdapter.repositoriesForProject(gradleProject);
+            List<String> unsupportedFeatures = unsupportedNativeDependencyFeatures(gradleProject, configuration, repositoryCapture.getUnsupportedFeatures());
             unsupportedFeatures = new ArrayList<>(new LinkedHashSet<>(unsupportedFeatures));
             List<JvmHostServiceImpl.ResolvedArtifactEntry> artifacts = new ArrayList<>();
             Object resolvedConfiguration = invoke(configuration, "getResolvedConfiguration");
@@ -449,36 +434,46 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     }
 
     private static void captureUnsupportedRepositoryContract(Task task, Map<String, String> inputs) {
+        List<String> unsupportedFeatures = unsupportedNativeDependencyFeatures(task.getProject(), null, Collections.emptyList());
         try {
-            List<String> unsupportedFeatures =
-                DependencyResolutionModelAdapter.repositoriesForProject(task.getProject()).getUnsupportedFeatures();
-            if (projectBuildScriptHasUnsupportedRepositoryContentFilter(task.getProject())) {
-                unsupportedFeatures = new ArrayList<>(unsupportedFeatures);
-                unsupportedFeatures.add("repository-content-filter:build-script");
-            }
-            if (projectBuildScriptHasDependencySubstitution(task.getProject())) {
-                unsupportedFeatures = new ArrayList<>(unsupportedFeatures);
-                unsupportedFeatures.add("dependency-substitution:build-script");
-            }
-            if (projectBuildScriptHasComponentMetadataRule(task.getProject())) {
-                unsupportedFeatures = new ArrayList<>(unsupportedFeatures);
-                unsupportedFeatures.add("component-metadata-rule:build-script");
-            }
-            if (projectBuildScriptHasDetachedConfiguration(task.getProject())) {
-                unsupportedFeatures = new ArrayList<>(unsupportedFeatures);
-                unsupportedFeatures.add("detached-configuration:build-script");
-            }
-            if (projectBuildScriptHasArtifactView(task.getProject())) {
-                unsupportedFeatures = new ArrayList<>(unsupportedFeatures);
-                unsupportedFeatures.add("artifact-view:build-script");
-            }
-            if (!unsupportedFeatures.isEmpty()) {
-                inputs.put("unsupported_dependency_semantics", "true");
-                inputs.put("unsupported_repository_features", String.join(",", new LinkedHashSet<>(unsupportedFeatures)));
-            }
+            unsupportedFeatures.addAll(DependencyResolutionModelAdapter.repositoriesForProject(task.getProject()).getUnsupportedFeatures());
         } catch (RuntimeException e) {
             LOGGER.debug("[substrate-jvmhost] Failed to inspect project repositories for unsupported native dependency semantics", e);
         }
+        if (!unsupportedFeatures.isEmpty()) {
+            inputs.put("unsupported_dependency_semantics", "true");
+            inputs.put("unsupported_repository_features", String.join(",", new LinkedHashSet<>(unsupportedFeatures)));
+        }
+    }
+
+    private static List<String> unsupportedNativeDependencyFeatures(
+        Project project,
+        @Nullable Configuration configuration,
+        Collection<String> repositoryUnsupportedFeatures
+    ) {
+        List<String> unsupportedFeatures = new ArrayList<>(repositoryUnsupportedFeatures);
+        if (configuration != null) {
+            unsupportedFeatures.addAll(unsupportedResolutionFeatures(configuration));
+        }
+        if (projectBuildScriptHasUnsupportedRepositoryContentFilter(project)) {
+            unsupportedFeatures.add("repository-content-filter:build-script");
+        }
+        if (projectBuildScriptHasDependencySubstitution(project)) {
+            unsupportedFeatures.add("dependency-substitution:build-script");
+        }
+        if (projectBuildScriptHasComponentMetadataRule(project)) {
+            unsupportedFeatures.add("component-metadata-rule:build-script");
+        }
+        if (projectBuildScriptHasDetachedConfiguration(project)) {
+            unsupportedFeatures.add("detached-configuration:build-script");
+        }
+        if (projectBuildScriptHasArtifactView(project)) {
+            unsupportedFeatures.add("artifact-view:build-script");
+        }
+        if (projectSettingsHasIncludedBuild(project)) {
+            unsupportedFeatures.add("composite-substitution:settings");
+        }
+        return new ArrayList<>(new LinkedHashSet<>(unsupportedFeatures));
     }
 
     private static boolean projectBuildScriptHasUnsupportedRepositoryContentFilter(Project project) {
@@ -501,6 +496,17 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         return projectBuildScriptMatches(project, "\\bartifactView\\s*\\{");
     }
 
+    private static boolean projectSettingsHasIncludedBuild(Project project) {
+        try {
+            if (!project.getGradle().getIncludedBuilds().isEmpty()) {
+                return true;
+            }
+        } catch (Exception e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to inspect included builds for unsupported native dependency semantics", e);
+        }
+        return projectSettingsMatches(project, "\\bincludeBuild\\s*\\(");
+    }
+
     private static boolean projectBuildScriptMatches(Project project, String pattern) {
         File buildFile = project.getBuildFile();
         if (buildFile == null || !buildFile.isFile()) {
@@ -515,6 +521,28 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             LOGGER.debug("[substrate-jvmhost] Failed to inspect build script for unsupported native dependency semantics", e);
             return false;
         }
+    }
+
+    private static boolean projectSettingsMatches(Project project, String pattern) {
+        try {
+            Project rootProject = project.getRootProject();
+            File rootDir = rootProject == null ? null : rootProject.getProjectDir();
+            if (rootDir == null || !rootDir.isDirectory()) {
+                return false;
+            }
+            for (String settingsName : new String[] {"settings.gradle.kts", "settings.gradle"}) {
+                File settingsFile = new File(rootDir, settingsName);
+                if (settingsFile.isFile()) {
+                    String text = new String(Files.readAllBytes(settingsFile.toPath()), StandardCharsets.UTF_8);
+                    if (Pattern.compile(pattern).matcher(text).find()) {
+                        return true;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to inspect settings script for unsupported native dependency semantics", e);
+        }
+        return false;
     }
 
     private static void captureJavaCompileInputs(Task task, Class<?> taskType, Map<String, String> inputs) {

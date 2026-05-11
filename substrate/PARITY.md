@@ -138,7 +138,7 @@
   outside approximate native execution until a complete contract exists. It now
   covers custom JVM task actions, method-level Test filters, repository regex
   content filters, dependency substitution, component metadata rules, and
-  detached configurations, and artifact views.
+  detached configurations, artifact views, and composite substitution.
   Contract-only validation covers these known unsupported shapes; the normal
   parity runner intentionally reports
   mismatches for unsupported projects rather than treating approximate native
