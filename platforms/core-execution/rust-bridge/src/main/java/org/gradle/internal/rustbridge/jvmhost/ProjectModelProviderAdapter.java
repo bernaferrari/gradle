@@ -37,6 +37,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -203,6 +204,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             if (projectBuildScriptHasDependencySubstitution((Project) project)) {
                 unsupportedFeatures.add("dependency-substitution:build-script");
             }
+            if (projectBuildScriptHasComponentMetadataRule((Project) project)) {
+                unsupportedFeatures.add("component-metadata-rule:build-script");
+            }
+            unsupportedFeatures = new ArrayList<>(new LinkedHashSet<>(unsupportedFeatures));
             List<JvmHostServiceImpl.ResolvedArtifactEntry> artifacts = new ArrayList<>();
             Object resolvedConfiguration = invoke(configuration, "getResolvedConfiguration");
             for (Object resolvedArtifact : asCollection(invoke(resolvedConfiguration, "getResolvedArtifacts"))) {
@@ -449,9 +454,13 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
                 unsupportedFeatures = new ArrayList<>(unsupportedFeatures);
                 unsupportedFeatures.add("dependency-substitution:build-script");
             }
+            if (projectBuildScriptHasComponentMetadataRule(task.getProject())) {
+                unsupportedFeatures = new ArrayList<>(unsupportedFeatures);
+                unsupportedFeatures.add("component-metadata-rule:build-script");
+            }
             if (!unsupportedFeatures.isEmpty()) {
                 inputs.put("unsupported_dependency_semantics", "true");
-                inputs.put("unsupported_repository_features", String.join(",", unsupportedFeatures));
+                inputs.put("unsupported_repository_features", String.join(",", new LinkedHashSet<>(unsupportedFeatures)));
             }
         } catch (RuntimeException e) {
             LOGGER.debug("[substrate-jvmhost] Failed to inspect project repositories for unsupported native dependency semantics", e);
@@ -464,6 +473,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
 
     private static boolean projectBuildScriptHasDependencySubstitution(Project project) {
         return projectBuildScriptMatches(project, "\\bdependencySubstitution\\s*\\{");
+    }
+
+    private static boolean projectBuildScriptHasComponentMetadataRule(Project project) {
+        return projectBuildScriptMatches(project, "\\bcomponents\\s*\\{");
     }
 
     private static boolean projectBuildScriptMatches(Project project, String pattern) {

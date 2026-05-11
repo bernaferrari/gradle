@@ -667,6 +667,32 @@ public class ProjectModelProviderAdapterTest {
             .anyMatch(path -> path.equals(outputFile.getAbsolutePath())));
     }
 
+    @org.junit.Test
+    public void marksComponentMetadataRulesAsUnsupportedDependencySemantics() throws IOException {
+        File buildFile = temporaryFolder.newFile("build.gradle.kts");
+        Files.write(buildFile.toPath(), Collections.singletonList(
+            "dependencies { components { all { status = \"release\" } } }"
+        ), StandardCharsets.UTF_8);
+        Task task = basicFileTransformTask(
+            ":classes",
+            "classes",
+            fileCollection(),
+            fileCollection(),
+            Collections.emptyMap(),
+            false,
+            false,
+            buildFile
+        );
+
+        BuildPlanTask planTask = ProjectModelProviderAdapter.toBuildPlanTask(task, DefaultTask.class);
+        Map<String, String> inputs = planTask.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("true", inputs.get("unsupported_dependency_semantics"));
+        assertTrue(inputs.get("unsupported_repository_features").contains("component-metadata-rule:build-script"));
+    }
+
     private static Task javaCompileTask(File sourceFile, File outputDir, File classpathEntry, File javaHome) {
         return javaCompileTask(
             ":compileJava",

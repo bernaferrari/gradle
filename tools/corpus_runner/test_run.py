@@ -205,6 +205,7 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         self.assertIn("test-method-filter-unsupported-kotlin-dsl", results)
         self.assertIn("repository-regex-filter-unsupported-kotlin-dsl", results)
         self.assertIn("dependency-substitution-unsupported-kotlin-dsl", results)
+        self.assertIn("component-metadata-rule-unsupported-kotlin-dsl", results)
         failures = {
             name: result["mismatches"]
             for name, result in results.items()
