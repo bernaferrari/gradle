@@ -23,7 +23,6 @@ use super::dependency_solver::ivyresolve::strategy::compare_versions;
 use super::dependency_solver::maven_metadata::{self, MavenMetadata, MavenVersioning};
 use super::dependency_solver::maven_pom::{self, ParentPom};
 pub use super::dependency_solver::maven_pom::{ManagedDependency, PomDependency};
-use super::dependency_solver::resolved_graph::TransitiveResolution;
 pub use super::dependency_solver::resolveengine::graph::conflicts::ResolutionStrategy;
 use super::dependency_solver::resolveengine::graph::conflicts::{
     resolve_conflicts, resolve_conflicts_with_strategy, try_resolve_conflicts_with_strategy,
@@ -133,15 +132,6 @@ impl DependencyResolutionServiceImpl {
 
     fn supports_gradle_module_metadata(repo: &RepositoryDescriptor) -> bool {
         crate::server::dependency_solver::metadata_source::supports_gradle_module_metadata(repo)
-    }
-
-    fn unsupported_repository_version_filter_reason(
-        repos: &[RepositoryDescriptor],
-        version: &str,
-    ) -> Option<String> {
-        crate::server::dependency_solver::repository_chain::unsupported_repository_version_filter_reason(
-            repos, version,
-        )
     }
 
     fn repositories_for_dependency(
@@ -1370,10 +1360,6 @@ impl DependencyResolutionServiceImpl {
         super::dependency_solver::selector::resolve_version_range(range, available, metadata)
     }
 
-    fn unsupported_version_selector_reason(version: &str) -> Option<String> {
-        graph_builder::unsupported_version_selector_reason(version)
-    }
-
     /// Fetch available versions for a dependency from maven-metadata.xml.
     async fn fetch_available_versions(
         &self,
@@ -1485,265 +1471,15 @@ impl DependencyResolutionServiceImpl {
         inherited_exclusions: &[(String, String)],
         lenient: bool,
     ) -> ResolvedDependency {
-        const MAX_DEPTH: u32 = 50;
-
-        let group = dep.group.clone();
-        let name = dep.name.clone();
-        let raw_version = dep.version.clone();
-        let scope = if dep.scope.is_empty() {
-            "compile".to_string()
-        } else {
-            dep.scope.clone()
-        };
-
-        if let Some(reason) =
-            Self::unsupported_repository_version_filter_reason(repos, &raw_version)
-        {
-            return ResolvedDependency {
-                group,
-                name,
-                version: raw_version.clone(),
-                selected_version: raw_version,
-                dependencies: Vec::new(),
-                resolved: false,
-                failure_reason: reason,
-                artifact_url: String::new(),
-                artifact_size: 0,
-                artifact_sha256: String::new(),
-                scope,
-            };
-        }
-
-        let allowed_repos = Self::repositories_for_dependency(repos, &group, &name, &raw_version);
-
-        if allowed_repos.is_empty() {
-            return ResolvedDependency {
-                group,
-                name,
-                version: raw_version.clone(),
-                selected_version: raw_version,
-                dependencies: Vec::new(),
-                resolved: false,
-                failure_reason: "No repository admits dependency group through content filters"
-                    .to_string(),
-                artifact_url: String::new(),
-                artifact_size: 0,
-                artifact_sha256: String::new(),
-                scope,
-            };
-        }
-
-        if let Some(reason) = Self::unsupported_version_selector_reason(&raw_version) {
-            return ResolvedDependency {
-                group,
-                name,
-                version: raw_version.clone(),
-                selected_version: raw_version,
-                dependencies: Vec::new(),
-                resolved: false,
-                failure_reason: reason,
-                artifact_url: String::new(),
-                artifact_size: 0,
-                artifact_sha256: String::new(),
-                scope,
-            };
-        }
-
-        // Resolve version ranges, LATEST, RELEASE, and SNAPSHOT
-        let selected_version =
-            if crate::server::dependency_solver::selector::requires_version_metadata(&raw_version) {
-                let (available, metadata) = self
-                    .fetch_available_versions(&group, &name, &allowed_repos)
-                    .await;
-                if !available.is_empty() {
-                    Self::resolve_version_range(&raw_version, &available, metadata.as_ref())
-                        .unwrap_or(raw_version.clone())
-                } else {
-                    raw_version.clone()
-                }
-            } else if raw_version.ends_with("-SNAPSHOT") {
-                // SNAPSHOT version — resolve to timestamped version via maven-metadata.xml
-                self.resolve_snapshot_version(&group, &name, &raw_version, &allowed_repos)
-                    .await
-            } else {
-                raw_version.clone()
-            };
-
-        if selected_version != raw_version {
-            let strategy =
-                crate::server::dependency_solver::selector::resolution_strategy_label(&raw_version);
-            tracing::info!(
-                group = %group,
-                name = %name,
-                resolved_version = %selected_version,
-                strategy = strategy,
-                "Version resolved"
-            );
-        }
-
-        // Cycle detection: if we've already visited this group:name, return a leaf node.
-        let coord = (group.clone(), name.clone());
-        if !visited.insert(coord.clone()) {
-            tracing::debug!(
-                group = %group,
-                name = %name,
-                depth,
-                "Cycle detected — skipping re-resolution"
-            );
-            let repo_base = allowed_repos
-                .first()
-                .map(|r| r.url.as_str())
-                .unwrap_or("https://repo.maven.apache.org/maven2");
-            let artifact_url = Self::artifact_url_for_descriptor(
-                repo_base,
-                &group,
-                &name,
-                &selected_version,
-                &dep.classifier,
-                &dep.extension,
-            );
-            return ResolvedDependency {
-                group,
-                name,
-                version: raw_version,
-                selected_version,
-                dependencies: Vec::new(),
-                resolved: true,
-                failure_reason: String::new(),
-                artifact_url,
-                artifact_size: 0,
-                artifact_sha256: String::new(),
-                scope,
-            };
-        }
-
-        // Fetch POM and resolve transitive dependencies
-        let transitive_resolution = if dep.transitive && depth < MAX_DEPTH {
-            match self
-                .fetch_and_resolve_transitive(
-                    &group,
-                    &name,
-                    &selected_version,
-                    &scope,
-                    repos,
-                    visited,
-                    depth,
-                    inherited_exclusions,
-                    lenient,
-                )
-                .await
-            {
-                Ok(resolution) => resolution,
-                Err(reason) => {
-                    visited.remove(&coord);
-                    return ResolvedDependency {
-                        group,
-                        name,
-                        version: raw_version.clone(),
-                        selected_version,
-                        dependencies: Vec::new(),
-                        resolved: false,
-                        failure_reason: reason,
-                        artifact_url: String::new(),
-                        artifact_size: 0,
-                        artifact_sha256: String::new(),
-                        scope,
-                    };
-                }
-            }
-        } else {
-            TransitiveResolution {
-                dependencies: Vec::new(),
-                source_repo_url: None,
-            }
-        };
-
-        // Remove from visited set so sibling branches can resolve the same dep
-        visited.remove(&coord);
-
-        let module_metadata_artifact_url = match self
-            .gradle_module_metadata_artifact_url(
-                &group,
-                &name,
-                &selected_version,
-                &scope,
-                &allowed_repos,
-            )
-            .await
-        {
-            Ok(url) => url,
-            Err(reason) => {
-                return ResolvedDependency {
-                    group,
-                    name,
-                    version: raw_version.clone(),
-                    selected_version,
-                    dependencies: Vec::new(),
-                    resolved: false,
-                    failure_reason: reason,
-                    artifact_url: String::new(),
-                    artifact_size: 0,
-                    artifact_sha256: String::new(),
-                    scope,
-                };
-            }
-        };
-
-        // Compute artifact URL
-        let repo_base = transitive_resolution
-            .source_repo_url
-            .as_deref()
-            .or_else(|| allowed_repos.first().map(|r| r.url.as_str()))
-            .unwrap_or("https://repo.maven.apache.org/maven2");
-        let artifact_url = module_metadata_artifact_url.unwrap_or_else(|| {
-            Self::artifact_url_for_descriptor(
-                repo_base,
-                &group,
-                &name,
-                &selected_version,
-                &dep.classifier,
-                &dep.extension,
-            )
-        });
-
-        ResolvedDependency {
-            group,
-            name,
-            version: raw_version,
-            selected_version,
-            dependencies: transitive_resolution.dependencies,
-            resolved: true,
-            failure_reason: String::new(),
-            artifact_url,
-            artifact_size: 0,
-            artifact_sha256: String::new(),
-            scope,
-        }
-    }
-
-    async fn fetch_and_resolve_transitive(
-        &self,
-        group: &str,
-        name: &str,
-        version: &str,
-        scope: &str,
-        repos: &[RepositoryDescriptor],
-        visited: &mut std::collections::HashSet<(String, String)>,
-        depth: u32,
-        inherited_exclusions: &[(String, String)],
-        lenient: bool,
-    ) -> Result<TransitiveResolution, String> {
-        maven_pom::resolve_transitive_dependencies(
-            group,
-            name,
-            version,
-            scope,
+        graph_builder::resolve_dependency_node(
+            dep,
             repos,
             self,
             visited,
             depth,
             inherited_exclusions,
             lenient,
+            50,
             MAX_PARENT_DEPTH,
         )
         .await
@@ -1819,6 +1555,46 @@ impl DependencyResolverTransport for DependencyResolutionServiceImpl {
     ) -> ResolvedDependency {
         Box::pin(self.resolve_recursive(dep, repos, visited, depth, inherited_exclusions, lenient))
             .await
+    }
+
+    async fn fetch_available_versions(
+        &self,
+        group: &str,
+        name: &str,
+        repos: &[RepositoryDescriptor],
+    ) -> (Vec<String>, Option<MavenMetadata>) {
+        DependencyResolutionServiceImpl::fetch_available_versions(self, group, name, repos).await
+    }
+
+    async fn resolve_snapshot_version(
+        &self,
+        group: &str,
+        name: &str,
+        raw_version: &str,
+        repos: &[RepositoryDescriptor],
+    ) -> String {
+        DependencyResolutionServiceImpl::resolve_snapshot_version(
+            self,
+            group,
+            name,
+            raw_version,
+            repos,
+        )
+        .await
+    }
+
+    async fn gradle_module_metadata_artifact_url(
+        &self,
+        group: &str,
+        name: &str,
+        version: &str,
+        scope: &str,
+        repos: &[RepositoryDescriptor],
+    ) -> Result<Option<String>, String> {
+        DependencyResolutionServiceImpl::gradle_module_metadata_artifact_url(
+            self, group, name, version, scope, repos,
+        )
+        .await
     }
 }
 
