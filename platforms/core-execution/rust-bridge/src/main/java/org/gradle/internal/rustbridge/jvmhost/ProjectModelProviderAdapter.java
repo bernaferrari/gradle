@@ -473,10 +473,26 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if (projectBuildScriptHasArtifactTransform(project)) {
             unsupportedFeatures.add("artifact-transform:build-script");
         }
+        unsupportedFeatures.addAll(unsupportedStartParameterDependencyFeatures(project));
         if (projectSettingsHasIncludedBuild(project)) {
             unsupportedFeatures.add("composite-substitution:settings");
         }
         return new ArrayList<>(new LinkedHashSet<>(unsupportedFeatures));
+    }
+
+    private static List<String> unsupportedStartParameterDependencyFeatures(Project project) {
+        List<String> unsupportedFeatures = new ArrayList<>();
+        try {
+            if (project.getGradle().getStartParameter().isOffline()) {
+                unsupportedFeatures.add("dependency-offline-mode:start-parameter");
+            }
+            if (project.getGradle().getStartParameter().isRefreshDependencies()) {
+                unsupportedFeatures.add("dependency-refresh:start-parameter");
+            }
+        } catch (Exception e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to inspect dependency start parameters", e);
+        }
+        return unsupportedFeatures;
     }
 
     private static boolean projectBuildScriptHasUnsupportedRepositoryContentFilter(Project project) {

@@ -331,8 +331,10 @@ fn unsupported_contract_marker_reason(
     .iter()
     .filter_map(|feature_key| input_properties.get(*feature_key))
     .filter_map(|value| value.as_str())
-    .filter(|value| !value.trim().is_empty())
-    .collect::<Vec<_>>();
+    .flat_map(|value| value.split(','))
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+    .collect::<std::collections::BTreeSet<_>>();
 
     if unsupported_features.is_empty() {
         format!("unsupported contract marker '{}'", key)
@@ -340,7 +342,11 @@ fn unsupported_contract_marker_reason(
         format!(
             "unsupported contract marker '{}' ({})",
             key,
-            unsupported_features.join(",")
+            unsupported_features
+                .iter()
+                .copied()
+                .collect::<Vec<_>>()
+                .join(",")
         )
     }
 }
@@ -478,6 +484,44 @@ mod tests {
         assert!(rejection
             .message()
             .contains("repository-content-filter:maven"));
+    }
+
+    #[test]
+    fn deduplicates_prefixed_unsupported_contract_features() {
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![task(
+                ":classes",
+                "Lifecycle",
+                Some(
+                    serde_json::json!({
+                        "input_properties": {
+                            "unsupported_dependency_semantics": "true",
+                            "unsupported_repository_features": "dependency-offline-mode:start-parameter",
+                            "input.unsupported_repository_features": "dependency-offline-mode:start-parameter,dependency-refresh:start-parameter"
+                        }
+                    })
+                    .to_string(),
+                ),
+            )],
+        };
+
+        let KernelAdmission::Rejected(rejection) =
+            admit_build_plan(&plan, &native_types(&["Lifecycle"]))
+        else {
+            panic!("expected rejection");
+        };
+        assert_eq!(
+            rejection
+                .message()
+                .matches("dependency-offline-mode:start-parameter")
+                .count(),
+            1
+        );
+        assert!(rejection
+            .message()
+            .contains("dependency-refresh:start-parameter"));
     }
 
     #[test]
