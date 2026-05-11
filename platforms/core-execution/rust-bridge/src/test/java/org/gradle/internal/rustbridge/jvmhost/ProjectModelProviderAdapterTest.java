@@ -4,12 +4,14 @@ import gradle.substrate.v1.BuildPlanTask;
 import gradle.substrate.v1.BuildPlanTaskInputSpec;
 import gradle.substrate.v1.BuildPlanTaskOutputSpec;
 
+import org.gradle.StartParameter;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.ConfigurationContainer;
 import org.gradle.api.artifacts.VersionConstraint;
 import org.gradle.api.file.FileCollection;
+import org.gradle.api.invocation.Gradle;
 import org.gradle.api.tasks.TaskDependency;
 import org.junit.Rule;
 import org.junit.rules.TemporaryFolder;
@@ -719,6 +721,52 @@ public class ProjectModelProviderAdapterTest {
         assertTrue(inputs.get("unsupported_repository_features").contains("artifact-transform:build-script"));
     }
 
+    @org.junit.Test
+    public void marksOfflineStartParameterAsUnsupportedDependencySemantics() {
+        Task task = basicFileTransformTask(
+            ":classes",
+            "classes",
+            fileCollection(),
+            fileCollection(),
+            Collections.emptyMap(),
+            false,
+            false,
+            null,
+            startParameter(true, false)
+        );
+
+        BuildPlanTask planTask = ProjectModelProviderAdapter.toBuildPlanTask(task, DefaultTask.class);
+        Map<String, String> inputs = planTask.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("true", inputs.get("unsupported_dependency_semantics"));
+        assertTrue(inputs.get("unsupported_repository_features").contains("dependency-offline-mode:start-parameter"));
+    }
+
+    @org.junit.Test
+    public void marksRefreshDependenciesStartParameterAsUnsupportedDependencySemantics() {
+        Task task = basicFileTransformTask(
+            ":classes",
+            "classes",
+            fileCollection(),
+            fileCollection(),
+            Collections.emptyMap(),
+            false,
+            false,
+            null,
+            startParameter(false, true)
+        );
+
+        BuildPlanTask planTask = ProjectModelProviderAdapter.toBuildPlanTask(task, DefaultTask.class);
+        Map<String, String> inputs = planTask.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("true", inputs.get("unsupported_dependency_semantics"));
+        assertTrue(inputs.get("unsupported_repository_features").contains("dependency-refresh:start-parameter"));
+    }
+
     private static Task javaCompileTask(File sourceFile, File outputDir, File classpathEntry, File javaHome) {
         return javaCompileTask(
             ":compileJava",
@@ -1347,12 +1395,29 @@ public class ProjectModelProviderAdapterTest {
         boolean supportedCustomActions,
         File buildFile
     ) {
+        return basicFileTransformTask(path, name, inputs, outputs, inputProperties, customActions, supportedCustomActions, buildFile, null);
+    }
+
+    private static Task basicFileTransformTask(
+        String path,
+        String name,
+        FileCollection inputs,
+        FileCollection outputs,
+        Map<String, String> inputProperties,
+        boolean customActions,
+        boolean supportedCustomActions,
+        File buildFile,
+        StartParameter startParameter
+    ) {
         Project project = proxy(Project.class, (proxy, method, args) -> {
             if (method.getName().equals("getPath")) {
                 return ":";
             }
             if (method.getName().equals("getBuildFile")) {
                 return buildFile;
+            }
+            if (method.getName().equals("getGradle") && startParameter != null) {
+                return gradle(startParameter);
             }
             return defaultValue(method.getReturnType());
         });
@@ -1397,6 +1462,22 @@ public class ProjectModelProviderAdapterTest {
                     return defaultValue(method.getReturnType());
             }
         });
+    }
+
+    private static Gradle gradle(StartParameter startParameter) {
+        return proxy(Gradle.class, (proxy, method, args) -> {
+            if (method.getName().equals("getStartParameter")) {
+                return startParameter;
+            }
+            return defaultValue(method.getReturnType());
+        });
+    }
+
+    private static StartParameter startParameter(boolean offline, boolean refreshDependencies) {
+        StartParameter startParameter = new StartParameter();
+        startParameter.setOffline(offline);
+        startParameter.setRefreshDependencies(refreshDependencies);
+        return startParameter;
     }
 
     private static String decodeMapping(String value) {
