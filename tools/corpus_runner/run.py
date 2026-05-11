@@ -1025,7 +1025,7 @@ def run_build(
             duration_ms=int((time.monotonic() - start) * 1000),
         )
 
-def main():
+def create_arg_parser():
     parser = argparse.ArgumentParser(description="Run Gradle corpus validation")
     parser.add_argument("--project", help="Single project to run")
     parser.add_argument("--projects", nargs="+", help="Multiple projects to run")
@@ -1044,8 +1044,9 @@ def main():
                        help="Gradle-under-test executable to run corpus projects, usually a built local distribution's bin/gradle")
     parser.add_argument("--allow-noop-substrate", action="store_true",
                        help="Do not fail if the substrate candidate falls back to no-op mode")
-    parser.add_argument("--runbuild-authoritative", action="store_true",
-                       help="Enable the explicit no-fallback Rust RunBuild gate for the substrate candidate")
+    parser.add_argument("--execution-kernel", "--runbuild-authoritative",
+                       dest="runbuild_authoritative", action="store_true",
+                       help="Enable the strict Rust execution-kernel admission gate for the substrate candidate")
     parser.add_argument("--runbuild-native-ready-default", action="store_true",
                        help="Try Rust RunBuild first and delegate to JVM when the selected plan is not fully native-ready")
     parser.add_argument("--timeout", type=int, default=300, help="Timeout per project in seconds")
@@ -1055,7 +1056,11 @@ def main():
                        help="Emit and compare lightweight declared dependency graph JSON artifacts")
     parser.add_argument("--resolved-dependency-graph-parity", action="store_true",
                        help="Emit and compare Gradle public ResolutionResult graph JSON artifacts")
-    
+
+    return parser
+
+def main():
+    parser = create_arg_parser()
     args = parser.parse_args()
     
     if args.manifest and args.contract_only:

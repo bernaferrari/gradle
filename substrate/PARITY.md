@@ -19,7 +19,7 @@
 - Captured JVM-host build-plan shadows can drive a small native Rust Java
   lifecycle with JVM fallback disabled: `JavaCompile`, `ProcessResources`
   lowered to `Copy`, no-action `classes` lowered to `Lifecycle`, and `Jar`.
-- Real Gradle task execution has an opt-in authoritative gate:
+- Real Gradle task execution has an opt-in execution-kernel gate:
   `org.gradle.rust.substrate.execution.kernel=true` executes the selected
   build-plan shadow through Rust `RunBuild`, admits the whole selected plan into
   the Rust execution kernel, and skips Gradle's JVM task executor only when Rust
@@ -35,12 +35,13 @@
   `--rust-substrate` strips the wrapper-only flag, injects the minimal Rust DAG
   flags plus safe dependency transport/read-through flags, locates
   `gradle-substrate-daemon`, and uses native-ready-default execution;
-  `--rust-substrate-authoritative` injects
+  `--rust-substrate-kernel` injects
   `org.gradle.rust.substrate.execution.kernel=true`, the stricter no-fallback
-  Rust execution-kernel gate for validation. `GRADLEW_DISTRIBUTION_DIR` can
-  point the Rust wrapper at a local install image from this fork, and launcher
-  discovery now supports both ZIP-extracted and direct install-image `lib/`
-  layouts.
+  Rust execution-kernel gate for validation. The older
+  `--rust-substrate-authoritative` wrapper flag remains a compatibility alias.
+  `GRADLEW_DISTRIBUTION_DIR` can point the Rust wrapper at a local install image
+  from this fork, and launcher discovery now supports both ZIP-extracted and
+  direct install-image `lib/` layouts.
 - The Rust wrapper now enforces `validateDistributionUrl=true` before fetching,
   supports `http(s)://` and `file:/` distribution URLs, copies local file
   distributions into the wrapper ZIP store, and still applies SHA-256

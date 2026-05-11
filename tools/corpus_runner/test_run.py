@@ -56,6 +56,12 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         self.assertNotIn("-Dorg.gradle.rust.substrate.mode=shadow", command)
         self.assertIn("--info", command)
 
+    def test_execution_kernel_cli_alias_maps_to_no_fallback_gate(self):
+        parser = corpus_run.create_arg_parser()
+        args = parser.parse_args(["--project", "/tmp/p", "--execution-kernel"])
+
+        self.assertTrue(args.runbuild_authoritative)
+
     def test_runbuild_native_ready_default_adds_delegating_gate(self):
         with tempfile.TemporaryDirectory() as tmp:
             command = corpus_run.build_gradle_command(

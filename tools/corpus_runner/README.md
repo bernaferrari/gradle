@@ -38,21 +38,21 @@ python3 tools/corpus_runner/run.py \
   --manifest testing/corpus/manifest.json \
   --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" \
   --daemon-binary target/debug/gradle-substrate-daemon \
-  --runbuild-authoritative
+  --execution-kernel
 
 # Run the explicit no-fallback RunBuild gate against the networked JUnit corpus
 python3 tools/corpus_runner/run.py \
   --manifest testing/corpus/external-manifest.json \
   --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" \
   --daemon-binary target/debug/gradle-substrate-daemon \
-  --runbuild-authoritative
+  --execution-kernel
 
 # Run the networked corpus with declared dependency graph parity artifacts
 python3 tools/corpus_runner/run.py \
   --manifest testing/corpus/external-manifest.json \
   --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" \
   --daemon-binary target/debug/gradle-substrate-daemon \
-  --runbuild-authoritative \
+  --execution-kernel \
   --dependency-graph-parity \
   --output-dir build/corpus-external-with-graphs
 
@@ -61,7 +61,7 @@ python3 tools/corpus_runner/run.py \
   --manifest testing/corpus/external-manifest.json \
   --gradle-command "$GRADLE_UNDER_TEST/bin/gradle" \
   --daemon-binary target/debug/gradle-substrate-daemon \
-  --runbuild-authoritative \
+  --execution-kernel \
   --resolved-dependency-graph-parity \
   --output-dir build/corpus-external-with-resolved-graphs
 
@@ -104,7 +104,7 @@ before invoking Gradle from each corpus project directory. This prevents
 project-local working directories from accidentally turning a real RunBuild gate
 into no-op fallback.
 
-`--runbuild-authoritative` adds
+`--execution-kernel` adds
 `-Dorg.gradle.rust.substrate.execution.kernel=true`. This is stricter
 than umbrella authoritative mode: Gradle skips its JVM task executor only when
 Rust `RunBuild` completes the selected plan with zero JVM forwards and the exact
