@@ -366,6 +366,8 @@ def scan_project_contract(project_dir: str) -> dict:
             unsupported_features.add("component-metadata-rule")
         if re.search(r"\bdetachedConfiguration\s*\(", text):
             unsupported_features.add("detached-configuration")
+        if re.search(r"\bartifactView\s*\{", text):
+            unsupported_features.add("artifact-view")
 
     return {
         "build_file_count": len(build_files),
