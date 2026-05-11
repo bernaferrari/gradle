@@ -1259,6 +1259,39 @@ mod tests {
                 scope: dep.scope.clone(),
             }
         }
+
+        async fn fetch_available_versions(
+            &self,
+            _group: &str,
+            _name: &str,
+            _repos: &[RepositoryDescriptor],
+        ) -> (
+            Vec<String>,
+            Option<crate::server::dependency_solver::maven_metadata::MavenMetadata>,
+        ) {
+            (Vec::new(), None)
+        }
+
+        async fn resolve_snapshot_version(
+            &self,
+            _group: &str,
+            _name: &str,
+            raw_version: &str,
+            _repos: &[RepositoryDescriptor],
+        ) -> String {
+            raw_version.to_string()
+        }
+
+        async fn gradle_module_metadata_artifact_url(
+            &self,
+            _group: &str,
+            _name: &str,
+            _version: &str,
+            _scope: &str,
+            _repos: &[RepositoryDescriptor],
+        ) -> Result<Option<String>, String> {
+            Ok(None)
+        }
     }
 
     fn repo() -> RepositoryDescriptor {

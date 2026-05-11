@@ -4,6 +4,8 @@ use std::collections::HashSet;
 
 use crate::proto::{DependencyDescriptor, RepositoryDescriptor, ResolvedDependency};
 
+use super::maven_metadata::MavenMetadata;
+
 #[tonic::async_trait]
 pub(crate) trait DependencyResolverTransport {
     async fn fetch_pom(
@@ -31,4 +33,28 @@ pub(crate) trait DependencyResolverTransport {
         inherited_exclusions: &[(String, String)],
         lenient: bool,
     ) -> ResolvedDependency;
+
+    async fn fetch_available_versions(
+        &self,
+        group: &str,
+        name: &str,
+        repos: &[RepositoryDescriptor],
+    ) -> (Vec<String>, Option<MavenMetadata>);
+
+    async fn resolve_snapshot_version(
+        &self,
+        group: &str,
+        name: &str,
+        raw_version: &str,
+        repos: &[RepositoryDescriptor],
+    ) -> String;
+
+    async fn gradle_module_metadata_artifact_url(
+        &self,
+        group: &str,
+        name: &str,
+        version: &str,
+        scope: &str,
+        repos: &[RepositoryDescriptor],
+    ) -> Result<Option<String>, String>;
 }

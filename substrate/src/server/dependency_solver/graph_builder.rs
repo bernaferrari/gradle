@@ -1,11 +1,20 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use crate::proto::{DependencyDescriptor, RepositoryDescriptor};
+use crate::proto::{DependencyDescriptor, RepositoryDescriptor, ResolvedDependency};
 
+use super::artifact_selection::artifact_url_for_descriptor;
 use super::ivyresolve::strategy::compare_versions;
+use super::maven_pom;
 pub use super::repository_chain::{
     normalized_repositories, unsupported_repository_reason, unsupported_repository_reason_parts,
     unsupported_repository_url_reason,
+};
+use super::repository_chain::{
+    repositories_for_dependency, unsupported_repository_version_filter_reason,
+};
+use super::resolver_transport::DependencyResolverTransport;
+use super::selector::{
+    requires_version_metadata, resolution_strategy_label, resolve_version_range,
 };
 use super::selector::{selected_static_version, validate_rejected_versions};
 pub use super::selector::{
@@ -123,6 +132,226 @@ pub fn parse_module_selector_notation(notation: &str) -> Option<ModuleSelector> 
         name: name.to_string(),
         version: version.to_string(),
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn resolve_dependency_node<T: DependencyResolverTransport + Sync>(
+    dep: &DependencyDescriptor,
+    repos: &[RepositoryDescriptor],
+    transport: &T,
+    visited: &mut HashSet<(String, String)>,
+    depth: u32,
+    inherited_exclusions: &[(String, String)],
+    lenient: bool,
+    max_depth: u32,
+    max_parent_depth: u32,
+) -> ResolvedDependency {
+    let group = dep.group.clone();
+    let name = dep.name.clone();
+    let raw_version = dep.version.clone();
+    let scope = if dep.scope.is_empty() {
+        "compile".to_string()
+    } else {
+        dep.scope.clone()
+    };
+
+    if let Some(reason) = unsupported_repository_version_filter_reason(repos, &raw_version) {
+        return unresolved_dependency(group, name, raw_version.clone(), raw_version, scope, reason);
+    }
+
+    let allowed_repos = repositories_for_dependency(repos, &group, &name, &raw_version);
+    if allowed_repos.is_empty() {
+        return unresolved_dependency(
+            group,
+            name,
+            raw_version.clone(),
+            raw_version,
+            scope,
+            "No repository admits dependency group through content filters".to_string(),
+        );
+    }
+
+    if let Some(reason) = unsupported_version_selector_reason(&raw_version) {
+        return unresolved_dependency(group, name, raw_version.clone(), raw_version, scope, reason);
+    }
+
+    let selected_version = if requires_version_metadata(&raw_version) {
+        let (available, metadata) = transport
+            .fetch_available_versions(&group, &name, &allowed_repos)
+            .await;
+        if !available.is_empty() {
+            resolve_version_range(&raw_version, &available, metadata.as_ref())
+                .unwrap_or(raw_version.clone())
+        } else {
+            raw_version.clone()
+        }
+    } else if raw_version.ends_with("-SNAPSHOT") {
+        transport
+            .resolve_snapshot_version(&group, &name, &raw_version, &allowed_repos)
+            .await
+    } else {
+        raw_version.clone()
+    };
+
+    if selected_version != raw_version {
+        let strategy = resolution_strategy_label(&raw_version);
+        tracing::info!(
+            group = %group,
+            name = %name,
+            resolved_version = %selected_version,
+            strategy = strategy,
+            "Version resolved"
+        );
+    }
+
+    let coord = (group.clone(), name.clone());
+    if !visited.insert(coord.clone()) {
+        tracing::debug!(
+            group = %group,
+            name = %name,
+            depth,
+            "Cycle detected — skipping re-resolution"
+        );
+        let repo_base = allowed_repos
+            .first()
+            .map(|r| r.url.as_str())
+            .unwrap_or("https://repo.maven.apache.org/maven2");
+        let artifact_url = artifact_url_for_descriptor(
+            repo_base,
+            &group,
+            &name,
+            &selected_version,
+            &dep.classifier,
+            &dep.extension,
+        );
+        return ResolvedDependency {
+            group,
+            name,
+            version: raw_version,
+            selected_version,
+            dependencies: Vec::new(),
+            resolved: true,
+            failure_reason: String::new(),
+            artifact_url,
+            artifact_size: 0,
+            artifact_sha256: String::new(),
+            scope,
+        };
+    }
+
+    let transitive_resolution = if dep.transitive && depth < max_depth {
+        match maven_pom::resolve_transitive_dependencies(
+            &group,
+            &name,
+            &selected_version,
+            &scope,
+            repos,
+            transport,
+            visited,
+            depth,
+            inherited_exclusions,
+            lenient,
+            max_parent_depth,
+        )
+        .await
+        {
+            Ok(resolution) => resolution,
+            Err(reason) => {
+                visited.remove(&coord);
+                return unresolved_dependency(
+                    group,
+                    name,
+                    raw_version.clone(),
+                    selected_version,
+                    scope,
+                    reason,
+                );
+            }
+        }
+    } else {
+        super::resolved_graph::TransitiveResolution {
+            dependencies: Vec::new(),
+            source_repo_url: None,
+        }
+    };
+
+    visited.remove(&coord);
+
+    let module_metadata_artifact_url = match transport
+        .gradle_module_metadata_artifact_url(
+            &group,
+            &name,
+            &selected_version,
+            &scope,
+            &allowed_repos,
+        )
+        .await
+    {
+        Ok(url) => url,
+        Err(reason) => {
+            return unresolved_dependency(
+                group,
+                name,
+                raw_version.clone(),
+                selected_version,
+                scope,
+                reason,
+            );
+        }
+    };
+
+    let repo_base = transitive_resolution
+        .source_repo_url
+        .as_deref()
+        .or_else(|| allowed_repos.first().map(|r| r.url.as_str()))
+        .unwrap_or("https://repo.maven.apache.org/maven2");
+    let artifact_url = module_metadata_artifact_url.unwrap_or_else(|| {
+        artifact_url_for_descriptor(
+            repo_base,
+            &group,
+            &name,
+            &selected_version,
+            &dep.classifier,
+            &dep.extension,
+        )
+    });
+
+    ResolvedDependency {
+        group,
+        name,
+        version: raw_version,
+        selected_version,
+        dependencies: transitive_resolution.dependencies,
+        resolved: true,
+        failure_reason: String::new(),
+        artifact_url,
+        artifact_size: 0,
+        artifact_sha256: String::new(),
+        scope,
+    }
+}
+
+fn unresolved_dependency(
+    group: String,
+    name: String,
+    version: String,
+    selected_version: String,
+    scope: String,
+    failure_reason: String,
+) -> ResolvedDependency {
+    ResolvedDependency {
+        group,
+        name,
+        version,
+        selected_version,
+        dependencies: Vec::new(),
+        resolved: false,
+        failure_reason,
+        artifact_url: String::new(),
+        artifact_size: 0,
+        artifact_sha256: String::new(),
+        scope,
+    }
 }
 
 fn constraint_versions(
