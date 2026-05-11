@@ -17,7 +17,7 @@ use crate::proto::{
     VerifyDependencyChecksumsResponse,
 };
 
-use super::dependency_solver::gradle_module_metadata::{self, ModuleMetadataSelection};
+use super::dependency_solver::gradle_module_metadata;
 use super::dependency_solver::graph_builder;
 use super::dependency_solver::ivyresolve::strategy::compare_versions;
 use super::dependency_solver::maven_metadata::{self, MavenMetadata, MavenVersioning};
@@ -128,10 +128,6 @@ impl DependencyResolutionServiceImpl {
 
     fn is_metadata_extension(extension: &str) -> bool {
         crate::server::dependency_solver::artifact_selection::is_metadata_extension(extension)
-    }
-
-    fn supports_gradle_module_metadata(repo: &RepositoryDescriptor) -> bool {
-        crate::server::dependency_solver::metadata_source::supports_gradle_module_metadata(repo)
     }
 
     fn repositories_for_dependency(
@@ -925,116 +921,7 @@ impl DependencyResolutionServiceImpl {
         scope: &str,
         repos: &[RepositoryDescriptor],
     ) -> Result<Option<String>, String> {
-        let mut redirects = std::collections::HashSet::new();
-        let allowed_repos = Self::repositories_for_dependency(repos, group, name, version);
-        for repo in allowed_repos
-            .iter()
-            .filter(|repo| Self::supports_gradle_module_metadata(repo))
-        {
-            if let Some(url) = Box::pin(self.gradle_module_metadata_artifact_url_in_repo(
-                group,
-                name,
-                version,
-                scope,
-                repo,
-                &mut redirects,
-                0,
-            ))
-            .await?
-            {
-                return Ok(Some(url));
-            }
-        }
-        Ok(None)
-    }
-
-    async fn gradle_module_metadata_artifact_url_in_repo(
-        &self,
-        group: &str,
-        name: &str,
-        version: &str,
-        scope: &str,
-        repo: &RepositoryDescriptor,
-        redirects: &mut std::collections::HashSet<(String, String, String)>,
-        depth: u32,
-    ) -> Result<Option<String>, String> {
-        const MAX_GMM_REDIRECT_DEPTH: u32 = 8;
-        if depth > MAX_GMM_REDIRECT_DEPTH {
-            return Err(format!(
-                "unsupported Gradle Module Metadata available-at redirect depth exceeded for {group}:{name}:{version}"
-            ));
-        }
-        let key = (group.to_string(), name.to_string(), version.to_string());
-        if !redirects.insert(key.clone()) {
-            return Err(format!(
-                "unsupported Gradle Module Metadata available-at redirect cycle at {group}:{name}:{version}"
-            ));
-        }
-        let Some(module_metadata) = self
-            .fetch_gradle_module_metadata(group, name, version, repo)
-            .await?
-        else {
-            redirects.remove(&key);
-            return Ok(None);
-        };
-        let selection = gradle_module_metadata::select_jvm_variant(
-            &module_metadata,
-            scope,
-            group,
-            name,
-            version,
-        )?;
-        let result = match selection {
-            Some(ModuleMetadataSelection::Selected(variant)) => {
-                let Some(artifact) = variant.artifacts.first() else {
-                    redirects.remove(&key);
-                    return Ok(None);
-                };
-                self.module_artifact_url(repo, group, name, version, &artifact.url)
-                    .map(Some)
-            }
-            Some(ModuleMetadataSelection::Redirect(redirect)) => {
-                Box::pin(self.gradle_module_metadata_artifact_url_in_repo(
-                    &redirect.group,
-                    &redirect.module,
-                    &redirect.version,
-                    scope,
-                    repo,
-                    redirects,
-                    depth + 1,
-                ))
-                .await
-            }
-            Some(ModuleMetadataSelection::Unsupported(reason)) => Err(reason),
-            None => Ok(None),
-        };
-        redirects.remove(&key);
-        result
-    }
-
-    fn module_artifact_url(
-        &self,
-        repo: &RepositoryDescriptor,
-        group: &str,
-        name: &str,
-        version: &str,
-        artifact_path: &str,
-    ) -> Result<String, String> {
-        if reqwest::Url::parse(artifact_path).is_ok() {
-            return Ok(artifact_path.to_string());
-        }
-        let group_path = Self::group_to_path(group);
-        let path = format!(
-            "{}/{}/{}/{}",
-            group_path,
-            name,
-            version,
-            artifact_path.trim_start_matches('/')
-        );
-        self.build_request(repo, &path)
-            .build()
-            .map(|request| request.url().to_string())
-            .map_err(|e| format!("Failed to build Gradle Module Metadata artifact URL: {e}"))
+        gradle_module_metadata::resolve_artifact_url(self, group, name, version, scope, repos).await
     }
 
     fn artifact_url_for_descriptor(

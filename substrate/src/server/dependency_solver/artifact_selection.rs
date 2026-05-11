@@ -1,3 +1,5 @@
+use crate::proto::RepositoryDescriptor;
+
 /// Gradle-shaped artifact selection helpers for Maven coordinates.
 ///
 /// These functions intentionally live under `dependency_solver` rather than the
@@ -80,6 +82,33 @@ pub fn artifact_url_for_descriptor(
         classifier_suffix,
         extension
     )
+}
+
+pub fn module_artifact_url(
+    repo: &RepositoryDescriptor,
+    group: &str,
+    name: &str,
+    version: &str,
+    artifact_path: &str,
+) -> Result<String, String> {
+    if reqwest::Url::parse(artifact_path).is_ok() {
+        return Ok(artifact_path.to_string());
+    }
+    let path = format!(
+        "{}/{}/{}/{}",
+        group_to_path(group),
+        name,
+        version,
+        artifact_path.trim_start_matches('/')
+    );
+    let base = repo.url.trim_end_matches('/');
+    let mut url = format!("{base}/{path}");
+    if repo.allow_insecure_protocol && url.starts_with("https://") {
+        url = url.replacen("https://", "http://", 1);
+    }
+    reqwest::Url::parse(&url)
+        .map(|url| url.to_string())
+        .map_err(|e| format!("Failed to build Gradle Module Metadata artifact URL: {e}"))
 }
 
 pub fn artifact_file_parts_from_url(

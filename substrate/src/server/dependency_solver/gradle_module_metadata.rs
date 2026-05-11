@@ -3,8 +3,11 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::proto::{DependencyDescriptor, RepositoryDescriptor};
 
+use super::artifact_selection;
 use super::ivyresolve::strategy::compare_versions;
 use super::maven_pom;
+use super::metadata_source;
+use super::repository_chain;
 use super::resolved_graph::TransitiveResolution;
 use super::resolveengine::graph::conflicts::resolve_conflicts;
 use super::resolver_transport::DependencyResolverTransport;
@@ -383,6 +386,99 @@ pub(crate) async fn resolve_transitive_from_module_metadata_in_repo<
                 lenient,
                 redirects,
                 redirect_depth + 1,
+            ))
+            .await
+        }
+        Some(ModuleMetadataSelection::Unsupported(reason)) => Err(reason),
+        None => Ok(None),
+    };
+    redirects.remove(&key);
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn resolve_artifact_url<T: DependencyResolverTransport + Sync>(
+    transport: &T,
+    group: &str,
+    name: &str,
+    version: &str,
+    scope: &str,
+    repos: &[RepositoryDescriptor],
+) -> Result<Option<String>, String> {
+    let mut redirects = HashSet::new();
+    let allowed_repos = repository_chain::repositories_for_dependency(repos, group, name, version);
+    for repo in allowed_repos
+        .iter()
+        .filter(|repo| metadata_source::supports_gradle_module_metadata(repo))
+    {
+        if let Some(url) = Box::pin(resolve_artifact_url_in_repo(
+            transport,
+            group,
+            name,
+            version,
+            scope,
+            repo,
+            &mut redirects,
+            0,
+        ))
+        .await?
+        {
+            return Ok(Some(url));
+        }
+    }
+    Ok(None)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn resolve_artifact_url_in_repo<T: DependencyResolverTransport + Sync>(
+    transport: &T,
+    group: &str,
+    name: &str,
+    version: &str,
+    scope: &str,
+    repo: &RepositoryDescriptor,
+    redirects: &mut HashSet<(String, String, String)>,
+    depth: u32,
+) -> Result<Option<String>, String> {
+    const MAX_GMM_REDIRECT_DEPTH: u32 = 8;
+    if depth > MAX_GMM_REDIRECT_DEPTH {
+        return Err(format!(
+            "unsupported Gradle Module Metadata available-at redirect depth exceeded for {group}:{name}:{version}"
+        ));
+    }
+    let key = (group.to_string(), name.to_string(), version.to_string());
+    if !redirects.insert(key.clone()) {
+        return Err(format!(
+            "unsupported Gradle Module Metadata available-at redirect cycle at {group}:{name}:{version}"
+        ));
+    }
+    let Some(module_metadata) = transport
+        .fetch_gradle_module_metadata(group, name, version, repo)
+        .await?
+    else {
+        redirects.remove(&key);
+        return Ok(None);
+    };
+    let selection = select_jvm_variant(&module_metadata, scope, group, name, version)?;
+    let result = match selection {
+        Some(ModuleMetadataSelection::Selected(variant)) => {
+            let Some(artifact) = variant.artifacts.first() else {
+                redirects.remove(&key);
+                return Ok(None);
+            };
+            artifact_selection::module_artifact_url(repo, group, name, version, &artifact.url)
+                .map(Some)
+        }
+        Some(ModuleMetadataSelection::Redirect(redirect)) => {
+            Box::pin(resolve_artifact_url_in_repo(
+                transport,
+                &redirect.group,
+                &redirect.module,
+                &redirect.version,
+                scope,
+                repo,
+                redirects,
+                depth + 1,
             ))
             .await
         }
