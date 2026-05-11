@@ -21,15 +21,14 @@ use super::dependency_solver::gradle_module_metadata::{self, ModuleMetadataSelec
 use super::dependency_solver::graph_builder;
 use super::dependency_solver::ivyresolve::strategy::compare_versions;
 use super::dependency_solver::maven_metadata::{self, MavenMetadata, MavenVersioning};
-use super::dependency_solver::maven_pom::{
-    self, ParentPom, PomDependencyPlan, PomInheritanceState,
-};
+use super::dependency_solver::maven_pom::{self, ParentPom, PomDependencyPlan};
 pub use super::dependency_solver::maven_pom::{ManagedDependency, PomDependency};
 use super::dependency_solver::resolved_graph::TransitiveResolution;
 pub use super::dependency_solver::resolveengine::graph::conflicts::ResolutionStrategy;
 use super::dependency_solver::resolveengine::graph::conflicts::{
     resolve_conflicts, resolve_conflicts_with_strategy, try_resolve_conflicts_with_strategy,
 };
+use super::dependency_solver::resolver_transport::DependencyResolverTransport;
 pub use super::dependency_solver::scope::DependencyScope;
 
 /// Cached artifact metadata.
@@ -1733,60 +1732,7 @@ impl DependencyResolutionServiceImpl {
         std::collections::HashMap<String, String>,
         std::collections::HashMap<(String, String), ManagedDependency>,
     ) {
-        let mut inheritance = PomInheritanceState::new(pom_content);
-
-        for _ in 0..MAX_PARENT_DEPTH {
-            let parent = match inheritance.next_parent() {
-                Some(p) => p,
-                None => break,
-            };
-
-            // Fetch parent POM from repos
-            let mut parent_content = None;
-            let parent_repos = Self::repositories_for_dependency(
-                repos,
-                &parent.group_id,
-                &parent.artifact_id,
-                &parent.version,
-            );
-            for repo in &parent_repos {
-                match self
-                    .fetch_pom(&parent.group_id, &parent.artifact_id, &parent.version, repo)
-                    .await
-                {
-                    Ok(content) => {
-                        parent_content = Some(content);
-                        break;
-                    }
-                    Err(e) => {
-                        tracing::debug!(
-                            parent_group = %parent.group_id,
-                            parent_name = %parent.artifact_id,
-                            parent_version = %parent.version,
-                            repo = %repo.url,
-                            error = %e,
-                            "Failed to fetch parent POM"
-                        );
-                    }
-                }
-            }
-
-            let parent_pom = match parent_content {
-                Some(content) => content,
-                None => break,
-            };
-
-            inheritance.merge_parent_pom(parent_pom);
-
-            tracing::debug!(
-                parent_group = %parent.group_id,
-                parent_name = %parent.artifact_id,
-                parent_version = %parent.version,
-                "Inherited properties and managed deps from parent POM"
-            );
-        }
-
-        inheritance.into_parts()
+        maven_pom::resolve_parent_inheritance(pom_content, repos, self, MAX_PARENT_DEPTH).await
     }
 
     /// Fetch a POM from repositories and recursively resolve its transitive dependencies.
@@ -2139,6 +2085,19 @@ impl DependencyResolutionServiceImpl {
                 Err(e) => return Err(format!("Download failed: {}", e)),
             }
         }
+    }
+}
+
+#[tonic::async_trait]
+impl DependencyResolverTransport for DependencyResolutionServiceImpl {
+    async fn fetch_pom(
+        &self,
+        group: &str,
+        name: &str,
+        version: &str,
+        repo: &RepositoryDescriptor,
+    ) -> Result<String, String> {
+        DependencyResolutionServiceImpl::fetch_pom(self, group, name, version, repo).await
     }
 }
 

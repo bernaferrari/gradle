@@ -9,6 +9,7 @@ pub mod metadata_source;
 pub mod repository_chain;
 pub mod resolved_graph;
 pub mod resolveengine;
+pub mod resolver_transport;
 pub mod scope;
 pub mod selector;
 pub mod variant_capability;
