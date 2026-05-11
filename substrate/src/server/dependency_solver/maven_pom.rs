@@ -22,6 +22,15 @@ pub struct ManagedDependency {
     pub(crate) exclusions: Vec<(String, String)>,
 }
 
+/// Parsed `<parent>` section from a POM file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ParentPom {
+    pub(crate) group_id: String,
+    pub(crate) artifact_id: String,
+    pub(crate) version: String,
+    pub(crate) relative_path: String,
+}
+
 /// Parse a POM file and extract regular dependencies using a byte-level scanner.
 /// Handles false matches like `<dependencyManagement>`.
 pub fn parse_pom_dependencies(pom_content: &str) -> Vec<PomDependency> {
@@ -203,6 +212,117 @@ pub fn effective_exclusions(
         .unwrap_or_default()
 }
 
+/// Parse the `<parent>` section from a POM file.
+pub(crate) fn parse_parent_pom(pom_content: &str) -> Option<ParentPom> {
+    let bytes = pom_content.as_bytes();
+    let pos = find_open_tag_exact(bytes, 0, b"parent")?;
+    let _end_pos = find_end_tag(bytes, pos, b"parent")?;
+
+    let group_id = extract_tag_text(bytes, pos, b"groupId").unwrap_or_default();
+    let artifact_id = extract_tag_text(bytes, pos, b"artifactId").unwrap_or_default();
+    let version = extract_tag_text(bytes, pos, b"version").unwrap_or_default();
+    let relative_path = extract_tag_text(bytes, pos, b"relativePath").unwrap_or_default();
+
+    if group_id.is_empty() || artifact_id.is_empty() || version.is_empty() {
+        return None;
+    }
+
+    Some(ParentPom {
+        group_id,
+        artifact_id,
+        version,
+        relative_path,
+    })
+}
+
+/// Parse properties from the `<properties>` section of a POM.
+pub fn parse_pom_properties(pom_content: &str) -> HashMap<String, String> {
+    let mut props = HashMap::new();
+    let bytes = pom_content.as_bytes();
+
+    let start = match find_open_tag_exact(bytes, 0, b"properties") {
+        Some(p) => p,
+        None => return props,
+    };
+    let end = match find_end_tag(bytes, start, b"properties") {
+        Some(p) => p,
+        None => return props,
+    };
+
+    let mut i = start + b"<properties>".len();
+    while i < end {
+        let tag_start = match bytes[i..].iter().position(|&b| b == b'<') {
+            Some(p) => i + p,
+            None => break,
+        };
+        if tag_start >= end {
+            break;
+        }
+
+        let tag_end = match bytes[tag_start..].iter().position(|&b| b == b'>') {
+            Some(p) => tag_start + p,
+            None => break,
+        };
+
+        let tag_name = &bytes[tag_start + 1..tag_end];
+        if tag_name.is_empty() || tag_name[0] == b'/' {
+            i = tag_end + 1;
+            continue;
+        }
+
+        let close_tag = format!("</{}", std::str::from_utf8(tag_name).unwrap_or_default());
+        let close_bytes = close_tag.as_bytes();
+        if let Some(val_end) = bytes[tag_end + 1..end]
+            .windows(close_bytes.len())
+            .position(|w| w == close_bytes)
+            .map(|p| tag_end + 1 + p)
+        {
+            let value = std::str::from_utf8(&bytes[tag_end + 1..val_end])
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            let key = std::str::from_utf8(tag_name)
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            if !key.is_empty() {
+                props.insert(key, value);
+            }
+            i = val_end + close_bytes.len();
+        } else {
+            i = tag_end + 1;
+        }
+    }
+
+    props
+}
+
+/// Interpolate `${property.name}` references in a string.
+pub fn interpolate_properties(value: &str, properties: &HashMap<String, String>) -> String {
+    let mut result = value.to_string();
+    let mut max_iterations = 10;
+    while result.contains("${") && max_iterations > 0 {
+        max_iterations -= 1;
+        if let Some(start) = result.find("${") {
+            if let Some(end) = result[start..].find('}') {
+                let key = &result[start + 2..start + end];
+                let replacement = properties.get(key).cloned().unwrap_or_else(|| match key {
+                    "project.version" | "version" | "pom.version" => "0.0.0-unknown".to_string(),
+                    "project.groupId" | "groupId" => "unknown".to_string(),
+                    "project.artifactId" | "artifactId" => "unknown".to_string(),
+                    _ => format!("${{{key}}}"),
+                });
+                result.replace_range(start..start + end + 1, &replacement);
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    result
+}
+
 /// Parse <exclusions> block within a single <dependency> element.
 fn parse_pom_exclusions(bytes: &[u8], dep_start: usize, dep_end: usize) -> Vec<(String, String)> {
     let mut exclusions = Vec::new();
@@ -355,4 +475,54 @@ fn extract_tag_text(bytes: &[u8], parent_start: usize, tag: &[u8]) -> Option<Str
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_parent_pom() {
+        let parent = parse_parent_pom(
+            r#"<project>
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.2.0</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+</project>"#,
+        )
+        .unwrap();
+
+        assert_eq!(parent.group_id, "org.springframework.boot");
+        assert_eq!(parent.artifact_id, "spring-boot-starter-parent");
+        assert_eq!(parent.version, "3.2.0");
+        assert_eq!(parent.relative_path, "../pom.xml");
+    }
+
+    #[test]
+    fn parses_and_interpolates_pom_properties() {
+        let props = parse_pom_properties(
+            r#"<project>
+  <properties>
+    <spring.version>6.1.0</spring.version>
+    <jackson.version>2.16.0</jackson.version>
+  </properties>
+</project>"#,
+        );
+
+        assert_eq!(
+            props.get("spring.version").map(String::as_str),
+            Some("6.1.0")
+        );
+        assert_eq!(
+            interpolate_properties("org.example:${spring.version}", &props),
+            "org.example:6.1.0"
+        );
+        assert_eq!(
+            interpolate_properties("${project.version}", &props),
+            "0.0.0-unknown"
+        );
+    }
 }
