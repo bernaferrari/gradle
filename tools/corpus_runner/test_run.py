@@ -217,6 +217,7 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         self.assertIn("artifact-transform-unsupported-kotlin-dsl", results)
         self.assertIn("composite-substitution-unsupported-kotlin-dsl", results)
         self.assertIn("enforced-platform-unsupported-kotlin-dsl", results)
+        self.assertIn("maven-local-unsupported-kotlin-dsl", results)
         failures = {
             name: result["mismatches"]
             for name, result in results.items()

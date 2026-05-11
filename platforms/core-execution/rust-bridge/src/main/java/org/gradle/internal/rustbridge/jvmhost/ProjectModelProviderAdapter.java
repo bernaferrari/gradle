@@ -462,6 +462,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if (projectBuildScriptHasUnsupportedRepositoryContentFilter(project)) {
             unsupportedFeatures.add("repository-content-filter:build-script");
         }
+        if (projectBuildScriptHasMavenLocal(project)) {
+            unsupportedFeatures.add("maven-local:build-script");
+        }
         if (projectBuildScriptHasDependencySubstitution(project)) {
             unsupportedFeatures.add("dependency-substitution:build-script");
         }
@@ -519,6 +522,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
 
     private static boolean projectBuildScriptHasUnsupportedRepositoryContentFilter(Project project) {
         return projectBuildScriptMatches(project, "\\b(?:include|exclude)(?:Group|Module|Version)ByRegex\\s*\\(");
+    }
+
+    private static boolean projectBuildScriptHasMavenLocal(Project project) {
+        return projectBuildScriptMatches(project, "\\bmavenLocal\\s*\\(");
     }
 
     private static boolean projectBuildScriptHasDependencySubstitution(Project project) {
