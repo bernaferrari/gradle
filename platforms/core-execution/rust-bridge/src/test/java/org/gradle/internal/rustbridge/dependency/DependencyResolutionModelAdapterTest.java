@@ -91,7 +91,7 @@ public class DependencyResolutionModelAdapterTest {
     }
 
     @Test
-    public void repositoryContentFilterFailsClosedForDurableCapture() {
+    public void emptyRepositoryContentFilterDoesNotMarkPlainRepositoryUnsupported() {
         DependencyResolutionModelAdapter.RepositoryCapture capture =
             DependencyResolutionModelAdapter.repositoriesForProject(
                 projectWithRepository(filteredMavenRepository(
@@ -105,8 +105,8 @@ public class DependencyResolutionModelAdapterTest {
                 false
             );
 
-        assertTrue(capture.getRepositories().isEmpty());
-        assertEquals(Collections.singletonList("repository-content-filter:filtered"), capture.getUnsupportedFeatures());
+        assertTrue(capture.getUnsupportedFeatures().isEmpty());
+        assertEquals("filtered", capture.getRepositories().get(0).getId());
     }
 
     @Test
