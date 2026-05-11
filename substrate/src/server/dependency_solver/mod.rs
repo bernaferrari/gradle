@@ -4,3 +4,4 @@ pub mod graph_builder;
 pub mod ivyresolve;
 pub mod maven_pom;
 pub mod resolveengine;
+pub mod selector;
