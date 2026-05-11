@@ -177,6 +177,24 @@ pub(crate) fn resolve_version_range(
     matching.last().map(|v| (*v).clone())
 }
 
+pub(crate) fn requires_version_metadata(selector: &str) -> bool {
+    selector.contains(',')
+        || selector.starts_with('[')
+        || selector.starts_with('(')
+        || selector == "LATEST"
+        || selector == "RELEASE"
+}
+
+pub(crate) fn resolution_strategy_label(selector: &str) -> &'static str {
+    if selector.contains(',') || selector.starts_with('[') || selector.starts_with('(') {
+        "range"
+    } else if selector.ends_with("-SNAPSHOT") {
+        "snapshot"
+    } else {
+        "latest"
+    }
+}
+
 fn looks_like_version_range(version: &str) -> bool {
     (version.starts_with('[') || version.starts_with('('))
         && (version.ends_with(']') || version.ends_with(')'))
@@ -261,5 +279,21 @@ mod tests {
         assert_eq!(resolve_version_range("1.+", &available, None), None);
         assert_eq!(resolve_version_range("", &available, None), None);
         assert_eq!(resolve_version_range("  ", &available, None), None);
+    }
+
+    #[test]
+    fn classifies_selectors_requiring_metadata() {
+        assert!(requires_version_metadata("[1.0,2.0)"));
+        assert!(requires_version_metadata("(1.0,)"));
+        assert!(requires_version_metadata("LATEST"));
+        assert!(requires_version_metadata("RELEASE"));
+        assert!(!requires_version_metadata("1.2.3"));
+    }
+
+    #[test]
+    fn labels_resolution_strategy_for_diagnostics() {
+        assert_eq!(resolution_strategy_label("[1.0,2.0)"), "range");
+        assert_eq!(resolution_strategy_label("1.0-SNAPSHOT"), "snapshot");
+        assert_eq!(resolution_strategy_label("LATEST"), "latest");
     }
 }
