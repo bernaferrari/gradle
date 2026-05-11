@@ -2,6 +2,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 
 use super::ivyresolve::strategy::compare_versions;
+use super::variant_capability;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StaticVersionRequirement {
@@ -157,14 +158,7 @@ pub fn select_jvm_variant(
         &metadata.component.version
     };
 
-    let usage = if matches!(
-        target_scope,
-        "runtime" | "runtimeClasspath" | "implementation"
-    ) {
-        "java-runtime"
-    } else {
-        "java-api"
-    };
+    let usage = variant_capability::jvm_usage_for_scope(target_scope);
 
     let usage_candidates: Vec<&Variant> = metadata
         .variants
@@ -210,10 +204,14 @@ pub fn select_jvm_variant(
         Err(selection) => return Ok(Some(selection)),
     };
     for capability in &variant.capabilities {
-        if capability.group != component_group
-            || capability.name != component_module
-            || capability.version != component_version
-        {
+        if !variant_capability::capability_matches_component(
+            &capability.group,
+            &capability.name,
+            &capability.version,
+            component_group,
+            component_module,
+            component_version,
+        ) {
             return Ok(Some(ModuleMetadataSelection::Unsupported(format!(
                 "unsupported Gradle Module Metadata capability {}:{}:{} on variant {}",
                 capability.group, capability.name, capability.version, variant.name
@@ -296,20 +294,14 @@ fn available_at_redirect(redirect: &AvailableAt, variant_name: &str) -> ModuleMe
 }
 
 fn variant_usage(variant: &Variant) -> Option<String> {
-    variant
-        .attributes
-        .get("org.gradle.usage")
-        .and_then(|value| value.as_str())
-        .map(str::to_string)
+    variant_capability::variant_usage(&variant.attributes)
 }
 
 fn preferred_jvm_candidates<'a>(candidates: &[&'a Variant]) -> Vec<&'a Variant> {
     let jar_candidates: Vec<&Variant> = candidates
         .iter()
         .copied()
-        .filter(|variant| {
-            variant_attribute(variant, "org.gradle.libraryelements").as_deref() == Some("jar")
-        })
+        .filter(|variant| variant_capability::has_jar_library_elements(&variant.attributes))
         .collect();
     let candidates = if jar_candidates.is_empty() {
         candidates.to_vec()
@@ -320,26 +312,13 @@ fn preferred_jvm_candidates<'a>(candidates: &[&'a Variant]) -> Vec<&'a Variant> 
     let standard_jvm_candidates: Vec<&Variant> = candidates
         .iter()
         .copied()
-        .filter(|variant| {
-            variant_attribute(variant, "org.gradle.jvm.environment")
-                .as_deref()
-                .map(|value| value == "standard-jvm")
-                .unwrap_or(true)
-        })
+        .filter(|variant| variant_capability::is_standard_jvm_environment(&variant.attributes))
         .collect();
     if standard_jvm_candidates.is_empty() {
         candidates
     } else {
         standard_jvm_candidates
     }
-}
-
-fn variant_attribute(variant: &Variant, name: &str) -> Option<String> {
-    variant
-        .attributes
-        .get(name)
-        .and_then(|value| value.as_str())
-        .map(str::to_string)
 }
 
 fn static_dependency_constraints(
