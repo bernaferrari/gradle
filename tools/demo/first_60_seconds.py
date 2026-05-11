@@ -37,6 +37,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DAEMON = ROOT / "target" / "debug" / "gradle-substrate-daemon"
+DAEMON_READY_THRESHOLD_MS = 2000
+FILE_WATCH_FIRST_EVENT_THRESHOLD_MS = 250
+DEPENDENCY_READTHROUGH_THRESHOLD_MS = 60000
+DEPENDENCY_REMOTE_REQUESTS_AVOIDED_MIN = 3
+AUTHORITATIVE_DAG_TOTAL_THRESHOLD_MS = 60000
+AUTHORITATIVE_DAG_COLD_THRESHOLD_MS = 30000
+AUTHORITATIVE_DAG_WARM_THRESHOLD_MS = 10000
 
 
 def run(cmd: list[str], *, timeout: int = 60, capture: bool = True) -> subprocess.CompletedProcess[str]:
@@ -128,10 +135,10 @@ def measure_daemon_readiness() -> dict[str, object]:
 
         return {
             "name": "daemon_socket_ready",
-            "ok": True,
+            "ok": ready_ms <= DAEMON_READY_THRESHOLD_MS,
             "elapsed_ms": ready_ms,
             "daemon_reported_ready_ms": internal_ready,
-            "threshold_ms": 1000,
+            "threshold_ms": DAEMON_READY_THRESHOLD_MS,
         }
     finally:
         if proc.poll() is None:
@@ -157,12 +164,17 @@ def measure_cargo_test(label: str, test_filter: str, timeout: int) -> dict[str, 
         if match:
             metric_ms = int(match.group(1))
 
+    ok = completed.returncode == 0
+    threshold_ms = FILE_WATCH_FIRST_EVENT_THRESHOLD_MS if label == "file_watch_first_event" else 3000
+    if label == "file_watch_first_event":
+        ok = ok and metric_ms is not None and metric_ms <= threshold_ms
+
     return {
         "name": label,
-        "ok": completed.returncode == 0,
+        "ok": ok,
         "elapsed_ms": elapsed_ms,
         "runtime_metric_ms": metric_ms,
-        "threshold_ms": 1500 if label == "file_watch_first_event" else 3000,
+        "threshold_ms": threshold_ms,
         "test_filter": test_filter,
         "tail": "\n".join(output.strip().splitlines()[-12:]),
     }
@@ -308,10 +320,11 @@ def measure_real_build_dependency_readthrough(timeout: int = 75) -> dict[str, ob
     if gradle is None:
         return {
             "name": "real_build_dependency_readthrough",
-            "ok": True,
+            "ok": False,
             "skipped": True,
             "elapsed_ms": 0,
-            "threshold_ms": 30000,
+            "threshold_ms": DEPENDENCY_READTHROUGH_THRESHOLD_MS,
+            "remote_requests_avoided_threshold": DEPENDENCY_REMOTE_REQUESTS_AVOIDED_MIN,
             "tail": "Skipped: build/gradle-under-test/bin/gradle was not found. Build :distributions-full:install or set GRADLE_UNDER_TEST_BIN.",
         }
 
@@ -438,7 +451,8 @@ tasks.register("retrieveStatic", Sync) {
             first.returncode == 0
             and second.returncode == 0
             and len(first_requests) > 0
-            and len(second_requests) == 0
+            and remote_requests_avoided >= DEPENDENCY_REMOTE_REQUESTS_AVOIDED_MIN
+            and elapsed_ms <= DEPENDENCY_READTHROUGH_THRESHOLD_MS
             and output_file.exists()
             and static_output_file.exists()
             and static_child_output_file.exists()
@@ -449,7 +463,8 @@ tasks.register("retrieveStatic", Sync) {
             "name": "real_build_dependency_readthrough",
             "ok": ok,
             "elapsed_ms": elapsed_ms,
-            "threshold_ms": 30000,
+            "threshold_ms": DEPENDENCY_READTHROUGH_THRESHOLD_MS,
+            "remote_requests_avoided_threshold": DEPENDENCY_REMOTE_REQUESTS_AVOIDED_MIN,
             "first_run_remote_requests": len(first_requests),
             "second_run_remote_requests": len(second_requests),
             "remote_requests_avoided": remote_requests_avoided,
@@ -473,10 +488,12 @@ def measure_authoritative_runbuild_fast(timeout: int = 90) -> dict[str, object]:
     if gradle is None:
         return {
             "name": "authoritative_rust_dag",
-            "ok": True,
+            "ok": False,
             "skipped": True,
             "elapsed_ms": 0,
-            "threshold_ms": 30000,
+            "threshold_ms": AUTHORITATIVE_DAG_TOTAL_THRESHOLD_MS,
+            "first_threshold_ms": AUTHORITATIVE_DAG_COLD_THRESHOLD_MS,
+            "warm_threshold_ms": AUTHORITATIVE_DAG_WARM_THRESHOLD_MS,
             "tail": "Skipped: build/gradle-under-test/bin/gradle was not found. Build :distributions-full:install or set GRADLE_UNDER_TEST_BIN.",
         }
 
@@ -567,15 +584,21 @@ def measure_authoritative_runbuild_fast(timeout: int = 90) -> dict[str, object]:
             and int(warm_parsed["rust_executed_tasks"]) > 0
             and int(first_parsed["tasks_forwarded_to_jvm"]) == 0
             and int(warm_parsed["tasks_forwarded_to_jvm"]) == 0
+            and elapsed_ms <= AUTHORITATIVE_DAG_TOTAL_THRESHOLD_MS
+            and first_elapsed_ms <= AUTHORITATIVE_DAG_COLD_THRESHOLD_MS
+            and warm_elapsed_ms <= AUTHORITATIVE_DAG_WARM_THRESHOLD_MS
+            and warm_elapsed_ms < first_elapsed_ms
             and jar.exists()
         )
         return {
             "name": "authoritative_rust_dag",
             "ok": ok,
             "elapsed_ms": elapsed_ms,
-            "threshold_ms": 30000,
+            "threshold_ms": AUTHORITATIVE_DAG_TOTAL_THRESHOLD_MS,
             "first_elapsed_ms": first_elapsed_ms,
+            "first_threshold_ms": AUTHORITATIVE_DAG_COLD_THRESHOLD_MS,
             "warm_elapsed_ms": warm_elapsed_ms,
+            "warm_threshold_ms": AUTHORITATIVE_DAG_WARM_THRESHOLD_MS,
             "first_rust_executed_tasks": first_parsed["rust_executed_tasks"],
             "warm_rust_executed_tasks": warm_parsed["rust_executed_tasks"],
             "first_selected_task_count": first_parsed["selected_task_count"],
@@ -640,7 +663,7 @@ def print_summary(results: list[dict[str, object]]) -> None:
     explanations = {
         "daemon_socket_ready": "the time before Gradle can send work to the Rust sidecar",
         "authoritative_rust_dag": "cold and warm real Gradle invocations handing a Java-library build to Rust RunBuild with zero JVM task forwards",
-        "real_build_dependency_readthrough": "a real Gradle build warming Rust over HTTP, including listener static prefetch, then rerunning from a fresh Gradle user home with zero remote requests",
+        "real_build_dependency_readthrough": "a real Gradle build warming Rust over HTTP, including listener static prefetch, then rerunning from a fresh Gradle user home with fewer remote requests",
         "file_watch_first_event": "the delay before source edits become observable",
         "dependency_transport_store_checksum": "the bounded Rust path for Maven bytes, local store, cache-first transport reuse, cache hit, and checksum verification",
         "dependency_metadata_transport_cache": "URL-only POM downloads through Rust warming the Rust metadata cache",

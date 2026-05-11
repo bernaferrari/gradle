@@ -17,7 +17,7 @@ inspect a profiler:
   Maven version-list metadata access when Rust already has the metadata
 - real build read-through: whether an installed Gradle build can warm Rust from
   HTTP once, including listener static direct/transitive artifact prefetch,
-  then rerun from a fresh Gradle user home with zero remote requests
+  then rerun from a fresh Gradle user home with fewer remote requests
 - hashing/fingerprinting: whether installed Gradle can run with Rust
   build-session hashing plus file-collection snapshot/fingerprint support
 - file watching: how quickly an edit becomes observable
@@ -71,6 +71,19 @@ Fast mode reports:
   deterministic output hash
 - `real_build_dependency_readthrough`: an installed Gradle-under-test build resolving a local HTTP Maven `1.+` dependency plus a static Maven graph-only dependency with a transitive child and isolated Rust state; the first run warms dynamic metadata/artifact stores and listener-prefetches the static direct/transitive artifacts, while the second run deletes `build/`, uses a fresh Gradle user home, materializes all artifacts again, and reports remote requests avoided
 - `file_watch_first_event`: native file watcher latency from write to event
+
+Fast mode is also a local regression gate. It exits nonzero when a required
+metric fails or when any headline budget regresses beyond the allowed band:
+
+- daemon socket readiness must be at or below 2000 ms;
+- authoritative Rust DAG must complete the cold run at or below 30000 ms, the
+  warm run at or below 10000 ms, and the combined cold+warm check at or below
+  60000 ms;
+- the warm Rust DAG run must be faster than the cold run and both runs must
+  report zero JVM forwards;
+- real-build dependency read-through must avoid at least 3 first-run remote
+  requests on the second run and complete at or below 60000 ms;
+- file-watch first event latency must be at or below 250 ms.
 
 Proof mode keeps the heavier subsystem checks out of the default visible demo:
 

@@ -72,3 +72,9 @@ The upstream sync inventory is tracked in `architecture/upstream-map/modules.tom
 The Rust substrate hot-path roadmap defines a clear compatibility boundary: Rust owns data-driven hot-path execution, JVM owns code-driven compatibility islands. Unsupported contracts fail closed instead of approximating behavior.
 
 See [Native-ready contract policy](native-ready-contract-policy.md) for the full boundary definition, fail-closed policy, native-ready task contract rules, and non-goals.
+
+### Rust substrate maintenance
+
+Schema evolution, proto regeneration, ownership boundaries, supported semantic
+slice workflow, unsupported fail-closed gates, PARITY updates, and Beads
+evidence rules are defined in [Rust substrate maintenance guardrails](rust-substrate-maintenance.md).

@@ -49,7 +49,7 @@ Use `SubstrateError` from `error.rs` instead of `String` errors in service imple
 6. **Add subsystem** — If authoritative: add field to `SubsystemModes` in `authoritative.rs`, update `control.rs`
 7. **Add tests** — Unit tests in `your_service.rs`, integration test in `tests/integration_test.rs`
 8. **Sync to Java** — Run `./gradlew :rust-bridge:syncProtos`
-9. **Update proto lock** — Run `python3 tools/upstream_map/check_proto_lock.py --update`
+9. **Update proto metadata** — Run `python3 tools/upstream_map/check_proto_lock.py --update` and `python3 tools/upstream_map/proto_version.py --update`
 
 ## Shadow Mode
 
@@ -65,7 +65,12 @@ Flip to authoritative: `-Dorg.gradle.rust.substrate.<subsystem>.authoritative=tr
 3. Update server implementation to match new proto
 4. Run `./gradlew :rust-bridge:syncProtos` to sync Java bridge
 5. Run `python3 tools/upstream_map/check_proto_lock.py --update`
-6. Verify: `cargo test`, `cargo clippy`
+6. Run `python3 tools/upstream_map/proto_version.py --update`
+7. Verify: `./tools/upstream_map/check_drift.sh`, focused tests, `cargo test`, `cargo clippy`
+
+See `architecture/rust-substrate-maintenance.md` for schema compatibility,
+supported semantic slice, unsupported fail-closed gate, PARITY, and Beads
+evidence rules.
 
 ## Commit Conventions
 

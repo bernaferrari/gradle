@@ -12,6 +12,10 @@ tools/demo/rust_substrate_demo.sh --quick
 This runs the strict quick gate, validates the checked-in offline corpus,
 builds the checked-in offline corpus samples, runs the no-fallback authoritative
 RunBuild corpus gate, and runs the Rust daemon gRPC e2e tests.
+In quick mode, the stabilization portion is a smoke path: proto/upstream drift
+checks, corpus runner tests, bridge fail-closed audit, and Rust daemon
+type-checking. Use `--full` for the stricter stabilization script that also
+compiles/runs the broader Java bridge test suite.
 
 ## Public Demo Gate
 

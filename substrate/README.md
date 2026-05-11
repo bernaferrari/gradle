@@ -99,14 +99,17 @@ python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.j
 ./tools/demo/rust_substrate_demo.sh --quick
 ```
 
-The real Gradle build-work path now has an opt-in no-fallback gate:
-`-Dorg.gradle.rust.substrate.runbuild.authoritative=true`. In that mode Gradle
-skips its JVM task executor only after Rust `RunBuild` completes exactly the
-scheduled task count with `allow_jvm_forwarding=false`; otherwise the build
-fails closed. Selected native-ready task contracts are captured eagerly at
-Gradle task-graph population and reused when they exactly match the finalized
-execution plan, so Rust controls the scheduled DAG without a build-script parser
-classpath fallback. The offline checked-in corpus currently proves that path
+The real Gradle build-work path now has an opt-in no-fallback execution-kernel
+gate: `-Dorg.gradle.rust.substrate.execution.kernel=true`. In that mode Rust
+admits or rejects the whole selected build plan before task dispatch, and
+Gradle skips its JVM task executor only after Rust `RunBuild` completes exactly
+the scheduled task count with zero JVM forwards; otherwise the build fails
+closed. The older `runbuild.authoritative` property is a compatibility alias for
+this strict kernel mode, not the primary product contract. Selected native-ready
+task contracts are captured eagerly at Gradle task-graph population and reused
+when they exactly match the finalized execution plan, so Rust controls the
+scheduled DAG without a build-script parser classpath fallback. The offline
+checked-in corpus currently proves that path
 against 21 projects covering Java lifecycle tasks, Copy/Sync, Zip/Tar/War/Ear,
 Exec, JavaExec, Javadoc, and an OSS-style Java library slice. The separate
 `testing/corpus/external-manifest.json` proof adds a networked JUnit Platform

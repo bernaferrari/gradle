@@ -498,6 +498,9 @@ impl JvmHostService for MockJvmHostService {
                     classifier: String::new(),
                     extension: "jar".to_string(),
                     configuration: req.configuration_name.clone(),
+                    kind: "dependency".to_string(),
+                    repositories: Vec::new(),
+                    unsupported_features: Vec::new(),
                 },
                 gradle_substrate_daemon::proto::ResolvedArtifact {
                     group: "org.example".to_string(),
@@ -506,6 +509,9 @@ impl JvmHostService for MockJvmHostService {
                     classifier: String::new(),
                     extension: "jar".to_string(),
                     configuration: req.configuration_name.clone(),
+                    kind: "dependency".to_string(),
+                    repositories: Vec::new(),
+                    unsupported_features: Vec::new(),
                 },
             ],
             "runtimeClasspath" => vec![gradle_substrate_daemon::proto::ResolvedArtifact {
@@ -515,6 +521,9 @@ impl JvmHostService for MockJvmHostService {
                 classifier: String::new(),
                 extension: "jar".to_string(),
                 configuration: req.configuration_name.clone(),
+                kind: "dependency".to_string(),
+                repositories: Vec::new(),
+                unsupported_features: Vec::new(),
             }],
             _ => Vec::new(),
         };
