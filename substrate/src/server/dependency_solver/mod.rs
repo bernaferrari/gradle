@@ -3,6 +3,7 @@ pub mod gradle_module_metadata;
 pub mod graph_builder;
 pub mod ivyresolve;
 pub mod maven_pom;
+pub mod metadata_source;
 pub mod repository_chain;
 pub mod resolveengine;
 pub mod selector;
