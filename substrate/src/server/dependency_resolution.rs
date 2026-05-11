@@ -20,6 +20,7 @@ use crate::proto::{
 use super::dependency_solver::gradle_module_metadata::{self, ModuleMetadataSelection};
 use super::dependency_solver::graph_builder;
 use super::dependency_solver::ivyresolve::strategy::compare_versions;
+use super::dependency_solver::maven_metadata::{self, MavenMetadata, MavenVersioning};
 use super::dependency_solver::maven_pom;
 pub use super::dependency_solver::maven_pom::{ManagedDependency, PomDependency};
 pub use super::dependency_solver::resolveengine::graph::conflicts::ResolutionStrategy;
@@ -128,33 +129,9 @@ pub struct DependencyResolutionServiceImpl {
     artifact_store_dir: PathBuf,
 }
 
-/// Parsed maven-metadata.xml.
-struct MavenMetadata {
-    group_id: String,
-    artifact_id: String,
-    versioning: MavenVersioning,
-}
-
-/// Versioning section from maven-metadata.xml.
-struct MavenVersioning {
-    latest: Option<String>,
-    release: Option<String>,
-    last_updated: Option<String>,
-    snapshot: Option<MavenSnapshot>,
-    versions: Vec<String>,
-}
-
 struct TransitiveResolution {
     dependencies: Vec<ResolvedDependency>,
     source_repo_url: Option<String>,
-}
-
-/// Snapshot info from maven-metadata.xml.
-#[derive(Clone)]
-struct MavenSnapshot {
-    build_number: Option<String>,
-    timestamp: Option<String>,
-    local_copy: bool,
 }
 
 /// Parsed <parent> section from a POM file.
@@ -491,100 +468,7 @@ impl DependencyResolutionServiceImpl {
 
     /// Parse maven-metadata.xml using quick-xml.
     fn parse_maven_metadata(xml: &str) -> Result<MavenMetadata, String> {
-        use quick_xml::events::Event;
-        let mut reader = quick_xml::Reader::from_str(xml);
-        reader.trim_text(true);
-
-        let mut metadata = MavenMetadata {
-            group_id: String::new(),
-            artifact_id: String::new(),
-            versioning: MavenVersioning {
-                latest: None,
-                release: None,
-                last_updated: None,
-                snapshot: None,
-                versions: Vec::new(),
-            },
-        };
-
-        let mut in_versions = false;
-        let mut in_snapshot = false;
-        let mut current_tag = String::new();
-        let mut snapshot = MavenSnapshot {
-            build_number: None,
-            timestamp: None,
-            local_copy: false,
-        };
-
-        let mut buf = Vec::new();
-        loop {
-            match reader.read_event_into(&mut buf) {
-                Ok(Event::Start(ref e)) => {
-                    let name = e.name();
-                    match name.as_ref() {
-                        b"versions" => in_versions = true,
-                        b"snapshot" => {
-                            in_snapshot = true;
-                            snapshot = MavenSnapshot {
-                                build_number: None,
-                                timestamp: None,
-                                local_copy: false,
-                            };
-                        }
-                        _ => {
-                            current_tag = std::str::from_utf8(name.local_name().as_ref())
-                                .unwrap_or_default()
-                                .to_string()
-                        }
-                    }
-                }
-                Ok(Event::Empty(ref e)) => {
-                    let name = e.name();
-                    current_tag = std::str::from_utf8(name.local_name().as_ref())
-                        .unwrap_or_default()
-                        .to_string();
-                }
-                Ok(Event::Text(ref e)) => {
-                    let text = e.unescape().unwrap_or_default().to_string();
-                    if in_versions && current_tag == "version" {
-                        metadata.versioning.versions.push(text);
-                    } else if in_snapshot {
-                        match current_tag.as_str() {
-                            "buildNumber" => snapshot.build_number = Some(text),
-                            "timestamp" => snapshot.timestamp = Some(text),
-                            "localCopy" => snapshot.local_copy = text == "true",
-                            _ => {}
-                        }
-                    } else {
-                        match current_tag.as_str() {
-                            "groupId" => metadata.group_id = text,
-                            "artifactId" => metadata.artifact_id = text,
-                            "latest" => metadata.versioning.latest = Some(text),
-                            "release" => metadata.versioning.release = Some(text),
-                            "lastUpdated" => metadata.versioning.last_updated = Some(text),
-                            _ => {}
-                        }
-                    }
-                }
-                Ok(Event::End(ref e)) => {
-                    let name = e.name();
-                    match name.as_ref() {
-                        b"versions" => in_versions = false,
-                        b"snapshot" => {
-                            in_snapshot = false;
-                            metadata.versioning.snapshot = Some(snapshot.clone());
-                        }
-                        _ => {}
-                    }
-                    current_tag.clear();
-                }
-                Ok(Event::Eof) => break,
-                Err(e) => return Err(format!("XML parse error: {}", e)),
-                _ => {}
-            }
-        }
-
-        Ok(metadata)
+        maven_metadata::parse_maven_metadata(xml)
     }
 
     /// Fetch maven-metadata.xml from a repository.
