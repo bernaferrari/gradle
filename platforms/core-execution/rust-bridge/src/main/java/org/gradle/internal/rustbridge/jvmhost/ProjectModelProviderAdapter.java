@@ -210,6 +210,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             if (projectBuildScriptHasDetachedConfiguration((Project) project)) {
                 unsupportedFeatures.add("detached-configuration:build-script");
             }
+            if (projectBuildScriptHasArtifactView((Project) project)) {
+                unsupportedFeatures.add("artifact-view:build-script");
+            }
             unsupportedFeatures = new ArrayList<>(new LinkedHashSet<>(unsupportedFeatures));
             List<JvmHostServiceImpl.ResolvedArtifactEntry> artifacts = new ArrayList<>();
             Object resolvedConfiguration = invoke(configuration, "getResolvedConfiguration");
@@ -465,6 +468,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
                 unsupportedFeatures = new ArrayList<>(unsupportedFeatures);
                 unsupportedFeatures.add("detached-configuration:build-script");
             }
+            if (projectBuildScriptHasArtifactView(task.getProject())) {
+                unsupportedFeatures = new ArrayList<>(unsupportedFeatures);
+                unsupportedFeatures.add("artifact-view:build-script");
+            }
             if (!unsupportedFeatures.isEmpty()) {
                 inputs.put("unsupported_dependency_semantics", "true");
                 inputs.put("unsupported_repository_features", String.join(",", new LinkedHashSet<>(unsupportedFeatures)));
@@ -488,6 +495,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
 
     private static boolean projectBuildScriptHasDetachedConfiguration(Project project) {
         return projectBuildScriptMatches(project, "\\bdetachedConfiguration\\s*\\(");
+    }
+
+    private static boolean projectBuildScriptHasArtifactView(Project project) {
+        return projectBuildScriptMatches(project, "\\bartifactView\\s*\\{");
     }
 
     private static boolean projectBuildScriptMatches(Project project, String pattern) {
