@@ -23,6 +23,7 @@ use super::dependency_solver::ivyresolve::strategy::compare_versions;
 use super::dependency_solver::maven_metadata::{self, MavenMetadata, MavenVersioning};
 use super::dependency_solver::maven_pom::{self, ParentPom};
 pub use super::dependency_solver::maven_pom::{ManagedDependency, PomDependency};
+use super::dependency_solver::resolved_graph::TransitiveResolution;
 pub use super::dependency_solver::resolveengine::graph::conflicts::ResolutionStrategy;
 use super::dependency_solver::resolveengine::graph::conflicts::{
     resolve_conflicts, resolve_conflicts_with_strategy, try_resolve_conflicts_with_strategy,
@@ -57,11 +58,6 @@ pub struct DependencyResolutionServiceImpl {
     resolution_stats: ResolutionStats,
     http_client: reqwest::Client,
     artifact_store_dir: PathBuf,
-}
-
-struct TransitiveResolution {
-    dependencies: Vec<ResolvedDependency>,
-    source_repo_url: Option<String>,
 }
 
 /// Maximum depth for parent POM inheritance chain.
@@ -159,15 +155,7 @@ impl DependencyResolutionServiceImpl {
     }
 
     fn first_unresolved_reason(dependencies: &[ResolvedDependency]) -> Option<String> {
-        for dep in dependencies {
-            if !dep.resolved {
-                return Some(dep.failure_reason.clone());
-            }
-            if let Some(reason) = Self::first_unresolved_reason(&dep.dependencies) {
-                return Some(reason);
-            }
-        }
-        None
+        crate::server::dependency_solver::resolved_graph::first_unresolved_reason(dependencies)
     }
 
     fn maven_artifact_shape(classifier: &str, type_field: &str) -> (String, String) {
