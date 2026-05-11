@@ -477,6 +477,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if (projectBuildScriptHasArtifactTransform(project)) {
             unsupportedFeatures.add("artifact-transform:build-script");
         }
+        if (projectBuildScriptHasEnforcedPlatform(project)) {
+            unsupportedFeatures.add("enforced-platform:build-script");
+        }
         unsupportedFeatures.addAll(unsupportedStartParameterDependencyFeatures(project));
         unsupportedFeatures.addAll(unsupportedProxyDependencyFeatures());
         if (projectSettingsHasIncludedBuild(project)) {
@@ -536,6 +539,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
 
     private static boolean projectBuildScriptHasArtifactTransform(Project project) {
         return projectBuildScriptMatches(project, "\\bregisterTransform(?:\\s*<[^>]+>)?\\s*\\(");
+    }
+
+    private static boolean projectBuildScriptHasEnforcedPlatform(Project project) {
+        return projectBuildScriptMatches(project, "\\benforcedPlatform\\s*\\(");
     }
 
     private static boolean projectSettingsHasIncludedBuild(Project project) {
