@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::proto::{DependencyDescriptor, RepositoryDescriptor};
+use crate::proto::{DependencyDescriptor, RepositoryDescriptor, ResolvedDependency};
 
 use super::artifact_selection::maven_artifact_shape;
 use super::repository_chain;
@@ -1040,6 +1040,40 @@ mod tests {
             _repo: &RepositoryDescriptor,
         ) -> Result<String, String> {
             Ok(self.pom.clone())
+        }
+
+        async fn fetch_gradle_module_metadata(
+            &self,
+            _group: &str,
+            _name: &str,
+            _version: &str,
+            _repo: &RepositoryDescriptor,
+        ) -> Result<Option<String>, String> {
+            Ok(None)
+        }
+
+        async fn resolve_dependency(
+            &self,
+            dep: &DependencyDescriptor,
+            _repos: &[RepositoryDescriptor],
+            _visited: &mut std::collections::HashSet<(String, String)>,
+            _depth: u32,
+            _inherited_exclusions: &[(String, String)],
+            _lenient: bool,
+        ) -> ResolvedDependency {
+            ResolvedDependency {
+                group: dep.group.clone(),
+                name: dep.name.clone(),
+                version: dep.version.clone(),
+                selected_version: dep.version.clone(),
+                dependencies: Vec::new(),
+                resolved: true,
+                failure_reason: String::new(),
+                artifact_url: String::new(),
+                artifact_size: 0,
+                artifact_sha256: String::new(),
+                scope: dep.scope.clone(),
+            }
         }
     }
 
