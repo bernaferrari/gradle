@@ -207,6 +207,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             if (projectBuildScriptHasComponentMetadataRule((Project) project)) {
                 unsupportedFeatures.add("component-metadata-rule:build-script");
             }
+            if (projectBuildScriptHasDetachedConfiguration((Project) project)) {
+                unsupportedFeatures.add("detached-configuration:build-script");
+            }
             unsupportedFeatures = new ArrayList<>(new LinkedHashSet<>(unsupportedFeatures));
             List<JvmHostServiceImpl.ResolvedArtifactEntry> artifacts = new ArrayList<>();
             Object resolvedConfiguration = invoke(configuration, "getResolvedConfiguration");
@@ -458,6 +461,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
                 unsupportedFeatures = new ArrayList<>(unsupportedFeatures);
                 unsupportedFeatures.add("component-metadata-rule:build-script");
             }
+            if (projectBuildScriptHasDetachedConfiguration(task.getProject())) {
+                unsupportedFeatures = new ArrayList<>(unsupportedFeatures);
+                unsupportedFeatures.add("detached-configuration:build-script");
+            }
             if (!unsupportedFeatures.isEmpty()) {
                 inputs.put("unsupported_dependency_semantics", "true");
                 inputs.put("unsupported_repository_features", String.join(",", new LinkedHashSet<>(unsupportedFeatures)));
@@ -477,6 +484,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
 
     private static boolean projectBuildScriptHasComponentMetadataRule(Project project) {
         return projectBuildScriptMatches(project, "\\bcomponents\\s*\\{");
+    }
+
+    private static boolean projectBuildScriptHasDetachedConfiguration(Project project) {
+        return projectBuildScriptMatches(project, "\\bdetachedConfiguration\\s*\\(");
     }
 
     private static boolean projectBuildScriptMatches(Project project, String pattern) {
