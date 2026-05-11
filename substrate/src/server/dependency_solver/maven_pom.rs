@@ -1,5 +1,9 @@
 use std::collections::HashMap;
 
+use crate::proto::DependencyDescriptor;
+
+use super::artifact_selection::maven_artifact_shape;
+
 /// Parsed dependency from a POM file.
 #[derive(Clone)]
 pub struct PomDependency {
@@ -20,6 +24,26 @@ pub struct ManagedDependency {
     pub(crate) scope: String,
     pub(crate) type_field: String,
     pub(crate) exclusions: Vec<(String, String)>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct BomImport {
+    pub(crate) group: String,
+    pub(crate) name: String,
+    pub(crate) version: String,
+}
+
+#[derive(Clone)]
+pub(crate) struct PomRegularDependency {
+    pom_dep: PomDependency,
+    resolved_version: String,
+    effective_scope: String,
+    effective_exclusions: Vec<(String, String)>,
+}
+
+pub(crate) enum PomDependencyPlan {
+    BomImport(BomImport),
+    Regular(PomRegularDependency),
 }
 
 /// Parsed `<parent>` section from a POM file.
@@ -210,6 +234,100 @@ pub fn effective_exclusions(
     managed
         .map(|managed| managed.exclusions.clone())
         .unwrap_or_default()
+}
+
+pub(crate) fn plan_pom_dependency(
+    parent_group: &str,
+    parent_name: &str,
+    dep: &PomDependency,
+    managed: Option<&ManagedDependency>,
+    properties: &HashMap<String, String>,
+    inherited_exclusions: &[(String, String)],
+) -> Option<PomDependencyPlan> {
+    let effective_scope = managed_default_scope(dep, managed);
+
+    if effective_scope == "import" && dep.type_field == "pom" {
+        let version = interpolate_properties(&dep.version, properties);
+        if version.is_empty() {
+            return None;
+        }
+        return Some(PomDependencyPlan::BomImport(BomImport {
+            group: dep.group.clone(),
+            name: dep.name.clone(),
+            version,
+        }));
+    }
+
+    if effective_scope == "test" || effective_scope == "provided" || dep.optional {
+        return None;
+    }
+    if dep.group == parent_group && dep.name == parent_name {
+        return None;
+    }
+    if is_dependency_excluded(dep, inherited_exclusions) {
+        return None;
+    }
+
+    let raw_dep_version = interpolate_properties(&dep.version, properties);
+    let resolved_version = if raw_dep_version.is_empty() || raw_dep_version.starts_with("${") {
+        managed
+            .map(|managed| managed.version.clone())
+            .unwrap_or(raw_dep_version)
+    } else {
+        raw_dep_version
+    };
+
+    Some(PomDependencyPlan::Regular(PomRegularDependency {
+        pom_dep: dep.clone(),
+        resolved_version,
+        effective_scope,
+        effective_exclusions: effective_exclusions(dep, managed),
+    }))
+}
+
+pub(crate) fn refresh_regular_dependency_from_managed(
+    plan: &mut PomRegularDependency,
+    managed_versions: &HashMap<(String, String), ManagedDependency>,
+) {
+    if !(plan.resolved_version.starts_with("${") || plan.resolved_version.is_empty()) {
+        return;
+    }
+    if let Some(managed) =
+        managed_versions.get(&(plan.pom_dep.group.clone(), plan.pom_dep.name.clone()))
+    {
+        plan.resolved_version = managed.version.clone();
+        plan.effective_scope = managed_default_scope(&plan.pom_dep, Some(managed));
+        plan.effective_exclusions = effective_exclusions(&plan.pom_dep, Some(managed));
+    }
+}
+
+pub(crate) fn child_descriptor_from_regular_dependency(
+    plan: &PomRegularDependency,
+) -> Option<(DependencyDescriptor, Vec<(String, String)>)> {
+    if plan.resolved_version.is_empty() {
+        return None;
+    }
+    let (classifier, extension) =
+        maven_artifact_shape(&plan.pom_dep.classifier, &plan.pom_dep.type_field);
+    Some((
+        DependencyDescriptor {
+            group: plan.pom_dep.group.clone(),
+            name: plan.pom_dep.name.clone(),
+            version: plan.resolved_version.clone(),
+            classifier,
+            extension,
+            transitive: true,
+            scope: plan.effective_scope.clone(),
+            changing: false,
+            optional: false,
+            ivy_conf: String::new(),
+            strict_version: String::new(),
+            required_version: String::new(),
+            preferred_version: String::new(),
+            rejected_versions: Vec::new(),
+        },
+        plan.effective_exclusions.clone(),
+    ))
 }
 
 /// Check if a dependency matches an exclusion pattern.
@@ -568,5 +686,152 @@ mod tests {
             "org.other",
             "child"
         ));
+    }
+
+    #[test]
+    fn plans_bom_import_and_regular_dependency() {
+        let mut properties = HashMap::new();
+        properties.insert("bom.version".to_string(), "1.0".to_string());
+        let bom = PomDependency {
+            group: "org.example".to_string(),
+            name: "bom".to_string(),
+            version: "${bom.version}".to_string(),
+            scope: "import".to_string(),
+            optional: false,
+            classifier: String::new(),
+            type_field: "pom".to_string(),
+            exclusions: Vec::new(),
+        };
+
+        match plan_pom_dependency("org.example", "root", &bom, None, &properties, &[]).unwrap() {
+            PomDependencyPlan::BomImport(import) => {
+                assert_eq!(import.group, "org.example");
+                assert_eq!(import.name, "bom");
+                assert_eq!(import.version, "1.0");
+            }
+            PomDependencyPlan::Regular(_) => panic!("expected BOM import"),
+        }
+
+        let regular = PomDependency {
+            group: "org.example".to_string(),
+            name: "child".to_string(),
+            version: "2.0".to_string(),
+            scope: "runtime".to_string(),
+            optional: false,
+            classifier: String::new(),
+            type_field: "test-jar".to_string(),
+            exclusions: Vec::new(),
+        };
+        let plan =
+            match plan_pom_dependency("org.example", "root", &regular, None, &properties, &[])
+                .unwrap()
+            {
+                PomDependencyPlan::Regular(plan) => plan,
+                PomDependencyPlan::BomImport(_) => panic!("expected regular dependency"),
+            };
+        let (descriptor, exclusions) = child_descriptor_from_regular_dependency(&plan).unwrap();
+
+        assert_eq!(descriptor.name, "child");
+        assert_eq!(descriptor.version, "2.0");
+        assert_eq!(descriptor.classifier, "tests");
+        assert_eq!(descriptor.extension, "jar");
+        assert!(exclusions.is_empty());
+    }
+
+    #[test]
+    fn refreshes_unresolved_regular_dependency_from_bom_managed_version() {
+        let dependency = PomDependency {
+            group: "org.example".to_string(),
+            name: "child".to_string(),
+            version: "${missing.version}".to_string(),
+            scope: String::new(),
+            optional: false,
+            classifier: String::new(),
+            type_field: String::new(),
+            exclusions: Vec::new(),
+        };
+        let mut plan = match plan_pom_dependency(
+            "org.example",
+            "root",
+            &dependency,
+            None,
+            &HashMap::new(),
+            &[],
+        )
+        .unwrap()
+        {
+            PomDependencyPlan::Regular(plan) => plan,
+            PomDependencyPlan::BomImport(_) => panic!("expected regular dependency"),
+        };
+        let mut managed = HashMap::new();
+        managed.insert(
+            ("org.example".to_string(), "child".to_string()),
+            ManagedDependency {
+                version: "3.0".to_string(),
+                scope: "runtime".to_string(),
+                type_field: String::new(),
+                exclusions: vec![("org.bad".to_string(), "*".to_string())],
+            },
+        );
+
+        refresh_regular_dependency_from_managed(&mut plan, &managed);
+        let (descriptor, exclusions) = child_descriptor_from_regular_dependency(&plan).unwrap();
+
+        assert_eq!(descriptor.version, "3.0");
+        assert_eq!(descriptor.scope, "runtime");
+        assert_eq!(exclusions, vec![("org.bad".to_string(), "*".to_string())]);
+    }
+
+    #[test]
+    fn skips_non_runtime_pom_dependencies() {
+        let optional = PomDependency {
+            group: "org.example".to_string(),
+            name: "optional".to_string(),
+            version: "1.0".to_string(),
+            scope: "runtime".to_string(),
+            optional: true,
+            classifier: String::new(),
+            type_field: String::new(),
+            exclusions: Vec::new(),
+        };
+        assert!(
+            plan_pom_dependency("org.example", "root", &optional, None, &HashMap::new(), &[])
+                .is_none()
+        );
+
+        let self_dep = PomDependency {
+            group: "org.example".to_string(),
+            name: "root".to_string(),
+            version: "1.0".to_string(),
+            scope: "runtime".to_string(),
+            optional: false,
+            classifier: String::new(),
+            type_field: String::new(),
+            exclusions: Vec::new(),
+        };
+        assert!(
+            plan_pom_dependency("org.example", "root", &self_dep, None, &HashMap::new(), &[])
+                .is_none()
+        );
+
+        let excluded = PomDependency {
+            group: "org.bad".to_string(),
+            name: "child".to_string(),
+            version: "1.0".to_string(),
+            scope: "runtime".to_string(),
+            optional: false,
+            classifier: String::new(),
+            type_field: String::new(),
+            exclusions: Vec::new(),
+        };
+        assert!(plan_pom_dependency(
+            "org.example",
+            "root",
+            &excluded,
+            None,
+            &HashMap::new(),
+            &[("org.bad".to_string(), "*".to_string())],
+        )
+        .is_none());
     }
 }

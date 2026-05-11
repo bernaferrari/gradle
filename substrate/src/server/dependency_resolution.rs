@@ -21,7 +21,7 @@ use super::dependency_solver::gradle_module_metadata::{self, ModuleMetadataSelec
 use super::dependency_solver::graph_builder;
 use super::dependency_solver::ivyresolve::strategy::compare_versions;
 use super::dependency_solver::maven_metadata::{self, MavenMetadata, MavenVersioning};
-use super::dependency_solver::maven_pom::{self, ParentPom};
+use super::dependency_solver::maven_pom::{self, ParentPom, PomDependencyPlan};
 pub use super::dependency_solver::maven_pom::{ManagedDependency, PomDependency};
 use super::dependency_solver::resolved_graph::TransitiveResolution;
 pub use super::dependency_solver::resolveengine::graph::conflicts::ResolutionStrategy;
@@ -2014,72 +2014,22 @@ impl DependencyResolutionServiceImpl {
                     for pom_dep in &pom_deps {
                         let managed =
                             managed_versions.get(&(pom_dep.group.clone(), pom_dep.name.clone()));
-                        let effective_scope = Self::managed_default_scope(pom_dep, managed);
-
-                        // BOM import: scope=import, type=pom
-                        if effective_scope == "import" && pom_dep.type_field == "pom" {
-                            let bom_version =
-                                Self::interpolate_properties(&pom_dep.version, &properties);
-                            if !bom_version.is_empty() {
-                                bom_imports.push((
-                                    pom_dep.group.clone(),
-                                    pom_dep.name.clone(),
-                                    bom_version,
-                                ));
+                        match maven_pom::plan_pom_dependency(
+                            group,
+                            name,
+                            pom_dep,
+                            managed,
+                            &properties,
+                            inherited_exclusions,
+                        ) {
+                            Some(PomDependencyPlan::BomImport(import)) => {
+                                bom_imports.push((import.group, import.name, import.version));
                             }
-                            continue;
+                            Some(PomDependencyPlan::Regular(plan)) => {
+                                regular_deps.push(plan);
+                            }
+                            None => {}
                         }
-
-                        // Skip test/provided scopes and optional deps
-                        if effective_scope == "test"
-                            || effective_scope == "provided"
-                            || pom_dep.optional
-                        {
-                            continue;
-                        }
-
-                        if pom_dep.group == group && pom_dep.name == name {
-                            tracing::debug!(
-                                group = %pom_dep.group,
-                                name = %pom_dep.name,
-                                "Skipping self dependency from POM"
-                            );
-                            continue;
-                        }
-
-                        // Exclusions declared on the edge from the parent apply to this
-                        // artifact's direct dependencies. A sibling dependency's own
-                        // exclusions must not remove other siblings.
-                        let is_excluded =
-                            Self::is_dependency_excluded(pom_dep, inherited_exclusions);
-                        if is_excluded {
-                            tracing::debug!(
-                                group = %pom_dep.group,
-                                name = %pom_dep.name,
-                                "Transitive dependency excluded"
-                            );
-                            continue;
-                        }
-
-                        // Resolve version via property interpolation + dependency management
-                        let raw_dep_version =
-                            Self::interpolate_properties(&pom_dep.version, &properties);
-                        let resolved_version =
-                            if raw_dep_version.is_empty() || raw_dep_version.starts_with("${") {
-                                managed
-                                    .map(|managed| managed.version.clone())
-                                    .unwrap_or(raw_dep_version)
-                            } else {
-                                raw_dep_version
-                            };
-
-                        let effective_exclusions = Self::effective_exclusions(pom_dep, managed);
-                        regular_deps.push((
-                            pom_dep.clone(),
-                            resolved_version,
-                            effective_scope,
-                            effective_exclusions,
-                        ));
                     }
 
                     // Merge BOM managed versions into our managed set
@@ -2109,55 +2059,25 @@ impl DependencyResolutionServiceImpl {
                     }
 
                     // Re-resolve versions with merged managed set
-                    for (pom_dep, resolved_version, effective_scope, effective_exclusions) in
-                        &mut regular_deps
-                    {
-                        if resolved_version.starts_with("${") || resolved_version.is_empty() {
-                            if let Some(managed) =
-                                merged_managed.get(&(pom_dep.group.clone(), pom_dep.name.clone()))
-                            {
-                                *resolved_version = managed.version.clone();
-                                *effective_scope =
-                                    Self::managed_default_scope(pom_dep, Some(managed));
-                                *effective_exclusions =
-                                    Self::effective_exclusions(pom_dep, Some(managed));
-                            }
-                        }
+                    for plan in &mut regular_deps {
+                        maven_pom::refresh_regular_dependency_from_managed(plan, &merged_managed);
                     }
 
                     // Resolve each regular dependency recursively
                     let mut transitive_deps = Vec::new();
 
-                    for (pom_dep, resolved_version, effective_scope, effective_exclusions) in
-                        &regular_deps
-                    {
-                        if resolved_version.is_empty() {
+                    for plan in &regular_deps {
+                        let Some((child_dep, effective_exclusions)) =
+                            maven_pom::child_descriptor_from_regular_dependency(plan)
+                        else {
                             continue;
-                        }
-                        let (classifier, extension) =
-                            Self::maven_artifact_shape(&pom_dep.classifier, &pom_dep.type_field);
-                        let child_dep = DependencyDescriptor {
-                            group: pom_dep.group.clone(),
-                            name: pom_dep.name.clone(),
-                            version: resolved_version.clone(),
-                            classifier,
-                            extension,
-                            transitive: true,
-                            scope: effective_scope.clone(),
-                            changing: false,
-                            optional: false,
-                            ivy_conf: String::new(),
-                            strict_version: String::new(),
-                            required_version: String::new(),
-                            preferred_version: String::new(),
-                            rejected_versions: Vec::new(),
                         };
                         let resolved = Box::pin(self.resolve_recursive(
                             &child_dep,
                             repos,
                             visited,
                             depth + 1,
-                            effective_exclusions,
+                            &effective_exclusions,
                             lenient,
                         ))
                         .await;
