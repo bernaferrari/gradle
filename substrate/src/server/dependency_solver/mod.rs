@@ -7,6 +7,7 @@ pub mod maven_metadata;
 pub mod maven_pom;
 pub mod metadata_source;
 pub mod repository_chain;
+pub mod resolved_graph;
 pub mod resolveengine;
 pub mod scope;
 pub mod selector;
