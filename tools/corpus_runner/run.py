@@ -362,6 +362,8 @@ def scan_project_contract(project_dir: str) -> dict:
             unsupported_features.add("repository-content-filter")
         if re.search(r"\bdependencySubstitution\s*\{", text):
             unsupported_features.add("dependency-substitution")
+        if re.search(r"\bcomponents\s*\{", text):
+            unsupported_features.add("component-metadata-rule")
 
     return {
         "build_file_count": len(build_files),

@@ -235,20 +235,19 @@ fn kernel_task_contract_rejection(
             return Some(format!("unsupported contract marker '{}'", key));
         }
         let input_properties = value.get("input_properties").and_then(|v| v.as_object());
-        if input_properties
-            .and_then(|props| props.get(key))
-            .and_then(|v| v.as_str())
-            == Some("true")
-            || input_properties
-                .and_then(|props| props.get(&format!("input.{key}")))
-                .and_then(|v| v.as_str())
-                == Some("true")
-            || input_properties
-                .and_then(|props| props.get(&format!("input_value.{key}")))
-                .and_then(|v| v.as_str())
-                == Some("true")
-        {
-            return Some(format!("unsupported contract marker '{}'", key));
+        if let Some(properties) = input_properties {
+            let has_marker = properties.get(key).and_then(|v| v.as_str()) == Some("true")
+                || properties
+                    .get(&format!("input.{key}"))
+                    .and_then(|v| v.as_str())
+                    == Some("true")
+                || properties
+                    .get(&format!("input_value.{key}"))
+                    .and_then(|v| v.as_str())
+                    == Some("true");
+            if has_marker {
+                return Some(unsupported_contract_marker_reason(key, properties));
+            }
         }
     }
 
@@ -272,6 +271,32 @@ fn kernel_task_contract_rejection(
     }
 
     None
+}
+
+fn unsupported_contract_marker_reason(
+    key: &str,
+    input_properties: &serde_json::Map<String, serde_json::Value>,
+) -> String {
+    let unsupported_features = [
+        "unsupported_repository_features",
+        "input.unsupported_repository_features",
+        "input_value.unsupported_repository_features",
+    ]
+    .iter()
+    .filter_map(|feature_key| input_properties.get(*feature_key))
+    .filter_map(|value| value.as_str())
+    .filter(|value| !value.trim().is_empty())
+    .collect::<Vec<_>>();
+
+    if unsupported_features.is_empty() {
+        format!("unsupported contract marker '{}'", key)
+    } else {
+        format!(
+            "unsupported contract marker '{}' ({})",
+            key,
+            unsupported_features.join(",")
+        )
+    }
 }
 
 fn string_option_present(
@@ -404,6 +429,7 @@ mod tests {
         assert!(rejection
             .message()
             .contains("unsupported_dependency_semantics"));
+        assert!(rejection.message().contains("repository-content-filter:maven"));
     }
 
     #[test]
