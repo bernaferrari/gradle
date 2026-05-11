@@ -27,77 +27,7 @@ pub use super::dependency_solver::resolveengine::graph::conflicts::ResolutionStr
 use super::dependency_solver::resolveengine::graph::conflicts::{
     resolve_conflicts, resolve_conflicts_with_strategy, try_resolve_conflicts_with_strategy,
 };
-
-// ---------------------------------------------------------------------------
-// Dependency scope
-// ---------------------------------------------------------------------------
-
-/// Dependency scope classification.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DependencyScope {
-    Compile,
-    Runtime,
-    Test,
-    Provided,
-    System,
-}
-
-impl DependencyScope {
-    /// Parse a scope string (case-insensitive).
-    pub fn from_str_loose(s: &str) -> Self {
-        match s.as_bytes() {
-            b"compile" | b"compileonly" | b"api" | b"Compile" | b"CompileOnly" | b"Api"
-            | b"COMPILE" | b"COMPILEONLY" | b"API" => DependencyScope::Compile,
-            b"runtime" | b"implementation" | b"runtimeonly" | b"Runtime" | b"Implementation"
-            | b"RuntimeOnly" | b"RUNTIME" | b"IMPLEMENTATION" | b"RUNTIMEONLY" => {
-                DependencyScope::Runtime
-            }
-            b"test"
-            | b"testimplementation"
-            | b"testruntimeonly"
-            | b"Test"
-            | b"TestImplementation"
-            | b"TestRuntimeOnly"
-            | b"TEST"
-            | b"TESTIMPLEMENTATION"
-            | b"TESTRUNTIMEONLY" => DependencyScope::Test,
-            b"provided" | b"Provided" | b"PROVIDED" => DependencyScope::Provided,
-            b"system" | b"System" | b"SYSTEM" => DependencyScope::System,
-            _ => DependencyScope::Compile,
-        }
-    }
-
-    /// Returns true if this scope includes the given dependency scope.
-    /// This follows Maven classpath semantics: runtime includes compile/runtime,
-    /// test includes everything, and compile excludes runtime/test-only entries.
-    pub fn includes(&self, other: &DependencyScope) -> bool {
-        match self {
-            DependencyScope::Compile => matches!(
-                other,
-                DependencyScope::Compile | DependencyScope::Provided | DependencyScope::System
-            ),
-            DependencyScope::Runtime => {
-                matches!(other, DependencyScope::Compile | DependencyScope::Runtime)
-            }
-            DependencyScope::Test => true,
-            DependencyScope::Provided => {
-                matches!(other, DependencyScope::Compile | DependencyScope::Provided)
-            }
-            DependencyScope::System => matches!(other, DependencyScope::System),
-        }
-    }
-
-    /// Scopes that are transitively inherited.
-    pub fn transitive_scopes(&self) -> Vec<DependencyScope> {
-        match self {
-            DependencyScope::Compile => vec![DependencyScope::Compile, DependencyScope::Runtime],
-            DependencyScope::Runtime => vec![DependencyScope::Runtime],
-            DependencyScope::Test => vec![DependencyScope::Compile, DependencyScope::Runtime],
-            DependencyScope::Provided => vec![],
-            DependencyScope::System => vec![],
-        }
-    }
-}
+pub use super::dependency_solver::scope::DependencyScope;
 
 /// Cached artifact metadata.
 struct CachedArtifact {
@@ -1402,17 +1332,7 @@ impl DependencyResolutionServiceImpl {
         deps: Vec<ResolvedDependency>,
         target: &DependencyScope,
     ) -> Vec<ResolvedDependency> {
-        deps.into_iter()
-            .filter_map(|mut dep| {
-                let dep_scope = DependencyScope::from_str_loose(&dep.scope);
-                if target.includes(&dep_scope) {
-                    dep.dependencies = Self::filter_by_scope(dep.dependencies, target);
-                    Some(dep)
-                } else {
-                    None
-                }
-            })
-            .collect()
+        crate::server::dependency_solver::scope::filter_by_scope(deps, target)
     }
 
     /// Check if a dependency matches an exclusion pattern.
