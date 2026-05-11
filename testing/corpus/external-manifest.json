@@ -150,6 +150,22 @@
         "project_dependencies": [],
         "toolchains": []
       }
+    },
+    {
+      "name": "dependency-repository-content-filter-kotlin-dsl",
+      "path": "dependency-repository-content-filter-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 1,
+        "plugins": ["java-library"],
+        "tasks": ["dependencyContractReport"],
+        "outputs": ["build/reports/dependency-contract.txt"],
+        "dependencies": ["org.gradle.substrate:filtered:1.0"],
+        "project_dependencies": [],
+        "toolchains": ["17"]
+      }
     }
   ]
 }
