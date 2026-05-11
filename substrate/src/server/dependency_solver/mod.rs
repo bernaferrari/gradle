@@ -7,3 +7,4 @@ pub mod metadata_source;
 pub mod repository_chain;
 pub mod resolveengine;
 pub mod selector;
+pub mod variant_capability;
