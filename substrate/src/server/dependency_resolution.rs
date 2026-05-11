@@ -1753,116 +1753,22 @@ impl DependencyResolutionServiceImpl {
         redirects: &mut std::collections::HashSet<(String, String, String)>,
         redirect_depth: u32,
     ) -> Result<Option<TransitiveResolution>, String> {
-        const MAX_GMM_REDIRECT_DEPTH: u32 = 8;
-        if redirect_depth > MAX_GMM_REDIRECT_DEPTH {
-            return Err(format!(
-                "unsupported Gradle Module Metadata available-at redirect depth exceeded for {group}:{name}:{version}"
-            ));
-        }
-        let key = (group.to_string(), name.to_string(), version.to_string());
-        if !redirects.insert(key.clone()) {
-            return Err(format!(
-                "unsupported Gradle Module Metadata available-at redirect cycle at {group}:{name}:{version}"
-            ));
-        }
-        let Some(module_metadata) = self
-            .fetch_gradle_module_metadata(group, name, version, repo)
-            .await?
-        else {
-            redirects.remove(&key);
-            return Ok(None);
-        };
-        let selection = gradle_module_metadata::select_jvm_variant(
-            &module_metadata,
-            scope,
+        gradle_module_metadata::resolve_transitive_from_module_metadata_in_repo(
+            self,
             group,
             name,
             version,
-        )?;
-        let result = match selection {
-            Some(ModuleMetadataSelection::Selected(variant)) => {
-                let mut transitive_deps = Vec::with_capacity(variant.dependencies.len());
-                for module_dep in &variant.dependencies {
-                    if inherited_exclusions.iter().any(|(excl_group, excl_name)| {
-                        Self::matches_exclusion(
-                            &module_dep.group,
-                            &module_dep.module,
-                            excl_group,
-                            excl_name,
-                        )
-                    }) {
-                        tracing::debug!(
-                            group = %module_dep.group,
-                            name = %module_dep.module,
-                            "Gradle Module Metadata dependency excluded"
-                        );
-                        continue;
-                    }
-                    let child_dep = DependencyDescriptor {
-                        group: module_dep.group.clone(),
-                        name: module_dep.module.clone(),
-                        version: module_dep.version.clone(),
-                        classifier: String::new(),
-                        extension: "jar".to_string(),
-                        transitive: true,
-                        scope: scope.to_string(),
-                        changing: false,
-                        optional: false,
-                        ivy_conf: String::new(),
-                        strict_version: String::new(),
-                        required_version: String::new(),
-                        preferred_version: String::new(),
-                        rejected_versions: Vec::new(),
-                    };
-                    let resolved = Box::pin(self.resolve_recursive(
-                        &child_dep,
-                        repos,
-                        visited,
-                        depth + 1,
-                        &module_dep.exclusions,
-                        lenient,
-                    ))
-                    .await;
-                    transitive_deps.push(resolved);
-                }
-                Self::resolve_conflicts(&mut transitive_deps);
-                tracing::debug!(
-                    group = %group,
-                    name = %name,
-                    version = %version,
-                    variant = %variant.name,
-                    transitive = transitive_deps.len(),
-                    "Resolved transitive dependencies from Gradle Module Metadata"
-                );
-                Ok(Some(TransitiveResolution {
-                    dependencies: transitive_deps,
-                    source_repo_url: Some(repo.url.clone()),
-                }))
-            }
-            Some(ModuleMetadataSelection::Redirect(redirect)) => {
-                Box::pin(
-                    self.fetch_and_resolve_transitive_from_module_metadata_in_repo(
-                        &redirect.group,
-                        &redirect.module,
-                        &redirect.version,
-                        scope,
-                        repo,
-                        repos,
-                        visited,
-                        depth,
-                        inherited_exclusions,
-                        lenient,
-                        redirects,
-                        redirect_depth + 1,
-                    ),
-                )
-                .await
-            }
-            Some(ModuleMetadataSelection::Unsupported(reason)) => Err(reason),
-            None => Ok(None),
-        };
-        redirects.remove(&key);
-        result
+            scope,
+            repo,
+            repos,
+            visited,
+            depth,
+            inherited_exclusions,
+            lenient,
+            redirects,
+            redirect_depth,
+        )
+        .await
     }
 
     async fn fetch_and_resolve_transitive(
@@ -2098,6 +2004,32 @@ impl DependencyResolverTransport for DependencyResolutionServiceImpl {
         repo: &RepositoryDescriptor,
     ) -> Result<String, String> {
         DependencyResolutionServiceImpl::fetch_pom(self, group, name, version, repo).await
+    }
+
+    async fn fetch_gradle_module_metadata(
+        &self,
+        group: &str,
+        name: &str,
+        version: &str,
+        repo: &RepositoryDescriptor,
+    ) -> Result<Option<String>, String> {
+        DependencyResolutionServiceImpl::fetch_gradle_module_metadata(
+            self, group, name, version, repo,
+        )
+        .await
+    }
+
+    async fn resolve_dependency(
+        &self,
+        dep: &DependencyDescriptor,
+        repos: &[RepositoryDescriptor],
+        visited: &mut std::collections::HashSet<(String, String)>,
+        depth: u32,
+        inherited_exclusions: &[(String, String)],
+        lenient: bool,
+    ) -> ResolvedDependency {
+        Box::pin(self.resolve_recursive(dep, repos, visited, depth, inherited_exclusions, lenient))
+            .await
     }
 }
 
