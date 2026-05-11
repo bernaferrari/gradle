@@ -21,7 +21,7 @@ use super::dependency_solver::gradle_module_metadata::{self, ModuleMetadataSelec
 use super::dependency_solver::graph_builder;
 use super::dependency_solver::ivyresolve::strategy::compare_versions;
 use super::dependency_solver::maven_metadata::{self, MavenMetadata, MavenVersioning};
-use super::dependency_solver::maven_pom::{self, ParentPom, PomDependencyPlan};
+use super::dependency_solver::maven_pom::{self, ParentPom};
 pub use super::dependency_solver::maven_pom::{ManagedDependency, PomDependency};
 use super::dependency_solver::resolved_graph::TransitiveResolution;
 pub use super::dependency_solver::resolveengine::graph::conflicts::ResolutionStrategy;
@@ -1721,56 +1721,6 @@ impl DependencyResolutionServiceImpl {
         }
     }
 
-    /// Resolve parent POM chain and merge inherited properties and dependency management.
-    /// Walks up the parent chain (grandparent, great-grandparent, etc.) up to MAX_PARENT_DEPTH.
-    /// Child properties override parent properties. Parent managed deps fill gaps in child.
-    async fn resolve_parent_inheritance(
-        &self,
-        pom_content: &str,
-        repos: &[RepositoryDescriptor],
-    ) -> (
-        std::collections::HashMap<String, String>,
-        std::collections::HashMap<(String, String), ManagedDependency>,
-    ) {
-        maven_pom::resolve_parent_inheritance(pom_content, repos, self, MAX_PARENT_DEPTH).await
-    }
-
-    /// Fetch a POM from repositories and recursively resolve its transitive dependencies.
-    /// Handles BOM imports (scope=import, type=pom) and applies exclusions.
-    #[allow(clippy::too_many_arguments)]
-    async fn fetch_and_resolve_transitive_from_module_metadata_in_repo(
-        &self,
-        group: &str,
-        name: &str,
-        version: &str,
-        scope: &str,
-        repo: &RepositoryDescriptor,
-        repos: &[RepositoryDescriptor],
-        visited: &mut std::collections::HashSet<(String, String)>,
-        depth: u32,
-        inherited_exclusions: &[(String, String)],
-        lenient: bool,
-        redirects: &mut std::collections::HashSet<(String, String, String)>,
-        redirect_depth: u32,
-    ) -> Result<Option<TransitiveResolution>, String> {
-        gradle_module_metadata::resolve_transitive_from_module_metadata_in_repo(
-            self,
-            group,
-            name,
-            version,
-            scope,
-            repo,
-            repos,
-            visited,
-            depth,
-            inherited_exclusions,
-            lenient,
-            redirects,
-            redirect_depth,
-        )
-        .await
-    }
-
     async fn fetch_and_resolve_transitive(
         &self,
         group: &str,
@@ -1783,181 +1733,20 @@ impl DependencyResolutionServiceImpl {
         inherited_exclusions: &[(String, String)],
         lenient: bool,
     ) -> Result<TransitiveResolution, String> {
-        let mut redirects = std::collections::HashSet::new();
-        let allowed_repos = Self::repositories_for_dependency(repos, group, name, version);
-        for repo in allowed_repos
-            .iter()
-            .filter(|repo| Self::supports_gradle_module_metadata(repo))
-        {
-            match Box::pin(
-                self.fetch_and_resolve_transitive_from_module_metadata_in_repo(
-                    group,
-                    name,
-                    version,
-                    scope,
-                    repo,
-                    repos,
-                    visited,
-                    depth,
-                    inherited_exclusions,
-                    lenient,
-                    &mut redirects,
-                    0,
-                ),
-            )
-            .await
-            {
-                Ok(Some(resolution)) => return Ok(resolution),
-                Ok(None) => {}
-                Err(error) => return Err(error),
-            }
-        }
-
-        for repo in &allowed_repos {
-            match self.fetch_pom(group, name, version, repo).await {
-                Ok(pom_content) => {
-                    // Resolve parent POM chain for inherited properties and managed deps
-                    let (properties, managed_versions) =
-                        self.resolve_parent_inheritance(&pom_content, repos).await;
-                    let pom_deps = Self::parse_pom_dependencies(&pom_content);
-
-                    // Separate BOM imports from regular dependencies
-                    let mut bom_imports = Vec::new();
-                    let mut regular_deps = Vec::new();
-
-                    for ((bom_group, bom_name), managed) in &managed_versions {
-                        if managed.scope == "import" && managed.type_field == "pom" {
-                            let bom_version =
-                                Self::interpolate_properties(&managed.version, &properties);
-                            if !bom_version.is_empty() {
-                                bom_imports.push((
-                                    bom_group.clone(),
-                                    bom_name.clone(),
-                                    bom_version,
-                                ));
-                            }
-                        }
-                    }
-
-                    for pom_dep in &pom_deps {
-                        let managed =
-                            managed_versions.get(&(pom_dep.group.clone(), pom_dep.name.clone()));
-                        match maven_pom::plan_pom_dependency(
-                            group,
-                            name,
-                            pom_dep,
-                            managed,
-                            &properties,
-                            inherited_exclusions,
-                        ) {
-                            Some(PomDependencyPlan::BomImport(import)) => {
-                                bom_imports.push((import.group, import.name, import.version));
-                            }
-                            Some(PomDependencyPlan::Regular(plan)) => {
-                                regular_deps.push(plan);
-                            }
-                            None => {}
-                        }
-                    }
-
-                    // Merge BOM managed versions into our managed set
-                    let mut merged_managed = managed_versions;
-                    for (bom_group, bom_name, bom_version) in &bom_imports {
-                        if let Ok(bom_pom) =
-                            self.fetch_pom(bom_group, bom_name, bom_version, repo).await
-                        {
-                            let bom_props = Self::parse_pom_properties(&bom_pom);
-                            let bom_managed = Self::parse_dependency_management(&bom_pom);
-                            for ((g, n), mut managed) in bom_managed {
-                                let interpolated =
-                                    Self::interpolate_properties(&managed.version, &bom_props);
-                                if !interpolated.is_empty() {
-                                    managed.version = interpolated;
-                                    merged_managed.entry((g, n)).or_insert(managed);
-                                }
-                            }
-                            tracing::debug!(
-                                bom_group = %bom_group,
-                                bom_name = %bom_name,
-                                bom_version = %bom_version,
-                                entries = merged_managed.len(),
-                                "Loaded BOM and merged managed dependencies"
-                            );
-                        }
-                    }
-
-                    // Re-resolve versions with merged managed set
-                    for plan in &mut regular_deps {
-                        maven_pom::refresh_regular_dependency_from_managed(plan, &merged_managed);
-                    }
-
-                    // Resolve each regular dependency recursively
-                    let mut transitive_deps = Vec::new();
-
-                    for plan in &regular_deps {
-                        let Some((child_dep, effective_exclusions)) =
-                            maven_pom::child_descriptor_from_regular_dependency(plan)
-                        else {
-                            continue;
-                        };
-                        let resolved = Box::pin(self.resolve_recursive(
-                            &child_dep,
-                            repos,
-                            visited,
-                            depth + 1,
-                            &effective_exclusions,
-                            lenient,
-                        ))
-                        .await;
-                        transitive_deps.push(resolved);
-                    }
-
-                    // Apply conflict resolution
-                    Self::resolve_conflicts(&mut transitive_deps);
-
-                    tracing::debug!(
-                        group = %group,
-                        name = %name,
-                        depth,
-                        transitive = transitive_deps.len(),
-                        "Resolved {} transitive dependencies (depth {})",
-                        transitive_deps.len(),
-                        depth
-                    );
-
-                    return Ok(TransitiveResolution {
-                        dependencies: transitive_deps,
-                        source_repo_url: Some(repo.url.clone()),
-                    });
-                }
-                Err(e) => {
-                    tracing::debug!(
-                        group = %group,
-                        name = %name,
-                        repo = %repo.url,
-                        error = %e,
-                        "Failed to fetch POM from repo"
-                    );
-                }
-            }
-        }
-        if lenient {
-            tracing::debug!(
-                group = %group,
-                name = %name,
-                version = %version,
-                depth,
-                "No module metadata found; preserving lenient artifact-only tolerance"
-            );
-            Ok(TransitiveResolution {
-                dependencies: Vec::new(),
-                source_repo_url: None,
-            })
-        } else {
-            Err(format!(
-                "No Gradle Module Metadata or Maven POM found for {group}:{name}:{version} in configured repositories"
-            ))
-        }
+        maven_pom::resolve_transitive_dependencies(
+            group,
+            name,
+            version,
+            scope,
+            repos,
+            self,
+            visited,
+            depth,
+            inherited_exclusions,
+            lenient,
+            MAX_PARENT_DEPTH,
+        )
+        .await
     }
 
     /// Download an artifact with retry logic.

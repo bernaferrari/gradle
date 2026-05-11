@@ -3,7 +3,11 @@ use std::collections::{HashMap, HashSet};
 use crate::proto::{DependencyDescriptor, RepositoryDescriptor, ResolvedDependency};
 
 use super::artifact_selection::maven_artifact_shape;
+use super::gradle_module_metadata;
+use super::metadata_source;
 use super::repository_chain;
+use super::resolved_graph::TransitiveResolution;
+use super::resolveengine::graph::conflicts::resolve_conflicts;
 use super::resolver_transport::DependencyResolverTransport;
 
 /// Parsed dependency from a POM file.
@@ -449,6 +453,186 @@ pub(crate) async fn resolve_parent_inheritance<T: DependencyResolverTransport + 
     }
 
     inheritance.into_parts()
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn resolve_transitive_dependencies<T: DependencyResolverTransport + Sync>(
+    group: &str,
+    name: &str,
+    version: &str,
+    scope: &str,
+    repos: &[RepositoryDescriptor],
+    transport: &T,
+    visited: &mut HashSet<(String, String)>,
+    depth: u32,
+    inherited_exclusions: &[(String, String)],
+    lenient: bool,
+    max_parent_depth: u32,
+) -> Result<TransitiveResolution, String> {
+    let mut redirects = HashSet::new();
+    let allowed_repos = repository_chain::repositories_for_dependency(repos, group, name, version);
+    for repo in allowed_repos
+        .iter()
+        .filter(|repo| metadata_source::supports_gradle_module_metadata(repo))
+    {
+        match Box::pin(
+            gradle_module_metadata::resolve_transitive_from_module_metadata_in_repo(
+                transport,
+                group,
+                name,
+                version,
+                scope,
+                repo,
+                repos,
+                visited,
+                depth,
+                inherited_exclusions,
+                lenient,
+                &mut redirects,
+                0,
+            ),
+        )
+        .await
+        {
+            Ok(Some(resolution)) => return Ok(resolution),
+            Ok(None) => {}
+            Err(error) => return Err(error),
+        }
+    }
+
+    for repo in &allowed_repos {
+        match transport.fetch_pom(group, name, version, repo).await {
+            Ok(pom_content) => {
+                let (properties, managed_versions) =
+                    resolve_parent_inheritance(&pom_content, repos, transport, max_parent_depth)
+                        .await;
+                let pom_deps = parse_pom_dependencies(&pom_content);
+
+                let mut bom_imports = Vec::new();
+                let mut regular_deps = Vec::new();
+
+                for ((bom_group, bom_name), managed) in &managed_versions {
+                    if managed.scope == "import" && managed.type_field == "pom" {
+                        let bom_version = interpolate_properties(&managed.version, &properties);
+                        if !bom_version.is_empty() {
+                            bom_imports.push((bom_group.clone(), bom_name.clone(), bom_version));
+                        }
+                    }
+                }
+
+                for pom_dep in &pom_deps {
+                    let managed =
+                        managed_versions.get(&(pom_dep.group.clone(), pom_dep.name.clone()));
+                    match plan_pom_dependency(
+                        group,
+                        name,
+                        pom_dep,
+                        managed,
+                        &properties,
+                        inherited_exclusions,
+                    ) {
+                        Some(PomDependencyPlan::BomImport(import)) => {
+                            bom_imports.push((import.group, import.name, import.version));
+                        }
+                        Some(PomDependencyPlan::Regular(plan)) => regular_deps.push(plan),
+                        None => {}
+                    }
+                }
+
+                let mut merged_managed = managed_versions;
+                for (bom_group, bom_name, bom_version) in &bom_imports {
+                    if let Ok(bom_pom) = transport
+                        .fetch_pom(bom_group, bom_name, bom_version, repo)
+                        .await
+                    {
+                        let bom_props = parse_pom_properties(&bom_pom);
+                        let bom_managed = parse_dependency_management(&bom_pom);
+                        for ((g, n), mut managed) in bom_managed {
+                            let interpolated = interpolate_properties(&managed.version, &bom_props);
+                            if !interpolated.is_empty() {
+                                managed.version = interpolated;
+                                merged_managed.entry((g, n)).or_insert(managed);
+                            }
+                        }
+                        tracing::debug!(
+                            bom_group = %bom_group,
+                            bom_name = %bom_name,
+                            bom_version = %bom_version,
+                            entries = merged_managed.len(),
+                            "Loaded BOM and merged managed dependencies"
+                        );
+                    }
+                }
+
+                for plan in &mut regular_deps {
+                    refresh_regular_dependency_from_managed(plan, &merged_managed);
+                }
+
+                let mut transitive_deps = Vec::new();
+                for plan in &regular_deps {
+                    let Some((child_dep, effective_exclusions)) =
+                        child_descriptor_from_regular_dependency(plan)
+                    else {
+                        continue;
+                    };
+                    let resolved = transport
+                        .resolve_dependency(
+                            &child_dep,
+                            repos,
+                            visited,
+                            depth + 1,
+                            &effective_exclusions,
+                            lenient,
+                        )
+                        .await;
+                    transitive_deps.push(resolved);
+                }
+
+                resolve_conflicts(&mut transitive_deps);
+                tracing::debug!(
+                    group = %group,
+                    name = %name,
+                    depth,
+                    transitive = transitive_deps.len(),
+                    "Resolved {} transitive dependencies (depth {})",
+                    transitive_deps.len(),
+                    depth
+                );
+
+                return Ok(TransitiveResolution {
+                    dependencies: transitive_deps,
+                    source_repo_url: Some(repo.url.clone()),
+                });
+            }
+            Err(error) => {
+                tracing::debug!(
+                    group = %group,
+                    name = %name,
+                    repo = %repo.url,
+                    error = %error,
+                    "Failed to fetch POM from repo"
+                );
+            }
+        }
+    }
+
+    if lenient {
+        tracing::debug!(
+            group = %group,
+            name = %name,
+            version = %version,
+            depth,
+            "No module metadata found; preserving lenient artifact-only tolerance"
+        );
+        Ok(TransitiveResolution {
+            dependencies: Vec::new(),
+            source_repo_url: None,
+        })
+    } else {
+        Err(format!(
+            "No Gradle Module Metadata or Maven POM found for {group}:{name}:{version} in configured repositories"
+        ))
+    }
 }
 
 /// Check if a dependency matches an exclusion pattern.
