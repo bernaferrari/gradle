@@ -21,7 +21,7 @@ use super::dependency_solver::gradle_module_metadata::{self, ModuleMetadataSelec
 use super::dependency_solver::graph_builder;
 use super::dependency_solver::ivyresolve::strategy::compare_versions;
 use super::dependency_solver::maven_metadata::{self, MavenMetadata, MavenVersioning};
-use super::dependency_solver::maven_pom;
+use super::dependency_solver::maven_pom::{self, ParentPom};
 pub use super::dependency_solver::maven_pom::{ManagedDependency, PomDependency};
 pub use super::dependency_solver::resolveengine::graph::conflicts::ResolutionStrategy;
 use super::dependency_solver::resolveengine::graph::conflicts::{
@@ -132,15 +132,6 @@ pub struct DependencyResolutionServiceImpl {
 struct TransitiveResolution {
     dependencies: Vec<ResolvedDependency>,
     source_repo_url: Option<String>,
-}
-
-/// Parsed <parent> section from a POM file.
-#[allow(dead_code)]
-struct ParentPom {
-    group_id: String,
-    artifact_id: String,
-    version: String,
-    relative_path: String,
 }
 
 /// Maximum depth for parent POM inheritance chain.
@@ -1506,93 +1497,12 @@ impl DependencyResolutionServiceImpl {
     /// Parse the <parent> section from a POM file.
     /// Returns None if no parent section exists.
     fn parse_parent_pom(pom_content: &str) -> Option<ParentPom> {
-        let bytes = pom_content.as_bytes();
-        let pos = find_open_tag_exact(bytes, 0, b"parent")?;
-        let _end_pos = find_end_tag(bytes, pos, b"parent")?;
-
-        let group_id = extract_tag_text(bytes, pos, b"groupId").unwrap_or_default();
-        let artifact_id = extract_tag_text(bytes, pos, b"artifactId").unwrap_or_default();
-        let version = extract_tag_text(bytes, pos, b"version").unwrap_or_default();
-        let relative_path = extract_tag_text(bytes, pos, b"relativePath").unwrap_or_default();
-
-        if group_id.is_empty() || artifact_id.is_empty() || version.is_empty() {
-            return None;
-        }
-
-        Some(ParentPom {
-            group_id,
-            artifact_id,
-            version,
-            relative_path,
-        })
+        maven_pom::parse_parent_pom(pom_content)
     }
 
     /// Parse properties from <properties> section of a POM.
     pub fn parse_pom_properties(pom_content: &str) -> std::collections::HashMap<String, String> {
-        let mut props = std::collections::HashMap::new();
-        let bytes = pom_content.as_bytes();
-
-        // Find <properties> block
-        let start = match find_open_tag_exact(bytes, 0, b"properties") {
-            Some(p) => p,
-            None => return props,
-        };
-        let end = match find_end_tag(bytes, start, b"properties") {
-            Some(p) => p,
-            None => return props,
-        };
-
-        // Extract all <key>value</key> pairs within the properties block
-        let mut i = start + b"<properties>".len();
-        while i < end {
-            // Find next opening tag <something>
-            let tag_start = match bytes[i..].iter().position(|&b| b == b'<') {
-                Some(p) => i + p,
-                None => break,
-            };
-            if tag_start >= end {
-                break;
-            }
-
-            // Find the closing >
-            let tag_end = match bytes[tag_start..].iter().position(|&b| b == b'>') {
-                Some(p) => tag_start + p,
-                None => break,
-            };
-
-            let tag_name = &bytes[tag_start + 1..tag_end];
-            // Skip closing tags, comments, etc.
-            if tag_name.is_empty() || tag_name[0] == b'/' {
-                i = tag_end + 1;
-                continue;
-            }
-
-            // Extract the text content between <key> and </key>
-            let close_tag = format!("</{}", std::str::from_utf8(tag_name).unwrap_or_default());
-            let close_bytes = close_tag.as_bytes();
-            if let Some(val_end) = bytes[tag_end + 1..end]
-                .windows(close_bytes.len())
-                .position(|w| w == close_bytes)
-                .map(|p| tag_end + 1 + p)
-            {
-                let value = std::str::from_utf8(&bytes[tag_end + 1..val_end])
-                    .unwrap_or_default()
-                    .trim()
-                    .to_string();
-                let key = std::str::from_utf8(tag_name)
-                    .unwrap_or_default()
-                    .trim()
-                    .to_string();
-                if !key.is_empty() {
-                    props.insert(key, value);
-                }
-                i = val_end + close_bytes.len();
-            } else {
-                i = tag_end + 1;
-            }
-        }
-
-        props
+        maven_pom::parse_pom_properties(pom_content)
     }
 
     /// Interpolate ${property.name} references in a string using the given properties map.
@@ -1600,34 +1510,7 @@ impl DependencyResolutionServiceImpl {
         value: &str,
         properties: &std::collections::HashMap<String, String>,
     ) -> String {
-        let mut result = value.to_string();
-        // Keep interpolating until no more ${...} references remain (handles nested refs)
-        let mut max_iterations = 10;
-        while result.contains("${") && max_iterations > 0 {
-            max_iterations -= 1;
-            if let Some(start) = result.find("${") {
-                if let Some(end) = result[start..].find('}') {
-                    let key = &result[start + 2..start + end];
-                    let replacement = properties.get(key).cloned().unwrap_or_else(|| {
-                        // Try common built-in properties
-                        match key {
-                            "project.version" | "version" | "pom.version" => {
-                                "0.0.0-unknown".to_string()
-                            }
-                            "project.groupId" | "groupId" => "unknown".to_string(),
-                            "project.artifactId" | "artifactId" => "unknown".to_string(),
-                            _ => format!("${{{}}}", key), // Leave unresolved
-                        }
-                    });
-                    result.replace_range(start..start + end + 1, &replacement);
-                } else {
-                    break;
-                }
-            } else {
-                break;
-            }
-        }
-        result
+        maven_pom::interpolate_properties(value, properties)
     }
 
     /// Resolve a version range to a concrete version.
@@ -2528,114 +2411,6 @@ impl DependencyResolutionServiceImpl {
             }
         }
     }
-}
-
-/// Find an exact opening tag (e.g., `<dependency>`) in bytes.
-/// Ensures the tag is followed by `>` or whitespace (not part of a longer tag name).
-fn find_open_tag_exact(bytes: &[u8], from: usize, tag: &[u8]) -> Option<usize> {
-    // Build "<tag" on the stack — avoids format!() heap allocation per call
-    let mut open_buf = [0u8; 64];
-    open_buf[0] = b'<';
-    let tag_len = tag.len().min(63);
-    open_buf[1..=tag_len].copy_from_slice(&tag[..tag_len]);
-    let open_bytes = &open_buf[..=tag_len];
-    let mut search_from = from;
-
-    while search_from < bytes.len() {
-        if let Some(pos) = bytes[search_from..]
-            .windows(open_bytes.len())
-            .position(|w| w == open_bytes)
-            .map(|pos| search_from + pos)
-        {
-            // Check the character after the tag name: must be '>' or whitespace
-            let after = pos + open_bytes.len();
-            if after < bytes.len() {
-                let next_char = bytes[after];
-                if next_char == b'>'
-                    || next_char == b' '
-                    || next_char == b'\n'
-                    || next_char == b'\r'
-                    || next_char == b'\t'
-                {
-                    return Some(pos);
-                }
-                // Not an exact match — e.g., <dependency> vs <dependencyManagement>
-                // Skip past this position and continue searching
-                search_from = after;
-                continue;
-            }
-            return Some(pos);
-        }
-        return None;
-    }
-    None
-}
-
-/// Find the start of a tag (e.g., `<dependency>`) in bytes. (Legacy — kept for compatibility)
-fn _find_tag(bytes: &[u8], from: usize, tag: &[u8]) -> Option<usize> {
-    find_open_tag_exact(bytes, from, tag)
-}
-
-/// Find an end tag (e.g., `</dependency>`) in bytes.
-fn find_end_tag(bytes: &[u8], from: usize, tag: &[u8]) -> Option<usize> {
-    // Build "</tag" on the stack — avoids format!() heap allocation
-    let mut close_buf = [0u8; 65];
-    close_buf[0] = b'<';
-    close_buf[1] = b'/';
-    let tag_len = tag.len().min(63);
-    close_buf[2..=tag_len + 1].copy_from_slice(&tag[..tag_len]);
-    let close_bytes = &close_buf[..=tag_len + 1];
-    bytes[from..]
-        .windows(close_bytes.len())
-        .position(|w| w == close_bytes)
-        .map(|pos| from + pos)
-}
-
-/// Extract text content of a child tag within a parent block.
-fn extract_tag_text(bytes: &[u8], parent_start: usize, tag: &[u8]) -> Option<String> {
-    // Build open/close tag patterns on the stack
-    let mut open_buf = [0u8; 64];
-    open_buf[0] = b'<';
-    let tag_len = tag.len().min(63);
-    open_buf[1..=tag_len].copy_from_slice(&tag[..tag_len]);
-    let open_bytes = &open_buf[..=tag_len];
-
-    let mut close_buf = [0u8; 65];
-    close_buf[0] = b'<';
-    close_buf[1] = b'/';
-    close_buf[2..=tag_len + 1].copy_from_slice(&tag[..tag_len]);
-    let close_bytes = &close_buf[..=tag_len + 1];
-
-    // Find the opening tag after parent_start
-    let search_from = parent_start;
-    if let Some(start_pos) = bytes[search_from..]
-        .windows(open_bytes.len())
-        .position(|w| w == open_bytes)
-        .map(|pos| search_from + pos)
-    {
-        let content_start = start_pos + open_bytes.len();
-        // Skip the closing `>` of the opening tag
-        let content_start = content_start
-            + bytes[content_start..]
-                .iter()
-                .position(|&b| b == b'>')
-                .unwrap_or(0)
-            + 1;
-
-        if let Some(end_pos) = bytes[content_start..]
-            .windows(close_bytes.len())
-            .position(|w| w == close_bytes)
-            .map(|pos| content_start + pos)
-        {
-            let content = &bytes[content_start..end_pos];
-            let text = std::str::from_utf8(content)
-                .unwrap_or_default()
-                .trim()
-                .to_string();
-            return Some(text);
-        }
-    }
-    None
 }
 
 #[tonic::async_trait]
