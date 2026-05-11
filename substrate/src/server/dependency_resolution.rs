@@ -243,92 +243,13 @@ impl DependencyResolutionServiceImpl {
         matches!(repo.layout.as_str(), "gradle-module-metadata" | "gradle")
     }
 
-    fn repository_allows_dependency(
-        repo: &RepositoryDescriptor,
-        group: &str,
-        module: &str,
-        version: &str,
-    ) -> bool {
-        let group = group.trim();
-        let module = module.trim();
-        let version = version.trim();
-        let module_key = format!("{group}:{module}");
-        let module_version_key = format!("{module_key}:{version}");
-        (repo.include_groups.is_empty()
-            && repo.include_group_prefixes.is_empty()
-            && repo.include_modules.is_empty()
-            && repo.include_module_versions.is_empty()
-            || repo
-                .include_groups
-                .iter()
-                .any(|candidate| candidate == group)
-            || repo
-                .include_group_prefixes
-                .iter()
-                .any(|candidate| Self::group_matches_prefix(group, candidate))
-            || repo
-                .include_modules
-                .iter()
-                .any(|candidate| candidate == &module_key)
-            || repo
-                .include_module_versions
-                .iter()
-                .any(|candidate| candidate == &module_version_key))
-            && !repo
-                .exclude_groups
-                .iter()
-                .any(|candidate| candidate == group)
-            && !repo
-                .exclude_group_prefixes
-                .iter()
-                .any(|candidate| Self::group_matches_prefix(group, candidate))
-            && !repo
-                .exclude_modules
-                .iter()
-                .any(|candidate| candidate == &module_key)
-            && !repo
-                .exclude_module_versions
-                .iter()
-                .any(|candidate| candidate == &module_version_key)
-    }
-
-    fn group_matches_prefix(group: &str, prefix: &str) -> bool {
-        let prefix = prefix.trim();
-        group == prefix
-            || group
-                .strip_prefix(prefix)
-                .is_some_and(|suffix| suffix.starts_with('.'))
-    }
-
-    fn repository_has_version_filters(repo: &RepositoryDescriptor) -> bool {
-        !repo.include_module_versions.is_empty() || !repo.exclude_module_versions.is_empty()
-    }
-
-    fn repositories_have_version_filters(repos: &[RepositoryDescriptor]) -> bool {
-        repos.iter().any(Self::repository_has_version_filters)
-    }
-
-    fn version_selector_is_dynamic_for_repository_filter(version: &str) -> bool {
-        let trimmed = version.trim();
-        trimmed.contains(',')
-            || trimmed.starts_with('[')
-            || trimmed.starts_with('(')
-            || trimmed == "LATEST"
-            || trimmed == "RELEASE"
-    }
-
     fn unsupported_repository_version_filter_reason(
         repos: &[RepositoryDescriptor],
         version: &str,
     ) -> Option<String> {
-        if Self::repositories_have_version_filters(repos)
-            && Self::version_selector_is_dynamic_for_repository_filter(version)
-        {
-            return Some(format!(
-                "Repository version content filters require a static version selector, got '{version}'"
-            ));
-        }
-        None
+        crate::server::dependency_solver::repository_chain::unsupported_repository_version_filter_reason(
+            repos, version,
+        )
     }
 
     fn repositories_for_dependency(
@@ -337,11 +258,9 @@ impl DependencyResolutionServiceImpl {
         module: &str,
         version: &str,
     ) -> Vec<RepositoryDescriptor> {
-        repos
-            .iter()
-            .filter(|repo| Self::repository_allows_dependency(repo, group, module, version))
-            .cloned()
-            .collect()
+        crate::server::dependency_solver::repository_chain::repositories_for_dependency(
+            repos, group, module, version,
+        )
     }
 
     fn first_unresolved_reason(dependencies: &[ResolvedDependency]) -> Option<String> {

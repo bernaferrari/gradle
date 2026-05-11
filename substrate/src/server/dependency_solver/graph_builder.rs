@@ -3,6 +3,10 @@ use std::collections::HashMap;
 use crate::proto::{DependencyDescriptor, RepositoryDescriptor};
 
 use super::ivyresolve::strategy::compare_versions;
+pub use super::repository_chain::{
+    normalized_repositories, unsupported_repository_reason, unsupported_repository_reason_parts,
+    unsupported_repository_url_reason,
+};
 use super::selector::{selected_static_version, validate_rejected_versions};
 pub use super::selector::{
     unsupported_native_version_selector_reason, unsupported_version_selector_reason,
@@ -95,88 +99,6 @@ fn validate_repositories(repositories: &[RepositoryDescriptor]) -> Result<(), St
         }
     }
     Ok(())
-}
-
-pub fn normalized_repositories(repositories: &[RepositoryDescriptor]) -> Vec<RepositoryDescriptor> {
-    if repositories.is_empty() {
-        return vec![RepositoryDescriptor {
-            id: "central".to_string(),
-            url: "https://repo.maven.apache.org/maven2/".to_string(),
-            m2compatible: true,
-            allow_insecure_protocol: false,
-            credentials: Default::default(),
-            layout: String::new(),
-            ivy_pattern: String::new(),
-            include_groups: Vec::new(),
-            exclude_groups: Vec::new(),
-            include_group_prefixes: Vec::new(),
-            exclude_group_prefixes: Vec::new(),
-            include_modules: Vec::new(),
-            exclude_modules: Vec::new(),
-            include_module_versions: Vec::new(),
-            exclude_module_versions: Vec::new(),
-        }];
-    }
-    repositories
-        .iter()
-        .map(|repo| RepositoryDescriptor {
-            id: repo.id.clone(),
-            url: repo.url.clone(),
-            m2compatible: repo.m2compatible,
-            allow_insecure_protocol: repo.allow_insecure_protocol,
-            credentials: repo.credentials.clone(),
-            layout: repo.layout.clone(),
-            ivy_pattern: repo.ivy_pattern.clone(),
-            include_groups: repo.include_groups.clone(),
-            exclude_groups: repo.exclude_groups.clone(),
-            include_group_prefixes: repo.include_group_prefixes.clone(),
-            exclude_group_prefixes: repo.exclude_group_prefixes.clone(),
-            include_modules: repo.include_modules.clone(),
-            exclude_modules: repo.exclude_modules.clone(),
-            include_module_versions: repo.include_module_versions.clone(),
-            exclude_module_versions: repo.exclude_module_versions.clone(),
-        })
-        .collect()
-}
-
-pub fn unsupported_repository_url_reason(repository_id: &str, url: &str) -> Option<String> {
-    let trimmed = url.trim();
-    if trimmed.is_empty() {
-        return Some(format!("Repository '{repository_id}' has no URL"));
-    }
-    if trimmed.starts_with("file:")
-        || trimmed.starts_with("https://")
-        || trimmed.starts_with("http://")
-    {
-        return None;
-    }
-    Some(format!(
-        "Repository '{repository_id}' has unsupported URL '{url}'"
-    ))
-}
-
-pub fn unsupported_repository_reason(repository: &RepositoryDescriptor) -> Option<String> {
-    unsupported_repository_reason_parts(
-        &repository.id,
-        &repository.url,
-        repository.allow_insecure_protocol,
-    )
-}
-
-pub fn unsupported_repository_reason_parts(
-    repository_id: &str,
-    url: &str,
-    allow_insecure_protocol: bool,
-) -> Option<String> {
-    if let Some(reason) = unsupported_repository_url_reason(repository_id, url) {
-        return Some(reason);
-    }
-    if url.trim().starts_with("http://") && !allow_insecure_protocol {
-        return Some(format!(
-            "Repository '{repository_id}' uses insecure HTTP without allowInsecureProtocol"
-        ));
-    }
-    None
 }
 
 pub fn parse_module_selector_notation(notation: &str) -> Option<ModuleSelector> {
