@@ -186,17 +186,14 @@ impl DependencyResolutionServiceImpl {
         classifier: &str,
         extension: &str,
     ) -> PathBuf {
-        let group_path = Self::group_to_path(group);
-        let filename = if classifier.is_empty() {
-            format!("{}-{}.{}", name, version, extension)
-        } else {
-            format!("{}-{}-{}.{}", name, version, classifier, extension)
-        };
-        self.artifact_store_dir
-            .join(&group_path)
-            .join(name)
-            .join(version)
-            .join(&filename)
+        crate::server::dependency_solver::cache_layout::artifact_path(
+            &self.artifact_store_dir,
+            group,
+            name,
+            version,
+            classifier,
+            extension,
+        )
     }
 
     fn normalize_extension(extension: &str) -> String {
@@ -565,14 +562,9 @@ impl DependencyResolutionServiceImpl {
         classifier: &str,
         extension: &str,
     ) -> String {
-        crate::server::dependency_solver::artifact_selection::artifact_cache_key(
+        crate::server::dependency_solver::cache_layout::coordinate_artifact_cache_key(
             group, name, version, classifier, extension,
         )
-    }
-
-    fn repository_cache_id(repo: &RepositoryDescriptor) -> String {
-        let digest = Self::compute_sha256(repo.url.as_bytes());
-        digest[..16].to_string()
     }
 
     fn metadata_cache_key(
@@ -582,28 +574,9 @@ impl DependencyResolutionServiceImpl {
         version: &str,
         extension: &str,
     ) -> String {
-        let extension = Self::normalize_extension(extension);
-        let repo_id = Self::repository_cache_id(repo);
-        let mut key = String::with_capacity(
-            "metadata:".len()
-                + repo_id.len()
-                + group.len()
-                + name.len()
-                + version.len()
-                + extension.len()
-                + 4,
-        );
-        key.push_str("metadata:");
-        key.push_str(&repo_id);
-        key.push(':');
-        key.push_str(group);
-        key.push(':');
-        key.push_str(name);
-        key.push(':');
-        key.push_str(version);
-        key.push(':');
-        key.push_str(&extension);
-        key
+        crate::server::dependency_solver::cache_layout::metadata_cache_key(
+            repo, group, name, version, extension,
+        )
     }
 
     fn module_metadata_cache_key(
@@ -612,37 +585,13 @@ impl DependencyResolutionServiceImpl {
         name: &str,
         extension: &str,
     ) -> String {
-        let extension = Self::normalize_extension(extension);
-        let repo_id = Self::repository_cache_id(repo);
-        let mut key = String::with_capacity(
-            "module-metadata:".len()
-                + repo_id.len()
-                + group.len()
-                + name.len()
-                + extension.len()
-                + 3,
-        );
-        key.push_str("module-metadata:");
-        key.push_str(&repo_id);
-        key.push(':');
-        key.push_str(group);
-        key.push(':');
-        key.push_str(name);
-        key.push(':');
-        key.push_str(&extension);
-        key
+        crate::server::dependency_solver::cache_layout::module_metadata_cache_key(
+            repo, group, name, extension,
+        )
     }
 
     fn metadata_url_cache_key(url: &str, extension: &str) -> String {
-        let extension = Self::normalize_extension(extension);
-        let digest = Self::compute_sha256(url.as_bytes());
-        let mut key =
-            String::with_capacity("metadata-url:".len() + digest.len() + extension.len() + 1);
-        key.push_str("metadata-url:");
-        key.push_str(&digest);
-        key.push(':');
-        key.push_str(&extension);
-        key
+        crate::server::dependency_solver::cache_layout::metadata_url_cache_key(url, extension)
     }
 
     fn warm_cached_artifact_path(
@@ -670,19 +619,14 @@ impl DependencyResolutionServiceImpl {
         version: &str,
         extension: &str,
     ) -> PathBuf {
-        let filename = format!(
-            "{}-{}.{}",
+        crate::server::dependency_solver::cache_layout::metadata_path(
+            &self.artifact_store_dir,
+            repo,
+            group,
             name,
             version,
-            Self::normalize_extension(extension)
-        );
-        self.artifact_store_dir
-            .join("_metadata")
-            .join(Self::repository_cache_id(repo))
-            .join(Self::group_to_path(group))
-            .join(name)
-            .join(version)
-            .join(filename)
+            extension,
+        )
     }
 
     fn module_metadata_path(
@@ -692,24 +636,21 @@ impl DependencyResolutionServiceImpl {
         name: &str,
         extension: &str,
     ) -> PathBuf {
-        self.artifact_store_dir
-            .join("_metadata")
-            .join(Self::repository_cache_id(repo))
-            .join(Self::group_to_path(group))
-            .join(name)
-            .join(Self::normalize_extension(extension))
+        crate::server::dependency_solver::cache_layout::module_metadata_path(
+            &self.artifact_store_dir,
+            repo,
+            group,
+            name,
+            extension,
+        )
     }
 
     fn metadata_url_path(&self, url: &str, extension: &str) -> PathBuf {
-        let digest = Self::compute_sha256(url.as_bytes());
-        self.artifact_store_dir
-            .join("_metadata")
-            .join("by-url")
-            .join(format!(
-                "{}.{}",
-                digest,
-                Self::normalize_extension(extension)
-            ))
+        crate::server::dependency_solver::cache_layout::metadata_url_path(
+            &self.artifact_store_dir,
+            url,
+            extension,
+        )
     }
 
     async fn read_cached_text_artifact(
