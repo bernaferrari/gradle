@@ -206,16 +206,7 @@ impl DependencyResolutionServiceImpl {
     /// Convert a Maven group id ("org.gradle") to a path ("org/gradle").
     /// Pre-allocates the result string to avoid repeated `replace` allocations.
     fn group_to_path(group: &str) -> String {
-        let dot_count = group.bytes().filter(|&b| b == b'.').count();
-        let mut path = String::with_capacity(group.len() + dot_count);
-        for b in group.bytes() {
-            if b == b'.' {
-                path.push('/');
-            } else {
-                path.push(b as char);
-            }
-        }
-        path
+        crate::server::dependency_solver::artifact_selection::group_to_path(group)
     }
 
     /// Compute the local filesystem path for an artifact using Maven repository layout.
@@ -241,19 +232,11 @@ impl DependencyResolutionServiceImpl {
     }
 
     fn normalize_extension(extension: &str) -> String {
-        let extension = extension.trim_start_matches('.');
-        if extension.is_empty() {
-            "jar".to_string()
-        } else {
-            extension.to_string()
-        }
+        crate::server::dependency_solver::artifact_selection::normalize_extension(extension)
     }
 
     fn is_metadata_extension(extension: &str) -> bool {
-        matches!(
-            Self::normalize_extension(extension).as_str(),
-            "pom" | "module" | "ivy" | "maven-metadata.xml"
-        )
+        crate::server::dependency_solver::artifact_selection::is_metadata_extension(extension)
     }
 
     fn supports_gradle_module_metadata(repo: &RepositoryDescriptor) -> bool {
@@ -374,39 +357,9 @@ impl DependencyResolutionServiceImpl {
     }
 
     fn maven_artifact_shape(classifier: &str, type_field: &str) -> (String, String) {
-        let classifier = classifier.trim();
-        let type_field = type_field.trim();
-        let effective_type = if type_field.is_empty() {
-            "jar"
-        } else {
-            type_field
-        };
-        let extension = if Self::maven_type_has_jar_extension(effective_type) {
-            "jar"
-        } else {
-            effective_type
-        };
-        let effective_classifier = if !classifier.is_empty() {
-            classifier
-        } else {
-            Self::implicit_classifier_for_maven_type(effective_type).unwrap_or("")
-        };
-        (effective_classifier.to_string(), extension.to_string())
-    }
-
-    fn maven_type_has_jar_extension(type_field: &str) -> bool {
-        matches!(
-            type_field,
-            "test-jar" | "ejb-client" | "ejb" | "bundle" | "maven-plugin" | "eclipse-plugin"
+        crate::server::dependency_solver::artifact_selection::maven_artifact_shape(
+            classifier, type_field,
         )
-    }
-
-    fn implicit_classifier_for_maven_type(type_field: &str) -> Option<&'static str> {
-        match type_field {
-            "test-jar" => Some("tests"),
-            "ejb-client" => Some("client"),
-            _ => None,
-        }
     }
 
     fn now_ms() -> i64 {
@@ -818,20 +771,9 @@ impl DependencyResolutionServiceImpl {
         classifier: &str,
         extension: &str,
     ) -> String {
-        let extension = Self::normalize_extension(extension);
-        let mut key = String::with_capacity(
-            group.len() + name.len() + version.len() + classifier.len() + extension.len() + 4,
-        );
-        key.push_str(group);
-        key.push(':');
-        key.push_str(name);
-        key.push(':');
-        key.push_str(version);
-        key.push(':');
-        key.push_str(classifier);
-        key.push(':');
-        key.push_str(&extension);
-        key
+        crate::server::dependency_solver::artifact_selection::artifact_cache_key(
+            group, name, version, classifier, extension,
+        )
     }
 
     fn repository_cache_id(repo: &RepositoryDescriptor) -> String {
@@ -1459,26 +1401,8 @@ impl DependencyResolutionServiceImpl {
         classifier: &str,
         extension: &str,
     ) -> String {
-        let extension = if extension.is_empty() {
-            "jar"
-        } else {
-            extension.trim_start_matches('.')
-        };
-        let classifier_suffix = if classifier.is_empty() {
-            String::new()
-        } else {
-            format!("-{}", classifier)
-        };
-        format!(
-            "{}/{}/{}/{}/{}-{}{}.{}",
-            repo_base.trim_end_matches('/'),
-            Self::group_to_path(group),
-            name,
-            version,
-            name,
-            version,
-            classifier_suffix,
-            extension
+        crate::server::dependency_solver::artifact_selection::artifact_url_for_descriptor(
+            repo_base, group, name, version, classifier, extension,
         )
     }
 
@@ -1487,25 +1411,11 @@ impl DependencyResolutionServiceImpl {
         name: &str,
         version: &str,
     ) -> Option<(String, String)> {
-        let path = reqwest::Url::parse(artifact_url)
-            .ok()
-            .and_then(|url| url.path_segments()?.last().map(str::to_string))
-            .or_else(|| artifact_url.rsplit('/').next().map(str::to_string))?;
-        let prefix = format!("{}-{}", name, version);
-        if !path.starts_with(&prefix) {
-            return None;
-        }
-        let dot = path.rfind('.')?;
-        let extension = path[dot + 1..].to_string();
-        if extension.is_empty() {
-            return None;
-        }
-        let suffix = &path[prefix.len()..dot];
-        if !suffix.is_empty() && !suffix.starts_with('-') {
-            return None;
-        }
-        let classifier = suffix.strip_prefix('-').unwrap_or("").to_string();
-        Some((classifier, extension))
+        crate::server::dependency_solver::artifact_selection::artifact_file_parts_from_url(
+            artifact_url,
+            name,
+            version,
+        )
     }
 
     async fn download_artifact_into_store(

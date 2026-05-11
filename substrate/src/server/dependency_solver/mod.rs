@@ -1,3 +1,4 @@
+pub mod artifact_selection;
 pub mod gradle_module_metadata;
 pub mod graph_builder;
 pub mod ivyresolve;
