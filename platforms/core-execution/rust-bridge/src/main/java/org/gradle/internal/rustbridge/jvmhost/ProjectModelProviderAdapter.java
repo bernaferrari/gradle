@@ -200,6 +200,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             if (projectBuildScriptHasUnsupportedRepositoryContentFilter((Project) project)) {
                 unsupportedFeatures.add("repository-content-filter:build-script");
             }
+            if (projectBuildScriptHasDependencySubstitution((Project) project)) {
+                unsupportedFeatures.add("dependency-substitution:build-script");
+            }
             List<JvmHostServiceImpl.ResolvedArtifactEntry> artifacts = new ArrayList<>();
             Object resolvedConfiguration = invoke(configuration, "getResolvedConfiguration");
             for (Object resolvedArtifact : asCollection(invoke(resolvedConfiguration, "getResolvedArtifacts"))) {
@@ -442,6 +445,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
                 unsupportedFeatures = new ArrayList<>(unsupportedFeatures);
                 unsupportedFeatures.add("repository-content-filter:build-script");
             }
+            if (projectBuildScriptHasDependencySubstitution(task.getProject())) {
+                unsupportedFeatures = new ArrayList<>(unsupportedFeatures);
+                unsupportedFeatures.add("dependency-substitution:build-script");
+            }
             if (!unsupportedFeatures.isEmpty()) {
                 inputs.put("unsupported_dependency_semantics", "true");
                 inputs.put("unsupported_repository_features", String.join(",", unsupportedFeatures));
@@ -452,17 +459,25 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     }
 
     private static boolean projectBuildScriptHasUnsupportedRepositoryContentFilter(Project project) {
+        return projectBuildScriptMatches(project, "\\b(?:include|exclude)(?:Group|Module|Version)ByRegex\\s*\\(");
+    }
+
+    private static boolean projectBuildScriptHasDependencySubstitution(Project project) {
+        return projectBuildScriptMatches(project, "\\bdependencySubstitution\\s*\\{");
+    }
+
+    private static boolean projectBuildScriptMatches(Project project, String pattern) {
         File buildFile = project.getBuildFile();
         if (buildFile == null || !buildFile.isFile()) {
             return false;
         }
         try {
             String text = new String(Files.readAllBytes(buildFile.toPath()), StandardCharsets.UTF_8);
-            return Pattern.compile("\\b(?:include|exclude)(?:Group|Module|Version)ByRegex\\s*\\(")
+            return Pattern.compile(pattern)
                 .matcher(text)
                 .find();
         } catch (Exception e) {
-            LOGGER.debug("[substrate-jvmhost] Failed to inspect build script repository content filters", e);
+            LOGGER.debug("[substrate-jvmhost] Failed to inspect build script for unsupported native dependency semantics", e);
             return false;
         }
     }
