@@ -177,17 +177,20 @@ Test framework classloading and initialization remains on the JVM because:
 
 ### Contract Gate
 
-The authoritative execution gate enforces the fail-closed policy:
+The execution-kernel gate enforces the fail-closed policy:
 
 ```
-org.gradle.rust.substrate.runbuild.authoritative=true
+org.gradle.rust.substrate.execution.kernel=true
 ```
 
-In authoritative mode:
+In execution-kernel mode:
 - Rust `RunBuild` executes the task DAG
-- If any task fails closed, the build fails with a diagnostic
-- JVM fallback is **not** available in authoritative mode
+- Rust admits or rejects the whole selected build plan before task dispatch
+- If any task or dependency contract fails closed, the build fails with a diagnostic
+- JVM fallback is **not** available after successful kernel admission
 - This mode is used for validation and CI
+- `org.gradle.rust.substrate.runbuild.authoritative=true` remains only as a
+  compatibility alias for the execution-kernel gate
 
 ### Shadow Mode
 

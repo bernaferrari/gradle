@@ -39,6 +39,14 @@ Gradle-under-test install is present, listener static artifact prefetch for
 direct and transitive artifacts in that installed build, and native file-watch
 first-event latency.
 
+Fast mode fails the command when the first-minute budgets regress: daemon socket
+readiness must stay at or below 2000 ms; the authoritative Rust DAG check must
+stay at or below 60000 ms total, with cold at or below 30000 ms, warm at or
+below 10000 ms, warm faster than cold, and zero JVM forwards; dependency
+read-through must avoid at least 3 first-run remote requests on the second run
+and stay at or below 60000 ms; file-watch first event latency must stay at or
+below 250 ms.
+
 For the heavier proof harness, run:
 
 ```bash

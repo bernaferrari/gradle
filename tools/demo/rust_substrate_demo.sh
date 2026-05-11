@@ -15,7 +15,7 @@ Usage: tools/demo/rust_substrate_demo.sh [--quick|--full] [--skip-first60] [--sk
 
 Runs an honest Rust substrate demo:
   - first-60-second visible wins: daemon ready time, authoritative Rust RunBuild with zero JVM forwards, real-build remote requests avoided, file-watch latency
-  - strict stabilization gate
+  - quick stabilization smoke, or full strict stabilization with --full
   - checked-in offline corpus contract validation
   - external dependency and unsupported corpus contract validation
   - captured build-plan shadow Java lifecycle execution with JVM fallback disabled
@@ -99,7 +99,14 @@ if [[ "$RUN_FIRST60" -eq 1 ]]; then
       --output "$OUTPUT_DIR/first60.json"
 fi
 
-run_step "Strict stabilization gate" ./tools/stabilization/run_strict_stabilization.sh "$MODE"
+if [[ "$MODE" == "full" ]]; then
+  run_step "Strict stabilization gate" ./tools/stabilization/run_strict_stabilization.sh full
+else
+  run_step "Quick upstream drift checks" ./tools/upstream_map/check_drift.sh
+  run_step "Corpus runner contract tests" python3 -m unittest discover -s tools/corpus_runner -p 'test_*.py'
+  run_step "Bridge fail-closed audit" python3 ./tools/stabilization/check_bridge_fail_closed.py
+  run_step "Rust daemon type-check" cargo check -p gradle-substrate-daemon
+fi
 
 run_step "Offline corpus contract validation" \
   python3 ./tools/corpus_runner/run.py \
@@ -207,6 +214,7 @@ Demo completed.
 
 What this proves:
   - Rust/JVM proto drift checks pass.
+  - Quick demo smoke checks corpus contracts, bridge fail-closed clients, and Rust daemon type-checking; --full runs the strict stabilization gate.
   - Hardened bridge clients fail closed instead of returning hidden defaults.
   - Build-plan IR v2 fingerprints and shadow artifacts are stable.
   - The checked-in Java library/application/multi-project/resource-expansion/compile-options/Copy/Sync/archive/Exec corpus has deterministic build-plan contracts.
