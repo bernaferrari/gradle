@@ -767,6 +767,41 @@ public class ProjectModelProviderAdapterTest {
         assertTrue(inputs.get("unsupported_repository_features").contains("dependency-refresh:start-parameter"));
     }
 
+    @org.junit.Test
+    public void marksProxySystemPropertiesAsUnsupportedDependencySemantics() {
+        String previousHttpProxy = System.getProperty("http.proxyHost");
+        String previousHttpsProxy = System.getProperty("https.proxyHost");
+        String previousSocksProxy = System.getProperty("socksProxyHost");
+        try {
+            System.setProperty("http.proxyHost", "proxy.local");
+            System.setProperty("https.proxyHost", "secure-proxy.local");
+            System.setProperty("socksProxyHost", "socks-proxy.local");
+            Task task = basicFileTransformTask(
+                ":classes",
+                "classes",
+                fileCollection(),
+                fileCollection(),
+                Collections.emptyMap(),
+                false,
+                false
+            );
+
+            BuildPlanTask planTask = ProjectModelProviderAdapter.toBuildPlanTask(task, DefaultTask.class);
+            Map<String, String> inputs = planTask.getInputSpecsList().stream()
+                .filter(input -> input.getKind().equals("value"))
+                .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+            assertEquals("true", inputs.get("unsupported_dependency_semantics"));
+            assertTrue(inputs.get("unsupported_repository_features").contains("dependency-proxy:http"));
+            assertTrue(inputs.get("unsupported_repository_features").contains("dependency-proxy:https"));
+            assertTrue(inputs.get("unsupported_repository_features").contains("dependency-proxy:socks"));
+        } finally {
+            restoreProperty("http.proxyHost", previousHttpProxy);
+            restoreProperty("https.proxyHost", previousHttpsProxy);
+            restoreProperty("socksProxyHost", previousSocksProxy);
+        }
+    }
+
     private static Task javaCompileTask(File sourceFile, File outputDir, File classpathEntry, File javaHome) {
         return javaCompileTask(
             ":compileJava",
@@ -1478,6 +1513,14 @@ public class ProjectModelProviderAdapterTest {
         startParameter.setOffline(offline);
         startParameter.setRefreshDependencies(refreshDependencies);
         return startParameter;
+    }
+
+    private static void restoreProperty(String name, String previousValue) {
+        if (previousValue == null) {
+            System.clearProperty(name);
+        } else {
+            System.setProperty(name, previousValue);
+        }
     }
 
     private static String decodeMapping(String value) {

@@ -247,6 +247,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         return value == null ? "" : value;
     }
 
+    private static boolean hasText(@Nullable String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
     private static List<String> unsupportedResolutionFeatures(Configuration configuration) {
         List<String> unsupported = new ArrayList<>();
         try {
@@ -474,6 +478,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             unsupportedFeatures.add("artifact-transform:build-script");
         }
         unsupportedFeatures.addAll(unsupportedStartParameterDependencyFeatures(project));
+        unsupportedFeatures.addAll(unsupportedProxyDependencyFeatures());
         if (projectSettingsHasIncludedBuild(project)) {
             unsupportedFeatures.add("composite-substitution:settings");
         }
@@ -491,6 +496,20 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             }
         } catch (Exception e) {
             LOGGER.debug("[substrate-jvmhost] Failed to inspect dependency start parameters", e);
+        }
+        return unsupportedFeatures;
+    }
+
+    private static List<String> unsupportedProxyDependencyFeatures() {
+        List<String> unsupportedFeatures = new ArrayList<>();
+        if (hasText(System.getProperty("http.proxyHost"))) {
+            unsupportedFeatures.add("dependency-proxy:http");
+        }
+        if (hasText(System.getProperty("https.proxyHost"))) {
+            unsupportedFeatures.add("dependency-proxy:https");
+        }
+        if (hasText(System.getProperty("socksProxyHost"))) {
+            unsupportedFeatures.add("dependency-proxy:socks");
         }
         return unsupportedFeatures;
     }
