@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::proto::DependencyDescriptor;
+use crate::proto::{DependencyDescriptor, RepositoryDescriptor};
 
 use super::artifact_selection::maven_artifact_shape;
+use super::repository_chain;
+use super::resolver_transport::DependencyResolverTransport;
 
 /// Parsed dependency from a POM file.
 #[derive(Clone)]
@@ -382,6 +384,71 @@ impl PomInheritanceState {
     ) {
         (self.properties, self.managed)
     }
+}
+
+/// Resolve parent POM inheritance while delegating network/cache access to the
+/// service-owned transport boundary.
+pub(crate) async fn resolve_parent_inheritance<T: DependencyResolverTransport + Sync>(
+    pom_content: &str,
+    repos: &[RepositoryDescriptor],
+    transport: &T,
+    max_parent_depth: u32,
+) -> (
+    HashMap<String, String>,
+    HashMap<(String, String), ManagedDependency>,
+) {
+    let mut inheritance = PomInheritanceState::new(pom_content);
+
+    for _ in 0..max_parent_depth {
+        let parent = match inheritance.next_parent() {
+            Some(parent) => parent,
+            None => break,
+        };
+
+        let mut parent_content = None;
+        let parent_repos = repository_chain::repositories_for_dependency(
+            repos,
+            &parent.group_id,
+            &parent.artifact_id,
+            &parent.version,
+        );
+        for repo in &parent_repos {
+            match transport
+                .fetch_pom(&parent.group_id, &parent.artifact_id, &parent.version, repo)
+                .await
+            {
+                Ok(content) => {
+                    parent_content = Some(content);
+                    break;
+                }
+                Err(error) => {
+                    tracing::debug!(
+                        parent_group = %parent.group_id,
+                        parent_name = %parent.artifact_id,
+                        parent_version = %parent.version,
+                        repo = %repo.url,
+                        error = %error,
+                        "Failed to fetch parent POM"
+                    );
+                }
+            }
+        }
+
+        let Some(parent_pom) = parent_content else {
+            break;
+        };
+
+        inheritance.merge_parent_pom(parent_pom);
+
+        tracing::debug!(
+            parent_group = %parent.group_id,
+            parent_name = %parent.artifact_id,
+            parent_version = %parent.version,
+            "Inherited properties and managed deps from parent POM"
+        );
+    }
+
+    inheritance.into_parts()
 }
 
 /// Check if a dependency matches an exclusion pattern.
@@ -957,5 +1024,70 @@ mod tests {
         assert!(state.next_parent().is_some());
         state.merge_parent_pom(pom.to_string());
         assert!(state.next_parent().is_none());
+    }
+
+    struct StaticPomTransport {
+        pom: String,
+    }
+
+    #[tonic::async_trait]
+    impl DependencyResolverTransport for StaticPomTransport {
+        async fn fetch_pom(
+            &self,
+            _group: &str,
+            _name: &str,
+            _version: &str,
+            _repo: &RepositoryDescriptor,
+        ) -> Result<String, String> {
+            Ok(self.pom.clone())
+        }
+    }
+
+    fn repo() -> RepositoryDescriptor {
+        RepositoryDescriptor {
+            id: "repo".to_string(),
+            url: "https://repo.example.test/maven".to_string(),
+            m2compatible: true,
+            allow_insecure_protocol: false,
+            credentials: Default::default(),
+            layout: String::new(),
+            ivy_pattern: String::new(),
+            include_groups: Vec::new(),
+            exclude_groups: Vec::new(),
+            include_group_prefixes: Vec::new(),
+            exclude_group_prefixes: Vec::new(),
+            include_modules: Vec::new(),
+            exclude_modules: Vec::new(),
+            include_module_versions: Vec::new(),
+            exclude_module_versions: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn async_parent_inheritance_uses_transport_boundary() {
+        let child_pom = r#"<project>
+  <parent>
+    <groupId>org.example</groupId>
+    <artifactId>parent</artifactId>
+    <version>1.0</version>
+  </parent>
+</project>"#;
+        let transport = StaticPomTransport {
+            pom: r#"<project>
+  <properties>
+    <parent.version>1.0</parent.version>
+  </properties>
+</project>"#
+                .to_string(),
+        };
+
+        let (properties, managed) =
+            resolve_parent_inheritance(child_pom, &[repo()], &transport, 10).await;
+
+        assert_eq!(
+            properties.get("parent.version").map(String::as_str),
+            Some("1.0")
+        );
+        assert!(managed.is_empty());
     }
 }
