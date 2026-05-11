@@ -1483,15 +1483,11 @@ impl DependencyResolutionServiceImpl {
         excl_group: &str,
         excl_name: &str,
     ) -> bool {
-        let group_matches = excl_group == "*" || excl_group == dep_group;
-        let name_matches = excl_name == "*" || excl_name == dep_name;
-        group_matches && name_matches
+        maven_pom::matches_exclusion(dep_group, dep_name, excl_group, excl_name)
     }
 
     fn is_dependency_excluded(dep: &PomDependency, exclusions: &[(String, String)]) -> bool {
-        exclusions.iter().any(|(excl_group, excl_name)| {
-            Self::matches_exclusion(&dep.group, &dep.name, excl_group, excl_name)
-        })
+        maven_pom::is_dependency_excluded(dep, exclusions)
     }
 
     /// Parse the <parent> section from a POM file.
