@@ -1684,24 +1684,17 @@ impl DependencyResolutionServiceImpl {
         for repo in &allowed_repos {
             match self.fetch_maven_metadata(group, name, repo).await {
                 Ok(meta) => {
-                    if let Some(ref snapshot) = meta.versioning.snapshot {
-                        // If localCopy is true, use the version as-is (don't re-resolve)
-                        if snapshot.local_copy {
+                    if let Some(resolved) =
+                        maven_metadata::resolve_snapshot_version_from_metadata(raw_version, &meta)
+                    {
+                        if resolved == raw_version {
                             tracing::debug!(
                                 group = %group,
                                 name = %name,
                                 version = %raw_version,
                                 "SNAPSHOT marked as localCopy, using base version"
                             );
-                            return raw_version.to_string();
-                        }
-
-                        let timestamp = snapshot.timestamp.as_deref().unwrap_or("");
-                        let build_number = snapshot.build_number.as_deref().unwrap_or("");
-
-                        if !timestamp.is_empty() && !build_number.is_empty() {
-                            let base = &raw_version[..raw_version.len() - "-SNAPSHOT".len()];
-                            let resolved = format!("{}-{}-{}", base, timestamp, build_number);
+                        } else {
                             tracing::debug!(
                                 group = %group,
                                 name = %name,
@@ -1709,21 +1702,8 @@ impl DependencyResolutionServiceImpl {
                                 resolved = %resolved,
                                 "Resolved SNAPSHOT version"
                             );
-                            return resolved;
                         }
-                    }
-                    // No snapshot info — try to find the latest timestamped version from versions list
-                    if let Some(ts_version) = meta.versioning.versions.iter().rfind(|v| {
-                        !v.ends_with("-SNAPSHOT")
-                            && v.starts_with(&raw_version[..raw_version.len() - "-SNAPSHOT".len()])
-                    }) {
-                        tracing::debug!(
-                            group = %group,
-                            name = %name,
-                            resolved = %ts_version,
-                            "Resolved SNAPSHOT from versions list"
-                        );
-                        return ts_version.clone();
+                        return resolved;
                     }
 
                     // No snapshot metadata available — fall through to next repo
