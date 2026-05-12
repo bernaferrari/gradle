@@ -1254,6 +1254,8 @@ struct PomComponentMetadata {
     publisher: String,
     url: String,
     inception_year: String,
+    developers: Vec<String>,
+    contributors: Vec<String>,
     licenses: Vec<CycloneDxLicenseChoice>,
     external_references: Vec<CycloneDxExternalReference>,
 }
@@ -1274,6 +1276,15 @@ impl PomComponentMetadata {
             properties.push((
                 "maven:pomInceptionYear".to_string(),
                 self.inception_year.clone(),
+            ));
+        }
+        if !self.developers.is_empty() {
+            properties.push(("maven:pomDevelopers".to_string(), self.developers.join(",")));
+        }
+        if !self.contributors.is_empty() {
+            properties.push((
+                "maven:pomContributors".to_string(),
+                self.contributors.join(","),
             ));
         }
         properties
@@ -1640,6 +1651,22 @@ fn apply_pom_metadata_text(
         {
             push_external_reference(&mut metadata.external_references, "website", text);
         }
+        [project, developers, developer, name]
+            if project == "project"
+                && developers == "developers"
+                && developer == "developer"
+                && name == "name" =>
+        {
+            metadata.developers.push(text);
+        }
+        [project, contributors, contributor, name]
+            if project == "project"
+                && contributors == "contributors"
+                && contributor == "contributor"
+                && name == "name" =>
+        {
+            metadata.contributors.push(text);
+        }
         [project, ci, url] if project == "project" && ci == "ciManagement" && url == "url" => {
             push_external_reference(&mut metadata.external_references, "build-system", text);
         }
@@ -1762,6 +1789,12 @@ fn interpolate_pom_component_metadata(
     metadata.publisher = interpolate_maven_properties(&metadata.publisher, properties);
     metadata.url = interpolate_maven_properties(&metadata.url, properties);
     metadata.inception_year = interpolate_maven_properties(&metadata.inception_year, properties);
+    for developer in &mut metadata.developers {
+        *developer = interpolate_maven_properties(developer, properties);
+    }
+    for contributor in &mut metadata.contributors {
+        *contributor = interpolate_maven_properties(contributor, properties);
+    }
     for choice in &mut metadata.licenses {
         if let Some(license) = &mut choice.license {
             license.name = interpolate_maven_properties(&license.name, properties);
@@ -3202,6 +3235,19 @@ mod tests {
     <name>Example Foundation</name>
     <url>https://example.test</url>
   </organization>
+  <developers>
+    <developer>
+      <name>Ada ${project.start}</name>
+    </developer>
+    <developer>
+      <name>Linus</name>
+    </developer>
+  </developers>
+  <contributors>
+    <contributor>
+      <name>Grace</name>
+    </contributor>
+  </contributors>
   <ciManagement>
     <url>https://ci.example.test/lib</url>
   </ciManagement>
@@ -3282,6 +3328,14 @@ mod tests {
         assert_eq!(
             Some(&"2024".to_string()),
             component.properties.get("maven:pomInceptionYear")
+        );
+        assert_eq!(
+            Some(&"Ada 2024,Linus".to_string()),
+            component.properties.get("maven:pomDevelopers")
+        );
+        assert_eq!(
+            Some(&"Grace".to_string()),
+            component.properties.get("maven:pomContributors")
         );
         assert_eq!("Useful & small", component.description);
         assert_eq!("Example Foundation", component.publisher);
