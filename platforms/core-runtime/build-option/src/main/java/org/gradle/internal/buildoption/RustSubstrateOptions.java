@@ -34,6 +34,12 @@ public class RustSubstrateOptions {
         AUTHORITATIVE
     }
 
+    public enum ExecutionKernelAdmission {
+        OFF,
+        NATIVE_READY_DEFAULT,
+        STRICT
+    }
+
     public static final InternalOption<String> SUBSTRATE_MODE =
         InternalOptions.ofString("org.gradle.rust.substrate.mode", "");
 
@@ -608,9 +614,34 @@ public class RustSubstrateOptions {
      * post-configuration Rust execution boundary.</p>
      */
     public static boolean isExecutionKernelEnabled(InternalOptions options) {
-        return isSubstrateEnabled(options)
-            && (options.getBoolean(ENABLE_RUST_EXECUTION_KERNEL)
-            || options.getBoolean(ENABLE_RUST_AUTHORITATIVE_RUN_BUILD));
+        return getExecutionKernelAdmission(options) == ExecutionKernelAdmission.STRICT;
+    }
+
+    /**
+     * Resolve the single preview admission mode for Rust RunBuild.
+     *
+     * <p>This collapses the scattered legacy flags into one decision point:
+     * strict kernel mode fails closed with JVM task forwarding disabled, while
+     * native-ready-default tries the Rust kernel only for fully admitted plans
+     * and delegates otherwise. The older RunBuild flags remain compatibility
+     * inputs but should not be read directly at new call sites.</p>
+     */
+    public static ExecutionKernelAdmission getExecutionKernelAdmission(InternalOptions options) {
+        if (!isSubstrateEnabled(options)) {
+            return ExecutionKernelAdmission.OFF;
+        }
+        if (options.getBoolean(ENABLE_RUST_EXECUTION_KERNEL)
+            || options.getBoolean(ENABLE_RUST_AUTHORITATIVE_RUN_BUILD)) {
+            return ExecutionKernelAdmission.STRICT;
+        }
+        if (options.getBoolean(ENABLE_RUST_NATIVE_READY_DEFAULT_RUN_BUILD)) {
+            return ExecutionKernelAdmission.NATIVE_READY_DEFAULT;
+        }
+        return ExecutionKernelAdmission.OFF;
+    }
+
+    public static boolean isExecutionKernelRequested(InternalOptions options) {
+        return getExecutionKernelAdmission(options) != ExecutionKernelAdmission.OFF;
     }
 
     private RustSubstrateOptions() {
