@@ -1049,15 +1049,18 @@ impl PomComponentMetadata {
 }
 
 fn read_pom_component_metadata(artifact_path: &Path) -> Option<PomComponentMetadata> {
-    let pom =
-        read_adjacent_pom(artifact_path).or_else(|| read_embedded_maven_pom(artifact_path))?;
-    Some(parse_pom_component_metadata(&pom))
+    if let Some((pom_path, pom)) = read_adjacent_pom(artifact_path) {
+        return Some(read_effective_pom_component_metadata(&pom_path, &pom, 0));
+    }
+    let pom = read_embedded_maven_pom(artifact_path)?;
+    Some(parse_pom_component_metadata(&pom).metadata)
 }
 
-fn read_adjacent_pom(artifact_path: &Path) -> Option<String> {
+fn read_adjacent_pom(artifact_path: &Path) -> Option<(std::path::PathBuf, String)> {
     let file_stem = artifact_path.file_stem()?.to_str()?;
     let pom_path = artifact_path.with_file_name(format!("{file_stem}.pom"));
-    std::fs::read_to_string(pom_path).ok()
+    let pom = std::fs::read_to_string(&pom_path).ok()?;
+    Some((pom_path, pom))
 }
 
 fn read_embedded_maven_pom(artifact_path: &Path) -> Option<String> {
@@ -1079,11 +1082,79 @@ fn read_embedded_maven_pom(artifact_path: &Path) -> Option<String> {
     None
 }
 
-fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadata {
+fn read_effective_pom_component_metadata(
+    pom_path: &Path,
+    pom: &str,
+    depth: usize,
+) -> PomComponentMetadata {
+    let document = parse_pom_component_metadata(pom);
+    if depth >= 8 {
+        return document.metadata;
+    }
+    let Some(parent_relative_path) = document.parent_relative_path else {
+        return document.metadata;
+    };
+    if parent_relative_path.trim().is_empty() {
+        return document.metadata;
+    }
+    let parent_path = pom_path
+        .parent()
+        .unwrap_or_else(|| Path::new(""))
+        .join(parent_relative_path)
+        .components()
+        .collect::<std::path::PathBuf>();
+    let Ok(parent_pom) = std::fs::read_to_string(&parent_path) else {
+        return document.metadata;
+    };
+    let parent = read_effective_pom_component_metadata(&parent_path, &parent_pom, depth + 1);
+    merge_parent_pom_metadata(parent, document.metadata)
+}
+
+fn merge_parent_pom_metadata(
+    mut parent: PomComponentMetadata,
+    child: PomComponentMetadata,
+) -> PomComponentMetadata {
+    if !child.name.is_empty() {
+        parent.name = child.name;
+    }
+    if !child.description.is_empty() {
+        parent.description = child.description;
+    }
+    if !child.publisher.is_empty() {
+        parent.publisher = child.publisher;
+    }
+    if !child.url.is_empty() {
+        parent.url = child.url;
+    }
+    if !child.licenses.is_empty() {
+        parent.licenses = child.licenses;
+    }
+    for reference in child.external_references {
+        if let Some(existing) = parent
+            .external_references
+            .iter_mut()
+            .find(|existing| existing.reference_type == reference.reference_type)
+        {
+            *existing = reference;
+        } else {
+            parent.external_references.push(reference);
+        }
+    }
+    normalize_pom_component_metadata(parent)
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct PomComponentMetadataDocument {
+    metadata: PomComponentMetadata,
+    parent_relative_path: Option<String>,
+}
+
+fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
     let mut reader = quick_xml::Reader::from_str(pom);
     reader.trim_text(true);
 
     let mut metadata = PomComponentMetadata::default();
+    let mut parent_relative_path = None;
     let mut path = Vec::<String>::new();
     let mut buf = Vec::new();
     loop {
@@ -1109,6 +1180,13 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadata {
                     }
                     [project, url] if project == "project" && url == "url" => {
                         metadata.url = text;
+                    }
+                    [project, parent, relative_path]
+                        if project == "project"
+                            && parent == "parent"
+                            && relative_path == "relativePath" =>
+                    {
+                        parent_relative_path = Some(text);
                     }
                     [project, organization, name]
                         if project == "project"
@@ -1209,11 +1287,21 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadata {
                 path.pop();
             }
             Ok(Event::Eof) => break,
-            Err(_) => return PomComponentMetadata::default(),
+            Err(_) => return PomComponentMetadataDocument::default(),
             _ => {}
         }
         buf.clear();
     }
+    if parent_relative_path.is_none() && pom.contains("<parent") {
+        parent_relative_path = Some("../pom.xml".to_string());
+    }
+    PomComponentMetadataDocument {
+        metadata: normalize_pom_component_metadata(metadata),
+        parent_relative_path,
+    }
+}
+
+fn normalize_pom_component_metadata(mut metadata: PomComponentMetadata) -> PomComponentMetadata {
     metadata
         .licenses
         .sort_by(|a, b| a.license.name.cmp(&b.license.name));
@@ -2172,6 +2260,111 @@ mod tests {
                 },
             }],
             component.licenses
+        );
+    }
+
+    #[test]
+    fn inherits_local_parent_pom_metadata_when_child_is_incomplete() {
+        let dir = tempfile::tempdir().unwrap();
+        let module_dir = dir.path().join("module");
+        std::fs::create_dir(&module_dir).unwrap();
+        let parent_pom = dir.path().join("pom.xml");
+        let jar_path = module_dir.join("lib-1.1.jar");
+        let pom_path = module_dir.join("lib-1.1.pom");
+        std::fs::write(&jar_path, b"not-a-real-jar").unwrap();
+        std::fs::write(
+            &parent_pom,
+            r#"
+<project>
+  <description>Inherited description</description>
+  <organization>
+    <name>Parent Publisher</name>
+    <url>https://parent.example.test</url>
+  </organization>
+  <licenses>
+    <license>
+      <name>MIT</name>
+    </license>
+  </licenses>
+  <scm>
+    <url>https://git.parent.example.test/root</url>
+  </scm>
+</project>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &pom_path,
+            r#"
+<project>
+  <parent>
+    <groupId>org.example</groupId>
+    <artifactId>parent</artifactId>
+    <version>1.0</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+  <name>Child Lib</name>
+  <url>https://child.example.test/lib</url>
+</project>
+"#,
+        )
+        .unwrap();
+
+        let mut graph = sample_resolution_graph();
+        graph.configurations[0].components[1].artifact_path =
+            jar_path.to_string_lossy().to_string();
+
+        let contract = draft_contract_from_resolution_graph(
+            &graph,
+            CycloneDxDraftOptions {
+                spec_version: "1.6".to_string(),
+                serial_number: "urn:uuid:00000000-0000-0000-0000-000000000003".to_string(),
+                timestamp: "2026-05-12T12:00:00Z".to_string(),
+                root_group: "org.example".to_string(),
+                root_name: "demo".to_string(),
+                root_version: "1.0".to_string(),
+                root_component_type: "application".to_string(),
+                include_metadata_resolution: true,
+                external_references: Vec::new(),
+            },
+        )
+        .unwrap();
+
+        let component = contract
+            .components
+            .iter()
+            .find(|component| component.bom_ref == "pkg:maven/org.example/lib@1.1")
+            .unwrap();
+
+        assert_eq!(
+            Some(&"Child Lib".to_string()),
+            component.properties.get("maven:pomName")
+        );
+        assert_eq!("Inherited description", component.description);
+        assert_eq!("Parent Publisher", component.publisher);
+        assert_eq!(
+            vec![CycloneDxLicenseChoice {
+                license: CycloneDxLicense {
+                    name: "MIT".to_string(),
+                },
+            }],
+            component.licenses
+        );
+        assert!(component
+            .external_references
+            .contains(&CycloneDxExternalReference {
+                reference_type: "website".to_string(),
+                url: "https://parent.example.test".to_string(),
+            }));
+        assert!(component
+            .external_references
+            .contains(&CycloneDxExternalReference {
+                reference_type: "vcs".to_string(),
+                url: "https://git.parent.example.test/root".to_string(),
+            }));
+        assert_eq!(
+            Some(&"https://child.example.test/lib".to_string()),
+            component.properties.get("maven:pomUrl")
         );
     }
 
