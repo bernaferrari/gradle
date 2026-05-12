@@ -491,6 +491,7 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("missing", inputs.get("cyclonedx_sbom_contract_status"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("resolution-result-edges"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("component-metadata"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("serial-timestamp-policy"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("aggregate-merge-policy"));
         assertEquals("true", inputs.get("requires_jvm_task_execution"));
         assertFalse(inputs.containsKey("sbom_contract_json_b64"));
@@ -529,6 +530,7 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("partial", inputs.get("cyclonedx_sbom_contract_status"));
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("resolution-result-edges"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("component-metadata"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("serial-timestamp-policy"));
         assertFalse(inputs.containsKey("sbom_contract_json_b64"));
     }
 

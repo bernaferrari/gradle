@@ -428,6 +428,30 @@ fn unsupported_contract_marker_reason(
     key: &str,
     input_properties: &serde_json::Map<String, serde_json::Value>,
 ) -> String {
+    let cyclonedx_missing_fields = [
+        "cyclonedx_missing_contract_fields",
+        "input.cyclonedx_missing_contract_fields",
+        "input_value.cyclonedx_missing_contract_fields",
+    ]
+    .iter()
+    .filter_map(|field_key| input_properties.get(*field_key))
+    .filter_map(|value| value.as_str())
+    .flat_map(|value| value.split(','))
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+    .collect::<std::collections::BTreeSet<_>>();
+    if key == "requires_jvm_task_execution" && !cyclonedx_missing_fields.is_empty() {
+        return format!(
+            "unsupported contract marker '{}' (CycloneDX missing schema-backed fields: {})",
+            key,
+            cyclonedx_missing_fields
+                .iter()
+                .copied()
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+    }
+
     let unsupported_features = [
         "unsupported_repository_features",
         "input.unsupported_repository_features",
@@ -755,6 +779,39 @@ mod tests {
         assert!(rejection
             .message()
             .contains("copy_unsupported_custom_actions"));
+    }
+
+    #[test]
+    fn reports_cyclonedx_missing_fields_for_jvm_execution_marker() {
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![task(
+                ":cyclonedxDirectBom",
+                "org.cyclonedx.gradle.CyclonedxDirectTask",
+                Some(
+                    serde_json::json!({
+                        "input_properties": {
+                            "input_value.requires_jvm_task_execution": "true",
+                            "input_value.cyclonedx_missing_contract_fields": "component-metadata,serial-timestamp-policy,aggregate-merge-policy"
+                        }
+                    })
+                    .to_string(),
+                ),
+            )],
+        };
+
+        let KernelAdmission::Rejected(rejection) = admit_build_plan(
+            &plan,
+            &native_types(&["org.cyclonedx.gradle.CyclonedxDirectTask"]),
+        ) else {
+            panic!("expected rejection");
+        };
+        let message = rejection.message();
+        assert!(message.contains("requires_jvm_task_execution"));
+        assert!(message.contains("component-metadata"));
+        assert!(message.contains("serial-timestamp-policy"));
+        assert!(message.contains("aggregate-merge-policy"));
     }
 
     #[test]
