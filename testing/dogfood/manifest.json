@@ -87,6 +87,46 @@
       }
     },
     {
+      "name": "javaexec-process-launch",
+      "path": "javaexec-kotlin-dsl",
+      "source": {
+        "kind": "checked-in-local",
+        "description": "Checked-in JavaExec fixture that compiles a Java class and invokes it through the Rust process executor."
+      },
+      "tasks": ["clean", "build"],
+      "mode": "strict",
+      "expectation": "supported",
+      "timeout_seconds": 300,
+      "reason": "Exercises Rust DAG control across Java compilation, classes lifecycle, and native JavaExec process launch with declared output parity.",
+      "checks": {
+        "task_parity": true,
+        "output_inventory": true,
+        "output_hashes": true,
+        "archive_entries": true,
+        "no_jvm_forwards": true
+      }
+    },
+    {
+      "name": "javadoc-process-launch",
+      "path": "javadoc-kotlin-dsl",
+      "source": {
+        "kind": "checked-in-local",
+        "description": "Checked-in Javadoc fixture that runs the Javadoc tool through the Rust process executor."
+      },
+      "tasks": ["clean", "build"],
+      "mode": "strict",
+      "expectation": "supported",
+      "timeout_seconds": 300,
+      "reason": "Exercises Rust DAG control across Java compilation, Jar packaging, and native Javadoc process launch with deterministic no-timestamp output.",
+      "checks": {
+        "task_parity": true,
+        "output_inventory": true,
+        "output_hashes": true,
+        "archive_entries": true,
+        "no_jvm_forwards": true
+      }
+    },
+    {
       "name": "unsupported-composite-substitution",
       "path": "composite-substitution-unsupported-kotlin-dsl",
       "source": {

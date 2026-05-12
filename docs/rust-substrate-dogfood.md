@@ -32,23 +32,25 @@ Latest checked run: 2026-05-12.
 | `java-multiproject` | supported | strict | pass | Rust DAG admission and execution handle a small multi-project Java build. |
 | `external-junit-library` | supported | strict | pass | Pinned external dependencies plus JUnit Platform execution remain no-fallback in the supported slice. |
 | `external-bom-and-conflict` | supported | strict | pass | Bounded Maven BOM/platform dependency semantics remain admitted in the dogfood path. |
+| `javaexec-process-launch` | supported | strict | pass | Rust DAG execution covers Java compilation plus native `JavaExec` process launch with declared output parity. |
+| `javadoc-process-launch` | supported | strict | pass | Rust DAG execution covers Java compilation, Jar packaging, and native Javadoc process launch with deterministic output. |
 | `unsupported-composite-substitution` | fail-closed | strict | pass | Settings-level `includeBuild(...)` composite substitution rejects before Rust execution instead of approximating included-build semantics. |
 
 Summary from `build/dogfood-current/dogfood-summary.md`:
 
 | Metric | Result |
 | --- | ---: |
-| Projects matched | 5/5 |
-| Supported projects matched | 4/4 |
+| Projects matched | 7/7 |
+| Supported projects matched | 6/6 |
 | Fail-closed projects matched | 1/1 |
-| Supported projects with zero JVM forwards | 4/4 |
-| Rust RunBuild markers | 5/5 |
-| Task-graph captures | 5/5 |
-| Daemon started signals | 5 |
-| Upstream observed wall time | 13783 ms |
-| Rust substrate observed wall time | 17306 ms |
-| Upstream task total | 83 |
-| Rust substrate task total | 79 |
+| Supported projects with zero JVM forwards | 6/6 |
+| Rust RunBuild markers | 7/7 |
+| Task-graph captures | 7/7 |
+| Daemon started signals | 7 |
+| Upstream observed wall time | 21795 ms |
+| Rust substrate observed wall time | 24449 ms |
+| Upstream task total | 109 |
+| Rust substrate task total | 105 |
 
 ## Boundaries
 
