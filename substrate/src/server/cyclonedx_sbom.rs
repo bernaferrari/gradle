@@ -86,6 +86,12 @@ pub struct CycloneDxResolvedComponent {
     pub project_path: String,
     #[serde(default, rename = "artifactPath")]
     pub artifact_path: String,
+    #[serde(default, rename = "artifactType")]
+    pub artifact_type: String,
+    #[serde(default, rename = "artifactExtension")]
+    pub artifact_extension: String,
+    #[serde(default, rename = "artifactClassifier")]
+    pub artifact_classifier: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -278,7 +284,7 @@ pub fn draft_contract_from_resolution_graph(
             {
                 continue;
             }
-            let bom_ref = purl(&component.group, &component.module, &component.version);
+            let bom_ref = purl_for_component(component);
             components_by_id.insert(component.id.clone(), (component, bom_ref.clone()));
             dependencies_by_ref.entry(bom_ref).or_default();
         }
@@ -309,6 +315,24 @@ pub fn draft_contract_from_resolution_graph(
                 properties.insert(
                     "gradle:artifactPath".to_string(),
                     component.artifact_path.clone(),
+                );
+            }
+            if !component.artifact_type.is_empty() {
+                properties.insert(
+                    "gradle:artifactType".to_string(),
+                    component.artifact_type.clone(),
+                );
+            }
+            if !component.artifact_extension.is_empty() {
+                properties.insert(
+                    "gradle:artifactExtension".to_string(),
+                    component.artifact_extension.clone(),
+                );
+            }
+            if !component.artifact_classifier.is_empty() {
+                properties.insert(
+                    "gradle:artifactClassifier".to_string(),
+                    component.artifact_classifier.clone(),
                 );
             }
             let metadata = if component.artifact_path.is_empty() {
@@ -371,11 +395,83 @@ fn validate_draft_options(options: &CycloneDxDraftOptions) -> Result<(), String>
 }
 
 fn purl(group: &str, name: &str, version: &str) -> String {
-    if group.is_empty() {
+    purl_with_qualifiers(group, name, version, &[])
+}
+
+fn purl_for_component(component: &CycloneDxResolvedComponent) -> String {
+    let mut qualifiers = Vec::<(&str, &str)>::new();
+    let extension = if component.artifact_extension.is_empty() {
+        artifact_extension_from_path(&component.artifact_path)
+    } else {
+        component.artifact_extension.clone()
+    };
+    if !extension.is_empty() && extension != "jar" {
+        qualifiers.push(("type", extension.as_str()));
+    }
+    if !component.artifact_type.is_empty()
+        && component.artifact_type != extension
+        && component.artifact_type != "jar"
+    {
+        qualifiers.push(("artifact_type", component.artifact_type.as_str()));
+    }
+    if !component.artifact_classifier.is_empty() {
+        qualifiers.push(("classifier", component.artifact_classifier.as_str()));
+    }
+    purl_with_qualifiers(
+        &component.group,
+        &component.module,
+        &component.version,
+        &qualifiers,
+    )
+}
+
+fn artifact_extension_from_path(path: &str) -> String {
+    Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn purl_with_qualifiers(
+    group: &str,
+    name: &str,
+    version: &str,
+    qualifiers: &[(&str, &str)],
+) -> String {
+    let base = if group.is_empty() {
         format!("pkg:maven/{name}@{version}")
     } else {
         format!("pkg:maven/{group}/{name}@{version}")
+    };
+    if qualifiers.is_empty() {
+        return base;
     }
+    let mut sorted = qualifiers
+        .iter()
+        .filter(|(_, value)| !value.is_empty())
+        .map(|(key, value)| (*key, *value))
+        .collect::<Vec<_>>();
+    sorted.sort_unstable_by(|a, b| a.0.cmp(b.0));
+    let encoded = sorted
+        .into_iter()
+        .map(|(key, value)| format!("{key}={}", purl_encode(value)))
+        .collect::<Vec<_>>()
+        .join("&");
+    format!("{base}?{encoded}")
+}
+
+fn purl_encode(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'.' | b'-' | b'_' | b'~' => {
+                encoded.push(byte as char);
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -686,6 +782,9 @@ mod tests {
                         version: "1.0".to_string(),
                         project_path: String::new(),
                         artifact_path: String::new(),
+                        artifact_type: String::new(),
+                        artifact_extension: String::new(),
+                        artifact_classifier: String::new(),
                     },
                     CycloneDxResolvedComponent {
                         id: "org.example:lib:1.1".to_string(),
@@ -694,6 +793,9 @@ mod tests {
                         version: "1.1".to_string(),
                         project_path: String::new(),
                         artifact_path: "/repo/lib-1.1.jar".to_string(),
+                        artifact_type: "jar".to_string(),
+                        artifact_extension: "jar".to_string(),
+                        artifact_classifier: String::new(),
                     },
                 ],
                 dependencies: vec![CycloneDxResolvedDependency {
@@ -875,6 +977,49 @@ mod tests {
                 },
             }],
             component.licenses
+        );
+    }
+
+    #[test]
+    fn drafts_contract_with_maven_purl_artifact_qualifiers() {
+        let mut graph = sample_resolution_graph();
+        graph.configurations[0].components[1].artifact_path =
+            "/repo/lib-1.1-sources.zip".to_string();
+        graph.configurations[0].components[1].artifact_type = "zip".to_string();
+        graph.configurations[0].components[1].artifact_extension = "zip".to_string();
+        graph.configurations[0].components[1].artifact_classifier = "sources".to_string();
+
+        let contract = draft_contract_from_resolution_graph(
+            &graph,
+            CycloneDxDraftOptions {
+                spec_version: "1.6".to_string(),
+                serial_number: "urn:uuid:00000000-0000-0000-0000-000000000004".to_string(),
+                timestamp: "2026-05-12T12:30:00Z".to_string(),
+                root_group: "org.example".to_string(),
+                root_name: "demo".to_string(),
+                root_version: "1.0".to_string(),
+                root_component_type: "application".to_string(),
+            },
+        )
+        .unwrap();
+
+        let component = contract
+            .components
+            .iter()
+            .find(|component| component.name == "lib")
+            .unwrap();
+        assert_eq!(
+            "pkg:maven/org.example/lib@1.1?classifier=sources&type=zip",
+            component.bom_ref
+        );
+        assert_eq!(component.bom_ref, component.purl);
+        assert_eq!(
+            Some(&"zip".to_string()),
+            component.properties.get("gradle:artifactType")
+        );
+        assert_eq!(
+            Some(&"sources".to_string()),
+            component.properties.get("gradle:artifactClassifier")
         );
     }
 }

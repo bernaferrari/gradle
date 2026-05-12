@@ -13,6 +13,7 @@ import org.gradle.api.artifacts.ModuleVersionIdentifier;
 import org.gradle.api.artifacts.ResolvableDependencies;
 import org.gradle.api.artifacts.ResolvedArtifact;
 import org.gradle.api.artifacts.ResolvedConfiguration;
+import org.gradle.api.artifacts.ResolvedModuleVersion;
 import org.gradle.api.artifacts.VersionConstraint;
 import org.gradle.api.artifacts.component.ComponentSelector;
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
@@ -519,6 +520,9 @@ public class ProjectModelProviderAdapterTest {
         assertTrue(graphJson, graphJson.contains("\"id\":\"org.example:app:1.0\""));
         assertTrue(graphJson, graphJson.contains("\"id\":\"org.example:lib:1.1\""));
         assertTrue(graphJson, graphJson.contains("\"artifactPath\":\"" + inputJar.getAbsolutePath().replace("\\", "\\\\") + "\""));
+        assertTrue(graphJson, graphJson.contains("\"artifactType\":\"jar\""));
+        assertTrue(graphJson, graphJson.contains("\"artifactExtension\":\"jar\""));
+        assertTrue(graphJson, graphJson.contains("\"artifactClassifier\":\"\""));
         assertTrue(graphJson, graphJson.contains("\"from\":\"org.example:app:1.0\""));
         assertTrue(graphJson, graphJson.contains("\"to\":\"org.example:lib:1.1\""));
         assertTrue(graphJson, graphJson.contains("\"requested\":\"org.example:lib:1.+\""));
@@ -1906,9 +1910,14 @@ public class ProjectModelProviderAdapterTest {
         Object artifact = proxy(ResolvedArtifact.class, (proxy, method, args) -> {
             switch (method.getName()) {
                 case "getModuleVersion":
-                    return moduleVersionIdentifier("org.example", "lib", "1.1");
+                    return resolvedModuleVersion("org.example", "lib", "1.1");
                 case "getFile":
                     return artifactFile;
+                case "getType":
+                case "getExtension":
+                    return "jar";
+                case "getClassifier":
+                    return "";
                 default:
                     return defaultValue(method.getReturnType());
             }
@@ -1933,6 +1942,15 @@ public class ProjectModelProviderAdapterTest {
                 default:
                     return defaultValue(method.getReturnType());
             }
+        });
+    }
+
+    private static Object resolvedModuleVersion(String group, String name, String version) {
+        return proxy(ResolvedModuleVersion.class, (proxy, method, args) -> {
+            if (method.getName().equals("getId")) {
+                return moduleVersionIdentifier(group, name, version);
+            }
+            return defaultValue(method.getReturnType());
         });
     }
 
