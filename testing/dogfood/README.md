@@ -56,3 +56,14 @@ This is not a full Gradle compatibility claim. The dogfood manifest is a
 showability gate: supported entries must prove no JVM task forwards and parity
 for configured checks; unsupported entries must produce precise fail-closed
 diagnostics instead of hidden task-by-task fallback.
+
+## CycloneDX SBOM Boundary
+
+The Spring PetClinic `clean testClasses` OSS entry is intentionally
+fail-closed. Its CycloneDX tasks declare real SBOM outputs, and the current
+task contract only exposes artifact paths plus generic task metadata. That is
+not enough to recreate Gradle/CycloneDX output faithfully: a native executor
+needs a schema-backed SBOM contract with resolved dependency edges, component
+metadata, scope mapping, plugin options, serial/timestamp policy, and JSON/XML
+mode semantics. Until that contract exists, this entry should remain an
+unsupported diagnostic rather than a synthetic native implementation.
