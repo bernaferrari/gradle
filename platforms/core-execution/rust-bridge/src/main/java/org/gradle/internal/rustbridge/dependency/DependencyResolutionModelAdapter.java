@@ -103,7 +103,7 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
             }
             URI url = maven.getUrl();
             String scheme = url == null ? "" : url.getScheme();
-            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme) && !"file".equalsIgnoreCase(scheme)) {
                 unsupportedFeatures.add("repository-url-scheme:" + maven.getName() + ":" + scheme);
                 continue;
             }

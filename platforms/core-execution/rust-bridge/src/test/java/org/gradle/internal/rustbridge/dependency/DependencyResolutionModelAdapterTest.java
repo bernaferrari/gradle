@@ -91,6 +91,20 @@ public class DependencyResolutionModelAdapterTest {
     }
 
     @Test
+    public void fileMavenRepositoryIsNativeReady() {
+        DependencyResolutionModelAdapter.RepositoryCapture capture =
+            DependencyResolutionModelAdapter.repositoriesForProject(
+                projectWithRepository(mavenRepository("local", "file:/tmp/local-maven-repo", credentials(null, null))),
+                false
+            );
+
+        assertTrue(capture.getUnsupportedFeatures().isEmpty());
+        RepositoryDescriptor repository = capture.getRepositories().get(0);
+        assertEquals("local", repository.getId());
+        assertEquals("file:/tmp/local-maven-repo", repository.getUrl());
+    }
+
+    @Test
     public void emptyRepositoryContentFilterDoesNotMarkPlainRepositoryUnsupported() {
         DependencyResolutionModelAdapter.RepositoryCapture capture =
             DependencyResolutionModelAdapter.repositoriesForProject(

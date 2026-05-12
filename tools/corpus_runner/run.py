@@ -360,8 +360,6 @@ def scan_project_contract(project_dir: str) -> dict:
             unsupported_features.add("unsupported-test-filters")
         if re.search(r"\b(?:include|exclude)(?:Group|Module|Version)ByRegex\s*\(", text):
             unsupported_features.add("repository-content-filter")
-        if re.search(r"\bmavenLocal\s*\(", text):
-            unsupported_features.add("maven-local")
         if re.search(r"\bdependencySubstitution\s*\{", text):
             unsupported_features.add("dependency-substitution")
         if re.search(r"\bcomponents\s*\{", text):

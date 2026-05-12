@@ -863,7 +863,7 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
-    public void marksMavenLocalAsUnsupportedDependencySemantics() throws IOException {
+    public void mavenLocalRepositoryIsNotBlanketUnsupportedDependencySemantics() throws IOException {
         File buildFile = temporaryFolder.newFile("build.gradle.kts");
         Files.write(buildFile.toPath(), Collections.singletonList(
             "repositories { mavenLocal() }"
@@ -884,8 +884,8 @@ public class ProjectModelProviderAdapterTest {
             .filter(input -> input.getKind().equals("value"))
             .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
 
-        assertEquals("true", inputs.get("unsupported_dependency_semantics"));
-        assertTrue(inputs.get("unsupported_repository_features").contains("maven-local:build-script"));
+        assertFalse(inputs.containsKey("unsupported_dependency_semantics"));
+        assertFalse(inputs.getOrDefault("unsupported_repository_features", "").contains("maven-local:build-script"));
     }
 
     @org.junit.Test
