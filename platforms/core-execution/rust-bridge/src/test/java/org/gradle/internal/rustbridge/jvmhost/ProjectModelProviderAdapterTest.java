@@ -592,7 +592,8 @@ public class ProjectModelProviderAdapterTest {
         assertTrue(graphJson, graphJson.contains("\"requested\":\"org.example:lib:1.+\""));
         assertEquals("partial", inputs.get("cyclonedx_sbom_contract_status"));
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("resolution-result-edges"));
-        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("component-metadata"));
+        assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("component-metadata"));
+        assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("license-metadata"));
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("artifact-hash-policy"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("timestamp-source-policy"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("serial-source-policy"));
