@@ -1644,6 +1644,14 @@ fn apply_pom_metadata_text(
         {
             push_external_reference(&mut metadata.external_references, "distribution", text);
         }
+        [project, distribution, site, url]
+            if project == "project"
+                && distribution == "distributionManagement"
+                && site == "site"
+                && url == "url" =>
+        {
+            push_external_reference(&mut metadata.external_references, "distribution", text);
+        }
         [project, issue, url]
             if project == "project" && issue == "issueManagement" && url == "url" =>
         {
@@ -3137,6 +3145,9 @@ mod tests {
   </ciManagement>
   <distributionManagement>
     <downloadUrl>https://downloads.example.test/lib</downloadUrl>
+    <site>
+      <url>https://site.example.test/lib</url>
+    </site>
   </distributionManagement>
   <issueManagement>
     <url>https://issues.example.test/lib</url>
@@ -3214,6 +3225,10 @@ mod tests {
         assert!(component.external_references.contains(&external_reference(
             "distribution",
             "https://downloads.example.test/lib"
+        )));
+        assert!(component.external_references.contains(&external_reference(
+            "distribution",
+            "https://site.example.test/lib"
         )));
         assert!(component.external_references.contains(&external_reference(
             "issue-tracker",
