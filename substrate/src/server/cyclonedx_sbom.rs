@@ -140,6 +140,7 @@ pub struct CycloneDxCapturedTaskOptions {
     pub include_build_environment: bool,
     pub include_license_text: bool,
     pub license_choice: String,
+    pub build_system_environment_variable: String,
     pub external_references: Vec<String>,
     pub json_output: String,
     pub xml_output: String,
@@ -235,6 +236,11 @@ pub fn validate_captured_task_options(
         include_license_text: value(inputs, "cyclonedx_include_license_text")
             .eq_ignore_ascii_case("true"),
         license_choice: value(inputs, "cyclonedx_license_choice").to_string(),
+        build_system_environment_variable: value(
+            inputs,
+            "cyclonedx_build_system_environment_variable",
+        )
+        .to_string(),
         external_references: whitespace_values(value(inputs, "cyclonedx_external_references")),
         json_output,
         xml_output,
@@ -307,6 +313,9 @@ fn reject_unsupported_captured_options(
     }
     if !options.license_choice.trim().is_empty() {
         unsupported.push("license-choice");
+    }
+    if !options.build_system_environment_variable.trim().is_empty() {
+        unsupported.push("build-system-environment-variable");
     }
     if unsupported.is_empty() {
         Ok(())
@@ -1318,6 +1327,7 @@ mod tests {
         assert!(!options.include_build_environment);
         assert!(!options.include_license_text);
         assert_eq!("", options.license_choice);
+        assert_eq!("", options.build_system_environment_variable);
         assert_eq!("/tmp/bom.json", options.json_output);
     }
 
@@ -1542,6 +1552,10 @@ mod tests {
             ),
             ("cyclonedx_license_choice".to_string(), "SPDX".to_string()),
             (
+                "cyclonedx_build_system_environment_variable".to_string(),
+                "CI".to_string(),
+            ),
+            (
                 "cyclonedx_json_output".to_string(),
                 "/tmp/bom.json".to_string(),
             ),
@@ -1558,6 +1572,7 @@ mod tests {
         assert!(err.contains("include-build-environment"));
         assert!(err.contains("include-license-text"));
         assert!(err.contains("license-choice"));
+        assert!(err.contains("build-system-environment-variable"));
     }
 
     #[test]
