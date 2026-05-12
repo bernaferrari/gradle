@@ -1290,6 +1290,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "cyclonedx_schema_version", enumName(invokeOptionalProvider(task, taskType, "getSchemaVersion")));
         String includeBomSerialNumber = providerBooleanString(invokeOptional(task, taskType, "getIncludeBomSerialNumber"));
         putIfPresent(inputs, "cyclonedx_include_bom_serial_number", includeBomSerialNumber);
+        putIfPresent(inputs, "cyclonedx_timestamp_source_policy", "cyclonedx-core-metadata-constructor-now");
+        putIfPresent(inputs, "cyclonedx_serial_source_policy", "true".equalsIgnoreCase(includeBomSerialNumber) ? "cyclonedx-gradle-random-uuid" : "omitted");
         String includeBuildSystem = providerBooleanString(invokeOptional(task, taskType, "getIncludeBuildSystem"));
         putIfPresent(inputs, "cyclonedx_include_build_system", includeBuildSystem);
         String includeBuildEnvironment = providerBooleanString(invokeOptional(task, taskType, "getIncludeBuildEnvironment"));
