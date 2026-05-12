@@ -1,0 +1,72 @@
+{
+  "schema": "gradle-substrate.dogfood-manifest.v1",
+  "root": ".",
+  "minimum_projects": 3,
+  "description": "Pinned external OSS Gradle projects for the next Rust substrate dogfood layer. These entries are not vendored into the repository; a fetch/cache runner should clone them under build/dogfood-oss before execution.",
+  "projects": [
+    {
+      "name": "spring-gs-gradle-complete",
+      "path": "spring-gs-gradle-complete",
+      "source": {
+        "kind": "git",
+        "url": "https://github.com/spring-guides/gs-gradle.git",
+        "ref": "878317c9a4a70d9b63ee649a5d5d274a4188ba91",
+        "subdir": "complete",
+        "description": "Spring guide Gradle sample pinned to an immutable commit."
+      },
+      "tasks": ["clean", "build"],
+      "mode": "native-ready-default",
+      "expectation": "supported-or-fail-closed",
+      "timeout_seconds": 300,
+      "reason": "Small recognizable Java Gradle project with wrapper/build lifecycle; useful as the first external OSS smoke.",
+      "checks": {
+        "task_parity": true,
+        "output_inventory": true,
+        "no_jvm_forwards": true,
+        "fail_closed_diagnostic": "required-if-not-supported"
+      }
+    },
+    {
+      "name": "mockito-main",
+      "path": "mockito-main",
+      "source": {
+        "kind": "git",
+        "url": "https://github.com/mockito/mockito.git",
+        "ref": "c9fe6a05550e04a86d069e42845a83766590140c",
+        "subdir": ".",
+        "description": "Mockito pinned to an immutable commit; expected to expose plugin/task/dependency semantics beyond the current preview."
+      },
+      "tasks": ["help"],
+      "mode": "native-ready-default",
+      "expectation": "supported-or-fail-closed",
+      "timeout_seconds": 300,
+      "reason": "Recognizable Gradle-heavy OSS build for admission diagnostics and plugin-boundary honesty.",
+      "checks": {
+        "task_parity": true,
+        "no_jvm_forwards": true,
+        "fail_closed_diagnostic": "required-if-not-supported"
+      }
+    },
+    {
+      "name": "okio-root",
+      "path": "okio-root",
+      "source": {
+        "kind": "git",
+        "url": "https://github.com/square/okio.git",
+        "ref": "f806620cd18dcbafa4eb3ac484ae7985fd92dba9",
+        "subdir": ".",
+        "description": "Okio pinned to an immutable commit; Kotlin Multiplatform is expected to fail closed until modeled."
+      },
+      "tasks": ["help"],
+      "mode": "native-ready-default",
+      "expectation": "supported-or-fail-closed",
+      "timeout_seconds": 300,
+      "reason": "Recognizable Gradle build with Kotlin/native/plugin semantics that should not be approximated by Rust.",
+      "checks": {
+        "task_parity": true,
+        "no_jvm_forwards": true,
+        "fail_closed_diagnostic": "required-if-not-supported"
+      }
+    }
+  ]
+}

@@ -30,6 +30,13 @@ class DogfoodRunnerTest(unittest.TestCase):
         self.assertGreaterEqual(summary["supported_count"], 3)
         self.assertGreaterEqual(summary["fail_closed_count"], 1)
 
+    def test_checked_in_oss_manifest_validates_without_cloning(self):
+        manifest = dogfood_run.REPO_ROOT / "testing" / "dogfood" / "oss-manifest.json"
+
+        errors = dogfood_run.validate_manifest(manifest)
+
+        self.assertEqual([], errors)
+
     def test_rejects_missing_supported_no_jvm_forward_check(self):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp) / "project"
@@ -61,6 +68,46 @@ class DogfoodRunnerTest(unittest.TestCase):
             errors = dogfood_run.validate_manifest(manifest)
 
         self.assertIn("p: supported entries must require no_jvm_forwards", errors)
+
+    def test_rejects_floating_git_ref(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "manifest.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "schema": "gradle-substrate.dogfood-manifest.v1",
+                        "root": ".",
+                        "projects": [
+                            {
+                                "name": "floating",
+                                "path": "floating",
+                                "source": {
+                                    "kind": "git",
+                                    "url": "https://example.invalid/repo.git",
+                                    "ref": "main",
+                                    "subdir": ".",
+                                    "description": "floating",
+                                },
+                                "tasks": ["build"],
+                                "mode": "native-ready-default",
+                                "expectation": "supported-or-fail-closed",
+                                "timeout_seconds": 1,
+                                "reason": "test",
+                                "checks": {
+                                    "task_parity": True,
+                                    "no_jvm_forwards": True,
+                                    "fail_closed_diagnostic": "required-if-not-supported",
+                                },
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            errors = dogfood_run.validate_manifest(manifest)
+
+        self.assertIn("floating: git source requires immutable 40-character ref", errors)
 
     def test_parse_jvm_forwards_from_runbuild_output(self):
         self.assertEqual(7, dogfood_run.parse_jvm_forwards("failed jvmForwarded=7"))

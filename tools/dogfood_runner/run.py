@@ -21,7 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = REPO_ROOT / "testing" / "dogfood" / "manifest.json"
 CORPUS_RUNNER_PATH = REPO_ROOT / "tools" / "corpus_runner" / "run.py"
 SUPPORTED_MODES = {"strict", "native-ready-default"}
-SUPPORTED_EXPECTATIONS = {"supported", "fail-closed"}
+SUPPORTED_EXPECTATIONS = {"supported", "fail-closed", "supported-or-fail-closed"}
 
 
 def load_corpus_runner():
@@ -93,8 +93,11 @@ def validate_manifest(manifest_path: Path) -> list[str]:
     errors: list[str] = []
     if data.get("schema") != "gradle-substrate.dogfood-manifest.v1":
         errors.append("schema must be gradle-substrate.dogfood-manifest.v1")
-    if len(projects) < 5:
-        errors.append(f"manifest must list at least 5 projects, got {len(projects)}")
+    minimum_projects = int(data.get("minimum_projects", 5))
+    if len(projects) < minimum_projects:
+        errors.append(
+            f"manifest must list at least {minimum_projects} projects, got {len(projects)}"
+        )
 
     names: set[str] = set()
     supported_count = 0
@@ -104,7 +107,16 @@ def validate_manifest(manifest_path: Path) -> list[str]:
         if project.name in names:
             errors.append(prefix + "duplicate project name")
         names.add(project.name)
-        if not project.path.exists():
+        source_kind = project.source.get("kind")
+        if source_kind == "git":
+            ref = str(project.source.get("ref", ""))
+            if not project.source.get("url"):
+                errors.append(prefix + "git source requires url")
+            if not is_immutable_git_ref(ref):
+                errors.append(prefix + "git source requires immutable 40-character ref")
+            if "subdir" not in project.source:
+                errors.append(prefix + "git source requires subdir")
+        elif not project.path.exists():
             errors.append(prefix + f"path does not exist: {project.path}")
         if not project.tasks:
             errors.append(prefix + "tasks must be non-empty")
@@ -118,13 +130,13 @@ def validate_manifest(manifest_path: Path) -> list[str]:
             errors.append(prefix + "reason must be non-empty")
         if not project.source.get("kind") or not project.source.get("description"):
             errors.append(prefix + "source.kind and source.description are required")
-        if project.expectation == "supported":
+        if project.expectation in {"supported", "supported-or-fail-closed"}:
             supported_count += 1
             if not project.checks.get("task_parity"):
                 errors.append(prefix + "supported entries must require task_parity")
             if not project.checks.get("no_jvm_forwards"):
                 errors.append(prefix + "supported entries must require no_jvm_forwards")
-        if project.expectation == "fail-closed":
+        if project.expectation in {"fail-closed", "supported-or-fail-closed"}:
             fail_closed_count += 1
             if not project.checks.get("fail_closed_diagnostic"):
                 errors.append(prefix + "fail-closed entries must name fail_closed_diagnostic")
@@ -136,6 +148,10 @@ def validate_manifest(manifest_path: Path) -> list[str]:
     return errors
 
 
+def is_immutable_git_ref(ref: str) -> bool:
+    return bool(re.fullmatch(r"[0-9a-fA-F]{40}", ref))
+
+
 def enumerate_manifest(manifest_path: Path) -> dict[str, Any]:
     data, projects = load_manifest(manifest_path)
     errors = validate_manifest(manifest_path)
@@ -145,8 +161,12 @@ def enumerate_manifest(manifest_path: Path) -> dict[str, Any]:
         "valid": not errors,
         "errors": errors,
         "project_count": len(projects),
-        "supported_count": sum(1 for project in projects if project.expectation == "supported"),
-        "fail_closed_count": sum(1 for project in projects if project.expectation == "fail-closed"),
+        "supported_count": sum(
+            1 for project in projects if project.expectation in {"supported", "supported-or-fail-closed"}
+        ),
+        "fail_closed_count": sum(
+            1 for project in projects if project.expectation in {"fail-closed", "supported-or-fail-closed"}
+        ),
         "projects": [project.to_dict() for project in projects],
     }
 
