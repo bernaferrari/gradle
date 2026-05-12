@@ -1,5 +1,8 @@
 use std::collections::HashSet;
 
+use base64::Engine as _;
+
+use super::cyclonedx_sbom::CycloneDxSbomContract;
 use super::dependency_solver::graph_builder;
 
 /// Whole-build plan admitted into the Rust execution kernel after JVM
@@ -334,6 +337,10 @@ fn kernel_task_contract_rejection(
     }
 
     match task_type {
+        "org.cyclonedx.gradle.CyclonedxDirectTask"
+        | "org.cyclonedx.gradle.CyclonedxAggregateTask" => {
+            return cyclonedx_contract_rejection(&value);
+        }
         "JavaExec" => {
             let options = value.get("options").and_then(|v| v.as_object());
             if !string_option_present(options, "main_class") {
@@ -353,6 +360,36 @@ fn kernel_task_contract_rejection(
     }
 
     None
+}
+
+fn cyclonedx_contract_rejection(value: &serde_json::Value) -> Option<String> {
+    let Some(properties) = value.get("input_properties").and_then(|v| v.as_object()) else {
+        return Some("CycloneDX task is missing schema-backed SBOM contract".to_string());
+    };
+    let encoded = properties
+        .get("input_value.sbom_contract_json_b64")
+        .or_else(|| properties.get("input.sbom_contract_json_b64"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let Some(encoded) = encoded else {
+        return Some("CycloneDX task is missing schema-backed SBOM contract".to_string());
+    };
+    let decoded = match base64::engine::general_purpose::STANDARD.decode(encoded) {
+        Ok(decoded) => decoded,
+        Err(err) => {
+            return Some(format!(
+                "CycloneDX SBOM contract is not valid base64: {err}"
+            ));
+        }
+    };
+    let contract = match serde_json::from_slice::<CycloneDxSbomContract>(&decoded) {
+        Ok(contract) => contract,
+        Err(err) => {
+            return Some(format!("CycloneDX SBOM contract is not valid JSON: {err}"));
+        }
+    };
+    contract.validate().err()
 }
 
 fn unsupported_contract_marker_reason(
@@ -401,6 +438,8 @@ fn string_option_present(
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
+
+    use base64::Engine as _;
 
     use super::{
         admit_build_plan, KernelAdmission, KernelBuildPlan, KernelDependencyConfiguration,
@@ -490,6 +529,82 @@ mod tests {
         assert!(message.contains("requires native CycloneDX SBOM generation support"));
         assert!(message.contains("declares SBOM outputs"));
         assert!(!message.contains("CyclonedxDirectTask) has no Rust executor"));
+    }
+
+    #[test]
+    fn rejects_native_cyclonedx_without_schema_backed_contract() {
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![task(
+                ":cyclonedxDirectBom",
+                "org.cyclonedx.gradle.CyclonedxDirectTask",
+                Some(
+                    serde_json::json!({
+                        "input_properties": {
+                            "input_path.input0": "/tmp/example.jar"
+                        }
+                    })
+                    .to_string(),
+                ),
+            )],
+        };
+
+        let KernelAdmission::Rejected(rejection) = admit_build_plan(
+            &plan,
+            &native_types(&["org.cyclonedx.gradle.CyclonedxDirectTask"]),
+        ) else {
+            panic!("expected rejection");
+        };
+        assert!(rejection
+            .message()
+            .contains("CycloneDX task is missing schema-backed SBOM contract"));
+    }
+
+    #[test]
+    fn admits_native_cyclonedx_when_schema_backed_contract_is_present() {
+        let contract_json = serde_json::json!({
+            "schema": "gradle-substrate.cyclonedx-sbom.v1",
+            "spec_version": "1.6",
+            "serial_number": "urn:uuid:00000000-0000-0000-0000-000000000001",
+            "timestamp": "2026-05-12T10:00:00Z",
+            "root_component": {
+                "type": "application",
+                "bom-ref": "pkg:maven/org.example/app@1.0.0?project_path=%3A",
+                "group": "org.example",
+                "name": "app",
+                "version": "1.0.0",
+                "purl": "pkg:maven/org.example/app@1.0.0"
+            },
+            "components": [],
+            "dependencies": []
+        })
+        .to_string();
+        let encoded = base64::engine::general_purpose::STANDARD.encode(contract_json);
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![task(
+                ":cyclonedxDirectBom",
+                "org.cyclonedx.gradle.CyclonedxDirectTask",
+                Some(
+                    serde_json::json!({
+                        "input_properties": {
+                            "input_value.sbom_contract_json_b64": encoded
+                        }
+                    })
+                    .to_string(),
+                ),
+            )],
+        };
+
+        assert_eq!(
+            admit_build_plan(
+                &plan,
+                &native_types(&["org.cyclonedx.gradle.CyclonedxDirectTask"])
+            ),
+            KernelAdmission::Accepted { task_count: 1 }
+        );
     }
 
     #[test]
