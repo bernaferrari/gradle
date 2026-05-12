@@ -587,6 +587,48 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
+    public void capturesCycloneDxAggregateInputSbomsWithDeterministicTimestampForRustSynthesis() throws IOException {
+        String previous = System.getProperty("org.gradle.rust.substrate.cyclonedx.timestamp.ms");
+        System.setProperty("org.gradle.rust.substrate.cyclonedx.timestamp.ms", "1778595445123");
+        try {
+            File inputJson = temporaryFolder.newFile("direct-bom.json");
+            File outputJson = temporaryFolder.newFile("aggregate-bom.json");
+            Task cyclonedx = cyclonedxAggregateTask(
+                inputJson,
+                outputJson,
+                Boolean.FALSE,
+                Boolean.FALSE,
+                Boolean.FALSE,
+                Boolean.FALSE,
+                Boolean.FALSE
+            );
+
+            BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(cyclonedx, CyclonedxAggregateTask.class);
+            Map<String, String> inputs = task.getInputSpecsList().stream()
+                .filter(input -> input.getKind().equals("value"))
+                .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+            assertEquals(inputJson.getAbsolutePath(), inputs.get("cyclonedx_input_sboms"));
+            assertEquals("gradle-substrate-explicit-epoch-ms", inputs.get("cyclonedx_timestamp_source_policy"));
+            assertEquals("1778595445123", inputs.get("cyclonedx_timestamp_epoch_ms"));
+            String missing = inputs.get("cyclonedx_missing_contract_fields");
+            assertTrue(missing.contains("aggregate-input-contracts"));
+            assertTrue(missing.contains("aggregate-merge-policy"));
+            assertFalse(missing.contains("timestamp-source-policy"));
+            assertFalse(missing.contains("serial-source-policy"));
+            assertFalse(missing.contains("license-text-rendering"));
+            assertEquals("true", inputs.get("requires_jvm_task_execution"));
+            assertFalse(inputs.containsKey("aggregate_input_contracts_json_b64"));
+        } finally {
+            if (previous == null) {
+                System.clearProperty("org.gradle.rust.substrate.cyclonedx.timestamp.ms");
+            } else {
+                System.setProperty("org.gradle.rust.substrate.cyclonedx.timestamp.ms", previous);
+            }
+        }
+    }
+
+    @org.junit.Test
     public void marksCycloneDxMissingRequiredRootOptionsAsMissingContractFields() throws IOException {
         File inputJar = temporaryFolder.newFile("runtime.jar");
         Task cyclonedx = cyclonedxDirectTask(

@@ -624,6 +624,9 @@ already-synthesized direct CycloneDX contracts whose output paths match the
 aggregate task's `cyclonedx_input_sboms`. Aggregate promotion still requires the
 same explicit deterministic timestamp path and does not read generated BOM files
 from disk during admission.
+Bridge coverage now proves aggregate tasks capture `cyclonedx_input_sboms` and
+the deterministic timestamp opt-in required by Rust aggregate synthesis while
+Java still leaves aggregate contract construction to the Rust task graph.
 
 Audit of closed roadmap (dyy.1-dyy.20): 18/21 verified against committed code and
 corpus parity, 3/21 partially verified (dependency solver complex scenarios,
