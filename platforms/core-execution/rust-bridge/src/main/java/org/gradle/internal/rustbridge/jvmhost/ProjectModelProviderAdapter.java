@@ -1289,13 +1289,19 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "cyclonedx_schema_version", enumName(invokeOptionalProvider(task, taskType, "getSchemaVersion")));
         String includeBomSerialNumber = providerBooleanString(invokeOptional(task, taskType, "getIncludeBomSerialNumber"));
         putIfPresent(inputs, "cyclonedx_include_bom_serial_number", includeBomSerialNumber);
-        putIfPresent(inputs, "cyclonedx_include_build_system", providerBooleanString(invokeOptional(task, taskType, "getIncludeBuildSystem")));
-        putIfPresent(inputs, "cyclonedx_include_build_environment", providerBooleanString(invokeOptional(task, taskType, "getIncludeBuildEnvironment")));
-        putIfPresent(inputs, "cyclonedx_include_license_text", providerBooleanString(invokeOptional(task, taskType, "getIncludeLicenseText")));
+        String includeBuildSystem = providerBooleanString(invokeOptional(task, taskType, "getIncludeBuildSystem"));
+        putIfPresent(inputs, "cyclonedx_include_build_system", includeBuildSystem);
+        String includeBuildEnvironment = providerBooleanString(invokeOptional(task, taskType, "getIncludeBuildEnvironment"));
+        putIfPresent(inputs, "cyclonedx_include_build_environment", includeBuildEnvironment);
+        String includeLicenseText = providerBooleanString(invokeOptional(task, taskType, "getIncludeLicenseText"));
+        putIfPresent(inputs, "cyclonedx_include_license_text", includeLicenseText);
         putIfPresent(inputs, "cyclonedx_include_metadata_resolution", providerBooleanString(invokeOptional(task, taskType, "getIncludeMetadataResolution")));
-        putIfPresent(inputs, "cyclonedx_license_choice", enumName(invokeOptionalProvider(task, taskType, "getLicenseChoice")));
-        putIfPresent(inputs, "cyclonedx_build_system_environment_variable", providerValue(invokeOptional(task, taskType, "getBuildSystemEnvironmentVariable")));
-        putIfPresent(inputs, "cyclonedx_external_references", providerStringList(invokeOptional(task, taskType, "getExternalReferences")));
+        String licenseChoice = enumName(invokeOptionalProvider(task, taskType, "getLicenseChoice"));
+        putIfPresent(inputs, "cyclonedx_license_choice", licenseChoice);
+        String buildSystemEnvironmentVariable = providerValue(invokeOptional(task, taskType, "getBuildSystemEnvironmentVariable"));
+        putIfPresent(inputs, "cyclonedx_build_system_environment_variable", buildSystemEnvironmentVariable);
+        String externalReferences = providerStringList(invokeOptional(task, taskType, "getExternalReferences"));
+        putIfPresent(inputs, "cyclonedx_external_references", externalReferences);
         putIfPresent(inputs, "cyclonedx_include_configs", providerStringList(invokeOptional(task, taskType, "getIncludeConfigs")));
         putIfPresent(inputs, "cyclonedx_skip_configs", providerStringList(invokeOptional(task, taskType, "getSkipConfigs")));
         putIfPresent(inputs, "cyclonedx_json_output", providerFilePath(invokeOptional(task, taskType, "getJsonOutput")));
@@ -1308,17 +1314,46 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         inputs.put(
             "cyclonedx_missing_contract_fields",
             resolutionGraphJsonBase64.isEmpty()
-                ? cyclonedxMissingContractFields("resolution-result-edges,component-metadata,license-metadata,timestamp-source-policy,aggregate-merge-policy", includeBomSerialNumber)
-                : cyclonedxMissingContractFields("component-metadata,license-metadata,timestamp-source-policy,aggregate-merge-policy", includeBomSerialNumber)
+                ? cyclonedxMissingContractFields("resolution-result-edges,component-metadata,license-metadata,timestamp-source-policy,aggregate-merge-policy", includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, licenseChoice, buildSystemEnvironmentVariable, externalReferences)
+                : cyclonedxMissingContractFields("component-metadata,license-metadata,timestamp-source-policy,aggregate-merge-policy", includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, licenseChoice, buildSystemEnvironmentVariable, externalReferences)
         );
         inputs.put("requires_jvm_task_execution", "true");
     }
 
-    private static String cyclonedxMissingContractFields(String baseFields, String includeBomSerialNumber) {
+    private static String cyclonedxMissingContractFields(
+        String baseFields,
+        String includeBomSerialNumber,
+        String includeBuildSystem,
+        String includeBuildEnvironment,
+        String includeLicenseText,
+        String licenseChoice,
+        String buildSystemEnvironmentVariable,
+        String externalReferences
+    ) {
+        List<String> fields = new ArrayList<>();
+        Collections.addAll(fields, baseFields.split(","));
         if ("true".equalsIgnoreCase(includeBomSerialNumber)) {
-            return baseFields + ",serial-source-policy";
+            fields.add("serial-source-policy");
         }
-        return baseFields;
+        if ("true".equalsIgnoreCase(includeBuildSystem)) {
+            fields.add("build-system-rendering");
+        }
+        if ("true".equalsIgnoreCase(includeBuildEnvironment)) {
+            fields.add("build-environment-rendering");
+        }
+        if ("true".equalsIgnoreCase(includeLicenseText)) {
+            fields.add("license-text-rendering");
+        }
+        if (licenseChoice != null && !licenseChoice.isEmpty()) {
+            fields.add("license-choice-rendering");
+        }
+        if (buildSystemEnvironmentVariable != null && !buildSystemEnvironmentVariable.isEmpty()) {
+            fields.add("build-system-environment-variable");
+        }
+        if (externalReferences != null && !externalReferences.isEmpty()) {
+            fields.add("external-reference-shape");
+        }
+        return String.join(",", fields);
     }
 
     private static String cyclonedxResolutionGraphJsonBase64(Task task, Class<?> taskType) {
