@@ -136,6 +136,10 @@ pub struct CycloneDxCapturedTaskOptions {
     pub root_component_type: String,
     pub include_bom_serial_number: bool,
     pub include_metadata_resolution: bool,
+    pub include_build_system: bool,
+    pub include_build_environment: bool,
+    pub include_license_text: bool,
+    pub license_choice: String,
     pub external_references: Vec<String>,
     pub json_output: String,
     pub xml_output: String,
@@ -224,6 +228,13 @@ pub fn validate_captured_task_options(
             .eq_ignore_ascii_case("true"),
         include_metadata_resolution: value(inputs, "cyclonedx_include_metadata_resolution")
             .eq_ignore_ascii_case("true"),
+        include_build_system: value(inputs, "cyclonedx_include_build_system")
+            .eq_ignore_ascii_case("true"),
+        include_build_environment: value(inputs, "cyclonedx_include_build_environment")
+            .eq_ignore_ascii_case("true"),
+        include_license_text: value(inputs, "cyclonedx_include_license_text")
+            .eq_ignore_ascii_case("true"),
+        license_choice: value(inputs, "cyclonedx_license_choice").to_string(),
         external_references: whitespace_values(value(inputs, "cyclonedx_external_references")),
         json_output,
         xml_output,
@@ -245,6 +256,7 @@ pub fn draft_contract_from_captured_inputs(
     let graph = serde_json::from_slice::<CycloneDxResolutionGraphEvidence>(&graph_bytes)
         .map_err(|error| format!("Invalid CycloneDX resolution graph evidence: {error}"))?;
     let options = validate_captured_task_options(inputs)?;
+    reject_unsupported_captured_options(&options)?;
     let task_path = value(inputs, "cyclonedx_identity_task_path");
     if task_path.trim().is_empty() {
         return Err("CycloneDX captured contract is missing task identity".to_string());
@@ -278,6 +290,32 @@ pub fn draft_contract_from_captured_inputs(
             external_references: options.external_references,
         },
     )
+}
+
+fn reject_unsupported_captured_options(
+    options: &CycloneDxCapturedTaskOptions,
+) -> Result<(), String> {
+    let mut unsupported = Vec::new();
+    if options.include_build_system {
+        unsupported.push("include-build-system");
+    }
+    if options.include_build_environment {
+        unsupported.push("include-build-environment");
+    }
+    if options.include_license_text {
+        unsupported.push("include-license-text");
+    }
+    if !options.license_choice.trim().is_empty() {
+        unsupported.push("license-choice");
+    }
+    if unsupported.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "CycloneDX captured contract has unsupported rendering options: {}",
+            unsupported.join(",")
+        ))
+    }
 }
 
 pub fn aggregate_contracts(
@@ -1276,6 +1314,10 @@ mod tests {
         assert_eq!("library", options.root_component_type);
         assert!(options.include_bom_serial_number);
         assert!(options.include_metadata_resolution);
+        assert!(!options.include_build_system);
+        assert!(!options.include_build_environment);
+        assert!(!options.include_license_text);
+        assert_eq!("", options.license_choice);
         assert_eq!("/tmp/bom.json", options.json_output);
     }
 
@@ -1457,6 +1499,65 @@ mod tests {
             .unwrap_err();
 
         assert!(err.contains("task identity"));
+    }
+
+    #[test]
+    fn rejects_captured_contract_with_unsupported_rendering_options() {
+        let graph_json = serde_json::to_vec(&sample_resolution_graph()).unwrap();
+        let encoded_graph = base64::engine::general_purpose::STANDARD.encode(graph_json);
+        let inputs = BTreeMap::from([
+            (
+                "cyclonedx_resolution_graph_json_b64".to_string(),
+                encoded_graph,
+            ),
+            (
+                "cyclonedx_schema_version".to_string(),
+                "VERSION_16".to_string(),
+            ),
+            (
+                "cyclonedx_component_group".to_string(),
+                "org.example".to_string(),
+            ),
+            ("cyclonedx_component_name".to_string(), "demo".to_string()),
+            ("cyclonedx_component_version".to_string(), "1.0".to_string()),
+            (
+                "cyclonedx_project_type".to_string(),
+                "APPLICATION".to_string(),
+            ),
+            (
+                "cyclonedx_include_bom_serial_number".to_string(),
+                "true".to_string(),
+            ),
+            (
+                "cyclonedx_include_build_system".to_string(),
+                "true".to_string(),
+            ),
+            (
+                "cyclonedx_include_build_environment".to_string(),
+                "true".to_string(),
+            ),
+            (
+                "cyclonedx_include_license_text".to_string(),
+                "true".to_string(),
+            ),
+            ("cyclonedx_license_choice".to_string(), "SPDX".to_string()),
+            (
+                "cyclonedx_json_output".to_string(),
+                "/tmp/bom.json".to_string(),
+            ),
+            (
+                "cyclonedx_identity_task_path".to_string(),
+                ":cyclonedxDirectBom".to_string(),
+            ),
+        ]);
+
+        let err = draft_contract_from_captured_inputs(&inputs, "build-123", 1_778_595_445_123)
+            .unwrap_err();
+
+        assert!(err.contains("include-build-system"));
+        assert!(err.contains("include-build-environment"));
+        assert!(err.contains("include-license-text"));
+        assert!(err.contains("license-choice"));
     }
 
     #[test]
