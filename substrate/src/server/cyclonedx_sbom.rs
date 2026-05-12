@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
+use base64::Engine as _;
 use quick_xml::events::Event;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -209,6 +210,49 @@ pub fn validate_captured_task_options(
         json_output,
         xml_output,
     })
+}
+
+pub fn draft_contract_from_captured_inputs(
+    inputs: &BTreeMap<String, String>,
+    build_id: &str,
+    timestamp_ms: i64,
+) -> Result<CycloneDxSbomContract, String> {
+    let graph = value(inputs, "cyclonedx_resolution_graph_json_b64");
+    if graph.trim().is_empty() {
+        return Err("CycloneDX captured contract is missing resolution graph evidence".to_string());
+    }
+    let graph_bytes = base64::engine::general_purpose::STANDARD
+        .decode(graph)
+        .map_err(|error| format!("Invalid cyclonedx_resolution_graph_json_b64: {error}"))?;
+    let graph = serde_json::from_slice::<CycloneDxResolutionGraphEvidence>(&graph_bytes)
+        .map_err(|error| format!("Invalid CycloneDX resolution graph evidence: {error}"))?;
+    let options = validate_captured_task_options(inputs)?;
+    let task_path = value(inputs, "cyclonedx_identity_task_path");
+    if task_path.trim().is_empty() {
+        return Err("CycloneDX captured contract is missing task identity".to_string());
+    }
+    let policy = CycloneDxIdentityPolicy {
+        build_id: build_id.to_string(),
+        task_path: task_path.to_string(),
+        root_group: options.root_group.clone(),
+        root_name: options.root_name.clone(),
+        root_version: options.root_version.clone(),
+        schema_version: options.spec_version.clone(),
+        timestamp_ms,
+    };
+    let timestamp = policy.timestamp()?;
+    draft_contract_from_resolution_graph(
+        &graph,
+        CycloneDxDraftOptions {
+            spec_version: options.spec_version,
+            serial_number: policy.serial_number(),
+            timestamp,
+            root_group: options.root_group,
+            root_name: options.root_name,
+            root_version: options.root_version,
+            root_component_type: options.root_component_type,
+        },
+    )
 }
 
 pub fn aggregate_contracts(
@@ -1173,6 +1217,92 @@ mod tests {
         let mut other = policy.clone();
         other.task_path = ":cyclonedxBom".to_string();
         assert_ne!(policy.serial_number(), other.serial_number());
+    }
+
+    #[test]
+    fn drafts_contract_from_captured_graph_options_and_identity() {
+        let graph_json = serde_json::to_vec(&sample_resolution_graph()).unwrap();
+        let encoded_graph = base64::engine::general_purpose::STANDARD.encode(graph_json);
+        let inputs = BTreeMap::from([
+            (
+                "cyclonedx_resolution_graph_json_b64".to_string(),
+                encoded_graph,
+            ),
+            (
+                "cyclonedx_schema_version".to_string(),
+                "VERSION_16".to_string(),
+            ),
+            (
+                "cyclonedx_component_group".to_string(),
+                "org.example".to_string(),
+            ),
+            ("cyclonedx_component_name".to_string(), "demo".to_string()),
+            ("cyclonedx_component_version".to_string(), "1.0".to_string()),
+            (
+                "cyclonedx_project_type".to_string(),
+                "APPLICATION".to_string(),
+            ),
+            (
+                "cyclonedx_include_bom_serial_number".to_string(),
+                "true".to_string(),
+            ),
+            (
+                "cyclonedx_json_output".to_string(),
+                "/tmp/bom.json".to_string(),
+            ),
+            (
+                "cyclonedx_identity_task_path".to_string(),
+                ":cyclonedxDirectBom".to_string(),
+            ),
+        ]);
+
+        let contract =
+            draft_contract_from_captured_inputs(&inputs, "build-123", 1_778_595_445_123).unwrap();
+
+        assert_eq!(CONTRACT_SCHEMA, contract.schema);
+        assert_eq!("1.6", contract.spec_version);
+        assert!(contract.serial_number.starts_with("urn:uuid:"));
+        assert_eq!("2026-05-12T14:17:25Z", contract.timestamp);
+        assert_eq!("application", contract.root_component.component_type);
+        assert!(contract
+            .components
+            .iter()
+            .any(|component| component.bom_ref == "pkg:maven/org.example/lib@1.1"));
+    }
+
+    #[test]
+    fn rejects_captured_contract_without_stable_identity() {
+        let graph_json = serde_json::to_vec(&sample_resolution_graph()).unwrap();
+        let encoded_graph = base64::engine::general_purpose::STANDARD.encode(graph_json);
+        let inputs = BTreeMap::from([
+            (
+                "cyclonedx_resolution_graph_json_b64".to_string(),
+                encoded_graph,
+            ),
+            (
+                "cyclonedx_schema_version".to_string(),
+                "VERSION_16".to_string(),
+            ),
+            (
+                "cyclonedx_component_group".to_string(),
+                "org.example".to_string(),
+            ),
+            ("cyclonedx_component_name".to_string(), "demo".to_string()),
+            ("cyclonedx_component_version".to_string(), "1.0".to_string()),
+            (
+                "cyclonedx_project_type".to_string(),
+                "APPLICATION".to_string(),
+            ),
+            (
+                "cyclonedx_json_output".to_string(),
+                "/tmp/bom.json".to_string(),
+            ),
+        ]);
+
+        let err = draft_contract_from_captured_inputs(&inputs, "build-123", 1_778_595_445_123)
+            .unwrap_err();
+
+        assert!(err.contains("task identity"));
     }
 
     #[test]
