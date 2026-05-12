@@ -91,7 +91,8 @@ admission, or an explicit unsupported corpus gate. The preview does not support:
   report fixture, artifact-view semantics outside the exact lenient resolved-file
   report fixture, artifact-transform semantics outside the exact marker report
   fixture, repository auth/proxy/offline/refresh semantics outside the checked-in
-  contract, and unsupported Gradle Module Metadata fields;
+  contract, explicit settings-level `includeBuild(...)` composite substitution,
+  and unsupported Gradle Module Metadata fields;
 - task-by-task fallback inside an admitted Rust-authoritative run.
 
 Unsupported fixtures belong in `testing/corpus/unsupported-manifest.json` or in
@@ -168,6 +169,13 @@ Module Metadata with constraints/excludes. Repository content filters,
 session-scoped credentials, and unsupported repository metadata rules are
 validated by focused bridge/Rust resolver tests and recorded in `PARITY.md`
 until they have stable standalone corpus projects.
+
+Composite substitution remains intentionally fail-closed. The bridge now records
+explicit `includeBuild(...)` settings as `composite-substitution:settings`, and
+Rust kernel admission rejects that plan before scheduler dispatch. Promoting this
+requires a real included-build IR/execution model, including substituted project
+dependency edges, included-build tasks, outputs, and classpaths across build
+scopes.
 
 Gate 5, one-command demo and dogfood workflow (`gradle-fork-33f.5`):
 `tools/demo/rust_substrate_demo.sh` builds or locates prerequisites, runs

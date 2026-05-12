@@ -477,6 +477,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if (projectBuildScriptHasUnsupportedEnforcedPlatform(project)) {
             unsupportedFeatures.add("enforced-platform:build-script");
         }
+        if (projectSettingsHasIncludedBuild(project)) {
+            unsupportedFeatures.add("composite-substitution:settings");
+        }
         unsupportedFeatures.addAll(unsupportedStartParameterDependencyFeatures(project));
         unsupportedFeatures.addAll(unsupportedProxyDependencyFeatures());
         return new ArrayList<>(new LinkedHashSet<>(unsupportedFeatures));
@@ -618,6 +621,48 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             LOGGER.debug("[substrate-jvmhost] Failed to inspect build script for unsupported native dependency semantics", e);
             return null;
         }
+    }
+
+    private static boolean projectSettingsHasIncludedBuild(Project project) {
+        String settingsText = projectSettingsText(project);
+        return settingsText != null && Pattern.compile("\\bincludeBuild\\s*(?:\\(|[\"'])").matcher(settingsText).find();
+    }
+
+    @Nullable
+    private static String projectSettingsText(Project project) {
+        File rootDir = null;
+        try {
+            Project rootProject = project.getRootProject();
+            if (rootProject != null) {
+                rootDir = rootProject.getProjectDir();
+            }
+        } catch (Exception e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to inspect root project for settings includeBuild", e);
+        }
+        if (rootDir == null) {
+            try {
+                rootDir = project.getProjectDir();
+            } catch (Exception e) {
+                LOGGER.debug("[substrate-jvmhost] Failed to inspect project directory for settings includeBuild", e);
+                return null;
+            }
+        }
+        if (rootDir == null) {
+            return null;
+        }
+        for (String name : new String[] {"settings.gradle.kts", "settings.gradle"}) {
+            File settingsFile = new File(rootDir, name);
+            if (!settingsFile.isFile()) {
+                continue;
+            }
+            try {
+                return new String(Files.readAllBytes(settingsFile.toPath()), StandardCharsets.UTF_8);
+            } catch (Exception e) {
+                LOGGER.debug("[substrate-jvmhost] Failed to inspect settings script for unsupported native dependency semantics", e);
+                return null;
+            }
+        }
+        return null;
     }
 
     private static List<String> balancedBlocks(String text, String blockName) {

@@ -9,7 +9,7 @@ use crate::proto::{
     BuildPlanToolchainRequest, RepositoryDescriptor,
 };
 
-pub const BUILD_PLAN_SCHEMA_VERSION: u32 = 3;
+pub const BUILD_PLAN_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CanonicalBuildPlan {
