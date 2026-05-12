@@ -1035,6 +1035,8 @@ fn maybe_synthesize_cyclonedx_aggregate_contract(
     let root_component_type = input_value(task, "cyclonedx_project_type")
         .unwrap_or_default()
         .to_lowercase();
+    let root_project_path =
+        input_value(task, "cyclonedx_identity_project_path").unwrap_or_default();
     if root_name.trim().is_empty()
         || root_version.trim().is_empty()
         || root_component_type.trim().is_empty()
@@ -1127,6 +1129,13 @@ fn maybe_synthesize_cyclonedx_aggregate_contract(
         task,
         "aggregate_root_component_type",
         &root_component_type,
+        "cyclonedx-aggregate-contracts-synthesized",
+        "scalar",
+    );
+    set_value_input(
+        task,
+        "aggregate_root_project_path",
+        &root_project_path,
         "cyclonedx-aggregate-contracts-synthesized",
         "scalar",
     );
@@ -2479,6 +2488,12 @@ fn task_options(
         insert_input_option(
             task,
             &mut options,
+            "aggregate_root_project_path",
+            "aggregate_root_project_path",
+        );
+        insert_input_option(
+            task,
+            &mut options,
             "aggregate_external_references",
             "aggregate_external_references",
         );
@@ -3268,6 +3283,7 @@ mod tests {
             value_input("aggregate_root_name", "aggregate"),
             value_input("aggregate_root_version", "1.0"),
             value_input("aggregate_root_component_type", "application"),
+            value_input("aggregate_root_project_path", ":"),
             value_input(
                 "aggregate_external_references",
                 "https://example.invalid/aggregate",
@@ -3287,6 +3303,12 @@ mod tests {
                 .get("aggregate_root_name")
                 .and_then(|value| value.as_str()),
             Some("aggregate")
+        );
+        assert_eq!(
+            options
+                .get("aggregate_root_project_path")
+                .and_then(|value| value.as_str()),
+            Some(":")
         );
         assert_eq!(
             options
