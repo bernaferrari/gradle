@@ -1437,6 +1437,7 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
     let mut parent_group = String::new();
     let mut parent_artifact = String::new();
     let mut parent_version = String::new();
+    let mut properties = BTreeMap::new();
     let mut path = Vec::<String>::new();
     let mut buf = Vec::new();
     let mut current_license_name = String::new();
@@ -1575,6 +1576,11 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
                     [project, scm, url] if project == "project" && scm == "scm" && url == "url" => {
                         push_external_reference(&mut metadata.external_references, "vcs", text);
                     }
+                    [project, properties_element, property_name]
+                        if project == "project" && properties_element == "properties" =>
+                    {
+                        properties.insert(property_name.clone(), text);
+                    }
                     [project, licenses, license, name]
                         if project == "project"
                             && licenses == "licenses"
@@ -1621,6 +1627,16 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
     if parent_relative_path.is_none() && pom.contains("<parent") {
         parent_relative_path = Some("../pom.xml".to_string());
     }
+    properties.insert("project.name".to_string(), metadata.name.clone());
+    properties.insert("pom.name".to_string(), metadata.name.clone());
+    properties.insert(
+        "project.description".to_string(),
+        metadata.description.clone(),
+    );
+    properties.insert("pom.description".to_string(), metadata.description.clone());
+    properties.insert("project.url".to_string(), metadata.url.clone());
+    properties.insert("pom.url".to_string(), metadata.url.clone());
+    interpolate_pom_component_metadata(&mut metadata, &properties);
     PomComponentMetadataDocument {
         metadata: normalize_pom_component_metadata(metadata),
         parent_relative_path,
@@ -1628,6 +1644,51 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
         parent_artifact,
         parent_version,
     }
+}
+
+fn interpolate_pom_component_metadata(
+    metadata: &mut PomComponentMetadata,
+    properties: &BTreeMap<String, String>,
+) {
+    metadata.name = interpolate_maven_properties(&metadata.name, properties);
+    metadata.description = interpolate_maven_properties(&metadata.description, properties);
+    metadata.publisher = interpolate_maven_properties(&metadata.publisher, properties);
+    metadata.url = interpolate_maven_properties(&metadata.url, properties);
+    for choice in &mut metadata.licenses {
+        if let Some(license) = &mut choice.license {
+            license.name = interpolate_maven_properties(&license.name, properties);
+            license.url = interpolate_maven_properties(&license.url, properties);
+            *license = resolve_cyclonedx_license(&license.name, &license.url);
+        }
+    }
+    for reference in &mut metadata.external_references {
+        reference.url = interpolate_maven_properties(&reference.url, properties);
+        reference.comment = interpolate_maven_properties(&reference.comment, properties);
+    }
+}
+
+fn interpolate_maven_properties(value: &str, properties: &BTreeMap<String, String>) -> String {
+    let mut output = String::with_capacity(value.len());
+    let mut remainder = value;
+    while let Some(start) = remainder.find("${") {
+        output.push_str(&remainder[..start]);
+        let after_start = &remainder[start + 2..];
+        let Some(end) = after_start.find('}') else {
+            output.push_str(&remainder[start..]);
+            return output;
+        };
+        let key = &after_start[..end];
+        if let Some(replacement) = properties.get(key) {
+            output.push_str(replacement);
+        } else {
+            output.push_str("${");
+            output.push_str(key);
+            output.push('}');
+        }
+        remainder = &after_start[end + 1..];
+    }
+    output.push_str(remainder);
+    output
 }
 
 fn normalize_pom_component_metadata(mut metadata: PomComponentMetadata) -> PomComponentMetadata {
@@ -3100,6 +3161,62 @@ mod tests {
                 text: None,
             })],
             component.licenses
+        );
+    }
+
+    #[test]
+    fn interpolates_maven_properties_in_pom_metadata() {
+        let metadata = parse_pom_component_metadata(
+            r#"
+<project>
+  <properties>
+    <display.name>Interpolated Lib</display.name>
+    <site.url>https://metadata.example.test/lib</site.url>
+    <license.name>The Apache Software License, Version 2.0</license.name>
+  </properties>
+  <name>${display.name}</name>
+  <description>${display.name} docs at ${site.url}</description>
+  <url>${site.url}</url>
+  <organization>
+    <name>${display.name} Foundation</name>
+    <url>${site.url}/org</url>
+  </organization>
+  <scm>
+    <url>${site.url}/git</url>
+  </scm>
+  <licenses>
+    <license>
+      <name>${license.name}</name>
+    </license>
+  </licenses>
+</project>
+"#,
+        )
+        .metadata;
+
+        assert_eq!("Interpolated Lib", metadata.name);
+        assert_eq!(
+            "Interpolated Lib docs at https://metadata.example.test/lib",
+            metadata.description
+        );
+        assert_eq!("https://metadata.example.test/lib", metadata.url);
+        assert_eq!("Interpolated Lib Foundation", metadata.publisher);
+        assert!(metadata.external_references.contains(&external_reference(
+            "website",
+            "https://metadata.example.test/lib/org"
+        )));
+        assert!(metadata.external_references.contains(&external_reference(
+            "vcs",
+            "https://metadata.example.test/lib/git"
+        )));
+        assert_eq!(
+            vec![CycloneDxLicenseChoice::from_license(CycloneDxLicense {
+                id: "Apache-2.0".to_string(),
+                name: String::new(),
+                url: "https://www.apache.org/licenses/LICENSE-2.0".to_string(),
+                text: None,
+            })],
+            metadata.licenses
         );
     }
 
