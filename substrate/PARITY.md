@@ -605,6 +605,9 @@ partially captured tasks look closer to native-ready than they are. Verification
 focused `ProjectModelProviderAdapterTest` CycloneDX root-option/schema tests,
 `cargo test -p gradle-substrate-daemon cyclonedx --lib`, and
 `cargo test -p gradle-substrate-daemon execution_kernel --lib`.
+Kernel admission now also rejects complete-but-unsupported captured CycloneDX
+policies, such as Gradle's current timestamp source, with the precise unsupported
+policy names before falling through to the generic missing-contract diagnostic.
 
 Audit of closed roadmap (dyy.1-dyy.20): 18/21 verified against committed code and
 corpus parity, 3/21 partially verified (dependency solver complex scenarios,

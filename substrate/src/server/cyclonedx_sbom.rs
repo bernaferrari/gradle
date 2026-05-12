@@ -509,7 +509,7 @@ pub fn draft_contract_from_captured_inputs(
     Ok(contract)
 }
 
-fn reject_unsupported_captured_options(
+pub(crate) fn reject_unsupported_captured_options(
     options: &CycloneDxCapturedTaskOptions,
 ) -> Result<(), String> {
     let mut unsupported = Vec::new();

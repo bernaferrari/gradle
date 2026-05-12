@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, HashSet};
 use base64::Engine as _;
 
 use super::cyclonedx_sbom::{
-    aggregate_contracts, validate_captured_task_options, CycloneDxAggregateOptions,
-    CycloneDxResolutionGraphEvidence, CycloneDxSbomContract,
+    aggregate_contracts, reject_unsupported_captured_options, validate_captured_task_options,
+    CycloneDxAggregateOptions, CycloneDxResolutionGraphEvidence, CycloneDxSbomContract,
 };
 use super::dependency_solver::graph_builder;
 
@@ -375,8 +375,13 @@ fn cyclonedx_contract_rejection(value: &serde_json::Value) -> Option<String> {
     }
     if cyclonedx_resolution_graph_present(properties) {
         let captured_options = cyclonedx_captured_options(properties);
-        if let Err(err) = validate_captured_task_options(&captured_options) {
-            return Some(err);
+        match validate_captured_task_options(&captured_options) {
+            Ok(options) => {
+                if let Err(err) = reject_unsupported_captured_options(&options) {
+                    return Some(err);
+                }
+            }
+            Err(err) => return Some(err),
         }
     }
     let encoded = properties
@@ -817,6 +822,64 @@ mod tests {
         assert!(message.contains("cyclonedx_include_build_environment"));
         assert!(message.contains("cyclonedx_include_metadata_resolution"));
         assert!(message.contains("cyclonedx_include_license_text"));
+    }
+
+    #[test]
+    fn rejects_partial_cyclonedx_with_unsupported_captured_policies_before_generic_contract() {
+        let graph_json = serde_json::json!({
+            "schema": "gradle-substrate.cyclonedx-resolution-graph.v1",
+            "configurations": [{
+                "name": "runtimeClasspath",
+                "components": [{
+                    "id": "org.example:app:1.0",
+                    "group": "org.example",
+                    "module": "app",
+                    "version": "1.0"
+                }],
+                "dependencies": []
+            }]
+        })
+        .to_string();
+        let encoded = base64::engine::general_purpose::STANDARD.encode(graph_json);
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![task(
+                ":cyclonedxDirectBom",
+                "org.cyclonedx.gradle.CyclonedxDirectTask",
+                Some(
+                    serde_json::json!({
+                        "input_properties": {
+                            "input_value.cyclonedx_resolution_graph_json_b64": encoded,
+                            "input_value.cyclonedx_schema_version": "VERSION_16",
+                            "input_value.cyclonedx_component_name": "app",
+                            "input_value.cyclonedx_component_version": "1.0",
+                            "input_value.cyclonedx_project_type": "APPLICATION",
+                            "input_value.cyclonedx_json_output": "/tmp/bom.json",
+                            "input_value.cyclonedx_include_bom_serial_number": "false",
+                            "input_value.cyclonedx_serial_source_policy": "omitted",
+                            "input_value.cyclonedx_timestamp_source_policy": "cyclonedx-core-metadata-constructor-now",
+                            "input_value.cyclonedx_include_build_system": "false",
+                            "input_value.cyclonedx_include_build_environment": "false",
+                            "input_value.cyclonedx_include_license_text": "false",
+                            "input_value.cyclonedx_include_metadata_resolution": "false"
+                        }
+                    })
+                    .to_string(),
+                ),
+            )],
+        };
+
+        let KernelAdmission::Rejected(rejection) = admit_build_plan(
+            &plan,
+            &native_types(&["org.cyclonedx.gradle.CyclonedxDirectTask"]),
+        ) else {
+            panic!("expected rejection");
+        };
+        let message = rejection.message();
+        assert!(message.contains("unsupported rendering options"));
+        assert!(message.contains("timestamp-source-policy"));
+        assert!(!message.contains("missing schema-backed SBOM contract"));
     }
 
     #[test]
