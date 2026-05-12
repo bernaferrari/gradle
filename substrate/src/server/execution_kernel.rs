@@ -442,8 +442,19 @@ fn cyclonedx_aggregate_options(
         root_name: string_property(properties, "aggregate_root_name"),
         root_version: string_property(properties, "aggregate_root_version"),
         root_component_type: string_property(properties, "aggregate_root_component_type"),
-        external_references: Vec::new(),
+        external_references: whitespace_values(&string_property(
+            properties,
+            "aggregate_external_references",
+        )),
     }
+}
+
+fn whitespace_values(value: &str) -> Vec<String> {
+    value
+        .split_whitespace()
+        .filter(|entry| !entry.trim().is_empty())
+        .map(|entry| entry.to_string())
+        .collect()
 }
 
 fn string_property(properties: &serde_json::Map<String, serde_json::Value>, key: &str) -> String {
