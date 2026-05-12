@@ -587,6 +587,43 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
+    public void marksCycloneDxMissingRequiredRootOptionsAsMissingContractFields() throws IOException {
+        File inputJar = temporaryFolder.newFile("runtime.jar");
+        Task cyclonedx = cyclonedxDirectTask(
+            inputJar,
+            null,
+            null,
+            Boolean.FALSE,
+            Boolean.FALSE,
+            Boolean.FALSE,
+            Boolean.FALSE,
+            Boolean.FALSE,
+            Collections.singletonList(new TestExternalReference()),
+            "",
+            "",
+            "",
+            ""
+        );
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(cyclonedx, CyclonedxDirectTask.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        String missing = inputs.get("cyclonedx_missing_contract_fields");
+        assertTrue(missing.contains("component-name"));
+        assertTrue(missing.contains("component-version"));
+        assertTrue(missing.contains("project-type"));
+        assertTrue(missing.contains("schema-version"));
+        assertTrue(missing.contains("json-or-xml-output"));
+        assertFalse(missing.contains("serial-source-policy"));
+        assertFalse(missing.contains("license-text-rendering"));
+        assertFalse(missing.contains("metadata-resolution-policy"));
+        assertEquals("true", inputs.get("requires_jvm_task_execution"));
+        assertFalse(inputs.containsKey("sbom_contract_json_b64"));
+    }
+
+    @org.junit.Test
     public void capturesCycloneDxResolutionGraphEvidenceWhenConfigurationGraphIsAvailable() throws IOException {
         File inputJar = temporaryFolder.newFile("lib-1.1.jar");
         File outputJson = temporaryFolder.newFile("bom.json");
@@ -2062,8 +2099,40 @@ public class ProjectModelProviderAdapterTest {
         Boolean includeMetadataResolution,
         Iterable<?> externalReferences
     ) {
+        return cyclonedxDirectTask(
+            runtimeJar,
+            outputJson,
+            configurations,
+            includeBomSerialNumber,
+            includeBuildSystem,
+            includeBuildEnvironment,
+            includeLicenseText,
+            includeMetadataResolution,
+            externalReferences,
+            "demo",
+            "1.0",
+            "LIBRARY",
+            "VERSION_16"
+        );
+    }
+
+    private static Task cyclonedxDirectTask(
+        File runtimeJar,
+        File outputJson,
+        ConfigurationContainer configurations,
+        Boolean includeBomSerialNumber,
+        Boolean includeBuildSystem,
+        Boolean includeBuildEnvironment,
+        Boolean includeLicenseText,
+        Boolean includeMetadataResolution,
+        Iterable<?> externalReferences,
+        String componentName,
+        String componentVersion,
+        String projectType,
+        String schemaVersion
+    ) {
         FileCollection inputs = fileCollection(runtimeJar);
-        FileCollection outputs = fileCollection(outputJson);
+        FileCollection outputs = outputJson == null ? fileCollection() : fileCollection(outputJson);
         Project project = proxy(Project.class, (proxy, method, args) -> {
             if (method.getName().equals("getPath")) {
                 return ":";
@@ -2110,13 +2179,13 @@ public class ProjectModelProviderAdapterTest {
                 case "getComponentGroup":
                     return new ObjectProvider("org.example");
                 case "getComponentName":
-                    return new ObjectProvider("demo");
+                    return new ObjectProvider(componentName);
                 case "getComponentVersion":
-                    return new ObjectProvider("1.0");
+                    return new ObjectProvider(componentVersion);
                 case "getProjectType":
-                    return new ObjectProvider("LIBRARY");
+                    return new ObjectProvider(projectType);
                 case "getSchemaVersion":
-                    return new ObjectProvider("VERSION_16");
+                    return new ObjectProvider(schemaVersion);
                 case "getIncludeBomSerialNumber":
                     return includeBomSerialNumber == null ? null : new ObjectProvider(includeBomSerialNumber);
                 case "getIncludeBuildSystem":
@@ -2140,7 +2209,7 @@ public class ProjectModelProviderAdapterTest {
                 case "getSkipConfigs":
                     return new ObjectProvider(Collections.singletonList(".*[Tt]est.*"));
                 case "getJsonOutput":
-                    return new FileProvider(outputJson);
+                    return outputJson == null ? null : new FileProvider(outputJson);
                 case "getXmlOutput":
                     return null;
                 case "getResolvedDependencies":

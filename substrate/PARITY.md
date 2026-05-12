@@ -597,7 +597,16 @@ Authoritative parity gates after fix (2026-05-03):
 | Focused JVM tests | Passed | `./gradlew :core:test --tests org.gradle.execution.RustAuthoritativeBuildExecutionActionTest :rust-bridge:test --tests org.gradle.internal.rustbridge.taskgraph.TaskGraphShadowListenerTest --no-daemon --console=plain` |
 | Integration tests | 49 passed, 2 pre-existing failures | `cargo test --test integration_test` |
 
-Audit of closed roadmap (dyy.1–dyy.20): 18/21 verified against committed code and
+CycloneDX SBOM promotion remains fail-closed until the bridge emits a complete
+schema-backed SBOM contract. The bridge now reports missing required root/output
+options as explicit contract blockers (`component-name`, `component-version`,
+`project-type`, `schema-version`, and `json-or-xml-output`) instead of letting
+partially captured tasks look closer to native-ready than they are. Verification:
+focused `ProjectModelProviderAdapterTest` CycloneDX root-option/schema tests,
+`cargo test -p gradle-substrate-daemon cyclonedx --lib`, and
+`cargo test -p gradle-substrate-daemon execution_kernel --lib`.
+
+Audit of closed roadmap (dyy.1-dyy.20): 18/21 verified against committed code and
 corpus parity, 3/21 partially verified (dependency solver complex scenarios,
 publication/signing completeness, Tooling API/IDE shim). No critical overclaims.
 Partially verified areas are documented as non-hot-path in the native-ready contract policy.

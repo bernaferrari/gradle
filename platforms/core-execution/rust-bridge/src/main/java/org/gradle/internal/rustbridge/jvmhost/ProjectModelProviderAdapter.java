@@ -1283,11 +1283,15 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "cyclonedx_identity_task_path", task.getPath());
         putIfPresent(inputs, "cyclonedx_identity_project_path", task.getProject().getPath());
         putIfPresent(inputs, "cyclonedx_identity_project_dir", task.getProject().getProjectDir().getAbsolutePath());
+        String componentName = providerValue(invokeOptional(task, taskType, "getComponentName"));
+        String componentVersion = providerValue(invokeOptional(task, taskType, "getComponentVersion"));
+        String projectType = enumName(invokeOptionalProvider(task, taskType, "getProjectType"));
+        String schemaVersion = enumName(invokeOptionalProvider(task, taskType, "getSchemaVersion"));
         putIfPresent(inputs, "cyclonedx_component_group", providerValue(invokeOptional(task, taskType, "getComponentGroup")));
-        putIfPresent(inputs, "cyclonedx_component_name", providerValue(invokeOptional(task, taskType, "getComponentName")));
-        putIfPresent(inputs, "cyclonedx_component_version", providerValue(invokeOptional(task, taskType, "getComponentVersion")));
-        putIfPresent(inputs, "cyclonedx_project_type", enumName(invokeOptionalProvider(task, taskType, "getProjectType")));
-        putIfPresent(inputs, "cyclonedx_schema_version", enumName(invokeOptionalProvider(task, taskType, "getSchemaVersion")));
+        putIfPresent(inputs, "cyclonedx_component_name", componentName);
+        putIfPresent(inputs, "cyclonedx_component_version", componentVersion);
+        putIfPresent(inputs, "cyclonedx_project_type", projectType);
+        putIfPresent(inputs, "cyclonedx_schema_version", schemaVersion);
         String includeBomSerialNumber = providerBooleanString(invokeOptional(task, taskType, "getIncludeBomSerialNumber"));
         putIfPresent(inputs, "cyclonedx_include_bom_serial_number", includeBomSerialNumber);
         putIfPresent(inputs, "cyclonedx_timestamp_source_policy", "cyclonedx-core-metadata-constructor-now");
@@ -1321,8 +1325,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "cyclonedx_external_references_json_b64", externalReferencesJsonBase64);
         putIfPresent(inputs, "cyclonedx_include_configs", providerStringList(invokeOptional(task, taskType, "getIncludeConfigs")));
         putIfPresent(inputs, "cyclonedx_skip_configs", providerStringList(invokeOptional(task, taskType, "getSkipConfigs")));
-        putIfPresent(inputs, "cyclonedx_json_output", providerFilePath(invokeOptional(task, taskType, "getJsonOutput")));
-        putIfPresent(inputs, "cyclonedx_xml_output", providerFilePath(invokeOptional(task, taskType, "getXmlOutput")));
+        String jsonOutput = providerFilePath(invokeOptional(task, taskType, "getJsonOutput"));
+        String xmlOutput = providerFilePath(invokeOptional(task, taskType, "getXmlOutput"));
+        putIfPresent(inputs, "cyclonedx_json_output", jsonOutput);
+        putIfPresent(inputs, "cyclonedx_xml_output", xmlOutput);
         putIfPresent(inputs, "cyclonedx_input_sboms", fileCollectionPathString(invokeOptional(task, taskType, "getInputSboms")));
         putIfPresent(inputs, "cyclonedx_resolved_dependencies", fileCollectionPathString(invokeOptional(task, taskType, "getResolvedDependencies")));
         String resolutionGraphJsonBase64 = cyclonedxResolutionGraphJsonBase64(task, taskType, includeBuildEnvironment);
@@ -1344,7 +1350,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         inputs.put("cyclonedx_sbom_contract_status", resolutionGraphJsonBase64.isEmpty() ? "missing" : "partial");
         inputs.put(
             "cyclonedx_missing_contract_fields",
-            cyclonedxMissingContractFields(missingBaseFields, includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, includeMetadataResolution, organizationalEntityPresent, organizationalEntityJsonBase64, licenseChoice, licenseChoiceJsonBase64, externalReferences, externalReferencesJsonBase64)
+            cyclonedxMissingContractFields(missingBaseFields, componentName, componentVersion, projectType, schemaVersion, jsonOutput, xmlOutput, includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, includeMetadataResolution, organizationalEntityPresent, organizationalEntityJsonBase64, licenseChoice, licenseChoiceJsonBase64, externalReferences, externalReferencesJsonBase64)
         );
         inputs.put("requires_jvm_task_execution", "true");
     }
@@ -1565,6 +1571,12 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
 
     private static String cyclonedxMissingContractFields(
         String baseFields,
+        String componentName,
+        String componentVersion,
+        String projectType,
+        String schemaVersion,
+        String jsonOutput,
+        String xmlOutput,
         String includeBomSerialNumber,
         String includeBuildSystem,
         String includeBuildEnvironment,
@@ -1579,6 +1591,21 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     ) {
         Set<String> fields = new LinkedHashSet<>();
         Collections.addAll(fields, baseFields.split(","));
+        if (isBlank(componentName)) {
+            fields.add("component-name");
+        }
+        if (isBlank(componentVersion)) {
+            fields.add("component-version");
+        }
+        if (isBlank(projectType)) {
+            fields.add("project-type");
+        }
+        if (isBlank(schemaVersion)) {
+            fields.add("schema-version");
+        }
+        if (isBlank(jsonOutput) && isBlank(xmlOutput)) {
+            fields.add("json-or-xml-output");
+        }
         if (!"false".equalsIgnoreCase(includeBomSerialNumber)) {
             fields.add("serial-source-policy");
         }
