@@ -31,6 +31,7 @@ pub mod configuration;
 pub mod console;
 pub mod control;
 pub mod corruption_detection;
+pub mod cyclonedx_sbom;
 pub mod dag_executor;
 pub mod dependency_resolution;
 pub mod dependency_solver;
