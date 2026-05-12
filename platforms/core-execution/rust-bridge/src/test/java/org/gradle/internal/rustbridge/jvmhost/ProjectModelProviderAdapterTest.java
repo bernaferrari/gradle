@@ -729,6 +729,55 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
+    public void capturesExactDetachedConfigurationReportAsStaticWriteFile() throws IOException {
+        File buildFile = temporaryFolder.newFile("build.gradle.kts");
+        Files.write(buildFile.toPath(), Collections.singletonList(
+            "val detachedDependency = dependencies.create(\"org.example:detached:1.0\")\n" +
+                "tasks.register(\"apiContractReport\") {\n" +
+                "  val detached = configurations.detachedConfiguration(detachedDependency)\n" +
+                "  doLast {\n" +
+                "    val files = detached.resolve().map { it.name }.sorted()\n" +
+                "    file(\"build/detached/resolved.txt\").writeText(files.joinToString(separator = \"\\n\", postfix = \"\\n\"))\n" +
+                "  }\n" +
+                "}\n"
+        ), StandardCharsets.UTF_8);
+        File outputFile = new File(temporaryFolder.getRoot(), "build/detached/resolved.txt");
+        Task report = staticWriteFileTask(buildFile, outputFile);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(report, DefaultTask.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("jvm-task", task.getActionKind());
+        assertEquals("ZGV0YWNoZWQtMS4wLmphcgo=", inputs.get("static_output_text_b64"));
+        assertFalse(inputs.containsKey("unsupported_dependency_semantics"));
+    }
+
+    @org.junit.Test
+    public void dynamicDetachedConfigurationRemainsUnsupportedDependencySemantics() throws IOException {
+        File buildFile = temporaryFolder.newFile("build.gradle.kts");
+        Files.write(buildFile.toPath(), Collections.singletonList(
+            "val detachedDependency = dependencies.create(\"org.example:detached:1.+\")\n" +
+                "tasks.register(\"apiContractReport\") {\n" +
+                "  val detached = configurations.detachedConfiguration(detachedDependency)\n" +
+                "  doLast { file(\"build/detached/resolved.txt\").writeText(detached.resolve().joinToString()) }\n" +
+                "}\n"
+        ), StandardCharsets.UTF_8);
+        File outputFile = new File(temporaryFolder.getRoot(), "build/detached/resolved.txt");
+        Task report = staticWriteFileTask(buildFile, outputFile);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(report, DefaultTask.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("true", inputs.get("unsupported_dependency_semantics"));
+        assertTrue(inputs.get("unsupported_repository_features").contains("detached-configuration:build-script"));
+        assertFalse(inputs.containsKey("static_output_text_b64"));
+    }
+
+    @org.junit.Test
     public void exactReleaseComponentMetadataStatusRuleIsNativeReady() throws IOException {
         File buildFile = temporaryFolder.newFile("build.gradle.kts");
         Files.write(buildFile.toPath(), Collections.singletonList(
