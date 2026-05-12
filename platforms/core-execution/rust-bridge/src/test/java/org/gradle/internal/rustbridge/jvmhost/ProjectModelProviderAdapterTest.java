@@ -9,9 +9,15 @@ import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.ConfigurationContainer;
+import org.gradle.api.artifacts.ResolvableDependencies;
 import org.gradle.api.artifacts.VersionConstraint;
+import org.gradle.api.artifacts.component.ComponentSelector;
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.invocation.Gradle;
+import org.gradle.api.artifacts.result.ResolutionResult;
+import org.gradle.api.artifacts.result.ResolvedComponentResult;
+import org.gradle.api.artifacts.result.ResolvedDependencyResult;
 import org.gradle.api.tasks.TaskDependency;
 import org.junit.Rule;
 import org.junit.rules.TemporaryFolder;
@@ -483,6 +489,38 @@ public class ProjectModelProviderAdapterTest {
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("component-metadata"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("aggregate-merge-policy"));
         assertEquals("true", inputs.get("requires_jvm_task_execution"));
+        assertFalse(inputs.containsKey("sbom_contract_json_b64"));
+    }
+
+    @org.junit.Test
+    public void capturesCycloneDxResolutionGraphEvidenceWhenConfigurationGraphIsAvailable() throws IOException {
+        File inputJar = temporaryFolder.newFile("runtime.jar");
+        File outputJson = temporaryFolder.newFile("bom.json");
+        Task cyclonedx = cyclonedxDirectTask(
+            inputJar,
+            outputJson,
+            cyclonedxConfigurationContainer("runtimeClasspath")
+        );
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(cyclonedx, CyclonedxDirectTask.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        String graphJson = new String(
+            Base64.getDecoder().decode(inputs.get("cyclonedx_resolution_graph_json_b64")),
+            StandardCharsets.UTF_8
+        );
+        assertTrue(graphJson.contains("\"schema\":\"gradle-substrate.cyclonedx-resolution-graph.v1\""));
+        assertTrue(graphJson.contains("\"name\":\"runtimeClasspath\""));
+        assertTrue(graphJson, graphJson.contains("\"id\":\"org.example:app:1.0\""));
+        assertTrue(graphJson, graphJson.contains("\"id\":\"org.example:lib:1.1\""));
+        assertTrue(graphJson, graphJson.contains("\"from\":\"org.example:app:1.0\""));
+        assertTrue(graphJson, graphJson.contains("\"to\":\"org.example:lib:1.1\""));
+        assertTrue(graphJson, graphJson.contains("\"requested\":\"org.example:lib:1.+\""));
+        assertEquals("partial", inputs.get("cyclonedx_sbom_contract_status"));
+        assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("resolution-result-edges"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("component-metadata"));
         assertFalse(inputs.containsKey("sbom_contract_json_b64"));
     }
 
@@ -1722,11 +1760,22 @@ public class ProjectModelProviderAdapterTest {
     }
 
     private static Task cyclonedxDirectTask(File runtimeJar, File outputJson) {
+        return cyclonedxDirectTask(runtimeJar, outputJson, null);
+    }
+
+    private static Task cyclonedxDirectTask(
+        File runtimeJar,
+        File outputJson,
+        ConfigurationContainer configurations
+    ) {
         FileCollection inputs = fileCollection(runtimeJar);
         FileCollection outputs = fileCollection(outputJson);
         Project project = proxy(Project.class, (proxy, method, args) -> {
             if (method.getName().equals("getPath")) {
                 return ":";
+            }
+            if (method.getName().equals("getConfigurations") && configurations != null) {
+                return configurations;
             }
             return defaultValue(method.getReturnType());
         });
@@ -1792,6 +1841,106 @@ public class ProjectModelProviderAdapterTest {
                 default:
                     return defaultValue(method.getReturnType());
             }
+        });
+    }
+
+    private static ConfigurationContainer cyclonedxConfigurationContainer(String name) {
+        ResolvedComponentResult child = resolvedComponent("org.example", "lib", "1.1");
+        ResolvedDependencyResult edge = proxy(ResolvedDependencyResult.class, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "getSelected":
+                    return child;
+                case "getRequested":
+                    return componentSelector("org.example:lib:1.+");
+                default:
+                    return defaultValue(method.getReturnType());
+            }
+        });
+        ResolvedComponentResult root = resolvedComponent("org.example", "app", "1.0", Collections.singleton(edge));
+        Set<ResolvedComponentResult> components = new LinkedHashSet<>(Arrays.asList(root, child));
+        ResolutionResult result = proxy(ResolutionResult.class, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "getRoot":
+                    return root;
+                case "getAllComponents":
+                    return components;
+                default:
+                    return defaultValue(method.getReturnType());
+            }
+        });
+        ResolvableDependencies incoming = proxy(ResolvableDependencies.class, (proxy, method, args) -> {
+            if (method.getName().equals("getResolutionResult")) {
+                return result;
+            }
+            return defaultValue(method.getReturnType());
+        });
+        Configuration configuration = proxy(Configuration.class, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "isCanBeResolved":
+                    return true;
+                case "getName":
+                    return name;
+                case "getIncoming":
+                    return incoming;
+                default:
+                    return defaultValue(method.getReturnType());
+            }
+        });
+        return proxy(ConfigurationContainer.class, (proxy, method, args) -> {
+            if (method.getName().equals("findByName") && args != null && args.length == 1 && name.equals(args[0])) {
+                return configuration;
+            }
+            return defaultValue(method.getReturnType());
+        });
+    }
+
+    private static ResolvedComponentResult resolvedComponent(String group, String module, String version) {
+        return resolvedComponent(group, module, version, Collections.emptySet());
+    }
+
+    private static ResolvedComponentResult resolvedComponent(
+        String group,
+        String module,
+        String version,
+        Set<ResolvedDependencyResult> dependencies
+    ) {
+        ModuleComponentIdentifier id = moduleComponentIdentifier(group, module, version);
+        return proxy(ResolvedComponentResult.class, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "getId":
+                    return id;
+                case "getDependencies":
+                    return dependencies;
+                default:
+                    return defaultValue(method.getReturnType());
+            }
+        });
+    }
+
+    private static ModuleComponentIdentifier moduleComponentIdentifier(String group, String module, String version) {
+        return proxy(ModuleComponentIdentifier.class, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "getGroup":
+                    return group;
+                case "getModule":
+                    return module;
+                case "getVersion":
+                    return version;
+                case "getDisplayName":
+                case "toString":
+                    return group + ":" + module + ":" + version;
+                default:
+                    return defaultValue(method.getReturnType());
+            }
+        });
+    }
+
+    private static ComponentSelector componentSelector(String displayName) {
+        return proxy(ComponentSelector.class, (proxy, method, args) -> {
+            if (method.getName().equals("getDisplayName") || method.getName().equals("toString")) {
+                return displayName;
+            }
+            return defaultValue(method.getReturnType());
         });
     }
 
