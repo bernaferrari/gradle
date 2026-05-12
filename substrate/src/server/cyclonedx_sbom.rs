@@ -104,6 +104,8 @@ pub struct CycloneDxResolvedComponent {
     pub artifact_extension: String,
     #[serde(default, rename = "artifactClassifier")]
     pub artifact_classifier: String,
+    #[serde(default, rename = "inScopeConfigurations")]
+    pub in_scope_configurations: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -507,6 +509,24 @@ impl CycloneDxResolutionConfiguration {
                     self.name, component.id
                 ));
             }
+            if component
+                .in_scope_configurations
+                .iter()
+                .any(|scope| scope.trim().is_empty())
+            {
+                return Err(format!(
+                    "CycloneDX resolution graph configuration '{}' has component '{}' with an empty scope",
+                    self.name, component.id
+                ));
+            }
+            if !component.in_scope_configurations.is_empty()
+                && !component.in_scope_configurations.contains(&self.name)
+            {
+                return Err(format!(
+                    "CycloneDX resolution graph configuration '{}' has component '{}' without matching scope membership",
+                    self.name, component.id
+                ));
+            }
         }
         for dependency in &self.dependencies {
             if dependency.from.trim().is_empty() || dependency.to.trim().is_empty() {
@@ -665,6 +685,12 @@ pub fn draft_contract_from_resolution_graph(
                     "gradle:artifactClassifier".to_string(),
                     component.artifact_classifier.clone(),
                 );
+            }
+            if !component.in_scope_configurations.is_empty() {
+                let mut scopes = component.in_scope_configurations.clone();
+                scopes.sort();
+                scopes.dedup();
+                properties.insert("gradle:inScopeConfigurations".to_string(), scopes.join(","));
             }
             let metadata = if component.artifact_path.is_empty()
                 || !options.include_metadata_resolution
@@ -1218,6 +1244,7 @@ mod tests {
                         artifact_type: String::new(),
                         artifact_extension: String::new(),
                         artifact_classifier: String::new(),
+                        in_scope_configurations: vec!["runtimeClasspath".to_string()],
                     },
                     CycloneDxResolvedComponent {
                         id: "org.example:lib:1.1".to_string(),
@@ -1229,6 +1256,7 @@ mod tests {
                         artifact_type: "jar".to_string(),
                         artifact_extension: "jar".to_string(),
                         artifact_classifier: String::new(),
+                        in_scope_configurations: vec!["runtimeClasspath".to_string()],
                     },
                 ],
                 dependencies: vec![CycloneDxResolvedDependency {
@@ -1638,6 +1666,11 @@ mod tests {
                     .properties
                     .get("gradle:artifactPath")
                     .map(|path| path == "/repo/lib-1.1.jar")
+                    .unwrap_or(false)
+                && component
+                    .properties
+                    .get("gradle:inScopeConfigurations")
+                    .map(|scope| scope == "runtimeClasspath")
                     .unwrap_or(false)
         }));
         assert!(contract.dependencies.iter().any(|dependency| {

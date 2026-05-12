@@ -541,6 +541,7 @@ public class ProjectModelProviderAdapterTest {
         assertTrue(graphJson, graphJson.contains("\"artifactType\":\"jar\""));
         assertTrue(graphJson, graphJson.contains("\"artifactExtension\":\"jar\""));
         assertTrue(graphJson, graphJson.contains("\"artifactClassifier\":\"\""));
+        assertTrue(graphJson, graphJson.contains("\"inScopeConfigurations\":[\"runtimeClasspath\"]"));
         assertTrue(graphJson, graphJson.contains("\"from\":\"org.example:app:1.0\""));
         assertTrue(graphJson, graphJson.contains("\"to\":\"org.example:lib:1.1\""));
         assertTrue(graphJson, graphJson.contains("\"requested\":\"org.example:lib:1.+\""));

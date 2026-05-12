@@ -1422,7 +1422,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         List<File> artifactFiles = cyclonedxConfigurationFiles(configuration);
         List<String> components = new ArrayList<>();
         for (Object component : asCollection(invokeOptional(result, "getAllComponents"))) {
-            String componentJson = cyclonedxResolvedComponentJson(component, artifactMetadata, artifactFiles);
+            String componentJson = cyclonedxResolvedComponentJson(configurationName, component, artifactMetadata, artifactFiles);
             if (!componentJson.isEmpty()) {
                 components.add(componentJson);
             }
@@ -1480,6 +1480,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     }
 
     private static String cyclonedxResolvedComponentJson(
+        String configurationName,
         @Nullable Object component,
         Map<String, CycloneDxArtifactMetadata> artifactMetadata,
         List<File> artifactFiles
@@ -1507,7 +1508,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             + "\",\"artifactType\":\"" + escapeJson(artifact.type)
             + "\",\"artifactExtension\":\"" + escapeJson(artifact.extension)
             + "\",\"artifactClassifier\":\"" + escapeJson(artifact.classifier)
-            + "\"}";
+            + "\",\"inScopeConfigurations\":[\"" + escapeJson(configurationName) + "\"]"
+            + "}";
     }
 
     private static final class CycloneDxArtifactMetadata {
