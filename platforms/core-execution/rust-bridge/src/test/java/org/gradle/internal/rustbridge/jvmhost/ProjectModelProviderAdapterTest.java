@@ -478,6 +478,9 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("sbom", task.getActionKind());
         assertEquals("process", task.getWorkerIsolation());
         assertEquals("CyclonedxDirectTask", inputs.get("taskType"));
+        assertEquals(":cyclonedxDirectBom", inputs.get("cyclonedx_identity_task_path"));
+        assertEquals(":", inputs.get("cyclonedx_identity_project_path"));
+        assertEquals(temporaryFolder.getRoot().getAbsolutePath(), inputs.get("cyclonedx_identity_project_dir"));
         assertEquals("org.example", inputs.get("cyclonedx_component_group"));
         assertEquals("demo", inputs.get("cyclonedx_component_name"));
         assertEquals("1.0", inputs.get("cyclonedx_component_version"));
@@ -1783,6 +1786,9 @@ public class ProjectModelProviderAdapterTest {
         Project project = proxy(Project.class, (proxy, method, args) -> {
             if (method.getName().equals("getPath")) {
                 return ":";
+            }
+            if (method.getName().equals("getProjectDir")) {
+                return runtimeJar.getParentFile();
             }
             if (method.getName().equals("getConfigurations") && configurations != null) {
                 return configurations;

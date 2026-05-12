@@ -1279,6 +1279,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     }
 
     private static void captureCycloneDxInputs(Task task, Class<?> taskType, Map<String, String> inputs) {
+        putIfPresent(inputs, "cyclonedx_identity_task_path", task.getPath());
+        putIfPresent(inputs, "cyclonedx_identity_project_path", task.getProject().getPath());
+        putIfPresent(inputs, "cyclonedx_identity_project_dir", task.getProject().getProjectDir().getAbsolutePath());
         putIfPresent(inputs, "cyclonedx_component_group", providerValue(invokeOptional(task, taskType, "getComponentGroup")));
         putIfPresent(inputs, "cyclonedx_component_name", providerValue(invokeOptional(task, taskType, "getComponentName")));
         putIfPresent(inputs, "cyclonedx_component_version", providerValue(invokeOptional(task, taskType, "getComponentVersion")));
