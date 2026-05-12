@@ -1253,6 +1253,7 @@ struct PomComponentMetadata {
     description: String,
     publisher: String,
     url: String,
+    inception_year: String,
     licenses: Vec<CycloneDxLicenseChoice>,
     external_references: Vec<CycloneDxExternalReference>,
 }
@@ -1268,6 +1269,12 @@ impl PomComponentMetadata {
         }
         if !self.url.is_empty() {
             properties.push(("maven:pomUrl".to_string(), self.url.clone()));
+        }
+        if !self.inception_year.is_empty() {
+            properties.push((
+                "maven:pomInceptionYear".to_string(),
+                self.inception_year.clone(),
+            ));
         }
         properties
     }
@@ -1591,6 +1598,9 @@ fn apply_pom_metadata_text(
         [project, url] if project == "project" && url == "url" => {
             metadata.url = text;
         }
+        [project, inception_year] if project == "project" && inception_year == "inceptionYear" => {
+            metadata.inception_year = text;
+        }
         [project, group_id] if project == "project" && group_id == "groupId" => {
             *project_group = text;
         }
@@ -1751,6 +1761,7 @@ fn interpolate_pom_component_metadata(
     metadata.description = interpolate_maven_properties(&metadata.description, properties);
     metadata.publisher = interpolate_maven_properties(&metadata.publisher, properties);
     metadata.url = interpolate_maven_properties(&metadata.url, properties);
+    metadata.inception_year = interpolate_maven_properties(&metadata.inception_year, properties);
     for choice in &mut metadata.licenses {
         if let Some(license) = &mut choice.license {
             license.name = interpolate_maven_properties(&license.name, properties);
@@ -3180,8 +3191,12 @@ mod tests {
             &pom_path,
             r#"
 <project>
+  <properties>
+    <project.start>2024</project.start>
+  </properties>
   <name>Example Lib</name>
   <description>Useful &amp; small</description>
+  <inceptionYear>${project.start}</inceptionYear>
   <url>https://example.test/lib</url>
   <organization>
     <name>Example Foundation</name>
@@ -3263,6 +3278,10 @@ mod tests {
         assert_eq!(
             Some(&"https://example.test/lib".to_string()),
             component.properties.get("maven:pomUrl")
+        );
+        assert_eq!(
+            Some(&"2024".to_string()),
+            component.properties.get("maven:pomInceptionYear")
         );
         assert_eq!("Useful & small", component.description);
         assert_eq!("Example Foundation", component.publisher);
