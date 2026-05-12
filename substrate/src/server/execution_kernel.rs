@@ -3,7 +3,8 @@ use std::collections::{BTreeMap, HashSet};
 use base64::Engine as _;
 
 use super::cyclonedx_sbom::{
-    validate_captured_task_options, CycloneDxResolutionGraphEvidence, CycloneDxSbomContract,
+    aggregate_contracts, validate_captured_task_options, CycloneDxAggregateOptions,
+    CycloneDxResolutionGraphEvidence, CycloneDxSbomContract,
 };
 use super::dependency_solver::graph_builder;
 
@@ -384,24 +385,74 @@ fn cyclonedx_contract_rejection(value: &serde_json::Value) -> Option<String> {
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|v| !v.is_empty());
-    let Some(encoded) = encoded else {
+    if let Some(encoded) = encoded {
+        let decoded = match base64::engine::general_purpose::STANDARD.decode(encoded) {
+            Ok(decoded) => decoded,
+            Err(err) => {
+                return Some(format!(
+                    "CycloneDX SBOM contract is not valid base64: {err}"
+                ));
+            }
+        };
+        let contract = match serde_json::from_slice::<CycloneDxSbomContract>(&decoded) {
+            Ok(contract) => contract,
+            Err(err) => {
+                return Some(format!("CycloneDX SBOM contract is not valid JSON: {err}"));
+            }
+        };
+        return contract.validate().err();
+    }
+
+    let aggregate_encoded = properties
+        .get("input_value.aggregate_input_contracts_json_b64")
+        .or_else(|| properties.get("input.aggregate_input_contracts_json_b64"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let Some(aggregate_encoded) = aggregate_encoded else {
         return Some("CycloneDX task is missing schema-backed SBOM contract".to_string());
     };
-    let decoded = match base64::engine::general_purpose::STANDARD.decode(encoded) {
+    let decoded = match base64::engine::general_purpose::STANDARD.decode(aggregate_encoded) {
         Ok(decoded) => decoded,
         Err(err) => {
             return Some(format!(
-                "CycloneDX SBOM contract is not valid base64: {err}"
+                "CycloneDX aggregate input contracts are not valid base64: {err}"
             ));
         }
     };
-    let contract = match serde_json::from_slice::<CycloneDxSbomContract>(&decoded) {
-        Ok(contract) => contract,
+    let contracts = match serde_json::from_slice::<Vec<CycloneDxSbomContract>>(&decoded) {
+        Ok(contracts) => contracts,
         Err(err) => {
-            return Some(format!("CycloneDX SBOM contract is not valid JSON: {err}"));
+            return Some(format!(
+                "CycloneDX aggregate input contracts are not valid JSON: {err}"
+            ));
         }
     };
-    contract.validate().err()
+    aggregate_contracts(&contracts, cyclonedx_aggregate_options(properties)).err()
+}
+
+fn cyclonedx_aggregate_options(
+    properties: &serde_json::Map<String, serde_json::Value>,
+) -> CycloneDxAggregateOptions {
+    CycloneDxAggregateOptions {
+        spec_version: string_property(properties, "aggregate_spec_version"),
+        serial_number: string_property(properties, "aggregate_serial_number"),
+        timestamp: string_property(properties, "aggregate_timestamp"),
+        root_group: string_property(properties, "aggregate_root_group"),
+        root_name: string_property(properties, "aggregate_root_name"),
+        root_version: string_property(properties, "aggregate_root_version"),
+        root_component_type: string_property(properties, "aggregate_root_component_type"),
+    }
+}
+
+fn string_property(properties: &serde_json::Map<String, serde_json::Value>, key: &str) -> String {
+    properties
+        .get(&format!("input_value.{key}"))
+        .or_else(|| properties.get(&format!("input.{key}")))
+        .or_else(|| properties.get(key))
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string()
 }
 
 fn cyclonedx_resolution_graph_present(
@@ -795,6 +846,107 @@ mod tests {
             ),
             KernelAdmission::Accepted { task_count: 1 }
         );
+    }
+
+    #[test]
+    fn admits_native_cyclonedx_aggregate_when_schema_backed_contracts_are_present() {
+        let input_contract = serde_json::json!({
+            "schema": "gradle-substrate.cyclonedx-sbom.v1",
+            "spec_version": "1.6",
+            "serial_number": "urn:uuid:00000000-0000-0000-0000-000000000001",
+            "timestamp": "2026-05-12T10:00:00Z",
+            "root_component": {
+                "type": "library",
+                "bom-ref": "pkg:maven/org.example/lib@1.0",
+                "group": "org.example",
+                "name": "lib",
+                "version": "1.0",
+                "purl": "pkg:maven/org.example/lib@1.0"
+            },
+            "components": [],
+            "dependencies": []
+        });
+        let encoded = base64::engine::general_purpose::STANDARD
+            .encode(serde_json::to_string(&vec![input_contract]).unwrap());
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![task(
+                ":cyclonedxBom",
+                "org.cyclonedx.gradle.CyclonedxAggregateTask",
+                Some(
+                    serde_json::json!({
+                        "input_properties": {
+                            "input_value.aggregate_input_contracts_json_b64": encoded,
+                            "input_value.aggregate_spec_version": "1.6",
+                            "input_value.aggregate_serial_number": "urn:uuid:00000000-0000-0000-0000-000000000002",
+                            "input_value.aggregate_timestamp": "2026-05-12T15:00:00Z",
+                            "input_value.aggregate_root_group": "org.example",
+                            "input_value.aggregate_root_name": "aggregate",
+                            "input_value.aggregate_root_version": "1.0",
+                            "input_value.aggregate_root_component_type": "application"
+                        }
+                    })
+                    .to_string(),
+                ),
+            )],
+        };
+
+        assert_eq!(
+            admit_build_plan(
+                &plan,
+                &native_types(&["org.cyclonedx.gradle.CyclonedxAggregateTask"])
+            ),
+            KernelAdmission::Accepted { task_count: 1 }
+        );
+    }
+
+    #[test]
+    fn rejects_native_cyclonedx_aggregate_with_missing_options() {
+        let input_contract = serde_json::json!({
+            "schema": "gradle-substrate.cyclonedx-sbom.v1",
+            "spec_version": "1.6",
+            "serial_number": "urn:uuid:00000000-0000-0000-0000-000000000001",
+            "timestamp": "2026-05-12T10:00:00Z",
+            "root_component": {
+                "type": "library",
+                "bom-ref": "pkg:maven/org.example/lib@1.0",
+                "group": "org.example",
+                "name": "lib",
+                "version": "1.0",
+                "purl": "pkg:maven/org.example/lib@1.0"
+            },
+            "components": [],
+            "dependencies": []
+        });
+        let encoded = base64::engine::general_purpose::STANDARD
+            .encode(serde_json::to_string(&vec![input_contract]).unwrap());
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![task(
+                ":cyclonedxBom",
+                "org.cyclonedx.gradle.CyclonedxAggregateTask",
+                Some(
+                    serde_json::json!({
+                        "input_properties": {
+                            "input_value.aggregate_input_contracts_json_b64": encoded
+                        }
+                    })
+                    .to_string(),
+                ),
+            )],
+        };
+
+        let KernelAdmission::Rejected(rejection) = admit_build_plan(
+            &plan,
+            &native_types(&["org.cyclonedx.gradle.CyclonedxAggregateTask"]),
+        ) else {
+            panic!("expected rejection");
+        };
+        assert!(rejection
+            .message()
+            .contains("CycloneDX aggregate options are missing"));
     }
 
     #[test]
