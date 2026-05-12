@@ -710,10 +710,12 @@ fn unsupported_plan_dependency_reason(
             if !feature.is_empty() {
                 let configuration =
                     format!("{}:{}", dependency.project_path, dependency.configuration);
-                return Some(format!(
-                    "dependency configuration '{}' uses unsupported feature '{}'",
-                    configuration, feature
-                ));
+                return Some(
+                    crate::server::execution_kernel::unsupported_dependency_feature_reason(
+                        &configuration,
+                        feature,
+                    ),
+                );
             }
         }
     }

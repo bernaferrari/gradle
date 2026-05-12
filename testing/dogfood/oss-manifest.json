@@ -22,7 +22,7 @@
       "timeout_seconds": 300,
       "reason": "Recognizable Java/Spring Gradle build with a normal settings file; useful as an external OSS smoke.",
       "checks": {
-        "fail_closed_diagnostic": "composite-substitution:settings",
+        "fail_closed_diagnostic": "settings/includeBuild/buildSrc composite setup",
         "no_task_by_task_fallback": true
       }
     },
@@ -42,7 +42,7 @@
       "timeout_seconds": 300,
       "reason": "Recognizable Gradle-heavy OSS build for admission diagnostics and plugin-boundary honesty.",
       "checks": {
-        "fail_closed_diagnostic": "composite-substitution:settings",
+        "fail_closed_diagnostic": "settings/includeBuild/buildSrc composite setup",
         "no_task_by_task_fallback": true
       }
     },
@@ -62,7 +62,7 @@
       "timeout_seconds": 300,
       "reason": "Recognizable Gradle build with Kotlin/native/plugin semantics that should not be approximated by Rust.",
       "checks": {
-        "fail_closed_diagnostic": "composite-substitution:settings",
+        "fail_closed_diagnostic": "settings/includeBuild/buildSrc composite setup",
         "no_task_by_task_fallback": true
       }
     }
