@@ -205,6 +205,11 @@ content changes even when mtimes are restored. Captured producer outputs, local
 state, and destroyables are excluded so normal producer-consumer paths under
 `build/` do not invalidate an otherwise unchanged plan. Artifacts with path
 inputs but no `input_fingerprints` are rejected as unsafe for direct RunBuild.
+When `--task` is supplied, the prototype accepts only fully-qualified task paths
+that exist in the cached graph, expands them to their captured dependency
+closure, and rejects incomplete graphs before contacting the daemon. Artifact
+lookup also remains fail-closed: zero matches and multiple matches both reject
+unless the caller supplies `--build-id` or an explicit `--artifact`.
 Use `--skip-invalidation` only for debugging stale artifacts.
 
 ## Ship Gates

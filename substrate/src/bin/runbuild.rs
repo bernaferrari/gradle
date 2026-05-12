@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -75,6 +75,10 @@ struct ShadowProject {
 #[derive(Debug, Deserialize)]
 struct ShadowTask {
     #[serde(default)]
+    path: String,
+    #[serde(default)]
+    depends_on: Vec<String>,
+    #[serde(default)]
     input_specs: Vec<ShadowInputSpec>,
     #[serde(default)]
     outputs: Vec<String>,
@@ -143,6 +147,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         validate_task_input_mtimes(&artifact, Path::new(&project_dir), artifact.stored_at_ms)?;
         validate_input_fingerprints(&artifact, Path::new(&project_dir))?;
     }
+    validate_plan_dependencies(&artifact)?;
+    let task_filter = resolve_task_filter(&artifact, &args.tasks)?;
 
     let channel = connect_tcp(&args.endpoint).await?;
     let mut bootstrap = BootstrapServiceClient::new(channel.clone());
@@ -166,7 +172,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .run_build(RunBuildRequest {
             build_id: build_id.clone(),
             max_parallelism: args.max_parallelism,
-            task_filter: args.tasks,
+            task_filter,
             task_contexts: HashMap::new(),
             allow_jvm_forwarding: false,
         })
@@ -426,6 +432,93 @@ fn validate_input_fingerprints(
     Ok(())
 }
 
+fn validate_plan_dependencies(artifact: &ShadowArtifact) -> Result<(), Box<dyn std::error::Error>> {
+    let task_paths = task_path_set(artifact);
+    for task in &artifact.plan.tasks {
+        if task.path.trim().is_empty() {
+            return Err("cached build-plan artifact contains a task without a path".into());
+        }
+        for dependency in &task.depends_on {
+            if !task_paths.contains(dependency) {
+                return Err(format!(
+                    "cached build-plan artifact is incomplete: task '{}' depends on missing task '{}'",
+                    task.path, dependency
+                )
+                .into());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn resolve_task_filter(
+    artifact: &ShadowArtifact,
+    requested_tasks: &[String],
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    if requested_tasks.is_empty() {
+        return Ok(Vec::new());
+    }
+    let task_paths = task_path_set(artifact);
+    let mut selected = HashSet::new();
+    for task in requested_tasks {
+        if !task.starts_with(':') {
+            return Err(format!(
+                "direct RunBuild only supports fully-qualified task paths, got '{}'",
+                task
+            )
+            .into());
+        }
+        if !task_paths.contains(task) {
+            return Err(format!(
+                "cached build-plan artifact does not contain requested task '{}'",
+                task
+            )
+            .into());
+        }
+        include_task_and_dependencies(artifact, task, &task_paths, &mut selected)?;
+    }
+    let mut result = selected.into_iter().collect::<Vec<_>>();
+    result.sort();
+    Ok(result)
+}
+
+fn include_task_and_dependencies(
+    artifact: &ShadowArtifact,
+    task_path: &str,
+    task_paths: &HashSet<String>,
+    selected: &mut HashSet<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if !selected.insert(task_path.to_string()) {
+        return Ok(());
+    }
+    let task = artifact
+        .plan
+        .tasks
+        .iter()
+        .find(|candidate| candidate.path == task_path)
+        .ok_or_else(|| format!("cached build-plan artifact does not contain task '{task_path}'"))?;
+    for dependency in &task.depends_on {
+        if !task_paths.contains(dependency) {
+            return Err(format!(
+                "cached build-plan artifact is incomplete: task '{}' depends on missing task '{}'",
+                task.path, dependency
+            )
+            .into());
+        }
+        include_task_and_dependencies(artifact, dependency, task_paths, selected)?;
+    }
+    Ok(())
+}
+
+fn task_path_set(artifact: &ShadowArtifact) -> HashSet<String> {
+    artifact
+        .plan
+        .tasks
+        .iter()
+        .map(|task| task.path.clone())
+        .collect()
+}
+
 fn has_project_path_inputs(artifact: &ShadowArtifact, project_dir: &Path) -> bool {
     let produced_paths = captured_produced_paths(artifact);
     artifact.plan.tasks.iter().any(|task| {
@@ -620,6 +713,8 @@ mod tests {
                 build_id: "build:test".to_string(),
                 projects: Vec::new(),
                 tasks: vec![ShadowTask {
+                    path: ":compileJava".to_string(),
+                    depends_on: Vec::new(),
                     input_specs: vec![ShadowInputSpec {
                         kind: "path".to_string(),
                         value: path.to_string_lossy().into_owned(),
@@ -696,5 +791,98 @@ mod tests {
         let error = validate_input_fingerprints(&artifact, temp.path()).unwrap_err();
 
         assert!(error.to_string().contains("missing input_fingerprints"));
+    }
+
+    #[test]
+    fn expands_requested_task_filter_to_dependency_closure() {
+        let artifact = ShadowArtifact {
+            plan: ShadowPlan {
+                build_id: "build:test".to_string(),
+                projects: Vec::new(),
+                tasks: vec![
+                    ShadowTask {
+                        path: ":compileJava".to_string(),
+                        depends_on: Vec::new(),
+                        input_specs: Vec::new(),
+                        outputs: Vec::new(),
+                        local_state: Vec::new(),
+                        destroyables: Vec::new(),
+                    },
+                    ShadowTask {
+                        path: ":classes".to_string(),
+                        depends_on: vec![":compileJava".to_string()],
+                        input_specs: Vec::new(),
+                        outputs: Vec::new(),
+                        local_state: Vec::new(),
+                        destroyables: Vec::new(),
+                    },
+                    ShadowTask {
+                        path: ":build".to_string(),
+                        depends_on: vec![":classes".to_string()],
+                        input_specs: Vec::new(),
+                        outputs: Vec::new(),
+                        local_state: Vec::new(),
+                        destroyables: Vec::new(),
+                    },
+                ],
+            },
+            stored_at_ms: 0,
+            input_fingerprints: Vec::new(),
+        };
+
+        let selected = resolve_task_filter(&artifact, &[":build".to_string()]).unwrap();
+
+        assert_eq!(selected, vec![":build", ":classes", ":compileJava"]);
+    }
+
+    #[test]
+    fn rejects_unqualified_or_unknown_requested_tasks() {
+        let artifact = ShadowArtifact {
+            plan: ShadowPlan {
+                build_id: "build:test".to_string(),
+                projects: Vec::new(),
+                tasks: vec![ShadowTask {
+                    path: ":build".to_string(),
+                    depends_on: Vec::new(),
+                    input_specs: Vec::new(),
+                    outputs: Vec::new(),
+                    local_state: Vec::new(),
+                    destroyables: Vec::new(),
+                }],
+            },
+            stored_at_ms: 0,
+            input_fingerprints: Vec::new(),
+        };
+
+        let unqualified = resolve_task_filter(&artifact, &["build".to_string()]).unwrap_err();
+        assert!(unqualified.to_string().contains("fully-qualified"));
+        let unknown = resolve_task_filter(&artifact, &[":test".to_string()]).unwrap_err();
+        assert!(unknown
+            .to_string()
+            .contains("does not contain requested task"));
+    }
+
+    #[test]
+    fn rejects_incomplete_dependency_graphs() {
+        let artifact = ShadowArtifact {
+            plan: ShadowPlan {
+                build_id: "build:test".to_string(),
+                projects: Vec::new(),
+                tasks: vec![ShadowTask {
+                    path: ":build".to_string(),
+                    depends_on: vec![":classes".to_string()],
+                    input_specs: Vec::new(),
+                    outputs: Vec::new(),
+                    local_state: Vec::new(),
+                    destroyables: Vec::new(),
+                }],
+            },
+            stored_at_ms: 0,
+            input_fingerprints: Vec::new(),
+        };
+
+        let error = validate_plan_dependencies(&artifact).unwrap_err();
+
+        assert!(error.to_string().contains("depends on missing task"));
     }
 }
