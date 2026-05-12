@@ -1,8 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
 pub const CONTRACT_SCHEMA: &str = "gradle-substrate.cyclonedx-sbom.v1";
+pub const RESOLUTION_GRAPH_SCHEMA: &str = "gradle-substrate.cyclonedx-resolution-graph.v1";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CycloneDxSbomContract {
@@ -38,6 +39,43 @@ pub struct CycloneDxDependency {
     pub reference: String,
     #[serde(default, rename = "dependsOn")]
     pub depends_on: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CycloneDxResolutionGraphEvidence {
+    pub schema: String,
+    #[serde(default)]
+    pub configurations: Vec<CycloneDxResolutionConfiguration>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CycloneDxResolutionConfiguration {
+    pub name: String,
+    #[serde(default)]
+    pub components: Vec<CycloneDxResolvedComponent>,
+    #[serde(default)]
+    pub dependencies: Vec<CycloneDxResolvedDependency>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CycloneDxResolvedComponent {
+    pub id: String,
+    #[serde(default)]
+    pub group: String,
+    #[serde(default)]
+    pub module: String,
+    #[serde(default)]
+    pub version: String,
+    #[serde(default, rename = "projectPath")]
+    pub project_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CycloneDxResolvedDependency {
+    pub from: String,
+    #[serde(default)]
+    pub requested: String,
+    pub to: String,
 }
 
 impl CycloneDxSbomContract {
@@ -80,6 +118,68 @@ impl CycloneDxComponent {
             return Err(format!(
                 "CycloneDX {label} is missing type, bom-ref, name, or version"
             ));
+        }
+        Ok(())
+    }
+}
+
+impl CycloneDxResolutionGraphEvidence {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema != RESOLUTION_GRAPH_SCHEMA {
+            return Err(format!(
+                "unsupported CycloneDX resolution graph schema '{}' (expected '{}')",
+                self.schema, RESOLUTION_GRAPH_SCHEMA
+            ));
+        }
+        if self.configurations.is_empty() {
+            return Err("CycloneDX resolution graph has no configurations".to_string());
+        }
+        for configuration in &self.configurations {
+            configuration.validate()?;
+        }
+        Ok(())
+    }
+}
+
+impl CycloneDxResolutionConfiguration {
+    fn validate(&self) -> Result<(), String> {
+        if self.name.trim().is_empty() {
+            return Err("CycloneDX resolution graph configuration is missing name".to_string());
+        }
+        if self.components.is_empty() {
+            return Err(format!(
+                "CycloneDX resolution graph configuration '{}' has no components",
+                self.name
+            ));
+        }
+        let mut component_ids = BTreeSet::new();
+        for component in &self.components {
+            if component.id.trim().is_empty() {
+                return Err(format!(
+                    "CycloneDX resolution graph configuration '{}' has a component without id",
+                    self.name
+                ));
+            }
+            if !component_ids.insert(component.id.clone()) {
+                return Err(format!(
+                    "CycloneDX resolution graph configuration '{}' has duplicate component '{}'",
+                    self.name, component.id
+                ));
+            }
+        }
+        for dependency in &self.dependencies {
+            if dependency.from.trim().is_empty() || dependency.to.trim().is_empty() {
+                return Err(format!(
+                    "CycloneDX resolution graph configuration '{}' has a dependency without from/to",
+                    self.name
+                ));
+            }
+            if !component_ids.contains(&dependency.from) || !component_ids.contains(&dependency.to) {
+                return Err(format!(
+                    "CycloneDX resolution graph configuration '{}' has dependency edge '{} -> {}' outside component set",
+                    self.name, dependency.from, dependency.to
+                ));
+            }
         }
         Ok(())
     }
@@ -276,6 +376,36 @@ mod tests {
         }
     }
 
+    fn sample_resolution_graph() -> CycloneDxResolutionGraphEvidence {
+        CycloneDxResolutionGraphEvidence {
+            schema: RESOLUTION_GRAPH_SCHEMA.to_string(),
+            configurations: vec![CycloneDxResolutionConfiguration {
+                name: "runtimeClasspath".to_string(),
+                components: vec![
+                    CycloneDxResolvedComponent {
+                        id: "org.example:app:1.0".to_string(),
+                        group: "org.example".to_string(),
+                        module: "app".to_string(),
+                        version: "1.0".to_string(),
+                        project_path: String::new(),
+                    },
+                    CycloneDxResolvedComponent {
+                        id: "org.example:lib:1.1".to_string(),
+                        group: "org.example".to_string(),
+                        module: "lib".to_string(),
+                        version: "1.1".to_string(),
+                        project_path: String::new(),
+                    },
+                ],
+                dependencies: vec![CycloneDxResolvedDependency {
+                    from: "org.example:app:1.0".to_string(),
+                    requested: "org.example:lib:1.+".to_string(),
+                    to: "org.example:lib:1.1".to_string(),
+                }],
+            }],
+        }
+    }
+
     #[test]
     fn renders_deterministic_json_from_explicit_contract() {
         let json = render_json(&sample_contract()).unwrap();
@@ -300,5 +430,29 @@ mod tests {
         contract.root_component.bom_ref.clear();
         let err = render_json(&contract).unwrap_err();
         assert!(err.contains("root component"));
+    }
+
+    #[test]
+    fn accepts_valid_resolution_graph_evidence() {
+        sample_resolution_graph().validate().unwrap();
+    }
+
+    #[test]
+    fn rejects_resolution_graph_edges_outside_component_set() {
+        let mut graph = sample_resolution_graph();
+        graph.configurations[0].dependencies[0].to = "org.example:missing:1.0".to_string();
+        let err = graph.validate().unwrap_err();
+        assert!(err.contains("outside component set"));
+    }
+
+    #[test]
+    fn rejects_duplicate_resolution_graph_components() {
+        let mut graph = sample_resolution_graph();
+        let duplicate = graph.configurations[0].components[0].clone();
+        graph.configurations[0]
+            .components
+            .push(duplicate);
+        let err = graph.validate().unwrap_err();
+        assert!(err.contains("duplicate component"));
     }
 }
