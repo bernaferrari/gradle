@@ -113,6 +113,64 @@ pub struct CycloneDxDraftOptions {
     pub root_component_type: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CycloneDxCapturedTaskOptions {
+    pub spec_version: String,
+    pub root_group: String,
+    pub root_name: String,
+    pub root_version: String,
+    pub root_component_type: String,
+    pub include_bom_serial_number: bool,
+    pub json_output: String,
+    pub xml_output: String,
+}
+
+pub fn validate_captured_task_options(
+    inputs: &BTreeMap<String, String>,
+) -> Result<CycloneDxCapturedTaskOptions, String> {
+    let spec_version = normalize_schema_version(value(inputs, "cyclonedx_schema_version"));
+    let root_name = value(inputs, "cyclonedx_component_name").to_string();
+    let root_version = value(inputs, "cyclonedx_component_version").to_string();
+    let root_component_type = value(inputs, "cyclonedx_project_type").to_lowercase();
+    let json_output = value(inputs, "cyclonedx_json_output").to_string();
+    let xml_output = value(inputs, "cyclonedx_xml_output").to_string();
+
+    let mut missing = Vec::new();
+    if spec_version.is_empty() {
+        missing.push("schema-version");
+    }
+    if root_name.trim().is_empty() {
+        missing.push("component-name");
+    }
+    if root_version.trim().is_empty() {
+        missing.push("component-version");
+    }
+    if root_component_type.trim().is_empty() {
+        missing.push("project-type");
+    }
+    if json_output.trim().is_empty() && xml_output.trim().is_empty() {
+        missing.push("json-or-xml-output");
+    }
+    if !missing.is_empty() {
+        return Err(format!(
+            "CycloneDX captured task options are missing {}",
+            missing.join(",")
+        ));
+    }
+
+    Ok(CycloneDxCapturedTaskOptions {
+        spec_version,
+        root_group: value(inputs, "cyclonedx_component_group").to_string(),
+        root_name,
+        root_version,
+        root_component_type,
+        include_bom_serial_number: value(inputs, "cyclonedx_include_bom_serial_number")
+            .eq_ignore_ascii_case("true"),
+        json_output,
+        xml_output,
+    })
+}
+
 impl CycloneDxSbomContract {
     pub fn validate(&self) -> Result<(), String> {
         if self.schema != CONTRACT_SCHEMA {
@@ -223,6 +281,26 @@ impl CycloneDxResolutionConfiguration {
             }
         }
         Ok(())
+    }
+}
+
+fn value<'a>(inputs: &'a BTreeMap<String, String>, key: &str) -> &'a str {
+    inputs.get(key).map(String::as_str).unwrap_or_default()
+}
+
+fn normalize_schema_version(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let version = trimmed.strip_prefix("VERSION_").unwrap_or(trimmed);
+    let digits = version.replace('_', ".");
+    if digits.contains('.') {
+        digits
+    } else if digits.len() == 2 {
+        format!("{}.{}", &digits[0..1], &digits[1..])
+    } else {
+        digits
     }
 }
 
@@ -862,6 +940,53 @@ mod tests {
         graph.configurations[0].components.push(duplicate);
         let err = graph.validate().unwrap_err();
         assert!(err.contains("duplicate component"));
+    }
+
+    #[test]
+    fn validates_captured_cyclonedx_task_options() {
+        let inputs = BTreeMap::from([
+            (
+                "cyclonedx_schema_version".to_string(),
+                "VERSION_16".to_string(),
+            ),
+            (
+                "cyclonedx_component_group".to_string(),
+                "org.example".to_string(),
+            ),
+            ("cyclonedx_component_name".to_string(), "demo".to_string()),
+            ("cyclonedx_component_version".to_string(), "1.0".to_string()),
+            ("cyclonedx_project_type".to_string(), "LIBRARY".to_string()),
+            (
+                "cyclonedx_include_bom_serial_number".to_string(),
+                "true".to_string(),
+            ),
+            (
+                "cyclonedx_json_output".to_string(),
+                "/tmp/bom.json".to_string(),
+            ),
+        ]);
+
+        let options = validate_captured_task_options(&inputs).unwrap();
+        assert_eq!("1.6", options.spec_version);
+        assert_eq!("org.example", options.root_group);
+        assert_eq!("demo", options.root_name);
+        assert_eq!("library", options.root_component_type);
+        assert!(options.include_bom_serial_number);
+        assert_eq!("/tmp/bom.json", options.json_output);
+    }
+
+    #[test]
+    fn rejects_incomplete_captured_cyclonedx_task_options() {
+        let inputs = BTreeMap::from([(
+            "cyclonedx_schema_version".to_string(),
+            "VERSION_16".to_string(),
+        )]);
+
+        let err = validate_captured_task_options(&inputs).unwrap_err();
+        assert!(err.contains("component-name"));
+        assert!(err.contains("component-version"));
+        assert!(err.contains("project-type"));
+        assert!(err.contains("json-or-xml-output"));
     }
 
     #[test]
