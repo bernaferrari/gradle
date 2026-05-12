@@ -80,6 +80,21 @@ pub struct CycloneDxLicense {
     pub name: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<CycloneDxLicenseText>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CycloneDxLicenseText {
+    #[serde(
+        default,
+        rename = "contentType",
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub content_type: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub encoding: String,
+    pub content: String,
 }
 
 impl CycloneDxLicenseChoice {
@@ -694,6 +709,11 @@ fn validate_cyclonedx_license_choices(
             return Err(format!(
                 "CycloneDX {label} has a license missing id or name"
             ));
+        }
+        if let Some(text) = &license.text {
+            if text.content.trim().is_empty() {
+                return Err(format!("CycloneDX {label} has empty license text"));
+            }
         }
     }
     Ok(())
@@ -1633,12 +1653,14 @@ fn resolve_cyclonedx_license(name: &str, url: &str) -> CycloneDxLicense {
             id: id.to_string(),
             name: String::new(),
             url: see_also.unwrap_or(trimmed_url).to_string(),
+            text: None,
         };
     }
     CycloneDxLicense {
         id: String::new(),
         name: trimmed_name.to_string(),
         url: trimmed_url.to_string(),
+        text: None,
     }
 }
 
@@ -1972,6 +1994,19 @@ fn write_license_choices(xml: &mut String, indent: &str, licenses: &[CycloneDxLi
         if !license.url.is_empty() {
             xml.push_str(&format!("<url>{}</url>", xml_escape(&license.url)));
         }
+        if let Some(text) = &license.text {
+            xml.push_str("<text");
+            if !text.content_type.is_empty() {
+                xml.push_str(&format!(
+                    " content-type=\"{}\"",
+                    xml_escape(&text.content_type)
+                ));
+            }
+            if !text.encoding.is_empty() {
+                xml.push_str(&format!(" encoding=\"{}\"", xml_escape(&text.encoding)));
+            }
+            xml.push_str(&format!(">{}</text>", xml_escape(&text.content)));
+        }
         xml.push_str("</license>\n");
     }
     xml.push_str(&format!("{indent}</licenses>\n"));
@@ -2182,11 +2217,24 @@ mod tests {
                 id: "Apache-2.0".to_string(),
                 name: String::new(),
                 url: "https://www.apache.org/licenses/LICENSE-2.0".to_string(),
+                text: None,
             }));
         contract.components[1].hashes.push(CycloneDxHash {
             algorithm: "SHA-256".to_string(),
             content: "0123456789abcdef".to_string(),
         });
+        contract.components[0]
+            .licenses
+            .push(CycloneDxLicenseChoice::from_license(CycloneDxLicense {
+                id: "MIT".to_string(),
+                name: String::new(),
+                url: "https://opensource.org/license/mit/".to_string(),
+                text: Some(CycloneDxLicenseText {
+                    content_type: "text/plain".to_string(),
+                    encoding: String::new(),
+                    content: "MIT License text".to_string(),
+                }),
+            }));
         contract
             .external_references
             .push(CycloneDxExternalReference {
@@ -2203,6 +2251,9 @@ mod tests {
         assert!(json.contains("\"specVersion\": \"1.6\""));
         assert!(json.contains("\"licenses\""));
         assert!(json.contains("\"id\": \"Apache-2.0\""));
+        assert!(json.contains("\"text\""));
+        assert!(json.contains("\"contentType\": \"text/plain\""));
+        assert!(json.contains("\"content\": \"MIT License text\""));
         assert!(json.contains("\"externalReferences\""));
         assert!(json.contains("\"hashes\""));
         assert!(json.contains("\"alg\": \"SHA-256\""));
@@ -2238,6 +2289,7 @@ mod tests {
                 id: "MIT".to_string(),
                 name: String::new(),
                 url: "https://opensource.org/license/mit/".to_string(),
+                text: None,
             }));
         contract.components[0]
             .licenses
@@ -2245,6 +2297,11 @@ mod tests {
                 id: "Apache-2.0".to_string(),
                 name: String::new(),
                 url: "https://www.apache.org/licenses/LICENSE-2.0".to_string(),
+                text: Some(CycloneDxLicenseText {
+                    content_type: "text/plain".to_string(),
+                    encoding: String::new(),
+                    content: "Apache License text".to_string(),
+                }),
             }));
         contract.components[0]
             .licenses
@@ -2282,6 +2339,7 @@ mod tests {
         assert!(xml.contains(
             "<license><id>MIT</id><url>https://opensource.org/license/mit/</url></license>"
         ));
+        assert!(xml.contains("<text content-type=\"text/plain\">Apache License text</text>"));
         assert!(xml.contains("<externalReferences>"));
         assert!(xml.contains("<reference type=\"website\">"));
         assert!(xml.contains("<url>https://example.invalid/app</url>"));
@@ -2294,7 +2352,7 @@ mod tests {
         assert!(xml.contains("<reference type=\"vcs\">"));
         assert!(xml.find("org.example/a").unwrap() < xml.find("org.example/b").unwrap());
         assert!(xml.contains(
-            "<license><id>Apache-2.0</id><url>https://www.apache.org/licenses/LICENSE-2.0</url></license>"
+            "<license><id>Apache-2.0</id><url>https://www.apache.org/licenses/LICENSE-2.0</url><text content-type=\"text/plain\">Apache License text</text></license>"
         ));
         assert!(xml.contains("<expression>(Apache-2.0 OR MIT)</expression>"));
         assert!(xml.contains("<dependencies>"));
@@ -2586,6 +2644,7 @@ mod tests {
                 id: "Apache-2.0".to_string(),
                 name: String::new(),
                 url: "https://www.apache.org/licenses/LICENSE-2.0".to_string(),
+                text: None,
             })],
             contract.metadata_licenses
         );
@@ -2923,6 +2982,7 @@ mod tests {
                 id: "Apache-2.0".to_string(),
                 name: String::new(),
                 url: "https://www.apache.org/licenses/LICENSE-2.0".to_string(),
+                text: None,
             })],
             component.licenses
         );
@@ -3012,6 +3072,7 @@ mod tests {
                 id: "MIT".to_string(),
                 name: String::new(),
                 url: "https://opensource.org/license/mit".to_string(),
+                text: None,
             })],
             component.licenses
         );
@@ -3056,6 +3117,7 @@ mod tests {
                 id: "Apache-2.0".to_string(),
                 name: String::new(),
                 url: "https://www.apache.org/licenses/LICENSE-2.0".to_string(),
+                text: None,
             })));
         assert!(metadata
             .licenses
@@ -3063,6 +3125,7 @@ mod tests {
                 id: "MIT".to_string(),
                 name: String::new(),
                 url: "https://opensource.org/license/mit".to_string(),
+                text: None,
             })));
         assert!(metadata
             .licenses
@@ -3070,6 +3133,7 @@ mod tests {
                 id: String::new(),
                 name: "Custom License".to_string(),
                 url: "https://licenses.example.test/custom".to_string(),
+                text: None,
             })));
     }
 
@@ -3137,6 +3201,7 @@ mod tests {
                 id: "MIT".to_string(),
                 name: String::new(),
                 url: "https://opensource.org/license/mit".to_string(),
+                text: None,
             })],
             metadata.licenses
         );
