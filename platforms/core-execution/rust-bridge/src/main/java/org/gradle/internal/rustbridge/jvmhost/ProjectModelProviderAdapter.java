@@ -1292,6 +1292,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "cyclonedx_input_sboms", fileCollectionPathString(invokeOptional(task, taskType, "getInputSboms")));
         putIfPresent(inputs, "cyclonedx_resolved_dependencies", fileCollectionPathString(invokeOptional(task, taskType, "getResolvedDependencies")));
         inputs.put("cyclonedx_sbom_contract_status", "missing");
+        inputs.put("cyclonedx_missing_contract_fields", "resolution-result-edges,component-metadata,license-metadata,purl-qualifiers,aggregate-merge-policy");
         inputs.put("requires_jvm_task_execution", "true");
     }
 
