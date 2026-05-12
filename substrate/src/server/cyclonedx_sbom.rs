@@ -123,6 +123,7 @@ pub struct CycloneDxDraftOptions {
     pub root_name: String,
     pub root_version: String,
     pub root_component_type: String,
+    pub include_metadata_resolution: bool,
     pub external_references: Vec<String>,
 }
 
@@ -134,6 +135,7 @@ pub struct CycloneDxCapturedTaskOptions {
     pub root_version: String,
     pub root_component_type: String,
     pub include_bom_serial_number: bool,
+    pub include_metadata_resolution: bool,
     pub external_references: Vec<String>,
     pub json_output: String,
     pub xml_output: String,
@@ -220,6 +222,8 @@ pub fn validate_captured_task_options(
         root_component_type,
         include_bom_serial_number: value(inputs, "cyclonedx_include_bom_serial_number")
             .eq_ignore_ascii_case("true"),
+        include_metadata_resolution: value(inputs, "cyclonedx_include_metadata_resolution")
+            .eq_ignore_ascii_case("true"),
         external_references: whitespace_values(value(inputs, "cyclonedx_external_references")),
         json_output,
         xml_output,
@@ -270,6 +274,7 @@ pub fn draft_contract_from_captured_inputs(
             root_name: options.root_name,
             root_version: options.root_version,
             root_component_type: options.root_component_type,
+            include_metadata_resolution: options.include_metadata_resolution,
             external_references: options.external_references,
         },
     )
@@ -605,7 +610,9 @@ pub fn draft_contract_from_resolution_graph(
                     component.artifact_classifier.clone(),
                 );
             }
-            let metadata = if component.artifact_path.is_empty() {
+            let metadata = if component.artifact_path.is_empty()
+                || !options.include_metadata_resolution
+            {
                 PomComponentMetadata::default()
             } else {
                 read_pom_component_metadata(Path::new(&component.artifact_path)).unwrap_or_default()
@@ -1253,6 +1260,10 @@ mod tests {
                 "true".to_string(),
             ),
             (
+                "cyclonedx_include_metadata_resolution".to_string(),
+                "true".to_string(),
+            ),
+            (
                 "cyclonedx_json_output".to_string(),
                 "/tmp/bom.json".to_string(),
             ),
@@ -1264,6 +1275,7 @@ mod tests {
         assert_eq!("demo", options.root_name);
         assert_eq!("library", options.root_component_type);
         assert!(options.include_bom_serial_number);
+        assert!(options.include_metadata_resolution);
         assert_eq!("/tmp/bom.json", options.json_output);
     }
 
@@ -1473,6 +1485,7 @@ mod tests {
                 root_name: "demo".to_string(),
                 root_version: "1.0".to_string(),
                 root_component_type: "application".to_string(),
+                include_metadata_resolution: true,
                 external_references: Vec::new(),
             },
         )
@@ -1543,6 +1556,7 @@ mod tests {
                 root_name: "demo".to_string(),
                 root_version: "1.0".to_string(),
                 root_component_type: "application".to_string(),
+                include_metadata_resolution: true,
                 external_references: Vec::new(),
             },
         )
@@ -1580,6 +1594,60 @@ mod tests {
     }
 
     #[test]
+    fn skips_pom_metadata_when_metadata_resolution_is_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let jar_path = dir.path().join("lib-1.1.jar");
+        let pom_path = dir.path().join("lib-1.1.pom");
+        std::fs::write(&jar_path, b"not-a-real-jar").unwrap();
+        std::fs::write(
+            &pom_path,
+            r#"
+<project>
+  <name>Example Lib</name>
+  <licenses>
+    <license>
+      <name>Apache-2.0</name>
+    </license>
+  </licenses>
+</project>
+"#,
+        )
+        .unwrap();
+
+        let mut graph = sample_resolution_graph();
+        graph.configurations[0].components[1].artifact_path =
+            jar_path.to_string_lossy().to_string();
+
+        let contract = draft_contract_from_resolution_graph(
+            &graph,
+            CycloneDxDraftOptions {
+                spec_version: "1.6".to_string(),
+                serial_number: "urn:uuid:00000000-0000-0000-0000-000000000007".to_string(),
+                timestamp: "2026-05-12T12:15:00Z".to_string(),
+                root_group: "org.example".to_string(),
+                root_name: "demo".to_string(),
+                root_version: "1.0".to_string(),
+                root_component_type: "application".to_string(),
+                include_metadata_resolution: false,
+                external_references: Vec::new(),
+            },
+        )
+        .unwrap();
+
+        let component = contract
+            .components
+            .iter()
+            .find(|component| component.bom_ref == "pkg:maven/org.example/lib@1.1")
+            .unwrap();
+        assert_eq!(
+            Some(&jar_path.to_string_lossy().to_string()),
+            component.properties.get("gradle:artifactPath")
+        );
+        assert!(!component.properties.contains_key("maven:pomName"));
+        assert!(component.licenses.is_empty());
+    }
+
+    #[test]
     fn drafts_contract_with_maven_purl_artifact_qualifiers() {
         let mut graph = sample_resolution_graph();
         graph.configurations[0].components[1].artifact_path =
@@ -1598,6 +1666,7 @@ mod tests {
                 root_name: "demo".to_string(),
                 root_version: "1.0".to_string(),
                 root_component_type: "application".to_string(),
+                include_metadata_resolution: true,
                 external_references: Vec::new(),
             },
         )
