@@ -34,6 +34,22 @@
       }
     },
     {
+      "name": "artifact-transform-unsupported-kotlin-dsl",
+      "path": "artifact-transform-unsupported-kotlin-dsl",
+      "tasks": ["clean", "build"],
+      "expected_contract": {
+        "build_file_count": 1,
+        "settings_file_count": 1,
+        "source_file_count": 1,
+        "plugins": ["java-library"],
+        "tasks": ["resolveTransformedArtifact"],
+        "outputs": ["build/artifact-transform/resolved.txt"],
+        "dependencies": ["org.gradle.substrate:artifact-transform:1.0"],
+        "project_dependencies": [],
+        "toolchains": ["17"]
+      }
+    },
+    {
       "name": "java-library-kotlin-dsl",
       "path": "java-library-kotlin-dsl",
       "tasks": ["clean", "build"],

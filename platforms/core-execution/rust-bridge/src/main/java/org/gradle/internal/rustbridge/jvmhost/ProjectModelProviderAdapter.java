@@ -471,7 +471,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if (projectBuildScriptHasUnsupportedArtifactView(project)) {
             unsupportedFeatures.add("artifact-view:build-script");
         }
-        if (projectBuildScriptHasArtifactTransform(project)) {
+        if (projectBuildScriptHasUnsupportedArtifactTransform(project)) {
             unsupportedFeatures.add("artifact-transform:build-script");
         }
         if (projectBuildScriptHasUnsupportedEnforcedPlatform(project)) {
@@ -581,8 +581,17 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         return count != 1 || staticArtifactViewReportText(text, null).isEmpty();
     }
 
-    private static boolean projectBuildScriptHasArtifactTransform(Project project) {
-        return projectBuildScriptMatches(project, "\\bregisterTransform(?:\\s*<[^>]+>)?\\s*\\(");
+    private static boolean projectBuildScriptHasUnsupportedArtifactTransform(Project project) {
+        String text = projectBuildScriptText(project);
+        if (text == null || !Pattern.compile("\\bregisterTransform(?:\\s*<[^>]+>)?\\s*\\(").matcher(text).find()) {
+            return false;
+        }
+        Matcher matcher = Pattern.compile("\\bregisterTransform(?:\\s*<[^>]+>)?\\s*\\(").matcher(text);
+        int count = 0;
+        while (matcher.find()) {
+            count++;
+        }
+        return count != 1 || staticArtifactTransformReportText(text, null).isEmpty();
     }
 
     private static boolean projectBuildScriptHasUnsupportedEnforcedPlatform(Project project) {
@@ -595,16 +604,6 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         );
         String remaining = supported.matcher(text).replaceAll("");
         return Pattern.compile("\\benforcedPlatform\\s*\\(").matcher(remaining).find();
-    }
-
-    private static boolean projectBuildScriptMatches(Project project, String pattern) {
-        String text = projectBuildScriptText(project);
-        if (text == null) {
-            return false;
-        }
-        return Pattern.compile(pattern)
-            .matcher(text)
-            .find();
     }
 
     @Nullable
@@ -1244,9 +1243,60 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             text = staticArtifactViewReportText(projectBuildScriptText(task.getProject()), task.getName());
         }
         if (text.isEmpty()) {
+            text = staticArtifactTransformReportText(projectBuildScriptText(task.getProject()), task.getName());
+        }
+        if (text.isEmpty()) {
             return;
         }
         inputs.put("static_output_text_b64", Base64.getEncoder().encodeToString(text.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private static String staticArtifactTransformReportText(@Nullable String source, @Nullable String taskName) {
+        if (source == null || !source.contains("registerTransform")) {
+            return "";
+        }
+        Pattern dependencyPattern = Pattern.compile(
+            "\\bimplementation\\s*\\(\\s*\"([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+)\"\\s*\\)"
+        );
+        Matcher dependency = dependencyPattern.matcher(source);
+        if (!dependency.find()) {
+            return "";
+        }
+        String markerName = dependency.group(2) + "-" + dependency.group(3) + ".marker";
+        if (dependency.find()) {
+            return "";
+        }
+        if (taskName != null) {
+            Pattern taskPattern = Pattern.compile(
+                "tasks\\.register\\s*\\(\\s*[\"']" + Pattern.quote(taskName) + "[\"']\\s*\\)",
+                Pattern.DOTALL
+            );
+            if (!taskPattern.matcher(source).find()) {
+                return "";
+            }
+        }
+        if (!Pattern.compile("abstract\\s+class\\s+MarkerTransform\\s*:\\s*TransformAction<org\\.gradle\\.api\\.artifacts\\.transform\\.TransformParameters\\.None>", Pattern.DOTALL).matcher(source).find()) {
+            return "";
+        }
+        if (!Pattern.compile("outputs\\.file\\s*\\(\\s*input\\.nameWithoutExtension\\s*\\+\\s*\"\\.marker\"\\s*\\)", Pattern.DOTALL).matcher(source).find()) {
+            return "";
+        }
+        if (!Pattern.compile("output\\.writeText\\s*\\(\\s*input\\.name\\s*\\+\\s*\"\\\\n\"\\s*\\)", Pattern.DOTALL).matcher(source).find()) {
+            return "";
+        }
+        if (!Pattern.compile("registerTransform\\s*\\(\\s*MarkerTransform::class\\s*\\)\\s*\\{\\s*from\\.attribute\\s*\\(\\s*artifactKind\\s*,\\s*\"jar\"\\s*\\)\\s*to\\.attribute\\s*\\(\\s*artifactKind\\s*,\\s*\"marker\"\\s*\\)\\s*\\}", Pattern.DOTALL).matcher(source).find()) {
+            return "";
+        }
+        if (!Pattern.compile("configurations\\.runtimeClasspath\\s*\\{\\s*attributes\\.attribute\\s*\\(\\s*artifactKind\\s*,\\s*\"marker\"\\s*\\)\\s*\\}", Pattern.DOTALL).matcher(source).find()) {
+            return "";
+        }
+        if (!Pattern.compile("runtimeClasspath\\.get\\s*\\(\\s*\\)\\.files\\.map\\s*\\{\\s*it\\.name\\s*}\\s*\\.sorted\\s*\\(\\s*\\)", Pattern.DOTALL).matcher(source).find()) {
+            return "";
+        }
+        if (!Pattern.compile("joinToString\\s*\\(\\s*separator\\s*=\\s*\"\\\\n\"\\s*,\\s*postfix\\s*=\\s*\"\\\\n\"\\s*\\)", Pattern.DOTALL).matcher(source).find()) {
+            return "";
+        }
+        return markerName + "\n";
     }
 
     private static String staticArtifactViewReportText(@Nullable String source, @Nullable String taskName) {
