@@ -360,7 +360,7 @@ def scan_project_contract(project_dir: str) -> dict:
             unsupported_features.add("unsupported-test-filters")
         if has_unsupported_repository_regex_filter(text):
             unsupported_features.add("repository-content-filter")
-        if re.search(r"\bdependencySubstitution\s*\{", text):
+        if has_unsupported_dependency_substitution(text):
             unsupported_features.add("dependency-substitution")
         if re.search(r"\bcomponents\s*\{", text):
             unsupported_features.add("component-metadata-rule")
@@ -405,6 +405,23 @@ def has_unsupported_repository_regex_filter(text: str) -> bool:
     )
     for _action, target, pattern in regex_calls:
         if target != "Group" or literal_group_from_regex(gradle_string_literal_value(pattern)) is None:
+            return True
+    return False
+
+
+def has_unsupported_dependency_substitution(text: str) -> bool:
+    if not re.search(r"\bdependencySubstitution\s*\{", text):
+        return False
+    blocks = extract_balanced_blocks(text, "dependencySubstitution")
+    if not blocks:
+        return True
+    supported = re.compile(
+        r"substitute\s*\(\s*module\s*\(\s*[\"'][A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+[\"']\s*\)\s*\)\s*\.\s*using\s*\(\s*module\s*\(\s*[\"'][A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+[\"']\s*\)\s*\)"
+    )
+    for block in blocks:
+        remaining = supported.sub("", block)
+        remaining = re.sub(r"[\s;]+", "", remaining)
+        if remaining:
             return True
     return False
 

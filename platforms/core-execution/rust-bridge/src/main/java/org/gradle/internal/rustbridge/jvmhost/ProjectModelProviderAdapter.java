@@ -459,7 +459,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if (configuration != null) {
             unsupportedFeatures.addAll(unsupportedResolutionFeatures(configuration));
         }
-        if (projectBuildScriptHasDependencySubstitution(project)) {
+        if (projectBuildScriptHasUnsupportedDependencySubstitution(project)) {
             unsupportedFeatures.add("dependency-substitution:build-script");
         }
         if (projectBuildScriptHasComponentMetadataRule(project)) {
@@ -511,8 +511,26 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         return unsupportedFeatures;
     }
 
-    private static boolean projectBuildScriptHasDependencySubstitution(Project project) {
-        return projectBuildScriptMatches(project, "\\bdependencySubstitution\\s*\\{");
+    private static boolean projectBuildScriptHasUnsupportedDependencySubstitution(Project project) {
+        String text = projectBuildScriptText(project);
+        if (text == null || !Pattern.compile("\\bdependencySubstitution\\s*\\{").matcher(text).find()) {
+            return false;
+        }
+        List<String> blocks = balancedBlocks(text, "dependencySubstitution");
+        if (blocks.isEmpty()) {
+            return true;
+        }
+        Pattern supported = Pattern.compile(
+            "substitute\\s*\\(\\s*module\\s*\\(\\s*\"[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+\"\\s*\\)\\s*\\)\\s*\\.\\s*using\\s*\\(\\s*module\\s*\\(\\s*\"[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+\"\\s*\\)\\s*\\)"
+        );
+        for (String block : blocks) {
+            String remaining = supported.matcher(block).replaceAll("");
+            remaining = remaining.replaceAll("[\\s;]+", "");
+            if (!remaining.isEmpty()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean projectBuildScriptHasComponentMetadataRule(Project project) {
@@ -536,19 +554,49 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     }
 
     private static boolean projectBuildScriptMatches(Project project, String pattern) {
+        String text = projectBuildScriptText(project);
+        if (text == null) {
+            return false;
+        }
+        return Pattern.compile(pattern)
+            .matcher(text)
+            .find();
+    }
+
+    @Nullable
+    private static String projectBuildScriptText(Project project) {
         File buildFile = project.getBuildFile();
         if (buildFile == null || !buildFile.isFile()) {
-            return false;
+            return null;
         }
         try {
-            String text = new String(Files.readAllBytes(buildFile.toPath()), StandardCharsets.UTF_8);
-            return Pattern.compile(pattern)
-                .matcher(text)
-                .find();
+            return new String(Files.readAllBytes(buildFile.toPath()), StandardCharsets.UTF_8);
         } catch (Exception e) {
             LOGGER.debug("[substrate-jvmhost] Failed to inspect build script for unsupported native dependency semantics", e);
-            return false;
+            return null;
         }
+    }
+
+    private static List<String> balancedBlocks(String text, String blockName) {
+        List<String> blocks = new ArrayList<>();
+        Matcher matcher = Pattern.compile("\\b" + Pattern.quote(blockName) + "\\s*\\{").matcher(text);
+        while (matcher.find()) {
+            int start = matcher.end();
+            int depth = 1;
+            int pos = start;
+            while (pos < text.length() && depth > 0) {
+                char ch = text.charAt(pos++);
+                if (ch == '{') {
+                    depth++;
+                } else if (ch == '}') {
+                    depth--;
+                }
+            }
+            if (depth == 0) {
+                blocks.add(text.substring(start, pos - 1));
+            }
+        }
+        return blocks;
     }
 
     private static void captureJavaCompileInputs(Task task, Class<?> taskType, Map<String, String> inputs) {
