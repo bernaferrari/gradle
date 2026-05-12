@@ -1296,7 +1296,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "cyclonedx_include_build_environment", includeBuildEnvironment);
         String includeLicenseText = providerBooleanString(invokeOptional(task, taskType, "getIncludeLicenseText"));
         putIfPresent(inputs, "cyclonedx_include_license_text", includeLicenseText);
-        putIfPresent(inputs, "cyclonedx_include_metadata_resolution", providerBooleanString(invokeOptional(task, taskType, "getIncludeMetadataResolution")));
+        String includeMetadataResolution = providerBooleanString(invokeOptional(task, taskType, "getIncludeMetadataResolution"));
+        putIfPresent(inputs, "cyclonedx_include_metadata_resolution", includeMetadataResolution);
         Object organizationalEntityProvider = invokeOptional(task, taskType, "getOrganizationalEntity");
         String organizationalEntityPresent = providerPresentString(organizationalEntityProvider);
         putIfPresent(inputs, "cyclonedx_organizational_entity_present", organizationalEntityPresent);
@@ -1325,9 +1326,14 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         String resolutionGraphJsonBase64 = cyclonedxResolutionGraphJsonBase64(task, taskType, includeBuildEnvironment);
         putIfPresent(inputs, "cyclonedx_resolution_graph_json_b64", resolutionGraphJsonBase64);
         boolean aggregateTask = isCycloneDxAggregateTask(taskType.getName(), taskType.getSimpleName());
-        String missingBaseFields = resolutionGraphJsonBase64.isEmpty()
-            ? "resolution-result-edges,component-metadata,license-metadata,artifact-hash-policy,timestamp-source-policy"
-            : "component-metadata,license-metadata,timestamp-source-policy";
+        String missingBaseFields;
+        if (resolutionGraphJsonBase64.isEmpty()) {
+            missingBaseFields = "resolution-result-edges,component-metadata,license-metadata,artifact-hash-policy,timestamp-source-policy";
+        } else if ("false".equalsIgnoreCase(includeMetadataResolution)) {
+            missingBaseFields = "timestamp-source-policy";
+        } else {
+            missingBaseFields = "component-metadata,license-metadata,timestamp-source-policy";
+        }
         if (aggregateTask) {
             missingBaseFields = missingBaseFields + ",aggregate-input-contracts,aggregate-merge-policy";
         } else {
