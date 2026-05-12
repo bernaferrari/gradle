@@ -76,6 +76,10 @@ outputs matched the upstream dogfood output file inventory, non-archive hashes,
 and archive entries. This is still a prototype: it requires a previously
 generated shadow store and explicit project directory, and it does not yet
 implement the invalidation policy needed for a safe warm CLI path.
+It now has a conservative build-definition guard: if `build.gradle(.kts)`,
+`settings.gradle(.kts)`, `gradle.properties`, or `gradle/libs.versions.toml`
+is newer than the cached artifact, direct RunBuild fails closed before Rust
+execution. Full source/input fingerprint invalidation is still future work.
 
 ## Boundaries
 
