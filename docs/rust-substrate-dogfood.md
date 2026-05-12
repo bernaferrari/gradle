@@ -81,7 +81,11 @@ artifacts. Paths captured as task outputs/local state/destroyables are excluded.
 Touching `src/main/java/example/PublicApi.java`, deleting it, or changing its
 content while restoring the old mtime rejects before `RunBuild` with a precise
 stale-input diagnostic. Mutating a generated class under `build/classes` does
-not invalidate the plan because Rust will regenerate it during execution.
+not invalidate the plan because Rust will regenerate it during execution. The
+same artifact ran `--task :build` in 54 ms with the selected task's dependency
+closure, 14 tasks, zero JVM forwards, and `build-plan-shadow` as the plan
+source. Unqualified task names, unknown task paths, incomplete dependency
+graphs, and ambiguous artifact matches reject before daemon execution.
 
 ## Boundaries
 
