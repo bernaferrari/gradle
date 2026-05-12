@@ -134,6 +134,11 @@ fn contract_from_input(input: &TaskInput) -> Result<CycloneDxSbomContract, Strin
                 root_name: required_option(input, "aggregate_root_name")?,
                 root_version: required_option(input, "aggregate_root_version")?,
                 root_component_type: required_option(input, "aggregate_root_component_type")?,
+                root_project_path: input
+                    .options
+                    .get("aggregate_root_project_path")
+                    .cloned()
+                    .unwrap_or_default(),
                 external_references: whitespace_values(
                     input
                         .options
@@ -294,6 +299,9 @@ mod tests {
             "aggregate_root_component_type".to_string(),
             "application".to_string(),
         );
+        input
+            .options
+            .insert("aggregate_root_project_path".to_string(), ":".to_string());
         input.options.insert(
             "aggregate_external_references".to_string(),
             "https://example.invalid/aggregate".to_string(),

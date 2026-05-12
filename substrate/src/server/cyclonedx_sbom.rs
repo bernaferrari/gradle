@@ -50,6 +50,8 @@ pub struct CycloneDxComponent {
     pub publisher: String,
     #[serde(default)]
     pub purl: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified: Option<bool>,
     #[serde(default)]
     pub properties: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -225,6 +227,7 @@ pub struct CycloneDxDraftOptions {
     pub root_name: String,
     pub root_version: String,
     pub root_component_type: String,
+    pub root_project_path: String,
     pub include_metadata_resolution: bool,
     pub external_references: Vec<String>,
 }
@@ -264,6 +267,7 @@ pub struct CycloneDxAggregateOptions {
     pub root_name: String,
     pub root_version: String,
     pub root_component_type: String,
+    pub root_project_path: String,
     pub external_references: Vec<String>,
 }
 
@@ -487,6 +491,7 @@ pub fn draft_contract_from_captured_inputs(
             root_name: options.root_name,
             root_version: options.root_version,
             root_component_type: options.root_component_type,
+            root_project_path: value(inputs, "cyclonedx_identity_project_path").to_string(),
             include_metadata_resolution: options.include_metadata_resolution,
             external_references: Vec::new(),
         },
@@ -554,10 +559,11 @@ pub fn aggregate_contracts(
         return Err("CycloneDX aggregate contract has no input SBOM contracts".to_string());
     }
     validate_aggregate_options(&options)?;
-    let root_purl = purl(
+    let root_purl = purl_with_project_path(
         &options.root_group,
         &options.root_name,
         &options.root_version,
+        &options.root_project_path,
     );
     let root_component = CycloneDxComponent {
         component_type: options.root_component_type.to_lowercase(),
@@ -568,6 +574,7 @@ pub fn aggregate_contracts(
         description: String::new(),
         publisher: String::new(),
         purl: root_purl,
+        modified: Some(false),
         properties: BTreeMap::new(),
         licenses: Vec::new(),
         hashes: Vec::new(),
@@ -579,7 +586,9 @@ pub fn aggregate_contracts(
     let mut aggregate_root_children = BTreeSet::new();
     for contract in contracts {
         contract.validate()?;
-        aggregate_root_children.insert(contract.root_component.bom_ref.clone());
+        if contract.root_component.bom_ref != root_component.bom_ref {
+            aggregate_root_children.insert(contract.root_component.bom_ref.clone());
+        }
         for component in &contract.components {
             merge_component(&mut components_by_ref, component.clone())?;
         }
@@ -968,10 +977,11 @@ pub fn draft_contract_from_resolution_graph(
 ) -> Result<CycloneDxSbomContract, String> {
     graph.validate()?;
     validate_draft_options(&options)?;
-    let root_purl = purl(
+    let root_purl = purl_with_project_path(
         &options.root_group,
         &options.root_name,
         &options.root_version,
+        &options.root_project_path,
     );
     let root_component = CycloneDxComponent {
         component_type: options.root_component_type.to_lowercase(),
@@ -982,6 +992,7 @@ pub fn draft_contract_from_resolution_graph(
         description: String::new(),
         publisher: String::new(),
         purl: root_purl,
+        modified: Some(false),
         properties: BTreeMap::new(),
         licenses: Vec::new(),
         hashes: Vec::new(),
@@ -990,12 +1001,18 @@ pub fn draft_contract_from_resolution_graph(
 
     let mut components_by_id = BTreeMap::new();
     let mut dependencies_by_ref = BTreeMap::<String, BTreeSet<String>>::new();
+    let mut root_component_ids = BTreeSet::new();
     for configuration in &graph.configurations {
         for component in &configuration.components {
             if component.group.is_empty()
                 || component.module.is_empty()
                 || component.version.is_empty()
             {
+                if component.project_path == options.root_project_path
+                    || component.id.starts_with("root project ")
+                {
+                    root_component_ids.insert(component.id.clone());
+                }
                 continue;
             }
             let bom_ref = purl_for_component(component);
@@ -1007,17 +1024,21 @@ pub fn draft_contract_from_resolution_graph(
     let mut root_children = BTreeSet::new();
     for configuration in &graph.configurations {
         for dependency in &configuration.dependencies {
-            let Some((_, from_ref)) = components_by_id.get(&dependency.from) else {
-                continue;
-            };
             let Some((_, to_ref)) = components_by_id.get(&dependency.to) else {
                 continue;
             };
-            dependencies_by_ref
-                .entry(from_ref.clone())
-                .or_default()
-                .insert(to_ref.clone());
-            root_children.insert(from_ref.clone());
+            if root_component_ids.contains(&dependency.from) {
+                if !is_root_dependency_constraint(&dependency.requested) {
+                    root_children.insert(to_ref.clone());
+                }
+                continue;
+            }
+            if let Some((_, from_ref)) = components_by_id.get(&dependency.from) {
+                dependencies_by_ref
+                    .entry(from_ref.clone())
+                    .or_default()
+                    .insert(to_ref.clone());
+            }
         }
     }
 
@@ -1078,6 +1099,7 @@ pub fn draft_contract_from_resolution_graph(
                 description: metadata.description,
                 publisher: metadata.publisher,
                 purl: bom_ref,
+                modified: None,
                 properties,
                 licenses: metadata.licenses,
                 hashes,
@@ -1149,6 +1171,10 @@ fn validate_aggregate_options(options: &CycloneDxAggregateOptions) -> Result<(),
     Ok(())
 }
 
+fn is_root_dependency_constraint(requested: &str) -> bool {
+    requested.contains("{strictly ")
+}
+
 fn deterministic_serial_number(parts: &[&str]) -> String {
     let mut hasher = Sha256::new();
     for part in parts {
@@ -1206,6 +1232,14 @@ fn merge_component(
 
 fn purl(group: &str, name: &str, version: &str) -> String {
     purl_with_qualifiers(group, name, version, &[])
+}
+
+fn purl_with_project_path(group: &str, name: &str, version: &str, project_path: &str) -> String {
+    if project_path.trim().is_empty() {
+        purl(group, name, version)
+    } else {
+        purl_with_qualifiers(group, name, version, &[("project_path", project_path)])
+    }
 }
 
 fn purl_for_component(component: &CycloneDxResolvedComponent) -> String {
@@ -2753,6 +2787,7 @@ mod tests {
                 description: String::new(),
                 publisher: String::new(),
                 purl: "pkg:maven/org.example/app@1.0.0".to_string(),
+                modified: Some(false),
                 properties: BTreeMap::new(),
                 licenses: Vec::new(),
                 hashes: Vec::new(),
@@ -2768,6 +2803,7 @@ mod tests {
                     description: String::new(),
                     publisher: String::new(),
                     purl: "pkg:maven/org.example/b@1.0.0?type=jar".to_string(),
+                    modified: None,
                     properties: BTreeMap::new(),
                     licenses: Vec::new(),
                     hashes: Vec::new(),
@@ -2782,6 +2818,7 @@ mod tests {
                     description: String::new(),
                     publisher: String::new(),
                     purl: "pkg:maven/org.example/a@1.0.0?type=jar".to_string(),
+                    modified: None,
                     properties: BTreeMap::new(),
                     licenses: Vec::new(),
                     hashes: Vec::new(),
@@ -2808,11 +2845,11 @@ mod tests {
                 name: "runtimeClasspath".to_string(),
                 components: vec![
                     CycloneDxResolvedComponent {
-                        id: "org.example:app:1.0".to_string(),
-                        group: "org.example".to_string(),
-                        module: "app".to_string(),
-                        version: "1.0".to_string(),
-                        project_path: String::new(),
+                        id: "root project 'demo'".to_string(),
+                        group: String::new(),
+                        module: String::new(),
+                        version: String::new(),
+                        project_path: ":".to_string(),
                         artifact_path: String::new(),
                         artifact_type: String::new(),
                         artifact_extension: String::new(),
@@ -2833,7 +2870,7 @@ mod tests {
                     },
                 ],
                 dependencies: vec![CycloneDxResolvedDependency {
-                    from: "org.example:app:1.0".to_string(),
+                    from: "root project 'demo'".to_string(),
                     requested: "org.example:lib:1.+".to_string(),
                     to: "org.example:lib:1.1".to_string(),
                 }],
@@ -3651,6 +3688,7 @@ mod tests {
                 root_name: "demo".to_string(),
                 root_version: "1.0".to_string(),
                 root_component_type: "application".to_string(),
+                root_project_path: ":".to_string(),
                 include_metadata_resolution: true,
                 external_references: Vec::new(),
             },
@@ -3659,9 +3697,10 @@ mod tests {
 
         assert_eq!(CONTRACT_SCHEMA, contract.schema);
         assert_eq!(
-            "pkg:maven/org.example/demo@1.0",
+            "pkg:maven/org.example/demo@1.0?project_path=%3A",
             contract.root_component.bom_ref
         );
+        assert_eq!(Some(false), contract.root_component.modified);
         assert!(contract
             .components
             .iter()
@@ -3680,7 +3719,7 @@ mod tests {
                     .unwrap_or(false)
         }));
         assert!(contract.dependencies.iter().any(|dependency| {
-            dependency.reference == "pkg:maven/org.example/app@1.0"
+            dependency.reference == "pkg:maven/org.example/demo@1.0?project_path=%3A"
                 && dependency
                     .depends_on
                     .contains(&"pkg:maven/org.example/lib@1.1?type=jar".to_string())
@@ -3793,6 +3832,7 @@ mod tests {
                 root_name: "demo".to_string(),
                 root_version: "1.0".to_string(),
                 root_component_type: "application".to_string(),
+                root_project_path: ":".to_string(),
                 include_metadata_resolution: true,
                 external_references: Vec::new(),
             },
@@ -4148,6 +4188,7 @@ mod tests {
                 root_name: "demo".to_string(),
                 root_version: "1.0".to_string(),
                 root_component_type: "application".to_string(),
+                root_project_path: ":".to_string(),
                 include_metadata_resolution: true,
                 external_references: Vec::new(),
             },
@@ -4357,6 +4398,7 @@ mod tests {
                 root_name: "demo".to_string(),
                 root_version: "1.0".to_string(),
                 root_component_type: "application".to_string(),
+                root_project_path: ":".to_string(),
                 include_metadata_resolution: false,
                 external_references: Vec::new(),
             },
@@ -4395,6 +4437,7 @@ mod tests {
                 root_name: "demo".to_string(),
                 root_version: "1.0".to_string(),
                 root_component_type: "application".to_string(),
+                root_project_path: ":".to_string(),
                 include_metadata_resolution: true,
                 external_references: Vec::new(),
             },
@@ -4451,15 +4494,17 @@ mod tests {
                 root_name: "aggregate".to_string(),
                 root_version: "1.0".to_string(),
                 root_component_type: "application".to_string(),
+                root_project_path: ":".to_string(),
                 external_references: Vec::new(),
             },
         )
         .unwrap();
 
         assert_eq!(
-            "pkg:maven/org.example/aggregate@1.0",
+            "pkg:maven/org.example/aggregate@1.0?project_path=%3A",
             aggregate.root_component.bom_ref
         );
+        assert_eq!(Some(false), aggregate.root_component.modified);
         assert_eq!(
             vec![
                 "pkg:maven/org.example/a@1.0.0?type=jar".to_string(),
@@ -4502,6 +4547,7 @@ mod tests {
                 root_name: "aggregate".to_string(),
                 root_version: "1.0".to_string(),
                 root_component_type: "application".to_string(),
+                root_project_path: ":".to_string(),
                 external_references: Vec::new(),
             },
         )
