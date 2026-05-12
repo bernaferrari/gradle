@@ -1432,12 +1432,15 @@ async fn detect_shadow_mismatch_after_manual_mutation() {
     json["plan"]["projects"][0]["name"] = serde_json::Value::String("tampered".to_string());
     std::fs::write(&artifact_path, serde_json::to_vec_pretty(&json).unwrap()).unwrap();
 
-    let report = verify_shadow_against_jvm(&bridge, &store, build_id)
+    let error = verify_shadow_against_jvm(&bridge, &store, build_id)
         .await
-        .unwrap();
+        .unwrap_err();
     assert!(
-        !report.is_match(),
-        "expected mismatches after mutation, report={:?}",
-        report
+        error.to_string().contains("fingerprint mismatch"),
+        "expected fail-closed fingerprint mismatch after mutation, got: {error}"
+    );
+    assert!(
+        store.root().join("quarantine").exists(),
+        "tampered artifact should be quarantined"
     );
 }

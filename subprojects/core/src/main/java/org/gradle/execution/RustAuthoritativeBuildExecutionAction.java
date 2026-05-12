@@ -122,7 +122,7 @@ public class RustAuthoritativeBuildExecutionAction implements BuildWorkExecutor 
                 LOGGER.info(
                     "[substrate:run-build] Rust executed {} Gradle tasks from {} with {} up-to-date, {} no-source/skipped and {} from-cache; JVM fallback disabled; JVM task executor skipped",
                     result.getTotalTasks(),
-                    result.getPlanSource(),
+                    displayPlanSource(result.getPlanSource()),
                     result.getTasksUpToDate(),
                     result.getTasksSkipped(),
                     result.getTasksFromCache()
@@ -240,6 +240,13 @@ public class RustAuthoritativeBuildExecutionAction implements BuildWorkExecutor 
             + ", jvmForwarded=" + result.getTasksForwardedToJvm()
             + ", upToDate=" + result.getTasksUpToDate()
             + ", fromCache=" + result.getTasksFromCache();
+    }
+
+    private static String displayPlanSource(String planSource) {
+        if ("build-plan-shadow".equals(planSource)) {
+            return "build-plan-cache";
+        }
+        return planSource;
     }
 
     private static void bindAllReferencesOfProject(FinalizedExecutionPlan plan) {

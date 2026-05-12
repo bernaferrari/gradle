@@ -609,6 +609,10 @@ def measure_authoritative_runbuild_fast(timeout: int = 90) -> dict[str, object]:
         elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
 
         def parse_run(output: str) -> dict[str, object]:
+            plan_source_match = re.search(
+                r"\[substrate:run-build\] Rust executed \d+(?: Gradle)? tasks from ([^ ]+)",
+                output,
+            )
             executed_match = re.search(
                 r"\[substrate:run-build\] Rust executed (\d+)(?: Gradle)? tasks .* with (\d+) up-to-date(?:, (\d+) no-source/skipped)? and (\d+) from-cache; JVM (?:forwarding|fallback) disabled",
                 output,
@@ -630,6 +634,8 @@ def measure_authoritative_runbuild_fast(timeout: int = 90) -> dict[str, object]:
                 "selected_task_count": len(selected_tasks),
                 "selected_tasks": selected_tasks,
                 "tasks_forwarded_to_jvm": int(jvm_forwarded_match.group(1)) if jvm_forwarded_match else 0,
+                "plan_source": plan_source_match.group(1) if plan_source_match else "",
+                "build_plan_cache_reused": plan_source_match is not None and plan_source_match.group(1) == "build-plan-cache",
                 "configuration_cache_reused": "Configuration cache entry reused" in output,
                 "configuration_cache_stored": "Configuration cache entry stored" in output,
             }
@@ -649,6 +655,7 @@ def measure_authoritative_runbuild_fast(timeout: int = 90) -> dict[str, object]:
             and int(warm_parsed["rust_executed_tasks"]) > 0
             and int(first_parsed["tasks_forwarded_to_jvm"]) == 0
             and int(warm_parsed["tasks_forwarded_to_jvm"]) == 0
+            and bool(warm_parsed["build_plan_cache_reused"])
             and elapsed_ms <= AUTHORITATIVE_DAG_TOTAL_THRESHOLD_MS
             and first_elapsed_ms <= AUTHORITATIVE_DAG_COLD_THRESHOLD_MS
             and warm_elapsed_ms <= AUTHORITATIVE_DAG_WARM_THRESHOLD_MS
@@ -678,6 +685,9 @@ def measure_authoritative_runbuild_fast(timeout: int = 90) -> dict[str, object]:
             "warm_tasks_from_cache": warm_parsed["tasks_from_cache"],
             "first_tasks_forwarded_to_jvm": first_parsed["tasks_forwarded_to_jvm"],
             "warm_tasks_forwarded_to_jvm": warm_parsed["tasks_forwarded_to_jvm"],
+            "first_plan_source": first_parsed["plan_source"],
+            "warm_plan_source": warm_parsed["plan_source"],
+            "warm_build_plan_cache_reused": warm_parsed["build_plan_cache_reused"],
             "first_configuration_cache_reused": first_parsed["configuration_cache_reused"],
             "first_configuration_cache_stored": first_parsed["configuration_cache_stored"],
             "warm_configuration_cache_reused": warm_parsed["configuration_cache_reused"],
@@ -707,6 +717,7 @@ def print_summary(results: list[dict[str, object]]) -> None:
                 f", cold {result['first_elapsed_ms']}ms/{result['first_rust_executed_tasks']} tasks, "
                 f"warm {result['warm_elapsed_ms']}ms/{result['warm_rust_executed_tasks']} tasks, "
                 f"cc reused {result['warm_configuration_cache_reused']}, "
+                f"plan {result['warm_plan_source']}, "
                 f"warm up-to-date {result['warm_tasks_up_to_date']}, "
                 f"warm skipped {result.get('warm_tasks_skipped', 0)}, "
                 f"JVM forwards {result['tasks_forwarded_to_jvm']}, "

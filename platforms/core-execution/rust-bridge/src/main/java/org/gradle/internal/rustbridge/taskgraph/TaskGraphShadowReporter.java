@@ -138,9 +138,12 @@ public class TaskGraphShadowReporter {
         if (result.isSuccess() && result.getTasksForwardedToJvm() == 0) {
             mismatchReporter.reportMatch();
             LOGGER.info(
-                "[substrate:run-build] Rust executed {} tasks from {} with JVM forwarding disabled",
+                "[substrate:run-build] Rust executed {} tasks from {} with {} up-to-date, {} no-source/skipped and {} from-cache; JVM forwarding disabled",
                 result.getTotalTasks(),
-                result.getPlanSource()
+                displayPlanSource(result.getPlanSource()),
+                result.getTasksUpToDate(),
+                result.getTasksSkipped(),
+                result.getTasksFromCache()
             );
             return result;
         }
@@ -165,6 +168,13 @@ public class TaskGraphShadowReporter {
         if (runBuildAuthoritative) {
             throw new SubstrateException("Rust authoritative run-build failed for " + buildId + ": " + reason, failure);
         }
+    }
+
+    static String displayPlanSource(String planSource) {
+        if ("build-plan-shadow".equals(planSource)) {
+            return "build-plan-cache";
+        }
+        return planSource;
     }
 
     /**

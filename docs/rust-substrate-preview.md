@@ -128,9 +128,11 @@ run, real-build dependency read-through at or below 60000 ms, and authoritative
 Rust DAG execution at or below 60000 ms total with zero JVM forwards. Cold and
 warm DAG durations are reported; cold must stay at or below 30000 ms, warm must
 stay at or below 10000 ms, and warm must be faster than cold for the checked-in
-Java-library sample. Installed authoritative file watching must also complete
-`help --watch-fs` against the local Gradle-under-test image at or below 30000 ms
-while observing Rust daemon startup/connection and active Gradle file-system
+Java-library sample. The warm Rust DAG run must report `build-plan-cache` as
+its plan source so configuration-cache replay is visible at the kernel
+admission boundary. Installed authoritative file watching must also complete
+`help --watch-fs` against the local Gradle-under-test image at or below 30000
+ms while observing Rust daemon startup/connection and active Gradle file-system
 watching.
 
 Gate 4, external dependency corpus parity (`gradle-fork-33f.4`):

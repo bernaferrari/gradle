@@ -3546,7 +3546,9 @@ mod tests {
         assert_eq!(resp.task_details.len(), 0);
         assert!(resp
             .failure_message
-            .contains("unsupported contract marker 'copy_unsupported_custom_actions'"));
+            .contains("unsupported contract marker 'copy_unsupported_custom_actions'"),
+            "unexpected failure message: {}",
+            resp.failure_message);
     }
 
     #[tokio::test]
@@ -3636,6 +3638,92 @@ mod tests {
         assert!(
             output_dir.exists(),
             "shadow IR context should create the directory"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_run_build_rejects_unsupported_cached_shadow_plan_before_dispatch() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(super::super::build_plan_shadow::BuildPlanShadowStore::new(
+            temp.path().to_path_buf(),
+        ));
+        let history = Arc::new(
+            super::super::execution_history::ExecutionHistoryServiceImpl::new(
+                temp.path().join("history"),
+            ),
+        );
+        let task_graph = Arc::new(
+            super::super::task_graph::TaskGraphServiceImpl::with_history_and_shadow(
+                history,
+                Arc::clone(&store),
+            ),
+        );
+        let svc = make_svc_with_task_graph(Arc::clone(&task_graph));
+        let build_id = "rb-shadow-unsupported";
+
+        register_chain(&svc, build_id, &[(":staleFallback", "StaleTask", &[])]).await;
+
+        store
+            .persist_plan(
+                &super::super::build_plan_ir::CanonicalBuildPlan {
+                    schema_version: super::super::build_plan_ir::BUILD_PLAN_SCHEMA_VERSION,
+                    build_id: build_id.to_string(),
+                    projects: Vec::new(),
+                    tasks: vec![super::super::build_plan_ir::CanonicalBuildPlanTask {
+                        path: ":unsafeMkdir".to_string(),
+                        project_path: ":".to_string(),
+                        implementation_id: "Mkdir".to_string(),
+                        depends_on: Vec::new(),
+                        inputs: [(
+                            "copy_unsupported_custom_actions".to_string(),
+                            "true".to_string(),
+                        )]
+                        .into_iter()
+                        .collect(),
+                        outputs: Vec::new(),
+                        worker_isolation: "compat-jvm".to_string(),
+                        should_run_after: Vec::new(),
+                        must_run_after: Vec::new(),
+                        finalized_by: Vec::new(),
+                        cacheability: "unknown".to_string(),
+                        local_state: Vec::new(),
+                        destroyables: Vec::new(),
+                        action_kind: "mkdir".to_string(),
+                        input_specs: Vec::new(),
+                        output_specs: Vec::new(),
+                        environment_inputs: Vec::new(),
+                        system_property_inputs: Vec::new(),
+                        diagnostics: Vec::new(),
+                    }],
+                    dependencies: Vec::new(),
+                    toolchains: Vec::new(),
+                    metadata: Default::default(),
+                },
+                "test-shadow",
+            )
+            .unwrap();
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: build_id.to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: HashMap::new(),
+                allow_jvm_forwarding: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.final_status, "FAILED");
+        assert_eq!(resp.plan_source, "build-plan-shadow");
+        assert_eq!(resp.tasks_forwarded_to_jvm, 0);
+        assert_eq!(resp.task_details.len(), 0);
+        assert!(
+            resp.failure_message
+                .contains("unsupported contract marker 'copy_unsupported_custom_actions'"),
+            "unexpected failure message: {}",
+            resp.failure_message
         );
     }
 
