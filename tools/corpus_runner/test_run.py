@@ -208,7 +208,6 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         results = corpus_run.run_manifest_contracts(str(manifest))
 
         self.assertIn("custom-task-unsupported-kotlin-dsl", results)
-        self.assertIn("dependency-substitution-unsupported-kotlin-dsl", results)
         self.assertIn("component-metadata-rule-unsupported-kotlin-dsl", results)
         self.assertIn("detached-configuration-unsupported-kotlin-dsl", results)
         self.assertIn("artifact-view-unsupported-kotlin-dsl", results)
@@ -240,6 +239,20 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         self.assertTrue(
             corpus_run.has_unsupported_repository_regex_filter(
                 'repositories { maven { content { includeModuleByRegex("org\\\\.gradle", "demo") } } }'
+            )
+        )
+
+    def test_exact_module_dependency_substitution_is_supported(self):
+        self.assertFalse(
+            corpus_run.has_unsupported_dependency_substitution(
+                'configurations.configureEach { resolutionStrategy.dependencySubstitution { substitute(module("org.example:original")).using(module("org.example:replacement:1.0")) } }'
+            )
+        )
+
+    def test_project_dependency_substitution_is_unsupported(self):
+        self.assertTrue(
+            corpus_run.has_unsupported_dependency_substitution(
+                'configurations.configureEach { resolutionStrategy.dependencySubstitution { substitute(module("org.example:original")).using(project(":replacement")) } }'
             )
         )
 

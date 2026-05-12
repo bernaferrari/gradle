@@ -755,6 +755,58 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
+    public void exactModuleDependencySubstitutionIsNativeReady() throws IOException {
+        File buildFile = temporaryFolder.newFile("build.gradle.kts");
+        Files.write(buildFile.toPath(), Collections.singletonList(
+            "configurations.configureEach { resolutionStrategy.dependencySubstitution { substitute(module(\"org.example:original\")).using(module(\"org.example:replacement:1.0\")) } }"
+        ), StandardCharsets.UTF_8);
+        Task task = basicFileTransformTask(
+            ":classes",
+            "classes",
+            fileCollection(),
+            fileCollection(),
+            Collections.emptyMap(),
+            false,
+            false,
+            buildFile
+        );
+
+        BuildPlanTask planTask = ProjectModelProviderAdapter.toBuildPlanTask(task, DefaultTask.class);
+        Map<String, String> inputs = planTask.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertFalse(inputs.containsKey("unsupported_dependency_semantics"));
+        assertFalse(inputs.getOrDefault("unsupported_repository_features", "").contains("dependency-substitution"));
+    }
+
+    @org.junit.Test
+    public void projectDependencySubstitutionRemainsUnsupportedDependencySemantics() throws IOException {
+        File buildFile = temporaryFolder.newFile("build.gradle.kts");
+        Files.write(buildFile.toPath(), Collections.singletonList(
+            "configurations.configureEach { resolutionStrategy.dependencySubstitution { substitute(module(\"org.example:original\")).using(project(\":replacement\")) } }"
+        ), StandardCharsets.UTF_8);
+        Task task = basicFileTransformTask(
+            ":classes",
+            "classes",
+            fileCollection(),
+            fileCollection(),
+            Collections.emptyMap(),
+            false,
+            false,
+            buildFile
+        );
+
+        BuildPlanTask planTask = ProjectModelProviderAdapter.toBuildPlanTask(task, DefaultTask.class);
+        Map<String, String> inputs = planTask.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("true", inputs.get("unsupported_dependency_semantics"));
+        assertTrue(inputs.get("unsupported_repository_features").contains("dependency-substitution:build-script"));
+    }
+
+    @org.junit.Test
     public void marksArtifactTransformsAsUnsupportedDependencySemantics() throws IOException {
         File buildFile = temporaryFolder.newFile("build.gradle.kts");
         Files.write(buildFile.toPath(), Collections.singletonList(

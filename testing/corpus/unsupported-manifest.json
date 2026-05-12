@@ -19,28 +19,6 @@
       }
     },
     {
-      "name": "dependency-substitution-unsupported-kotlin-dsl",
-      "path": "dependency-substitution-unsupported-kotlin-dsl",
-      "tasks": ["clean", "build"],
-      "expected_substrate_fail_closed": true,
-      "expected_contract": {
-        "build_file_count": 1,
-        "settings_file_count": 1,
-        "source_file_count": 1,
-        "plugins": ["java-library"],
-        "tasks": [],
-        "outputs": [],
-        "dependencies": [
-          "org.gradle.substrate:original",
-          "org.gradle.substrate:original:1.0",
-          "org.gradle.substrate:replacement:1.0"
-        ],
-        "project_dependencies": [],
-        "toolchains": ["17"],
-        "unsupported_features": ["dependency-substitution"]
-      }
-    },
-    {
       "name": "component-metadata-rule-unsupported-kotlin-dsl",
       "path": "component-metadata-rule-unsupported-kotlin-dsl",
       "tasks": ["clean", "build"],
