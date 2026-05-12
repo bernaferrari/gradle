@@ -62,6 +62,99 @@ class DogfoodRunnerTest(unittest.TestCase):
 
         self.assertIn("p: supported entries must require no_jvm_forwards", errors)
 
+    def test_parse_jvm_forwards_from_runbuild_output(self):
+        self.assertEqual(7, dogfood_run.parse_jvm_forwards("failed jvmForwarded=7"))
+        self.assertEqual(0, dogfood_run.parse_jvm_forwards("JVM forwarding disabled"))
+        self.assertEqual(-1, dogfood_run.parse_jvm_forwards("BUILD SUCCESSFUL"))
+
+    def test_summarizes_pass_and_fail_closed_results(self):
+        results = [
+            {
+                "name": "supported",
+                "expectation": "supported",
+                "match": True,
+                "upstream": {"duration_ms": 100, "task_count": 2},
+                "substrate": {"duration_ms": 50, "task_count": 2},
+                "checks": {"jvm_forward_count": 0},
+            },
+            {
+                "name": "unsupported",
+                "expectation": "fail-closed",
+                "match": True,
+                "upstream": {"duration_ms": 100, "task_count": 1},
+                "substrate": {"duration_ms": 10, "task_count": 0},
+                "checks": {"fail_closed_message": True},
+            },
+            {
+                "name": "drift",
+                "expectation": "supported",
+                "match": False,
+                "upstream": {"duration_ms": 100, "task_count": 1},
+                "substrate": {"duration_ms": 90, "task_count": 2},
+                "checks": {"jvm_forward_count": 1},
+            },
+        ]
+
+        summary = dogfood_run.summarize_execution(results)
+
+        self.assertEqual(3, summary["project_count"])
+        self.assertEqual(2, summary["matched_project_count"])
+        self.assertEqual(1, summary["zero_jvm_forward_supported_count"])
+        self.assertEqual(["drift"], summary["failed_projects"])
+
+    def test_writes_markdown_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            results = [
+                {
+                    "name": "supported",
+                    "expectation": "supported",
+                    "mode": "strict",
+                    "match": True,
+                    "upstream": {"duration_ms": 100, "task_count": 2},
+                    "substrate": {"duration_ms": 50, "task_count": 2},
+                    "checks": {"jvm_forward_count": 0},
+                }
+            ]
+            summary = dogfood_run.summarize_execution(results)
+
+            report = dogfood_run.write_markdown_report(Path(tmp), summary, results)
+            text = report.read_text(encoding="utf-8")
+
+        self.assertIn("Projects matched: 1/1", text)
+        self.assertIn("not a 100% Gradle compatibility claim", text)
+
+    def test_summary_names_task_and_output_drift_failures(self):
+        results = [
+            {
+                "name": "task-drift",
+                "expectation": "supported",
+                "match": False,
+                "upstream": {"duration_ms": 1, "task_count": 1},
+                "substrate": {"duration_ms": 1, "task_count": 2},
+                "checks": {
+                    "task_list_match": False,
+                    "output_hashes_match": True,
+                    "jvm_forward_count": 0,
+                },
+            },
+            {
+                "name": "output-drift",
+                "expectation": "supported",
+                "match": False,
+                "upstream": {"duration_ms": 1, "task_count": 1},
+                "substrate": {"duration_ms": 1, "task_count": 1},
+                "checks": {
+                    "task_list_match": True,
+                    "output_hashes_match": False,
+                    "jvm_forward_count": 0,
+                },
+            },
+        ]
+
+        summary = dogfood_run.summarize_execution(results)
+
+        self.assertEqual(["task-drift", "output-drift"], summary["failed_projects"])
+
 
 if __name__ == "__main__":
     unittest.main()
