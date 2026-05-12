@@ -236,6 +236,8 @@ pub struct CycloneDxCapturedTaskOptions {
     pub root_name: String,
     pub root_version: String,
     pub root_component_type: String,
+    pub timestamp_source_policy: String,
+    pub serial_source_policy: String,
     pub include_bom_serial_number: bool,
     pub include_metadata_resolution: bool,
     pub include_build_system: bool,
@@ -332,6 +334,8 @@ pub fn validate_captured_task_options(
         root_name,
         root_version,
         root_component_type,
+        timestamp_source_policy: value(inputs, "cyclonedx_timestamp_source_policy").to_string(),
+        serial_source_policy: value(inputs, "cyclonedx_serial_source_policy").to_string(),
         include_bom_serial_number: value(inputs, "cyclonedx_include_bom_serial_number")
             .eq_ignore_ascii_case("true"),
         include_metadata_resolution: value(inputs, "cyclonedx_include_metadata_resolution")
@@ -486,6 +490,17 @@ fn reject_unsupported_captured_options(
     options: &CycloneDxCapturedTaskOptions,
 ) -> Result<(), String> {
     let mut unsupported = Vec::new();
+    if options.timestamp_source_policy.trim() != "gradle-substrate-explicit-epoch-ms" {
+        unsupported.push("timestamp-source-policy");
+    }
+    if options.include_bom_serial_number
+        && options.serial_source_policy.trim() != "gradle-substrate-deterministic-identity"
+    {
+        unsupported.push("serial-source-policy");
+    }
+    if !options.include_bom_serial_number && options.serial_source_policy.trim() != "omitted" {
+        unsupported.push("serial-source-policy");
+    }
     if options.include_license_text {
         unsupported.push("include-license-text");
     }
@@ -2491,6 +2506,14 @@ mod tests {
                 "true".to_string(),
             ),
             (
+                "cyclonedx_timestamp_source_policy".to_string(),
+                "gradle-substrate-explicit-epoch-ms".to_string(),
+            ),
+            (
+                "cyclonedx_serial_source_policy".to_string(),
+                "gradle-substrate-deterministic-identity".to_string(),
+            ),
+            (
                 "cyclonedx_include_metadata_resolution".to_string(),
                 "true".to_string(),
             ),
@@ -2505,6 +2528,14 @@ mod tests {
         assert_eq!("org.example", options.root_group);
         assert_eq!("demo", options.root_name);
         assert_eq!("library", options.root_component_type);
+        assert_eq!(
+            "gradle-substrate-explicit-epoch-ms",
+            options.timestamp_source_policy
+        );
+        assert_eq!(
+            "gradle-substrate-deterministic-identity",
+            options.serial_source_policy
+        );
         assert!(options.include_bom_serial_number);
         assert!(options.include_metadata_resolution);
         assert!(!options.include_build_system);
@@ -2583,6 +2614,14 @@ mod tests {
             (
                 "cyclonedx_include_bom_serial_number".to_string(),
                 "true".to_string(),
+            ),
+            (
+                "cyclonedx_timestamp_source_policy".to_string(),
+                "gradle-substrate-explicit-epoch-ms".to_string(),
+            ),
+            (
+                "cyclonedx_serial_source_policy".to_string(),
+                "gradle-substrate-deterministic-identity".to_string(),
             ),
             (
                 "cyclonedx_include_build_system".to_string(),
@@ -2682,6 +2721,14 @@ mod tests {
                 "false".to_string(),
             ),
             (
+                "cyclonedx_timestamp_source_policy".to_string(),
+                "gradle-substrate-explicit-epoch-ms".to_string(),
+            ),
+            (
+                "cyclonedx_serial_source_policy".to_string(),
+                "omitted".to_string(),
+            ),
+            (
                 "cyclonedx_json_output".to_string(),
                 "/tmp/bom.json".to_string(),
             ),
@@ -2726,6 +2773,14 @@ mod tests {
                 "APPLICATION".to_string(),
             ),
             (
+                "cyclonedx_timestamp_source_policy".to_string(),
+                "gradle-substrate-explicit-epoch-ms".to_string(),
+            ),
+            (
+                "cyclonedx_serial_source_policy".to_string(),
+                "omitted".to_string(),
+            ),
+            (
                 "cyclonedx_json_output".to_string(),
                 "/tmp/bom.json".to_string(),
             ),
@@ -2765,6 +2820,14 @@ mod tests {
                 "true".to_string(),
             ),
             (
+                "cyclonedx_timestamp_source_policy".to_string(),
+                "gradle-substrate-explicit-epoch-ms".to_string(),
+            ),
+            (
+                "cyclonedx_serial_source_policy".to_string(),
+                "gradle-substrate-deterministic-identity".to_string(),
+            ),
+            (
                 "cyclonedx_include_build_environment".to_string(),
                 "true".to_string(),
             ),
@@ -2801,6 +2864,58 @@ mod tests {
         assert!(err.contains("license-choice"));
         assert!(!err.contains("build-system-environment-variable"));
         assert!(err.contains("external-references"));
+    }
+
+    #[test]
+    fn rejects_captured_contract_with_gradle_nondeterministic_identity_policy() {
+        let graph_json = serde_json::to_vec(&sample_resolution_graph()).unwrap();
+        let encoded_graph = base64::engine::general_purpose::STANDARD.encode(graph_json);
+        let inputs = BTreeMap::from([
+            (
+                "cyclonedx_resolution_graph_json_b64".to_string(),
+                encoded_graph,
+            ),
+            (
+                "cyclonedx_schema_version".to_string(),
+                "VERSION_16".to_string(),
+            ),
+            (
+                "cyclonedx_component_group".to_string(),
+                "org.example".to_string(),
+            ),
+            ("cyclonedx_component_name".to_string(), "demo".to_string()),
+            ("cyclonedx_component_version".to_string(), "1.0".to_string()),
+            (
+                "cyclonedx_project_type".to_string(),
+                "APPLICATION".to_string(),
+            ),
+            (
+                "cyclonedx_include_bom_serial_number".to_string(),
+                "true".to_string(),
+            ),
+            (
+                "cyclonedx_timestamp_source_policy".to_string(),
+                "cyclonedx-core-metadata-constructor-now".to_string(),
+            ),
+            (
+                "cyclonedx_serial_source_policy".to_string(),
+                "cyclonedx-gradle-random-uuid".to_string(),
+            ),
+            (
+                "cyclonedx_json_output".to_string(),
+                "/tmp/bom.json".to_string(),
+            ),
+            (
+                "cyclonedx_identity_task_path".to_string(),
+                ":cyclonedxDirectBom".to_string(),
+            ),
+        ]);
+
+        let err = draft_contract_from_captured_inputs(&inputs, "build-123", 1_778_595_445_123)
+            .unwrap_err();
+
+        assert!(err.contains("timestamp-source-policy"));
+        assert!(err.contains("serial-source-policy"));
     }
 
     #[test]
