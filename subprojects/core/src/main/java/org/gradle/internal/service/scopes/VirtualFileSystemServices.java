@@ -88,6 +88,8 @@ import org.gradle.internal.rustbridge.snapshot.RustValueSnapshotClient;
 import org.gradle.internal.rustbridge.snapshot.ShadowingInputFingerprinter;
 import org.gradle.internal.rustbridge.snapshot.ShadowingValueSnapshotter;
 import org.gradle.internal.rustbridge.snapshot.SnapshotHashDelegate;
+import org.gradle.internal.rustbridge.watch.RustFileWatchClient;
+import org.gradle.internal.rustbridge.watch.RustFileWatchWiring;
 import org.gradle.internal.serialize.HashCodeSerializer;
 import org.gradle.internal.service.PrivateService;
 import org.gradle.internal.service.Provides;
@@ -224,7 +226,8 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
             FileChangeListeners fileChangeListeners,
             NativeServices.FileEventFunctionsProvider fileEvents,
             FileSystem fileSystem,
-            WatchableFileSystemDetector watchableFileSystemDetector
+            WatchableFileSystemDetector watchableFileSystemDetector,
+            @Nullable RustFileWatchClient rustFileWatchClient
         ) {
             CaseSensitivity caseSensitivity = fileSystem.isCaseSensitive() ? CASE_SENSITIVE : CASE_INSENSITIVE;
             SnapshotHierarchy root = DefaultSnapshotHierarchy.empty(caseSensitivity);
@@ -234,6 +237,7 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
                 nativeCapabilities,
                 fileEvents,
                 fileWatchingFilter::isImmutableLocation);
+            maybeFactory = RustFileWatchWiring.wrapIfEnabled(maybeFactory, rustFileWatchClient);
 
             BuildLifecycleAwareVirtualFileSystem virtualFileSystem = maybeFactory
                 .<BuildLifecycleAwareVirtualFileSystem>map(watcherRegistryFactory -> new WatchingVirtualFileSystem(

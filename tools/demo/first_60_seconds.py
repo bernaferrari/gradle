@@ -46,7 +46,13 @@ AUTHORITATIVE_DAG_COLD_THRESHOLD_MS = 30000
 AUTHORITATIVE_DAG_WARM_THRESHOLD_MS = 10000
 
 
-def run(cmd: list[str], *, timeout: int = 60, capture: bool = True) -> subprocess.CompletedProcess[str]:
+def run(
+    cmd: list[str],
+    *,
+    timeout: int = 60,
+    capture: bool = True,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         cmd,
         cwd=ROOT,
@@ -54,6 +60,7 @@ def run(cmd: list[str], *, timeout: int = 60, capture: bool = True) -> subproces
         capture_output=capture,
         timeout=timeout,
         check=False,
+        env=env,
     )
 
 
@@ -176,6 +183,64 @@ def measure_cargo_test(label: str, test_filter: str, timeout: int) -> dict[str, 
         "runtime_metric_ms": metric_ms,
         "threshold_ms": threshold_ms,
         "test_filter": test_filter,
+        "tail": "\n".join(output.strip().splitlines()[-12:]),
+    }
+
+
+def measure_installed_authoritative_file_watch(timeout: int = 30) -> dict[str, object]:
+    gradle = resolve_gradle_under_test()
+    if gradle is None:
+        return {
+            "name": "installed_authoritative_file_watch",
+            "ok": False,
+            "skipped": True,
+            "elapsed_ms": 0,
+            "threshold_ms": 30000,
+            "tail": "Skipped: build/gradle-under-test/bin/gradle was not found. Build :distributions-full:install or set GRADLE_UNDER_TEST_BIN.",
+        }
+
+    state_dir = ROOT / "build" / "first60-filewatch-state"
+    project = ROOT / "testing" / "corpus" / "java-library-kotlin-dsl"
+    java_tool_options = " ".join(
+        [
+            os.environ.get("JAVA_TOOL_OPTIONS", "").strip(),
+            "-Dorg.gradle.rust.substrate.enabled=true",
+            "-Dorg.gradle.rust.substrate.filewatch.enabled=true",
+            "-Dorg.gradle.rust.substrate.filewatch.authoritative=true",
+            f"-Dorg.gradle.rust.substrate.daemon.path={DAEMON}",
+            f"-Dorg.gradle.rust.substrate.state.dir={state_dir}",
+        ]
+    ).strip()
+    env = os.environ.copy()
+    env["JAVA_TOOL_OPTIONS"] = java_tool_options
+
+    started = time.perf_counter()
+    completed = run(
+        [
+            str(gradle),
+            "-p",
+            str(project),
+            "help",
+            "--watch-fs",
+            "--no-daemon",
+            "--console=plain",
+            "--info",
+        ],
+        timeout=timeout,
+        env=env,
+    )
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+    output = completed.stdout + completed.stderr
+    rust_started = "[substrate] Daemon started successfully" in output or "[substrate] Connecting to existing daemon" in output
+    watching_active = "File system watching is active" in output
+    ok = completed.returncode == 0 and rust_started and watching_active and elapsed_ms <= 30000
+    return {
+        "name": "installed_authoritative_file_watch",
+        "ok": ok,
+        "elapsed_ms": elapsed_ms,
+        "threshold_ms": 30000,
+        "rust_daemon_observed": rust_started,
+        "watching_active": watching_active,
         "tail": "\n".join(output.strip().splitlines()[-12:]),
     }
 
@@ -702,6 +767,7 @@ def main() -> int:
                 "file_watch_reports_first_change_quickly",
                 timeout=60,
             ),
+            measure_installed_authoritative_file_watch(),
         ]
 
     def proof_results() -> list[dict[str, object]]:
