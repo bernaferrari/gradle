@@ -1579,7 +1579,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if (!"false".equalsIgnoreCase(includeBomSerialNumber)) {
             fields.add("serial-source-policy");
         }
-        if ("true".equalsIgnoreCase(includeLicenseText)) {
+        if (!"false".equalsIgnoreCase(includeLicenseText)) {
             fields.add("license-text-rendering");
         }
         if ("true".equalsIgnoreCase(organizationalEntityPresent) && (organizationalEntityJsonBase64 == null || organizationalEntityJsonBase64.isEmpty())) {
