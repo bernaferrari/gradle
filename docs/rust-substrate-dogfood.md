@@ -96,8 +96,8 @@ Summary from `build/dogfood-oss/dogfood-summary.md`:
 | Rust RunBuild markers | 4/4 |
 | Rust RunBuild executions | 1/4 |
 | Task-graph captures | 4/4 |
-| Upstream observed wall time | 35526 ms |
-| Rust substrate observed wall time | 108959 ms |
+| Upstream observed wall time | 31275 ms |
+| Rust substrate observed wall time | 105104 ms |
 | Upstream task total | 33 |
 | Rust substrate task total | 11 |
 
@@ -108,11 +108,12 @@ executed tasks, zero JVM forwards, and task/output/hash parity.
 broader `clean testClasses` slice: it now rejects with a precise CycloneDX SBOM
 diagnostic because `:cyclonedxBom` and `:cyclonedxDirectBom` declare SBOM
 outputs and cannot be treated as lifecycle/no-op tasks. `mockito-main` and
-`okio-root` remain strict fail-closed gates with
-`settings/includeBuild/buildSrc composite setup`; the diagnostic preserves the
-raw marker `composite-substitution:settings` and explains that Rust cannot yet
-separate JVM-owned composite configuration setup from selected root task
-execution. Earlier native-ready smoke runs delegated before concrete Rust
+`okio-root` now pass the earlier coarse composite/buildSrc gate and fail closed
+at selected-task admission on Kotlin/build-logic tasks such as `KotlinCompile`,
+precompiled script plugin generation, and plugin descriptor generation. That is
+the narrower honest boundary: Rust has separated configuration-only composite
+setup from root task admission, but it still must not approximate Kotlin
+build-logic execution. Earlier native-ready smoke runs delegated before concrete Rust
 execution, so they are no longer counted as Rust-executed support evidence.
 
 Related docs:
