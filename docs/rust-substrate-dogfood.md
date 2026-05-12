@@ -48,8 +48,10 @@ Summary from `build/dogfood-current/dogfood-summary.md`:
 | Task-graph captures | 7/7 |
 | Daemon started signals | 0 |
 | Daemon reused signals | 7 |
-| Upstream observed wall time | 21506 ms |
-| Rust substrate observed wall time | 25467 ms |
+| Upstream observed wall time | 19784 ms |
+| Rust substrate observed wall time | 23112 ms |
+| Rust bootstrap/RunBuild observed time | 3740 ms |
+| Non-Rust/Gradle overhead estimate | 19372 ms |
 | Upstream task total | 109 |
 | Rust substrate task total | 105 |
 
@@ -57,6 +59,13 @@ The dogfood runner owns one prewarmed Rust daemon for the manifest execution
 and passes its shared state directory to each substrate invocation. This removes
 per-project Rust daemon startup from the measured substrate path, but it does
 not yet make the full dogfood set faster than upstream.
+
+The current timing split shows the remaining gap is not primarily inside the
+Rust task executor. The measured Rust bootstrap/RunBuild portion is about
+3.7s across the whole local dogfood manifest, while the non-Rust/Gradle
+invocation and configuration overhead is about 19.4s. The next performance
+work should therefore target skipping or amortizing JVM-side configuration for
+warm supported runs, not micro-optimizing individual Rust task executors first.
 
 ## Boundaries
 
