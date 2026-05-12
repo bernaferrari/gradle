@@ -1,9 +1,9 @@
 {
   "schema": "gradle-substrate.dogfood-manifest.v1",
   "root": ".",
-  "minimum_projects": 3,
+  "minimum_projects": 4,
   "minimum_supported_projects": 1,
-  "minimum_fail_closed_projects": 2,
+  "minimum_fail_closed_projects": 3,
   "description": "Pinned external OSS Gradle projects for the next Rust substrate dogfood layer. These entries are not vendored into the repository; a fetch/cache runner should clone them under build/dogfood-oss before execution.",
   "projects": [
     {
@@ -27,6 +27,26 @@
         "output_hashes": true,
         "archive_entries": true,
         "no_jvm_forwards": true
+      }
+    },
+    {
+      "name": "spring-petclinic-testclasses",
+      "path": "spring-petclinic-testclasses",
+      "source": {
+        "kind": "git",
+        "url": "https://github.com/spring-projects/spring-petclinic.git",
+        "ref": "c7ee170434ec3e369fdc9201290ba2ea4c92b557",
+        "subdir": ".",
+        "description": "Spring PetClinic pinned to an immutable commit for the broader testClasses gate."
+      },
+      "tasks": ["clean", "testClasses"],
+      "mode": "strict",
+      "expectation": "fail-closed",
+      "timeout_seconds": 300,
+      "reason": "Documents the next Spring PetClinic blocker after compileJava: CycloneDX SBOM task outputs need native support before the broader testClasses slice can be admitted.",
+      "checks": {
+        "fail_closed_diagnostic": "requires native CycloneDX SBOM generation support",
+        "no_task_by_task_fallback": true
       }
     },
     {

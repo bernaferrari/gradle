@@ -89,22 +89,26 @@ Summary from `build/dogfood-oss/dogfood-summary.md`:
 
 | Metric | Result |
 | --- | ---: |
-| Projects matched | 3/3 |
+| Projects matched | 4/4 |
 | Supported projects matched | 1/1 |
-| Fail-closed projects matched | 2/2 |
+| Fail-closed projects matched | 3/3 |
 | Supported projects with zero JVM forwards | 1/1 |
-| Rust RunBuild markers | 3/3 |
-| Rust RunBuild executions | 1/3 |
-| Task-graph captures | 3/3 |
-| Upstream observed wall time | 76962 ms |
-| Rust substrate observed wall time | 99426 ms |
-| Upstream task total | 24 |
-| Rust substrate task total | 2 |
+| Rust RunBuild markers | 4/4 |
+| Rust RunBuild executions | 1/4 |
+| Task-graph captures | 4/4 |
+| Upstream observed wall time | 35526 ms |
+| Rust substrate observed wall time | 108959 ms |
+| Upstream task total | 33 |
+| Rust substrate task total | 11 |
 
 `spring-petclinic` now runs the selected `clean compileJava` slice through
 strict Rust RunBuild with `build-plan-cache` as the plan source, two Rust
-executed tasks, zero JVM forwards, and task/output/hash parity. `mockito-main`
-and `okio-root` remain strict fail-closed gates with
+executed tasks, zero JVM forwards, and task/output/hash parity.
+`spring-petclinic-testclasses` is a separate strict fail-closed gate for the
+broader `clean testClasses` slice: it now rejects with a precise CycloneDX SBOM
+diagnostic because `:cyclonedxBom` and `:cyclonedxDirectBom` declare SBOM
+outputs and cannot be treated as lifecycle/no-op tasks. `mockito-main` and
+`okio-root` remain strict fail-closed gates with
 `settings/includeBuild/buildSrc composite setup`; the diagnostic preserves the
 raw marker `composite-substitution:settings` and explains that Rust cannot yet
 separate JVM-owned composite configuration setup from selected root task
