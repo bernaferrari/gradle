@@ -652,17 +652,24 @@ fn execution_context_declares_composite_build(context_json: &str) -> bool {
         .filter_map(|paths| paths.as_array())
         .flat_map(|paths| paths.iter())
         .filter_map(|path| path.as_str())
-        .filter_map(project_dir_from_build_path)
+        .filter_map(project_dir_from_context_path)
         .any(|project_dir| settings_declares_included_build(&project_dir))
 }
 
-fn project_dir_from_build_path(path: &str) -> Option<String> {
-    let parts = path.split('/').collect::<Vec<_>>();
-    let build_index = parts.iter().position(|part| *part == "build")?;
-    if build_index == 0 {
-        return None;
-    }
-    Some(parts[..build_index].join("/"))
+fn project_dir_from_context_path(path: &str) -> Option<String> {
+    let path = Path::new(path);
+    let start = if path.is_dir() {
+        path
+    } else {
+        path.parent().unwrap_or(path)
+    };
+    start
+        .ancestors()
+        .find(|ancestor| {
+            ancestor.join("settings.gradle.kts").is_file()
+                || ancestor.join("settings.gradle").is_file()
+        })
+        .map(|ancestor| ancestor.to_string_lossy().into_owned())
 }
 
 fn logical_gradle_task_type(simple: &str) -> String {
@@ -2534,6 +2541,48 @@ mod tests {
         .to_string();
 
         assert!(execution_context_declares_composite_build(&context));
+    }
+
+    #[test]
+    fn test_project_dir_from_context_path_uses_nearest_settings_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::write(repo.join("settings.gradle.kts"), "includeBuild(\"tools\")").unwrap();
+        let outer = repo.join("build/dogfood/project");
+        std::fs::create_dir_all(&outer).unwrap();
+        std::fs::write(
+            outer.join("settings.gradle.kts"),
+            "rootProject.name = \"project\"",
+        )
+        .unwrap();
+        let output = outer
+            .join("build/classes/java/main/App.class")
+            .to_string_lossy()
+            .into_owned();
+        let source = outer
+            .join("src/main/java/App.java")
+            .to_string_lossy()
+            .into_owned();
+
+        assert_eq!(
+            project_dir_from_context_path(&output).as_deref(),
+            Some(outer.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            project_dir_from_context_path(&source).as_deref(),
+            Some(outer.to_string_lossy().as_ref())
+        );
+
+        let context = serde_json::json!({
+            "source_files": [source],
+            "output_files": [output]
+        })
+        .to_string();
+        assert!(
+            !execution_context_declares_composite_build(&context),
+            "outer checkout settings must not make copied dogfood projects look composite"
+        );
     }
 
     #[test]

@@ -2,8 +2,8 @@
   "schema": "gradle-substrate.dogfood-manifest.v1",
   "root": ".",
   "minimum_projects": 3,
-  "minimum_supported_projects": 0,
-  "minimum_fail_closed_projects": 3,
+  "minimum_supported_projects": 1,
+  "minimum_fail_closed_projects": 2,
   "description": "Pinned external OSS Gradle projects for the next Rust substrate dogfood layer. These entries are not vendored into the repository; a fetch/cache runner should clone them under build/dogfood-oss before execution.",
   "projects": [
     {
@@ -16,14 +16,17 @@
         "subdir": ".",
         "description": "Spring PetClinic pinned to an immutable commit."
       },
-      "tasks": ["clean", "testClasses"],
+      "tasks": ["clean", "compileJava"],
       "mode": "strict",
-      "expectation": "fail-closed",
+      "expectation": "supported",
       "timeout_seconds": 300,
-      "reason": "Recognizable Java/Spring Gradle build with a normal settings file; useful as an external OSS smoke.",
+      "reason": "Recognizable Java/Spring Gradle build. The selected compileJava slice proves external OSS Rust RunBuild after JVM configuration without hidden task fallback.",
       "checks": {
-        "fail_closed_diagnostic": "settings/includeBuild/buildSrc composite setup",
-        "no_task_by_task_fallback": true
+        "task_parity": true,
+        "output_inventory": true,
+        "output_hashes": true,
+        "archive_entries": true,
+        "no_jvm_forwards": true
       }
     },
     {

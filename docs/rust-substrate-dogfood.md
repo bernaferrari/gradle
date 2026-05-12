@@ -90,24 +90,25 @@ Summary from `build/dogfood-oss/dogfood-summary.md`:
 | Metric | Result |
 | --- | ---: |
 | Projects matched | 3/3 |
-| Supported projects matched | 0/0 |
-| Fail-closed projects matched | 3/3 |
-| Supported projects with zero JVM forwards | 0/0 |
+| Supported projects matched | 1/1 |
+| Fail-closed projects matched | 2/2 |
+| Supported projects with zero JVM forwards | 1/1 |
 | Rust RunBuild markers | 3/3 |
-| Rust RunBuild executions | 0/3 |
+| Rust RunBuild executions | 1/3 |
 | Task-graph captures | 3/3 |
-| Upstream observed wall time | 27981 ms |
-| Rust substrate observed wall time | 104262 ms |
-| Upstream task total | 31 |
-| Rust substrate task total | 9 |
+| Upstream observed wall time | 76962 ms |
+| Rust substrate observed wall time | 99426 ms |
+| Upstream task total | 24 |
+| Rust substrate task total | 2 |
 
-The external entries are currently strict fail-closed gates. `spring-petclinic`,
-`mockito-main`, and `okio-root` all reject before Rust execution with
-`settings/includeBuild/buildSrc composite setup`. The precise kernel diagnostic
-also preserves the raw marker `composite-substitution:settings` and explains
-that Rust cannot yet separate JVM-owned composite configuration setup from
-selected root task execution, so strict Rust execution is rejected before task
-dispatch. Earlier native-ready smoke runs delegated before concrete Rust
+`spring-petclinic` now runs the selected `clean compileJava` slice through
+strict Rust RunBuild with `build-plan-cache` as the plan source, two Rust
+executed tasks, zero JVM forwards, and task/output/hash parity. `mockito-main`
+and `okio-root` remain strict fail-closed gates with
+`settings/includeBuild/buildSrc composite setup`; the diagnostic preserves the
+raw marker `composite-substitution:settings` and explains that Rust cannot yet
+separate JVM-owned composite configuration setup from selected root task
+execution. Earlier native-ready smoke runs delegated before concrete Rust
 execution, so they are no longer counted as Rust-executed support evidence.
 
 Related docs:
