@@ -1098,23 +1098,74 @@ fn read_effective_pom_component_metadata(
     if depth >= 8 {
         return document.metadata;
     }
-    let Some(parent_relative_path) = document.parent_relative_path else {
+    let Some(parent_path) = resolve_parent_pom_path(pom_path, &document) else {
         return document.metadata;
     };
-    if parent_relative_path.trim().is_empty() {
-        return document.metadata;
-    }
-    let parent_path = pom_path
-        .parent()
-        .unwrap_or_else(|| Path::new(""))
-        .join(parent_relative_path)
-        .components()
-        .collect::<std::path::PathBuf>();
     let Ok(parent_pom) = std::fs::read_to_string(&parent_path) else {
         return document.metadata;
     };
     let parent = read_effective_pom_component_metadata(&parent_path, &parent_pom, depth + 1);
     merge_parent_pom_metadata(parent, document.metadata)
+}
+
+fn resolve_parent_pom_path(
+    pom_path: &Path,
+    document: &PomComponentMetadataDocument,
+) -> Option<std::path::PathBuf> {
+    if let Some(parent_relative_path) = document.parent_relative_path.as_deref() {
+        if !parent_relative_path.trim().is_empty() {
+            let parent_path = pom_path
+                .parent()
+                .unwrap_or_else(|| Path::new(""))
+                .join(parent_relative_path)
+                .components()
+                .collect::<std::path::PathBuf>();
+            if parent_path.exists() {
+                return Some(parent_path);
+            }
+        }
+    }
+    resolve_parent_pom_from_gradle_module_cache(pom_path, document)
+}
+
+fn resolve_parent_pom_from_gradle_module_cache(
+    pom_path: &Path,
+    document: &PomComponentMetadataDocument,
+) -> Option<std::path::PathBuf> {
+    if document.parent_group.trim().is_empty()
+        || document.parent_artifact.trim().is_empty()
+        || document.parent_version.trim().is_empty()
+    {
+        return None;
+    }
+    let files_root = gradle_module_cache_files_root(pom_path)?;
+    let parent_dir = files_root
+        .join(&document.parent_group)
+        .join(&document.parent_artifact)
+        .join(&document.parent_version);
+    let expected_name = format!(
+        "{}-{}.pom",
+        document.parent_artifact, document.parent_version
+    );
+    let entries = std::fs::read_dir(parent_dir).ok()?;
+    for entry in entries.flatten() {
+        let candidate = entry.path().join(&expected_name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn gradle_module_cache_files_root(pom_path: &Path) -> Option<std::path::PathBuf> {
+    let mut root = std::path::PathBuf::new();
+    for component in pom_path.components() {
+        root.push(component.as_os_str());
+        if component.as_os_str() == "files-2.1" {
+            return Some(root);
+        }
+    }
+    None
 }
 
 fn merge_parent_pom_metadata(
@@ -1154,6 +1205,9 @@ fn merge_parent_pom_metadata(
 struct PomComponentMetadataDocument {
     metadata: PomComponentMetadata,
     parent_relative_path: Option<String>,
+    parent_group: String,
+    parent_artifact: String,
+    parent_version: String,
 }
 
 fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
@@ -1162,6 +1216,9 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
 
     let mut metadata = PomComponentMetadata::default();
     let mut parent_relative_path = None;
+    let mut parent_group = String::new();
+    let mut parent_artifact = String::new();
+    let mut parent_version = String::new();
     let mut path = Vec::<String>::new();
     let mut buf = Vec::new();
     let mut current_license_name = String::new();
@@ -1200,6 +1257,23 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
                             && relative_path == "relativePath" =>
                     {
                         parent_relative_path = Some(text);
+                    }
+                    [project, parent, group_id]
+                        if project == "project" && parent == "parent" && group_id == "groupId" =>
+                    {
+                        parent_group = text;
+                    }
+                    [project, parent, artifact_id]
+                        if project == "project"
+                            && parent == "parent"
+                            && artifact_id == "artifactId" =>
+                    {
+                        parent_artifact = text;
+                    }
+                    [project, parent, version]
+                        if project == "project" && parent == "parent" && version == "version" =>
+                    {
+                        parent_version = text;
                     }
                     [project, organization, name]
                         if project == "project"
@@ -1331,6 +1405,9 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
     PomComponentMetadataDocument {
         metadata: normalize_pom_component_metadata(metadata),
         parent_relative_path,
+        parent_group,
+        parent_artifact,
+        parent_version,
     }
 }
 
@@ -2602,6 +2679,77 @@ mod tests {
                 url: "https://licenses.example.test/custom".to_string(),
             },
         }));
+    }
+
+    #[test]
+    fn inherits_parent_pom_metadata_from_gradle_module_cache_coordinates() {
+        let dir = tempfile::tempdir().unwrap();
+        let files_root = dir.path().join("modules-2").join("files-2.1");
+        let parent_dir = files_root
+            .join("org.parent")
+            .join("parent-bom")
+            .join("1.0")
+            .join("parent-hash");
+        let child_dir = files_root
+            .join("org.child")
+            .join("child-lib")
+            .join("2.0")
+            .join("child-hash");
+        std::fs::create_dir_all(&parent_dir).unwrap();
+        std::fs::create_dir_all(&child_dir).unwrap();
+        std::fs::write(
+            parent_dir.join("parent-bom-1.0.pom"),
+            r#"
+<project>
+  <description>Repository parent description</description>
+  <organization>
+    <name>Repository Parent Publisher</name>
+  </organization>
+  <licenses>
+    <license>
+      <name>MIT License</name>
+    </license>
+  </licenses>
+</project>
+"#,
+        )
+        .unwrap();
+        let child_pom = child_dir.join("child-lib-2.0.pom");
+        std::fs::write(
+            &child_pom,
+            r#"
+<project>
+  <parent>
+    <groupId>org.parent</groupId>
+    <artifactId>parent-bom</artifactId>
+    <version>1.0</version>
+    <relativePath>../missing-parent.xml</relativePath>
+  </parent>
+  <name>Child From Cache</name>
+</project>
+"#,
+        )
+        .unwrap();
+
+        let metadata = read_effective_pom_component_metadata(
+            &child_pom,
+            &std::fs::read_to_string(&child_pom).unwrap(),
+            0,
+        );
+
+        assert_eq!("Child From Cache", metadata.name);
+        assert_eq!("Repository parent description", metadata.description);
+        assert_eq!("Repository Parent Publisher", metadata.publisher);
+        assert_eq!(
+            vec![CycloneDxLicenseChoice {
+                license: CycloneDxLicense {
+                    id: "MIT".to_string(),
+                    name: String::new(),
+                    url: "https://opensource.org/license/mit".to_string(),
+                },
+            }],
+            metadata.licenses
+        );
     }
 
     #[test]
