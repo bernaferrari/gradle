@@ -14,7 +14,7 @@
         "subdir": ".",
         "description": "Spring PetClinic pinned to an immutable commit."
       },
-      "tasks": ["help"],
+      "tasks": ["clean", "classes"],
       "mode": "native-ready-default",
       "expectation": "supported-or-fail-closed",
       "timeout_seconds": 300,
@@ -23,6 +23,9 @@
         "task_parity": true,
         "task_order": false,
         "output_inventory": true,
+        "ignore_output_hash_patterns": [
+          "build/resources/main/META-INF/sbom/.*"
+        ],
         "no_jvm_forwards": true,
         "fail_closed_diagnostic": "required-if-not-supported"
       }

@@ -420,6 +420,24 @@ class DogfoodRunnerTest(unittest.TestCase):
         self.assertTrue(result["match"])
         self.assertTrue(result["checks"]["task_set_match"])
 
+    def test_ignored_hash_differences_are_pattern_scoped(self):
+        ignored = dogfood_run.ignored_hash_differences(
+            {
+                "build/resources/main/META-INF/sbom/application.cdx.json": "a",
+                "build/classes/App.class": "a",
+            },
+            {
+                "build/resources/main/META-INF/sbom/application.cdx.json": "b",
+                "build/classes/App.class": "b",
+            },
+            [r"build/resources/main/META-INF/sbom/.*"],
+        )
+
+        self.assertEqual(
+            {"build/resources/main/META-INF/sbom/application.cdx.json"},
+            ignored,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
