@@ -630,6 +630,26 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
+    public void marksCycloneDxUnknownLicenseTextPolicyAsMissingContractField() throws IOException {
+        File inputJar = temporaryFolder.newFile("runtime.jar");
+        File outputJson = temporaryFolder.newFile("bom.json");
+        Task cyclonedx = cyclonedxDirectTask(inputJar, outputJson, null, Boolean.FALSE, null);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(cyclonedx, CyclonedxDirectTask.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("false", inputs.get("cyclonedx_include_bom_serial_number"));
+        assertEquals("omitted", inputs.get("cyclonedx_serial_source_policy"));
+        assertFalse(inputs.containsKey("cyclonedx_include_license_text"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("license-text-rendering"));
+        assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("serial-source-policy"));
+        assertEquals("true", inputs.get("requires_jvm_task_execution"));
+        assertFalse(inputs.containsKey("sbom_contract_json_b64"));
+    }
+
+    @org.junit.Test
     public void capturesNativeReadyStartScriptsContractFromTaskModel() throws IOException {
         File jarFile = temporaryFolder.newFile("corpus-app-1.0.jar");
         File outputDir = temporaryFolder.newFolder("build/scripts");
@@ -1882,6 +1902,16 @@ public class ProjectModelProviderAdapterTest {
         ConfigurationContainer configurations,
         Boolean includeBomSerialNumber
     ) {
+        return cyclonedxDirectTask(runtimeJar, outputJson, configurations, includeBomSerialNumber, Boolean.TRUE);
+    }
+
+    private static Task cyclonedxDirectTask(
+        File runtimeJar,
+        File outputJson,
+        ConfigurationContainer configurations,
+        Boolean includeBomSerialNumber,
+        Boolean includeLicenseText
+    ) {
         FileCollection inputs = fileCollection(runtimeJar);
         FileCollection outputs = fileCollection(outputJson);
         Project project = proxy(Project.class, (proxy, method, args) -> {
@@ -1944,7 +1974,7 @@ public class ProjectModelProviderAdapterTest {
                 case "getIncludeMetadataResolution":
                     return new ObjectProvider(false);
                 case "getIncludeLicenseText":
-                    return new ObjectProvider(true);
+                    return includeLicenseText == null ? null : new ObjectProvider(includeLicenseText);
                 case "getOrganizationalEntity":
                     return new ObjectProvider(new TestOrganizationalEntity());
                 case "getLicenseChoice":
