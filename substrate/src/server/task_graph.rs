@@ -4,7 +4,10 @@ use std::path::Path;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use base64::{
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+    Engine as _,
+};
 use dashmap::DashMap;
 use sha2::{Digest, Sha256};
 use tonic::{Request, Response, Status};
@@ -528,6 +531,9 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
             compat_task_type(task, "org.gradle.api.tasks.compile.JavaCompile")
         }
         ("archive", "Jar") | (_, "Jar") => "Jar".to_string(),
+        ("archive", "BootJar") | (_, "BootJar") if boot_jar_contract_complete(task) => {
+            "Jar".to_string()
+        }
         ("archive", "Zip") | (_, "Zip") => "Zip".to_string(),
         ("archive", "War") | (_, "War") => "War".to_string(),
         ("archive", "Ear") | (_, "Ear") => "Ear".to_string(),
@@ -570,6 +576,9 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
         }
         ("documentation", "Javadoc") | (_, "Javadoc") => {
             compat_task_type(task, "org.gradle.api.tasks.javadoc.Javadoc")
+        }
+        (_, "ResolveMainClassName") if static_write_file_contract_complete(task) => {
+            "WriteFile".to_string()
         }
         ("jvm-task", "DefaultTask") | (_, "DefaultTask")
             if static_write_file_contract_complete(task) =>
@@ -640,12 +649,13 @@ fn parse_include_build_paths(text: &str) -> Vec<String> {
 }
 
 fn logical_gradle_task_type(simple: &str) -> String {
-    const KNOWN_TASK_TYPES: [&str; 23] = [
+    const KNOWN_TASK_TYPES: [&str; 25] = [
         "JavaCompile",
         "KotlinCompile",
         "GroovyCompile",
         "ScalaCompile",
         "Jar",
+        "BootJar",
         "Zip",
         "War",
         "Ear",
@@ -664,6 +674,7 @@ fn logical_gradle_task_type(simple: &str) -> String {
         "Symlink",
         "Help",
         "Wrapper",
+        "ResolveMainClassName",
     ];
     for task_type in KNOWN_TASK_TYPES {
         if simple == task_type || simple.starts_with(&format!("{task_type}_")) {
@@ -770,6 +781,9 @@ fn enrich_task_contract_from_graph(
 
     if is_archive_task(task) {
         add_archive_convention_dependencies(task, task_outputs);
+    }
+    if is_resolve_main_class_name_task(task) {
+        infer_resolved_main_class_output(task);
     }
 }
 
@@ -879,6 +893,97 @@ fn archive_convention_producer_paths(task: &CanonicalBuildPlanTask) -> Vec<Strin
         .iter()
         .map(|name| format!("{prefix}{name}"))
         .collect()
+}
+
+fn is_resolve_main_class_name_task(task: &CanonicalBuildPlanTask) -> bool {
+    let simple = task
+        .implementation_id
+        .rsplit('.')
+        .next()
+        .unwrap_or(task.implementation_id.as_str());
+    logical_gradle_task_type(simple) == "ResolveMainClassName"
+}
+
+fn infer_resolved_main_class_output(task: &mut CanonicalBuildPlanTask) {
+    if has_input_value(task, "static_output_text_b64") || output_paths(task).len() != 1 {
+        return;
+    }
+    let Some(project_dir) = output_paths(task)
+        .into_iter()
+        .next()
+        .and_then(|output| project_dir_from_build_output(Path::new(&output)))
+    else {
+        return;
+    };
+    let Some(main_class) = discover_java_main_class(&project_dir.join("src/main/java")) else {
+        return;
+    };
+    set_value_input(
+        task,
+        "static_output_text_b64",
+        &STANDARD.encode(main_class),
+        "resolve-main-class",
+        "scalar",
+    );
+}
+
+fn project_dir_from_build_output(output: &Path) -> Option<std::path::PathBuf> {
+    let mut path = output.parent()?;
+    while path.file_name().and_then(|name| name.to_str()) != Some("build") {
+        path = path.parent()?;
+    }
+    path.parent().map(Path::to_path_buf)
+}
+
+fn discover_java_main_class(source_root: &Path) -> Option<String> {
+    let mut candidates = Vec::new();
+    collect_java_main_class_candidates(source_root, &mut candidates);
+    candidates.sort_unstable();
+    (candidates.len() == 1).then(|| candidates.remove(0))
+}
+
+fn collect_java_main_class_candidates(dir: &Path, candidates: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
+            collect_java_main_class_candidates(&path, candidates);
+            continue;
+        }
+        if path.extension().and_then(|ext| ext.to_str()) != Some("java") {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if !text.contains("static void main") {
+            continue;
+        }
+        let package = text
+            .lines()
+            .map(str::trim)
+            .find_map(|line| {
+                line.strip_prefix("package ")
+                    .and_then(|rest| rest.strip_suffix(';'))
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+            })
+            .unwrap_or_default();
+        let Some(class_name) = path.file_stem().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if package.is_empty() {
+            candidates.push(class_name.to_string());
+        } else {
+            candidates.push(format!("{package}.{class_name}"));
+        }
+    }
 }
 
 fn is_test_task(task: &CanonicalBuildPlanTask) -> bool {
@@ -1685,6 +1790,12 @@ fn exec_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
 fn java_exec_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
     has_input_value(task, "main_class")
         && (has_input_value(task, "classpath") || inferred_java_exec_classpath(task).is_some())
+}
+
+fn boot_jar_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
+    has_outputs(task)
+        && has_input_value(task, "copy_file_mappings")
+        && !has_input_value_equal(task, "copy_contains_symlinks", "true")
 }
 
 fn javadoc_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
@@ -2576,6 +2687,55 @@ mod tests {
             system_property_inputs: Vec::new(),
             diagnostics: Vec::new(),
         }
+    }
+
+    #[test]
+    fn test_resolve_main_class_name_infers_static_write_file_contract() {
+        let temp = tempfile::tempdir().unwrap();
+        let source_dir = temp.path().join("src/main/java/com/example");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::write(
+            source_dir.join("App.java"),
+            "package com.example;\npublic class App { public static void main(String[] args) {} }\n",
+        )
+        .unwrap();
+        let mut task = canonical_task(
+            ":resolveMainClassName",
+            "org.springframework.boot.gradle.plugin.ResolveMainClassName",
+            Vec::new(),
+            vec![temp
+                .path()
+                .join("build/resolvedMainClassName")
+                .to_string_lossy()
+                .into_owned()],
+        );
+
+        enrich_task_contract_from_graph(&mut task, &HashMap::new(), &[]);
+
+        assert_eq!(executable_task_type(&task), "WriteFile");
+        assert_eq!(
+            task.inputs.get("static_output_text_b64"),
+            Some(&STANDARD.encode("com.example.App"))
+        );
+    }
+
+    #[test]
+    fn test_boot_jar_with_captured_mappings_lowers_to_native_jar_executor() {
+        let mut task = canonical_task(
+            ":bootJar",
+            "org.springframework.boot.gradle.tasks.bundling.BootJar",
+            Vec::new(),
+            vec!["/repo/build/libs/app.jar".to_string()],
+        );
+        set_value_input(
+            &mut task,
+            "copy_file_mappings",
+            "encoded>encoded>F",
+            "test",
+            "scalar",
+        );
+
+        assert_eq!(executable_task_type(&task), "Jar");
     }
 
     #[test]

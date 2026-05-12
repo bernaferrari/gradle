@@ -710,6 +710,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
 
     private static boolean isArchiveTask(String simpleName) {
         return isTaskNamed(simpleName, "Jar")
+            || isTaskNamed(simpleName, "BootJar")
             || isTaskNamed(simpleName, "War")
             || isTaskNamed(simpleName, "Ear")
             || isTaskNamed(simpleName, "Zip")
