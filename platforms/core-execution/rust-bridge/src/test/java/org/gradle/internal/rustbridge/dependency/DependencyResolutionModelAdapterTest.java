@@ -179,6 +179,22 @@ public class DependencyResolutionModelAdapterTest {
     }
 
     @Test
+    public void literalRegexGroupFiltersAreCapturedAsExactGroups() {
+        DependencyResolutionModelAdapter.RepositoryContentCapture content =
+            DependencyResolutionModelAdapter.repositoryContentCapture(
+                new RepositoryWithContentSpecs(
+                    setOf(new ContentSpec("REGEX", "org\\.gradle\\.substrate", null, null, true)),
+                    setOf(new ContentSpec("REGEX", "org\\.gradle\\.internal", null, null, false))
+                ),
+                "filtered"
+            );
+
+        assertEquals(Collections.singletonList("org.gradle.substrate"), content.getIncludeGroups());
+        assertEquals(Collections.singletonList("org.gradle.internal"), content.getExcludeGroups());
+        assertTrue(content.getUnsupportedFeatures().isEmpty());
+    }
+
+    @Test
     public void nonGroupRepositoryContentSpecsRemainUnsupported() {
         DependencyResolutionModelAdapter.RepositoryContentCapture content =
             DependencyResolutionModelAdapter.repositoryContentCapture(

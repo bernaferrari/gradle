@@ -459,9 +459,6 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if (configuration != null) {
             unsupportedFeatures.addAll(unsupportedResolutionFeatures(configuration));
         }
-        if (projectBuildScriptHasUnsupportedRepositoryContentFilter(project)) {
-            unsupportedFeatures.add("repository-content-filter:build-script");
-        }
         if (projectBuildScriptHasDependencySubstitution(project)) {
             unsupportedFeatures.add("dependency-substitution:build-script");
         }
@@ -512,10 +509,6 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             unsupportedFeatures.add("dependency-proxy:socks");
         }
         return unsupportedFeatures;
-    }
-
-    private static boolean projectBuildScriptHasUnsupportedRepositoryContentFilter(Project project) {
-        return projectBuildScriptMatches(project, "\\b(?:include|exclude)(?:Group|Module|Version)ByRegex\\s*\\(");
     }
 
     private static boolean projectBuildScriptHasDependencySubstitution(Project project) {

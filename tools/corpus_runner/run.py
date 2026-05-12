@@ -358,7 +358,7 @@ def scan_project_contract(project_dir: str) -> dict:
             unsupported_features.add("copy-eachfile-action")
         if has_unsupported_test_filters:
             unsupported_features.add("unsupported-test-filters")
-        if re.search(r"\b(?:include|exclude)(?:Group|Module|Version)ByRegex\s*\(", text):
+        if has_unsupported_repository_regex_filter(text):
             unsupported_features.add("repository-content-filter")
         if re.search(r"\bdependencySubstitution\s*\{", text):
             unsupported_features.add("dependency-substitution")
@@ -396,6 +396,39 @@ def scan_dependency_constraints(build_text: str) -> set[str]:
     for block in extract_balanced_blocks(build_text, "constraints"):
         constraints.update(re.findall(r"[\"']([A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+(?::[^\"']+)?)[\"']", block))
     return constraints
+
+
+def has_unsupported_repository_regex_filter(text: str) -> bool:
+    regex_calls = re.findall(
+        r"\b(include|exclude)(Group|Module|Version)ByRegex\s*\(\s*[\"']([^\"']+)[\"']",
+        text,
+    )
+    for _action, target, pattern in regex_calls:
+        if target != "Group" or literal_group_from_regex(gradle_string_literal_value(pattern)) is None:
+            return True
+    return False
+
+
+def gradle_string_literal_value(value: str) -> str:
+    return value.replace("\\\\", "\\")
+
+
+def literal_group_from_regex(pattern: str) -> str | None:
+    group: list[str] = []
+    i = 0
+    while i < len(pattern):
+        char = pattern[i]
+        if char == "\\":
+            i += 1
+            if i >= len(pattern) or pattern[i] != ".":
+                return None
+            group.append(".")
+        elif char.isalnum() or char in "_-":
+            group.append(char)
+        else:
+            return None
+        i += 1
+    return "".join(group) if group else None
 
 
 def extract_balanced_blocks(text: str, block_name: str) -> list[str]:
