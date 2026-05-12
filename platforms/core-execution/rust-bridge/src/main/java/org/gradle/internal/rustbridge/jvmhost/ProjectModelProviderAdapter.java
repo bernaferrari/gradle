@@ -1294,7 +1294,15 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             );
             Matcher matcher = pattern.matcher(source);
             if (!matcher.find()) {
-                return "";
+                Pattern variablePattern = Pattern.compile(
+                    "tasks\\.register\\s*\\(\\s*[\"']" + quotedTaskName + "[\"']\\s*\\)\\s*\\{.*?\\bval\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\".*?writeText\\s*\\(\\s*\\1\\s*\\)",
+                    Pattern.DOTALL
+                );
+                Matcher variableMatcher = variablePattern.matcher(source);
+                if (!variableMatcher.find()) {
+                    return "";
+                }
+                return decodeJavaStringLiteral(variableMatcher.group(2));
             }
             return decodeJavaStringLiteral(matcher.group(1));
         } catch (RuntimeException | java.io.IOException e) {

@@ -54,6 +54,8 @@ The supported preview corpus is intentionally narrow and explicit:
 - resource processing, `Copy`, `Sync`, `Jar`, `Zip`, `War`, `Ear`, `Tar`,
   `Exec`, `JavaExec`, `Javadoc`, and JUnit Platform `Test` shapes covered by
   checked-in corpus fixtures;
+- exact single-output static `writeText` report tasks covered by the checked-in
+  custom task fixture;
 - exact detached-configuration resolved-file reports covered by the checked-in
   static fixture;
 - Maven-layout external dependencies with static selectors, representative BOM
@@ -71,7 +73,8 @@ output/hash/archive parity, and zero JVM task forwards.
 Unsupported semantics must fail closed at build-plan admission, dependency graph
 admission, or an explicit unsupported corpus gate. The preview does not support:
 
-- arbitrary task actions or unmodeled task implementations;
+- arbitrary task actions or unmodeled task implementations outside the exact
+  static `writeText` report-task contract;
 - arbitrary JVM plugin behavior after the typed task/dependency contract has
   been captured;
 - arbitrary `buildSrc` execution in Rust;

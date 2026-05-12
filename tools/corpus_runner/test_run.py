@@ -207,7 +207,7 @@ class CorpusRunnerCommandTest(unittest.TestCase):
 
         results = corpus_run.run_manifest_contracts(str(manifest))
 
-        self.assertIn("custom-task-unsupported-kotlin-dsl", results)
+        self.assertNotIn("custom-task-unsupported-kotlin-dsl", results)
         self.assertNotIn("component-metadata-rule-unsupported-kotlin-dsl", results)
         self.assertNotIn("detached-configuration-unsupported-kotlin-dsl", results)
         self.assertIn("artifact-view-unsupported-kotlin-dsl", results)
@@ -220,6 +220,31 @@ class CorpusRunnerCommandTest(unittest.TestCase):
             if not result["match"]
         }
         self.assertEqual({}, failures)
+
+    def test_val_backed_static_write_text_task_is_supported(self):
+        text = '''
+tasks.register("customJvmTask") {
+    val message = "custom JVM task requires compatibility execution\\n"
+    doLast {
+        output.get().asFile.writeText(message)
+    }
+}
+'''
+        self.assertEqual(
+            "custom JVM task requires compatibility execution\n",
+            corpus_run.static_write_text_task_text(text, "customJvmTask"),
+        )
+
+    def test_dynamic_static_write_text_task_is_not_supported(self):
+        text = '''
+tasks.register("customJvmTask") {
+    val message = System.getenv("MESSAGE") ?: "fallback"
+    doLast {
+        output.get().asFile.writeText(message)
+    }
+}
+'''
+        self.assertIsNone(corpus_run.static_write_text_task_text(text, "customJvmTask"))
 
     def test_literal_repository_regex_group_filter_is_supported(self):
         self.assertFalse(
