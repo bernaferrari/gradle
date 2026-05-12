@@ -11,6 +11,7 @@ import argparse
 import importlib.util
 import json
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -312,16 +313,27 @@ def run_project(
     runbuild_native_ready_default = project.mode == "native-ready-default"
     project_output_dir = output_dir / project.name
     project_output_dir.mkdir(parents=True, exist_ok=True)
+    upstream_project_path = project.path
+    substrate_project_path = project.path
+    if project.source.get("kind") == "git":
+        upstream_project_path = prepare_project_run_dir(
+            project.path,
+            project_output_dir / "upstream-work",
+        )
+        substrate_project_path = prepare_project_run_dir(
+            project.path,
+            project_output_dir / "substrate-work",
+        )
 
     upstream = corpus.run_build(
-        str(project.path),
+        str(upstream_project_path),
         substrate=False,
         timeout=project.timeout_seconds,
         tasks=project.tasks,
         gradle_command=gradle_command,
     )
     substrate = corpus.run_build(
-        str(project.path),
+        str(substrate_project_path),
         substrate=True,
         timeout=project.timeout_seconds,
         tasks=project.tasks,
@@ -418,6 +430,23 @@ def run_project(
     if verbose:
         print(f"{project.name}: {'PASS' if result['match'] else 'FAIL'}")
     return result
+
+
+def prepare_project_run_dir(source_dir: Path, destination_dir: Path) -> Path:
+    if destination_dir.exists():
+        shutil.rmtree(destination_dir)
+    shutil.copytree(
+        source_dir,
+        destination_dir,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".gradle",
+            "build",
+            ".kotlin",
+            ".idea",
+        ),
+    )
+    return destination_dir.resolve()
 
 
 def ignored_hash_differences(
