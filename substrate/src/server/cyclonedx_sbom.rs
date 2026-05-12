@@ -450,9 +450,6 @@ fn reject_unsupported_captured_options(
     options: &CycloneDxCapturedTaskOptions,
 ) -> Result<(), String> {
     let mut unsupported = Vec::new();
-    if options.include_build_environment {
-        unsupported.push("include-build-environment");
-    }
     if options.include_license_text {
         unsupported.push("include-license-text");
     }
@@ -2656,7 +2653,7 @@ mod tests {
             .unwrap_err();
 
         assert!(!err.contains("include-build-system"));
-        assert!(err.contains("include-build-environment"));
+        assert!(!err.contains("include-build-environment"));
         assert!(err.contains("include-license-text"));
         assert!(err.contains("organizational-entity"));
         assert!(err.contains("license-choice"));

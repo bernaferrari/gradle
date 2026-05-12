@@ -517,6 +517,7 @@ public class ProjectModelProviderAdapterTest {
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("serial-source-policy"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("license-text-rendering"));
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("build-system-rendering"));
+        assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("build-environment-rendering"));
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("organizational-entity-rendering"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("license-choice-rendering"));
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("build-system-environment-variable"));
@@ -592,6 +593,7 @@ public class ProjectModelProviderAdapterTest {
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("serial-source-policy"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("license-text-rendering"));
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("build-system-rendering"));
+        assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("build-environment-rendering"));
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("organizational-entity-rendering"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("license-choice-rendering"));
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("build-system-environment-variable"));
