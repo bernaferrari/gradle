@@ -42,6 +42,8 @@ pub struct CycloneDxComponent {
     pub properties: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub licenses: Vec<CycloneDxLicenseChoice>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hashes: Vec<CycloneDxHash>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,6 +54,13 @@ pub struct CycloneDxLicenseChoice {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CycloneDxLicense {
     pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CycloneDxHash {
+    #[serde(rename = "alg")]
+    pub algorithm: String,
+    pub content: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -360,6 +369,7 @@ pub fn aggregate_contracts(
         purl: root_purl,
         properties: BTreeMap::new(),
         licenses: Vec::new(),
+        hashes: Vec::new(),
     };
 
     let mut components_by_ref = BTreeMap::<String, CycloneDxComponent>::new();
@@ -460,6 +470,13 @@ impl CycloneDxComponent {
         for license in &self.licenses {
             if license.license.name.trim().is_empty() {
                 return Err(format!("CycloneDX {label} has an empty license name"));
+            }
+        }
+        for hash in &self.hashes {
+            if hash.algorithm.trim().is_empty() || hash.content.trim().is_empty() {
+                return Err(format!(
+                    "CycloneDX {label} has an empty hash algorithm or content"
+                ));
             }
         }
         Ok(())
@@ -623,6 +640,7 @@ pub fn draft_contract_from_resolution_graph(
         purl: root_purl,
         properties: BTreeMap::new(),
         licenses: Vec::new(),
+        hashes: Vec::new(),
     };
 
     let mut components_by_id = BTreeMap::new();
@@ -711,6 +729,7 @@ pub fn draft_contract_from_resolution_graph(
                 purl: bom_ref,
                 properties,
                 licenses: metadata.licenses,
+                hashes: Vec::new(),
             }
         })
         .collect::<Vec<_>>();
@@ -1152,6 +1171,17 @@ fn write_component(xml: &mut String, indent: &str, component: &CycloneDxComponen
         }
         xml.push_str(&format!("{indent}  </licenses>\n"));
     }
+    if !component.hashes.is_empty() {
+        xml.push_str(&format!("{indent}  <hashes>\n"));
+        for hash in &component.hashes {
+            xml.push_str(&format!(
+                "{indent}    <hash alg=\"{}\">{}</hash>\n",
+                xml_escape(&hash.algorithm),
+                xml_escape(&hash.content)
+            ));
+        }
+        xml.push_str(&format!("{indent}  </hashes>\n"));
+    }
     if !component.properties.is_empty() {
         xml.push_str(&format!("{indent}  <properties>\n"));
         for (name, value) in &component.properties {
@@ -1194,6 +1224,7 @@ mod tests {
                 purl: "pkg:maven/org.example/app@1.0.0".to_string(),
                 properties: BTreeMap::new(),
                 licenses: Vec::new(),
+                hashes: Vec::new(),
             },
             components: vec![
                 CycloneDxComponent {
@@ -1205,6 +1236,7 @@ mod tests {
                     purl: "pkg:maven/org.example/b@1.0.0?type=jar".to_string(),
                     properties: BTreeMap::new(),
                     licenses: Vec::new(),
+                    hashes: Vec::new(),
                 },
                 CycloneDxComponent {
                     component_type: "library".to_string(),
@@ -1215,6 +1247,7 @@ mod tests {
                     purl: "pkg:maven/org.example/a@1.0.0?type=jar".to_string(),
                     properties: BTreeMap::new(),
                     licenses: Vec::new(),
+                    hashes: Vec::new(),
                 },
             ],
             dependencies: vec![CycloneDxDependency {
@@ -1271,6 +1304,10 @@ mod tests {
     #[test]
     fn renders_deterministic_json_from_explicit_contract() {
         let mut contract = sample_contract();
+        contract.components[1].hashes.push(CycloneDxHash {
+            algorithm: "SHA-256".to_string(),
+            content: "0123456789abcdef".to_string(),
+        });
         contract
             .external_references
             .push(CycloneDxExternalReference {
@@ -1281,6 +1318,9 @@ mod tests {
         assert!(json.contains("\"bomFormat\": \"CycloneDX\""));
         assert!(json.contains("\"specVersion\": \"1.6\""));
         assert!(json.contains("\"externalReferences\""));
+        assert!(json.contains("\"hashes\""));
+        assert!(json.contains("\"alg\": \"SHA-256\""));
+        assert!(json.contains("\"content\": \"0123456789abcdef\""));
         assert!(json.contains("\"type\": \"website\""));
         assert!(json.contains("\"url\": \"https://example.invalid/app\""));
         assert!(json.find("org.example/a").unwrap() < json.find("org.example/b").unwrap());
@@ -1303,6 +1343,10 @@ mod tests {
                 reference_type: "website".to_string(),
                 url: "https://example.invalid/app".to_string(),
             });
+        contract.components[0].hashes.push(CycloneDxHash {
+            algorithm: "SHA-256".to_string(),
+            content: "0123456789abcdef".to_string(),
+        });
         let xml = render_xml(&contract).unwrap();
         assert!(xml.contains("http://cyclonedx.org/schema/bom/1.6"));
         assert!(xml.contains("<metadata>"));
@@ -1310,6 +1354,8 @@ mod tests {
         assert!(xml.contains(
             "<reference type=\"website\"><url>https://example.invalid/app</url></reference>"
         ));
+        assert!(xml.contains("<hashes>"));
+        assert!(xml.contains("<hash alg=\"SHA-256\">0123456789abcdef</hash>"));
         assert!(xml.find("org.example/a").unwrap() < xml.find("org.example/b").unwrap());
         assert!(xml.contains("<license><name>Apache-2.0</name></license>"));
         assert!(xml.contains("<dependencies>"));

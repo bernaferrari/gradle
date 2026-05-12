@@ -1316,8 +1316,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         inputs.put(
             "cyclonedx_missing_contract_fields",
             resolutionGraphJsonBase64.isEmpty()
-                ? cyclonedxMissingContractFields("resolution-result-edges,component-metadata,license-metadata,timestamp-source-policy,aggregate-merge-policy", includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, organizationalEntityPresent, licenseChoice, buildSystemEnvironmentVariable, externalReferences)
-                : cyclonedxMissingContractFields("component-metadata,license-metadata,timestamp-source-policy,aggregate-merge-policy", includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, organizationalEntityPresent, licenseChoice, buildSystemEnvironmentVariable, externalReferences)
+                ? cyclonedxMissingContractFields("resolution-result-edges,component-metadata,license-metadata,artifact-hash-policy,timestamp-source-policy,aggregate-merge-policy", includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, organizationalEntityPresent, licenseChoice, buildSystemEnvironmentVariable, externalReferences)
+                : cyclonedxMissingContractFields("component-metadata,license-metadata,artifact-hash-policy,timestamp-source-policy,aggregate-merge-policy", includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, organizationalEntityPresent, licenseChoice, buildSystemEnvironmentVariable, externalReferences)
         );
         inputs.put("requires_jvm_task_execution", "true");
     }
