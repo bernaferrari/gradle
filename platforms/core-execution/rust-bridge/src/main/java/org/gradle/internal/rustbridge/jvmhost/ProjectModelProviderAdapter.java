@@ -1312,12 +1312,19 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "cyclonedx_resolved_dependencies", fileCollectionPathString(invokeOptional(task, taskType, "getResolvedDependencies")));
         String resolutionGraphJsonBase64 = cyclonedxResolutionGraphJsonBase64(task, taskType);
         putIfPresent(inputs, "cyclonedx_resolution_graph_json_b64", resolutionGraphJsonBase64);
+        boolean aggregateTask = isCycloneDxAggregateTask(taskType.getName(), taskType.getSimpleName());
+        String missingBaseFields = resolutionGraphJsonBase64.isEmpty()
+            ? "resolution-result-edges,component-metadata,license-metadata,artifact-hash-policy,timestamp-source-policy"
+            : "component-metadata,license-metadata,artifact-hash-policy,timestamp-source-policy";
+        if (aggregateTask) {
+            missingBaseFields = missingBaseFields + ",aggregate-input-contracts,aggregate-merge-policy";
+        } else {
+            missingBaseFields = missingBaseFields + ",aggregate-merge-policy";
+        }
         inputs.put("cyclonedx_sbom_contract_status", resolutionGraphJsonBase64.isEmpty() ? "missing" : "partial");
         inputs.put(
             "cyclonedx_missing_contract_fields",
-            resolutionGraphJsonBase64.isEmpty()
-                ? cyclonedxMissingContractFields("resolution-result-edges,component-metadata,license-metadata,artifact-hash-policy,timestamp-source-policy,aggregate-merge-policy", includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, organizationalEntityPresent, licenseChoice, buildSystemEnvironmentVariable, externalReferences)
-                : cyclonedxMissingContractFields("component-metadata,license-metadata,artifact-hash-policy,timestamp-source-policy,aggregate-merge-policy", includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, organizationalEntityPresent, licenseChoice, buildSystemEnvironmentVariable, externalReferences)
+            cyclonedxMissingContractFields(missingBaseFields, includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, organizationalEntityPresent, licenseChoice, buildSystemEnvironmentVariable, externalReferences)
         );
         inputs.put("requires_jvm_task_execution", "true");
     }
@@ -2459,6 +2466,11 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         return "CyclonedxDirectTask".equals(simpleName)
             || "CyclonedxAggregateTask".equals(simpleName)
             || "org.cyclonedx.gradle.CyclonedxDirectTask".equals(taskTypeName)
+            || "org.cyclonedx.gradle.CyclonedxAggregateTask".equals(taskTypeName);
+    }
+
+    private static boolean isCycloneDxAggregateTask(String taskTypeName, String simpleName) {
+        return "CyclonedxAggregateTask".equals(simpleName)
             || "org.cyclonedx.gradle.CyclonedxAggregateTask".equals(taskTypeName);
     }
 

@@ -511,7 +511,34 @@ public class ProjectModelProviderAdapterTest {
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("build-system-environment-variable"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("external-reference-shape"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("aggregate-merge-policy"));
+        assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("aggregate-input-contracts"));
         assertEquals("true", inputs.get("requires_jvm_task_execution"));
+        assertFalse(inputs.containsKey("sbom_contract_json_b64"));
+    }
+
+    @org.junit.Test
+    public void marksCycloneDxAggregateTaskAsMissingSchemaBackedInputContracts() throws IOException {
+        File inputJson = temporaryFolder.newFile("direct-bom.json");
+        File outputJson = temporaryFolder.newFile("aggregate-bom.json");
+        Task cyclonedx = cyclonedxAggregateTask(inputJson, outputJson);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(cyclonedx, CyclonedxAggregateTask.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals(":cyclonedxBom", task.getPath());
+        assertEquals("sbom", task.getActionKind());
+        assertEquals("process", task.getWorkerIsolation());
+        assertEquals("CyclonedxAggregateTask", inputs.get("taskType"));
+        assertEquals(inputJson.getAbsolutePath(), inputs.get("cyclonedx_input_sboms"));
+        assertEquals(outputJson.getAbsolutePath(), inputs.get("cyclonedx_json_output"));
+        assertEquals("missing", inputs.get("cyclonedx_sbom_contract_status"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("aggregate-input-contracts"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("aggregate-merge-policy"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("component-metadata"));
+        assertEquals("true", inputs.get("requires_jvm_task_execution"));
+        assertFalse(inputs.containsKey("aggregate_input_contracts_json_b64"));
         assertFalse(inputs.containsKey("sbom_contract_json_b64"));
     }
 
@@ -1893,6 +1920,83 @@ public class ProjectModelProviderAdapterTest {
         });
     }
 
+    private static Task cyclonedxAggregateTask(File inputJson, File outputJson) {
+        FileCollection inputs = fileCollection(inputJson);
+        FileCollection outputs = fileCollection(outputJson);
+        Project project = proxy(Project.class, (proxy, method, args) -> {
+            if (method.getName().equals("getPath")) {
+                return ":";
+            }
+            if (method.getName().equals("getProjectDir")) {
+                return outputJson.getParentFile();
+            }
+            return defaultValue(method.getReturnType());
+        });
+        TaskDependency noDependencies = proxy(TaskDependency.class, (proxy, method, args) -> {
+            if (method.getName().equals("getDependencies")) {
+                return Collections.emptySet();
+            }
+            return defaultValue(method.getReturnType());
+        });
+        return proxy(new Class<?>[] {Task.class, CyclonedxAggregateTask.class}, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "getPath":
+                    return ":cyclonedxBom";
+                case "getProject":
+                    return project;
+                case "getName":
+                    return "cyclonedxBom";
+                case "getEnabled":
+                    return true;
+                case "getGroup":
+                case "getDescription":
+                    return "";
+                case "getTaskDependencies":
+                case "getShouldRunAfter":
+                case "getMustRunAfter":
+                case "getFinalizedBy":
+                    return noDependencies;
+                case "getInputs":
+                    return filesOwner(method.getReturnType(), inputs);
+                case "getOutputs":
+                    return filesOwner(method.getReturnType(), outputs);
+                case "getLocalState":
+                case "getDestroyables":
+                    return registeredFilesOwner(method.getReturnType());
+                case "getComponentGroup":
+                    return new ObjectProvider("org.example");
+                case "getComponentName":
+                    return new ObjectProvider("aggregate");
+                case "getComponentVersion":
+                    return new ObjectProvider("1.0");
+                case "getProjectType":
+                    return new ObjectProvider("APPLICATION");
+                case "getSchemaVersion":
+                    return new ObjectProvider("VERSION_16");
+                case "getIncludeBomSerialNumber":
+                case "getIncludeBuildSystem":
+                case "getIncludeBuildEnvironment":
+                case "getIncludeLicenseText":
+                case "getIncludeMetadataResolution":
+                    return new ObjectProvider(false);
+                case "getIncludeConfigs":
+                case "getSkipConfigs":
+                case "getExternalReferences":
+                    return new ObjectProvider(Collections.emptyList());
+                case "getJsonOutput":
+                    return new FileProvider(outputJson);
+                case "getXmlOutput":
+                    return null;
+                case "getInputSboms":
+                    return inputs;
+                case "compareTo":
+                    return 0;
+                default:
+                    return defaultValue(method.getReturnType());
+            }
+        });
+    }
+
     private static ConfigurationContainer cyclonedxConfigurationContainer(String name, File artifactFile) {
         ResolvedComponentResult child = resolvedComponent("org.example", "lib", "1.1");
         ResolvedDependencyResult edge = proxy(ResolvedDependencyResult.class, (proxy, method, args) -> {
@@ -2929,6 +3033,25 @@ public class ProjectModelProviderAdapterTest {
     }
 
     public interface CyclonedxAggregateTask {
+        Object getComponentGroup();
+        Object getComponentName();
+        Object getComponentVersion();
+        Object getProjectType();
+        Object getSchemaVersion();
+        Object getIncludeBomSerialNumber();
+        Object getIncludeBuildSystem();
+        Object getIncludeBuildEnvironment();
+        Object getIncludeLicenseText();
+        Object getIncludeMetadataResolution();
+        Object getOrganizationalEntity();
+        Object getLicenseChoice();
+        Object getBuildSystemEnvironmentVariable();
+        Object getExternalReferences();
+        Object getIncludeConfigs();
+        Object getSkipConfigs();
+        Object getJsonOutput();
+        Object getXmlOutput();
+        FileCollection getInputSboms();
     }
 
     public static class Copy {
