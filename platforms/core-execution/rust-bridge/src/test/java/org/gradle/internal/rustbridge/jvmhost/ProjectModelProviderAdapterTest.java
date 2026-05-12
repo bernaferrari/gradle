@@ -491,6 +491,7 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("false", inputs.get("cyclonedx_include_build_environment"));
         assertEquals("true", inputs.get("cyclonedx_include_license_text"));
         assertEquals("false", inputs.get("cyclonedx_include_metadata_resolution"));
+        assertEquals("true", inputs.get("cyclonedx_organizational_entity_present"));
         assertEquals("SPDX", inputs.get("cyclonedx_license_choice"));
         assertEquals("CI", inputs.get("cyclonedx_build_system_environment_variable"));
         assertEquals("https://example.invalid/sbom", inputs.get("cyclonedx_external_references"));
@@ -504,6 +505,7 @@ public class ProjectModelProviderAdapterTest {
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("timestamp-source-policy"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("serial-source-policy"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("license-text-rendering"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("organizational-entity-rendering"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("license-choice-rendering"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("build-system-environment-variable"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("external-reference-shape"));
@@ -548,6 +550,7 @@ public class ProjectModelProviderAdapterTest {
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("timestamp-source-policy"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("serial-source-policy"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("license-text-rendering"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("organizational-entity-rendering"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("license-choice-rendering"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("build-system-environment-variable"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("external-reference-shape"));
@@ -1861,6 +1864,8 @@ public class ProjectModelProviderAdapterTest {
                     return new ObjectProvider(false);
                 case "getIncludeLicenseText":
                     return new ObjectProvider(true);
+                case "getOrganizationalEntity":
+                    return new ObjectProvider("Acme");
                 case "getLicenseChoice":
                     return new ObjectProvider("SPDX");
                 case "getBuildSystemEnvironmentVariable":
@@ -2909,6 +2914,7 @@ public class ProjectModelProviderAdapterTest {
         Object getIncludeBuildEnvironment();
         Object getIncludeLicenseText();
         Object getIncludeMetadataResolution();
+        Object getOrganizationalEntity();
         Object getLicenseChoice();
         Object getBuildSystemEnvironmentVariable();
         Object getExternalReferences();
