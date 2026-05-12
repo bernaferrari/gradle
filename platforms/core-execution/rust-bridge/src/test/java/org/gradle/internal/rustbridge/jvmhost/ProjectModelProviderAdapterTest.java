@@ -454,6 +454,32 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
+    public void marksCycloneDxTaskAsMissingSchemaBackedSbomContract() throws IOException {
+        File inputJar = temporaryFolder.newFile("runtime.jar");
+        File outputJson = temporaryFolder.newFile("bom.json");
+        Task cyclonedx = basicTask(
+            ":cyclonedxDirectBom",
+            "cyclonedxDirectBom",
+            fileCollection(inputJar),
+            fileCollection(outputJson),
+            false
+        );
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(cyclonedx, CyclonedxDirectTask.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals(":cyclonedxDirectBom", task.getPath());
+        assertEquals("sbom", task.getActionKind());
+        assertEquals("process", task.getWorkerIsolation());
+        assertEquals("CyclonedxDirectTask", inputs.get("taskType"));
+        assertEquals("missing", inputs.get("cyclonedx_sbom_contract_status"));
+        assertEquals("true", inputs.get("requires_jvm_task_execution"));
+        assertFalse(inputs.containsKey("sbom_contract_json_b64"));
+    }
+
+    @org.junit.Test
     public void capturesNativeReadyStartScriptsContractFromTaskModel() throws IOException {
         File jarFile = temporaryFolder.newFile("corpus-app-1.0.jar");
         File outputDir = temporaryFolder.newFolder("build/scripts");
@@ -2535,6 +2561,12 @@ public class ProjectModelProviderAdapterTest {
     }
 
     public static class CreateStartScripts {
+    }
+
+    public static class CyclonedxDirectTask {
+    }
+
+    public static class CyclonedxAggregateTask {
     }
 
     public static class Copy {

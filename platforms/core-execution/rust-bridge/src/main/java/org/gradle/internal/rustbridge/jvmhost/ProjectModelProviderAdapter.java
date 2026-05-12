@@ -395,6 +395,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if ("Javadoc".equals(shortTaskTypeName)) {
             captureJavadocInputs(task, taskType, inputs);
         }
+        if (isCycloneDxTask(taskTypeName, shortTaskTypeName)) {
+            captureCycloneDxInputs(inputs);
+        }
         if ("DefaultTask".equals(shortTaskTypeName) || "Task".equals(shortTaskTypeName)) {
             captureStaticWriteFileInputs(task, inputs);
         }
@@ -1272,6 +1275,11 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "no_timestamp", booleanString(invokeOptional(options, "isNoTimestamp")));
     }
 
+    private static void captureCycloneDxInputs(Map<String, String> inputs) {
+        inputs.put("cyclonedx_sbom_contract_status", "missing");
+        inputs.put("requires_jvm_task_execution", "true");
+    }
+
     private static void captureStaticWriteFileInputs(Task task, Map<String, String> inputs) {
         if (taskActionCount(task) != 1) {
             return;
@@ -2076,6 +2084,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if ("Javadoc".equals(simpleName)) {
             return "documentation";
         }
+        if (isCycloneDxTask(taskType.getName(), simpleName)) {
+            return "sbom";
+        }
         if (("DefaultTask".equals(simpleName) || "Task".equals(simpleName)) && taskActionCount(task) == 0) {
             return "lifecycle";
         }
@@ -2092,6 +2103,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             || "Exec".equals(simpleName)
             || "JavaExec".equals(simpleName)
             || "Javadoc".equals(simpleName)
+            || isCycloneDxTask(taskType.getName(), simpleName)
             || "Groovydoc".equals(simpleName)
             || "Scaladoc".equals(simpleName)) {
             return "process";
@@ -2103,6 +2115,13 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             return "in-process";
         }
         return "compat-jvm";
+    }
+
+    private static boolean isCycloneDxTask(String taskTypeName, String simpleName) {
+        return "CyclonedxDirectTask".equals(simpleName)
+            || "CyclonedxAggregateTask".equals(simpleName)
+            || "org.cyclonedx.gradle.CyclonedxDirectTask".equals(taskTypeName)
+            || "org.cyclonedx.gradle.CyclonedxAggregateTask".equals(taskTypeName);
     }
 
     @SuppressWarnings("unchecked")
