@@ -208,7 +208,7 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         results = corpus_run.run_manifest_contracts(str(manifest))
 
         self.assertIn("custom-task-unsupported-kotlin-dsl", results)
-        self.assertIn("component-metadata-rule-unsupported-kotlin-dsl", results)
+        self.assertNotIn("component-metadata-rule-unsupported-kotlin-dsl", results)
         self.assertIn("detached-configuration-unsupported-kotlin-dsl", results)
         self.assertIn("artifact-view-unsupported-kotlin-dsl", results)
         self.assertIn("artifact-transform-unsupported-kotlin-dsl", results)
@@ -253,6 +253,20 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         self.assertTrue(
             corpus_run.has_unsupported_dependency_substitution(
                 'configurations.configureEach { resolutionStrategy.dependencySubstitution { substitute(module("org.example:original")).using(project(":replacement")) } }'
+            )
+        )
+
+    def test_exact_release_component_metadata_status_rule_is_supported(self):
+        self.assertFalse(
+            corpus_run.has_unsupported_component_metadata_rule(
+                'dependencies { components { all { status = "release" } } }'
+            )
+        )
+
+    def test_nontrivial_component_metadata_rule_is_unsupported(self):
+        self.assertTrue(
+            corpus_run.has_unsupported_component_metadata_rule(
+                'dependencies { components { all { status = "integration" } } }'
             )
         )
 
