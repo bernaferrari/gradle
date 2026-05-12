@@ -487,6 +487,8 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("LIBRARY", inputs.get("cyclonedx_project_type"));
         assertEquals("VERSION_16", inputs.get("cyclonedx_schema_version"));
         assertEquals("true", inputs.get("cyclonedx_include_bom_serial_number"));
+        assertEquals("cyclonedx-core-metadata-constructor-now", inputs.get("cyclonedx_timestamp_source_policy"));
+        assertEquals("cyclonedx-gradle-random-uuid", inputs.get("cyclonedx_serial_source_policy"));
         assertEquals("false", inputs.get("cyclonedx_include_build_system"));
         assertEquals("false", inputs.get("cyclonedx_include_build_environment"));
         assertEquals("true", inputs.get("cyclonedx_include_license_text"));
@@ -550,6 +552,8 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("CyclonedxAggregateTask", inputs.get("taskType"));
         assertEquals(inputJson.getAbsolutePath(), inputs.get("cyclonedx_input_sboms"));
         assertEquals(outputJson.getAbsolutePath(), inputs.get("cyclonedx_json_output"));
+        assertEquals("cyclonedx-core-metadata-constructor-now", inputs.get("cyclonedx_timestamp_source_policy"));
+        assertEquals("omitted", inputs.get("cyclonedx_serial_source_policy"));
         assertEquals("missing", inputs.get("cyclonedx_sbom_contract_status"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("aggregate-input-contracts"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("aggregate-merge-policy"));
