@@ -1,4 +1,5 @@
 mod copy;
+mod cyclonedx_sbom;
 mod delete;
 mod exec_task;
 mod jar;
@@ -16,6 +17,7 @@ mod test_exec;
 mod write_file;
 
 pub use copy::CopyTaskExecutor;
+pub use cyclonedx_sbom::CycloneDxSbomTaskExecutor;
 pub use delete::DeleteTaskExecutor;
 pub use exec_task::ExecTaskExecutor;
 pub use jar::JarTaskExecutor;
@@ -101,6 +103,7 @@ impl TaskInput {
                 | "Ear"
                 | "Tar"
                 | "WriteFile"
+                | "CycloneDxSbom"
                 | "Lifecycle"
         )
     }
@@ -236,6 +239,12 @@ impl TaskExecutorRegistry {
             Box::new(write_file_executor),
         );
 
+        let cyclonedx_sbom_executor = CycloneDxSbomTaskExecutor::new();
+        executors.insert(
+            cyclonedx_sbom_executor.task_type().to_string(),
+            Box::new(cyclonedx_sbom_executor),
+        );
+
         let lifecycle_executor = LifecycleTaskExecutor::new();
         executors.insert(
             lifecycle_executor.task_type().to_string(),
@@ -304,6 +313,7 @@ mod tests {
         assert!(types.contains(&"War"));
         assert!(types.contains(&"Ear"));
         assert!(types.contains(&"Tar"));
+        assert!(types.contains(&"CycloneDxSbom"));
         assert!(types.contains(&"Lifecycle"));
     }
 
@@ -338,6 +348,7 @@ mod tests {
         assert!(TaskInput::is_native_supported("War"));
         assert!(TaskInput::is_native_supported("Ear"));
         assert!(TaskInput::is_native_supported("Tar"));
+        assert!(TaskInput::is_native_supported("CycloneDxSbom"));
         assert!(TaskInput::is_native_supported("Lifecycle"));
         assert!(!TaskInput::is_native_supported("Test"));
     }

@@ -337,7 +337,8 @@ fn kernel_task_contract_rejection(
     }
 
     match task_type {
-        "org.cyclonedx.gradle.CyclonedxDirectTask"
+        "CycloneDxSbom"
+        | "org.cyclonedx.gradle.CyclonedxDirectTask"
         | "org.cyclonedx.gradle.CyclonedxAggregateTask" => {
             return cyclonedx_contract_rejection(&value);
         }
