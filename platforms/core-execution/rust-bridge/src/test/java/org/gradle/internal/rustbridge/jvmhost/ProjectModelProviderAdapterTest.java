@@ -612,6 +612,24 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
+    public void marksCycloneDxUnknownSerialPolicyAsMissingContractField() throws IOException {
+        File inputJar = temporaryFolder.newFile("runtime.jar");
+        File outputJson = temporaryFolder.newFile("bom.json");
+        Task cyclonedx = cyclonedxDirectTask(inputJar, outputJson, null, null);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(cyclonedx, CyclonedxDirectTask.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertFalse(inputs.containsKey("cyclonedx_include_bom_serial_number"));
+        assertFalse(inputs.containsKey("cyclonedx_serial_source_policy"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("serial-source-policy"));
+        assertEquals("true", inputs.get("requires_jvm_task_execution"));
+        assertFalse(inputs.containsKey("sbom_contract_json_b64"));
+    }
+
+    @org.junit.Test
     public void capturesNativeReadyStartScriptsContractFromTaskModel() throws IOException {
         File jarFile = temporaryFolder.newFile("corpus-app-1.0.jar");
         File outputDir = temporaryFolder.newFolder("build/scripts");
@@ -1855,6 +1873,15 @@ public class ProjectModelProviderAdapterTest {
         File outputJson,
         ConfigurationContainer configurations
     ) {
+        return cyclonedxDirectTask(runtimeJar, outputJson, configurations, Boolean.TRUE);
+    }
+
+    private static Task cyclonedxDirectTask(
+        File runtimeJar,
+        File outputJson,
+        ConfigurationContainer configurations,
+        Boolean includeBomSerialNumber
+    ) {
         FileCollection inputs = fileCollection(runtimeJar);
         FileCollection outputs = fileCollection(outputJson);
         Project project = proxy(Project.class, (proxy, method, args) -> {
@@ -1911,7 +1938,7 @@ public class ProjectModelProviderAdapterTest {
                 case "getSchemaVersion":
                     return new ObjectProvider("VERSION_16");
                 case "getIncludeBomSerialNumber":
-                    return new ObjectProvider(true);
+                    return includeBomSerialNumber == null ? null : new ObjectProvider(includeBomSerialNumber);
                 case "getIncludeBuildSystem":
                 case "getIncludeBuildEnvironment":
                 case "getIncludeMetadataResolution":
