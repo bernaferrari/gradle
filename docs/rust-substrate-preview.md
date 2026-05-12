@@ -1,9 +1,10 @@
 # Rust Substrate Preview Contract
 
 This document is the product contract for the Rust Substrate Preview tracked by
-Beads milestone `gradle-fork-33f`. The preview is not a claim that Rust can run
-all Gradle builds. It is a documented, measurable path where a supported build
-uses Gradle for JVM-owned configuration semantics and then hands the admitted
+Beads epic `gradle-fork-ujt3`. The supported/fail-closed matrix is locked by
+`gradle-fork-wx9j`. The preview is not a claim that Rust can run all Gradle
+builds. It is a documented, measurable path where a supported build uses Gradle
+for JVM-owned configuration semantics and then hands the admitted
 post-configuration execution plan to Rust without task-by-task fallback.
 
 ## Product Shape
@@ -72,6 +73,24 @@ Supported builds must pass the corpus runner with authoritative kernel mode,
 declared graph parity where applicable, resolved graph parity where applicable,
 output/hash/archive parity, and zero JVM task forwards.
 
+## Supported Preview Matrix
+
+This matrix is the public preview contract. A build shape is not supported just
+because a unit test exists; it is supported only when the named evidence gate
+proves no JVM task forwards plus the listed parity checks.
+
+| Shape | Current preview status | Required evidence |
+| --- | --- | --- |
+| Offline Java library/application/multiproject lifecycle | Supported | `testing/corpus/manifest.json` authoritative RunBuild with task parity, output/hash/archive parity, and zero JVM forwards. |
+| Offline resources, Copy, Sync, CopySpec mapping, archive, Exec, JavaExec, Javadoc, and JUnit Platform `Test` slices | Supported when represented by checked-in corpus fixtures | `testing/corpus/manifest.json` authoritative RunBuild with zero JVM forwards and fixture-specific output/hash/archive parity. |
+| Exact static report-style tasks: single-output `writeText`, detached resolved-file report, lenient artifact-view report, artifact-transform marker report | Supported only for the exact captured static contract shapes | Checked-in corpus contract/admission plus authoritative RunBuild parity for the fixture; arbitrary task actions remain unsupported. |
+| External Maven dependency builds with static selectors, representative BOM/platform, constraints, conflict resolution, classifier/artifact shape, JUnit runtime dependencies, and selected Gradle Module Metadata | Supported for `testing/corpus/external-manifest.json` fixtures | Authoritative RunBuild with declared and resolved dependency graph parity where requested, output/hash/archive parity, and zero JVM forwards. |
+| Real-project dogfood: OSS-style Java library, Java multiproject, external JUnit library, external BOM/conflict | Supported strict dogfood entries | `testing/dogfood/manifest.json` execution with configured parity checks and zero JVM forwards. |
+| Real OSS dogfood: Spring guide REST `clean assemble`, Spring PetClinic `clean compileJava` | Supported narrow slices only | `testing/dogfood/oss-manifest.json` execution with task/output/hash/archive parity and zero JVM forwards. |
+
+No other Gradle build shape is part of the supported preview contract until it
+is added to this table and backed by reproducible evidence.
+
 ## Unsupported Build Shapes
 
 Unsupported semantics must fail closed at build-plan admission, dependency graph
@@ -97,6 +116,22 @@ admission, or an explicit unsupported corpus gate. The preview does not support:
 
 Unsupported fixtures belong in `testing/corpus/unsupported-manifest.json` or in
 focused JVM/Rust tests that assert a precise unsupported diagnostic.
+
+## Fail-Closed Matrix
+
+These cases are intentionally rejected before Rust execution or by an explicit
+unsupported corpus gate. Rejection is success for the preview because hidden
+fallback would make the Rust-kernel claim false.
+
+| Unsupported shape | Required diagnostic behavior |
+| --- | --- |
+| Arbitrary custom JVM task actions and unmodeled task implementations | Reject at build-plan admission unless the task matches an exact static report contract. |
+| Unsupported CopySpec behavior, unsupported copy filters, method-level or richer test filters, unsafe symlink/archive variants | Reject via unsupported corpus or focused task-graph/executor admission tests before native execution. |
+| DSL evaluation, `buildSrc`, arbitrary JVM plugins, and reflection-heavy Gradle APIs in Rust | Stay JVM-owned before the typed contract boundary; never approximate inside the Rust daemon. |
+| Rich dependency semantics outside the native contract: unsupported dynamic selectors, non-module dependency substitution, unsupported enforced-platform forms, unsupported component metadata rules, repository regex/configuration/attribute filters, unsupported Gradle Module Metadata fields | Reject at dependency graph or execution-kernel admission with a precise unsupported-feature reason. |
+| Explicit settings-level `includeBuild(...)` composite substitution | Reject as `composite-substitution:settings` until Rust has an included-build IR/execution model. |
+| CycloneDX SBOM tasks without a complete schema-backed SBOM contract | Reject native execution; graph/artifact/POM evidence may be captured but must not be promoted without output parity. |
+| Any task-by-task JVM fallback after an admitted authoritative Rust run | Treat as a failed preview gate. |
 
 ## Ownership Boundaries
 
@@ -126,12 +161,12 @@ Rust-owned preview surfaces after admission:
 
 ## Ship Gates
 
-Gate 1, product contract and non-goals (`gradle-fork-33f.1`):
+Gate 1, product contract and non-goals (`gradle-fork-wx9j`):
 this document exists, is linked from `substrate/PARITY.md`, names supported and
 unsupported shapes, lists commands, thresholds, and maps every open preview
 child task to a gate.
 
-Gate 2, one Rust kernel admission path (`gradle-fork-33f.2`):
+Gate 2, one Rust kernel admission path:
 `org.gradle.rust.substrate.execution.kernel=true` is the documented strict
 kernel mode. Admission returns structured accepted/rejected results before
 execution. After accepted admission, the run must report zero JVM forwards.
@@ -140,7 +175,7 @@ entry uses the same admission resolver in `NATIVE_READY_DEFAULT` mode: it tries
 Rust only for admitted plans and delegates otherwise. Legacy RunBuild flags are
 compatibility inputs, not separate admission paths.
 
-Gate 3, first-60s performance budget (`gradle-fork-33f.3`):
+Gate 3, first-60s performance budget (`gradle-fork-ilbp`):
 `tools/demo/first_60_seconds.py` emits JSON and a human summary. Fast mode must
 pass these budgets unless the threshold is deliberately updated with evidence:
 daemon socket readiness at or below 2000 ms, file-watch first event at or below
@@ -156,7 +191,7 @@ admission boundary. Installed authoritative file watching must also complete
 ms while observing Rust daemon startup/connection and active Gradle file-system
 watching.
 
-Gate 4, external dependency corpus parity (`gradle-fork-33f.4`):
+Gate 4, external dependency corpus parity:
 `testing/corpus/external-manifest.json` covers representative Maven POM,
 BOM/platform, Gradle Module Metadata, classifier/artifact-shape, repository
 content/filter/auth-local cases as supported or unsupported fixtures. Supported
@@ -177,13 +212,13 @@ requires a real included-build IR/execution model, including substituted project
 dependency edges, included-build tasks, outputs, and classpaths across build
 scopes.
 
-Gate 5, one-command demo and dogfood workflow (`gradle-fork-33f.5`):
+Gate 5, one-command demo and dogfood workflow (`gradle-fork-9dh1`):
 `tools/demo/rust_substrate_demo.sh` builds or locates prerequisites, runs
 supported sample builds through kernel mode, prints JVM-owned and Rust-owned
 phases, reports no JVM forwards, points to artifacts, and explains unsupported
 failures without hidden manual setup.
 
-Gate 6, maintenance guardrails (`gradle-fork-33f.6`):
+Gate 6, maintenance guardrails:
 [`architecture/rust-substrate-maintenance.md`](../architecture/rust-substrate-maintenance.md)
 documents schema versioning, proto regeneration, Rust/JVM contract ownership,
 how to add supported semantic slices, how to add unsupported fail-closed gates,
