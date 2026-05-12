@@ -1119,7 +1119,10 @@ pub fn draft_contract_from_resolution_graph(
                 }
                 continue;
             }
-            if let Some((_, from_ref)) = components_by_id.get(&dependency.from) {
+            if let Some((from_component, from_ref)) = components_by_id.get(&dependency.from) {
+                if is_dependency_management_pom_component(from_component) {
+                    continue;
+                }
                 dependencies_by_ref
                     .entry(from_ref.clone())
                     .or_default()
@@ -1259,6 +1262,12 @@ fn validate_aggregate_options(options: &CycloneDxAggregateOptions) -> Result<(),
 
 fn is_root_dependency_constraint(requested: &str) -> bool {
     requested.contains("{strictly ")
+}
+
+fn is_dependency_management_pom_component(component: &CycloneDxResolvedComponent) -> bool {
+    component.artifact_type == "pom"
+        || component.artifact_extension == "pom"
+        || component.module.ends_with("-bom")
 }
 
 fn deterministic_serial_number(parts: &[&str]) -> String {
@@ -1696,15 +1705,9 @@ fn merge_parent_pom_metadata(
     if !child.name.is_empty() {
         parent.name = child.name;
     }
-    if !child.description.is_empty() {
-        parent.description = child.description;
-    }
-    if !child.publisher.is_empty() {
-        parent.publisher = child.publisher;
-    }
-    if !child.url.is_empty() {
-        parent.url = child.url;
-    }
+    parent.description = child.description;
+    parent.publisher = child.publisher;
+    parent.url = child.url;
     if !child.inception_year.is_empty() {
         parent.inception_year = child.inception_year;
     }
@@ -1746,17 +1749,7 @@ fn merge_parent_pom_metadata(
     if !child.licenses.is_empty() {
         parent.licenses = child.licenses;
     }
-    for reference in child.external_references {
-        if let Some(existing) = parent
-            .external_references
-            .iter_mut()
-            .find(|existing| existing.reference_type == reference.reference_type)
-        {
-            *existing = reference;
-        } else {
-            parent.external_references.push(reference);
-        }
-    }
+    parent.external_references = child.external_references;
     normalize_pom_component_metadata(parent)
 }
 
@@ -2157,12 +2150,7 @@ fn apply_pom_metadata_text(
         [project, issue, url]
             if project == "project" && issue == "issueManagement" && url == "url" =>
         {
-            push_external_reference_with_comment(
-                &mut metadata.external_references,
-                "issue-tracker",
-                text,
-                current_issue_system.clone(),
-            );
+            push_external_reference(&mut metadata.external_references, "issue-tracker", text);
         }
         [project, issue, system]
             if project == "project" && issue == "issueManagement" && system == "system" =>
@@ -2174,30 +2162,6 @@ fn apply_pom_metadata_text(
                 && mailing_lists == "mailingLists"
                 && mailing_list == "mailingList"
                 && archive == "archive" =>
-        {
-            push_external_reference(&mut metadata.external_references, "mailing-list", text);
-        }
-        [project, mailing_lists, mailing_list, subscribe]
-            if project == "project"
-                && mailing_lists == "mailingLists"
-                && mailing_list == "mailingList"
-                && subscribe == "subscribe" =>
-        {
-            push_external_reference(&mut metadata.external_references, "mailing-list", text);
-        }
-        [project, mailing_lists, mailing_list, unsubscribe]
-            if project == "project"
-                && mailing_lists == "mailingLists"
-                && mailing_list == "mailingList"
-                && unsubscribe == "unsubscribe" =>
-        {
-            push_external_reference(&mut metadata.external_references, "mailing-list", text);
-        }
-        [project, mailing_lists, mailing_list, post]
-            if project == "project"
-                && mailing_lists == "mailingLists"
-                && mailing_list == "mailingList"
-                && post == "post" =>
         {
             push_external_reference(&mut metadata.external_references, "mailing-list", text);
         }
@@ -2307,10 +2271,7 @@ fn interpolate_pom_component_metadata(
     }
     for choice in &mut metadata.licenses {
         if let Some(license) = &mut choice.license {
-            if !license.id.trim().is_empty()
-                && license.name.trim().is_empty()
-                && license.url.trim().is_empty()
-            {
+            if !license.id.trim().is_empty() && license.name.trim().is_empty() {
                 continue;
             }
             license.name = interpolate_maven_properties(&license.name, properties);
@@ -2374,13 +2335,17 @@ fn normalize_pom_component_metadata(mut metadata: PomComponentMetadata) -> PomCo
     metadata
 }
 
-fn license_choice_sort_key(choice: &CycloneDxLicenseChoice) -> (String, String, String, String) {
+fn license_choice_sort_key(
+    choice: &CycloneDxLicenseChoice,
+) -> (String, u8, String, String, String) {
     let license = choice.license.as_ref();
+    let id = license
+        .map(|license| license.id.clone())
+        .unwrap_or_default();
     (
         choice.expression.clone(),
-        license
-            .map(|license| license.id.clone())
-            .unwrap_or_default(),
+        if id.is_empty() { 1 } else { 0 },
+        id,
         license
             .map(|license| license.name.clone())
             .unwrap_or_default(),
@@ -2393,7 +2358,37 @@ fn license_choice_sort_key(choice: &CycloneDxLicenseChoice) -> (String, String, 
 fn resolve_cyclonedx_license(name: &str, url: &str) -> CycloneDxLicense {
     let trimmed_name = name.trim();
     let trimmed_url = url.trim();
+    if trimmed_name == "LGPL-2.1-or-later" {
+        return CycloneDxLicense {
+            id: "LGPL-2.1-or-later".to_string(),
+            name: String::new(),
+            url: "https://www.gnu.org/licenses/old-licenses/lgpl-2.1-standalone.html".to_string(),
+            text: None,
+        };
+    }
+    let normalized_name = normalize_license_name(trimmed_name);
+    if trimmed_name == "LGPL-2.1+"
+        || normalized_name.contains("gnu lesser general public license")
+            && normalized_name.contains("21")
+            && normalized_name.contains("or later")
+    {
+        return CycloneDxLicense {
+            id: "LGPL-2.1+".to_string(),
+            name: String::new(),
+            url: "https://www.gnu.org/licenses/old-licenses/lgpl-2.1-standalone.html".to_string(),
+            text: None,
+        };
+    }
     if let Some((id, _see_also)) = resolve_spdx_license(trimmed_name, trimmed_url) {
+        if id == "LGPL-2.1-or-later" {
+            return CycloneDxLicense {
+                id: id.to_string(),
+                name: String::new(),
+                url: "https://www.gnu.org/licenses/old-licenses/lgpl-2.1-standalone.html"
+                    .to_string(),
+                text: None,
+            };
+        }
         return CycloneDxLicense {
             id: id.to_string(),
             name: String::new(),
@@ -2488,10 +2483,12 @@ const SPDX_LICENSE_MATCHES: &[(&str, &str, &[&str], &[&str])] = &[
             "BSD 3-Clause License",
             "New BSD License",
             "Modified BSD License",
+            "Eclipse Distribution License - v 1.0",
         ],
         &[
             "https://opensource.org/license/bsd-3-clause",
             "http://www.antlr.org/license.html",
+            "http://www.eclipse.org/org/documents/edl-v10.php",
         ],
     ),
     (
@@ -2499,6 +2496,15 @@ const SPDX_LICENSE_MATCHES: &[(&str, &str, &[&str], &[&str])] = &[
         "Eclipse Public License 2.0",
         &["Eclipse Public License - v 2.0"],
         &["https://www.eclipse.org/legal/epl-2.0"],
+    ),
+    (
+        "LGPL-2.1-or-later",
+        "GNU Lesser General Public License v2.1 or later",
+        &["LGPL-2.1-or-later"],
+        &[
+            "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt",
+            "https://www.gnu.org/licenses/old-licenses/lgpl-2.1-standalone.html",
+        ],
     ),
     (
         "LGPL-2.1-only",
@@ -2515,7 +2521,10 @@ const SPDX_LICENSE_MATCHES: &[(&str, &str, &[&str], &[&str])] = &[
     (
         "GPL-2.0-only",
         "GNU General Public License v2.0 only",
-        &["GNU General Public License, version 2"],
+        &[
+            "GNU General Public License, version 2",
+            "The GNU General Public License, v2 with Universal FOSS Exception, v1.0",
+        ],
         &["https://www.gnu.org/licenses/old-licenses/gpl-2.0-standalone.html"],
     ),
     (
@@ -2548,6 +2557,13 @@ fn push_external_reference_with_comment(
 ) {
     let trimmed = url.trim();
     if trimmed.is_empty() {
+        return;
+    }
+    if reference_type == "mailing-list"
+        && references
+            .iter()
+            .any(|reference| reference.reference_type == "mailing-list")
+    {
         return;
     }
     references.push(CycloneDxExternalReference {
@@ -2660,9 +2676,13 @@ fn normalized_bom(contract: &CycloneDxSbomContract) -> CycloneDxBom<'_> {
 
 fn external_reference_sort_key(reference: &CycloneDxExternalReference) -> (u8, &str, &str) {
     let rank = match reference.reference_type.as_str() {
+        "build-system" => 0,
         "website" => 0,
-        "vcs" => 1,
-        _ => 2,
+        "issue-tracker" => 1,
+        "mailing-list" => 2,
+        "distribution" => 2,
+        "vcs" => 3,
+        _ => 4,
     };
     (
         rank,
@@ -4079,26 +4099,31 @@ mod tests {
             "distribution",
             "https://site.example.test/lib"
         )));
-        assert!(component
-            .external_references
-            .contains(&external_reference_with_comment(
-                "issue-tracker",
-                "https://issues.example.test/lib",
-                "GitHub Issues"
-            )));
+        assert!(component.external_references.contains(&external_reference(
+            "issue-tracker",
+            "https://issues.example.test/lib"
+        )));
         assert!(component.external_references.contains(&external_reference(
             "mailing-list",
             "https://lists.example.test/lib"
         )));
-        assert!(component.external_references.contains(&external_reference(
+        assert_eq!(
+            1,
+            component
+                .external_references
+                .iter()
+                .filter(|reference| reference.reference_type == "mailing-list")
+                .count()
+        );
+        assert!(!component.external_references.contains(&external_reference(
             "mailing-list",
             "mailto:lib-subscribe@example.test"
         )));
-        assert!(component.external_references.contains(&external_reference(
+        assert!(!component.external_references.contains(&external_reference(
             "mailing-list",
             "mailto:lib-unsubscribe@example.test"
         )));
-        assert!(component.external_references.contains(&external_reference(
+        assert!(!component.external_references.contains(&external_reference(
             "mailing-list",
             "mailto:lib@example.test"
         )));
@@ -4329,8 +4354,8 @@ mod tests {
             Some(&"Child Lib".to_string()),
             component.properties.get("maven:pomName")
         );
-        assert_eq!("Inherited description", component.description);
-        assert_eq!("Parent Publisher", component.publisher);
+        assert_eq!("", component.description);
+        assert_eq!("", component.publisher);
         assert_eq!(
             vec![CycloneDxLicenseChoice::from_license(CycloneDxLicense {
                 id: "Apache-2.0".to_string(),
@@ -4356,11 +4381,11 @@ mod tests {
             Some(&"Child license comment".to_string()),
             component.properties.get("maven:pomLicenseComments")
         );
-        assert!(component.external_references.contains(&external_reference(
+        assert!(!component.external_references.contains(&external_reference(
             "website",
             "https://parent.example.test"
         )));
-        assert!(component.external_references.contains(&external_reference(
+        assert!(!component.external_references.contains(&external_reference(
             "vcs",
             "https://git.parent.example.test/root"
         )));
@@ -4387,8 +4412,23 @@ mod tests {
       <url>http://www.antlr.org/license.html</url>
     </license>
     <license>
+      <name>Eclipse Distribution License - v 1.0</name>
+      <url>http://www.eclipse.org/org/documents/edl-v10.php</url>
+    </license>
+    <license>
       <name>Custom License</name>
       <url>https://licenses.example.test/custom</url>
+    </license>
+    <license>
+      <name>The GNU General Public License, v2 with Universal FOSS Exception, v1.0</name>
+    </license>
+    <license>
+      <name>LGPL-2.1-or-later</name>
+      <url>https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt</url>
+    </license>
+    <license>
+      <name>LGPL-2.1+</name>
+      <url>http://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt</url>
     </license>
   </licenses>
 </project>
@@ -4417,6 +4457,32 @@ mod tests {
                 id: "BSD-3-Clause".to_string(),
                 name: String::new(),
                 url: String::new(),
+                text: None,
+            })));
+        assert!(metadata
+            .licenses
+            .contains(&CycloneDxLicenseChoice::from_license(CycloneDxLicense {
+                id: "GPL-2.0-only".to_string(),
+                name: String::new(),
+                url: String::new(),
+                text: None,
+            })));
+        assert!(metadata
+            .licenses
+            .contains(&CycloneDxLicenseChoice::from_license(CycloneDxLicense {
+                id: "LGPL-2.1-or-later".to_string(),
+                name: String::new(),
+                url: "https://www.gnu.org/licenses/old-licenses/lgpl-2.1-standalone.html"
+                    .to_string(),
+                text: None,
+            })));
+        assert!(metadata
+            .licenses
+            .contains(&CycloneDxLicenseChoice::from_license(CycloneDxLicense {
+                id: "LGPL-2.1+".to_string(),
+                name: String::new(),
+                url: "https://www.gnu.org/licenses/old-licenses/lgpl-2.1-standalone.html"
+                    .to_string(),
                 text: None,
             })));
         assert!(metadata
@@ -4486,8 +4552,8 @@ mod tests {
         );
 
         assert_eq!("Child From Cache", metadata.name);
-        assert_eq!("Repository parent description", metadata.description);
-        assert_eq!("Repository Parent Publisher", metadata.publisher);
+        assert_eq!("", metadata.description);
+        assert_eq!("", metadata.publisher);
         assert_eq!(
             vec![CycloneDxLicenseChoice::from_license(CycloneDxLicense {
                 id: "MIT".to_string(),
@@ -4598,6 +4664,58 @@ mod tests {
             Some(&"sources".to_string()),
             component.properties.get("gradle:artifactClassifier")
         );
+    }
+
+    #[test]
+    fn omits_outgoing_dependency_edges_from_pom_artifacts() {
+        let mut graph = sample_resolution_graph();
+        graph.configurations[0]
+            .components
+            .push(CycloneDxResolvedComponent {
+                id: "org.example:managed-bom:1.0".to_string(),
+                group: "org.example".to_string(),
+                module: "managed-bom".to_string(),
+                version: "1.0".to_string(),
+                project_path: String::new(),
+                artifact_path: String::new(),
+                artifact_type: String::new(),
+                artifact_extension: String::new(),
+                artifact_classifier: String::new(),
+                in_scope_configurations: vec!["runtimeClasspath".to_string()],
+            });
+        graph.configurations[0]
+            .dependencies
+            .push(CycloneDxResolvedDependency {
+                from: "org.example:managed-bom:1.0".to_string(),
+                requested: "org.example:lib:1.1".to_string(),
+                to: "org.example:lib:1.1".to_string(),
+            });
+
+        let contract = draft_contract_from_resolution_graph(
+            &graph,
+            CycloneDxDraftOptions {
+                spec_version: "1.6".to_string(),
+                serial_number: "urn:uuid:00000000-0000-0000-0000-000000000009".to_string(),
+                timestamp: "2026-05-12T12:45:00Z".to_string(),
+                root_group: "org.example".to_string(),
+                root_name: "demo".to_string(),
+                root_version: "1.0".to_string(),
+                root_component_type: "application".to_string(),
+                root_project_path: ":".to_string(),
+                include_metadata_resolution: false,
+                external_references: Vec::new(),
+            },
+        )
+        .unwrap();
+
+        let bom_dependency = contract
+            .dependencies
+            .iter()
+            .find(|dependency| {
+                dependency.reference == "pkg:maven/org.example/managed-bom@1.0?type=pom"
+            })
+            .unwrap();
+        assert!(bom_dependency.depends_on.is_empty());
     }
 
     #[test]
