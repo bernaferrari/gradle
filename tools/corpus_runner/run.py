@@ -362,7 +362,7 @@ def scan_project_contract(project_dir: str) -> dict:
             unsupported_features.add("repository-content-filter")
         if has_unsupported_dependency_substitution(text):
             unsupported_features.add("dependency-substitution")
-        if re.search(r"\bcomponents\s*\{", text):
+        if has_unsupported_component_metadata_rule(text):
             unsupported_features.add("component-metadata-rule")
         if re.search(r"\bdetachedConfiguration\s*\(", text):
             unsupported_features.add("detached-configuration")
@@ -418,6 +418,21 @@ def has_unsupported_dependency_substitution(text: str) -> bool:
     supported = re.compile(
         r"substitute\s*\(\s*module\s*\(\s*[\"'][A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+[\"']\s*\)\s*\)\s*\.\s*using\s*\(\s*module\s*\(\s*[\"'][A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+[\"']\s*\)\s*\)"
     )
+    for block in blocks:
+        remaining = supported.sub("", block)
+        remaining = re.sub(r"[\s;]+", "", remaining)
+        if remaining:
+            return True
+    return False
+
+
+def has_unsupported_component_metadata_rule(text: str) -> bool:
+    if not re.search(r"\bcomponents\s*\{", text):
+        return False
+    blocks = extract_balanced_blocks(text, "components")
+    if not blocks:
+        return True
+    supported = re.compile(r"\ball\s*\{\s*status\s*=\s*[\"']release[\"']\s*\}")
     for block in blocks:
         remaining = supported.sub("", block)
         remaining = re.sub(r"[\s;]+", "", remaining)

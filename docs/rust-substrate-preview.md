@@ -77,9 +77,10 @@ admission, or an explicit unsupported corpus gate. The preview does not support:
 - rich dependency semantics not represented by the native contract, including
   unsupported dynamic selectors, non-module dependency substitution, richer
   enforced-platform forms outside exact static `enforcedPlatform("g:n:v")`,
-  component metadata rules, artifact transforms/views, repository
-  auth/proxy/offline/refresh semantics outside the checked-in contract, and
-  unsupported Gradle Module Metadata fields;
+  component metadata rules outside exact `components { all { status = "release" } }`
+  normalization, artifact transforms/views, repository auth/proxy/offline/refresh
+  semantics outside the checked-in contract, and unsupported Gradle Module Metadata
+  fields;
 - task-by-task fallback inside an admitted Rust-authoritative run.
 
 Unsupported fixtures belong in `testing/corpus/unsupported-manifest.json` or in

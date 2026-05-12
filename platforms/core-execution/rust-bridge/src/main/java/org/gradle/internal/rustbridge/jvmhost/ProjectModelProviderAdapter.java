@@ -462,7 +462,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if (projectBuildScriptHasUnsupportedDependencySubstitution(project)) {
             unsupportedFeatures.add("dependency-substitution:build-script");
         }
-        if (projectBuildScriptHasComponentMetadataRule(project)) {
+        if (projectBuildScriptHasUnsupportedComponentMetadataRule(project)) {
             unsupportedFeatures.add("component-metadata-rule:build-script");
         }
         if (projectBuildScriptHasDetachedConfiguration(project)) {
@@ -533,8 +533,26 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         return false;
     }
 
-    private static boolean projectBuildScriptHasComponentMetadataRule(Project project) {
-        return projectBuildScriptMatches(project, "\\bcomponents\\s*\\{");
+    private static boolean projectBuildScriptHasUnsupportedComponentMetadataRule(Project project) {
+        String text = projectBuildScriptText(project);
+        if (text == null || !Pattern.compile("\\bcomponents\\s*\\{").matcher(text).find()) {
+            return false;
+        }
+        List<String> blocks = balancedBlocks(text, "components");
+        if (blocks.isEmpty()) {
+            return true;
+        }
+        Pattern supported = Pattern.compile(
+            "\\ball\\s*\\{\\s*status\\s*=\\s*\"release\"\\s*\\}"
+        );
+        for (String block : blocks) {
+            String remaining = supported.matcher(block).replaceAll("");
+            remaining = remaining.replaceAll("[\\s;]+", "");
+            if (!remaining.isEmpty()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean projectBuildScriptHasDetachedConfiguration(Project project) {
