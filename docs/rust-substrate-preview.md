@@ -194,14 +194,18 @@ shadow artifacts may have an empty canonical `project_dir`, so the prototype
 uses `--project-dir` plus absolute task paths to find exactly one matching
 artifact under `--state-dir`. It fails closed when no artifact matches or when
 multiple artifacts match without `--build-id` or explicit `--artifact`.
-Promoting this to a user-facing warm path still requires stable build identity,
-content fingerprints, and selected-task compatibility checks. The prototype
-already fails closed when tracked build-definition files (`build.gradle(.kts)`,
-`settings.gradle(.kts)`, `gradle.properties`, or `gradle/libs.versions.toml`)
-or captured absolute project input paths are newer than the cached artifact.
-Captured producer outputs, local state, and destroyables are excluded so normal
-producer-consumer paths under `build/` do not invalidate an otherwise unchanged
-plan. Use `--skip-invalidation` only for debugging stale artifacts.
+Promoting this to a user-facing warm path still requires stable build identity
+and selected-task compatibility checks. The prototype already fails closed when
+tracked build-definition files (`build.gradle(.kts)`, `settings.gradle(.kts)`,
+`gradle.properties`, or `gradle/libs.versions.toml`) or captured absolute
+project input paths are newer than the cached artifact. New shadow artifacts
+also carry SHA-256 content fingerprints for captured project input paths, and
+direct RunBuild validates those fingerprints before `InitBuild`. This catches
+content changes even when mtimes are restored. Captured producer outputs, local
+state, and destroyables are excluded so normal producer-consumer paths under
+`build/` do not invalidate an otherwise unchanged plan. Artifacts with path
+inputs but no `input_fingerprints` are rejected as unsafe for direct RunBuild.
+Use `--skip-invalidation` only for debugging stale artifacts.
 
 ## Ship Gates
 

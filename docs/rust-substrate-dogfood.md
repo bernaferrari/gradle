@@ -70,17 +70,18 @@ warm supported runs, not micro-optimizing individual Rust task executors first.
 A direct cached-plan prototype now proves that seam for one supported fixture.
 Using `gradle-substrate-runbuild --state-dir ... --project-dir ...` against an
 existing `oss-style-java-library` build-plan shadow store found the matching
-artifact and ran the cached Rust plan in 730 ms with 15 tasks, zero JVM
+artifact and ran the cached Rust plan in 728 ms with 15 tasks, zero JVM
 forwards, and `build-plan-shadow` as the plan source. The resulting build
 outputs matched the upstream dogfood output file inventory, non-archive hashes,
 and archive entries. This is still a prototype: it requires a previously
 generated shadow store and explicit project directory. It now has conservative
 mtime invalidation for tracked build-definition files and captured absolute
-project input paths, while excluding paths captured as task outputs/local
-state/destroyables. Touching
-`src/main/java/example/PublicApi.java` rejects before `RunBuild` with a precise
-stale-input diagnostic. Full content fingerprint invalidation is still future
-work.
+project input paths, plus SHA-256 content fingerprint validation for new shadow
+artifacts. Paths captured as task outputs/local state/destroyables are excluded.
+Touching `src/main/java/example/PublicApi.java`, deleting it, or changing its
+content while restoring the old mtime rejects before `RunBuild` with a precise
+stale-input diagnostic. Mutating a generated class under `build/classes` does
+not invalidate the plan because Rust will regenerate it during execution.
 
 ## Boundaries
 
