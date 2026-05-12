@@ -821,6 +821,57 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
+    public void capturesExactArtifactViewReportAsStaticWriteFile() throws IOException {
+        File buildFile = temporaryFolder.newFile("build.gradle.kts");
+        Files.write(buildFile.toPath(), Collections.singletonList(
+            "dependencies { implementation(\"org.gradle.substrate:artifact-view:1.0\") }\n" +
+                "tasks.register(\"resolveArtifactView\") {\n" +
+                "  doLast {\n" +
+                "    val view = configurations.runtimeClasspath.get().incoming.artifactView { lenient(true) }\n" +
+                "    val files = view.files.files.map { it.name }.sorted()\n" +
+                "    file(\"build/artifact-view/resolved.txt\").writeText(files.joinToString(separator = \"\\n\", postfix = \"\\n\"))\n" +
+                "  }\n" +
+                "}\n"
+        ), StandardCharsets.UTF_8);
+        File outputFile = new File(temporaryFolder.getRoot(), "build/artifact-view/resolved.txt");
+        Task report = staticWriteFileTask("resolveArtifactView", buildFile, outputFile);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(report, DefaultTask.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("jvm-task", task.getActionKind());
+        assertEquals("YXJ0aWZhY3Qtdmlldy0xLjAuamFyCg==", inputs.get("static_output_text_b64"));
+        assertFalse(inputs.containsKey("unsupported_dependency_semantics"));
+    }
+
+    @org.junit.Test
+    public void nontrivialArtifactViewRemainsUnsupportedDependencySemantics() throws IOException {
+        File buildFile = temporaryFolder.newFile("build.gradle.kts");
+        Files.write(buildFile.toPath(), Collections.singletonList(
+            "dependencies { implementation(\"org.gradle.substrate:artifact-view:1.0\") }\n" +
+                "tasks.register(\"resolveArtifactView\") {\n" +
+                "  doLast {\n" +
+                "    val view = configurations.runtimeClasspath.get().incoming.artifactView { componentFilter { false } }\n" +
+                "    file(\"build/artifact-view/resolved.txt\").writeText(view.files.files.joinToString())\n" +
+                "  }\n" +
+                "}\n"
+        ), StandardCharsets.UTF_8);
+        File outputFile = new File(temporaryFolder.getRoot(), "build/artifact-view/resolved.txt");
+        Task report = staticWriteFileTask("resolveArtifactView", buildFile, outputFile);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(report, DefaultTask.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("true", inputs.get("unsupported_dependency_semantics"));
+        assertTrue(inputs.get("unsupported_repository_features").contains("artifact-view:build-script"));
+        assertFalse(inputs.containsKey("static_output_text_b64"));
+    }
+
+    @org.junit.Test
     public void exactReleaseComponentMetadataStatusRuleIsNativeReady() throws IOException {
         File buildFile = temporaryFolder.newFile("build.gradle.kts");
         Files.write(buildFile.toPath(), Collections.singletonList(

@@ -366,7 +366,7 @@ def scan_project_contract(project_dir: str) -> dict:
             unsupported_features.add("component-metadata-rule")
         if has_unsupported_detached_configuration(text):
             unsupported_features.add("detached-configuration")
-        if re.search(r"\bartifactView\s*\{", text):
+        if has_unsupported_artifact_view(text):
             unsupported_features.add("artifact-view")
         if re.search(r"\bregisterTransform(?:\s*<[^>]+>)?\s*\(", text):
             unsupported_features.add("artifact-transform")
@@ -488,6 +488,41 @@ def static_write_text_task_text(text: str, task_name: str) -> str | None:
     if variable:
         return decode_gradle_string_literal(variable.group(2))
     return None
+
+
+def has_unsupported_artifact_view(text: str) -> bool:
+    if not re.search(r"\bartifactView\s*\{", text):
+        return False
+    if len(re.findall(r"\bartifactView\s*\{", text)) != 1:
+        return True
+    return static_artifact_view_report_text(text) is None
+
+
+def static_artifact_view_report_text(text: str, task_name: str | None = None) -> str | None:
+    dependency = re.findall(
+        r"\bimplementation\s*\(\s*[\"']([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+)[\"']\s*\)",
+        text,
+    )
+    if len(dependency) != 1:
+        return None
+    _group, name, version = dependency[0]
+    if task_name is not None and not re.search(
+        r"tasks\.register\s*\(\s*[\"']" + re.escape(task_name) + r"[\"']\s*\)",
+        text,
+        re.DOTALL,
+    ):
+        return None
+    if not re.search(
+        r"runtimeClasspath\.get\s*\(\s*\)\.incoming\.artifactView\s*\{\s*lenient\s*\(\s*true\s*\)\s*\}",
+        text,
+        re.DOTALL,
+    ):
+        return None
+    if not re.search(r"\.files\.files\.map\s*\{\s*it\.name\s*}\s*\.sorted\s*\(\s*\)", text, re.DOTALL):
+        return None
+    if not re.search(r"joinToString\s*\(\s*separator\s*=\s*[\"']\\n[\"']\s*,\s*postfix\s*=\s*[\"']\\n[\"']\s*\)", text, re.DOTALL):
+        return None
+    return f"{name}-{version}.jar\n"
 
 
 def has_unsupported_enforced_platform(text: str) -> bool:
