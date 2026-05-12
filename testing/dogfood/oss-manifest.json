@@ -5,22 +5,23 @@
   "description": "Pinned external OSS Gradle projects for the next Rust substrate dogfood layer. These entries are not vendored into the repository; a fetch/cache runner should clone them under build/dogfood-oss before execution.",
   "projects": [
     {
-      "name": "spring-gs-gradle-complete",
-      "path": "spring-gs-gradle-complete",
+      "name": "spring-petclinic",
+      "path": "spring-petclinic",
       "source": {
         "kind": "git",
-        "url": "https://github.com/spring-guides/gs-gradle.git",
-        "ref": "878317c9a4a70d9b63ee649a5d5d274a4188ba91",
-        "subdir": "complete",
-        "description": "Spring guide Gradle sample pinned to an immutable commit."
+        "url": "https://github.com/spring-projects/spring-petclinic.git",
+        "ref": "c7ee170434ec3e369fdc9201290ba2ea4c92b557",
+        "subdir": ".",
+        "description": "Spring PetClinic pinned to an immutable commit."
       },
-      "tasks": ["clean", "build"],
+      "tasks": ["help"],
       "mode": "native-ready-default",
       "expectation": "supported-or-fail-closed",
       "timeout_seconds": 300,
-      "reason": "Small recognizable Java Gradle project with wrapper/build lifecycle; useful as the first external OSS smoke.",
+      "reason": "Recognizable Java/Spring Gradle build with a normal settings file; useful as an external OSS smoke.",
       "checks": {
         "task_parity": true,
+        "task_order": false,
         "output_inventory": true,
         "no_jvm_forwards": true,
         "fail_closed_diagnostic": "required-if-not-supported"
@@ -43,6 +44,7 @@
       "reason": "Recognizable Gradle-heavy OSS build for admission diagnostics and plugin-boundary honesty.",
       "checks": {
         "task_parity": true,
+        "task_order": false,
         "no_jvm_forwards": true,
         "fail_closed_diagnostic": "required-if-not-supported"
       }
@@ -64,6 +66,7 @@
       "reason": "Recognizable Gradle build with Kotlin/native/plugin semantics that should not be approximated by Rust.",
       "checks": {
         "task_parity": true,
+        "task_order": false,
         "no_jvm_forwards": true,
         "fail_closed_diagnostic": "required-if-not-supported"
       }

@@ -284,6 +284,142 @@ class DogfoodRunnerTest(unittest.TestCase):
 
         self.assertEqual(["task-drift", "output-drift"], summary["failed_projects"])
 
+    def test_supported_or_fail_closed_accepts_diagnostic_failure(self):
+        class Result:
+            def __init__(self, exit_code, output):
+                self.exit_code = exit_code
+                self.output = output
+                self.tasks = []
+                self.output_files = []
+                self.output_hashes = {}
+                self.archive_entries = {}
+                self.substrate_noop = False
+                self.duration_ms = 1
+
+            def to_dict(self):
+                return {
+                    "exit_code": self.exit_code,
+                    "output_preview": self.output,
+                    "tasks": self.tasks,
+                    "task_count": 0,
+                    "output_file_count": 0,
+                    "output_files": [],
+                    "output_hashes": {},
+                    "archive_entries": {},
+                    "substrate_noop": False,
+                    "duration_ms": self.duration_ms,
+                }
+
+        project = dogfood_run.DogfoodProject(
+            name="maybe",
+            path=Path("/tmp/maybe"),
+            tasks=["help"],
+            mode="native-ready-default",
+            expectation="supported-or-fail-closed",
+            timeout_seconds=1,
+            reason="test",
+            checks={"fail_closed_diagnostic": "required-if-not-supported"},
+            source={"kind": "checked-in-local", "description": "test"},
+        )
+
+        corpus = dogfood_run.load_corpus_runner()
+        original_run_build = corpus.run_build
+        original_load_corpus_runner = dogfood_run.load_corpus_runner
+        try:
+            calls = []
+
+            def fake_run_build(*args, **kwargs):
+                calls.append(kwargs.get("substrate", False))
+                if kwargs.get("substrate", False):
+                    return Result(
+                        1,
+                        "Rust authoritative run-build did not complete jvmForwarded=0",
+                    )
+                return Result(0, "BUILD SUCCESSFUL")
+
+            corpus.run_build = fake_run_build
+            dogfood_run.load_corpus_runner = lambda: corpus
+            result = dogfood_run.run_project(
+                project,
+                Path(tempfile.mkdtemp()),
+                gradle_command=None,
+                daemon_binary=None,
+            )
+        finally:
+            corpus.run_build = original_run_build
+            dogfood_run.load_corpus_runner = original_load_corpus_runner
+
+        self.assertEqual([False, True], calls)
+        self.assertTrue(result["match"])
+        self.assertEqual("fail-closed", result["checks"]["resolved_expectation"])
+
+    def test_supported_or_fail_closed_can_accept_task_set_parity(self):
+        class Result:
+            def __init__(self, tasks):
+                self.exit_code = 0
+                self.output = (
+                    "[substrate:run-build] Rust executed 2 Gradle tasks from build-plan-cache "
+                    "with 0 up-to-date; JVM forwarding disabled"
+                )
+                self.tasks = tasks
+                self.output_files = []
+                self.output_hashes = {}
+                self.archive_entries = {}
+                self.substrate_noop = False
+                self.duration_ms = 1
+
+            def to_dict(self):
+                return {
+                    "exit_code": self.exit_code,
+                    "output_preview": self.output,
+                    "tasks": self.tasks,
+                    "task_count": len(self.tasks),
+                    "output_file_count": 0,
+                    "output_files": [],
+                    "output_hashes": {},
+                    "archive_entries": {},
+                    "substrate_noop": False,
+                    "duration_ms": self.duration_ms,
+                }
+
+        project = dogfood_run.DogfoodProject(
+            name="maybe",
+            path=Path("/tmp/maybe"),
+            tasks=["help"],
+            mode="native-ready-default",
+            expectation="supported-or-fail-closed",
+            timeout_seconds=1,
+            reason="test",
+            checks={"task_parity": True, "task_order": False, "no_jvm_forwards": True},
+            source={"kind": "checked-in-local", "description": "test"},
+        )
+
+        corpus = dogfood_run.load_corpus_runner()
+        original_run_build = corpus.run_build
+        original_load_corpus_runner = dogfood_run.load_corpus_runner
+        try:
+            calls = []
+
+            def fake_run_build(*args, **kwargs):
+                calls.append(kwargs.get("substrate", False))
+                return Result([":b", ":a"] if kwargs.get("substrate", False) else [":a", ":b"])
+
+            corpus.run_build = fake_run_build
+            dogfood_run.load_corpus_runner = lambda: corpus
+            result = dogfood_run.run_project(
+                project,
+                Path(tempfile.mkdtemp()),
+                gradle_command=None,
+                daemon_binary=None,
+            )
+        finally:
+            corpus.run_build = original_run_build
+            dogfood_run.load_corpus_runner = original_load_corpus_runner
+
+        self.assertEqual([False, True], calls)
+        self.assertTrue(result["match"])
+        self.assertTrue(result["checks"]["task_set_match"])
+
 
 if __name__ == "__main__":
     unittest.main()
