@@ -15,6 +15,13 @@ assert SPEC.loader is not None
 sys.modules[SPEC.name] = dogfood_run
 SPEC.loader.exec_module(dogfood_run)
 
+DIRECT_WARM_PATH = Path(__file__).with_name("direct_warm.py")
+DIRECT_WARM_SPEC = importlib.util.spec_from_file_location("dogfood_direct_warm", DIRECT_WARM_PATH)
+direct_warm = importlib.util.module_from_spec(DIRECT_WARM_SPEC)
+assert DIRECT_WARM_SPEC.loader is not None
+sys.modules[DIRECT_WARM_SPEC.name] = direct_warm
+DIRECT_WARM_SPEC.loader.exec_module(direct_warm)
+
 
 class DogfoodRunnerTest(unittest.TestCase):
     def test_checked_in_manifest_validates(self):
@@ -174,6 +181,53 @@ class DogfoodRunnerTest(unittest.TestCase):
         self.assertEqual("build-plan-cache", signals["plan_source"])
         self.assertEqual(3, signals["rust_executed_tasks"])
         self.assertEqual(0, signals["jvm_forward_count"])
+
+    def test_parse_direct_runbuild_output(self):
+        signals = direct_warm.parse_direct_runbuild_output(
+            "direct-runbuild status=COMPLETED tasks=14 succeeded=14 failed=0 skipped=4 "
+            "up_to_date=8 from_cache=0 jvm_forwarded=0 duration_ms=48 "
+            "plan_source=build-plan-shadow"
+        )
+
+        self.assertTrue(signals["marker"])
+        self.assertEqual("COMPLETED", signals["status"])
+        self.assertEqual(14, signals["tasks"])
+        self.assertEqual(0, signals["jvm_forwarded"])
+        self.assertEqual(48, signals["duration_ms"])
+        self.assertEqual("build-plan-shadow", signals["plan_source"])
+
+    def test_direct_warm_summary_counts_supported_passes(self):
+        summary = direct_warm.summarize(
+            [
+                {
+                    "name": "a",
+                    "expectation": "supported",
+                    "match": True,
+                    "direct_ms": 50,
+                    "direct": {"jvm_forwarded": 0},
+                },
+                {
+                    "name": "b",
+                    "expectation": "supported",
+                    "match": False,
+                    "direct_ms": 0,
+                    "direct": {"jvm_forwarded": None},
+                },
+                {
+                    "name": "unsupported",
+                    "expectation": "fail-closed",
+                    "match": False,
+                    "direct_ms": 0,
+                    "direct": {},
+                },
+            ]
+        )
+
+        self.assertEqual(3, summary["project_count"])
+        self.assertEqual(2, summary["supported_project_count"])
+        self.assertEqual(1, summary["direct_warm_supported_count"])
+        self.assertEqual(1, summary["zero_jvm_forward_count"])
+        self.assertEqual(["b"], summary["failed_projects"])
 
     def test_summarizes_pass_and_fail_closed_results(self):
         results = [

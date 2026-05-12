@@ -29,6 +29,17 @@ The preview command line is:
 tools/demo/rust_substrate_demo.sh
 ```
 
+The direct warm dogfood command is:
+
+```bash
+python3 tools/dogfood_runner/direct_warm.py \
+  --manifest testing/dogfood/manifest.json \
+  --gradle-command "$PWD/build/gradle-under-test/bin/gradle" \
+  --daemon-binary target/debug/gradle-substrate-daemon \
+  --runbuild-binary target/debug/gradle-substrate-runbuild \
+  --output-dir build/direct-warm-dogfood-current
+```
+
 The direct first-60s metrics command is:
 
 ```bash
@@ -243,6 +254,8 @@ admission boundary. Fast mode also reports the Rust-only direct cached-plan
 warm path: after one Gradle/JVM capture, `gradle-substrate-runbuild` must skip
 Gradle configuration, validate content fingerprints, execute from
 `build-plan-shadow`, and report zero JVM forwards at or below 10000 ms.
+`tools/dogfood_runner/direct_warm.py` extends that same proof from the single
+first-60s fixture to the supported local dogfood projects.
 Installed authoritative file watching must also complete `help --watch-fs`
 against the local Gradle-under-test image at or below 30000 ms while observing
 Rust daemon startup/connection and active Gradle file-system watching.
