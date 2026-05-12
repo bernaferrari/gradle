@@ -1254,14 +1254,21 @@ struct PomComponentMetadata {
     publisher: String,
     url: String,
     inception_year: String,
+    developer_ids: Vec<String>,
     developers: Vec<String>,
     developer_emails: Vec<String>,
+    developer_urls: Vec<String>,
     developer_organizations: Vec<String>,
     developer_organization_urls: Vec<String>,
+    developer_roles: Vec<String>,
+    developer_timezones: Vec<String>,
     contributors: Vec<String>,
     contributor_emails: Vec<String>,
+    contributor_urls: Vec<String>,
     contributor_organizations: Vec<String>,
     contributor_organization_urls: Vec<String>,
+    contributor_roles: Vec<String>,
+    contributor_timezones: Vec<String>,
     licenses: Vec<CycloneDxLicenseChoice>,
     external_references: Vec<CycloneDxExternalReference>,
 }
@@ -1284,6 +1291,12 @@ impl PomComponentMetadata {
                 self.inception_year.clone(),
             ));
         }
+        if !self.developer_ids.is_empty() {
+            properties.push((
+                "maven:pomDeveloperIds".to_string(),
+                self.developer_ids.join(","),
+            ));
+        }
         if !self.developers.is_empty() {
             properties.push(("maven:pomDevelopers".to_string(), self.developers.join(",")));
         }
@@ -1291,6 +1304,12 @@ impl PomComponentMetadata {
             properties.push((
                 "maven:pomDeveloperEmails".to_string(),
                 self.developer_emails.join(","),
+            ));
+        }
+        if !self.developer_urls.is_empty() {
+            properties.push((
+                "maven:pomDeveloperUrls".to_string(),
+                self.developer_urls.join(","),
             ));
         }
         if !self.developer_organizations.is_empty() {
@@ -1305,6 +1324,18 @@ impl PomComponentMetadata {
                 self.developer_organization_urls.join(","),
             ));
         }
+        if !self.developer_roles.is_empty() {
+            properties.push((
+                "maven:pomDeveloperRoles".to_string(),
+                self.developer_roles.join(","),
+            ));
+        }
+        if !self.developer_timezones.is_empty() {
+            properties.push((
+                "maven:pomDeveloperTimezones".to_string(),
+                self.developer_timezones.join(","),
+            ));
+        }
         if !self.contributors.is_empty() {
             properties.push((
                 "maven:pomContributors".to_string(),
@@ -1317,6 +1348,12 @@ impl PomComponentMetadata {
                 self.contributor_emails.join(","),
             ));
         }
+        if !self.contributor_urls.is_empty() {
+            properties.push((
+                "maven:pomContributorUrls".to_string(),
+                self.contributor_urls.join(","),
+            ));
+        }
         if !self.contributor_organizations.is_empty() {
             properties.push((
                 "maven:pomContributorOrganizations".to_string(),
@@ -1327,6 +1364,18 @@ impl PomComponentMetadata {
             properties.push((
                 "maven:pomContributorOrganizationUrls".to_string(),
                 self.contributor_organization_urls.join(","),
+            ));
+        }
+        if !self.contributor_roles.is_empty() {
+            properties.push((
+                "maven:pomContributorRoles".to_string(),
+                self.contributor_roles.join(","),
+            ));
+        }
+        if !self.contributor_timezones.is_empty() {
+            properties.push((
+                "maven:pomContributorTimezones".to_string(),
+                self.contributor_timezones.join(","),
             ));
         }
         properties
@@ -1693,6 +1742,14 @@ fn apply_pom_metadata_text(
         {
             push_external_reference(&mut metadata.external_references, "website", text);
         }
+        [project, developers, developer, id]
+            if project == "project"
+                && developers == "developers"
+                && developer == "developer"
+                && id == "id" =>
+        {
+            metadata.developer_ids.push(text);
+        }
         [project, developers, developer, name]
             if project == "project"
                 && developers == "developers"
@@ -1708,6 +1765,14 @@ fn apply_pom_metadata_text(
                 && email == "email" =>
         {
             metadata.developer_emails.push(text);
+        }
+        [project, developers, developer, url]
+            if project == "project"
+                && developers == "developers"
+                && developer == "developer"
+                && url == "url" =>
+        {
+            metadata.developer_urls.push(text);
         }
         [project, developers, developer, organization]
             if project == "project"
@@ -1725,6 +1790,23 @@ fn apply_pom_metadata_text(
         {
             metadata.developer_organization_urls.push(text);
         }
+        [project, developers, developer, roles, role]
+            if project == "project"
+                && developers == "developers"
+                && developer == "developer"
+                && roles == "roles"
+                && role == "role" =>
+        {
+            metadata.developer_roles.push(text);
+        }
+        [project, developers, developer, timezone]
+            if project == "project"
+                && developers == "developers"
+                && developer == "developer"
+                && timezone == "timezone" =>
+        {
+            metadata.developer_timezones.push(text);
+        }
         [project, contributors, contributor, name]
             if project == "project"
                 && contributors == "contributors"
@@ -1741,6 +1823,14 @@ fn apply_pom_metadata_text(
         {
             metadata.contributor_emails.push(text);
         }
+        [project, contributors, contributor, url]
+            if project == "project"
+                && contributors == "contributors"
+                && contributor == "contributor"
+                && url == "url" =>
+        {
+            metadata.contributor_urls.push(text);
+        }
         [project, contributors, contributor, organization]
             if project == "project"
                 && contributors == "contributors"
@@ -1756,6 +1846,23 @@ fn apply_pom_metadata_text(
                 && organization_url == "organizationUrl" =>
         {
             metadata.contributor_organization_urls.push(text);
+        }
+        [project, contributors, contributor, roles, role]
+            if project == "project"
+                && contributors == "contributors"
+                && contributor == "contributor"
+                && roles == "roles"
+                && role == "role" =>
+        {
+            metadata.contributor_roles.push(text);
+        }
+        [project, contributors, contributor, timezone]
+            if project == "project"
+                && contributors == "contributors"
+                && contributor == "contributor"
+                && timezone == "timezone" =>
+        {
+            metadata.contributor_timezones.push(text);
         }
         [project, ci, url] if project == "project" && ci == "ciManagement" && url == "url" => {
             push_external_reference(&mut metadata.external_references, "build-system", text);
@@ -1879,11 +1986,17 @@ fn interpolate_pom_component_metadata(
     metadata.publisher = interpolate_maven_properties(&metadata.publisher, properties);
     metadata.url = interpolate_maven_properties(&metadata.url, properties);
     metadata.inception_year = interpolate_maven_properties(&metadata.inception_year, properties);
+    for id in &mut metadata.developer_ids {
+        *id = interpolate_maven_properties(id, properties);
+    }
     for developer in &mut metadata.developers {
         *developer = interpolate_maven_properties(developer, properties);
     }
     for email in &mut metadata.developer_emails {
         *email = interpolate_maven_properties(email, properties);
+    }
+    for url in &mut metadata.developer_urls {
+        *url = interpolate_maven_properties(url, properties);
     }
     for organization in &mut metadata.developer_organizations {
         *organization = interpolate_maven_properties(organization, properties);
@@ -1891,17 +2004,32 @@ fn interpolate_pom_component_metadata(
     for url in &mut metadata.developer_organization_urls {
         *url = interpolate_maven_properties(url, properties);
     }
+    for role in &mut metadata.developer_roles {
+        *role = interpolate_maven_properties(role, properties);
+    }
+    for timezone in &mut metadata.developer_timezones {
+        *timezone = interpolate_maven_properties(timezone, properties);
+    }
     for contributor in &mut metadata.contributors {
         *contributor = interpolate_maven_properties(contributor, properties);
     }
     for email in &mut metadata.contributor_emails {
         *email = interpolate_maven_properties(email, properties);
     }
+    for url in &mut metadata.contributor_urls {
+        *url = interpolate_maven_properties(url, properties);
+    }
     for organization in &mut metadata.contributor_organizations {
         *organization = interpolate_maven_properties(organization, properties);
     }
     for url in &mut metadata.contributor_organization_urls {
         *url = interpolate_maven_properties(url, properties);
+    }
+    for role in &mut metadata.contributor_roles {
+        *role = interpolate_maven_properties(role, properties);
+    }
+    for timezone in &mut metadata.contributor_timezones {
+        *timezone = interpolate_maven_properties(timezone, properties);
     }
     for choice in &mut metadata.licenses {
         if let Some(license) = &mut choice.license {
@@ -3345,10 +3473,16 @@ mod tests {
   </organization>
   <developers>
     <developer>
+      <id>ada-${project.start}</id>
       <name>Ada ${project.start}</name>
       <email>ada-${project.start}@example.test</email>
+      <url>https://ada.example.test/${project.start}</url>
       <organization>Example Devs</organization>
       <organizationUrl>https://devs.example.test/${project.start}</organizationUrl>
+      <roles>
+        <role>maintainer-${project.start}</role>
+      </roles>
+      <timezone>+1</timezone>
     </developer>
     <developer>
       <name>Linus</name>
@@ -3358,8 +3492,13 @@ mod tests {
     <contributor>
       <name>Grace</name>
       <email>grace@example.test</email>
+      <url>https://grace.example.test</url>
       <organization>Example Contributors</organization>
       <organizationUrl>https://contributors.example.test</organizationUrl>
+      <roles>
+        <role>docs</role>
+      </roles>
+      <timezone>-5</timezone>
     </contributor>
   </contributors>
   <ciManagement>
@@ -3448,8 +3587,16 @@ mod tests {
             component.properties.get("maven:pomDevelopers")
         );
         assert_eq!(
+            Some(&"ada-2024".to_string()),
+            component.properties.get("maven:pomDeveloperIds")
+        );
+        assert_eq!(
             Some(&"ada-2024@example.test".to_string()),
             component.properties.get("maven:pomDeveloperEmails")
+        );
+        assert_eq!(
+            Some(&"https://ada.example.test/2024".to_string()),
+            component.properties.get("maven:pomDeveloperUrls")
         );
         assert_eq!(
             Some(&"Example Devs".to_string()),
@@ -3462,12 +3609,24 @@ mod tests {
                 .get("maven:pomDeveloperOrganizationUrls")
         );
         assert_eq!(
+            Some(&"maintainer-2024".to_string()),
+            component.properties.get("maven:pomDeveloperRoles")
+        );
+        assert_eq!(
+            Some(&"+1".to_string()),
+            component.properties.get("maven:pomDeveloperTimezones")
+        );
+        assert_eq!(
             Some(&"Grace".to_string()),
             component.properties.get("maven:pomContributors")
         );
         assert_eq!(
             Some(&"grace@example.test".to_string()),
             component.properties.get("maven:pomContributorEmails")
+        );
+        assert_eq!(
+            Some(&"https://grace.example.test".to_string()),
+            component.properties.get("maven:pomContributorUrls")
         );
         assert_eq!(
             Some(&"Example Contributors".to_string()),
@@ -3480,6 +3639,14 @@ mod tests {
             component
                 .properties
                 .get("maven:pomContributorOrganizationUrls")
+        );
+        assert_eq!(
+            Some(&"docs".to_string()),
+            component.properties.get("maven:pomContributorRoles")
+        );
+        assert_eq!(
+            Some(&"-5".to_string()),
+            component.properties.get("maven:pomContributorTimezones")
         );
         assert_eq!("Useful & small", component.description);
         assert_eq!("Example Foundation", component.publisher);
