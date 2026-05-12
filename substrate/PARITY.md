@@ -12,7 +12,9 @@
   [`docs/rust-substrate-preview.md`](../docs/rust-substrate-preview.md). That
   document is the source of truth for supported preview shapes, unsupported
   non-goals, JVM-owned surfaces, Rust-owned surfaces, ship gates, validation
-  commands, and first-60s thresholds.
+  commands, first-60s thresholds, the supported preview matrix, and the
+  fail-closed matrix. No build shape is considered preview-supported unless it
+  is listed there and backed by no-forward parity evidence.
 - Rust daemon protocol services compile and run in-process tests.
 - Hash compatibility suite validates cross-language digest behavior.
 - Strict stabilization script validates proto sync and daemon smoke startup.
