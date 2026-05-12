@@ -1,8 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use base64::Engine as _;
 
-use super::cyclonedx_sbom::{CycloneDxResolutionGraphEvidence, CycloneDxSbomContract};
+use super::cyclonedx_sbom::{
+    validate_captured_task_options, CycloneDxResolutionGraphEvidence, CycloneDxSbomContract,
+};
 use super::dependency_solver::graph_builder;
 
 /// Whole-build plan admitted into the Rust execution kernel after JVM
@@ -370,6 +372,12 @@ fn cyclonedx_contract_rejection(value: &serde_json::Value) -> Option<String> {
     if let Some(graph_rejection) = cyclonedx_resolution_graph_rejection(properties) {
         return Some(graph_rejection);
     }
+    if cyclonedx_resolution_graph_present(properties) {
+        let captured_options = cyclonedx_captured_options(properties);
+        if let Err(err) = validate_captured_task_options(&captured_options) {
+            return Some(err);
+        }
+    }
     let encoded = properties
         .get("input_value.sbom_contract_json_b64")
         .or_else(|| properties.get("input.sbom_contract_json_b64"))
@@ -394,6 +402,38 @@ fn cyclonedx_contract_rejection(value: &serde_json::Value) -> Option<String> {
         }
     };
     contract.validate().err()
+}
+
+fn cyclonedx_resolution_graph_present(
+    properties: &serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    properties
+        .get("input_value.cyclonedx_resolution_graph_json_b64")
+        .or_else(|| properties.get("input.cyclonedx_resolution_graph_json_b64"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .is_some()
+}
+
+fn cyclonedx_captured_options(
+    properties: &serde_json::Map<String, serde_json::Value>,
+) -> BTreeMap<String, String> {
+    properties
+        .iter()
+        .filter_map(|(key, value)| {
+            let normalized = key
+                .strip_prefix("input_value.")
+                .or_else(|| key.strip_prefix("input."))
+                .unwrap_or(key);
+            if !normalized.starts_with("cyclonedx_") {
+                return None;
+            }
+            value
+                .as_str()
+                .map(|value| (normalized.to_string(), value.to_string()))
+        })
+        .collect()
 }
 
 fn cyclonedx_resolution_graph_rejection(
@@ -662,6 +702,53 @@ mod tests {
             panic!("expected rejection");
         };
         assert!(rejection.message().contains("outside component set"));
+    }
+
+    #[test]
+    fn rejects_partial_cyclonedx_with_incomplete_captured_options() {
+        let graph_json = serde_json::json!({
+            "schema": "gradle-substrate.cyclonedx-resolution-graph.v1",
+            "configurations": [{
+                "name": "runtimeClasspath",
+                "components": [{
+                    "id": "org.example:app:1.0",
+                    "group": "org.example",
+                    "module": "app",
+                    "version": "1.0"
+                }],
+                "dependencies": []
+            }]
+        })
+        .to_string();
+        let encoded = base64::engine::general_purpose::STANDARD.encode(graph_json);
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![task(
+                ":cyclonedxDirectBom",
+                "org.cyclonedx.gradle.CyclonedxDirectTask",
+                Some(
+                    serde_json::json!({
+                        "input_properties": {
+                            "input_value.cyclonedx_resolution_graph_json_b64": encoded,
+                            "input_value.cyclonedx_schema_version": "VERSION_16"
+                        }
+                    })
+                    .to_string(),
+                ),
+            )],
+        };
+
+        let KernelAdmission::Rejected(rejection) = admit_build_plan(
+            &plan,
+            &native_types(&["org.cyclonedx.gradle.CyclonedxDirectTask"]),
+        ) else {
+            panic!("expected rejection");
+        };
+        let message = rejection.message();
+        assert!(message.contains("captured task options"));
+        assert!(message.contains("component-name"));
+        assert!(message.contains("json-or-xml-output"));
     }
 
     #[test]
