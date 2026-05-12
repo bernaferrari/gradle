@@ -442,6 +442,7 @@ fn cyclonedx_aggregate_options(
         root_name: string_property(properties, "aggregate_root_name"),
         root_version: string_property(properties, "aggregate_root_version"),
         root_component_type: string_property(properties, "aggregate_root_component_type"),
+        external_references: Vec::new(),
     }
 }
 

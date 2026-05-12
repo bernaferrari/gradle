@@ -23,6 +23,8 @@ pub struct CycloneDxSbomContract {
     pub components: Vec<CycloneDxComponent>,
     #[serde(default)]
     pub dependencies: Vec<CycloneDxDependency>,
+    #[serde(default)]
+    pub external_references: Vec<CycloneDxExternalReference>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,6 +60,13 @@ pub struct CycloneDxDependency {
     pub reference: String,
     #[serde(default, rename = "dependsOn")]
     pub depends_on: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CycloneDxExternalReference {
+    #[serde(rename = "type")]
+    pub reference_type: String,
+    pub url: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,6 +123,7 @@ pub struct CycloneDxDraftOptions {
     pub root_name: String,
     pub root_version: String,
     pub root_component_type: String,
+    pub external_references: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -124,6 +134,7 @@ pub struct CycloneDxCapturedTaskOptions {
     pub root_version: String,
     pub root_component_type: String,
     pub include_bom_serial_number: bool,
+    pub external_references: Vec<String>,
     pub json_output: String,
     pub xml_output: String,
 }
@@ -137,6 +148,7 @@ pub struct CycloneDxAggregateOptions {
     pub root_name: String,
     pub root_version: String,
     pub root_component_type: String,
+    pub external_references: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -208,6 +220,7 @@ pub fn validate_captured_task_options(
         root_component_type,
         include_bom_serial_number: value(inputs, "cyclonedx_include_bom_serial_number")
             .eq_ignore_ascii_case("true"),
+        external_references: whitespace_values(value(inputs, "cyclonedx_external_references")),
         json_output,
         xml_output,
     })
@@ -257,6 +270,7 @@ pub fn draft_contract_from_captured_inputs(
             root_name: options.root_name,
             root_version: options.root_version,
             root_component_type: options.root_component_type,
+            external_references: options.external_references,
         },
     )
 }
@@ -325,6 +339,14 @@ pub fn aggregate_contracts(
         root_component,
         components,
         dependencies,
+        external_references: options
+            .external_references
+            .into_iter()
+            .map(|url| CycloneDxExternalReference {
+                reference_type: "other".to_string(),
+                url,
+            })
+            .collect(),
     };
     contract.validate()?;
     Ok(contract)
@@ -348,6 +370,13 @@ impl CycloneDxSbomContract {
         for dependency in &self.dependencies {
             if dependency.reference.trim().is_empty() {
                 return Err("CycloneDX dependency is missing ref".to_string());
+            }
+        }
+        for external_reference in &self.external_references {
+            if external_reference.reference_type.trim().is_empty()
+                || external_reference.url.trim().is_empty()
+            {
+                return Err("CycloneDX external reference is missing type or url".to_string());
             }
         }
         Ok(())
@@ -441,6 +470,14 @@ fn value<'a>(inputs: &'a BTreeMap<String, String>, key: &str) -> &'a str {
     inputs.get(key).map(String::as_str).unwrap_or_default()
 }
 
+fn whitespace_values(value: &str) -> Vec<String> {
+    value
+        .split_whitespace()
+        .filter(|entry| !entry.trim().is_empty())
+        .map(|entry| entry.to_string())
+        .collect()
+}
+
 fn normalize_schema_version(value: &str) -> String {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -469,6 +506,8 @@ struct CycloneDxBom<'a> {
     metadata: CycloneDxMetadata<'a>,
     components: Vec<CycloneDxComponent>,
     dependencies: Vec<CycloneDxDependency>,
+    #[serde(rename = "externalReferences", skip_serializing_if = "Vec::is_empty")]
+    external_references: Vec<CycloneDxExternalReference>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -607,6 +646,14 @@ pub fn draft_contract_from_resolution_graph(
         root_component,
         components,
         dependencies,
+        external_references: options
+            .external_references
+            .into_iter()
+            .map(|url| CycloneDxExternalReference {
+                reference_type: "other".to_string(),
+                url,
+            })
+            .collect(),
     };
     contract.validate()?;
     Ok(contract)
@@ -936,6 +983,17 @@ pub fn render_xml(contract: &CycloneDxSbomContract) -> Result<String, String> {
         xml.push_str("    </dependency>\n");
     }
     xml.push_str("  </dependencies>\n");
+    if !bom.external_references.is_empty() {
+        xml.push_str("  <externalReferences>\n");
+        for reference in &bom.external_references {
+            xml.push_str(&format!(
+                "    <reference type=\"{}\"><url>{}</url></reference>\n",
+                xml_escape(&reference.reference_type),
+                xml_escape(&reference.url)
+            ));
+        }
+        xml.push_str("  </externalReferences>\n");
+    }
     xml.push_str("</bom>\n");
     Ok(xml)
 }
@@ -951,6 +1009,9 @@ fn normalized_bom(contract: &CycloneDxSbomContract) -> CycloneDxBom<'_> {
         dependency.depends_on.sort();
     }
     dependencies.sort_by(|a, b| a.reference.cmp(&b.reference));
+    let mut external_references = contract.external_references.clone();
+    external_references
+        .sort_by(|a, b| (&a.reference_type, &a.url).cmp(&(&b.reference_type, &b.url)));
     CycloneDxBom {
         bom_format: "CycloneDX",
         spec_version: &contract.spec_version,
@@ -962,6 +1023,7 @@ fn normalized_bom(contract: &CycloneDxSbomContract) -> CycloneDxBom<'_> {
         },
         components,
         dependencies,
+        external_references,
     }
 }
 
@@ -1073,6 +1135,7 @@ mod tests {
                     "pkg:maven/org.example/a@1.0.0?type=jar".to_string(),
                 ],
             }],
+            external_references: Vec::new(),
         }
     }
 
@@ -1257,6 +1320,10 @@ mod tests {
                 "/tmp/bom.json".to_string(),
             ),
             (
+                "cyclonedx_external_references".to_string(),
+                "https://example.invalid/source https://example.invalid/docs".to_string(),
+            ),
+            (
                 "cyclonedx_identity_task_path".to_string(),
                 ":cyclonedxDirectBom".to_string(),
             ),
@@ -1270,6 +1337,27 @@ mod tests {
         assert!(contract.serial_number.starts_with("urn:uuid:"));
         assert_eq!("2026-05-12T14:17:25Z", contract.timestamp);
         assert_eq!("application", contract.root_component.component_type);
+        assert_eq!(
+            vec![
+                CycloneDxExternalReference {
+                    reference_type: "other".to_string(),
+                    url: "https://example.invalid/source".to_string(),
+                },
+                CycloneDxExternalReference {
+                    reference_type: "other".to_string(),
+                    url: "https://example.invalid/docs".to_string(),
+                },
+            ],
+            contract.external_references
+        );
+        let json = render_json(&contract).unwrap();
+        let xml = render_xml(&contract).unwrap();
+        assert!(json.contains("\"externalReferences\""));
+        assert!(json.contains("\"url\": \"https://example.invalid/source\""));
+        assert!(xml.contains("<externalReferences>"));
+        assert!(xml.contains(
+            "<reference type=\"other\"><url>https://example.invalid/docs</url></reference>"
+        ));
         assert!(contract
             .components
             .iter()
@@ -1385,6 +1473,7 @@ mod tests {
                 root_name: "demo".to_string(),
                 root_version: "1.0".to_string(),
                 root_component_type: "application".to_string(),
+                external_references: Vec::new(),
             },
         )
         .unwrap();
@@ -1454,6 +1543,7 @@ mod tests {
                 root_name: "demo".to_string(),
                 root_version: "1.0".to_string(),
                 root_component_type: "application".to_string(),
+                external_references: Vec::new(),
             },
         )
         .unwrap();
@@ -1508,6 +1598,7 @@ mod tests {
                 root_name: "demo".to_string(),
                 root_version: "1.0".to_string(),
                 root_component_type: "application".to_string(),
+                external_references: Vec::new(),
             },
         )
         .unwrap();
@@ -1562,6 +1653,7 @@ mod tests {
                 root_name: "aggregate".to_string(),
                 root_version: "1.0".to_string(),
                 root_component_type: "application".to_string(),
+                external_references: Vec::new(),
             },
         )
         .unwrap();
@@ -1614,6 +1706,7 @@ mod tests {
                 root_name: "aggregate".to_string(),
                 root_version: "1.0".to_string(),
                 root_component_type: "application".to_string(),
+                external_references: Vec::new(),
             },
         )
         .unwrap_err();

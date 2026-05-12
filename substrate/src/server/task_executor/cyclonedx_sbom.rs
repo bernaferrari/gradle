@@ -134,6 +134,7 @@ fn contract_from_input(input: &TaskInput) -> Result<CycloneDxSbomContract, Strin
                 root_name: required_option(input, "aggregate_root_name")?,
                 root_version: required_option(input, "aggregate_root_version")?,
                 root_component_type: required_option(input, "aggregate_root_component_type")?,
+                external_references: Vec::new(),
             },
         );
     }
