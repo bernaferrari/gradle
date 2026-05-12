@@ -138,6 +138,7 @@ public class SubstrateLifecycleTest {
         values.put(RustSubstrateOptions.ENABLE_RUST_EXECUTION_KERNEL.getPropertyName(), "true");
 
         DefaultInternalOptions options = new DefaultInternalOptions(values);
+        assertEquals(RustSubstrateOptions.ExecutionKernelAdmission.STRICT, RustSubstrateOptions.getExecutionKernelAdmission(options));
         assertTrue(RustSubstrateOptions.isExecutionKernelEnabled(options));
         assertFalse(RustBridgeCoreServices.shouldEnableBootstrapLifecycle(options));
         assertFalse(RustBridgeCoreServices.shouldEnableBuildResultLifecycle(options));
@@ -151,6 +152,19 @@ public class SubstrateLifecycleTest {
         values.put(RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_RUN_BUILD.getPropertyName(), "true");
 
         assertTrue(RustSubstrateOptions.isExecutionKernelEnabled(new DefaultInternalOptions(values)));
+    }
+
+    @Test
+    public void nativeReadyDefaultUsesDelegatingKernelAdmission() {
+        Map<String, String> values = new HashMap<>();
+        values.put(RustSubstrateOptions.ENABLE_SUBSTRATE.getPropertyName(), "true");
+        values.put(RustSubstrateOptions.ENABLE_RUST_NATIVE_READY_DEFAULT_RUN_BUILD.getPropertyName(), "true");
+
+        DefaultInternalOptions options = new DefaultInternalOptions(values);
+        assertEquals(RustSubstrateOptions.ExecutionKernelAdmission.NATIVE_READY_DEFAULT, RustSubstrateOptions.getExecutionKernelAdmission(options));
+        assertTrue(RustSubstrateOptions.isExecutionKernelRequested(options));
+        assertFalse(RustSubstrateOptions.isExecutionKernelEnabled(options));
+        assertTrue(RustBridgeCoreServices.shouldCaptureSelectedTaskContracts(options));
     }
 
     @Test

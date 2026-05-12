@@ -77,9 +77,7 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
     static boolean shouldCaptureSelectedTaskContracts(InternalOptions options) {
         return shouldEnableJvmHost(options)
             || RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_RUN_BUILD)
-            || options.getBoolean(RustSubstrateOptions.ENABLE_RUST_EXECUTION_KERNEL)
-            || options.getBoolean(RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_RUN_BUILD)
-            || options.getBoolean(RustSubstrateOptions.ENABLE_RUST_NATIVE_READY_DEFAULT_RUN_BUILD);
+            || RustSubstrateOptions.isExecutionKernelRequested(options);
     }
 
     @Override

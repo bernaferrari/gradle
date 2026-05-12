@@ -121,7 +121,10 @@ Gate 2, one Rust kernel admission path (`gradle-fork-33f.2`):
 `org.gradle.rust.substrate.execution.kernel=true` is the documented strict
 kernel mode. Admission returns structured accepted/rejected results before
 execution. After accepted admission, the run must report zero JVM forwards.
-Unsupported semantics must reject before execution.
+Unsupported semantics must reject before execution. The safe public preview
+entry uses the same admission resolver in `NATIVE_READY_DEFAULT` mode: it tries
+Rust only for admitted plans and delegates otherwise. Legacy RunBuild flags are
+compatibility inputs, not separate admission paths.
 
 Gate 3, first-60s performance budget (`gradle-fork-33f.3`):
 `tools/demo/first_60_seconds.py` emits JSON and a human summary. Fast mode must
