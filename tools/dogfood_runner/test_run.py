@@ -67,6 +67,20 @@ class DogfoodRunnerTest(unittest.TestCase):
         self.assertEqual(0, dogfood_run.parse_jvm_forwards("JVM forwarding disabled"))
         self.assertEqual(-1, dogfood_run.parse_jvm_forwards("BUILD SUCCESSFUL"))
 
+    def test_parse_substrate_signals(self):
+        signals = dogfood_run.parse_substrate_signals(
+            "[substrate] Connecting to existing daemon at tcp://127.0.0.1:1\n"
+            "[substrate:taskgraph] captured 3 selected task contracts\n"
+            "[substrate:run-build] Rust executed 3 Gradle tasks from build-plan-cache "
+            "with 0 up-to-date; JVM forwarding disabled"
+        )
+
+        self.assertTrue(signals["daemon_reused"])
+        self.assertTrue(signals["runbuild_marker"])
+        self.assertTrue(signals["taskgraph_captured"])
+        self.assertEqual("build-plan-cache", signals["plan_source"])
+        self.assertEqual(0, signals["jvm_forward_count"])
+
     def test_summarizes_pass_and_fail_closed_results(self):
         results = [
             {
@@ -76,6 +90,12 @@ class DogfoodRunnerTest(unittest.TestCase):
                 "upstream": {"duration_ms": 100, "task_count": 2},
                 "substrate": {"duration_ms": 50, "task_count": 2},
                 "checks": {"jvm_forward_count": 0},
+                "substrate_signals": {
+                    "runbuild_marker": True,
+                    "taskgraph_captured": True,
+                    "daemon_started": True,
+                    "daemon_reused": False,
+                },
             },
             {
                 "name": "unsupported",
@@ -84,6 +104,12 @@ class DogfoodRunnerTest(unittest.TestCase):
                 "upstream": {"duration_ms": 100, "task_count": 1},
                 "substrate": {"duration_ms": 10, "task_count": 0},
                 "checks": {"fail_closed_message": True},
+                "substrate_signals": {
+                    "runbuild_marker": True,
+                    "taskgraph_captured": True,
+                    "daemon_started": False,
+                    "daemon_reused": True,
+                },
             },
             {
                 "name": "drift",
@@ -92,6 +118,12 @@ class DogfoodRunnerTest(unittest.TestCase):
                 "upstream": {"duration_ms": 100, "task_count": 1},
                 "substrate": {"duration_ms": 90, "task_count": 2},
                 "checks": {"jvm_forward_count": 1},
+                "substrate_signals": {
+                    "runbuild_marker": False,
+                    "taskgraph_captured": False,
+                    "daemon_started": False,
+                    "daemon_reused": False,
+                },
             },
         ]
 
@@ -100,6 +132,9 @@ class DogfoodRunnerTest(unittest.TestCase):
         self.assertEqual(3, summary["project_count"])
         self.assertEqual(2, summary["matched_project_count"])
         self.assertEqual(1, summary["zero_jvm_forward_supported_count"])
+        self.assertEqual(2, summary["runbuild_marker_count"])
+        self.assertEqual(1, summary["daemon_started_count"])
+        self.assertEqual(1, summary["daemon_reused_count"])
         self.assertEqual(["drift"], summary["failed_projects"])
 
     def test_writes_markdown_report(self):
@@ -113,6 +148,7 @@ class DogfoodRunnerTest(unittest.TestCase):
                     "upstream": {"duration_ms": 100, "task_count": 2},
                     "substrate": {"duration_ms": 50, "task_count": 2},
                     "checks": {"jvm_forward_count": 0},
+                    "substrate_signals": {"plan_source": "build-plan-cache"},
                 }
             ]
             summary = dogfood_run.summarize_execution(results)

@@ -160,6 +160,19 @@ def parse_jvm_forwards(output: str) -> int:
     return -1
 
 
+def parse_substrate_signals(output: str) -> dict[str, Any]:
+    plan_match = re.search(r"\[substrate:run-build\].*? from ([A-Za-z0-9_.-]+)", output)
+    return {
+        "daemon_started": "Daemon started successfully" in output,
+        "daemon_reused": "Connecting to existing daemon" in output
+        and "Failed to connect to existing daemon" not in output,
+        "runbuild_marker": "[substrate:run-build]" in output,
+        "taskgraph_captured": "[substrate:taskgraph] captured" in output,
+        "plan_source": plan_match.group(1) if plan_match else "",
+        "jvm_forward_count": parse_jvm_forwards(output),
+    }
+
+
 def run_project(
     project: DogfoodProject,
     output_dir: Path,
@@ -205,6 +218,7 @@ def run_project(
             checks["no_jvm_forwards"] = jvm_forwards == 0
             checks["match"] = checks["match"] and checks["no_jvm_forwards"]
 
+    substrate_signals = parse_substrate_signals(substrate.output)
     result = {
         "name": project.name,
         "path": str(project.path),
@@ -214,6 +228,7 @@ def run_project(
         "reason": project.reason,
         "upstream": upstream.to_dict(),
         "substrate": substrate.to_dict(),
+        "substrate_signals": substrate_signals,
         "checks": checks,
         "match": checks["match"],
     }
@@ -246,6 +261,18 @@ def summarize_execution(results: list[dict[str, Any]]) -> dict[str, Any]:
         "substrate_duration_ms": sum(result["substrate"].get("duration_ms", 0) for result in results),
         "upstream_task_total": sum(result["upstream"].get("task_count", 0) for result in results),
         "substrate_task_total": sum(result["substrate"].get("task_count", 0) for result in results),
+        "runbuild_marker_count": sum(
+            1 for result in results if result.get("substrate_signals", {}).get("runbuild_marker")
+        ),
+        "taskgraph_capture_count": sum(
+            1 for result in results if result.get("substrate_signals", {}).get("taskgraph_captured")
+        ),
+        "daemon_started_count": sum(
+            1 for result in results if result.get("substrate_signals", {}).get("daemon_started")
+        ),
+        "daemon_reused_count": sum(
+            1 for result in results if result.get("substrate_signals", {}).get("daemon_reused")
+        ),
         "failed_projects": [result["name"] for result in results if not result["match"]],
     }
 
@@ -261,19 +288,24 @@ def write_markdown_report(output_dir: Path, summary: dict[str, Any], results: li
         f"Supported projects with zero JVM forwards: {summary['zero_jvm_forward_supported_count']}/{summary['supported_project_count']}",
         f"Observed wall time: upstream={summary['upstream_duration_ms']}ms, substrate={summary['substrate_duration_ms']}ms",
         f"Task totals: upstream={summary['upstream_task_total']}, substrate={summary['substrate_task_total']}",
+        f"Rust RunBuild markers: {summary['runbuild_marker_count']}/{summary['project_count']}",
+        f"Task-graph captures: {summary['taskgraph_capture_count']}/{summary['project_count']}",
+        f"Daemon signals: started={summary['daemon_started_count']}, reused={summary['daemon_reused_count']}",
         "",
-        "| Project | Expectation | Mode | Result | Upstream ms | Substrate ms | JVM forwards |",
-        "| --- | --- | --- | --- | ---: | ---: | ---: |",
+        "| Project | Expectation | Mode | Result | Plan Source | Upstream ms | Substrate ms | JVM forwards |",
+        "| --- | --- | --- | --- | --- | ---: | ---: | ---: |",
     ]
     for result in results:
         checks = result.get("checks", {})
+        signals = result.get("substrate_signals", {})
         jvm_forwards = checks.get("jvm_forward_count", "")
         lines.append(
-            "| {name} | {expectation} | {mode} | {status} | {upstream_ms} | {substrate_ms} | {jvm_forwards} |".format(
+            "| {name} | {expectation} | {mode} | {status} | {plan_source} | {upstream_ms} | {substrate_ms} | {jvm_forwards} |".format(
                 name=result["name"],
                 expectation=result["expectation"],
                 mode=result["mode"],
                 status="PASS" if result["match"] else "FAIL",
+                plan_source=signals.get("plan_source", ""),
                 upstream_ms=result["upstream"].get("duration_ms", 0),
                 substrate_ms=result["substrate"].get("duration_ms", 0),
                 jvm_forwards=jvm_forwards,
