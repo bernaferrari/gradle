@@ -608,6 +608,14 @@ focused `ProjectModelProviderAdapterTest` CycloneDX root-option/schema tests,
 Kernel admission now also rejects complete-but-unsupported captured CycloneDX
 policies, such as Gradle's current timestamp source, with the precise unsupported
 policy names before falling through to the generic missing-contract diagnostic.
+There is now a narrow Rust-side synthesis path for direct CycloneDX tasks when
+the JVM bridge captures a deterministic timestamp via
+`org.gradle.rust.substrate.cyclonedx.timestamp.ms`: Rust drafts
+`sbom_contract_json_b64` from the captured resolution graph/options, marks the
+task contract complete, and clears the JVM-required marker. This is an explicit
+opt-in path only; default CycloneDX tasks still fail closed because Gradle's
+normal timestamp policy is not deterministic and aggregate input contracts are
+not yet captured.
 
 Audit of closed roadmap (dyy.1-dyy.20): 18/21 verified against committed code and
 corpus parity, 3/21 partially verified (dependency solver complex scenarios,

@@ -1287,6 +1287,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         String componentVersion = providerValue(invokeOptional(task, taskType, "getComponentVersion"));
         String projectType = enumName(invokeOptionalProvider(task, taskType, "getProjectType"));
         String schemaVersion = enumName(invokeOptionalProvider(task, taskType, "getSchemaVersion"));
+        String timestampEpochMs = cyclonedxExplicitTimestampEpochMillis();
+        String timestampSourcePolicy = timestampEpochMs.isEmpty()
+            ? "cyclonedx-core-metadata-constructor-now"
+            : "gradle-substrate-explicit-epoch-ms";
         putIfPresent(inputs, "cyclonedx_component_group", providerValue(invokeOptional(task, taskType, "getComponentGroup")));
         putIfPresent(inputs, "cyclonedx_component_name", componentName);
         putIfPresent(inputs, "cyclonedx_component_version", componentVersion);
@@ -1294,7 +1298,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "cyclonedx_schema_version", schemaVersion);
         String includeBomSerialNumber = providerBooleanString(invokeOptional(task, taskType, "getIncludeBomSerialNumber"));
         putIfPresent(inputs, "cyclonedx_include_bom_serial_number", includeBomSerialNumber);
-        putIfPresent(inputs, "cyclonedx_timestamp_source_policy", "cyclonedx-core-metadata-constructor-now");
+        putIfPresent(inputs, "cyclonedx_timestamp_source_policy", timestampSourcePolicy);
+        putIfPresent(inputs, "cyclonedx_timestamp_epoch_ms", timestampEpochMs);
         putIfPresent(inputs, "cyclonedx_serial_source_policy", cyclonedxSerialSourcePolicy(includeBomSerialNumber));
         String includeBuildSystem = providerBooleanString(invokeOptional(task, taskType, "getIncludeBuildSystem"));
         putIfPresent(inputs, "cyclonedx_include_build_system", includeBuildSystem);
@@ -1335,12 +1340,13 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "cyclonedx_resolution_graph_json_b64", resolutionGraphJsonBase64);
         boolean aggregateTask = isCycloneDxAggregateTask(taskType.getName(), taskType.getSimpleName());
         String missingBaseFields;
+        String timestampField = timestampEpochMs.isEmpty() ? "timestamp-source-policy" : "";
         if (resolutionGraphJsonBase64.isEmpty()) {
-            missingBaseFields = "resolution-result-edges,component-metadata,license-metadata,artifact-hash-policy,timestamp-source-policy";
+            missingBaseFields = joinCycloneDxMissingFields("resolution-result-edges", "component-metadata", "license-metadata", "artifact-hash-policy", timestampField);
         } else if ("false".equalsIgnoreCase(includeMetadataResolution)) {
-            missingBaseFields = "timestamp-source-policy";
+            missingBaseFields = timestampField;
         } else {
-            missingBaseFields = "component-metadata,license-metadata,timestamp-source-policy";
+            missingBaseFields = joinCycloneDxMissingFields("component-metadata", "license-metadata", timestampField);
         }
         if (aggregateTask) {
             missingBaseFields = missingBaseFields + ",aggregate-input-contracts,aggregate-merge-policy";
@@ -1363,6 +1369,30 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             return "omitted";
         }
         return "";
+    }
+
+    private static String cyclonedxExplicitTimestampEpochMillis() {
+        String configured = System.getProperty("org.gradle.rust.substrate.cyclonedx.timestamp.ms", "").trim();
+        if (configured.isEmpty()) {
+            return "";
+        }
+        try {
+            Long.parseLong(configured);
+            return configured;
+        } catch (NumberFormatException e) {
+            LOGGER.debug("[substrate-jvmhost] Ignoring invalid CycloneDX timestamp epoch millis '{}'", configured, e);
+            return "";
+        }
+    }
+
+    private static String joinCycloneDxMissingFields(String... fields) {
+        List<String> present = new ArrayList<>();
+        for (String field : fields) {
+            if (field != null && !field.isEmpty()) {
+                present.add(field);
+            }
+        }
+        return String.join(",", present);
     }
 
     private static String cyclonedxLicenseChoiceJsonBase64(@Nullable Object value) {
@@ -1590,7 +1620,11 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         String externalReferencesJsonBase64
     ) {
         Set<String> fields = new LinkedHashSet<>();
-        Collections.addAll(fields, baseFields.split(","));
+        for (String field : baseFields.split(",")) {
+            if (!field.isEmpty()) {
+                fields.add(field);
+            }
+        }
         if (isBlank(componentName)) {
             fields.add("component-name");
         }
