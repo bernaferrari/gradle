@@ -5,6 +5,10 @@ corpus. It groups realistic Gradle build shapes that should be meaningful in
 the first minute of use and records whether each project is expected to run
 through the Rust kernel or fail closed before execution.
 
+`testing/dogfood/oss-manifest.json` is the next layer after that: pinned
+external OSS repositories. The manifest is intentionally validation-only until
+the fetch/cache runner clones entries under `build/dogfood-oss`.
+
 Validate and enumerate the manifest without invoking Gradle:
 
 ```bash
@@ -15,6 +19,12 @@ Emit machine-readable inventory:
 
 ```bash
 python3 tools/dogfood_runner/run.py --manifest testing/dogfood/manifest.json --json
+```
+
+Validate the external OSS manifest without cloning:
+
+```bash
+python3 tools/dogfood_runner/run.py --manifest testing/dogfood/oss-manifest.json --list
 ```
 
 Execute the dogfood manifest against an installed Gradle-under-test and Rust
