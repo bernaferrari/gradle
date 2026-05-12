@@ -104,6 +104,10 @@ Rust-owned preview surfaces after admission:
 - task DAG materialization from the captured plan;
 - scheduling, work validation, up-to-date checks, cache/history decisions, and
   native execution for supported task contracts;
+- Rust-owned process launch for supported `JavaCompile`, `Exec`, `JavaExec`,
+  `Javadoc`, and `Test` contracts, reported as `rust_process` task execution
+  details; JVM worker/compatibility paths remain explicit sidecars rather than
+  hidden in-daemon fallback;
 - first-60s metrics and no-fallback execution evidence.
 
 ## Ship Gates

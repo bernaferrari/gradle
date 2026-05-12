@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use tokio::process::Command;
-
 use crate::server::task_executor::{
     option_string_list, option_string_map, TaskExecutor, TaskInput, TaskResult,
 };
+
+use super::process_launch::{run_to_output, ProcessLaunchSpec};
 
 /// Executes a Gradle JavaExec task from an explicit, native-ready contract.
 pub struct JavaExecTaskExecutor;
@@ -92,37 +92,39 @@ impl TaskExecutor for JavaExecTaskExecutor {
             .unwrap_or(false);
         let java = Self::java_executable(input.options.get("java_home").map(String::as_str));
 
-        let mut command = Command::new(&java);
+        let mut args = Vec::new();
         if let Some(max_heap) =
             Self::max_heap_arg(input.options.get("max_heap_size").map(String::as_str))
         {
-            command.arg(max_heap);
+            args.push(max_heap);
         }
-        command.args(option_string_list(
+        args.extend(option_string_list(
             &input.options,
             "jvm_args_json",
             "jvm_args",
         ));
-        command.args(Self::system_property_args(
+        args.extend(Self::system_property_args(
             input.options.get("system_properties").map(String::as_str),
         ));
-        command.envs(option_string_map(
-            &input.options,
-            "environment_json",
-            "environment",
-        ));
-        command.arg("-cp");
-        command.arg(classpath);
-        command.arg(main_class);
-        command.args(option_string_list(&input.options, "args_json", "args"));
+        args.push("-cp".to_string());
+        args.push(classpath.to_string());
+        args.push(main_class.to_string());
+        args.extend(option_string_list(&input.options, "args_json", "args"));
+        let mut spec = ProcessLaunchSpec::new(&java)
+            .args(args)
+            .environment(option_string_map(
+                &input.options,
+                "environment_json",
+                "environment",
+            ));
         if let Some(working_dir) = input.options.get("working_dir") {
             if !working_dir.trim().is_empty() {
-                command.current_dir(working_dir);
+                spec = spec.working_dir(working_dir);
             }
         }
 
-        match command.output().await {
-            Ok(output) if output.status.success() || ignore_exit_value => {
+        match run_to_output(&spec).await {
+            Ok(output) if output.exit_code == 0 || ignore_exit_value => {
                 result.files_processed = 1;
                 result.bytes_processed = (output.stdout.len() + output.stderr.len()) as u64;
             }
@@ -130,13 +132,12 @@ impl TaskExecutor for JavaExecTaskExecutor {
                 result.success = false;
                 result.error_message = format!(
                     "JavaExec task '{}' failed with exit code {}",
-                    main_class,
-                    output.status.code().unwrap_or(-1)
+                    main_class, output.exit_code
                 );
             }
             Err(error) => {
                 result.success = false;
-                result.error_message = format!("Failed to execute '{}': {}", java.display(), error);
+                result.error_message = error;
             }
         }
 
