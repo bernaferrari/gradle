@@ -66,9 +66,43 @@ precise diagnostic.
 This is a showable technical preview. It is not a 100% compatibility claim and
 it does not prove a universal speedup. The current dogfood run proves that
 several realistic supported build shapes can execute with zero JVM task forwards
-and that one unsupported build fails closed. The next credibility step is to add
-reproducibly cloned external OSS projects and keep expanding supported entries
-only when parity artifacts prove them.
+and that one unsupported build fails closed.
+
+## External OSS Gate
+
+`testing/dogfood/oss-manifest.json` pins external repositories by immutable Git
+commit and the runner fetches them under `build/dogfood-oss/sources`.
+
+Latest checked run: 2026-05-12.
+
+```bash
+python3 tools/dogfood_runner/run.py \
+  --manifest testing/dogfood/oss-manifest.json \
+  --execute \
+  --gradle-command "$PWD/build/gradle-under-test/bin/gradle" \
+  --daemon-binary target/debug/gradle-substrate-daemon \
+  --output-dir build/dogfood-oss \
+  --verbose
+```
+
+Summary from `build/dogfood-oss/dogfood-summary.md`:
+
+| Metric | Result |
+| --- | ---: |
+| Projects matched | 3/3 |
+| Supported projects matched | 3/3 |
+| Supported projects with zero JVM forwards | 3/3 |
+| Rust RunBuild markers | 3/3 |
+| Task-graph captures | 3/3 |
+| Upstream observed wall time | 59808 ms |
+| Rust substrate observed wall time | 25783 ms |
+| Upstream task total | 23 |
+| Rust substrate task total | 23 |
+
+Passing external entries are `spring-petclinic`, `mockito-main`, and
+`okio-root`, all in `native-ready-default` mode. These are `help`-level smoke
+runs for recognizable OSS builds; they prove Rust kernel admission and
+no-forward execution for the selected tasks, not full project build parity.
 
 Related docs:
 

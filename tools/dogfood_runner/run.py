@@ -337,13 +337,38 @@ def run_project(
         if expected_marker:
             checks["expected_diagnostic_present"] = expected_marker in substrate.output
             checks["match"] = checks["match"] and checks["expected_diagnostic_present"]
+    elif project.expectation == "supported-or-fail-closed" and substrate.exit_code != 0:
+        checks = corpus.compare_expected_fail_closed(upstream, substrate)
+        expected_marker = str(project.checks.get("fail_closed_diagnostic", ""))
+        if expected_marker and expected_marker != "required-if-not-supported":
+            checks["expected_diagnostic_present"] = expected_marker in substrate.output
+            checks["match"] = checks["match"] and checks["expected_diagnostic_present"]
+        checks["resolved_expectation"] = "fail-closed"
     else:
         checks = corpus.compare_run_pair(upstream, substrate)
+        if (
+            not checks["task_list_match"]
+            and project.checks.get("task_order") is False
+            and sorted(upstream.tasks) == sorted(substrate.tasks)
+        ):
+            checks["task_list_match"] = True
+            checks["task_set_match"] = True
+            checks["match"] = (
+                checks["substrate_usable"]
+                and checks["successful"]
+                and checks["exit_code_match"]
+                and checks["task_list_match"]
+                and checks["output_files_match"]
+                and checks["output_hashes_match"]
+                and checks["archive_entries_match"]
+            )
         jvm_forwards = parse_jvm_forwards(substrate.output)
         checks["jvm_forward_count"] = jvm_forwards
         if project.checks.get("no_jvm_forwards"):
             checks["no_jvm_forwards"] = jvm_forwards == 0
             checks["match"] = checks["match"] and checks["no_jvm_forwards"]
+        if project.expectation == "supported-or-fail-closed":
+            checks["resolved_expectation"] = "supported"
 
     substrate_signals = parse_substrate_signals(substrate.output)
     result = {
@@ -369,8 +394,18 @@ def run_project(
 
 
 def summarize_execution(results: list[dict[str, Any]]) -> dict[str, Any]:
-    supported = [result for result in results if result["expectation"] == "supported"]
-    fail_closed = [result for result in results if result["expectation"] == "fail-closed"]
+    supported = [
+        result
+        for result in results
+        if result["expectation"] in {"supported", "supported-or-fail-closed"}
+        and result.get("checks", {}).get("resolved_expectation", "supported") == "supported"
+    ]
+    fail_closed = [
+        result
+        for result in results
+        if result["expectation"] == "fail-closed"
+        or result.get("checks", {}).get("resolved_expectation") == "fail-closed"
+    ]
     return {
         "schema": "gradle-substrate.dogfood-summary.v1",
         "project_count": len(results),
