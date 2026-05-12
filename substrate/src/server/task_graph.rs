@@ -1867,7 +1867,9 @@ fn static_write_file_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
 }
 
 fn cyclonedx_sbom_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
-    has_input_value(task, "sbom_contract_json_b64") && !task.outputs.is_empty()
+    (has_input_value(task, "sbom_contract_json_b64")
+        || has_input_value(task, "aggregate_input_contracts_json_b64"))
+        && !task.outputs.is_empty()
 }
 
 fn compat_task_type(task: &CanonicalBuildPlanTask, fallback: &str) -> String {
@@ -2096,6 +2098,54 @@ fn task_options(
             &mut options,
             "sbom_contract_json_b64",
             "sbom_contract_json_b64",
+        );
+        insert_input_option(
+            task,
+            &mut options,
+            "aggregate_input_contracts_json_b64",
+            "aggregate_input_contracts_json_b64",
+        );
+        insert_input_option(
+            task,
+            &mut options,
+            "aggregate_spec_version",
+            "aggregate_spec_version",
+        );
+        insert_input_option(
+            task,
+            &mut options,
+            "aggregate_serial_number",
+            "aggregate_serial_number",
+        );
+        insert_input_option(
+            task,
+            &mut options,
+            "aggregate_timestamp",
+            "aggregate_timestamp",
+        );
+        insert_input_option(
+            task,
+            &mut options,
+            "aggregate_root_group",
+            "aggregate_root_group",
+        );
+        insert_input_option(
+            task,
+            &mut options,
+            "aggregate_root_name",
+            "aggregate_root_name",
+        );
+        insert_input_option(
+            task,
+            &mut options,
+            "aggregate_root_version",
+            "aggregate_root_version",
+        );
+        insert_input_option(
+            task,
+            &mut options,
+            "aggregate_root_component_type",
+            "aggregate_root_component_type",
         );
     }
     options
@@ -2732,6 +2782,7 @@ impl TaskGraphService for TaskGraphServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::build_plan_ir::CanonicalBuildPlanTaskInputSpec;
 
     fn make_svc() -> TaskGraphServiceImpl {
         TaskGraphServiceImpl::new()
@@ -2764,6 +2815,71 @@ mod tests {
             system_property_inputs: Vec::new(),
             diagnostics: Vec::new(),
         }
+    }
+
+    fn value_input(name: &str, value: &str) -> CanonicalBuildPlanTaskInputSpec {
+        CanonicalBuildPlanTaskInputSpec {
+            name: name.to_string(),
+            kind: "value".to_string(),
+            value: value.to_string(),
+            normalization: "scalar".to_string(),
+            optional: false,
+        }
+    }
+
+    #[test]
+    fn test_cyclonedx_direct_contract_lowers_to_sbom_executor() {
+        let mut task = canonical_task(
+            ":cyclonedxDirectBom",
+            "org.cyclonedx.gradle.CyclonedxDirectTask",
+            Vec::new(),
+            vec!["/repo/build/bom.json".to_string()],
+        );
+        task.input_specs = vec![value_input("sbom_contract_json_b64", "encoded")];
+
+        assert_eq!(executable_task_type(&task), "CycloneDxSbom");
+        let options = task_options(&task, "CycloneDxSbom");
+        assert_eq!(
+            options
+                .get("sbom_contract_json_b64")
+                .and_then(|value| value.as_str()),
+            Some("encoded")
+        );
+    }
+
+    #[test]
+    fn test_cyclonedx_aggregate_contract_lowers_to_sbom_executor() {
+        let mut task = canonical_task(
+            ":cyclonedxBom",
+            "org.cyclonedx.gradle.CyclonedxAggregateTask",
+            Vec::new(),
+            vec!["/repo/build/aggregate.json".to_string()],
+        );
+        task.input_specs = vec![
+            value_input("aggregate_input_contracts_json_b64", "encoded-contracts"),
+            value_input("aggregate_spec_version", "1.6"),
+            value_input("aggregate_serial_number", "urn:uuid:test"),
+            value_input("aggregate_timestamp", "2026-05-12T14:00:00Z"),
+            value_input("aggregate_root_group", "org.example"),
+            value_input("aggregate_root_name", "aggregate"),
+            value_input("aggregate_root_version", "1.0"),
+            value_input("aggregate_root_component_type", "application"),
+        ];
+
+        assert_eq!(executable_task_type(&task), "CycloneDxSbom");
+        let options = task_options(&task, "CycloneDxSbom");
+        assert_eq!(
+            options
+                .get("aggregate_input_contracts_json_b64")
+                .and_then(|value| value.as_str()),
+            Some("encoded-contracts")
+        );
+        assert_eq!(
+            options
+                .get("aggregate_root_name")
+                .and_then(|value| value.as_str()),
+            Some("aggregate")
+        );
     }
 
     #[test]

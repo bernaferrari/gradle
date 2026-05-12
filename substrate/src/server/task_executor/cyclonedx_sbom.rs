@@ -2,7 +2,9 @@ use std::path::PathBuf;
 
 use base64::Engine as _;
 
-use crate::server::cyclonedx_sbom::{render_json, render_xml, CycloneDxSbomContract};
+use crate::server::cyclonedx_sbom::{
+    aggregate_contracts, render_json, render_xml, CycloneDxAggregateOptions, CycloneDxSbomContract,
+};
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
 pub struct CycloneDxSbomTaskExecutor;
@@ -29,26 +31,11 @@ impl TaskExecutor for CycloneDxSbomTaskExecutor {
         let start = std::time::Instant::now();
         let mut result = TaskResult::default();
 
-        let Some(encoded_contract) = input.options.get("sbom_contract_json_b64") else {
-            result.success = false;
-            result.error_message =
-                "CycloneDxSbom task is missing sbom_contract_json_b64".to_string();
-            return result;
-        };
-        let contract_bytes =
-            match base64::engine::general_purpose::STANDARD.decode(encoded_contract) {
-                Ok(bytes) => bytes,
-                Err(error) => {
-                    result.success = false;
-                    result.error_message = format!("Invalid sbom_contract_json_b64: {}", error);
-                    return result;
-                }
-            };
-        let contract = match serde_json::from_slice::<CycloneDxSbomContract>(&contract_bytes) {
+        let contract = match contract_from_input(input) {
             Ok(contract) => contract,
             Err(error) => {
                 result.success = false;
-                result.error_message = format!("Invalid CycloneDX SBOM contract JSON: {}", error);
+                result.error_message = error;
                 return result;
             }
         };
@@ -112,6 +99,58 @@ impl TaskExecutor for CycloneDxSbomTaskExecutor {
         result.duration_ms = start.elapsed().as_millis() as u64;
         result
     }
+}
+
+fn contract_from_input(input: &TaskInput) -> Result<CycloneDxSbomContract, String> {
+    if let Some(encoded_contract) = input.options.get("sbom_contract_json_b64") {
+        let contract_bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded_contract)
+            .map_err(|error| format!("Invalid sbom_contract_json_b64: {}", error))?;
+        return serde_json::from_slice::<CycloneDxSbomContract>(&contract_bytes)
+            .map_err(|error| format!("Invalid CycloneDX SBOM contract JSON: {}", error));
+    }
+    if let Some(encoded_contracts) = input.options.get("aggregate_input_contracts_json_b64") {
+        let contracts_bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded_contracts)
+            .map_err(|error| format!("Invalid aggregate_input_contracts_json_b64: {}", error))?;
+        let contracts = serde_json::from_slice::<Vec<CycloneDxSbomContract>>(&contracts_bytes)
+            .map_err(|error| {
+                format!(
+                    "Invalid CycloneDX aggregate input contract JSON array: {}",
+                    error
+                )
+            })?;
+        return aggregate_contracts(
+            &contracts,
+            CycloneDxAggregateOptions {
+                spec_version: required_option(input, "aggregate_spec_version")?,
+                serial_number: required_option(input, "aggregate_serial_number")?,
+                timestamp: required_option(input, "aggregate_timestamp")?,
+                root_group: input
+                    .options
+                    .get("aggregate_root_group")
+                    .cloned()
+                    .unwrap_or_default(),
+                root_name: required_option(input, "aggregate_root_name")?,
+                root_version: required_option(input, "aggregate_root_version")?,
+                root_component_type: required_option(input, "aggregate_root_component_type")?,
+            },
+        );
+    }
+    Err(
+        "CycloneDxSbom task is missing sbom_contract_json_b64 or aggregate_input_contracts_json_b64"
+            .to_string(),
+    )
+}
+
+fn required_option(input: &TaskInput, key: &str) -> Result<String, String> {
+    input
+        .options
+        .get(key)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| format!("CycloneDxSbom aggregate task is missing {key}"))
 }
 
 fn output_files(input: &TaskInput) -> Vec<PathBuf> {
@@ -186,5 +225,70 @@ mod tests {
             .unwrap()
             .contains("http://cyclonedx.org/schema/bom/1.6"));
         assert_eq!(result.files_processed, 2);
+    }
+
+    #[tokio::test]
+    async fn writes_aggregate_outputs_from_input_contracts() {
+        let dir = tempfile::tempdir().unwrap();
+        let json_output = dir.path().join("aggregate.json");
+        let contract = serde_json::json!({
+            "schema": CONTRACT_SCHEMA,
+            "spec_version": "1.6",
+            "serial_number": "urn:uuid:00000000-0000-0000-0000-000000000001",
+            "timestamp": "2026-05-12T10:00:00Z",
+            "root_component": {
+                "type": "library",
+                "bom-ref": "pkg:maven/org.example/lib@1.0",
+                "group": "org.example",
+                "name": "lib",
+                "version": "1.0",
+                "purl": "pkg:maven/org.example/lib@1.0"
+            },
+            "components": [],
+            "dependencies": []
+        });
+
+        let mut input = TaskInput::new("CycloneDxSbom");
+        input.options.insert(
+            "aggregate_input_contracts_json_b64".to_string(),
+            base64::engine::general_purpose::STANDARD
+                .encode(serde_json::to_string(&vec![contract]).unwrap()),
+        );
+        input
+            .options
+            .insert("aggregate_spec_version".to_string(), "1.6".to_string());
+        input.options.insert(
+            "aggregate_serial_number".to_string(),
+            "urn:uuid:00000000-0000-0000-0000-000000000007".to_string(),
+        );
+        input.options.insert(
+            "aggregate_timestamp".to_string(),
+            "2026-05-12T14:00:00Z".to_string(),
+        );
+        input.options.insert(
+            "aggregate_root_group".to_string(),
+            "org.example".to_string(),
+        );
+        input
+            .options
+            .insert("aggregate_root_name".to_string(), "aggregate".to_string());
+        input
+            .options
+            .insert("aggregate_root_version".to_string(), "1.0".to_string());
+        input.options.insert(
+            "aggregate_root_component_type".to_string(),
+            "application".to_string(),
+        );
+        input.options.insert(
+            "output_files_json".to_string(),
+            serde_json::to_string(&vec![json_output.to_string_lossy().into_owned()]).unwrap(),
+        );
+
+        let result = CycloneDxSbomTaskExecutor::new().execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        let json = std::fs::read_to_string(json_output).unwrap();
+        assert!(json.contains("pkg:maven/org.example/aggregate@1.0"));
+        assert!(json.contains("pkg:maven/org.example/lib@1.0"));
     }
 }
