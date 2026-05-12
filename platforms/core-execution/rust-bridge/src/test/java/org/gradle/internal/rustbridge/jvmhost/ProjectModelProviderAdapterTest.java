@@ -479,6 +479,9 @@ public class ProjectModelProviderAdapterTest {
         assertEquals(outputJson.getAbsolutePath(), inputs.get("cyclonedx_json_output"));
         assertEquals(inputJar.getAbsolutePath(), inputs.get("cyclonedx_resolved_dependencies"));
         assertEquals("missing", inputs.get("cyclonedx_sbom_contract_status"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("resolution-result-edges"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("component-metadata"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("aggregate-merge-policy"));
         assertEquals("true", inputs.get("requires_jvm_task_execution"));
         assertFalse(inputs.containsKey("sbom_contract_json_b64"));
     }
