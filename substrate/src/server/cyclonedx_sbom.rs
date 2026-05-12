@@ -989,7 +989,7 @@ fn serialize_cyclonedx_properties<S>(
 where
     S: serde::Serializer,
 {
-    let properties = properties
+    let properties = rendered_cyclonedx_properties(properties)
         .iter()
         .map(|(name, value)| CycloneDxProperty {
             name: name.clone(),
@@ -1026,6 +1026,35 @@ where
             "CycloneDX properties must be an object or an array",
         )),
     }
+}
+
+fn rendered_cyclonedx_properties(
+    properties: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let mut rendered = properties
+        .iter()
+        .filter(|(name, _)| !is_internal_cyclonedx_property(name))
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect::<BTreeMap<_, _>>();
+    if !rendered.contains_key("cdx:maven:package:test")
+        && (properties.contains_key("gradle:artifactPath")
+            || properties.contains_key("gradle:inScopeConfigurations"))
+    {
+        let is_test = properties
+            .get("gradle:inScopeConfigurations")
+            .map(|scopes| {
+                scopes
+                    .split(',')
+                    .any(|scope| scope.to_ascii_lowercase().contains("test"))
+            })
+            .unwrap_or(false);
+        rendered.insert("cdx:maven:package:test".to_string(), is_test.to_string());
+    }
+    rendered
+}
+
+fn is_internal_cyclonedx_property(name: &str) -> bool {
+    name.starts_with("gradle:") || name.starts_with("maven:")
 }
 
 pub fn draft_contract_from_resolution_graph(
@@ -1156,7 +1185,7 @@ pub fn draft_contract_from_resolution_graph(
                 description: metadata.description,
                 publisher: metadata.publisher,
                 purl: bom_ref,
-                modified: None,
+                modified: Some(false),
                 properties,
                 licenses: metadata.licenses,
                 hashes,
@@ -2785,9 +2814,10 @@ fn write_component(xml: &mut String, indent: &str, component: &CycloneDxComponen
         }
         xml.push_str(&format!("{indent}  </externalReferences>\n"));
     }
-    if !component.properties.is_empty() {
+    let rendered_properties = rendered_cyclonedx_properties(&component.properties);
+    if !rendered_properties.is_empty() {
         xml.push_str(&format!("{indent}  <properties>\n"));
-        for (name, value) in &component.properties {
+        for (name, value) in &rendered_properties {
             xml.push_str(&format!(
                 "{indent}    <property name=\"{}\">{}</property>\n",
                 xml_escape(name),
