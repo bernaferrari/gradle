@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::proto::{DependencyDescriptor, RepositoryDescriptor, ResolvedDependency};
+use crate::proto::{DependencyDescriptor, RepositoryDescriptor};
+#[cfg(test)]
+use crate::proto::ResolvedDependency;
 
 use super::artifact_selection::maven_artifact_shape;
 use super::gradle_module_metadata;

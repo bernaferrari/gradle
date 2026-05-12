@@ -962,6 +962,7 @@ fn parse_artifact_coordinate(value: &str) -> Option<ArtifactCoordinate> {
     })
 }
 
+#[cfg(test)]
 fn parse_coordinate(value: &str) -> Option<(String, String, String)> {
     let coordinate = parse_artifact_coordinate(value)?;
     if !coordinate.extension.eq_ignore_ascii_case("jar") {

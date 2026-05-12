@@ -112,6 +112,18 @@ Gradle test startup overhead.
 Use `--mode all` when you want both the fast path and proof harness in one
 command.
 
+Current all-mode proof evidence:
+
+```bash
+python3 tools/demo/first_60_seconds.py --mode all --skip-build --output build/first60-current-all.json
+```
+
+The latest local run passed all 10 checks: daemon ready in 676.8ms,
+authoritative Rust DAG in 15566.9ms with zero JVM forwards, real-build
+dependency read-through in 7467.8ms with 3/5 remote requests avoided,
+file-watch first event in 11ms, and all dependency transport/cache/read-through
+proof checks under their budgets.
+
 The real-build read-through metric runs when `build/gradle-under-test/bin/gradle`
 exists, or when `GRADLE_UNDER_TEST_BIN`/`GRADLE_UNDER_TEST` points at a local
 install image from this fork. It uses `org.gradle.rust.substrate.state.dir` so
