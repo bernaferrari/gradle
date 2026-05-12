@@ -16,11 +16,11 @@
         "subdir": "complete",
         "description": "Spring guide REST service complete sample pinned to an immutable commit."
       },
-      "tasks": ["clean", "jar"],
+      "tasks": ["clean", "assemble"],
       "mode": "strict",
       "expectation": "supported",
       "timeout_seconds": 300,
-      "reason": "Recognizable Spring guide Java build. This broader supported slice proves Rust RunBuild can own Java compile, resource processing, lifecycle task scheduling, and plain Jar packaging beyond compileJava.",
+      "reason": "Recognizable Spring Boot Java build. This broader supported slice proves Rust RunBuild can own Java compile, resource processing, lifecycle task scheduling, plain Jar packaging, ResolveMainClassName, and BootJar packaging through assemble.",
       "checks": {
         "task_parity": true,
         "output_inventory": true,

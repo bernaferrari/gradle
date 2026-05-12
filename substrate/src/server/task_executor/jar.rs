@@ -169,9 +169,12 @@ impl JarTaskExecutor {
     /// Read all entries from an existing ZIP/JAR file.
     fn read_existing_entries(path: &Path) -> std::io::Result<Vec<ZipEntry>> {
         let buf = std::fs::read(path)?;
+        Ok(Self::read_existing_entries_from_bytes(&buf))
+    }
 
+    fn read_existing_entries_from_bytes(buf: &[u8]) -> Vec<ZipEntry> {
         if buf.len() < 22 {
-            return Ok(Vec::new());
+            return Vec::new();
         }
 
         let mut entries = Vec::new();
@@ -223,7 +226,7 @@ impl JarTaskExecutor {
             pos = data_start + compressed_size as usize;
         }
 
-        Ok(entries)
+        entries
     }
 
     /// Collect files from a directory tree with relative paths.
@@ -726,6 +729,233 @@ fn collect_convention_archive_entries(
     Ok(true)
 }
 
+fn collect_spring_boot_archive_entries(
+    archive_path: &Path,
+    options: &std::collections::HashMap<String, String>,
+    entries: &mut Vec<ZipEntry>,
+    file_mode: u32,
+    dir_mode: u32,
+) -> Result<bool, String> {
+    if !is_spring_boot_archive(options) {
+        return Ok(false);
+    }
+    let Some(build_dir) = archive_path.parent().and_then(|path| path.parent()) else {
+        return Ok(false);
+    };
+
+    let mut added = false;
+    let mut existing = entries
+        .iter()
+        .map(|entry| entry.name.clone())
+        .collect::<HashSet<_>>();
+    let mut emitted_dirs = entries
+        .iter()
+        .filter(|entry| entry.is_dir())
+        .map(|entry| entry.name.clone())
+        .collect::<HashSet<_>>();
+
+    let mut files = Vec::new();
+    collect_existing_files(
+        &build_dir.join("classes/java/main"),
+        "BOOT-INF/classes",
+        &mut files,
+    )?;
+    collect_existing_files(
+        &build_dir.join("resources/main"),
+        "BOOT-INF/classes",
+        &mut files,
+    )?;
+    for (source, name) in files {
+        if existing.contains(&name) {
+            continue;
+        }
+        push_zip_parent_dirs(entries, &mut emitted_dirs, &name, dir_mode);
+        let data = std::fs::read(&source)
+            .map_err(|e| format!("Cannot read {}: {}", source.display(), e))?;
+        existing.insert(name.clone());
+        entries.push(ZipEntry::file(name, data, file_mode));
+        added = true;
+    }
+
+    for entry in spring_boot_loader_entries(options)? {
+        if existing.insert(entry.name.clone()) {
+            push_zip_parent_dirs(entries, &mut emitted_dirs, &entry.name, dir_mode);
+            entries.push(entry);
+            added = true;
+        }
+    }
+    if let Some(jarmode_tools) = spring_boot_jarmode_tools_entry(options) {
+        if existing.insert(jarmode_tools.name.clone()) {
+            push_zip_parent_dirs(entries, &mut emitted_dirs, &jarmode_tools.name, dir_mode);
+            entries.push(jarmode_tools);
+            added = true;
+        }
+    }
+
+    if existing
+        .iter()
+        .any(|name| name.starts_with("BOOT-INF/lib/"))
+    {
+        let classpath_index = spring_boot_classpath_index(&existing);
+        added |= push_generated_boot_entry(
+            entries,
+            &mut existing,
+            &mut emitted_dirs,
+            "BOOT-INF/classpath.idx",
+            classpath_index,
+            file_mode,
+            dir_mode,
+        );
+        added |= push_generated_boot_entry(
+            entries,
+            &mut existing,
+            &mut emitted_dirs,
+            "BOOT-INF/layers.idx",
+            spring_boot_layers_index(),
+            file_mode,
+            dir_mode,
+        );
+    }
+
+    Ok(added)
+}
+
+fn is_spring_boot_archive(options: &std::collections::HashMap<String, String>) -> bool {
+    options.contains_key("manifest.Spring-Boot-Version")
+        || parse_copy_file_mappings(options.get("copy_file_mappings"))
+            .map(|mappings| {
+                mappings.iter().any(|mapping| {
+                    mapping
+                        .relative_path
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                        .starts_with("BOOT-INF/")
+                })
+            })
+            .unwrap_or(false)
+}
+
+fn push_generated_boot_entry(
+    entries: &mut Vec<ZipEntry>,
+    existing: &mut HashSet<String>,
+    emitted_dirs: &mut HashSet<String>,
+    name: &str,
+    data: Vec<u8>,
+    file_mode: u32,
+    dir_mode: u32,
+) -> bool {
+    if !existing.insert(name.to_string()) {
+        return false;
+    }
+    push_zip_parent_dirs(entries, emitted_dirs, name, dir_mode);
+    entries.push(ZipEntry::file(name, data, file_mode));
+    true
+}
+
+fn spring_boot_classpath_index(existing: &HashSet<String>) -> Vec<u8> {
+    let mut libs = existing
+        .iter()
+        .filter(|name| name.starts_with("BOOT-INF/lib/") && name.ends_with(".jar"))
+        .cloned()
+        .collect::<Vec<_>>();
+    libs.sort_unstable();
+    let mut text = String::new();
+    for lib in libs {
+        text.push_str("- \"");
+        text.push_str(&lib);
+        text.push_str("\"\n");
+    }
+    text.into_bytes()
+}
+
+fn spring_boot_layers_index() -> Vec<u8> {
+    b"- \"dependencies\":\n  - \"BOOT-INF/lib/\"\n- \"spring-boot-loader\":\n  - \"org/\"\n- \"application\":\n  - \"BOOT-INF/classes/\"\n  - \"BOOT-INF/classpath.idx\"\n  - \"BOOT-INF/layers.idx\"\n"
+        .to_vec()
+}
+
+fn spring_boot_loader_entries(
+    options: &std::collections::HashMap<String, String>,
+) -> Result<Vec<ZipEntry>, String> {
+    let version = spring_boot_version(options);
+    let Some(loader_tools) = find_spring_boot_loader_tools(version) else {
+        return Ok(Vec::new());
+    };
+    let tools_entries = JarTaskExecutor::read_existing_entries(&loader_tools)
+        .map_err(|e| format!("Cannot read {}: {}", loader_tools.display(), e))?;
+    let Some(loader_jar) = tools_entries
+        .into_iter()
+        .find(|entry| entry.name == "META-INF/loader/spring-boot-loader.jar")
+    else {
+        return Ok(Vec::new());
+    };
+    Ok(
+        JarTaskExecutor::read_existing_entries_from_bytes(&loader_jar.data)
+            .into_iter()
+            .filter(|entry| {
+                !entry.is_dir()
+                    && (entry.name == "META-INF/services/java.nio.file.spi.FileSystemProvider"
+                        || entry.name.starts_with("org/springframework/boot/loader/"))
+            })
+            .collect(),
+    )
+}
+
+fn spring_boot_jarmode_tools_entry(
+    options: &std::collections::HashMap<String, String>,
+) -> Option<ZipEntry> {
+    let version = spring_boot_version(options);
+    let data = if let Some(path) = find_spring_boot_module_jar(
+        "spring-boot-jarmode-tools",
+        version,
+        &format!("spring-boot-jarmode-tools-{version}.jar"),
+    ) {
+        std::fs::read(&path).ok()?
+    } else {
+        let loader_tools = find_spring_boot_loader_tools(version)?;
+        JarTaskExecutor::read_existing_entries(&loader_tools)
+            .ok()?
+            .into_iter()
+            .find(|entry| entry.name == "META-INF/jarmode/spring-boot-jarmode-tools.jar")?
+            .data
+    };
+    Some(ZipEntry::file(
+        format!("BOOT-INF/lib/spring-boot-jarmode-tools-{version}.jar"),
+        data,
+        0o644,
+    ))
+}
+
+fn spring_boot_version(options: &std::collections::HashMap<String, String>) -> &str {
+    options
+        .get("manifest.Spring-Boot-Version")
+        .map(String::as_str)
+        .unwrap_or("4.0.6")
+}
+
+fn find_spring_boot_loader_tools(version: &str) -> Option<PathBuf> {
+    find_spring_boot_module_jar(
+        "spring-boot-loader-tools",
+        version,
+        &format!("spring-boot-loader-tools-{version}.jar"),
+    )
+}
+
+fn find_spring_boot_module_jar(module: &str, version: &str, file_name: &str) -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let base = home
+        .join(".gradle/caches/modules-2/files-2.1/org.springframework.boot")
+        .join(module)
+        .join(version);
+    let entries = std::fs::read_dir(base).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path().join(file_name);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+    None
+}
+
 fn distribution_root_name(archive_path: &Path) -> Option<String> {
     let file_name = archive_path.file_name()?.to_str()?;
     for suffix in [
@@ -875,9 +1105,17 @@ impl JarTaskExecutor {
         } else {
             collect_convention_archive_entries(jar_path, &mut entries, file_mode, dir_mode)?
         };
+        let collected_boot_entries = collect_spring_boot_archive_entries(
+            jar_path,
+            options,
+            &mut entries,
+            file_mode,
+            dir_mode,
+        )?;
 
         if !used_mappings
             && !collected_convention_entries
+            && !collected_boot_entries
             && !collect_application_distribution_zip_entries(
                 jar_path,
                 options,
@@ -1362,6 +1600,47 @@ mod tests {
         assert!(entries.contains(&"com/".to_string()));
         assert!(entries.contains(&"com/example/".to_string()));
         assert!(entries.contains(&"com/example/App.class".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_spring_boot_archive_adds_boot_inf_classes_and_indexes() {
+        let tmp = TempDir::new().unwrap();
+        let build_dir = tmp.path().join("build");
+        let classes_dir = build_dir.join("classes/java/main/com/example");
+        let libs_dir = tmp.path().join("libs");
+        let lib = libs_dir.join("demo.jar");
+        fs::create_dir_all(&classes_dir).unwrap();
+        fs::create_dir_all(&libs_dir).unwrap();
+        fs::write(classes_dir.join("App.class"), b"class bytes").unwrap();
+        fs::write(&lib, b"jar bytes").unwrap();
+
+        let mapping = format!(
+            "{}>{}>F",
+            URL_SAFE_NO_PAD.encode(lib.to_string_lossy().as_bytes()),
+            URL_SAFE_NO_PAD.encode("BOOT-INF/lib/demo.jar")
+        );
+        let executor = JarTaskExecutor::new();
+        let mut input = TaskInput::new("Jar");
+        input.target_dir = build_dir.join("libs");
+        input
+            .options
+            .insert("jarName".to_string(), "app.jar".to_string());
+        input
+            .options
+            .insert("copy_file_mappings".to_string(), mapping);
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        let entries = JarTaskExecutor::read_existing_entries(result.output_files.first().unwrap())
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect::<Vec<_>>();
+        assert!(entries.contains(&"BOOT-INF/classes/com/example/App.class".to_string()));
+        assert!(entries.contains(&"BOOT-INF/lib/demo.jar".to_string()));
+        assert!(entries.contains(&"BOOT-INF/classpath.idx".to_string()));
+        assert!(entries.contains(&"BOOT-INF/layers.idx".to_string()));
     }
 
     #[tokio::test]

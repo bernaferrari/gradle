@@ -7,8 +7,8 @@ through the Rust kernel or fail closed before execution.
 
 `testing/dogfood/oss-manifest.json` is the next layer after that: pinned
 external OSS repositories. It currently includes a supported Spring guide
-`clean jar` slice, a supported Spring PetClinic `clean compileJava` slice, and
-strict fail-closed gates for broader Spring/Kotlin-heavy builds.
+`clean assemble` slice, a supported Spring PetClinic `clean compileJava` slice,
+and strict fail-closed gates for broader Spring/Kotlin-heavy builds.
 
 Validate and enumerate the manifest without invoking Gradle:
 

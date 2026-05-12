@@ -96,15 +96,16 @@ Summary from `build/dogfood-oss/dogfood-summary.md`:
 | Rust RunBuild markers | 5/5 |
 | Rust RunBuild executions | 2/5 |
 | Task-graph captures | 5/5 |
-| Upstream observed wall time | 34338 ms |
-| Rust substrate observed wall time | 111348 ms |
-| Upstream task total | 38 |
-| Rust substrate task total | 16 |
+| Upstream observed wall time | 92849 ms |
+| Rust substrate observed wall time | 111151 ms |
+| Upstream task total | 41 |
+| Rust substrate task total | 19 |
 
-`spring-gs-rest-service-complete` now runs `clean jar` through strict Rust
-RunBuild with `build-plan-cache` as the plan source, five Rust-executed tasks
-(`clean`, `compileJava`, `processResources`, `classes`, `jar`), zero JVM
-forwards, and task/output/hash/archive-entry parity. `spring-petclinic` runs the selected
+`spring-gs-rest-service-complete` now runs `clean assemble` through strict Rust
+RunBuild with `build-plan-cache` as the plan source, eight Rust-executed tasks
+including `compileJava`, `processResources`, `jar`, `resolveMainClassName`, and
+`bootJar`, zero JVM forwards, and task/output/hash/archive-entry parity.
+`spring-petclinic` runs the selected
 `clean compileJava` slice with two Rust-executed tasks, zero JVM forwards, and
 the same parity checks.
 `spring-petclinic-testclasses` is a separate strict fail-closed gate for the
