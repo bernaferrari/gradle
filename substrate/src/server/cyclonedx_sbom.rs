@@ -228,6 +228,7 @@ pub struct CycloneDxCapturedTaskOptions {
     pub organizational_entity: Option<CycloneDxOrganizationalEntity>,
     pub license_choice: String,
     pub build_system_environment_variable: String,
+    pub build_system_url: String,
     pub raw_external_references_present: bool,
     pub external_references: Vec<CycloneDxExternalReference>,
     pub json_output: String,
@@ -332,6 +333,7 @@ pub fn validate_captured_task_options(
             "cyclonedx_build_system_environment_variable",
         )
         .to_string(),
+        build_system_url: value(inputs, "cyclonedx_build_system_url").to_string(),
         raw_external_references_present: !value(inputs, "cyclonedx_external_references")
             .trim()
             .is_empty(),
@@ -427,6 +429,17 @@ pub fn draft_contract_from_captured_inputs(
             external_references: Vec::new(),
         },
     )?;
+    if options.include_build_system && !options.build_system_url.trim().is_empty() {
+        contract
+            .root_component
+            .external_references
+            .push(CycloneDxExternalReference {
+                reference_type: "build-system".to_string(),
+                url: options.build_system_url.trim().to_string(),
+                comment: String::new(),
+                hashes: Vec::new(),
+            });
+    }
     contract.external_references = options.external_references;
     contract.organizational_entity = options.organizational_entity;
     contract.validate()?;
@@ -437,9 +450,6 @@ fn reject_unsupported_captured_options(
     options: &CycloneDxCapturedTaskOptions,
 ) -> Result<(), String> {
     let mut unsupported = Vec::new();
-    if options.include_build_system {
-        unsupported.push("include-build-system");
-    }
     if options.include_build_environment {
         unsupported.push("include-build-environment");
     }
@@ -451,9 +461,6 @@ fn reject_unsupported_captured_options(
     }
     if !options.license_choice.trim().is_empty() {
         unsupported.push("license-choice");
-    }
-    if !options.build_system_environment_variable.trim().is_empty() {
-        unsupported.push("build-system-environment-variable");
     }
     if options.raw_external_references_present && options.external_references.is_empty() {
         unsupported.push("external-references");
@@ -2390,6 +2397,7 @@ mod tests {
         assert!(!options.organizational_entity_present);
         assert_eq!("", options.license_choice);
         assert_eq!("", options.build_system_environment_variable);
+        assert_eq!("", options.build_system_url);
         assert_eq!("/tmp/bom.json", options.json_output);
     }
 
@@ -2452,6 +2460,18 @@ mod tests {
                 "true".to_string(),
             ),
             (
+                "cyclonedx_include_build_system".to_string(),
+                "true".to_string(),
+            ),
+            (
+                "cyclonedx_build_system_environment_variable".to_string(),
+                "CI".to_string(),
+            ),
+            (
+                "cyclonedx_build_system_url".to_string(),
+                "https://ci.example.test/build/123".to_string(),
+            ),
+            (
                 "cyclonedx_organizational_entity_present".to_string(),
                 "true".to_string(),
             ),
@@ -2477,6 +2497,13 @@ mod tests {
         assert!(contract.serial_number.starts_with("urn:uuid:"));
         assert_eq!("2026-05-12T14:17:25Z", contract.timestamp);
         assert_eq!("application", contract.root_component.component_type);
+        assert_eq!(
+            vec![external_reference(
+                "build-system",
+                "https://ci.example.test/build/123"
+            )],
+            contract.root_component.external_references
+        );
         assert!(contract.external_references.is_empty());
         assert_eq!(
             "Example Security",
@@ -2599,10 +2626,6 @@ mod tests {
                 "true".to_string(),
             ),
             (
-                "cyclonedx_include_build_system".to_string(),
-                "true".to_string(),
-            ),
-            (
                 "cyclonedx_include_build_environment".to_string(),
                 "true".to_string(),
             ),
@@ -2615,10 +2638,6 @@ mod tests {
                 "true".to_string(),
             ),
             ("cyclonedx_license_choice".to_string(), "SPDX".to_string()),
-            (
-                "cyclonedx_build_system_environment_variable".to_string(),
-                "CI".to_string(),
-            ),
             (
                 "cyclonedx_external_references".to_string(),
                 "https://example.invalid/sbom".to_string(),
@@ -2636,12 +2655,12 @@ mod tests {
         let err = draft_contract_from_captured_inputs(&inputs, "build-123", 1_778_595_445_123)
             .unwrap_err();
 
-        assert!(err.contains("include-build-system"));
+        assert!(!err.contains("include-build-system"));
         assert!(err.contains("include-build-environment"));
         assert!(err.contains("include-license-text"));
         assert!(err.contains("organizational-entity"));
         assert!(err.contains("license-choice"));
-        assert!(err.contains("build-system-environment-variable"));
+        assert!(!err.contains("build-system-environment-variable"));
         assert!(err.contains("external-references"));
     }
 

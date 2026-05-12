@@ -1306,6 +1306,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "cyclonedx_license_choice", licenseChoice);
         String buildSystemEnvironmentVariable = providerValue(invokeOptional(task, taskType, "getBuildSystemEnvironmentVariable"));
         putIfPresent(inputs, "cyclonedx_build_system_environment_variable", buildSystemEnvironmentVariable);
+        if ("true".equalsIgnoreCase(includeBuildSystem)) {
+            putIfPresent(inputs, "cyclonedx_build_system_url", cyclonedxBuildSystemUrl(buildSystemEnvironmentVariable));
+        }
         Object externalReferencesProvider = invokeOptional(task, taskType, "getExternalReferences");
         String externalReferences = providerStringList(externalReferencesProvider);
         putIfPresent(inputs, "cyclonedx_external_references", externalReferences);
@@ -1331,9 +1334,62 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         inputs.put("cyclonedx_sbom_contract_status", resolutionGraphJsonBase64.isEmpty() ? "missing" : "partial");
         inputs.put(
             "cyclonedx_missing_contract_fields",
-            cyclonedxMissingContractFields(missingBaseFields, includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, organizationalEntityPresent, organizationalEntityJsonBase64, licenseChoice, buildSystemEnvironmentVariable, externalReferences, externalReferencesJsonBase64)
+            cyclonedxMissingContractFields(missingBaseFields, includeBomSerialNumber, includeBuildEnvironment, includeLicenseText, organizationalEntityPresent, organizationalEntityJsonBase64, licenseChoice, externalReferences, externalReferencesJsonBase64)
         );
         inputs.put("requires_jvm_task_execution", "true");
+    }
+
+    private static String cyclonedxBuildSystemUrl(String configuredEnvironmentVariable) {
+        if (configuredEnvironmentVariable != null && !configuredEnvironmentVariable.trim().isEmpty()) {
+            return cyclonedxBuildSystemUrlFromConfiguredVariable(configuredEnvironmentVariable);
+        }
+        String githubServerUrl = System.getenv("GITHUB_SERVER_URL");
+        String githubRepository = System.getenv("GITHUB_REPOSITORY");
+        String githubRunId = System.getenv("GITHUB_RUN_ID");
+        if (!isBlank(githubServerUrl) && !isBlank(githubRepository) && !isBlank(githubRunId)) {
+            return githubServerUrl + "/" + githubRepository + "/actions/runs/" + githubRunId;
+        }
+        String gitlabProjectUrl = System.getenv("CI_PROJECT_URL");
+        String gitlabJobId = System.getenv("CI_JOB_ID");
+        if (!isBlank(gitlabProjectUrl) && !isBlank(gitlabJobId)) {
+            return gitlabProjectUrl + "/-/jobs/" + gitlabJobId;
+        }
+        String jenkinsBuildUrl = System.getenv("BUILD_URL");
+        if (!isBlank(jenkinsBuildUrl)) {
+            return jenkinsBuildUrl;
+        }
+        String circleBuildUrl = System.getenv("CIRCLE_BUILD_URL");
+        if (!isBlank(circleBuildUrl)) {
+            return circleBuildUrl;
+        }
+        String travisBuildWebUrl = System.getenv("TRAVIS_BUILD_WEB_URL");
+        if (!isBlank(travisBuildWebUrl)) {
+            return travisBuildWebUrl;
+        }
+        String droneBuildLink = System.getenv("DRONE_BUILD_LINK");
+        return isBlank(droneBuildLink) ? "" : droneBuildLink;
+    }
+
+    private static String cyclonedxBuildSystemUrlFromConfiguredVariable(String configuredEnvironmentVariable) {
+        if (configuredEnvironmentVariable.contains("${")) {
+            StringBuffer resolved = new StringBuffer();
+            Matcher matcher = Pattern.compile("\\$\\{([^}]+)}").matcher(configuredEnvironmentVariable);
+            while (matcher.find()) {
+                String variableName = matcher.group(1);
+                if (isBlank(variableName)) {
+                    return "";
+                }
+                String variableValue = System.getenv(variableName);
+                if (isBlank(variableValue)) {
+                    return "";
+                }
+                matcher.appendReplacement(resolved, Matcher.quoteReplacement(variableValue));
+            }
+            matcher.appendTail(resolved);
+            return resolved.toString();
+        }
+        String value = System.getenv(configuredEnvironmentVariable);
+        return isBlank(value) ? "" : value;
     }
 
     private static String cyclonedxExternalReferencesJsonBase64(@Nullable Object value) {
@@ -1427,13 +1483,11 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     private static String cyclonedxMissingContractFields(
         String baseFields,
         String includeBomSerialNumber,
-        String includeBuildSystem,
         String includeBuildEnvironment,
         String includeLicenseText,
         String organizationalEntityPresent,
         String organizationalEntityJsonBase64,
         String licenseChoice,
-        String buildSystemEnvironmentVariable,
         String externalReferences,
         String externalReferencesJsonBase64
     ) {
@@ -1441,9 +1495,6 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         Collections.addAll(fields, baseFields.split(","));
         if ("true".equalsIgnoreCase(includeBomSerialNumber)) {
             fields.add("serial-source-policy");
-        }
-        if ("true".equalsIgnoreCase(includeBuildSystem)) {
-            fields.add("build-system-rendering");
         }
         if ("true".equalsIgnoreCase(includeBuildEnvironment)) {
             fields.add("build-environment-rendering");
@@ -1456,9 +1507,6 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         }
         if (licenseChoice != null && !licenseChoice.isEmpty()) {
             fields.add("license-choice-rendering");
-        }
-        if (buildSystemEnvironmentVariable != null && !buildSystemEnvironmentVariable.isEmpty()) {
-            fields.add("build-system-environment-variable");
         }
         if (externalReferences != null && !externalReferences.isEmpty() && (externalReferencesJsonBase64 == null || externalReferencesJsonBase64.isEmpty())) {
             fields.add("external-reference-shape");
@@ -2162,6 +2210,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
 
     private static String stringOrEmpty(@Nullable Object value) {
         return value == null ? "" : value.toString();
+    }
+
+    private static boolean isBlank(@Nullable String value) {
+        return value == null || value.trim().isEmpty();
     }
 
     private static String fileCollectionPathString(@Nullable Object files) {
