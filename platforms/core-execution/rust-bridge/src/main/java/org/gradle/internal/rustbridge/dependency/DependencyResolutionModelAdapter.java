@@ -209,6 +209,13 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
             } else if (isGroupSpec(spec, expectedInclusive, "SUB_GROUP")) {
                 Object group = readFieldInHierarchy(spec, "group");
                 groupPrefixes.add(group.toString());
+            } else if (isGroupSpec(spec, expectedInclusive, "REGEX")) {
+                Object group = readFieldInHierarchy(spec, "group");
+                String exactGroup = exactGroupFromLiteralRegex(group.toString());
+                if (exactGroup == null) {
+                    return false;
+                }
+                groups.add(exactGroup);
             } else {
                 return false;
             }
@@ -218,6 +225,33 @@ public class DependencyResolutionModelAdapter implements DependencyResolutionSha
         Collections.sort(modules);
         Collections.sort(moduleVersions);
         return true;
+    }
+
+    @Nullable
+    static String exactGroupFromLiteralRegex(String pattern) {
+        StringBuilder group = new StringBuilder();
+        for (int i = 0; i < pattern.length(); i++) {
+            char ch = pattern.charAt(i);
+            if (ch == '\\') {
+                if (i + 1 >= pattern.length()) {
+                    return null;
+                }
+                char escaped = pattern.charAt(++i);
+                if (escaped != '.') {
+                    return null;
+                }
+                group.append('.');
+            } else if ((ch >= 'A' && ch <= 'Z')
+                || (ch >= 'a' && ch <= 'z')
+                || (ch >= '0' && ch <= '9')
+                || ch == '_'
+                || ch == '-') {
+                group.append(ch);
+            } else {
+                return null;
+            }
+        }
+        return group.length() == 0 ? null : group.toString();
     }
 
     private static boolean isGroupSpec(Object spec, boolean expectedInclusive, String expectedMatcherKind) {

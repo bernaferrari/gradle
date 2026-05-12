@@ -208,7 +208,6 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         results = corpus_run.run_manifest_contracts(str(manifest))
 
         self.assertIn("custom-task-unsupported-kotlin-dsl", results)
-        self.assertIn("repository-regex-filter-unsupported-kotlin-dsl", results)
         self.assertIn("dependency-substitution-unsupported-kotlin-dsl", results)
         self.assertIn("component-metadata-rule-unsupported-kotlin-dsl", results)
         self.assertIn("detached-configuration-unsupported-kotlin-dsl", results)
@@ -222,6 +221,27 @@ class CorpusRunnerCommandTest(unittest.TestCase):
             if not result["match"]
         }
         self.assertEqual({}, failures)
+
+    def test_literal_repository_regex_group_filter_is_supported(self):
+        self.assertFalse(
+            corpus_run.has_unsupported_repository_regex_filter(
+                'repositories { maven { content { includeGroupByRegex("org\\\\.gradle\\\\.substrate") } } }'
+            )
+        )
+
+    def test_non_literal_repository_regex_group_filter_is_unsupported(self):
+        self.assertTrue(
+            corpus_run.has_unsupported_repository_regex_filter(
+                'repositories { maven { content { includeGroupByRegex("org\\\\..*") } } }'
+            )
+        )
+
+    def test_repository_regex_module_filter_is_unsupported(self):
+        self.assertTrue(
+            corpus_run.has_unsupported_repository_regex_filter(
+                'repositories { maven { content { includeModuleByRegex("org\\\\.gradle", "demo") } } }'
+            )
+        )
 
     def test_contract_comparison_reports_mismatch(self):
         mismatches = corpus_run.compare_contract(
