@@ -103,9 +103,9 @@ pub fn admit_build_plan(
         }
 
         if !native_executor_types.contains(&task.task_type) {
-            reasons.push(format!(
-                "{} ({}) has no Rust executor",
-                task.task_path, task.task_type
+            reasons.push(missing_native_executor_reason(
+                &task.task_path,
+                &task.task_type,
             ));
             continue;
         }
@@ -134,6 +134,23 @@ pub fn admit_build_plan(
             reasons,
         })
     }
+}
+
+fn missing_native_executor_reason(task_path: &str, task_type: &str) -> String {
+    if is_cyclonedx_sbom_task(task_type) {
+        return format!(
+            "{} ({}) requires native CycloneDX SBOM generation support; the task declares SBOM outputs and cannot be treated as a lifecycle/no-op task",
+            task_path, task_type
+        );
+    }
+    format!("{} ({}) has no Rust executor", task_path, task_type)
+}
+
+fn is_cyclonedx_sbom_task(task_type: &str) -> bool {
+    matches!(
+        task_type,
+        "org.cyclonedx.gradle.CyclonedxAggregateTask" | "org.cyclonedx.gradle.CyclonedxDirectTask"
+    )
 }
 
 fn admit_dependency_graph(graph: &KernelDependencyGraph, reasons: &mut Vec<String>) {
@@ -448,6 +465,36 @@ mod tests {
             panic!("expected rejection");
         };
         assert!(rejection.message().contains("has no Rust executor"));
+    }
+
+    #[test]
+    fn rejects_cyclonedx_sbom_tasks_with_precise_diagnostic() {
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![
+                task(
+                    ":cyclonedxDirectBom",
+                    "org.cyclonedx.gradle.CyclonedxDirectTask",
+                    None,
+                ),
+                task(
+                    ":cyclonedxBom",
+                    "org.cyclonedx.gradle.CyclonedxAggregateTask",
+                    None,
+                ),
+            ],
+        };
+
+        let KernelAdmission::Rejected(rejection) =
+            admit_build_plan(&plan, &native_types(&["Lifecycle"]))
+        else {
+            panic!("expected rejection");
+        };
+        let message = rejection.message();
+        assert!(message.contains("requires native CycloneDX SBOM generation support"));
+        assert!(message.contains("declares SBOM outputs"));
+        assert!(!message.contains("CyclonedxDirectTask) has no Rust executor"));
     }
 
     #[test]
