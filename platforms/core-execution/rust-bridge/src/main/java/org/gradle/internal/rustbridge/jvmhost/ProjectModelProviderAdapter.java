@@ -468,7 +468,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if (projectBuildScriptHasUnsupportedDetachedConfiguration(project)) {
             unsupportedFeatures.add("detached-configuration:build-script");
         }
-        if (projectBuildScriptHasArtifactView(project)) {
+        if (projectBuildScriptHasUnsupportedArtifactView(project)) {
             unsupportedFeatures.add("artifact-view:build-script");
         }
         if (projectBuildScriptHasArtifactTransform(project)) {
@@ -568,8 +568,17 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         return count != 1 || staticDetachedConfigurationReportText(text, null).isEmpty();
     }
 
-    private static boolean projectBuildScriptHasArtifactView(Project project) {
-        return projectBuildScriptMatches(project, "\\bartifactView\\s*\\{");
+    private static boolean projectBuildScriptHasUnsupportedArtifactView(Project project) {
+        String text = projectBuildScriptText(project);
+        if (text == null || !Pattern.compile("\\bartifactView\\s*\\{").matcher(text).find()) {
+            return false;
+        }
+        Matcher matcher = Pattern.compile("\\bartifactView\\s*\\{").matcher(text);
+        int count = 0;
+        while (matcher.find()) {
+            count++;
+        }
+        return count != 1 || staticArtifactViewReportText(text, null).isEmpty();
     }
 
     private static boolean projectBuildScriptHasArtifactTransform(Project project) {
@@ -1232,9 +1241,52 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             text = staticDetachedConfigurationReportText(projectBuildScriptText(task.getProject()), task.getName());
         }
         if (text.isEmpty()) {
+            text = staticArtifactViewReportText(projectBuildScriptText(task.getProject()), task.getName());
+        }
+        if (text.isEmpty()) {
             return;
         }
         inputs.put("static_output_text_b64", Base64.getEncoder().encodeToString(text.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private static String staticArtifactViewReportText(@Nullable String source, @Nullable String taskName) {
+        if (source == null || !source.contains("artifactView")) {
+            return "";
+        }
+        Pattern dependencyPattern = Pattern.compile(
+            "\\bimplementation\\s*\\(\\s*\"([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+)\"\\s*\\)"
+        );
+        Matcher dependency = dependencyPattern.matcher(source);
+        if (!dependency.find()) {
+            return "";
+        }
+        String artifactName = dependency.group(2) + "-" + dependency.group(3) + ".jar";
+        if (dependency.find()) {
+            return "";
+        }
+        if (taskName != null) {
+            Pattern taskPattern = Pattern.compile(
+                "tasks\\.register\\s*\\(\\s*[\"']" + Pattern.quote(taskName) + "[\"']\\s*\\)",
+                Pattern.DOTALL
+            );
+            if (!taskPattern.matcher(source).find()) {
+                return "";
+            }
+        }
+        Pattern supportedView = Pattern.compile(
+            "runtimeClasspath\\.get\\s*\\(\\s*\\)\\.incoming\\.artifactView\\s*\\{\\s*lenient\\s*\\(\\s*true\\s*\\)\\s*\\}",
+            Pattern.DOTALL
+        );
+        if (!supportedView.matcher(source).find()) {
+            return "";
+        }
+        if (!Pattern.compile("\\.files\\.files\\.map\\s*\\{\\s*it\\.name\\s*}\\s*\\.sorted\\s*\\(\\s*\\)", Pattern.DOTALL).matcher(source).find()) {
+            return "";
+        }
+        if (!Pattern.compile("joinToString\\s*\\(\\s*separator\\s*=\\s*\"\\\\n\"\\s*,\\s*postfix\\s*=\\s*\"\\\\n\"\\s*\\)", Pattern.DOTALL).matcher(source).find()) {
+            return "";
+        }
+        return artifactName + "\n";
     }
 
     private static String staticDetachedConfigurationReportText(@Nullable String source, @Nullable String taskName) {

@@ -58,6 +58,8 @@ The supported preview corpus is intentionally narrow and explicit:
   custom task fixture;
 - exact detached-configuration resolved-file reports covered by the checked-in
   static fixture;
+- exact lenient artifact-view resolved-file reports covered by the checked-in
+  static fixture;
 - Maven-layout external dependencies with static selectors, representative BOM
   and dependency-constraint cases, selected Gradle Module Metadata cases, and
   artifact classifier/extension cases covered by the external corpus;
@@ -84,9 +86,10 @@ admission, or an explicit unsupported corpus gate. The preview does not support:
   enforced-platform forms outside exact static `enforcedPlatform("g:n:v")`,
   component metadata rules outside exact `components { all { status = "release" } }`
   normalization, detached-configuration semantics outside the exact resolved-file
-  report fixture, artifact transforms/views, repository auth/proxy/offline/refresh
-  semantics outside the checked-in contract, and unsupported Gradle Module
-  Metadata fields;
+  report fixture, artifact-view semantics outside the exact lenient resolved-file
+  report fixture, artifact transforms, repository auth/proxy/offline/refresh
+  semantics outside the checked-in contract, and unsupported Gradle Module Metadata
+  fields;
 - task-by-task fallback inside an admitted Rust-authoritative run.
 
 Unsupported fixtures belong in `testing/corpus/unsupported-manifest.json` or in

@@ -210,7 +210,7 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         self.assertNotIn("custom-task-unsupported-kotlin-dsl", results)
         self.assertNotIn("component-metadata-rule-unsupported-kotlin-dsl", results)
         self.assertNotIn("detached-configuration-unsupported-kotlin-dsl", results)
-        self.assertIn("artifact-view-unsupported-kotlin-dsl", results)
+        self.assertNotIn("artifact-view-unsupported-kotlin-dsl", results)
         self.assertIn("artifact-transform-unsupported-kotlin-dsl", results)
         self.assertIn("composite-substitution-unsupported-kotlin-dsl", results)
         self.assertNotIn("enforced-platform-unsupported-kotlin-dsl", results)
@@ -245,6 +245,34 @@ tasks.register("customJvmTask") {
 }
 '''
         self.assertIsNone(corpus_run.static_write_text_task_text(text, "customJvmTask"))
+
+    def test_exact_lenient_artifact_view_report_is_supported(self):
+        text = '''
+dependencies {
+    implementation("org.gradle.substrate:artifact-view:1.0")
+}
+tasks.register("resolveArtifactView") {
+    doLast {
+        val view = configurations.runtimeClasspath.get().incoming.artifactView {
+            lenient(true)
+        }
+        val files = view.files.files.map { it.name }.sorted()
+        file("build/artifact-view/resolved.txt").writeText(files.joinToString(separator = "\\n", postfix = "\\n"))
+    }
+}
+'''
+        self.assertFalse(corpus_run.has_unsupported_artifact_view(text))
+        self.assertEqual("artifact-view-1.0.jar\n", corpus_run.static_artifact_view_report_text(text))
+
+    def test_nontrivial_artifact_view_is_unsupported(self):
+        self.assertTrue(
+            corpus_run.has_unsupported_artifact_view(
+                'dependencies { implementation("org.gradle.substrate:artifact-view:1.0") }\n'
+                'tasks.register("resolveArtifactView") {\n'
+                '  doLast { configurations.runtimeClasspath.get().incoming.artifactView { componentFilter { false } } }\n'
+                '}'
+            )
+        )
 
     def test_literal_repository_regex_group_filter_is_supported(self):
         self.assertFalse(
