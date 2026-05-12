@@ -62,7 +62,10 @@ pub struct CycloneDxComponent {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CycloneDxLicenseChoice {
-    pub license: CycloneDxLicense,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub expression: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub license: Option<CycloneDxLicense>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,6 +76,22 @@ pub struct CycloneDxLicense {
     pub name: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub url: String,
+}
+
+impl CycloneDxLicenseChoice {
+    fn from_license(license: CycloneDxLicense) -> Self {
+        Self {
+            expression: String::new(),
+            license: Some(license),
+        }
+    }
+
+    fn from_expression(expression: impl Into<String>) -> Self {
+        Self {
+            expression: expression.into(),
+            license: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -490,7 +509,15 @@ impl CycloneDxComponent {
             ));
         }
         for license in &self.licenses {
-            if license.license.id.trim().is_empty() && license.license.name.trim().is_empty() {
+            if !license.expression.trim().is_empty() {
+                continue;
+            }
+            let Some(license) = license.license.as_ref() else {
+                return Err(format!(
+                    "CycloneDX {label} has a license missing id or name"
+                ));
+            };
+            if license.id.trim().is_empty() && license.name.trim().is_empty() {
                 return Err(format!(
                     "CycloneDX {label} has a license missing id or name"
                 ));
@@ -1382,10 +1409,11 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
                         || !current_license_url.trim().is_empty()
                     {
                         metadata.licenses.push(CycloneDxLicenseChoice {
-                            license: resolve_cyclonedx_license(
+                            expression: String::new(),
+                            license: Some(resolve_cyclonedx_license(
                                 &current_license_name,
                                 &current_license_url,
-                            ),
+                            )),
                         });
                     }
                     current_license_name.clear();
@@ -1412,23 +1440,33 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
 }
 
 fn normalize_pom_component_metadata(mut metadata: PomComponentMetadata) -> PomComponentMetadata {
-    metadata.licenses.sort_by(|a, b| {
-        (&a.license.id, &a.license.name, &a.license.url).cmp(&(
-            &b.license.id,
-            &b.license.name,
-            &b.license.url,
-        ))
-    });
-    metadata.licenses.dedup_by(|a, b| {
-        a.license.id == b.license.id
-            && a.license.name == b.license.name
-            && a.license.url == b.license.url
-    });
+    metadata
+        .licenses
+        .sort_by(|a, b| license_choice_sort_key(a).cmp(&license_choice_sort_key(b)));
+    metadata
+        .licenses
+        .dedup_by(|a, b| license_choice_sort_key(a) == license_choice_sort_key(b));
     metadata
         .external_references
         .sort_by(|a, b| (&a.reference_type, &a.url).cmp(&(&b.reference_type, &b.url)));
     metadata.external_references.dedup();
     metadata
+}
+
+fn license_choice_sort_key(choice: &CycloneDxLicenseChoice) -> (String, String, String, String) {
+    let license = choice.license.as_ref();
+    (
+        choice.expression.clone(),
+        license
+            .map(|license| license.id.clone())
+            .unwrap_or_default(),
+        license
+            .map(|license| license.name.clone())
+            .unwrap_or_default(),
+        license
+            .map(|license| license.url.clone())
+            .unwrap_or_default(),
+    )
 }
 
 fn resolve_cyclonedx_license(name: &str, url: &str) -> CycloneDxLicense {
@@ -1712,18 +1750,25 @@ fn write_component(xml: &mut String, indent: &str, component: &CycloneDxComponen
     }
     if !component.licenses.is_empty() {
         xml.push_str(&format!("{indent}  <licenses>\n"));
-        for license in &component.licenses {
-            xml.push_str(&format!("{indent}    <license>"));
-            if !license.license.id.is_empty() {
-                xml.push_str(&format!("<id>{}</id>", xml_escape(&license.license.id)));
-            } else if !license.license.name.is_empty() {
+        for license_choice in &component.licenses {
+            if !license_choice.expression.is_empty() {
                 xml.push_str(&format!(
-                    "<name>{}</name>",
-                    xml_escape(&license.license.name)
+                    "{indent}    <expression>{}</expression>\n",
+                    xml_escape(&license_choice.expression)
                 ));
+                continue;
             }
-            if !license.license.url.is_empty() {
-                xml.push_str(&format!("<url>{}</url>", xml_escape(&license.license.url)));
+            let Some(license) = license_choice.license.as_ref() else {
+                continue;
+            };
+            xml.push_str(&format!("{indent}    <license>"));
+            if !license.id.is_empty() {
+                xml.push_str(&format!("<id>{}</id>", xml_escape(&license.id)));
+            } else if !license.name.is_empty() {
+                xml.push_str(&format!("<name>{}</name>", xml_escape(&license.name)));
+            }
+            if !license.url.is_empty() {
+                xml.push_str(&format!("<url>{}</url>", xml_escape(&license.url)));
             }
             xml.push_str("</license>\n");
         }
@@ -1923,13 +1968,16 @@ mod tests {
         let mut contract = sample_contract();
         contract.components[0]
             .licenses
-            .push(CycloneDxLicenseChoice {
-                license: CycloneDxLicense {
-                    id: "Apache-2.0".to_string(),
-                    name: String::new(),
-                    url: "https://www.apache.org/licenses/LICENSE-2.0".to_string(),
-                },
-            });
+            .push(CycloneDxLicenseChoice::from_license(CycloneDxLicense {
+                id: "Apache-2.0".to_string(),
+                name: String::new(),
+                url: "https://www.apache.org/licenses/LICENSE-2.0".to_string(),
+            }));
+        contract.components[0]
+            .licenses
+            .push(CycloneDxLicenseChoice::from_expression(
+                "(Apache-2.0 OR MIT)",
+            ));
         contract
             .external_references
             .push(CycloneDxExternalReference {
@@ -1966,6 +2014,7 @@ mod tests {
         assert!(xml.contains(
             "<license><id>Apache-2.0</id><url>https://www.apache.org/licenses/LICENSE-2.0</url></license>"
         ));
+        assert!(xml.contains("<expression>(Apache-2.0 OR MIT)</expression>"));
         assert!(xml.contains("<dependencies>"));
     }
 
@@ -2519,13 +2568,11 @@ mod tests {
                 url: "https://git.example.test/lib".to_string(),
             }));
         assert_eq!(
-            vec![CycloneDxLicenseChoice {
-                license: CycloneDxLicense {
-                    id: "Apache-2.0".to_string(),
-                    name: String::new(),
-                    url: "https://www.apache.org/licenses/LICENSE-2.0".to_string(),
-                },
-            }],
+            vec![CycloneDxLicenseChoice::from_license(CycloneDxLicense {
+                id: "Apache-2.0".to_string(),
+                name: String::new(),
+                url: "https://www.apache.org/licenses/LICENSE-2.0".to_string(),
+            })],
             component.licenses
         );
     }
@@ -2610,13 +2657,11 @@ mod tests {
         assert_eq!("Inherited description", component.description);
         assert_eq!("Parent Publisher", component.publisher);
         assert_eq!(
-            vec![CycloneDxLicenseChoice {
-                license: CycloneDxLicense {
-                    id: "MIT".to_string(),
-                    name: String::new(),
-                    url: "https://opensource.org/license/mit".to_string(),
-                },
-            }],
+            vec![CycloneDxLicenseChoice::from_license(CycloneDxLicense {
+                id: "MIT".to_string(),
+                name: String::new(),
+                url: "https://opensource.org/license/mit".to_string(),
+            })],
             component.licenses
         );
         assert!(component
@@ -2658,27 +2703,27 @@ mod tests {
 "#,
         )
         .metadata;
-        assert!(metadata.licenses.contains(&CycloneDxLicenseChoice {
-            license: CycloneDxLicense {
+        assert!(metadata
+            .licenses
+            .contains(&CycloneDxLicenseChoice::from_license(CycloneDxLicense {
                 id: "Apache-2.0".to_string(),
                 name: String::new(),
                 url: "https://www.apache.org/licenses/LICENSE-2.0".to_string(),
-            },
-        }));
-        assert!(metadata.licenses.contains(&CycloneDxLicenseChoice {
-            license: CycloneDxLicense {
+            })));
+        assert!(metadata
+            .licenses
+            .contains(&CycloneDxLicenseChoice::from_license(CycloneDxLicense {
                 id: "MIT".to_string(),
                 name: String::new(),
                 url: "https://opensource.org/license/mit".to_string(),
-            },
-        }));
-        assert!(metadata.licenses.contains(&CycloneDxLicenseChoice {
-            license: CycloneDxLicense {
+            })));
+        assert!(metadata
+            .licenses
+            .contains(&CycloneDxLicenseChoice::from_license(CycloneDxLicense {
                 id: String::new(),
                 name: "Custom License".to_string(),
                 url: "https://licenses.example.test/custom".to_string(),
-            },
-        }));
+            })));
     }
 
     #[test]
@@ -2741,13 +2786,11 @@ mod tests {
         assert_eq!("Repository parent description", metadata.description);
         assert_eq!("Repository Parent Publisher", metadata.publisher);
         assert_eq!(
-            vec![CycloneDxLicenseChoice {
-                license: CycloneDxLicense {
-                    id: "MIT".to_string(),
-                    name: String::new(),
-                    url: "https://opensource.org/license/mit".to_string(),
-                },
-            }],
+            vec![CycloneDxLicenseChoice::from_license(CycloneDxLicense {
+                id: "MIT".to_string(),
+                name: String::new(),
+                url: "https://opensource.org/license/mit".to_string(),
+            })],
             metadata.licenses
         );
     }
