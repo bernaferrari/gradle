@@ -346,6 +346,33 @@ def run_project(
         checks["resolved_expectation"] = "fail-closed"
     else:
         checks = corpus.compare_run_pair(upstream, substrate)
+        ignored_hashes = ignored_hash_differences(
+            upstream.output_hashes,
+            substrate.output_hashes,
+            project.checks.get("ignore_output_hash_patterns", []),
+        )
+        if ignored_hashes:
+            filtered_upstream_hashes = {
+                path: hash_value
+                for path, hash_value in upstream.output_hashes.items()
+                if path not in ignored_hashes
+            }
+            filtered_substrate_hashes = {
+                path: hash_value
+                for path, hash_value in substrate.output_hashes.items()
+                if path not in ignored_hashes
+            }
+            checks["ignored_output_hash_differences"] = sorted(ignored_hashes)
+            checks["output_hashes_match"] = filtered_upstream_hashes == filtered_substrate_hashes
+            checks["match"] = (
+                checks["substrate_usable"]
+                and checks["successful"]
+                and checks["exit_code_match"]
+                and checks["task_list_match"]
+                and checks["output_files_match"]
+                and checks["output_hashes_match"]
+                and checks["archive_entries_match"]
+            )
         if (
             not checks["task_list_match"]
             and project.checks.get("task_order") is False
@@ -391,6 +418,25 @@ def run_project(
     if verbose:
         print(f"{project.name}: {'PASS' if result['match'] else 'FAIL'}")
     return result
+
+
+def ignored_hash_differences(
+    upstream_hashes: dict[str, str],
+    substrate_hashes: dict[str, str],
+    patterns: Any,
+) -> set[str]:
+    if not isinstance(patterns, list) or not patterns:
+        return set()
+    differing = {
+        path
+        for path in set(upstream_hashes) | set(substrate_hashes)
+        if upstream_hashes.get(path) != substrate_hashes.get(path)
+    }
+    ignored: set[str] = set()
+    for path in differing:
+        if any(re.fullmatch(str(pattern), path) for pattern in patterns):
+            ignored.add(path)
+    return ignored
 
 
 def summarize_execution(results: list[dict[str, Any]]) -> dict[str, Any]:
