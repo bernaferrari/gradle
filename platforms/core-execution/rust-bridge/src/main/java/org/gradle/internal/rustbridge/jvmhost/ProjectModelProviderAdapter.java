@@ -13,6 +13,9 @@ import org.gradle.api.Task;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.ConfigurationContainer;
 import org.gradle.api.artifacts.DependencyConstraint;
+import org.gradle.api.artifacts.ModuleVersionIdentifier;
+import org.gradle.api.artifacts.ResolvedArtifact;
+import org.gradle.api.artifacts.ResolvedModuleVersion;
 import org.gradle.api.artifacts.VersionConstraint;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.file.FileTree;
@@ -1359,11 +1362,11 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if (result == null) {
             return "";
         }
-        Map<String, String> artifactPaths = cyclonedxResolvedArtifactPaths(configuration);
+        Map<String, CycloneDxArtifactMetadata> artifactMetadata = cyclonedxResolvedArtifactMetadata(configuration);
         List<File> artifactFiles = cyclonedxConfigurationFiles(configuration);
         List<String> components = new ArrayList<>();
         for (Object component : asCollection(invokeOptional(result, "getAllComponents"))) {
-            String componentJson = cyclonedxResolvedComponentJson(component, artifactPaths, artifactFiles);
+            String componentJson = cyclonedxResolvedComponentJson(component, artifactMetadata, artifactFiles);
             if (!componentJson.isEmpty()) {
                 components.add(componentJson);
             }
@@ -1381,26 +1384,33 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             + "]}";
     }
 
-    private static Map<String, String> cyclonedxResolvedArtifactPaths(Configuration configuration) {
-        Map<String, String> paths = new LinkedHashMap<>();
+    private static Map<String, CycloneDxArtifactMetadata> cyclonedxResolvedArtifactMetadata(Configuration configuration) {
+        Map<String, CycloneDxArtifactMetadata> artifacts = new LinkedHashMap<>();
         Object resolvedConfiguration = invokeOptional(configuration, "getResolvedConfiguration");
         for (Object artifact : asCollection(invokeOptional(resolvedConfiguration, "getResolvedArtifacts"))) {
-            Object moduleVersion = invokeOptional(artifact, "getModuleVersion");
-            String componentId = displayName(invokeOptional(moduleVersion, "getId"));
-            if (componentId.isEmpty()) {
-                String group = stringOrEmpty(invokeOptional(moduleVersion, "getGroup"));
-                String name = stringOrEmpty(invokeOptional(moduleVersion, "getName"));
-                String version = stringOrEmpty(invokeOptional(moduleVersion, "getVersion"));
-                if (!group.isEmpty() && !name.isEmpty() && !version.isEmpty()) {
-                    componentId = group + ":" + name + ":" + version;
-                }
+            Object moduleVersion = invokeOptional(artifact, ResolvedArtifact.class, "getModuleVersion");
+            Object moduleVersionId = invokeOptional(moduleVersion, ResolvedModuleVersion.class, "getId");
+            String group = stringOrEmpty(invokeOptional(moduleVersionId, ModuleVersionIdentifier.class, "getGroup"));
+            String name = stringOrEmpty(invokeOptional(moduleVersionId, ModuleVersionIdentifier.class, "getName"));
+            String version = stringOrEmpty(invokeOptional(moduleVersionId, ModuleVersionIdentifier.class, "getVersion"));
+            String componentId = "";
+            if (!group.isEmpty() && !name.isEmpty() && !version.isEmpty()) {
+                componentId = group + ":" + name + ":" + version;
             }
-            String filePath = filePath(invokeOptional(artifact, "getFile"));
+            if (componentId.isEmpty()) {
+                componentId = displayName(moduleVersionId);
+            }
+            String filePath = filePath(invokeOptional(artifact, ResolvedArtifact.class, "getFile"));
             if (!componentId.isEmpty() && !filePath.isEmpty()) {
-                paths.put(componentId, filePath);
+                artifacts.put(componentId, new CycloneDxArtifactMetadata(
+                    filePath,
+                    stringOrEmpty(invokeOptional(artifact, ResolvedArtifact.class, "getType")),
+                    stringOrEmpty(invokeOptional(artifact, ResolvedArtifact.class, "getExtension")),
+                    stringOrEmpty(invokeOptional(artifact, ResolvedArtifact.class, "getClassifier"))
+                ));
             }
         }
-        return paths;
+        return artifacts;
     }
 
     private static List<File> cyclonedxConfigurationFiles(Configuration configuration) {
@@ -1415,7 +1425,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
 
     private static String cyclonedxResolvedComponentJson(
         @Nullable Object component,
-        Map<String, String> artifactPaths,
+        Map<String, CycloneDxArtifactMetadata> artifactMetadata,
         List<File> artifactFiles
     ) {
         Object id = invokeOptional(component, "getId");
@@ -1427,7 +1437,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         String module = stringOrEmpty(invokeOptional(id, "getModule"));
         String version = stringOrEmpty(invokeOptional(id, "getVersion"));
         String projectPath = stringOrEmpty(invokeOptional(id, "getProjectPath"));
-        String artifactPath = artifactPaths.getOrDefault(displayName, "");
+        CycloneDxArtifactMetadata artifact = artifactMetadata.getOrDefault(displayName, CycloneDxArtifactMetadata.EMPTY);
+        String artifactPath = artifact.path;
         if (artifactPath.isEmpty()) {
             artifactPath = cyclonedxArtifactPathFromFiles(module, version, artifactFiles);
         }
@@ -1437,7 +1448,25 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             + "\",\"version\":\"" + escapeJson(version)
             + "\",\"projectPath\":\"" + escapeJson(projectPath)
             + "\",\"artifactPath\":\"" + escapeJson(artifactPath)
+            + "\",\"artifactType\":\"" + escapeJson(artifact.type)
+            + "\",\"artifactExtension\":\"" + escapeJson(artifact.extension)
+            + "\",\"artifactClassifier\":\"" + escapeJson(artifact.classifier)
             + "\"}";
+    }
+
+    private static final class CycloneDxArtifactMetadata {
+        private static final CycloneDxArtifactMetadata EMPTY = new CycloneDxArtifactMetadata("", "", "", "");
+        private final String path;
+        private final String type;
+        private final String extension;
+        private final String classifier;
+
+        private CycloneDxArtifactMetadata(String path, String type, String extension, String classifier) {
+            this.path = path;
+            this.type = type;
+            this.extension = extension;
+            this.classifier = classifier;
+        }
     }
 
     private static String cyclonedxArtifactPathFromFiles(String module, String version, List<File> artifactFiles) {
