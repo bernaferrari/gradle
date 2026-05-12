@@ -12,8 +12,10 @@ import importlib.util
 import json
 import re
 import shutil
+import socket
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -314,6 +316,7 @@ def run_project(
     output_dir: Path,
     gradle_command: str | None,
     daemon_binary: str | None,
+    shared_substrate_state_dir: Path | None = None,
     verbose: bool = False,
 ) -> dict[str, Any]:
     corpus = load_corpus_runner()
@@ -349,6 +352,11 @@ def run_project(
         runbuild_authoritative=runbuild_authoritative,
         runbuild_native_ready_default=runbuild_native_ready_default,
         gradle_command=gradle_command,
+        extra_gradle_args=(
+            [f"-Dorg.gradle.rust.substrate.state.dir={shared_substrate_state_dir}"]
+            if shared_substrate_state_dir is not None
+            else None
+        ),
     )
 
     if project.expectation == "fail-closed":
@@ -441,6 +449,111 @@ def run_project(
     if verbose:
         print(f"{project.name}: {'PASS' if result['match'] else 'FAIL'}")
     return result
+
+
+def reserve_loopback_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def write_endpoint_file(endpoint_file: Path, endpoint: str, daemon_path: Path) -> None:
+    stat = daemon_path.stat()
+    endpoint_file.parent.mkdir(parents=True, exist_ok=True)
+    endpoint_file.write_text(
+        "\n".join(
+            [
+                "# Gradle Rust substrate daemon endpoint",
+                f"endpoint={endpoint}",
+                f"daemonBinary={daemon_path.resolve()}",
+                f"daemonBinaryLastModifiedMillis={int(stat.st_mtime * 1000)}",
+                f"daemonBinarySize={stat.st_size}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def prewarm_shared_substrate_daemon(output_dir: Path, daemon_binary: str | None) -> tuple[Path | None, subprocess.Popen[str] | None, dict[str, Any]]:
+    if not daemon_binary:
+        return None, None, {"enabled": False, "reason": "daemon-binary-not-configured"}
+    daemon_path = Path(daemon_binary).expanduser()
+    if not daemon_path.is_absolute():
+        daemon_path = (REPO_ROOT / daemon_path).resolve()
+    if not daemon_path.exists():
+        return None, None, {"enabled": False, "reason": f"daemon-binary-missing:{daemon_path}"}
+
+    state_dir = (output_dir / "shared-substrate-state").resolve()
+    state_root = state_dir / "state"
+    cache_dir = state_root / "cache"
+    history_dir = state_root / "history"
+    config_cache_dir = state_root / "config-cache"
+    toolchain_dir = state_root / "toolchains"
+    artifact_store_dir = state_root / "artifacts"
+    for directory in [cache_dir, history_dir, config_cache_dir, toolchain_dir, artifact_store_dir]:
+        directory.mkdir(parents=True, exist_ok=True)
+
+    port = reserve_loopback_port()
+    endpoint = f"tcp://127.0.0.1:{port}"
+    socket_path = state_dir / "substrate.sock"
+    proc = subprocess.Popen(
+        [
+            str(daemon_path),
+            "--socket-path",
+            str(socket_path),
+            "--tcp-address",
+            f"127.0.0.1:{port}",
+            "--log-level",
+            "warn",
+            "--cache-dir",
+            str(cache_dir),
+            "--history-dir",
+            str(history_dir),
+            "--config-cache-dir",
+            str(config_cache_dir),
+            "--toolchain-dir",
+            str(toolchain_dir),
+            "--artifact-store-dir",
+            str(artifact_store_dir),
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT,
+    )
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            return None, None, {
+                "enabled": False,
+                "reason": f"daemon-exited:{proc.returncode}",
+                "state_dir": str(state_dir),
+            }
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.1):
+                write_endpoint_file(state_dir / "substrate.tcp-endpoint", endpoint, daemon_path)
+                return state_dir, proc, {
+                    "enabled": True,
+                    "endpoint": endpoint,
+                    "state_dir": str(state_dir),
+                }
+        except OSError:
+            time.sleep(0.05)
+    proc.kill()
+    proc.wait(timeout=5)
+    return None, None, {"enabled": False, "reason": "daemon-not-ready", "state_dir": str(state_dir)}
+
+
+def stop_shared_substrate_daemon(proc: subprocess.Popen[str] | None) -> None:
+    if proc is None or proc.poll() is not None:
+        return
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
 
 
 def prepare_project_run_dir(source_dir: Path, destination_dir: Path) -> Path:
@@ -545,10 +658,22 @@ def write_markdown_report(output_dir: Path, summary: dict[str, Any], results: li
         f"Rust RunBuild executions: {summary['rust_runbuild_executed_count']}/{summary['project_count']}",
         f"Task-graph captures: {summary['taskgraph_capture_count']}/{summary['project_count']}",
         f"Daemon signals: started={summary['daemon_started_count']}, reused={summary['daemon_reused_count']}",
+    ]
+    shared_daemon = summary.get("shared_daemon", {})
+    if shared_daemon:
+        lines.append(
+            "Shared daemon: "
+            + (
+                f"enabled at {shared_daemon.get('endpoint')} with state {shared_daemon.get('state_dir')}"
+                if shared_daemon.get("enabled")
+                else f"disabled ({shared_daemon.get('reason', 'unknown')})"
+            )
+        )
+    lines.extend([
         "",
         "| Project | Expectation | Mode | Result | Plan Source | Upstream ms | Substrate ms | JVM forwards |",
         "| --- | --- | --- | --- | --- | ---: | ---: | ---: |",
-    ]
+    ])
     for result in results:
         checks = result.get("checks", {})
         signals = result.get("substrate_signals", {})
@@ -596,11 +721,23 @@ def execute_manifest(
             "summary": {},
         }
     projects = [materialized_project(project, source_cache_dir) for project in projects]
-    results = [
-        run_project(project, output_dir, gradle_command, daemon_binary, verbose=verbose)
-        for project in projects
-    ]
+    shared_state_dir, shared_daemon, shared_daemon_info = prewarm_shared_substrate_daemon(output_dir, daemon_binary)
+    try:
+        results = [
+            run_project(
+                project,
+                output_dir,
+                gradle_command,
+                daemon_binary,
+                shared_substrate_state_dir=shared_state_dir,
+                verbose=verbose,
+            )
+            for project in projects
+        ]
+    finally:
+        stop_shared_substrate_daemon(shared_daemon)
     summary = summarize_execution(results)
+    summary["shared_daemon"] = shared_daemon_info
     report_path = write_markdown_report(output_dir, summary, results)
     payload = {
         "valid": True,

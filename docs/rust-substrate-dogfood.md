@@ -46,11 +46,17 @@ Summary from `build/dogfood-current/dogfood-summary.md`:
 | Supported projects with zero JVM forwards | 6/6 |
 | Rust RunBuild markers | 7/7 |
 | Task-graph captures | 7/7 |
-| Daemon started signals | 7 |
-| Upstream observed wall time | 21795 ms |
-| Rust substrate observed wall time | 24449 ms |
+| Daemon started signals | 0 |
+| Daemon reused signals | 7 |
+| Upstream observed wall time | 21506 ms |
+| Rust substrate observed wall time | 25467 ms |
 | Upstream task total | 109 |
 | Rust substrate task total | 105 |
+
+The dogfood runner owns one prewarmed Rust daemon for the manifest execution
+and passes its shared state directory to each substrate invocation. This removes
+per-project Rust daemon startup from the measured substrate path, but it does
+not yet make the full dogfood set faster than upstream.
 
 ## Boundaries
 
