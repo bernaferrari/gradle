@@ -1461,158 +1461,43 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
                     buf.clear();
                     continue;
                 }
-                match path.as_slice() {
-                    [project, name] if project == "project" && name == "name" => {
-                        metadata.name = text;
-                    }
-                    [project, description]
-                        if project == "project" && description == "description" =>
-                    {
-                        metadata.description = text;
-                    }
-                    [project, url] if project == "project" && url == "url" => {
-                        metadata.url = text;
-                    }
-                    [project, group_id] if project == "project" && group_id == "groupId" => {
-                        project_group = text;
-                    }
-                    [project, artifact_id]
-                        if project == "project" && artifact_id == "artifactId" =>
-                    {
-                        project_artifact = text;
-                    }
-                    [project, version] if project == "project" && version == "version" => {
-                        project_version = text;
-                    }
-                    [project, parent, relative_path]
-                        if project == "project"
-                            && parent == "parent"
-                            && relative_path == "relativePath" =>
-                    {
-                        parent_relative_path = Some(text);
-                    }
-                    [project, parent, group_id]
-                        if project == "project" && parent == "parent" && group_id == "groupId" =>
-                    {
-                        parent_group = text;
-                    }
-                    [project, parent, artifact_id]
-                        if project == "project"
-                            && parent == "parent"
-                            && artifact_id == "artifactId" =>
-                    {
-                        parent_artifact = text;
-                    }
-                    [project, parent, version]
-                        if project == "project" && parent == "parent" && version == "version" =>
-                    {
-                        parent_version = text;
-                    }
-                    [project, organization, name]
-                        if project == "project"
-                            && organization == "organization"
-                            && name == "name" =>
-                    {
-                        metadata.publisher = text;
-                    }
-                    [project, organization, url]
-                        if project == "project"
-                            && organization == "organization"
-                            && url == "url" =>
-                    {
-                        push_external_reference(&mut metadata.external_references, "website", text);
-                    }
-                    [project, ci, url]
-                        if project == "project" && ci == "ciManagement" && url == "url" =>
-                    {
-                        push_external_reference(
-                            &mut metadata.external_references,
-                            "build-system",
-                            text,
-                        );
-                    }
-                    [project, distribution, download_url]
-                        if project == "project"
-                            && distribution == "distributionManagement"
-                            && download_url == "downloadUrl" =>
-                    {
-                        push_external_reference(
-                            &mut metadata.external_references,
-                            "distribution",
-                            text,
-                        );
-                    }
-                    [project, distribution, repository, url]
-                        if project == "project"
-                            && distribution == "distributionManagement"
-                            && repository == "repository"
-                            && url == "url" =>
-                    {
-                        push_external_reference(
-                            &mut metadata.external_references,
-                            "distribution",
-                            text,
-                        );
-                    }
-                    [project, issue, url]
-                        if project == "project" && issue == "issueManagement" && url == "url" =>
-                    {
-                        push_external_reference(
-                            &mut metadata.external_references,
-                            "issue-tracker",
-                            text,
-                        );
-                    }
-                    [project, mailing_lists, mailing_list, archive]
-                        if project == "project"
-                            && mailing_lists == "mailingLists"
-                            && mailing_list == "mailingList"
-                            && archive == "archive" =>
-                    {
-                        push_external_reference(
-                            &mut metadata.external_references,
-                            "mailing-list",
-                            text,
-                        );
-                    }
-                    [project, mailing_lists, mailing_list, subscribe]
-                        if project == "project"
-                            && mailing_lists == "mailingLists"
-                            && mailing_list == "mailingList"
-                            && subscribe == "subscribe" =>
-                    {
-                        push_external_reference(
-                            &mut metadata.external_references,
-                            "mailing-list",
-                            text,
-                        );
-                    }
-                    [project, scm, url] if project == "project" && scm == "scm" && url == "url" => {
-                        push_external_reference(&mut metadata.external_references, "vcs", text);
-                    }
-                    [project, properties_element, property_name]
-                        if project == "project" && properties_element == "properties" =>
-                    {
-                        properties.insert(property_name.clone(), text);
-                    }
-                    [project, licenses, license, name]
-                        if project == "project"
-                            && licenses == "licenses"
-                            && license == "license"
-                            && name == "name" =>
-                    {
-                        current_license_name = text;
-                    }
-                    [project, licenses, license, url]
-                        if project == "project"
-                            && licenses == "licenses"
-                            && license == "license"
-                            && url == "url" =>
-                    {
-                        current_license_url = text;
-                    }
-                    _ => {}
+                apply_pom_metadata_text(
+                    path.as_slice(),
+                    text,
+                    &mut metadata,
+                    &mut parent_relative_path,
+                    &mut parent_group,
+                    &mut parent_artifact,
+                    &mut parent_version,
+                    &mut project_group,
+                    &mut project_artifact,
+                    &mut project_version,
+                    &mut properties,
+                    &mut current_license_name,
+                    &mut current_license_url,
+                );
+            }
+            Ok(Event::CData(event)) => {
+                let text = String::from_utf8_lossy(event.as_ref()).trim().to_string();
+                if text.is_empty() {
+                    buf.clear();
+                    continue;
                 }
+                apply_pom_metadata_text(
+                    path.as_slice(),
+                    text,
+                    &mut metadata,
+                    &mut parent_relative_path,
+                    &mut parent_group,
+                    &mut parent_artifact,
+                    &mut parent_version,
+                    &mut project_group,
+                    &mut project_artifact,
+                    &mut project_version,
+                    &mut properties,
+                    &mut current_license_name,
+                    &mut current_license_url,
+                );
             }
             Ok(Event::End(_)) => {
                 if path.as_slice() == ["project", "licenses", "license"] {
@@ -1673,6 +1558,138 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
         parent_group,
         parent_artifact,
         parent_version,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_pom_metadata_text(
+    path: &[String],
+    text: String,
+    metadata: &mut PomComponentMetadata,
+    parent_relative_path: &mut Option<String>,
+    parent_group: &mut String,
+    parent_artifact: &mut String,
+    parent_version: &mut String,
+    project_group: &mut String,
+    project_artifact: &mut String,
+    project_version: &mut String,
+    properties: &mut BTreeMap<String, String>,
+    current_license_name: &mut String,
+    current_license_url: &mut String,
+) {
+    match path {
+        [project, name] if project == "project" && name == "name" => {
+            metadata.name = text;
+        }
+        [project, description] if project == "project" && description == "description" => {
+            metadata.description = text;
+        }
+        [project, url] if project == "project" && url == "url" => {
+            metadata.url = text;
+        }
+        [project, group_id] if project == "project" && group_id == "groupId" => {
+            *project_group = text;
+        }
+        [project, artifact_id] if project == "project" && artifact_id == "artifactId" => {
+            *project_artifact = text;
+        }
+        [project, version] if project == "project" && version == "version" => {
+            *project_version = text;
+        }
+        [project, parent, relative_path]
+            if project == "project" && parent == "parent" && relative_path == "relativePath" =>
+        {
+            *parent_relative_path = Some(text);
+        }
+        [project, parent, group_id]
+            if project == "project" && parent == "parent" && group_id == "groupId" =>
+        {
+            *parent_group = text;
+        }
+        [project, parent, artifact_id]
+            if project == "project" && parent == "parent" && artifact_id == "artifactId" =>
+        {
+            *parent_artifact = text;
+        }
+        [project, parent, version]
+            if project == "project" && parent == "parent" && version == "version" =>
+        {
+            *parent_version = text;
+        }
+        [project, organization, name]
+            if project == "project" && organization == "organization" && name == "name" =>
+        {
+            metadata.publisher = text;
+        }
+        [project, organization, url]
+            if project == "project" && organization == "organization" && url == "url" =>
+        {
+            push_external_reference(&mut metadata.external_references, "website", text);
+        }
+        [project, ci, url] if project == "project" && ci == "ciManagement" && url == "url" => {
+            push_external_reference(&mut metadata.external_references, "build-system", text);
+        }
+        [project, distribution, download_url]
+            if project == "project"
+                && distribution == "distributionManagement"
+                && download_url == "downloadUrl" =>
+        {
+            push_external_reference(&mut metadata.external_references, "distribution", text);
+        }
+        [project, distribution, repository, url]
+            if project == "project"
+                && distribution == "distributionManagement"
+                && repository == "repository"
+                && url == "url" =>
+        {
+            push_external_reference(&mut metadata.external_references, "distribution", text);
+        }
+        [project, issue, url]
+            if project == "project" && issue == "issueManagement" && url == "url" =>
+        {
+            push_external_reference(&mut metadata.external_references, "issue-tracker", text);
+        }
+        [project, mailing_lists, mailing_list, archive]
+            if project == "project"
+                && mailing_lists == "mailingLists"
+                && mailing_list == "mailingList"
+                && archive == "archive" =>
+        {
+            push_external_reference(&mut metadata.external_references, "mailing-list", text);
+        }
+        [project, mailing_lists, mailing_list, subscribe]
+            if project == "project"
+                && mailing_lists == "mailingLists"
+                && mailing_list == "mailingList"
+                && subscribe == "subscribe" =>
+        {
+            push_external_reference(&mut metadata.external_references, "mailing-list", text);
+        }
+        [project, scm, url] if project == "project" && scm == "scm" && url == "url" => {
+            push_external_reference(&mut metadata.external_references, "vcs", text);
+        }
+        [project, properties_element, property_name]
+            if project == "project" && properties_element == "properties" =>
+        {
+            properties.insert(property_name.clone(), text);
+        }
+        [project, licenses, license, name]
+            if project == "project"
+                && licenses == "licenses"
+                && license == "license"
+                && name == "name" =>
+        {
+            *current_license_name = text;
+        }
+        [project, licenses, license, url]
+            if project == "project"
+                && licenses == "licenses"
+                && license == "license"
+                && url == "url" =>
+        {
+            *current_license_url = text;
+        }
+        _ => {}
     }
 }
 
@@ -3265,6 +3282,48 @@ mod tests {
                 id: "Apache-2.0".to_string(),
                 name: String::new(),
                 url: "https://www.apache.org/licenses/LICENSE-2.0".to_string(),
+                text: None,
+            })],
+            metadata.licenses
+        );
+    }
+
+    #[test]
+    fn reads_cdata_pom_metadata_fields() {
+        let metadata = parse_pom_component_metadata(
+            r#"
+<project>
+  <name><![CDATA[CDATA Lib]]></name>
+  <description><![CDATA[CDATA description with <xml-ish> text]]></description>
+  <organization>
+    <name><![CDATA[CDATA Org]]></name>
+    <url><![CDATA[https://cdata.example.test/org]]></url>
+  </organization>
+  <licenses>
+    <license>
+      <name><![CDATA[MIT]]></name>
+    </license>
+  </licenses>
+</project>
+"#,
+        )
+        .metadata;
+
+        assert_eq!("CDATA Lib", metadata.name);
+        assert_eq!(
+            "CDATA description with <xml-ish> text",
+            metadata.description
+        );
+        assert_eq!("CDATA Org", metadata.publisher);
+        assert!(metadata.external_references.contains(&external_reference(
+            "website",
+            "https://cdata.example.test/org"
+        )));
+        assert_eq!(
+            vec![CycloneDxLicenseChoice::from_license(CycloneDxLicense {
+                id: "MIT".to_string(),
+                name: String::new(),
+                url: "https://opensource.org/license/mit".to_string(),
                 text: None,
             })],
             metadata.licenses
