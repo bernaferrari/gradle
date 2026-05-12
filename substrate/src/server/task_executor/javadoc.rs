@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use tokio::process::Command;
-
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
+
+use super::process_launch::{run_to_output, ProcessLaunchSpec};
 
 /// Executes Gradle Javadoc from a conservative source/output contract.
 pub struct JavadocTaskExecutor;
@@ -87,32 +87,37 @@ impl TaskExecutor for JavadocTaskExecutor {
         }
 
         let javadoc = Self::javadoc_executable(input.options.get("java_home").map(String::as_str));
-        let mut command = Command::new(&javadoc);
-        command.arg("-d").arg(&target_dir);
-        command.arg("-quiet");
+        let mut args = vec![
+            "-d".to_string(),
+            target_dir.to_string_lossy().to_string(),
+            "-quiet".to_string(),
+        ];
         if input
             .options
             .get("no_timestamp")
             .map(|value| value == "true")
             .unwrap_or(false)
         {
-            command.arg("-notimestamp");
+            args.push("-notimestamp".to_string());
         }
         if let Some(encoding) = input
             .options
             .get("encoding")
             .filter(|value| !value.is_empty())
         {
-            command.arg("-encoding").arg(encoding);
+            args.push("-encoding".to_string());
+            args.push(encoding.to_string());
         }
         if let Some(title) = input.options.get("title").filter(|value| !value.is_empty()) {
-            command.arg("-doctitle").arg(title);
-            command.arg("-windowtitle").arg(title);
+            args.push("-doctitle".to_string());
+            args.push(title.to_string());
+            args.push("-windowtitle".to_string());
+            args.push(title.to_string());
         }
         if let Some(max_memory) =
             Self::max_memory_arg(input.options.get("max_memory").map(String::as_str))
         {
-            command.arg(max_memory);
+            args.push(max_memory);
         }
         if let Some(classpath) = input
             .options
@@ -120,14 +125,16 @@ impl TaskExecutor for JavadocTaskExecutor {
             .map(|value| value.trim())
             .filter(|value| !value.is_empty())
         {
-            command.arg("-classpath").arg(classpath);
+            args.push("-classpath".to_string());
+            args.push(classpath.to_string());
         }
         for source in &input.source_files {
-            command.arg(source);
+            args.push(source.to_string_lossy().to_string());
         }
+        let spec = ProcessLaunchSpec::new(&javadoc).args(args);
 
-        match command.output().await {
-            Ok(output) if output.status.success() => {
+        match run_to_output(&spec).await {
+            Ok(output) if output.exit_code == 0 => {
                 result.output_files.push(target_dir);
                 result.files_processed = input.source_files.len() as u64;
                 result.bytes_processed = (output.stdout.len() + output.stderr.len()) as u64;
@@ -136,14 +143,13 @@ impl TaskExecutor for JavadocTaskExecutor {
                 result.success = false;
                 result.error_message = format!(
                     "Javadoc task failed with exit code {}: {}",
-                    output.status.code().unwrap_or(-1),
+                    output.exit_code,
                     String::from_utf8_lossy(&output.stderr).trim()
                 );
             }
             Err(error) => {
                 result.success = false;
-                result.error_message =
-                    format!("Failed to execute '{}': {}", javadoc.display(), error);
+                result.error_message = error;
             }
         }
 

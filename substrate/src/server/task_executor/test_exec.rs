@@ -6,6 +6,8 @@ use tokio::process::Command;
 
 use crate::server::task_executor::{option_string_list, TaskExecutor, TaskInput, TaskResult};
 
+use super::process_launch::{run_to_output, ProcessLaunchSpec};
+
 /// Outcome of a single test method.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TestOutcome {
@@ -101,18 +103,24 @@ impl TestExecExecutor {
     /// - `parallel_classes`: whether to run test classes in parallel ("true"/"false")
     /// - `parallel_methods`: whether to run test methods in parallel ("true"/"false")
     pub fn build_command(&self, java_path: &Path, input: &TaskInput) -> Command {
-        let mut cmd = Command::new(java_path);
+        let spec = self.build_process_spec(java_path, input);
+        let mut cmd = spec.to_command();
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd
+    }
 
+    fn build_process_spec(&self, java_path: &Path, input: &TaskInput) -> ProcessLaunchSpec {
+        let mut args = Vec::new();
         // JVM args
         let max_heap = input
             .options
             .get("max_heap_mb")
             .map(|s| s.as_str())
             .unwrap_or("512");
-        cmd.arg(format!("-Xmx{}m", max_heap));
+        args.push(format!("-Xmx{}m", max_heap));
 
         // Additional JVM args
-        cmd.args(option_string_list(
+        args.extend(option_string_list(
             &input.options,
             "jvm_args_json",
             "jvm_args",
@@ -123,27 +131,24 @@ impl TestExecExecutor {
             for prop in props.split(',') {
                 let prop = prop.trim();
                 if !prop.is_empty() && prop.contains('=') {
-                    cmd.arg(format!("-D{}", prop));
+                    args.push(format!("-D{}", prop));
                 }
             }
         }
 
-        // Working directory
-        if let Some(working_dir) = input.options.get("working_dir") {
-            cmd.current_dir(working_dir);
-        }
-
         // Classpath
         if let Some(classpath) = input.options.get("classpath") {
-            cmd.arg("-classpath").arg(classpath);
+            args.push("-classpath".to_string());
+            args.push(classpath.to_string());
         }
 
         // JUnit Platform Console Launcher main class
-        cmd.arg("org.junit.platform.console.ConsoleLauncher");
+        args.push("org.junit.platform.console.ConsoleLauncher".to_string());
 
         // XML reports directory
         if let Some(report_dir) = input.options.get("xml_report_dir") {
-            cmd.arg("--reports-dir").arg(report_dir);
+            args.push("--reports-dir".to_string());
+            args.push(report_dir.to_string());
         }
 
         // Include engines
@@ -152,14 +157,16 @@ impl TestExecExecutor {
             .get("include_engines")
             .map(|s| s.as_str())
             .unwrap_or("junit-jupiter");
-        cmd.arg("--include-engine").arg(engines);
+        args.push("--include-engine".to_string());
+        args.push(engines.to_string());
 
         // Exclude tags
         if let Some(exclude_tags) = input.options.get("exclude_tags") {
             for tag in exclude_tags.split(',') {
                 let tag = tag.trim();
                 if !tag.is_empty() {
-                    cmd.arg("--exclude-tag").arg(tag);
+                    args.push("--exclude-tag".to_string());
+                    args.push(tag.to_string());
                 }
             }
         }
@@ -169,19 +176,21 @@ impl TestExecExecutor {
             for tag in include_tags.split(',') {
                 let tag = tag.trim();
                 if !tag.is_empty() {
-                    cmd.arg("--include-tag").arg(tag);
+                    args.push("--include-tag".to_string());
+                    args.push(tag.to_string());
                 }
             }
         }
 
-        self.append_classname_filters(&mut cmd, input);
+        self.append_classname_filters(&mut args, input);
 
         // Test classes (positional args to ConsoleLauncher)
         if let Some(test_classes) = input.options.get("test_classes") {
             for class in test_classes.split(',') {
                 let class = class.trim();
                 if !class.is_empty() {
-                    cmd.arg("--select-class").arg(class);
+                    args.push("--select-class".to_string());
+                    args.push(class.to_string());
                 }
             }
         } else if input
@@ -189,7 +198,7 @@ impl TestExecExecutor {
             .get("scan_classpath")
             .is_some_and(|value| value == "true")
         {
-            cmd.arg("--scan-classpath");
+            args.push("--scan-classpath".to_string());
         }
 
         // Source files as test class candidates (if no explicit test_classes)
@@ -199,28 +208,31 @@ impl TestExecExecutor {
             for source in &input.source_files {
                 // Convert .java paths to class names: src/test/java/com/example/FooTest.java -> com.example.FooTest
                 if let Some(class_name) = Self::java_file_to_class(source) {
-                    cmd.arg("--select-class").arg(class_name);
+                    args.push("--select-class".to_string());
+                    args.push(class_name);
                 }
             }
         }
 
-        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-
-        cmd
+        let mut spec = ProcessLaunchSpec::new(java_path).args(args);
+        if let Some(working_dir) = input.options.get("working_dir") {
+            spec = spec.working_dir(working_dir);
+        }
+        spec
     }
 
-    fn append_classname_filters(&self, cmd: &mut Command, input: &TaskInput) {
+    fn append_classname_filters(&self, args: &mut Vec<String>, input: &TaskInput) {
         let mut includes = option_csv_list(&input.options, "test_filter_includes");
         if includes.is_empty() {
             includes.extend(option_csv_list(&input.options, "test_filter"));
         }
         for include in includes {
-            cmd.arg("--include-classname")
-                .arg(gradle_test_pattern_to_regex(&include));
+            args.push("--include-classname".to_string());
+            args.push(gradle_test_pattern_to_regex(&include));
         }
         for exclude in option_csv_list(&input.options, "test_filter_excludes") {
-            cmd.arg("--exclude-classname")
-                .arg(gradle_test_pattern_to_regex(&exclude));
+            args.push("--exclude-classname".to_string());
+            args.push(gradle_test_pattern_to_regex(&exclude));
         }
     }
 
@@ -457,7 +469,7 @@ impl TestExecExecutor {
         // Ensure report directory exists
         let _ = std::fs::create_dir_all(&xml_report_dir);
 
-        let mut cmd = self.build_command(&java_path, input);
+        let spec = self.build_process_spec(&java_path, input);
 
         tracing::debug!(
             java = %java_path.display(),
@@ -465,13 +477,13 @@ impl TestExecExecutor {
             "Starting test execution"
         );
 
-        match cmd.output().await {
+        match run_to_output(&spec).await {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
 
-                result.exit_code = output.status.code().unwrap_or(-1);
-                result.success = output.status.success();
+                result.exit_code = output.exit_code;
+                result.success = output.exit_code == 0;
 
                 // Parse console summary from stdout
                 if let Some((tests, failures, skipped)) = Self::parse_console_summary(&stdout) {

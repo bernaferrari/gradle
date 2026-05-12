@@ -1,8 +1,8 @@
-use tokio::process::Command;
-
 use crate::server::task_executor::{
     option_string_list, option_string_map, TaskExecutor, TaskInput, TaskResult,
 };
+
+use super::process_launch::{run_to_output, ProcessLaunchSpec};
 
 /// Executes a simple external process task.
 ///
@@ -46,21 +46,21 @@ impl TaskExecutor for ExecTaskExecutor {
             .map(|value| value == "true")
             .unwrap_or(false);
 
-        let mut command = Command::new(executable);
-        command.args(option_string_list(&input.options, "args_json", "args"));
-        command.envs(option_string_map(
-            &input.options,
-            "environment_json",
-            "environment",
-        ));
+        let mut spec = ProcessLaunchSpec::new(executable)
+            .args(option_string_list(&input.options, "args_json", "args"))
+            .environment(option_string_map(
+                &input.options,
+                "environment_json",
+                "environment",
+            ));
         if let Some(working_dir) = input.options.get("working_dir") {
             if !working_dir.trim().is_empty() {
-                command.current_dir(working_dir);
+                spec = spec.working_dir(working_dir);
             }
         }
 
-        match command.output().await {
-            Ok(output) if output.status.success() || ignore_exit_value => {
+        match run_to_output(&spec).await {
+            Ok(output) if output.exit_code == 0 || ignore_exit_value => {
                 result.files_processed = 1;
                 result.bytes_processed = (output.stdout.len() + output.stderr.len()) as u64;
             }
@@ -68,13 +68,12 @@ impl TaskExecutor for ExecTaskExecutor {
                 result.success = false;
                 result.error_message = format!(
                     "Exec task '{}' failed with exit code {}",
-                    executable,
-                    output.status.code().unwrap_or(-1)
+                    executable, output.exit_code
                 );
             }
             Err(error) => {
                 result.success = false;
-                result.error_message = format!("Failed to execute '{}': {}", executable, error);
+                result.error_message = error;
             }
         }
 

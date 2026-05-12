@@ -7,6 +7,7 @@ mod java_exec;
 mod javadoc;
 mod lifecycle;
 mod mkdir_op;
+mod process_launch;
 mod start_scripts;
 mod symlink;
 mod sync;

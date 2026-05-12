@@ -5,6 +5,8 @@ use tokio::process::Command;
 
 use crate::server::task_executor::{option_string_list, TaskExecutor, TaskInput, TaskResult};
 
+use super::process_launch::{run_to_output, ProcessLaunchSpec};
+
 /// Result of a Java compilation.
 #[derive(Debug, Clone, Default)]
 pub struct JavaCompileResult {
@@ -53,56 +55,71 @@ impl JavaCompileExecutor {
 
     /// Build the javac command line.
     pub fn build_command(&self, javac_path: &Path, input: &TaskInput) -> Command {
-        let mut cmd = Command::new(javac_path);
+        let spec = self.build_process_spec(javac_path, input);
+        let mut cmd = spec.to_command();
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd
+    }
 
+    fn build_process_spec(&self, javac_path: &Path, input: &TaskInput) -> ProcessLaunchSpec {
+        let mut args = Vec::new();
         // Source files
         for source in &input.source_files {
-            cmd.arg(source);
+            args.push(source.to_string_lossy().to_string());
         }
 
         // Source path (-sourcepath)
         if let Some(source_path) = input.options.get("source_path") {
-            cmd.arg("-sourcepath").arg(source_path);
+            args.push("-sourcepath".to_string());
+            args.push(source_path.to_string());
         }
 
         // Classpath (-classpath / -cp)
         if let Some(classpath) = input.options.get("classpath") {
-            cmd.arg("-classpath").arg(classpath);
+            args.push("-classpath".to_string());
+            args.push(classpath.to_string());
         }
 
         // Output directory (-d)
         if !input.target_dir.as_os_str().is_empty() {
-            cmd.arg("-d").arg(&input.target_dir);
+            args.push("-d".to_string());
+            args.push(input.target_dir.to_string_lossy().to_string());
         }
 
         // Annotation processor path (-processorpath)
         if let Some(proc_path) = input.options.get("processor_path") {
-            cmd.arg("-processorpath").arg(proc_path);
+            args.push("-processorpath".to_string());
+            args.push(proc_path.to_string());
         }
 
         // Annotation processors (-processor)
         if let Some(processors) = input.options.get("processors") {
-            cmd.arg("-processor").arg(processors);
+            args.push("-processor".to_string());
+            args.push(processors.to_string());
         }
 
         // Release version (--release)
         if let Some(release) = input.options.get("release") {
-            cmd.arg("--release").arg(release);
+            args.push("--release".to_string());
+            args.push(release.to_string());
         }
 
         // Source compatibility (-source)
         if let Some(source_ver) = input.options.get("source_version") {
-            cmd.arg("-source").arg(source_ver);
+            args.push("-source".to_string());
+            args.push(source_ver.to_string());
         }
 
         // Target compatibility (-target)
         if let Some(target_ver) = input.options.get("target_version") {
-            cmd.arg("-target").arg(target_ver);
+            args.push("-target".to_string());
+            args.push(target_ver.to_string());
         }
 
         // Encoding
         if let Some(encoding) = input.options.get("encoding") {
-            cmd.arg("-encoding").arg(encoding);
+            args.push("-encoding".to_string());
+            args.push(encoding.to_string());
         }
 
         // Gradle JavaCompile defaults debug=true, which maps to javac's full debug metadata.
@@ -112,14 +129,15 @@ impl JavaCompileExecutor {
             .map(|value| value == "false")
             .unwrap_or(false)
         {
-            cmd.arg("-g:none");
+            args.push("-g:none".to_string());
         } else {
-            cmd.arg("-g");
+            args.push("-g".to_string());
         }
 
         // Generated sources directory (-s)
         if let Some(gen_dir) = input.options.get("generated_sources_dir") {
-            cmd.arg("-s").arg(gen_dir);
+            args.push("-s".to_string());
+            args.push(gen_dir.to_string());
         }
 
         // Warnings
@@ -129,7 +147,7 @@ impl JavaCompileExecutor {
             .map(|v| v == "true")
             .unwrap_or(false)
         {
-            cmd.arg("-Xlint:all");
+            args.push("-Xlint:all".to_string());
         }
 
         // Verbose
@@ -139,18 +157,18 @@ impl JavaCompileExecutor {
             .map(|v| v == "true")
             .unwrap_or(false)
         {
-            cmd.arg("-verbose");
+            args.push("-verbose".to_string());
         }
 
         // Parameters for compilation
         if let Some(params) = input.options.get("parameters") {
             if params == "true" {
-                cmd.arg("-parameters");
+                args.push("-parameters".to_string());
             }
         }
 
         for arg in option_string_list(&input.options, "compiler_args_json", "compiler_args") {
-            cmd.arg(arg);
+            args.push(arg);
         }
 
         // Proc only (generate but don't compile)
@@ -160,12 +178,10 @@ impl JavaCompileExecutor {
             .map(|v| v == "true")
             .unwrap_or(false)
         {
-            cmd.arg("-proc:only");
+            args.push("-proc:only".to_string());
         }
 
-        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-
-        cmd
+        ProcessLaunchSpec::new(javac_path).args(args)
     }
 
     /// Parse javac output for errors, warnings, and notes.
@@ -236,7 +252,7 @@ impl JavaCompileExecutor {
             return result;
         }
 
-        let mut cmd = self.build_command(&javac, input);
+        let spec = self.build_process_spec(&javac, input);
 
         tracing::debug!(
             javac = %javac.display(),
@@ -244,14 +260,14 @@ impl JavaCompileExecutor {
             "Starting javac compilation"
         );
 
-        match cmd.output().await {
+        match run_to_output(&spec).await {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 let combined = format!("{}\n{}", stdout, stderr);
 
-                result.exit_code = output.status.code().unwrap_or(-1);
-                result.success = output.status.success();
+                result.exit_code = output.exit_code;
+                result.success = output.exit_code == 0;
 
                 let (errors, warnings, notes) = Self::parse_javac_output(&combined);
                 result.errors = errors;
@@ -293,7 +309,7 @@ impl JavaCompileExecutor {
                 }
             }
             Err(e) => {
-                result.error_message = format!("Failed to execute javac: {}", e);
+                result.error_message = e;
             }
         }
 

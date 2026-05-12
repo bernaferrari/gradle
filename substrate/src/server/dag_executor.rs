@@ -286,6 +286,13 @@ fn is_jvm_execution_mode(mode: &str) -> bool {
     mode == "jvm_host" || mode.starts_with("mock-jvm") || mode.starts_with("jvm_")
 }
 
+fn rust_execution_mode(task_type: &str) -> &'static str {
+    match task_type {
+        "JavaCompile" | "Exec" | "JavaExec" | "Javadoc" | "TestExec" => "rust_process",
+        _ => "rust_in_process",
+    }
+}
+
 /// DAG Executor service.
 /// Orchestrates build execution by managing task scheduling, parallelism,
 /// cancellation, and event dispatch.
@@ -1318,7 +1325,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                             } else {
                                 "FAILED".to_string()
                             },
-                            "native".to_string(),
+                            rust_execution_mode(&task_type).to_string(),
                             result.error_message,
                         )
                     } else if allow_jvm_forwarding_for_task {
@@ -3544,11 +3551,12 @@ mod tests {
         assert_eq!(resp.final_status, "FAILED");
         assert_eq!(resp.tasks_forwarded_to_jvm, 0);
         assert_eq!(resp.task_details.len(), 0);
-        assert!(resp
-            .failure_message
-            .contains("unsupported contract marker 'copy_unsupported_custom_actions'"),
+        assert!(
+            resp.failure_message
+                .contains("unsupported contract marker 'copy_unsupported_custom_actions'"),
             "unexpected failure message: {}",
-            resp.failure_message);
+            resp.failure_message
+        );
     }
 
     #[tokio::test]
@@ -3834,7 +3842,7 @@ mod tests {
         assert_eq!(resp.tasks_succeeded, 1);
         assert_eq!(resp.tasks_forwarded_to_jvm, 0);
         assert_eq!(resp.task_details[0].task_type, "JavaCompile");
-        assert_eq!(resp.task_details[0].execution_mode, "native");
+        assert_eq!(resp.task_details[0].execution_mode, "rust_process");
         assert!(
             output_dir.join("HelloFromShadow.class").exists(),
             "shadow JavaCompile should produce a class file through Rust javac execution"
@@ -4093,7 +4101,7 @@ mod tests {
         let native_count = resp
             .task_details
             .iter()
-            .filter(|d| d.execution_mode == "native")
+            .filter(|d| d.execution_mode.starts_with("rust_"))
             .count();
         assert_eq!(native_count, 3);
         assert!(mkdir_target.exists(), "Mkdir should have run");
@@ -4248,7 +4256,7 @@ mod tests {
         assert_eq!(resp.task_details[0].task_path, ":a");
         assert_eq!(resp.task_details[0].execution_mode, "mock-jvm:UnknownTask");
         assert_eq!(resp.task_details[1].task_path, ":b");
-        assert_eq!(resp.task_details[1].execution_mode, "native");
+        assert_eq!(resp.task_details[1].execution_mode, "rust_in_process");
         assert!(resp.task_details[1].duration_ms >= 0);
     }
 
