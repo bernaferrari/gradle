@@ -1445,6 +1445,7 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
     let mut buf = Vec::new();
     let mut current_license_name = String::new();
     let mut current_license_url = String::new();
+    let mut current_issue_system = String::new();
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(event)) => {
@@ -1475,6 +1476,7 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
                     &mut properties,
                     &mut current_license_name,
                     &mut current_license_url,
+                    &mut current_issue_system,
                 );
             }
             Ok(Event::CData(event)) => {
@@ -1497,6 +1499,7 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
                     &mut properties,
                     &mut current_license_name,
                     &mut current_license_url,
+                    &mut current_issue_system,
                 );
             }
             Ok(Event::End(_)) => {
@@ -1576,6 +1579,7 @@ fn apply_pom_metadata_text(
     properties: &mut BTreeMap<String, String>,
     current_license_name: &mut String,
     current_license_url: &mut String,
+    current_issue_system: &mut String,
 ) {
     match path {
         [project, name] if project == "project" && name == "name" => {
@@ -1655,7 +1659,17 @@ fn apply_pom_metadata_text(
         [project, issue, url]
             if project == "project" && issue == "issueManagement" && url == "url" =>
         {
-            push_external_reference(&mut metadata.external_references, "issue-tracker", text);
+            push_external_reference_with_comment(
+                &mut metadata.external_references,
+                "issue-tracker",
+                text,
+                current_issue_system.clone(),
+            );
+        }
+        [project, issue, system]
+            if project == "project" && issue == "issueManagement" && system == "system" =>
+        {
+            *current_issue_system = text;
         }
         [project, mailing_lists, mailing_list, archive]
             if project == "project"
@@ -1943,6 +1957,15 @@ fn push_external_reference(
     reference_type: &str,
     url: String,
 ) {
+    push_external_reference_with_comment(references, reference_type, url, String::new());
+}
+
+fn push_external_reference_with_comment(
+    references: &mut Vec<CycloneDxExternalReference>,
+    reference_type: &str,
+    url: String,
+    comment: String,
+) {
     let trimmed = url.trim();
     if trimmed.is_empty() {
         return;
@@ -1950,7 +1973,7 @@ fn push_external_reference(
     references.push(CycloneDxExternalReference {
         reference_type: reference_type.to_string(),
         url: trimmed.to_string(),
-        comment: String::new(),
+        comment: comment.trim().to_string(),
         hashes: Vec::new(),
     });
 }
@@ -2252,10 +2275,18 @@ mod tests {
     use super::*;
 
     fn external_reference(reference_type: &str, url: &str) -> CycloneDxExternalReference {
+        external_reference_with_comment(reference_type, url, "")
+    }
+
+    fn external_reference_with_comment(
+        reference_type: &str,
+        url: &str,
+        comment: &str,
+    ) -> CycloneDxExternalReference {
         CycloneDxExternalReference {
             reference_type: reference_type.to_string(),
             url: url.to_string(),
-            comment: String::new(),
+            comment: comment.to_string(),
             hashes: Vec::new(),
         }
     }
@@ -3150,6 +3181,7 @@ mod tests {
     </site>
   </distributionManagement>
   <issueManagement>
+    <system>GitHub Issues</system>
     <url>https://issues.example.test/lib</url>
   </issueManagement>
   <mailingLists>
@@ -3230,10 +3262,13 @@ mod tests {
             "distribution",
             "https://site.example.test/lib"
         )));
-        assert!(component.external_references.contains(&external_reference(
-            "issue-tracker",
-            "https://issues.example.test/lib"
-        )));
+        assert!(component
+            .external_references
+            .contains(&external_reference_with_comment(
+                "issue-tracker",
+                "https://issues.example.test/lib",
+                "GitHub Issues"
+            )));
         assert!(component.external_references.contains(&external_reference(
             "mailing-list",
             "https://lists.example.test/lib"
