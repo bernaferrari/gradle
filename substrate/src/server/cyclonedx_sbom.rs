@@ -125,6 +125,17 @@ pub struct CycloneDxCapturedTaskOptions {
     pub xml_output: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CycloneDxAggregateOptions {
+    pub spec_version: String,
+    pub serial_number: String,
+    pub timestamp: String,
+    pub root_group: String,
+    pub root_name: String,
+    pub root_version: String,
+    pub root_component_type: String,
+}
+
 pub fn validate_captured_task_options(
     inputs: &BTreeMap<String, String>,
 ) -> Result<CycloneDxCapturedTaskOptions, String> {
@@ -169,6 +180,75 @@ pub fn validate_captured_task_options(
         json_output,
         xml_output,
     })
+}
+
+pub fn aggregate_contracts(
+    contracts: &[CycloneDxSbomContract],
+    options: CycloneDxAggregateOptions,
+) -> Result<CycloneDxSbomContract, String> {
+    if contracts.is_empty() {
+        return Err("CycloneDX aggregate contract has no input SBOM contracts".to_string());
+    }
+    validate_aggregate_options(&options)?;
+    let root_purl = purl(
+        &options.root_group,
+        &options.root_name,
+        &options.root_version,
+    );
+    let root_component = CycloneDxComponent {
+        component_type: options.root_component_type.to_lowercase(),
+        bom_ref: root_purl.clone(),
+        group: options.root_group,
+        name: options.root_name,
+        version: options.root_version,
+        purl: root_purl,
+        properties: BTreeMap::new(),
+        licenses: Vec::new(),
+    };
+
+    let mut components_by_ref = BTreeMap::<String, CycloneDxComponent>::new();
+    let mut dependencies_by_ref = BTreeMap::<String, BTreeSet<String>>::new();
+    let mut aggregate_root_children = BTreeSet::new();
+    for contract in contracts {
+        contract.validate()?;
+        merge_component(&mut components_by_ref, contract.root_component.clone())?;
+        aggregate_root_children.insert(contract.root_component.bom_ref.clone());
+        for component in &contract.components {
+            merge_component(&mut components_by_ref, component.clone())?;
+        }
+        for dependency in &contract.dependencies {
+            dependencies_by_ref
+                .entry(dependency.reference.clone())
+                .or_default()
+                .extend(dependency.depends_on.iter().cloned());
+        }
+    }
+    dependencies_by_ref
+        .entry(root_component.bom_ref.clone())
+        .or_default()
+        .extend(aggregate_root_children);
+
+    let mut components = components_by_ref.into_values().collect::<Vec<_>>();
+    components.sort_by(|a, b| a.bom_ref.cmp(&b.bom_ref));
+    let dependencies = dependencies_by_ref
+        .into_iter()
+        .map(|(reference, depends_on)| CycloneDxDependency {
+            reference,
+            depends_on: depends_on.into_iter().collect(),
+        })
+        .collect::<Vec<_>>();
+
+    let contract = CycloneDxSbomContract {
+        schema: CONTRACT_SCHEMA.to_string(),
+        spec_version: options.spec_version,
+        serial_number: options.serial_number,
+        timestamp: options.timestamp,
+        root_component,
+        components,
+        dependencies,
+    };
+    contract.validate()?;
+    Ok(contract)
 }
 
 impl CycloneDxSbomContract {
@@ -468,6 +548,38 @@ fn validate_draft_options(options: &CycloneDxDraftOptions) -> Result<(), String>
         || options.root_component_type.trim().is_empty()
     {
         return Err("CycloneDX draft options are missing spec/root identity fields".to_string());
+    }
+    Ok(())
+}
+
+fn validate_aggregate_options(options: &CycloneDxAggregateOptions) -> Result<(), String> {
+    if options.spec_version.trim().is_empty()
+        || options.serial_number.trim().is_empty()
+        || options.timestamp.trim().is_empty()
+        || options.root_name.trim().is_empty()
+        || options.root_version.trim().is_empty()
+        || options.root_component_type.trim().is_empty()
+    {
+        return Err(
+            "CycloneDX aggregate options are missing spec/root identity fields".to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn merge_component(
+    components_by_ref: &mut BTreeMap<String, CycloneDxComponent>,
+    component: CycloneDxComponent,
+) -> Result<(), String> {
+    if let Some(existing) = components_by_ref.get(&component.bom_ref) {
+        if existing != &component {
+            return Err(format!(
+                "CycloneDX aggregate input contains conflicting component '{}'",
+                component.bom_ref
+            ));
+        }
+    } else {
+        components_by_ref.insert(component.bom_ref.clone(), component);
     }
     Ok(())
 }
@@ -1146,5 +1258,93 @@ mod tests {
             Some(&"sources".to_string()),
             component.properties.get("gradle:artifactClassifier")
         );
+    }
+
+    #[test]
+    fn aggregates_sbom_contracts_deterministically() {
+        let mut first = sample_contract();
+        first.root_component.bom_ref = "pkg:maven/org.example/app-a@1.0".to_string();
+        first.root_component.purl = first.root_component.bom_ref.clone();
+        first.root_component.name = "app-a".to_string();
+        first.dependencies = vec![CycloneDxDependency {
+            reference: first.root_component.bom_ref.clone(),
+            depends_on: vec!["pkg:maven/org.example/a@1.0.0?type=jar".to_string()],
+        }];
+
+        let mut second = sample_contract();
+        second.root_component.bom_ref = "pkg:maven/org.example/app-b@1.0".to_string();
+        second.root_component.purl = second.root_component.bom_ref.clone();
+        second.root_component.name = "app-b".to_string();
+        second.dependencies = vec![CycloneDxDependency {
+            reference: second.root_component.bom_ref.clone(),
+            depends_on: vec!["pkg:maven/org.example/b@1.0.0?type=jar".to_string()],
+        }];
+
+        let aggregate = aggregate_contracts(
+            &[second, first],
+            CycloneDxAggregateOptions {
+                spec_version: "1.6".to_string(),
+                serial_number: "urn:uuid:00000000-0000-0000-0000-000000000005".to_string(),
+                timestamp: "2026-05-12T13:00:00Z".to_string(),
+                root_group: "org.example".to_string(),
+                root_name: "aggregate".to_string(),
+                root_version: "1.0".to_string(),
+                root_component_type: "application".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            "pkg:maven/org.example/aggregate@1.0",
+            aggregate.root_component.bom_ref
+        );
+        assert_eq!(
+            vec![
+                "pkg:maven/org.example/a@1.0.0?type=jar".to_string(),
+                "pkg:maven/org.example/app-a@1.0".to_string(),
+                "pkg:maven/org.example/app-b@1.0".to_string(),
+                "pkg:maven/org.example/b@1.0.0?type=jar".to_string(),
+            ],
+            aggregate
+                .components
+                .iter()
+                .map(|component| component.bom_ref.clone())
+                .collect::<Vec<_>>()
+        );
+        let root_dependency = aggregate
+            .dependencies
+            .iter()
+            .find(|dependency| dependency.reference == aggregate.root_component.bom_ref)
+            .unwrap();
+        assert_eq!(
+            vec![
+                "pkg:maven/org.example/app-a@1.0".to_string(),
+                "pkg:maven/org.example/app-b@1.0".to_string(),
+            ],
+            root_dependency.depends_on
+        );
+        assert!(render_json(&aggregate).unwrap().contains("aggregate"));
+    }
+
+    #[test]
+    fn rejects_conflicting_aggregate_components() {
+        let first = sample_contract();
+        let mut second = sample_contract();
+        second.components[0].version = "2.0.0".to_string();
+
+        let err = aggregate_contracts(
+            &[first, second],
+            CycloneDxAggregateOptions {
+                spec_version: "1.6".to_string(),
+                serial_number: "urn:uuid:00000000-0000-0000-0000-000000000006".to_string(),
+                timestamp: "2026-05-12T13:30:00Z".to_string(),
+                root_group: "org.example".to_string(),
+                root_name: "aggregate".to_string(),
+                root_version: "1.0".to_string(),
+                root_component_type: "application".to_string(),
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("conflicting component"));
     }
 }
