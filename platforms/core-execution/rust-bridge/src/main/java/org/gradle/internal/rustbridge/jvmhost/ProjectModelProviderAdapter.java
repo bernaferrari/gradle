@@ -396,7 +396,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             captureJavadocInputs(task, taskType, inputs);
         }
         if (isCycloneDxTask(taskTypeName, shortTaskTypeName)) {
-            captureCycloneDxInputs(inputs);
+            captureCycloneDxInputs(task, taskType, inputs);
         }
         if ("DefaultTask".equals(shortTaskTypeName) || "Task".equals(shortTaskTypeName)) {
             captureStaticWriteFileInputs(task, inputs);
@@ -1275,7 +1275,22 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "no_timestamp", booleanString(invokeOptional(options, "isNoTimestamp")));
     }
 
-    private static void captureCycloneDxInputs(Map<String, String> inputs) {
+    private static void captureCycloneDxInputs(Task task, Class<?> taskType, Map<String, String> inputs) {
+        putIfPresent(inputs, "cyclonedx_component_group", providerValue(invokeOptional(task, taskType, "getComponentGroup")));
+        putIfPresent(inputs, "cyclonedx_component_name", providerValue(invokeOptional(task, taskType, "getComponentName")));
+        putIfPresent(inputs, "cyclonedx_component_version", providerValue(invokeOptional(task, taskType, "getComponentVersion")));
+        putIfPresent(inputs, "cyclonedx_project_type", enumName(invokeOptionalProvider(task, taskType, "getProjectType")));
+        putIfPresent(inputs, "cyclonedx_schema_version", enumName(invokeOptionalProvider(task, taskType, "getSchemaVersion")));
+        putIfPresent(inputs, "cyclonedx_include_bom_serial_number", providerBooleanString(invokeOptional(task, taskType, "getIncludeBomSerialNumber")));
+        putIfPresent(inputs, "cyclonedx_include_build_system", providerBooleanString(invokeOptional(task, taskType, "getIncludeBuildSystem")));
+        putIfPresent(inputs, "cyclonedx_include_build_environment", providerBooleanString(invokeOptional(task, taskType, "getIncludeBuildEnvironment")));
+        putIfPresent(inputs, "cyclonedx_include_metadata_resolution", providerBooleanString(invokeOptional(task, taskType, "getIncludeMetadataResolution")));
+        putIfPresent(inputs, "cyclonedx_include_configs", providerStringList(invokeOptional(task, taskType, "getIncludeConfigs")));
+        putIfPresent(inputs, "cyclonedx_skip_configs", providerStringList(invokeOptional(task, taskType, "getSkipConfigs")));
+        putIfPresent(inputs, "cyclonedx_json_output", providerFilePath(invokeOptional(task, taskType, "getJsonOutput")));
+        putIfPresent(inputs, "cyclonedx_xml_output", providerFilePath(invokeOptional(task, taskType, "getXmlOutput")));
+        putIfPresent(inputs, "cyclonedx_input_sboms", fileCollectionPathString(invokeOptional(task, taskType, "getInputSboms")));
+        putIfPresent(inputs, "cyclonedx_resolved_dependencies", fileCollectionPathString(invokeOptional(task, taskType, "getResolvedDependencies")));
         inputs.put("cyclonedx_sbom_contract_status", "missing");
         inputs.put("requires_jvm_task_execution", "true");
     }
@@ -1688,6 +1703,31 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         }
         Object providerValue = invokeOptional(value, "getOrNull");
         return providerValue == null ? "" : providerValue.toString();
+    }
+
+    private static Object invokeOptionalProvider(@Nullable Object target, Class<?> methodOwner, String methodName) {
+        Object value = invokeOptional(target, methodOwner, methodName);
+        Object providerValue = invokeOptional(value, "getOrNull");
+        return providerValue == null ? value : providerValue;
+    }
+
+    private static String providerBooleanString(@Nullable Object value) {
+        Object providerValue = invokeOptional(value, "getOrNull");
+        Object candidate = providerValue == null ? value : providerValue;
+        return candidate instanceof Boolean ? candidate.toString() : "";
+    }
+
+    private static String providerStringList(@Nullable Object value) {
+        Object providerValue = invokeOptional(value, "getOrNull");
+        Object candidate = providerValue == null ? value : providerValue;
+        return stringList(candidate);
+    }
+
+    private static String enumName(@Nullable Object value) {
+        if (value instanceof Enum<?>) {
+            return ((Enum<?>) value).name();
+        }
+        return value == null ? "" : value.toString();
     }
 
     private static String permissionUnixMode(@Nullable Object value) {
