@@ -1315,7 +1315,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         boolean aggregateTask = isCycloneDxAggregateTask(taskType.getName(), taskType.getSimpleName());
         String missingBaseFields = resolutionGraphJsonBase64.isEmpty()
             ? "resolution-result-edges,component-metadata,license-metadata,artifact-hash-policy,timestamp-source-policy"
-            : "component-metadata,license-metadata,artifact-hash-policy,timestamp-source-policy";
+            : "component-metadata,license-metadata,timestamp-source-policy";
         if (aggregateTask) {
             missingBaseFields = missingBaseFields + ",aggregate-input-contracts,aggregate-merge-policy";
         } else {

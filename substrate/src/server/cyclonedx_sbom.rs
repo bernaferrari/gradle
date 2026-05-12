@@ -1,12 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
 use base64::Engine as _;
+use md5::Md5;
 use quick_xml::events::Event;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use sha1::Sha1;
+use sha2::{Digest, Sha256, Sha384, Sha512};
+use sha3::{Sha3_256, Sha3_384, Sha3_512};
 
 pub const CONTRACT_SCHEMA: &str = "gradle-substrate.cyclonedx-sbom.v1";
 pub const RESOLUTION_GRAPH_SCHEMA: &str = "gradle-substrate.cyclonedx-resolution-graph.v1";
@@ -592,6 +596,60 @@ fn normalize_schema_version(value: &str) -> String {
     }
 }
 
+pub fn calculate_cyclonedx_artifact_hashes(
+    path: &Path,
+    spec_version: &str,
+) -> Result<Vec<CycloneDxHash>, String> {
+    if path.as_os_str().is_empty() || !path.exists() {
+        return Ok(Vec::new());
+    }
+    let bytes = std::fs::read(path)
+        .map_err(|err| format!("failed to read CycloneDX artifact '{}': {err}", path.display()))?;
+    let mut hashes = vec![
+        digest_hash::<Md5>("MD5", &bytes),
+        digest_hash::<Sha1>("SHA-1", &bytes),
+        digest_hash::<Sha256>("SHA-256", &bytes),
+        digest_hash::<Sha512>("SHA-512", &bytes),
+    ];
+    if schema_version_at_least(spec_version, 1, 2) {
+        hashes.push(digest_hash::<Sha384>("SHA-384", &bytes));
+        hashes.push(digest_hash::<Sha3_384>("SHA3-384", &bytes));
+    }
+    hashes.push(digest_hash::<Sha3_256>("SHA3-256", &bytes));
+    hashes.push(digest_hash::<Sha3_512>("SHA3-512", &bytes));
+    Ok(hashes)
+}
+
+fn digest_hash<D: Digest>(algorithm: &str, bytes: &[u8]) -> CycloneDxHash {
+    let digest = D::digest(bytes);
+    CycloneDxHash {
+        algorithm: algorithm.to_string(),
+        content: hex_lower(&digest),
+    }
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(&mut encoded, "{byte:02x}");
+    }
+    encoded
+}
+
+fn schema_version_at_least(value: &str, major: u32, minor: u32) -> bool {
+    let normalized = normalize_schema_version(value);
+    let mut parts = normalized.split('.');
+    let parsed_major = parts
+        .next()
+        .and_then(|part| part.parse::<u32>().ok())
+        .unwrap_or(0);
+    let parsed_minor = parts
+        .next()
+        .and_then(|part| part.parse::<u32>().ok())
+        .unwrap_or(0);
+    (parsed_major, parsed_minor) >= (major, minor)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct CycloneDxBom<'a> {
     #[serde(rename = "bomFormat")]
@@ -720,7 +778,9 @@ pub fn draft_contract_from_resolution_graph(
             for (key, value) in metadata.properties() {
                 properties.insert(key, value);
             }
-            CycloneDxComponent {
+            let hashes =
+                calculate_cyclonedx_artifact_hashes(Path::new(&component.artifact_path), &options.spec_version)?;
+            Ok(CycloneDxComponent {
                 component_type: "library".to_string(),
                 bom_ref: bom_ref.clone(),
                 group: component.group.clone(),
@@ -729,10 +789,10 @@ pub fn draft_contract_from_resolution_graph(
                 purl: bom_ref,
                 properties,
                 licenses: metadata.licenses,
-                hashes: Vec::new(),
-            }
+                hashes,
+            })
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, String>>()?;
 
     let mut dependencies = dependencies_by_ref
         .into_iter()
@@ -1359,6 +1419,64 @@ mod tests {
         assert!(xml.find("org.example/a").unwrap() < xml.find("org.example/b").unwrap());
         assert!(xml.contains("<license><name>Apache-2.0</name></license>"));
         assert!(xml.contains("<dependencies>"));
+    }
+
+    #[test]
+    fn calculates_cyclonedx_artifact_hashes_with_upstream_algorithm_policy() {
+        let dir = tempfile::tempdir().unwrap();
+        let artifact = dir.path().join("empty.jar");
+        std::fs::write(&artifact, b"").unwrap();
+
+        let hashes = calculate_cyclonedx_artifact_hashes(&artifact, "1.6").unwrap();
+        let by_algorithm = hashes
+            .iter()
+            .map(|hash| (hash.algorithm.as_str(), hash.content.as_str()))
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(
+            hashes
+                .iter()
+                .map(|hash| hash.algorithm.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "MD5", "SHA-1", "SHA-256", "SHA-512", "SHA-384", "SHA3-384", "SHA3-256",
+                "SHA3-512"
+            ]
+        );
+        assert_eq!(
+            by_algorithm.get("MD5").copied(),
+            Some("d41d8cd98f00b204e9800998ecf8427e")
+        );
+        assert_eq!(
+            by_algorithm.get("SHA-1").copied(),
+            Some("da39a3ee5e6b4b0d3255bfef95601890afd80709")
+        );
+        assert_eq!(
+            by_algorithm.get("SHA-256").copied(),
+            Some("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        );
+        assert_eq!(
+            by_algorithm.get("SHA3-256").copied(),
+            Some("a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a")
+        );
+    }
+
+    #[test]
+    fn omits_newer_cyclonedx_hash_algorithms_before_spec_1_2() {
+        let dir = tempfile::tempdir().unwrap();
+        let artifact = dir.path().join("artifact.jar");
+        std::fs::write(&artifact, b"abc").unwrap();
+
+        let hashes = calculate_cyclonedx_artifact_hashes(&artifact, "1.1").unwrap();
+        let algorithms = hashes
+            .iter()
+            .map(|hash| hash.algorithm.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            algorithms,
+            vec!["MD5", "SHA-1", "SHA-256", "SHA-512", "SHA3-256", "SHA3-512"]
+        );
     }
 
     #[test]
