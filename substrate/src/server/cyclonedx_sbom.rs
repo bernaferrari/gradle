@@ -31,6 +31,8 @@ pub struct CycloneDxSbomContract {
     pub external_references: Vec<CycloneDxExternalReference>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub organizational_entity: Option<CycloneDxOrganizationalEntity>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub metadata_licenses: Vec<CycloneDxLicenseChoice>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -226,7 +228,8 @@ pub struct CycloneDxCapturedTaskOptions {
     pub include_license_text: bool,
     pub organizational_entity_present: bool,
     pub organizational_entity: Option<CycloneDxOrganizationalEntity>,
-    pub license_choice: String,
+    pub raw_license_choice_present: bool,
+    pub license_choices: Vec<CycloneDxLicenseChoice>,
     pub build_system_environment_variable: String,
     pub build_system_url: String,
     pub raw_external_references_present: bool,
@@ -327,7 +330,8 @@ pub fn validate_captured_task_options(
         organizational_entity_present: value(inputs, "cyclonedx_organizational_entity_present")
             .eq_ignore_ascii_case("true"),
         organizational_entity: decode_cyclonedx_organizational_entity(inputs)?,
-        license_choice: value(inputs, "cyclonedx_license_choice").to_string(),
+        raw_license_choice_present: !value(inputs, "cyclonedx_license_choice").trim().is_empty(),
+        license_choices: decode_cyclonedx_license_choices(inputs)?,
         build_system_environment_variable: value(
             inputs,
             "cyclonedx_build_system_environment_variable",
@@ -378,6 +382,22 @@ fn decode_cyclonedx_external_references(
         validate_cyclonedx_hashes(&reference.hashes, "external reference")?;
     }
     Ok(references)
+}
+
+fn decode_cyclonedx_license_choices(
+    inputs: &BTreeMap<String, String>,
+) -> Result<Vec<CycloneDxLicenseChoice>, String> {
+    let encoded = value(inputs, "cyclonedx_license_choice_json_b64");
+    if encoded.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|error| format!("Invalid cyclonedx_license_choice_json_b64: {error}"))?;
+    let choices = serde_json::from_slice::<Vec<CycloneDxLicenseChoice>>(&bytes)
+        .map_err(|error| format!("Invalid CycloneDX license choice: {error}"))?;
+    validate_cyclonedx_license_choices(&choices, "metadata")?;
+    Ok(choices)
 }
 
 pub fn draft_contract_from_captured_inputs(
@@ -442,6 +462,7 @@ pub fn draft_contract_from_captured_inputs(
     }
     contract.external_references = options.external_references;
     contract.organizational_entity = options.organizational_entity;
+    contract.metadata_licenses = options.license_choices;
     contract.validate()?;
     Ok(contract)
 }
@@ -456,7 +477,7 @@ fn reject_unsupported_captured_options(
     if options.organizational_entity_present && options.organizational_entity.is_none() {
         unsupported.push("organizational-entity");
     }
-    if !options.license_choice.trim().is_empty() {
+    if options.raw_license_choice_present && options.license_choices.is_empty() {
         unsupported.push("license-choice");
     }
     if options.raw_external_references_present && options.external_references.is_empty() {
@@ -551,6 +572,7 @@ pub fn aggregate_contracts(
             })
             .collect(),
         organizational_entity: None,
+        metadata_licenses: Vec::new(),
     };
     contract.validate()?;
     Ok(contract)
@@ -584,6 +606,7 @@ impl CycloneDxSbomContract {
             }
             validate_cyclonedx_hashes(&external_reference.hashes, "external reference")?;
         }
+        validate_cyclonedx_license_choices(&self.metadata_licenses, "metadata")?;
         if let Some(entity) = &self.organizational_entity {
             entity.validate()?;
         }
@@ -621,21 +644,7 @@ impl CycloneDxComponent {
                 "CycloneDX {label} is missing type, bom-ref, name, or version"
             ));
         }
-        for license in &self.licenses {
-            if !license.expression.trim().is_empty() {
-                continue;
-            }
-            let Some(license) = license.license.as_ref() else {
-                return Err(format!(
-                    "CycloneDX {label} has a license missing id or name"
-                ));
-            };
-            if license.id.trim().is_empty() && license.name.trim().is_empty() {
-                return Err(format!(
-                    "CycloneDX {label} has a license missing id or name"
-                ));
-            }
-        }
+        validate_cyclonedx_license_choices(&self.licenses, label)?;
         for hash in &self.hashes {
             if hash.algorithm.trim().is_empty() || hash.content.trim().is_empty() {
                 return Err(format!(
@@ -662,6 +671,28 @@ fn validate_cyclonedx_hashes(hashes: &[CycloneDxHash], label: &str) -> Result<()
         if hash.algorithm.trim().is_empty() || hash.content.trim().is_empty() {
             return Err(format!(
                 "CycloneDX {label} has an empty hash algorithm or content"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_cyclonedx_license_choices(
+    choices: &[CycloneDxLicenseChoice],
+    label: &str,
+) -> Result<(), String> {
+    for choice in choices {
+        if !choice.expression.trim().is_empty() {
+            continue;
+        }
+        let Some(license) = choice.license.as_ref() else {
+            return Err(format!(
+                "CycloneDX {label} has a license missing id or name"
+            ));
+        };
+        if license.id.trim().is_empty() && license.name.trim().is_empty() {
+            return Err(format!(
+                "CycloneDX {label} has a license missing id or name"
             ));
         }
     }
@@ -848,6 +879,8 @@ struct CycloneDxMetadata<'a> {
     timestamp: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     supplier: Option<CycloneDxOrganizationalEntity>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    licenses: Vec<CycloneDxLicenseChoice>,
     component: &'a CycloneDxComponent,
 }
 
@@ -1012,6 +1045,7 @@ pub fn draft_contract_from_resolution_graph(
             })
             .collect(),
         organizational_entity: None,
+        metadata_licenses: Vec::new(),
     };
     contract.validate()?;
     Ok(contract)
@@ -1771,6 +1805,7 @@ pub fn render_xml(contract: &CycloneDxSbomContract) -> Result<String, String> {
     if let Some(supplier) = &bom.metadata.supplier {
         write_organizational_entity(&mut xml, "    ", "supplier", supplier);
     }
+    write_license_choices(&mut xml, "    ", &bom.metadata.licenses);
     write_component(&mut xml, "    ", bom.metadata.component);
     xml.push_str("  </metadata>\n");
     xml.push_str("  <components>\n");
@@ -1826,6 +1861,7 @@ fn normalized_bom(contract: &CycloneDxSbomContract) -> CycloneDxBom<'_> {
         metadata: CycloneDxMetadata {
             timestamp: &contract.timestamp,
             supplier: contract.organizational_entity.clone(),
+            licenses: contract.metadata_licenses.clone(),
             component: &contract.root_component,
         },
         components,
@@ -1911,6 +1947,36 @@ fn write_external_reference(
     xml.push_str(&format!("{indent}</reference>\n"));
 }
 
+fn write_license_choices(xml: &mut String, indent: &str, licenses: &[CycloneDxLicenseChoice]) {
+    if licenses.is_empty() {
+        return;
+    }
+    xml.push_str(&format!("{indent}<licenses>\n"));
+    for license_choice in licenses {
+        if !license_choice.expression.is_empty() {
+            xml.push_str(&format!(
+                "{indent}  <expression>{}</expression>\n",
+                xml_escape(&license_choice.expression)
+            ));
+            continue;
+        }
+        let Some(license) = license_choice.license.as_ref() else {
+            continue;
+        };
+        xml.push_str(&format!("{indent}  <license>"));
+        if !license.id.is_empty() {
+            xml.push_str(&format!("<id>{}</id>", xml_escape(&license.id)));
+        } else if !license.name.is_empty() {
+            xml.push_str(&format!("<name>{}</name>", xml_escape(&license.name)));
+        }
+        if !license.url.is_empty() {
+            xml.push_str(&format!("<url>{}</url>", xml_escape(&license.url)));
+        }
+        xml.push_str("</license>\n");
+    }
+    xml.push_str(&format!("{indent}</licenses>\n"));
+}
+
 fn write_component(xml: &mut String, indent: &str, component: &CycloneDxComponent) {
     xml.push_str(&format!(
         "{indent}<component type=\"{}\" bom-ref=\"{}\">\n",
@@ -1949,32 +2015,7 @@ fn write_component(xml: &mut String, indent: &str, component: &CycloneDxComponen
             xml_escape(&component.purl)
         ));
     }
-    if !component.licenses.is_empty() {
-        xml.push_str(&format!("{indent}  <licenses>\n"));
-        for license_choice in &component.licenses {
-            if !license_choice.expression.is_empty() {
-                xml.push_str(&format!(
-                    "{indent}    <expression>{}</expression>\n",
-                    xml_escape(&license_choice.expression)
-                ));
-                continue;
-            }
-            let Some(license) = license_choice.license.as_ref() else {
-                continue;
-            };
-            xml.push_str(&format!("{indent}    <license>"));
-            if !license.id.is_empty() {
-                xml.push_str(&format!("<id>{}</id>", xml_escape(&license.id)));
-            } else if !license.name.is_empty() {
-                xml.push_str(&format!("<name>{}</name>", xml_escape(&license.name)));
-            }
-            if !license.url.is_empty() {
-                xml.push_str(&format!("<url>{}</url>", xml_escape(&license.url)));
-            }
-            xml.push_str("</license>\n");
-        }
-        xml.push_str(&format!("{indent}  </licenses>\n"));
-    }
+    write_license_choices(xml, &format!("{indent}  "), &component.licenses);
     if !component.hashes.is_empty() {
         xml.push_str(&format!("{indent}  <hashes>\n"));
         for hash in &component.hashes {
@@ -2088,6 +2129,7 @@ mod tests {
             }],
             external_references: Vec::new(),
             organizational_entity: None,
+            metadata_licenses: Vec::new(),
         }
     }
 
@@ -2134,6 +2176,13 @@ mod tests {
     #[test]
     fn renders_deterministic_json_from_explicit_contract() {
         let mut contract = sample_contract();
+        contract
+            .metadata_licenses
+            .push(CycloneDxLicenseChoice::from_license(CycloneDxLicense {
+                id: "Apache-2.0".to_string(),
+                name: String::new(),
+                url: "https://www.apache.org/licenses/LICENSE-2.0".to_string(),
+            }));
         contract.components[1].hashes.push(CycloneDxHash {
             algorithm: "SHA-256".to_string(),
             content: "0123456789abcdef".to_string(),
@@ -2152,6 +2201,8 @@ mod tests {
         let json = render_json(&contract).unwrap();
         assert!(json.contains("\"bomFormat\": \"CycloneDX\""));
         assert!(json.contains("\"specVersion\": \"1.6\""));
+        assert!(json.contains("\"licenses\""));
+        assert!(json.contains("\"id\": \"Apache-2.0\""));
         assert!(json.contains("\"externalReferences\""));
         assert!(json.contains("\"hashes\""));
         assert!(json.contains("\"alg\": \"SHA-256\""));
@@ -2181,6 +2232,13 @@ mod tests {
     #[test]
     fn renders_deterministic_xml_from_explicit_contract() {
         let mut contract = sample_contract();
+        contract
+            .metadata_licenses
+            .push(CycloneDxLicenseChoice::from_license(CycloneDxLicense {
+                id: "MIT".to_string(),
+                name: String::new(),
+                url: "https://opensource.org/license/mit/".to_string(),
+            }));
         contract.components[0]
             .licenses
             .push(CycloneDxLicenseChoice::from_license(CycloneDxLicense {
@@ -2221,6 +2279,9 @@ mod tests {
         let xml = render_xml(&contract).unwrap();
         assert!(xml.contains("http://cyclonedx.org/schema/bom/1.6"));
         assert!(xml.contains("<metadata>"));
+        assert!(xml.contains(
+            "<license><id>MIT</id><url>https://opensource.org/license/mit/</url></license>"
+        ));
         assert!(xml.contains("<externalReferences>"));
         assert!(xml.contains("<reference type=\"website\">"));
         assert!(xml.contains("<url>https://example.invalid/app</url>"));
@@ -2392,7 +2453,8 @@ mod tests {
         assert!(!options.include_build_environment);
         assert!(!options.include_license_text);
         assert!(!options.organizational_entity_present);
-        assert_eq!("", options.license_choice);
+        assert!(!options.raw_license_choice_present);
+        assert!(options.license_choices.is_empty());
         assert_eq!("", options.build_system_environment_variable);
         assert_eq!("", options.build_system_url);
         assert_eq!("/tmp/bom.json", options.json_output);
@@ -2433,6 +2495,14 @@ mod tests {
         });
         let encoded_organizational_entity = base64::engine::general_purpose::STANDARD
             .encode(serde_json::to_vec(&organizational_entity_json).unwrap());
+        let license_choice_json = serde_json::json!([{
+            "license": {
+                "id": "Apache-2.0",
+                "url": "https://www.apache.org/licenses/LICENSE-2.0"
+            }
+        }]);
+        let encoded_license_choice = base64::engine::general_purpose::STANDARD
+            .encode(serde_json::to_vec(&license_choice_json).unwrap());
         let inputs = BTreeMap::from([
             (
                 "cyclonedx_resolution_graph_json_b64".to_string(),
@@ -2476,6 +2546,11 @@ mod tests {
                 "cyclonedx_organizational_entity_json_b64".to_string(),
                 encoded_organizational_entity,
             ),
+            ("cyclonedx_license_choice".to_string(), "SPDX".to_string()),
+            (
+                "cyclonedx_license_choice_json_b64".to_string(),
+                encoded_license_choice,
+            ),
             (
                 "cyclonedx_json_output".to_string(),
                 "/tmp/bom.json".to_string(),
@@ -2505,6 +2580,14 @@ mod tests {
         assert_eq!(
             "Example Security",
             contract.organizational_entity.as_ref().unwrap().name
+        );
+        assert_eq!(
+            vec![CycloneDxLicenseChoice::from_license(CycloneDxLicense {
+                id: "Apache-2.0".to_string(),
+                name: String::new(),
+                url: "https://www.apache.org/licenses/LICENSE-2.0".to_string(),
+            })],
+            contract.metadata_licenses
         );
         assert!(contract
             .components

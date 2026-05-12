@@ -1304,6 +1304,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "cyclonedx_organizational_entity_json_b64", organizationalEntityJsonBase64);
         String licenseChoice = enumName(invokeOptionalProvider(task, taskType, "getLicenseChoice"));
         putIfPresent(inputs, "cyclonedx_license_choice", licenseChoice);
+        String licenseChoiceJsonBase64 = cyclonedxLicenseChoiceJsonBase64(invokeOptional(task, taskType, "getLicenseChoice"));
+        putIfPresent(inputs, "cyclonedx_license_choice_json_b64", licenseChoiceJsonBase64);
         String buildSystemEnvironmentVariable = providerValue(invokeOptional(task, taskType, "getBuildSystemEnvironmentVariable"));
         putIfPresent(inputs, "cyclonedx_build_system_environment_variable", buildSystemEnvironmentVariable);
         if ("true".equalsIgnoreCase(includeBuildSystem)) {
@@ -1334,9 +1336,45 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         inputs.put("cyclonedx_sbom_contract_status", resolutionGraphJsonBase64.isEmpty() ? "missing" : "partial");
         inputs.put(
             "cyclonedx_missing_contract_fields",
-            cyclonedxMissingContractFields(missingBaseFields, includeBomSerialNumber, includeLicenseText, organizationalEntityPresent, organizationalEntityJsonBase64, licenseChoice, externalReferences, externalReferencesJsonBase64)
+            cyclonedxMissingContractFields(missingBaseFields, includeBomSerialNumber, includeLicenseText, organizationalEntityPresent, organizationalEntityJsonBase64, licenseChoice, licenseChoiceJsonBase64, externalReferences, externalReferencesJsonBase64)
         );
         inputs.put("requires_jvm_task_execution", "true");
+    }
+
+    private static String cyclonedxLicenseChoiceJsonBase64(@Nullable Object value) {
+        Object providerValue = invokeOptional(value, "getOrNull");
+        Object licenseChoice = providerValue == null ? value : providerValue;
+        if (licenseChoice == null) {
+            return "";
+        }
+        List<String> choices = new ArrayList<>();
+        Object expression = invokeOptional(licenseChoice, "getExpression");
+        if (expression != null && !stringOrEmpty(expression).isEmpty()) {
+            choices.add("{\"expression\":\"" + escapeJson(stringOrEmpty(expression)) + "\"}");
+        }
+        Object licenses = invokeOptional(licenseChoice, "getLicenses");
+        if (licenses instanceof Iterable) {
+            for (Object license : (Iterable<?>) licenses) {
+                if (license == null) {
+                    continue;
+                }
+                String id = stringOrEmpty(invokeOptional(license, "getId"));
+                String name = stringOrEmpty(invokeOptional(license, "getName"));
+                String url = stringOrEmpty(invokeOptional(license, "getUrl"));
+                if (id.isEmpty() && name.isEmpty()) {
+                    continue;
+                }
+                choices.add("{\"license\":{\"id\":\"" + escapeJson(id)
+                    + "\",\"name\":\"" + escapeJson(name)
+                    + "\",\"url\":\"" + escapeJson(url)
+                    + "\"}}");
+            }
+        }
+        if (choices.isEmpty()) {
+            return "";
+        }
+        String json = "[" + String.join(",", choices) + "]";
+        return Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
     }
 
     private static String cyclonedxBuildSystemUrl(String configuredEnvironmentVariable) {
@@ -1487,6 +1525,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         String organizationalEntityPresent,
         String organizationalEntityJsonBase64,
         String licenseChoice,
+        String licenseChoiceJsonBase64,
         String externalReferences,
         String externalReferencesJsonBase64
     ) {
@@ -1501,7 +1540,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if ("true".equalsIgnoreCase(organizationalEntityPresent) && (organizationalEntityJsonBase64 == null || organizationalEntityJsonBase64.isEmpty())) {
             fields.add("organizational-entity-rendering");
         }
-        if (licenseChoice != null && !licenseChoice.isEmpty()) {
+        if (licenseChoice != null && !licenseChoice.isEmpty() && (licenseChoiceJsonBase64 == null || licenseChoiceJsonBase64.isEmpty())) {
             fields.add("license-choice-rendering");
         }
         if (externalReferences != null && !externalReferences.isEmpty() && (externalReferencesJsonBase64 == null || externalReferencesJsonBase64.isEmpty())) {
