@@ -123,6 +123,19 @@ precompiled Kotlin DSL plugin generation, Gradle plugin descriptor generation,
 and Kotlin Gradle plugin diagnostics. Earlier native-ready smoke runs delegated before concrete Rust
 execution, so they are no longer counted as Rust-executed support evidence.
 
+CycloneDX was inspected as a possible native promotion target and remains
+fail-closed by design. The current captured contract for
+`org.cyclonedx.gradle.CyclonedxDirectTask` exposes the resolved artifact files
+as path inputs and the two declared report outputs, but it does not expose the
+resolved dependency edge graph, component metadata/properties, scope mapping,
+CycloneDX plugin options, serial/timestamp policy, or JSON/XML generation
+semantics needed to reproduce the upstream SBOM faithfully. The aggregate task
+only exposes the direct BOM files as inputs and its aggregate JSON output. The
+observed upstream direct and aggregate JSON files differ in serial number,
+timestamp, root component type, and dependency ordering. A native implementation
+must therefore start with a schema-backed SBOM IR contract; copying or
+synthesizing files from artifact paths would overclaim parity.
+
 Related docs:
 
 - [`docs/rust-substrate-preview.md`](rust-substrate-preview.md)
