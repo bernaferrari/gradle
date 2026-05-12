@@ -1296,6 +1296,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         String includeLicenseText = providerBooleanString(invokeOptional(task, taskType, "getIncludeLicenseText"));
         putIfPresent(inputs, "cyclonedx_include_license_text", includeLicenseText);
         putIfPresent(inputs, "cyclonedx_include_metadata_resolution", providerBooleanString(invokeOptional(task, taskType, "getIncludeMetadataResolution")));
+        String organizationalEntityPresent = providerPresentString(invokeOptional(task, taskType, "getOrganizationalEntity"));
+        putIfPresent(inputs, "cyclonedx_organizational_entity_present", organizationalEntityPresent);
         String licenseChoice = enumName(invokeOptionalProvider(task, taskType, "getLicenseChoice"));
         putIfPresent(inputs, "cyclonedx_license_choice", licenseChoice);
         String buildSystemEnvironmentVariable = providerValue(invokeOptional(task, taskType, "getBuildSystemEnvironmentVariable"));
@@ -1314,8 +1316,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         inputs.put(
             "cyclonedx_missing_contract_fields",
             resolutionGraphJsonBase64.isEmpty()
-                ? cyclonedxMissingContractFields("resolution-result-edges,component-metadata,license-metadata,timestamp-source-policy,aggregate-merge-policy", includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, licenseChoice, buildSystemEnvironmentVariable, externalReferences)
-                : cyclonedxMissingContractFields("component-metadata,license-metadata,timestamp-source-policy,aggregate-merge-policy", includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, licenseChoice, buildSystemEnvironmentVariable, externalReferences)
+                ? cyclonedxMissingContractFields("resolution-result-edges,component-metadata,license-metadata,timestamp-source-policy,aggregate-merge-policy", includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, organizationalEntityPresent, licenseChoice, buildSystemEnvironmentVariable, externalReferences)
+                : cyclonedxMissingContractFields("component-metadata,license-metadata,timestamp-source-policy,aggregate-merge-policy", includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, organizationalEntityPresent, licenseChoice, buildSystemEnvironmentVariable, externalReferences)
         );
         inputs.put("requires_jvm_task_execution", "true");
     }
@@ -1326,6 +1328,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         String includeBuildSystem,
         String includeBuildEnvironment,
         String includeLicenseText,
+        String organizationalEntityPresent,
         String licenseChoice,
         String buildSystemEnvironmentVariable,
         String externalReferences
@@ -1343,6 +1346,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         }
         if ("true".equalsIgnoreCase(includeLicenseText)) {
             fields.add("license-text-rendering");
+        }
+        if ("true".equalsIgnoreCase(organizationalEntityPresent)) {
+            fields.add("organizational-entity-rendering");
         }
         if (licenseChoice != null && !licenseChoice.isEmpty()) {
             fields.add("license-choice-rendering");
@@ -1979,6 +1985,17 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         Object providerValue = invokeOptional(value, "getOrNull");
         Object candidate = providerValue == null ? value : providerValue;
         return candidate instanceof Boolean ? candidate.toString() : "";
+    }
+
+    private static String providerPresentString(@Nullable Object value) {
+        if (value == null) {
+            return "";
+        }
+        Object isPresent = invokeOptional(value, "isPresent");
+        if (isPresent instanceof Boolean) {
+            return isPresent.toString();
+        }
+        return invokeOptional(value, "getOrNull") == null ? "" : "true";
     }
 
     private static String providerStringList(@Nullable Object value) {
