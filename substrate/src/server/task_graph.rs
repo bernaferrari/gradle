@@ -24,6 +24,7 @@ use super::build_plan_ir::{
     CanonicalBuildPlanDependency, CanonicalBuildPlanProject, CanonicalBuildPlanTask,
 };
 use super::build_plan_shadow::BuildPlanShadowStore;
+use super::cyclonedx_sbom::draft_contract_from_captured_inputs;
 use super::execution_history::ExecutionHistoryServiceImpl;
 use super::scopes::BuildId;
 
@@ -210,6 +211,7 @@ impl TaskGraphServiceImpl {
                 );
             }
             enrich_task_contract_from_graph(&mut task, &task_outputs, &plan_dependencies);
+            maybe_synthesize_cyclonedx_sbom_contract(&mut task, &build_id_str);
             if !clean_tasks.is_empty() && !is_clean_task_path(&task.path) {
                 for clean_task in &clean_tasks {
                     if !task.depends_on.contains(clean_task) {
@@ -845,6 +847,64 @@ fn enrich_task_contract_from_graph(
     if is_resolve_main_class_name_task(task) {
         infer_resolved_main_class_output(task);
     }
+}
+
+fn maybe_synthesize_cyclonedx_sbom_contract(task: &mut CanonicalBuildPlanTask, build_id: &str) {
+    let simple = task
+        .implementation_id
+        .rsplit('.')
+        .next()
+        .unwrap_or(task.implementation_id.as_str());
+    if simple != "CyclonedxDirectTask" || has_input_value(task, "sbom_contract_json_b64") {
+        return;
+    }
+    let Some(timestamp_ms) = input_value(task, "cyclonedx_timestamp_epoch_ms")
+        .and_then(|value| value.parse::<i64>().ok())
+    else {
+        return;
+    };
+    let captured = task
+        .input_specs
+        .iter()
+        .filter(|input| input.kind == "value" && input.name.starts_with("cyclonedx_"))
+        .map(|input| (input.name.clone(), input.value.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let Ok(contract) = draft_contract_from_captured_inputs(&captured, build_id, timestamp_ms)
+    else {
+        return;
+    };
+    let Ok(contract_json) = serde_json::to_string(&contract) else {
+        return;
+    };
+    let encoded = STANDARD.encode(contract_json);
+    set_value_input(
+        task,
+        "sbom_contract_json_b64",
+        &encoded,
+        "cyclonedx-sbom-contract-synthesized",
+        "scalar",
+    );
+    set_value_input(
+        task,
+        "cyclonedx_sbom_contract_status",
+        "complete",
+        "cyclonedx-sbom-contract-synthesized",
+        "scalar",
+    );
+    set_value_input(
+        task,
+        "cyclonedx_missing_contract_fields",
+        "",
+        "cyclonedx-sbom-contract-synthesized",
+        "scalar",
+    );
+    set_value_input(
+        task,
+        "requires_jvm_task_execution",
+        "false",
+        "cyclonedx-sbom-contract-synthesized",
+        "scalar",
+    );
 }
 
 fn add_archive_convention_dependencies(
@@ -2850,6 +2910,75 @@ mod tests {
                 .get("sbom_contract_json_b64")
                 .and_then(|value| value.as_str()),
             Some("encoded")
+        );
+    }
+
+    #[test]
+    fn test_cyclonedx_direct_captured_inputs_synthesize_sbom_contract() {
+        let graph_json = serde_json::json!({
+            "schema": "gradle-substrate.cyclonedx-resolution-graph.v1",
+            "configurations": [{
+                "name": "runtimeClasspath",
+                "components": [{
+                    "id": "org.example:app:1.0",
+                    "group": "org.example",
+                    "module": "app",
+                    "version": "1.0"
+                }],
+                "dependencies": []
+            }]
+        })
+        .to_string();
+        let encoded_graph = STANDARD.encode(graph_json);
+        let mut task = canonical_task(
+            ":cyclonedxDirectBom",
+            "org.cyclonedx.gradle.CyclonedxDirectTask",
+            Vec::new(),
+            vec!["/repo/build/bom.json".to_string()],
+        );
+        task.input_specs = vec![
+            value_input("cyclonedx_resolution_graph_json_b64", &encoded_graph),
+            value_input("cyclonedx_identity_task_path", ":cyclonedxDirectBom"),
+            value_input("cyclonedx_schema_version", "VERSION_16"),
+            value_input("cyclonedx_component_group", "org.example"),
+            value_input("cyclonedx_component_name", "app"),
+            value_input("cyclonedx_component_version", "1.0"),
+            value_input("cyclonedx_project_type", "APPLICATION"),
+            value_input("cyclonedx_json_output", "/repo/build/bom.json"),
+            value_input("cyclonedx_include_bom_serial_number", "false"),
+            value_input("cyclonedx_serial_source_policy", "omitted"),
+            value_input(
+                "cyclonedx_timestamp_source_policy",
+                "gradle-substrate-explicit-epoch-ms",
+            ),
+            value_input("cyclonedx_timestamp_epoch_ms", "1778595445123"),
+            value_input("cyclonedx_include_build_system", "false"),
+            value_input("cyclonedx_include_build_environment", "false"),
+            value_input("cyclonedx_include_license_text", "false"),
+            value_input("cyclonedx_include_metadata_resolution", "false"),
+        ];
+
+        maybe_synthesize_cyclonedx_sbom_contract(&mut task, "build-123");
+
+        assert_eq!(executable_task_type(&task), "CycloneDxSbom");
+        let encoded_contract = input_value(&task, "sbom_contract_json_b64").unwrap();
+        let decoded = STANDARD.decode(encoded_contract).unwrap();
+        let contract: serde_json::Value = serde_json::from_slice(&decoded).unwrap();
+        assert_eq!(
+            contract.get("schema").and_then(|value| value.as_str()),
+            Some("gradle-substrate.cyclonedx-sbom.v1")
+        );
+        assert_eq!(
+            contract.get("timestamp").and_then(|value| value.as_str()),
+            Some("2026-05-12T14:17:25Z")
+        );
+        assert_eq!(
+            input_value(&task, "cyclonedx_sbom_contract_status").as_deref(),
+            Some("complete")
+        );
+        assert_eq!(
+            input_value(&task, "requires_jvm_task_execution").as_deref(),
+            Some("false")
         );
     }
 
