@@ -1344,7 +1344,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         inputs.put("cyclonedx_sbom_contract_status", resolutionGraphJsonBase64.isEmpty() ? "missing" : "partial");
         inputs.put(
             "cyclonedx_missing_contract_fields",
-            cyclonedxMissingContractFields(missingBaseFields, includeBomSerialNumber, includeLicenseText, includeMetadataResolution, organizationalEntityPresent, organizationalEntityJsonBase64, licenseChoice, licenseChoiceJsonBase64, externalReferences, externalReferencesJsonBase64)
+            cyclonedxMissingContractFields(missingBaseFields, includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, includeMetadataResolution, organizationalEntityPresent, organizationalEntityJsonBase64, licenseChoice, licenseChoiceJsonBase64, externalReferences, externalReferencesJsonBase64)
         );
         inputs.put("requires_jvm_task_execution", "true");
     }
@@ -1566,6 +1566,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     private static String cyclonedxMissingContractFields(
         String baseFields,
         String includeBomSerialNumber,
+        String includeBuildSystem,
+        String includeBuildEnvironment,
         String includeLicenseText,
         String includeMetadataResolution,
         String organizationalEntityPresent,
@@ -1579,6 +1581,12 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         Collections.addAll(fields, baseFields.split(","));
         if (!"false".equalsIgnoreCase(includeBomSerialNumber)) {
             fields.add("serial-source-policy");
+        }
+        if (!"true".equalsIgnoreCase(includeBuildSystem) && !"false".equalsIgnoreCase(includeBuildSystem)) {
+            fields.add("build-system-policy");
+        }
+        if (!"true".equalsIgnoreCase(includeBuildEnvironment) && !"false".equalsIgnoreCase(includeBuildEnvironment)) {
+            fields.add("build-environment-policy");
         }
         if (!"false".equalsIgnoreCase(includeLicenseText)) {
             fields.add("license-text-rendering");
