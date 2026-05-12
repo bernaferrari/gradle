@@ -32,13 +32,21 @@ tools/demo/rust_substrate_demo.sh
 The direct first-60s metrics command is:
 
 ```bash
-python3 tools/demo/first_60_seconds.py --mode fast --skip-build --output build/first60-preview.json
+python3 tools/demo/first_60_seconds.py \
+  --mode fast \
+  --skip-build \
+  --output build/first60-preview.json \
+  --markdown-output build/first60-preview.md
 ```
 
 The heavier proof command is:
 
 ```bash
-python3 tools/demo/first_60_seconds.py --mode proof --skip-build --output build/first60-preview-proof.json
+python3 tools/demo/first_60_seconds.py \
+  --mode proof \
+  --skip-build \
+  --output build/first60-preview-proof.json \
+  --markdown-output build/first60-preview-proof.md
 ```
 
 These commands assume this fork has already produced `build/gradle-under-test`
@@ -229,13 +237,21 @@ how to update `PARITY.md`, and how to record evidence in Beads.
 Fast preview metrics:
 
 ```bash
-python3 tools/demo/first_60_seconds.py --mode fast --skip-build --output build/first60-preview.json
+python3 tools/demo/first_60_seconds.py \
+  --mode fast \
+  --skip-build \
+  --output build/first60-preview.json \
+  --markdown-output build/first60-preview.md
 ```
 
 Proof preview metrics:
 
 ```bash
-python3 tools/demo/first_60_seconds.py --mode proof --skip-build --output build/first60-preview-proof.json
+python3 tools/demo/first_60_seconds.py \
+  --mode proof \
+  --skip-build \
+  --output build/first60-preview-proof.json \
+  --markdown-output build/first60-preview-proof.md
 ```
 
 Offline supported corpus:

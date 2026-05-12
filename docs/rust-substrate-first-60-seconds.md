@@ -28,7 +28,10 @@ inspect a profiler:
 Run:
 
 ```bash
-python3 tools/demo/first_60_seconds.py --mode fast --output build/first60.json
+python3 tools/demo/first_60_seconds.py \
+  --mode fast \
+  --output build/first60.json \
+  --markdown-output build/first60.md
 ```
 
 The Rust wrapper can also be used as the first-minute entry point after the
@@ -98,7 +101,10 @@ metric fails or when any headline budget regresses beyond the allowed band:
 Proof mode keeps the heavier subsystem checks out of the default visible demo:
 
 ```bash
-python3 tools/demo/first_60_seconds.py --mode proof --output build/first60-proof.json
+python3 tools/demo/first_60_seconds.py \
+  --mode proof \
+  --output build/first60-proof.json \
+  --markdown-output build/first60-proof.md
 ```
 
 Proof mode reports:
