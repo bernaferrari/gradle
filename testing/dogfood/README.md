@@ -56,6 +56,11 @@ python3 tools/dogfood_runner/run.py \
 The execution path writes `dogfood-results.json`, one `result.json` per project,
 and `dogfood-summary.md`.
 
+For execution runs, the dogfood runner prewarms one shared Rust substrate daemon
+under the selected output directory and passes that state directory to each
+substrate invocation. This keeps project workdirs and Gradle homes isolated
+while measuring the preview path without repeated Rust daemon startup.
+
 This is not a full Gradle compatibility claim. The dogfood manifest is a
 showability gate: supported entries must prove no JVM task forwards and parity
 for configured checks; unsupported entries must produce precise fail-closed

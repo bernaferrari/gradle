@@ -689,6 +689,7 @@ def build_gradle_command(
     runbuild_authoritative: bool = False,
     runbuild_native_ready_default: bool = False,
     gradle_command: str | None = None,
+    extra_gradle_args: list[str] | None = None,
 ) -> list[str]:
     """Build the Gradle invocation used by corpus runs."""
     if gradle_command:
@@ -723,6 +724,7 @@ def build_gradle_command(
             cmd.append("-Dorg.gradle.rust.substrate.runbuild.native-ready-default=true")
         if runbuild_authoritative or runbuild_native_ready_default:
             cmd.append("--info")
+        cmd.extend(extra_gradle_args or [])
 
     return cmd
 
@@ -1178,6 +1180,7 @@ def run_build(
     runbuild_authoritative: bool = False,
     runbuild_native_ready_default: bool = False,
     gradle_command: str | None = None,
+    extra_gradle_args: list[str] | None = None,
 ) -> RunResult:
     """Run gradle on a project directory."""
     cmd = build_gradle_command(
@@ -1189,6 +1192,7 @@ def run_build(
         runbuild_authoritative=runbuild_authoritative,
         runbuild_native_ready_default=runbuild_native_ready_default,
         gradle_command=gradle_command,
+        extra_gradle_args=extra_gradle_args,
     )
     
     start = time.monotonic()
