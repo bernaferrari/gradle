@@ -75,6 +75,8 @@ use gradle_substrate_daemon::{
     PROTOCOL_VERSION,
 };
 
+const MAX_GRPC_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+
 /// Gradle Rust Substrate Daemon
 ///
 /// A sidecar process that provides high-performance execution
@@ -417,15 +419,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("No JVM host connection established — running in standalone mode");
     });
 
+    let task_graph_service = TaskGraphServiceServer::new((*task_graph).clone())
+        .max_decoding_message_size(MAX_GRPC_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_GRPC_MESSAGE_BYTES);
+    let execution_plan_service = ExecutionPlanServiceServer::new(execution_plan)
+        .max_decoding_message_size(MAX_GRPC_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_GRPC_MESSAGE_BYTES);
+    let dag_executor_service = DagExecutorServiceServer::new(dag_executor)
+        .max_decoding_message_size(MAX_GRPC_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_GRPC_MESSAGE_BYTES);
+    let bootstrap_service = BootstrapServiceServer::new(bootstrap)
+        .max_decoding_message_size(MAX_GRPC_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_GRPC_MESSAGE_BYTES);
+
     let router = Server::builder()
         .add_service(ControlServiceServer::new(control))
-        .add_service(DagExecutorServiceServer::new(dag_executor))
+        .add_service(dag_executor_service)
         .add_service(HashServiceServer::new(hash))
         .add_service(CacheServiceServer::new(cache))
         .add_service(ClasspathServiceServer::new(ClasspathServiceImpl::new()))
         .add_service(ExecServiceServer::new(exec))
         .add_service(WorkServiceServer::new(work))
-        .add_service(ExecutionPlanServiceServer::new(execution_plan))
+        .add_service(execution_plan_service)
         .add_service(ExecutionHistoryServiceServer::new(
             (*execution_history).clone(),
         ))
@@ -435,12 +450,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(FileFingerprintServiceServer::new(file_fingerprint))
         .add_service(FileTreeServiceServer::new(FileTreeServiceImpl::new()))
         .add_service(ValueSnapshotServiceServer::new(value_snapshot))
-        .add_service(TaskGraphServiceServer::new((*task_graph).clone()))
+        .add_service(task_graph_service)
         .add_service(ConfigurationServiceServer::new(configuration))
         .add_service(PluginServiceServer::new(plugin))
         .add_service(ParserServiceServer::new(parser))
         .add_service(BuildOperationsServiceServer::new(build_operations))
-        .add_service(BootstrapServiceServer::new(bootstrap))
+        .add_service(bootstrap_service)
         .add_service(DependencyResolutionServiceServer::new(
             dependency_resolution,
         ))
