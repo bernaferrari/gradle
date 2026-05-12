@@ -14,7 +14,7 @@
         "subdir": ".",
         "description": "Spring PetClinic pinned to an immutable commit."
       },
-      "tasks": ["clean", "classes"],
+      "tasks": ["clean", "testClasses"],
       "mode": "native-ready-default",
       "expectation": "supported-or-fail-closed",
       "timeout_seconds": 300,
