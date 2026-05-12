@@ -1033,7 +1033,7 @@ mod tests {
                     serde_json::json!({
                         "input_properties": {
                             "input_value.requires_jvm_task_execution": "true",
-                            "input_value.cyclonedx_missing_contract_fields": "component-metadata,serial-timestamp-policy,aggregate-merge-policy"
+                            "input_value.cyclonedx_missing_contract_fields": "component-metadata,timestamp-source-policy,aggregate-merge-policy"
                         }
                     })
                     .to_string(),
@@ -1050,7 +1050,7 @@ mod tests {
         let message = rejection.message();
         assert!(message.contains("requires_jvm_task_execution"));
         assert!(message.contains("component-metadata"));
-        assert!(message.contains("serial-timestamp-policy"));
+        assert!(message.contains("timestamp-source-policy"));
         assert!(message.contains("aggregate-merge-policy"));
     }
 

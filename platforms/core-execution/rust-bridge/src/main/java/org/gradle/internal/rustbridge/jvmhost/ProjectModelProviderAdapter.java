@@ -1307,8 +1307,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         inputs.put(
             "cyclonedx_missing_contract_fields",
             resolutionGraphJsonBase64.isEmpty()
-                ? "resolution-result-edges,component-metadata,license-metadata,serial-timestamp-policy,aggregate-merge-policy"
-                : "component-metadata,license-metadata,serial-timestamp-policy,aggregate-merge-policy"
+                ? "resolution-result-edges,component-metadata,license-metadata,timestamp-source-policy,aggregate-merge-policy"
+                : "component-metadata,license-metadata,timestamp-source-policy,aggregate-merge-policy"
         );
         inputs.put("requires_jvm_task_execution", "true");
     }
