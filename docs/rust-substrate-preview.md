@@ -239,10 +239,13 @@ warm DAG durations are reported; cold must stay at or below 30000 ms, warm must
 stay at or below 10000 ms, and warm must be faster than cold for the checked-in
 Java-library sample. The warm Rust DAG run must report `build-plan-cache` as
 its plan source so configuration-cache replay is visible at the kernel
-admission boundary. Installed authoritative file watching must also complete
-`help --watch-fs` against the local Gradle-under-test image at or below 30000
-ms while observing Rust daemon startup/connection and active Gradle file-system
-watching.
+admission boundary. Fast mode also reports the Rust-only direct cached-plan
+warm path: after one Gradle/JVM capture, `gradle-substrate-runbuild` must skip
+Gradle configuration, validate content fingerprints, execute from
+`build-plan-shadow`, and report zero JVM forwards at or below 10000 ms.
+Installed authoritative file watching must also complete `help --watch-fs`
+against the local Gradle-under-test image at or below 30000 ms while observing
+Rust daemon startup/connection and active Gradle file-system watching.
 
 Gate 4, external dependency corpus parity:
 `testing/corpus/external-manifest.json` covers representative Maven POM,

@@ -142,10 +142,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "project_dir is required because the cached artifact does not contain one".into(),
         );
     }
+    let project_dir_path = Path::new(&project_dir).canonicalize()?;
+    let project_dir = project_dir_path.to_string_lossy().to_string();
     if !args.skip_invalidation {
-        validate_build_definition_mtimes(Path::new(&project_dir), artifact.stored_at_ms)?;
-        validate_task_input_mtimes(&artifact, Path::new(&project_dir), artifact.stored_at_ms)?;
-        validate_input_fingerprints(&artifact, Path::new(&project_dir))?;
+        validate_build_definition_mtimes(&project_dir_path, artifact.stored_at_ms)?;
+        validate_task_input_mtimes(&artifact, &project_dir_path, artifact.stored_at_ms)?;
+        validate_input_fingerprints(&artifact, &project_dir_path)?;
     }
     validate_plan_dependencies(&artifact)?;
     let task_filter = resolve_task_filter(&artifact, &args.tasks)?;
