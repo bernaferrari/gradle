@@ -42,11 +42,16 @@ struct Args {
     /// Optional task paths to execute from the cached plan. Defaults to all tasks.
     #[arg(long = "task")]
     tasks: Vec<String>,
+
+    /// Skip conservative build-definition mtime invalidation checks.
+    #[arg(long)]
+    skip_invalidation: bool,
 }
 
 #[derive(Debug, Deserialize)]
 struct ShadowArtifact {
     plan: ShadowPlan,
+    stored_at_ms: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -99,6 +104,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err(
             "project_dir is required because the cached artifact does not contain one".into(),
         );
+    }
+    if !args.skip_invalidation {
+        validate_build_definition_mtimes(Path::new(&project_dir), artifact.stored_at_ms)?;
     }
 
     let channel = connect_tcp(&args.endpoint).await?;
@@ -260,6 +268,48 @@ fn artifact_matches_project(artifact: &ShadowArtifact, project_dir: &Path) -> bo
 fn path_belongs_to_project(path: &str, project_dir: &Path) -> bool {
     let candidate = Path::new(path);
     candidate.is_absolute() && candidate.starts_with(project_dir)
+}
+
+fn validate_build_definition_mtimes(
+    project_dir: &Path,
+    stored_at_ms: i64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for path in tracked_build_definition_files(project_dir) {
+        let modified_ms = file_modified_ms(&path)?;
+        if modified_ms > stored_at_ms {
+            return Err(format!(
+                "cached build-plan artifact is stale: '{}' was modified at {}ms after artifact stored_at_ms {}",
+                path.display(),
+                modified_ms,
+                stored_at_ms
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
+fn tracked_build_definition_files(project_dir: &Path) -> Vec<PathBuf> {
+    [
+        "build.gradle",
+        "build.gradle.kts",
+        "settings.gradle",
+        "settings.gradle.kts",
+        "gradle.properties",
+        "gradle/libs.versions.toml",
+    ]
+    .into_iter()
+    .map(|relative| project_dir.join(relative))
+    .filter(|path| path.exists())
+    .collect()
+}
+
+fn file_modified_ms(path: &Path) -> Result<i64, Box<dyn std::error::Error>> {
+    Ok(path
+        .metadata()?
+        .modified()?
+        .duration_since(UNIX_EPOCH)?
+        .as_millis() as i64)
 }
 
 async fn connect_tcp(
