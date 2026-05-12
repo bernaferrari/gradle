@@ -96,16 +96,18 @@ Summary from `build/dogfood-oss/dogfood-summary.md`:
 | Rust RunBuild markers | 3/3 |
 | Rust RunBuild executions | 0/3 |
 | Task-graph captures | 3/3 |
-| Upstream observed wall time | 24439 ms |
-| Rust substrate observed wall time | 18441 ms |
+| Upstream observed wall time | 27981 ms |
+| Rust substrate observed wall time | 104262 ms |
 | Upstream task total | 31 |
 | Rust substrate task total | 9 |
 
 The external entries are currently strict fail-closed gates. `spring-petclinic`,
 `mockito-main`, and `okio-root` all reject before Rust execution with
-`composite-substitution:settings`. This is intentional until buildSrc/composite
-configuration can be separated from root selected task execution or modeled
-faithfully. Earlier native-ready smoke runs delegated before concrete Rust
+`settings/includeBuild/buildSrc composite setup`. The precise kernel diagnostic
+also preserves the raw marker `composite-substitution:settings` and explains
+that Rust cannot yet separate JVM-owned composite configuration setup from
+selected root task execution, so strict Rust execution is rejected before task
+dispatch. Earlier native-ready smoke runs delegated before concrete Rust
 execution, so they are no longer counted as Rust-executed support evidence.
 
 Related docs:

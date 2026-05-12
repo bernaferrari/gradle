@@ -1630,7 +1630,10 @@ mod tests {
             "unexpected error: {}",
             error
         );
-        assert!(!path.exists(), "schema-mismatched artifact should be quarantined");
+        assert!(
+            !path.exists(),
+            "schema-mismatched artifact should be quarantined"
+        );
     }
 
     #[test]

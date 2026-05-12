@@ -151,9 +151,9 @@ fn admit_dependency_graph(graph: &KernelDependencyGraph, reasons: &mut Vec<Strin
             ));
         }
         for feature in &configuration.unsupported_features {
-            reasons.push(format!(
-                "dependency configuration '{}' uses unsupported feature '{}'",
-                configuration.name, feature
+            reasons.push(unsupported_dependency_feature_reason(
+                &configuration.name,
+                feature,
             ));
         }
         for repository in &configuration.repositories {
@@ -184,6 +184,22 @@ fn admit_dependency_graph(graph: &KernelDependencyGraph, reasons: &mut Vec<Strin
             }
         }
     }
+}
+
+pub(crate) fn unsupported_dependency_feature_reason(
+    configuration_name: &str,
+    feature: &str,
+) -> String {
+    if feature.trim() == "composite-substitution:settings" {
+        return format!(
+            "dependency configuration '{}' uses JVM-owned settings/includeBuild/buildSrc composite setup ('{}'); Rust cannot yet separate that configuration setup from selected root task execution, so strict Rust execution is rejected before task dispatch",
+            configuration_name, feature
+        );
+    }
+    format!(
+        "dependency configuration '{}' uses unsupported feature '{}'",
+        configuration_name, feature
+    )
 }
 
 fn admit_dependency_request(
@@ -225,7 +241,7 @@ fn kernel_task_contract_rejection(
 
     if context_declares_composite_build(&value) {
         return Some(
-            "unsupported contract marker 'unsupported_dependency_semantics' (composite-substitution:settings)"
+            "unsupported contract marker 'unsupported_dependency_semantics' (JVM-owned settings/includeBuild/buildSrc composite setup: composite-substitution:settings; Rust cannot yet separate that setup from selected root task execution)"
                 .to_string(),
         );
     }
@@ -560,6 +576,10 @@ mod tests {
         assert!(rejection
             .message()
             .contains("composite-substitution:settings"));
+        assert!(rejection
+            .message()
+            .contains("settings/includeBuild/buildSrc"));
+        assert!(rejection.message().contains("selected root task execution"));
     }
 
     #[test]
@@ -618,6 +638,35 @@ mod tests {
         let message = rejection.message();
         assert!(message.contains("component-metadata-rule"));
         assert!(message.contains("unsupported dynamic version"));
+    }
+
+    #[test]
+    fn rejects_composite_dependency_graph_with_precise_boundary_reason() {
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            tasks: vec![task(":testClasses", "Lifecycle", None)],
+            dependency_graph: Some(KernelDependencyGraph {
+                configurations: vec![KernelDependencyConfiguration {
+                    name: "::composite-build".to_string(),
+                    repositories: Vec::new(),
+                    dependencies: Vec::new(),
+                    project_dependencies: Vec::new(),
+                    constraints: Vec::new(),
+                    unsupported_features: vec!["composite-substitution:settings".to_string()],
+                }],
+            }),
+        };
+
+        let KernelAdmission::Rejected(rejection) =
+            admit_build_plan(&plan, &native_types(&["Lifecycle"]))
+        else {
+            panic!("expected rejection");
+        };
+        let message = rejection.message();
+        assert!(message.contains("::composite-build"));
+        assert!(message.contains("settings/includeBuild/buildSrc"));
+        assert!(message.contains("selected root task execution"));
+        assert!(message.contains("before task dispatch"));
     }
 
     #[test]

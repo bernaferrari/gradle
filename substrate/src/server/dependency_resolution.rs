@@ -21,9 +21,9 @@ use super::dependency_solver::gradle_module_metadata;
 use super::dependency_solver::graph_builder;
 #[cfg(test)]
 use super::dependency_solver::ivyresolve::strategy::compare_versions;
-use super::dependency_solver::maven_metadata::{self, MavenMetadata};
 #[cfg(test)]
 use super::dependency_solver::maven_metadata::MavenVersioning;
+use super::dependency_solver::maven_metadata::{self, MavenMetadata};
 use super::dependency_solver::maven_pom;
 #[cfg(test)]
 use super::dependency_solver::maven_pom::ParentPom;

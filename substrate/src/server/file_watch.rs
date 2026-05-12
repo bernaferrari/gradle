@@ -1461,8 +1461,7 @@ mod tests {
         let svc = FileWatchServiceImpl::new();
         let dir = tempfile::tempdir().unwrap();
         let fifo_path = dir.path().join("named-pipe");
-        let fifo_cstring =
-            std::ffi::CString::new(fifo_path.to_string_lossy().as_bytes()).unwrap();
+        let fifo_cstring = std::ffi::CString::new(fifo_path.to_string_lossy().as_bytes()).unwrap();
 
         let created = unsafe { libc::mkfifo(fifo_cstring.as_ptr(), 0o600) };
         assert_eq!(created, 0, "mkfifo should create a special file root");
@@ -1480,7 +1479,9 @@ mod tests {
 
         assert_eq!(status.code(), tonic::Code::FailedPrecondition);
         assert!(
-            status.message().contains("unsupported file-watch root type"),
+            status
+                .message()
+                .contains("unsupported file-watch root type"),
             "diagnostic should explain why Rust refused the root: {}",
             status.message()
         );
