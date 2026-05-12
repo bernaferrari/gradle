@@ -96,8 +96,8 @@ Summary from `build/dogfood-oss/dogfood-summary.md`:
 | Rust RunBuild markers | 4/4 |
 | Rust RunBuild executions | 1/4 |
 | Task-graph captures | 4/4 |
-| Upstream observed wall time | 31275 ms |
-| Rust substrate observed wall time | 105104 ms |
+| Upstream observed wall time | 33284 ms |
+| Rust substrate observed wall time | 107128 ms |
 | Upstream task total | 33 |
 | Rust substrate task total | 11 |
 
@@ -113,7 +113,10 @@ at selected-task admission on Kotlin/build-logic tasks such as `KotlinCompile`,
 precompiled script plugin generation, and plugin descriptor generation. That is
 the narrower honest boundary: Rust has separated configuration-only composite
 setup from root task admission, but it still must not approximate Kotlin
-build-logic execution. Earlier native-ready smoke runs delegated before concrete Rust
+build-logic execution. The diagnostics are grouped by missing capability:
+native Kotlin compilation or a Rust-controlled Kotlin compiler worker contract,
+precompiled Kotlin DSL plugin generation, Gradle plugin descriptor generation,
+and Kotlin Gradle plugin diagnostics. Earlier native-ready smoke runs delegated before concrete Rust
 execution, so they are no longer counted as Rust-executed support evidence.
 
 Related docs:

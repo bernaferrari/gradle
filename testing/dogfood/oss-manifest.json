@@ -65,7 +65,7 @@
       "timeout_seconds": 300,
       "reason": "Recognizable Gradle-heavy OSS build for admission diagnostics and plugin-boundary honesty. The current selected help slice reaches selected-task admission and fails closed on Kotlin/precompiled-plugin build-logic tasks without native executors.",
       "checks": {
-        "fail_closed_diagnostic": "KotlinCompile) has no Rust executor",
+        "fail_closed_diagnostic": "requires native Kotlin compilation support or a Rust-controlled Kotlin compiler worker contract",
         "no_task_by_task_fallback": true
       }
     },
@@ -85,7 +85,7 @@
       "timeout_seconds": 300,
       "reason": "Recognizable Gradle build with Kotlin/native/plugin semantics that should not be approximated by Rust. The current selected help slice reaches selected-task admission and fails closed on Kotlin/plugin-descriptor tasks without native executors.",
       "checks": {
-        "fail_closed_diagnostic": "KotlinCompile) has no Rust executor",
+        "fail_closed_diagnostic": "requires native Kotlin compilation support or a Rust-controlled Kotlin compiler worker contract",
         "no_task_by_task_fallback": true
       }
     }

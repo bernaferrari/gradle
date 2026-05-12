@@ -143,6 +143,30 @@ fn missing_native_executor_reason(task_path: &str, task_type: &str) -> String {
             task_path, task_type
         );
     }
+    if is_kotlin_compile_task(task_type) {
+        return format!(
+            "{} ({}) requires native Kotlin compilation support or a Rust-controlled Kotlin compiler worker contract; Rust cannot approximate Kotlin task execution",
+            task_path, task_type
+        );
+    }
+    if is_precompiled_kotlin_dsl_task(task_type) {
+        return format!(
+            "{} ({}) requires native precompiled Kotlin DSL plugin generation support; Rust cannot synthesize script plugin accessors/adapters without modeling Gradle's Kotlin DSL generator",
+            task_path, task_type
+        );
+    }
+    if is_plugin_descriptor_task(task_type) {
+        return format!(
+            "{} ({}) requires native Gradle plugin descriptor generation support; Rust cannot approximate META-INF/gradle-plugins output generation",
+            task_path, task_type
+        );
+    }
+    if is_kotlin_plugin_diagnostic_task(task_type) {
+        return format!(
+            "{} ({}) requires Kotlin Gradle plugin diagnostics support; Rust cannot decide this task as lifecycle/no-op without the Kotlin plugin contract",
+            task_path, task_type
+        );
+    }
     format!("{} ({}) has no Rust executor", task_path, task_type)
 }
 
@@ -151,6 +175,31 @@ fn is_cyclonedx_sbom_task(task_type: &str) -> bool {
         task_type,
         "org.cyclonedx.gradle.CyclonedxAggregateTask" | "org.cyclonedx.gradle.CyclonedxDirectTask"
     )
+}
+
+fn is_kotlin_compile_task(task_type: &str) -> bool {
+    task_type == "org.jetbrains.kotlin.gradle.tasks.KotlinCompile"
+        || task_type.ends_with(".KotlinCompile")
+        || task_type == "KotlinCompile"
+}
+
+fn is_precompiled_kotlin_dsl_task(task_type: &str) -> bool {
+    matches!(
+        task_type,
+        "org.gradle.kotlin.dsl.provider.plugins.precompiled.tasks.ExtractPrecompiledScriptPluginPlugins"
+            | "org.gradle.kotlin.dsl.provider.plugins.precompiled.tasks.GenerateExternalPluginSpecBuilders"
+            | "org.gradle.kotlin.dsl.provider.plugins.precompiled.tasks.GeneratePrecompiledScriptPluginAccessors"
+            | "org.gradle.kotlin.dsl.provider.plugins.precompiled.tasks.GenerateScriptPluginAdapters"
+    )
+}
+
+fn is_plugin_descriptor_task(task_type: &str) -> bool {
+    task_type == "org.gradle.plugin.devel.tasks.GeneratePluginDescriptors"
+        || task_type == "GeneratePluginDescriptors"
+}
+
+fn is_kotlin_plugin_diagnostic_task(task_type: &str) -> bool {
+    task_type == "org.jetbrains.kotlin.gradle.plugin.diagnostics.CheckKotlinGradlePluginConfigurationErrors"
 }
 
 fn admit_dependency_graph(graph: &KernelDependencyGraph, reasons: &mut Vec<String>) {
@@ -441,6 +490,50 @@ mod tests {
         assert!(message.contains("requires native CycloneDX SBOM generation support"));
         assert!(message.contains("declares SBOM outputs"));
         assert!(!message.contains("CyclonedxDirectTask) has no Rust executor"));
+    }
+
+    #[test]
+    fn rejects_kotlin_build_logic_tasks_with_grouped_capability_diagnostics() {
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![
+                task(
+                    ":compileKotlin",
+                    "org.jetbrains.kotlin.gradle.tasks.KotlinCompile",
+                    None,
+                ),
+                task(
+                    ":generatePrecompiledScriptPluginAccessors",
+                    "org.gradle.kotlin.dsl.provider.plugins.precompiled.tasks.GeneratePrecompiledScriptPluginAccessors",
+                    None,
+                ),
+                task(
+                    ":pluginDescriptors",
+                    "org.gradle.plugin.devel.tasks.GeneratePluginDescriptors",
+                    None,
+                ),
+                task(
+                    ":checkKotlinGradlePluginConfigurationErrors",
+                    "org.jetbrains.kotlin.gradle.plugin.diagnostics.CheckKotlinGradlePluginConfigurationErrors",
+                    None,
+                ),
+            ],
+        };
+
+        let KernelAdmission::Rejected(rejection) =
+            admit_build_plan(&plan, &native_types(&["Lifecycle"]))
+        else {
+            panic!("expected rejection");
+        };
+        let message = rejection.message();
+        assert!(message.contains("native Kotlin compilation support"));
+        assert!(message.contains("Rust-controlled Kotlin compiler worker contract"));
+        assert!(message.contains("native precompiled Kotlin DSL plugin generation support"));
+        assert!(message.contains("native Gradle plugin descriptor generation support"));
+        assert!(message.contains("Kotlin Gradle plugin diagnostics support"));
+        assert!(!message.contains("KotlinCompile) has no Rust executor"));
+        assert!(!message.contains("GeneratePluginDescriptors) has no Rust executor"));
     }
 
     #[test]
