@@ -182,7 +182,7 @@ cargo build -p gradle-substrate-daemon --bin gradle-substrate-runbuild
 
 target/debug/gradle-substrate-runbuild \
   --endpoint tcp://127.0.0.1:58276 \
-  --artifact build/dogfood-overhead-probe/shared-substrate-state/state/config-cache/build-plan-shadow/<artifact>.json \
+  --state-dir build/dogfood-overhead-probe/shared-substrate-state \
   --project-dir "$PWD/testing/corpus/oss-style-java-library-kotlin-dsl" \
   --max-parallelism 4
 ```
@@ -191,10 +191,12 @@ This is not a public replacement CLI yet. It is a proof seam for the next
 architecture step: after Gradle/JVM has produced and validated a supported
 build-plan artifact once, Rust can execute that cached plan directly. Current
 shadow artifacts may have an empty canonical `project_dir`, so the prototype
-requires `--project-dir` for those artifacts. Promoting this to a user-facing
-warm path requires stable build identity, invalidation/fingerprint checks
-against source/settings/build files, selected-task compatibility checks, and a
-safe way to locate the right artifact without asking the user for a path.
+uses `--project-dir` plus absolute task paths to find exactly one matching
+artifact under `--state-dir`. It fails closed when no artifact matches or when
+multiple artifacts match without `--build-id` or explicit `--artifact`.
+Promoting this to a user-facing warm path still requires stable build identity,
+invalidation/fingerprint checks against source/settings/build files, and
+selected-task compatibility checks.
 
 ## Ship Gates
 

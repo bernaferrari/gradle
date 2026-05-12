@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::Parser;
@@ -21,7 +21,15 @@ struct Args {
 
     /// Build-plan shadow artifact JSON written under state/config-cache/build-plan-shadow.
     #[arg(long)]
-    artifact: PathBuf,
+    artifact: Option<PathBuf>,
+
+    /// Substrate state directory containing state/config-cache/build-plan-shadow.
+    #[arg(long)]
+    state_dir: Option<PathBuf>,
+
+    /// Build id to select when multiple cached plans match a project.
+    #[arg(long)]
+    build_id: Option<String>,
 
     /// Project directory to register with the daemon when the cached artifact does not contain one.
     #[arg(long)]
@@ -46,6 +54,8 @@ struct ShadowPlan {
     build_id: String,
     #[serde(default)]
     projects: Vec<ShadowProject>,
+    #[serde(default)]
+    tasks: Vec<ShadowTask>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,11 +64,22 @@ struct ShadowProject {
     project_dir: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct ShadowTask {
+    #[serde(default)]
+    outputs: Vec<String>,
+    #[serde(default)]
+    local_state: Vec<String>,
+    #[serde(default)]
+    destroyables: Vec<String>,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    let artifact = read_artifact(&args.artifact)?;
-    let build_id = artifact.plan.build_id;
+    let artifact_path = resolve_artifact_path(&args)?;
+    let artifact = read_artifact(&artifact_path)?;
+    let build_id = artifact.plan.build_id.clone();
     let project_dir = args
         .project_dir
         .as_ref()
@@ -74,6 +95,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             })
         })
         .unwrap_or_default();
+    if project_dir.trim().is_empty() {
+        return Err(
+            "project_dir is required because the cached artifact does not contain one".into(),
+        );
+    }
 
     let channel = connect_tcp(&args.endpoint).await?;
     let mut bootstrap = BootstrapServiceClient::new(channel.clone());
@@ -146,6 +172,94 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn read_artifact(path: &PathBuf) -> Result<ShadowArtifact, Box<dyn std::error::Error>> {
     let bytes = std::fs::read(path)?;
     Ok(serde_json::from_slice(&bytes)?)
+}
+
+fn resolve_artifact_path(args: &Args) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    if let Some(path) = &args.artifact {
+        return Ok(path.clone());
+    }
+    let state_dir = args
+        .state_dir
+        .as_ref()
+        .ok_or("--state-dir is required when --artifact is not supplied")?;
+    let project_dir = args
+        .project_dir
+        .as_ref()
+        .ok_or("--project-dir is required when locating a cached artifact")?
+        .canonicalize()?;
+    let root = build_plan_shadow_root(state_dir);
+    let mut candidates = Vec::new();
+    for entry in std::fs::read_dir(&root)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let artifact = match read_artifact(&path) {
+            Ok(artifact) => artifact,
+            Err(_) => continue,
+        };
+        if let Some(build_id) = &args.build_id {
+            if artifact.plan.build_id != *build_id {
+                continue;
+            }
+        }
+        if artifact_matches_project(&artifact, &project_dir) {
+            candidates.push((path, artifact.plan.build_id));
+        }
+    }
+    match candidates.len() {
+        0 => Err(format!(
+            "no cached build-plan artifact under '{}' matches project '{}'",
+            root.display(),
+            project_dir.display()
+        )
+        .into()),
+        1 => Ok(candidates.remove(0).0),
+        _ => Err(format!(
+            "multiple cached build-plan artifacts match project '{}': {}; pass --build-id or --artifact",
+            project_dir.display(),
+            candidates
+                .iter()
+                .map(|(_, build_id)| build_id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+        .into()),
+    }
+}
+
+fn build_plan_shadow_root(state_dir: &Path) -> PathBuf {
+    let direct = state_dir.join("config-cache").join("build-plan-shadow");
+    if direct.exists() {
+        return direct;
+    }
+    state_dir
+        .join("state")
+        .join("config-cache")
+        .join("build-plan-shadow")
+}
+
+fn artifact_matches_project(artifact: &ShadowArtifact, project_dir: &Path) -> bool {
+    artifact.plan.projects.iter().any(|project| {
+        let value = project.project_dir.trim();
+        !value.is_empty()
+            && Path::new(value)
+                .canonicalize()
+                .map(|path| path == project_dir)
+                .unwrap_or(false)
+    }) || artifact.plan.tasks.iter().any(|task| {
+        task.outputs
+            .iter()
+            .chain(task.local_state.iter())
+            .chain(task.destroyables.iter())
+            .any(|path| path_belongs_to_project(path, project_dir))
+    })
+}
+
+fn path_belongs_to_project(path: &str, project_dir: &Path) -> bool {
+    let candidate = Path::new(path);
+    candidate.is_absolute() && candidate.starts_with(project_dir)
 }
 
 async fn connect_tcp(
