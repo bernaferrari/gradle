@@ -767,6 +767,118 @@ fn enrich_task_contract_from_graph(
             }
         }
     }
+
+    if is_archive_task(task) {
+        add_archive_convention_dependencies(task, task_outputs);
+    }
+}
+
+fn add_archive_convention_dependencies(
+    task: &mut CanonicalBuildPlanTask,
+    task_outputs: &HashMap<String, Vec<String>>,
+) {
+    let roots = archive_convention_input_roots(task);
+    if roots.is_empty() {
+        return;
+    }
+
+    let mut inferred = task.depends_on.iter().cloned().collect::<HashSet<String>>();
+    for (producer, outputs) in task_outputs {
+        if producer == &task.path || inferred.contains(producer) {
+            continue;
+        }
+        if outputs.iter().any(|output| {
+            let output = std::path::Path::new(output);
+            roots
+                .iter()
+                .any(|root| output == root || output.starts_with(root))
+        }) {
+            task.depends_on.push(producer.clone());
+            inferred.insert(producer.clone());
+        }
+    }
+
+    for producer in archive_convention_producer_paths(task) {
+        if producer != task.path
+            && task_outputs.contains_key(&producer)
+            && inferred.insert(producer.clone())
+        {
+            task.depends_on.push(producer);
+        }
+    }
+}
+
+fn archive_convention_input_roots(task: &CanonicalBuildPlanTask) -> Vec<std::path::PathBuf> {
+    if !is_archive_task(task) {
+        return Vec::new();
+    }
+    let output_paths = output_paths(task);
+    let Some(archive_path) = output_paths.first().map(std::path::Path::new) else {
+        return Vec::new();
+    };
+    let Some(build_dir) = archive_path.parent().and_then(|path| path.parent()) else {
+        return Vec::new();
+    };
+    let Some(project_dir) = build_dir.parent() else {
+        return Vec::new();
+    };
+    let archive_name = archive_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let simple = task
+        .implementation_id
+        .rsplit('.')
+        .next()
+        .unwrap_or(task.implementation_id.as_str());
+    match logical_gradle_task_type(simple).as_str() {
+        "Jar" if archive_name.ends_with("-sources.jar") => vec![
+            project_dir.join("src/main/java"),
+            project_dir.join("src/main/resources"),
+        ],
+        "Jar" if archive_name.ends_with(".jar") => vec![
+            build_dir.join("classes/java/main"),
+            build_dir.join("resources/main"),
+        ],
+        "War" => vec![
+            project_dir.join("src/main/webapp"),
+            build_dir.join("classes/java/main"),
+            build_dir.join("resources/main"),
+        ],
+        "Ear" => vec![project_dir.join("src/main/application")],
+        _ => Vec::new(),
+    }
+}
+
+fn is_archive_task(task: &CanonicalBuildPlanTask) -> bool {
+    let simple = task
+        .implementation_id
+        .rsplit('.')
+        .next()
+        .unwrap_or(task.implementation_id.as_str());
+    matches!(
+        logical_gradle_task_type(simple).as_str(),
+        "Jar" | "Zip" | "War" | "Ear" | "Tar"
+    )
+}
+
+fn archive_convention_producer_paths(task: &CanonicalBuildPlanTask) -> Vec<String> {
+    let Some((project_prefix, task_name)) = task.path.rsplit_once(':') else {
+        return Vec::new();
+    };
+    if task_name != "jar" {
+        return Vec::new();
+    }
+    let prefix = if project_prefix.is_empty() {
+        ":".to_string()
+    } else {
+        format!("{project_prefix}:")
+    };
+    ["compileJava", "processResources", "classes"]
+        .iter()
+        .map(|name| format!("{prefix}{name}"))
+        .collect()
 }
 
 fn is_test_task(task: &CanonicalBuildPlanTask) -> bool {
@@ -1321,11 +1433,6 @@ fn up_to_date_planning_enabled(task_type: &str) -> bool {
             | "Javadoc"
             | "Copy"
             | "Sync"
-            | "Jar"
-            | "Zip"
-            | "War"
-            | "Ear"
-            | "Tar"
             | "TestExec"
             | "CreateStartScripts"
             | "WriteFile"
@@ -2676,6 +2783,8 @@ mod tests {
         );
         assert!(!up_to_date_planning_enabled("Exec"));
         assert!(!up_to_date_planning_enabled("JavaExec"));
+        assert!(!up_to_date_planning_enabled("Jar"));
+        assert!(!up_to_date_planning_enabled("Zip"));
         assert!(up_to_date_planning_enabled("JavaCompile"));
     }
 
@@ -2986,6 +3095,45 @@ mod tests {
                 "/repo/lib/build/libs/lib-1.0.jar"
             ]
         );
+    }
+
+    #[test]
+    fn test_graph_enrichment_adds_jar_dependencies_for_convention_outputs() {
+        let mut task = canonical_task(
+            ":jar",
+            "org.gradle.api.tasks.bundling.Jar",
+            Vec::new(),
+            vec!["/repo/build/libs/app.jar".to_string()],
+        );
+        set_value_input(
+            &mut task,
+            "archive_file",
+            "/repo/build/libs/app.jar",
+            "test",
+            "scalar",
+        );
+        let task_outputs = HashMap::from([
+            (
+                ":compileJava".to_string(),
+                vec!["/repo/build/classes/java/main".to_string()],
+            ),
+            (
+                ":processResources".to_string(),
+                vec!["/repo/build/resources/main".to_string()],
+            ),
+            (":classes".to_string(), Vec::new()),
+            (
+                ":unrelated".to_string(),
+                vec!["/repo/build/generated/other.txt".to_string()],
+            ),
+        ]);
+
+        enrich_task_contract_from_graph(&mut task, &task_outputs, &[]);
+
+        assert_eq!(task.depends_on.len(), 3);
+        assert!(task.depends_on.contains(&":compileJava".to_string()));
+        assert!(task.depends_on.contains(&":processResources".to_string()));
+        assert!(task.depends_on.contains(&":classes".to_string()));
     }
 
     #[test]

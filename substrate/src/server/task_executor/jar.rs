@@ -867,7 +867,9 @@ impl JarTaskExecutor {
             file_mode,
             dir_mode,
         )?;
-        let mapped_payload_entries = entries.iter().any(|entry| !is_manifest_entry(&entry.name));
+        let mapped_payload_entries = entries
+            .iter()
+            .any(|entry| !entry.is_dir() && !is_manifest_entry(&entry.name));
         let collected_convention_entries = if mapped_payload_entries {
             false
         } else {
@@ -1322,6 +1324,44 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(entries.contains(&"nested/app.txt".to_string()));
         assert!(!entries.contains(&"app.txt".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_convention_jar_collects_classes_when_mappings_only_have_directories() {
+        let tmp = TempDir::new().unwrap();
+        let build_dir = tmp.path().join("build");
+        let classes_dir = build_dir.join("classes/java/main");
+        let package_dir = classes_dir.join("com/example");
+        let out_dir = build_dir.join("libs");
+        fs::create_dir_all(&package_dir).unwrap();
+        fs::write(package_dir.join("App.class"), b"class bytes").unwrap();
+
+        let mapping = format!(
+            "{}>{}>D",
+            URL_SAFE_NO_PAD.encode(package_dir.to_string_lossy().as_bytes()),
+            URL_SAFE_NO_PAD.encode("com/example")
+        );
+        let executor = JarTaskExecutor::new();
+        let mut input = TaskInput::new("Jar");
+        input.target_dir = out_dir;
+        input
+            .options
+            .insert("jarName".to_string(), "app.jar".to_string());
+        input
+            .options
+            .insert("copy_file_mappings".to_string(), mapping);
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        let entries = JarTaskExecutor::read_existing_entries(result.output_files.first().unwrap())
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect::<Vec<_>>();
+        assert!(entries.contains(&"com/".to_string()));
+        assert!(entries.contains(&"com/example/".to_string()));
+        assert!(entries.contains(&"com/example/App.class".to_string()));
     }
 
     #[tokio::test]
