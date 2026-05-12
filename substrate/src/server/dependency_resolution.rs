@@ -168,6 +168,17 @@ impl DependencyResolutionServiceImpl {
         PathBuf::from(format!("{}.sha256", path.to_string_lossy()))
     }
 
+    async fn read_sha256_sidecar(path: &Path) -> Option<String> {
+        let sidecar = Self::sha256_sidecar_path(path);
+        let text = tokio::fs::read_to_string(sidecar).await.ok()?;
+        let hash = text.split_whitespace().next()?;
+        if hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            Some(hash.to_ascii_lowercase())
+        } else {
+            None
+        }
+    }
+
     async fn compute_file_sha256(path: &Path) -> Result<String, String> {
         use tokio::io::AsyncReadExt;
 
@@ -187,6 +198,15 @@ impl DependencyResolutionServiceImpl {
             hasher.update(&buf[..read]);
         }
         Ok(format!("{:x}", hasher.finalize()))
+    }
+
+    async fn cached_or_compute_file_sha256(path: &Path) -> Result<String, String> {
+        if let Some(sha256) = Self::read_sha256_sidecar(path).await {
+            return Ok(sha256);
+        }
+        let sha256 = Self::compute_file_sha256(path).await?;
+        Self::write_sha256_sidecar(path, &sha256).await?;
+        Ok(sha256)
     }
 
     async fn write_sha256_sidecar(path: &Path, sha256: &str) -> Result<(), String> {
@@ -980,7 +1000,7 @@ impl DependencyResolutionServiceImpl {
         let store_path = self.artifact_path(group, name, version, classifier, &extension);
         if store_path.exists() {
             let size = store_path.metadata().map(|m| m.len() as i64).unwrap_or(0);
-            let sha256 = Self::compute_file_sha256(&store_path)
+            let sha256 = Self::cached_or_compute_file_sha256(&store_path)
                 .await
                 .unwrap_or_default();
             self.artifact_cache.insert(
@@ -1679,7 +1699,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             }
 
             let actual_sha256 = if !req.sha256.is_empty() && cached_sha256.is_empty() {
-                Self::compute_file_sha256(Path::new(&cached_local_path))
+                Self::cached_or_compute_file_sha256(Path::new(&cached_local_path))
                     .await
                     .unwrap_or_default()
             } else {
@@ -1749,7 +1769,9 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             let actual_sha256 = if req.sha256.is_empty() {
                 String::new()
             } else {
-                Self::compute_file_sha256(&path).await.unwrap_or_default()
+                Self::cached_or_compute_file_sha256(&path)
+                    .await
+                    .unwrap_or_default()
             };
 
             if !req.sha256.is_empty() && actual_sha256 != req.sha256 {
@@ -1828,7 +1850,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             drop(cached);
 
             let actual_sha256 = if !req.sha256.is_empty() && cached_sha256.is_empty() {
-                Self::compute_file_sha256(Path::new(&cached_local_path))
+                Self::cached_or_compute_file_sha256(Path::new(&cached_local_path))
                     .await
                     .unwrap_or_default()
             } else {
@@ -1860,7 +1882,9 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
             let actual_sha256 = if req.sha256.is_empty() {
                 String::new()
             } else {
-                Self::compute_file_sha256(&path).await.unwrap_or_default()
+                Self::cached_or_compute_file_sha256(&path)
+                    .await
+                    .unwrap_or_default()
             };
             if !req.sha256.is_empty() && actual_sha256 != req.sha256 {
                 return Ok(Response::new(CheckMetadataCacheResponse {
@@ -2452,7 +2476,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
 
                     let actual_sha256 = if cached_sha256.is_empty() && !cached_local_path.is_empty()
                     {
-                        Self::compute_file_sha256(Path::new(&cached_local_path))
+                        Self::cached_or_compute_file_sha256(Path::new(&cached_local_path))
                             .await
                             .unwrap_or_default()
                     } else {
@@ -2478,7 +2502,9 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                         "jar",
                     );
                     let actual_sha256 = if path.exists() {
-                        Self::compute_file_sha256(&path).await.unwrap_or_default()
+                        Self::cached_or_compute_file_sha256(&path)
+                            .await
+                            .unwrap_or_default()
                     } else {
                         String::new()
                     };
@@ -2512,6 +2538,82 @@ mod tests {
     fn make_svc() -> DependencyResolutionServiceImpl {
         let dir = tempfile::tempdir().unwrap();
         DependencyResolutionServiceImpl::new(dir.path().to_path_buf())
+    }
+
+    #[tokio::test]
+    async fn test_cached_or_compute_sha256_uses_valid_sidecar_without_rehashing() {
+        let dir = tempfile::tempdir().unwrap();
+        let artifact = dir.path().join("artifact.jar");
+        tokio::fs::write(&artifact, b"artifact bytes")
+            .await
+            .unwrap();
+        let sidecar_hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        tokio::fs::write(
+            DependencyResolutionServiceImpl::sha256_sidecar_path(&artifact),
+            format!("{sidecar_hash}  artifact.jar\n"),
+        )
+        .await
+        .unwrap();
+
+        let actual = DependencyResolutionServiceImpl::cached_or_compute_file_sha256(&artifact)
+            .await
+            .unwrap();
+
+        assert_eq!(actual, sidecar_hash);
+    }
+
+    #[tokio::test]
+    async fn test_cached_or_compute_sha256_repairs_missing_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let artifact = dir.path().join("artifact.jar");
+        tokio::fs::write(&artifact, b"artifact bytes")
+            .await
+            .unwrap();
+        let expected = DependencyResolutionServiceImpl::compute_file_sha256(&artifact)
+            .await
+            .unwrap();
+
+        let actual = DependencyResolutionServiceImpl::cached_or_compute_file_sha256(&artifact)
+            .await
+            .unwrap();
+        let sidecar = tokio::fs::read_to_string(
+            DependencyResolutionServiceImpl::sha256_sidecar_path(&artifact),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(actual, expected);
+        assert!(sidecar.starts_with(&expected));
+    }
+
+    #[tokio::test]
+    async fn test_cached_or_compute_sha256_repairs_malformed_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let artifact = dir.path().join("artifact.jar");
+        tokio::fs::write(&artifact, b"artifact bytes")
+            .await
+            .unwrap();
+        tokio::fs::write(
+            DependencyResolutionServiceImpl::sha256_sidecar_path(&artifact),
+            "not-a-sha artifact.jar\n",
+        )
+        .await
+        .unwrap();
+        let expected = DependencyResolutionServiceImpl::compute_file_sha256(&artifact)
+            .await
+            .unwrap();
+
+        let actual = DependencyResolutionServiceImpl::cached_or_compute_file_sha256(&artifact)
+            .await
+            .unwrap();
+        let sidecar = tokio::fs::read_to_string(
+            DependencyResolutionServiceImpl::sha256_sidecar_path(&artifact),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(actual, expected);
+        assert!(sidecar.starts_with(&expected));
     }
 
     fn make_dep(group: &str, name: &str, version: &str) -> DependencyDescriptor {
