@@ -579,7 +579,6 @@ pub fn aggregate_contracts(
     let mut aggregate_root_children = BTreeSet::new();
     for contract in contracts {
         contract.validate()?;
-        merge_component(&mut components_by_ref, contract.root_component.clone())?;
         aggregate_root_children.insert(contract.root_component.bom_ref.clone());
         for component in &contract.components {
             merge_component(&mut components_by_ref, component.clone())?;
@@ -935,11 +934,26 @@ struct CycloneDxBom<'a> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct CycloneDxMetadata<'a> {
     timestamp: &'a str,
+    tools: CycloneDxTools,
     #[serde(skip_serializing_if = "Option::is_none")]
     supplier: Option<CycloneDxOrganizationalEntity>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     licenses: Vec<CycloneDxLicenseChoice>,
     component: &'a CycloneDxComponent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct CycloneDxTools {
+    components: Vec<CycloneDxToolComponent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct CycloneDxToolComponent {
+    #[serde(rename = "type")]
+    component_type: &'static str,
+    author: &'static str,
+    name: &'static str,
+    version: &'static str,
 }
 
 pub fn render_json(contract: &CycloneDxSbomContract) -> Result<String, String> {
@@ -1201,8 +1215,12 @@ fn purl_for_component(component: &CycloneDxResolvedComponent) -> String {
     } else {
         component.artifact_extension.clone()
     };
-    if !extension.is_empty() && extension != "jar" {
+    if !extension.is_empty() {
         qualifiers.push(("type", extension.as_str()));
+    } else if !component.artifact_type.is_empty() {
+        qualifiers.push(("type", component.artifact_type.as_str()));
+    } else if component.module.ends_with("-bom") {
+        qualifiers.push(("type", "pom"));
     }
     if !component.artifact_type.is_empty()
         && component.artifact_type != extension
@@ -1210,7 +1228,7 @@ fn purl_for_component(component: &CycloneDxResolvedComponent) -> String {
     {
         qualifiers.push(("artifact_type", component.artifact_type.as_str()));
     }
-    if !component.artifact_classifier.is_empty() {
+    if !component.artifact_classifier.is_empty() && extension != "jar" {
         qualifiers.push(("classifier", component.artifact_classifier.as_str()));
     }
     purl_with_qualifiers(
@@ -2481,6 +2499,14 @@ fn normalized_bom(contract: &CycloneDxSbomContract) -> CycloneDxBom<'_> {
         version: 1,
         metadata: CycloneDxMetadata {
             timestamp: &contract.timestamp,
+            tools: CycloneDxTools {
+                components: vec![CycloneDxToolComponent {
+                    component_type: "application",
+                    author: "CycloneDX",
+                    name: "cyclonedx-gradle-plugin",
+                    version: "3.2.0",
+                }],
+            },
             supplier: contract.organizational_entity.clone(),
             licenses: contract.metadata_licenses.clone(),
             component: &contract.root_component,
@@ -3306,7 +3332,7 @@ mod tests {
         assert!(contract
             .components
             .iter()
-            .any(|component| component.bom_ref == "pkg:maven/org.example/lib@1.1"));
+            .any(|component| component.bom_ref == "pkg:maven/org.example/lib@1.1?type=jar"));
     }
 
     #[test]
@@ -3639,9 +3665,9 @@ mod tests {
         assert!(contract
             .components
             .iter()
-            .any(|component| component.bom_ref == "pkg:maven/org.example/lib@1.1"));
+            .any(|component| component.bom_ref == "pkg:maven/org.example/lib@1.1?type=jar"));
         assert!(contract.components.iter().any(|component| {
-            component.bom_ref == "pkg:maven/org.example/lib@1.1"
+            component.bom_ref == "pkg:maven/org.example/lib@1.1?type=jar"
                 && component
                     .properties
                     .get("gradle:artifactPath")
@@ -3657,11 +3683,11 @@ mod tests {
             dependency.reference == "pkg:maven/org.example/app@1.0"
                 && dependency
                     .depends_on
-                    .contains(&"pkg:maven/org.example/lib@1.1".to_string())
+                    .contains(&"pkg:maven/org.example/lib@1.1?type=jar".to_string())
         }));
         assert!(render_json(&contract)
             .unwrap()
-            .contains("pkg:maven/org.example/lib@1.1"));
+            .contains("pkg:maven/org.example/lib@1.1?type=jar"));
     }
 
     #[test]
@@ -3776,7 +3802,7 @@ mod tests {
         let component = contract
             .components
             .iter()
-            .find(|component| component.bom_ref == "pkg:maven/org.example/lib@1.1")
+            .find(|component| component.bom_ref == "pkg:maven/org.example/lib@1.1?type=jar")
             .unwrap();
         assert_eq!(
             Some(&jar_path.to_string_lossy().to_string()),
@@ -4131,7 +4157,7 @@ mod tests {
         let component = contract
             .components
             .iter()
-            .find(|component| component.bom_ref == "pkg:maven/org.example/lib@1.1")
+            .find(|component| component.bom_ref == "pkg:maven/org.example/lib@1.1?type=jar")
             .unwrap();
 
         assert_eq!(
@@ -4340,7 +4366,7 @@ mod tests {
         let component = contract
             .components
             .iter()
-            .find(|component| component.bom_ref == "pkg:maven/org.example/lib@1.1")
+            .find(|component| component.bom_ref == "pkg:maven/org.example/lib@1.1?type=jar")
             .unwrap();
         assert_eq!(
             Some(&jar_path.to_string_lossy().to_string()),
@@ -4437,8 +4463,6 @@ mod tests {
         assert_eq!(
             vec![
                 "pkg:maven/org.example/a@1.0.0?type=jar".to_string(),
-                "pkg:maven/org.example/app-a@1.0".to_string(),
-                "pkg:maven/org.example/app-b@1.0".to_string(),
                 "pkg:maven/org.example/b@1.0.0?type=jar".to_string(),
             ],
             aggregate
