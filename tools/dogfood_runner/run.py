@@ -299,6 +299,13 @@ def parse_jvm_forwards(output: str) -> int:
 def parse_substrate_signals(output: str) -> dict[str, Any]:
     plan_match = re.search(r"\[substrate:run-build\].*? from ([A-Za-z0-9_.-]+)", output)
     rust_executed_match = re.search(r"\[substrate:run-build\] Rust executed (\d+)", output)
+    bootstrap_durations = [
+        int(match)
+        for match in re.findall(
+            r"\[substrate:bootstrap\] build [^ ]+ completed \([^,]+, (\d+)ms, acked=true\)",
+            output,
+        )
+    ]
     return {
         "daemon_started": "Daemon started successfully" in output,
         "daemon_reused": "Connecting to existing daemon" in output
@@ -308,6 +315,8 @@ def parse_substrate_signals(output: str) -> dict[str, Any]:
         "taskgraph_captured": "[substrate:taskgraph] captured" in output,
         "plan_source": plan_match.group(1) if plan_match else "",
         "jvm_forward_count": parse_jvm_forwards(output),
+        "rust_bootstrap_duration_ms": sum(bootstrap_durations),
+        "rust_bootstrap_completion_count": len(bootstrap_durations),
     }
 
 
@@ -426,6 +435,10 @@ def run_project(
             checks["resolved_expectation"] = "supported"
 
     substrate_signals = parse_substrate_signals(substrate.output)
+    substrate_signals["non_rust_overhead_ms"] = max(
+        0,
+        substrate.duration_ms - int(substrate_signals.get("rust_bootstrap_duration_ms", 0)),
+    )
     if checks.get("resolved_expectation", project.expectation) == "supported":
         checks["rust_runbuild_executed"] = substrate_signals["rust_executed_tasks"] > 0
         checks["match"] = checks["match"] and checks["rust_runbuild_executed"]
@@ -639,6 +652,14 @@ def summarize_execution(results: list[dict[str, Any]]) -> dict[str, Any]:
         "daemon_reused_count": sum(
             1 for result in results if result.get("substrate_signals", {}).get("daemon_reused")
         ),
+        "rust_bootstrap_duration_ms": sum(
+            result.get("substrate_signals", {}).get("rust_bootstrap_duration_ms", 0)
+            for result in results
+        ),
+        "non_rust_overhead_ms": sum(
+            result.get("substrate_signals", {}).get("non_rust_overhead_ms", 0)
+            for result in results
+        ),
         "failed_projects": [result["name"] for result in results if not result["match"]],
     }
 
@@ -658,6 +679,8 @@ def write_markdown_report(output_dir: Path, summary: dict[str, Any], results: li
         f"Rust RunBuild executions: {summary['rust_runbuild_executed_count']}/{summary['project_count']}",
         f"Task-graph captures: {summary['taskgraph_capture_count']}/{summary['project_count']}",
         f"Daemon signals: started={summary['daemon_started_count']}, reused={summary['daemon_reused_count']}",
+        f"Rust bootstrap duration total: {summary['rust_bootstrap_duration_ms']}ms",
+        f"Non-Rust/Gradle overhead estimate: {summary['non_rust_overhead_ms']}ms",
     ]
     shared_daemon = summary.get("shared_daemon", {})
     if shared_daemon:
@@ -671,15 +694,15 @@ def write_markdown_report(output_dir: Path, summary: dict[str, Any], results: li
         )
     lines.extend([
         "",
-        "| Project | Expectation | Mode | Result | Plan Source | Upstream ms | Substrate ms | JVM forwards |",
-        "| --- | --- | --- | --- | --- | ---: | ---: | ---: |",
+        "| Project | Expectation | Mode | Result | Plan Source | Upstream ms | Substrate ms | Rust ms | Non-Rust ms | JVM forwards |",
+        "| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
     ])
     for result in results:
         checks = result.get("checks", {})
         signals = result.get("substrate_signals", {})
         jvm_forwards = checks.get("jvm_forward_count", "")
         lines.append(
-            "| {name} | {expectation} | {mode} | {status} | {plan_source} | {upstream_ms} | {substrate_ms} | {jvm_forwards} |".format(
+            "| {name} | {expectation} | {mode} | {status} | {plan_source} | {upstream_ms} | {substrate_ms} | {rust_ms} | {non_rust_ms} | {jvm_forwards} |".format(
                 name=result["name"],
                 expectation=result["expectation"],
                 mode=result["mode"],
@@ -687,6 +710,8 @@ def write_markdown_report(output_dir: Path, summary: dict[str, Any], results: li
                 plan_source=signals.get("plan_source", ""),
                 upstream_ms=result["upstream"].get("duration_ms", 0),
                 substrate_ms=result["substrate"].get("duration_ms", 0),
+                rust_ms=signals.get("rust_bootstrap_duration_ms", 0),
+                non_rust_ms=signals.get("non_rust_overhead_ms", 0),
                 jvm_forwards=jvm_forwards,
             )
         )
