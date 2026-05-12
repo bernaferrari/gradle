@@ -17,6 +17,21 @@ Emit machine-readable inventory:
 python3 tools/dogfood_runner/run.py --manifest testing/dogfood/manifest.json --json
 ```
 
+Execute the dogfood manifest against an installed Gradle-under-test and Rust
+daemon:
+
+```bash
+python3 tools/dogfood_runner/run.py \
+  --manifest testing/dogfood/manifest.json \
+  --execute \
+  --gradle-command "$PWD/build/gradle-under-test/bin/gradle" \
+  --daemon-binary target/debug/gradle-substrate-daemon \
+  --output-dir build/dogfood
+```
+
+The execution path writes `dogfood-results.json`, one `result.json` per project,
+and `dogfood-summary.md`.
+
 This is not a full Gradle compatibility claim. The dogfood manifest is a
 showability gate: supported entries must prove no JVM task forwards and parity
 for configured checks; unsupported entries must produce precise fail-closed

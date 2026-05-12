@@ -94,12 +94,12 @@
         "description": "Checked-in unsupported fixture with arbitrary JVM task action semantics."
       },
       "tasks": ["clean", "build"],
-      "mode": "native-ready-default",
+      "mode": "strict",
       "expectation": "fail-closed",
       "timeout_seconds": 300,
       "reason": "Demonstrates that the preview rejects unsupported JVM task semantics at admission instead of hiding task-by-task fallback.",
       "checks": {
-        "fail_closed_diagnostic": "custom-task-action",
+        "fail_closed_diagnostic": "org.gradle.api.DefaultTask",
         "no_task_by_task_fallback": true
       }
     }
