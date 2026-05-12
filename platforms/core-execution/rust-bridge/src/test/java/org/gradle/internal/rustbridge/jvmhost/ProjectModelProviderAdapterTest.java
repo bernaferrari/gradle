@@ -564,6 +564,29 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
+    public void marksCycloneDxAggregateUnknownPoliciesAsMissingContractFields() throws IOException {
+        File inputJson = temporaryFolder.newFile("direct-bom.json");
+        File outputJson = temporaryFolder.newFile("aggregate-bom.json");
+        Task cyclonedx = cyclonedxAggregateTask(inputJson, outputJson, null, null, null, null, null);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(cyclonedx, CyclonedxAggregateTask.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        String missing = inputs.get("cyclonedx_missing_contract_fields");
+        assertTrue(missing.contains("aggregate-input-contracts"));
+        assertTrue(missing.contains("aggregate-merge-policy"));
+        assertTrue(missing.contains("serial-source-policy"));
+        assertTrue(missing.contains("build-system-policy"));
+        assertTrue(missing.contains("build-environment-policy"));
+        assertTrue(missing.contains("license-text-rendering"));
+        assertTrue(missing.contains("metadata-resolution-policy"));
+        assertFalse(inputs.containsKey("aggregate_input_contracts_json_b64"));
+        assertFalse(inputs.containsKey("sbom_contract_json_b64"));
+    }
+
+    @org.junit.Test
     public void capturesCycloneDxResolutionGraphEvidenceWhenConfigurationGraphIsAvailable() throws IOException {
         File inputJar = temporaryFolder.newFile("lib-1.1.jar");
         File outputJson = temporaryFolder.newFile("bom.json");
@@ -2131,6 +2154,18 @@ public class ProjectModelProviderAdapterTest {
     }
 
     private static Task cyclonedxAggregateTask(File inputJson, File outputJson) {
+        return cyclonedxAggregateTask(inputJson, outputJson, Boolean.FALSE, Boolean.FALSE, Boolean.FALSE, Boolean.FALSE, Boolean.FALSE);
+    }
+
+    private static Task cyclonedxAggregateTask(
+        File inputJson,
+        File outputJson,
+        Boolean includeBomSerialNumber,
+        Boolean includeBuildSystem,
+        Boolean includeBuildEnvironment,
+        Boolean includeLicenseText,
+        Boolean includeMetadataResolution
+    ) {
         FileCollection inputs = fileCollection(inputJson);
         FileCollection outputs = fileCollection(outputJson);
         Project project = proxy(Project.class, (proxy, method, args) -> {
@@ -2184,11 +2219,15 @@ public class ProjectModelProviderAdapterTest {
                 case "getSchemaVersion":
                     return new ObjectProvider("VERSION_16");
                 case "getIncludeBomSerialNumber":
+                    return includeBomSerialNumber == null ? null : new ObjectProvider(includeBomSerialNumber);
                 case "getIncludeBuildSystem":
+                    return includeBuildSystem == null ? null : new ObjectProvider(includeBuildSystem);
                 case "getIncludeBuildEnvironment":
+                    return includeBuildEnvironment == null ? null : new ObjectProvider(includeBuildEnvironment);
                 case "getIncludeLicenseText":
+                    return includeLicenseText == null ? null : new ObjectProvider(includeLicenseText);
                 case "getIncludeMetadataResolution":
-                    return new ObjectProvider(false);
+                    return includeMetadataResolution == null ? null : new ObjectProvider(includeMetadataResolution);
                 case "getIncludeConfigs":
                 case "getSkipConfigs":
                 case "getExternalReferences":
