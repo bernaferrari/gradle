@@ -123,9 +123,19 @@ pub struct CycloneDxOrganizationalEntity {
     #[serde(default, rename = "bom-ref", skip_serializing_if = "String::is_empty")]
     pub bom_ref: String,
     pub name: String,
-    #[serde(default, rename = "url", skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        rename = "url",
+        alias = "urls",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub urls: Vec<String>,
-    #[serde(default, rename = "contact", skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        rename = "contact",
+        alias = "contacts",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub contacts: Vec<CycloneDxOrganizationalContact>,
 }
 
@@ -211,6 +221,7 @@ pub struct CycloneDxCapturedTaskOptions {
     pub include_build_environment: bool,
     pub include_license_text: bool,
     pub organizational_entity_present: bool,
+    pub organizational_entity: Option<CycloneDxOrganizationalEntity>,
     pub license_choice: String,
     pub build_system_environment_variable: String,
     pub external_references: Vec<String>,
@@ -309,6 +320,7 @@ pub fn validate_captured_task_options(
             .eq_ignore_ascii_case("true"),
         organizational_entity_present: value(inputs, "cyclonedx_organizational_entity_present")
             .eq_ignore_ascii_case("true"),
+        organizational_entity: decode_cyclonedx_organizational_entity(inputs)?,
         license_choice: value(inputs, "cyclonedx_license_choice").to_string(),
         build_system_environment_variable: value(
             inputs,
@@ -319,6 +331,22 @@ pub fn validate_captured_task_options(
         json_output,
         xml_output,
     })
+}
+
+fn decode_cyclonedx_organizational_entity(
+    inputs: &BTreeMap<String, String>,
+) -> Result<Option<CycloneDxOrganizationalEntity>, String> {
+    let encoded = value(inputs, "cyclonedx_organizational_entity_json_b64");
+    if encoded.trim().is_empty() {
+        return Ok(None);
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|error| format!("Invalid cyclonedx_organizational_entity_json_b64: {error}"))?;
+    let entity = serde_json::from_slice::<CycloneDxOrganizationalEntity>(&bytes)
+        .map_err(|error| format!("Invalid CycloneDX organizational entity: {error}"))?;
+    entity.validate()?;
+    Ok(Some(entity))
 }
 
 pub fn draft_contract_from_captured_inputs(
@@ -356,7 +384,7 @@ pub fn draft_contract_from_captured_inputs(
     } else {
         String::new()
     };
-    draft_contract_from_resolution_graph(
+    let mut contract = draft_contract_from_resolution_graph(
         &graph,
         CycloneDxDraftOptions {
             spec_version: options.spec_version,
@@ -369,7 +397,10 @@ pub fn draft_contract_from_captured_inputs(
             include_metadata_resolution: options.include_metadata_resolution,
             external_references: options.external_references,
         },
-    )
+    )?;
+    contract.organizational_entity = options.organizational_entity;
+    contract.validate()?;
+    Ok(contract)
 }
 
 fn reject_unsupported_captured_options(
@@ -385,7 +416,7 @@ fn reject_unsupported_captured_options(
     if options.include_license_text {
         unsupported.push("include-license-text");
     }
-    if options.organizational_entity_present {
+    if options.organizational_entity_present && options.organizational_entity.is_none() {
         unsupported.push("organizational-entity");
     }
     if !options.license_choice.trim().is_empty() {
@@ -2298,6 +2329,16 @@ mod tests {
     fn drafts_contract_from_captured_graph_options_and_identity() {
         let graph_json = serde_json::to_vec(&sample_resolution_graph()).unwrap();
         let encoded_graph = base64::engine::general_purpose::STANDARD.encode(graph_json);
+        let organizational_entity_json = serde_json::json!({
+            "name": "Example Security",
+            "url": ["https://security.example.test"],
+            "contact": [{
+                "name": "Security Team",
+                "email": "security@example.test"
+            }]
+        });
+        let encoded_organizational_entity = base64::engine::general_purpose::STANDARD
+            .encode(serde_json::to_vec(&organizational_entity_json).unwrap());
         let inputs = BTreeMap::from([
             (
                 "cyclonedx_resolution_graph_json_b64".to_string(),
@@ -2322,6 +2363,14 @@ mod tests {
                 "true".to_string(),
             ),
             (
+                "cyclonedx_organizational_entity_present".to_string(),
+                "true".to_string(),
+            ),
+            (
+                "cyclonedx_organizational_entity_json_b64".to_string(),
+                encoded_organizational_entity,
+            ),
+            (
                 "cyclonedx_json_output".to_string(),
                 "/tmp/bom.json".to_string(),
             ),
@@ -2340,6 +2389,10 @@ mod tests {
         assert_eq!("2026-05-12T14:17:25Z", contract.timestamp);
         assert_eq!("application", contract.root_component.component_type);
         assert!(contract.external_references.is_empty());
+        assert_eq!(
+            "Example Security",
+            contract.organizational_entity.as_ref().unwrap().name
+        );
         assert!(contract
             .components
             .iter()

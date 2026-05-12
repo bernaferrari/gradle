@@ -492,6 +492,10 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("true", inputs.get("cyclonedx_include_license_text"));
         assertEquals("false", inputs.get("cyclonedx_include_metadata_resolution"));
         assertEquals("true", inputs.get("cyclonedx_organizational_entity_present"));
+        String organizationalEntityJson = new String(Base64.getDecoder().decode(inputs.get("cyclonedx_organizational_entity_json_b64")), StandardCharsets.UTF_8);
+        assertTrue(organizationalEntityJson.contains("\"name\":\"Acme Security\""));
+        assertTrue(organizationalEntityJson.contains("\"url\":[\"https://security.example.invalid\"]"));
+        assertTrue(organizationalEntityJson.contains("\"email\":\"security@example.invalid\""));
         assertEquals("SPDX", inputs.get("cyclonedx_license_choice"));
         assertEquals("CI", inputs.get("cyclonedx_build_system_environment_variable"));
         assertEquals("https://example.invalid/sbom", inputs.get("cyclonedx_external_references"));
@@ -506,7 +510,7 @@ public class ProjectModelProviderAdapterTest {
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("timestamp-source-policy"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("serial-source-policy"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("license-text-rendering"));
-        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("organizational-entity-rendering"));
+        assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("organizational-entity-rendering"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("license-choice-rendering"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("build-system-environment-variable"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("external-reference-shape"));
@@ -580,7 +584,7 @@ public class ProjectModelProviderAdapterTest {
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("timestamp-source-policy"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("serial-source-policy"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("license-text-rendering"));
-        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("organizational-entity-rendering"));
+        assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("organizational-entity-rendering"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("license-choice-rendering"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("build-system-environment-variable"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("external-reference-shape"));
@@ -1895,7 +1899,7 @@ public class ProjectModelProviderAdapterTest {
                 case "getIncludeLicenseText":
                     return new ObjectProvider(true);
                 case "getOrganizationalEntity":
-                    return new ObjectProvider("Acme");
+                    return new ObjectProvider(new TestOrganizationalEntity());
                 case "getLicenseChoice":
                     return new ObjectProvider("SPDX");
                 case "getBuildSystemEnvironmentVariable":
@@ -2815,6 +2819,34 @@ public class ProjectModelProviderAdapterTest {
 
         public Object getOrNull() {
             return value;
+        }
+    }
+
+    public static class TestOrganizationalEntity {
+        public String getName() {
+            return "Acme Security";
+        }
+
+        public Iterable<String> getUrls() {
+            return Collections.singletonList("https://security.example.invalid");
+        }
+
+        public Iterable<TestOrganizationalContact> getContacts() {
+            return Collections.singletonList(new TestOrganizationalContact());
+        }
+    }
+
+    public static class TestOrganizationalContact {
+        public String getName() {
+            return "Security Team";
+        }
+
+        public String getEmail() {
+            return "security@example.invalid";
+        }
+
+        public String getPhone() {
+            return "";
         }
     }
 

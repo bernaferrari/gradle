@@ -1296,8 +1296,11 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         String includeLicenseText = providerBooleanString(invokeOptional(task, taskType, "getIncludeLicenseText"));
         putIfPresent(inputs, "cyclonedx_include_license_text", includeLicenseText);
         putIfPresent(inputs, "cyclonedx_include_metadata_resolution", providerBooleanString(invokeOptional(task, taskType, "getIncludeMetadataResolution")));
-        String organizationalEntityPresent = providerPresentString(invokeOptional(task, taskType, "getOrganizationalEntity"));
+        Object organizationalEntityProvider = invokeOptional(task, taskType, "getOrganizationalEntity");
+        String organizationalEntityPresent = providerPresentString(organizationalEntityProvider);
         putIfPresent(inputs, "cyclonedx_organizational_entity_present", organizationalEntityPresent);
+        String organizationalEntityJsonBase64 = cyclonedxOrganizationalEntityJsonBase64(organizationalEntityProvider);
+        putIfPresent(inputs, "cyclonedx_organizational_entity_json_b64", organizationalEntityJsonBase64);
         String licenseChoice = enumName(invokeOptionalProvider(task, taskType, "getLicenseChoice"));
         putIfPresent(inputs, "cyclonedx_license_choice", licenseChoice);
         String buildSystemEnvironmentVariable = providerValue(invokeOptional(task, taskType, "getBuildSystemEnvironmentVariable"));
@@ -1324,9 +1327,47 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         inputs.put("cyclonedx_sbom_contract_status", resolutionGraphJsonBase64.isEmpty() ? "missing" : "partial");
         inputs.put(
             "cyclonedx_missing_contract_fields",
-            cyclonedxMissingContractFields(missingBaseFields, includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, organizationalEntityPresent, licenseChoice, buildSystemEnvironmentVariable, externalReferences)
+            cyclonedxMissingContractFields(missingBaseFields, includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, organizationalEntityPresent, organizationalEntityJsonBase64, licenseChoice, buildSystemEnvironmentVariable, externalReferences)
         );
         inputs.put("requires_jvm_task_execution", "true");
+    }
+
+    private static String cyclonedxOrganizationalEntityJsonBase64(@Nullable Object value) {
+        Object providerValue = invokeOptional(value, "getOrNull");
+        Object entity = providerValue == null ? value : providerValue;
+        if (entity == null) {
+            return "";
+        }
+        String name = stringOrEmpty(invokeOptional(entity, "getName"));
+        if (name.isEmpty()) {
+            return "";
+        }
+        String json = "{\"name\":\"" + escapeJson(name)
+            + "\",\"url\":" + stringListJson(invokeOptional(entity, "getUrls"))
+            + ",\"contact\":" + cyclonedxOrganizationalContactsJson(invokeOptional(entity, "getContacts"))
+            + "}";
+        return Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String cyclonedxOrganizationalContactsJson(@Nullable Object contacts) {
+        if (!(contacts instanceof Iterable)) {
+            return "[]";
+        }
+        List<String> contactJson = new ArrayList<>();
+        for (Object contact : (Iterable<?>) contacts) {
+            if (contact == null) {
+                continue;
+            }
+            String name = stringOrEmpty(invokeOptional(contact, "getName"));
+            if (name.isEmpty()) {
+                continue;
+            }
+            contactJson.add("{\"name\":\"" + escapeJson(name)
+                + "\",\"email\":\"" + escapeJson(stringOrEmpty(invokeOptional(contact, "getEmail")))
+                + "\",\"phone\":\"" + escapeJson(stringOrEmpty(invokeOptional(contact, "getPhone")))
+                + "\"}");
+        }
+        return "[" + String.join(",", contactJson) + "]";
     }
 
     private static String cyclonedxMissingContractFields(
@@ -1336,6 +1377,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         String includeBuildEnvironment,
         String includeLicenseText,
         String organizationalEntityPresent,
+        String organizationalEntityJsonBase64,
         String licenseChoice,
         String buildSystemEnvironmentVariable,
         String externalReferences
@@ -1354,7 +1396,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if ("true".equalsIgnoreCase(includeLicenseText)) {
             fields.add("license-text-rendering");
         }
-        if ("true".equalsIgnoreCase(organizationalEntityPresent)) {
+        if ("true".equalsIgnoreCase(organizationalEntityPresent) && (organizationalEntityJsonBase64 == null || organizationalEntityJsonBase64.isEmpty())) {
             fields.add("organizational-entity-rendering");
         }
         if (licenseChoice != null && !licenseChoice.isEmpty()) {
