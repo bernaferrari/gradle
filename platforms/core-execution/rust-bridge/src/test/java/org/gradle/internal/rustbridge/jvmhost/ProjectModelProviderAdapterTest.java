@@ -487,6 +487,13 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("LIBRARY", inputs.get("cyclonedx_project_type"));
         assertEquals("VERSION_16", inputs.get("cyclonedx_schema_version"));
         assertEquals("true", inputs.get("cyclonedx_include_bom_serial_number"));
+        assertEquals("false", inputs.get("cyclonedx_include_build_system"));
+        assertEquals("false", inputs.get("cyclonedx_include_build_environment"));
+        assertEquals("true", inputs.get("cyclonedx_include_license_text"));
+        assertEquals("false", inputs.get("cyclonedx_include_metadata_resolution"));
+        assertEquals("SPDX", inputs.get("cyclonedx_license_choice"));
+        assertEquals("CI", inputs.get("cyclonedx_build_system_environment_variable"));
+        assertEquals("https://example.invalid/sbom", inputs.get("cyclonedx_external_references"));
         assertEquals("runtimeClasspath", inputs.get("cyclonedx_include_configs"));
         assertEquals(".*[Tt]est.*", inputs.get("cyclonedx_skip_configs"));
         assertEquals(outputJson.getAbsolutePath(), inputs.get("cyclonedx_json_output"));
@@ -1842,6 +1849,14 @@ public class ProjectModelProviderAdapterTest {
                 case "getIncludeBuildEnvironment":
                 case "getIncludeMetadataResolution":
                     return new ObjectProvider(false);
+                case "getIncludeLicenseText":
+                    return new ObjectProvider(true);
+                case "getLicenseChoice":
+                    return new ObjectProvider("SPDX");
+                case "getBuildSystemEnvironmentVariable":
+                    return new ObjectProvider("CI");
+                case "getExternalReferences":
+                    return new ObjectProvider(Collections.singletonList("https://example.invalid/sbom"));
                 case "getIncludeConfigs":
                     return new ObjectProvider(Collections.singletonList("runtimeClasspath"));
                 case "getSkipConfigs":
@@ -2882,7 +2897,11 @@ public class ProjectModelProviderAdapterTest {
         Object getIncludeBomSerialNumber();
         Object getIncludeBuildSystem();
         Object getIncludeBuildEnvironment();
+        Object getIncludeLicenseText();
         Object getIncludeMetadataResolution();
+        Object getLicenseChoice();
+        Object getBuildSystemEnvironmentVariable();
+        Object getExternalReferences();
         Object getIncludeConfigs();
         Object getSkipConfigs();
         Object getJsonOutput();

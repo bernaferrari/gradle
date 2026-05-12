@@ -1290,7 +1290,11 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "cyclonedx_include_bom_serial_number", providerBooleanString(invokeOptional(task, taskType, "getIncludeBomSerialNumber")));
         putIfPresent(inputs, "cyclonedx_include_build_system", providerBooleanString(invokeOptional(task, taskType, "getIncludeBuildSystem")));
         putIfPresent(inputs, "cyclonedx_include_build_environment", providerBooleanString(invokeOptional(task, taskType, "getIncludeBuildEnvironment")));
+        putIfPresent(inputs, "cyclonedx_include_license_text", providerBooleanString(invokeOptional(task, taskType, "getIncludeLicenseText")));
         putIfPresent(inputs, "cyclonedx_include_metadata_resolution", providerBooleanString(invokeOptional(task, taskType, "getIncludeMetadataResolution")));
+        putIfPresent(inputs, "cyclonedx_license_choice", enumName(invokeOptionalProvider(task, taskType, "getLicenseChoice")));
+        putIfPresent(inputs, "cyclonedx_build_system_environment_variable", providerValue(invokeOptional(task, taskType, "getBuildSystemEnvironmentVariable")));
+        putIfPresent(inputs, "cyclonedx_external_references", providerStringList(invokeOptional(task, taskType, "getExternalReferences")));
         putIfPresent(inputs, "cyclonedx_include_configs", providerStringList(invokeOptional(task, taskType, "getIncludeConfigs")));
         putIfPresent(inputs, "cyclonedx_skip_configs", providerStringList(invokeOptional(task, taskType, "getSkipConfigs")));
         putIfPresent(inputs, "cyclonedx_json_output", providerFilePath(invokeOptional(task, taskType, "getJsonOutput")));
