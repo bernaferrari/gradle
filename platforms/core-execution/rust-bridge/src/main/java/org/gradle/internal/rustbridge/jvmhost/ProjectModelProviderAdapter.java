@@ -42,6 +42,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -1305,8 +1306,11 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "cyclonedx_license_choice", licenseChoice);
         String buildSystemEnvironmentVariable = providerValue(invokeOptional(task, taskType, "getBuildSystemEnvironmentVariable"));
         putIfPresent(inputs, "cyclonedx_build_system_environment_variable", buildSystemEnvironmentVariable);
-        String externalReferences = providerStringList(invokeOptional(task, taskType, "getExternalReferences"));
+        Object externalReferencesProvider = invokeOptional(task, taskType, "getExternalReferences");
+        String externalReferences = providerStringList(externalReferencesProvider);
         putIfPresent(inputs, "cyclonedx_external_references", externalReferences);
+        String externalReferencesJsonBase64 = cyclonedxExternalReferencesJsonBase64(externalReferencesProvider);
+        putIfPresent(inputs, "cyclonedx_external_references_json_b64", externalReferencesJsonBase64);
         putIfPresent(inputs, "cyclonedx_include_configs", providerStringList(invokeOptional(task, taskType, "getIncludeConfigs")));
         putIfPresent(inputs, "cyclonedx_skip_configs", providerStringList(invokeOptional(task, taskType, "getSkipConfigs")));
         putIfPresent(inputs, "cyclonedx_json_output", providerFilePath(invokeOptional(task, taskType, "getJsonOutput")));
@@ -1327,9 +1331,59 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         inputs.put("cyclonedx_sbom_contract_status", resolutionGraphJsonBase64.isEmpty() ? "missing" : "partial");
         inputs.put(
             "cyclonedx_missing_contract_fields",
-            cyclonedxMissingContractFields(missingBaseFields, includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, organizationalEntityPresent, organizationalEntityJsonBase64, licenseChoice, buildSystemEnvironmentVariable, externalReferences)
+            cyclonedxMissingContractFields(missingBaseFields, includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, organizationalEntityPresent, organizationalEntityJsonBase64, licenseChoice, buildSystemEnvironmentVariable, externalReferences, externalReferencesJsonBase64)
         );
         inputs.put("requires_jvm_task_execution", "true");
+    }
+
+    private static String cyclonedxExternalReferencesJsonBase64(@Nullable Object value) {
+        Object providerValue = invokeOptional(value, "getOrNull");
+        Object references = providerValue == null ? value : providerValue;
+        if (!(references instanceof Iterable)) {
+            return "";
+        }
+        List<String> referenceJson = new ArrayList<>();
+        for (Object reference : (Iterable<?>) references) {
+            if (reference == null) {
+                continue;
+            }
+            String url = stringOrEmpty(invokeOptional(reference, "getUrl"));
+            String type = enumName(invokeOptional(reference, "getType"));
+            if (url.isEmpty() || type.isEmpty()) {
+                continue;
+            }
+            referenceJson.add("{\"type\":\"" + escapeJson(type.toLowerCase(Locale.ROOT).replace('_', '-'))
+                + "\",\"url\":\"" + escapeJson(url)
+                + "\",\"comment\":\"" + escapeJson(stringOrEmpty(invokeOptional(reference, "getComment")))
+                + "\",\"hashes\":" + cyclonedxHashesJson(invokeOptional(reference, "getHashes"))
+                + "}");
+        }
+        if (referenceJson.isEmpty()) {
+            return "";
+        }
+        String json = "[" + String.join(",", referenceJson) + "]";
+        return Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String cyclonedxHashesJson(@Nullable Object hashes) {
+        if (!(hashes instanceof Iterable)) {
+            return "[]";
+        }
+        List<String> hashJson = new ArrayList<>();
+        for (Object hash : (Iterable<?>) hashes) {
+            if (hash == null) {
+                continue;
+            }
+            String algorithm = stringOrEmpty(invokeOptional(hash, "getAlgorithm"));
+            String value = stringOrEmpty(invokeOptional(hash, "getValue"));
+            if (algorithm.isEmpty() || value.isEmpty()) {
+                continue;
+            }
+            hashJson.add("{\"alg\":\"" + escapeJson(algorithm)
+                + "\",\"content\":\"" + escapeJson(value)
+                + "\"}");
+        }
+        return "[" + String.join(",", hashJson) + "]";
     }
 
     private static String cyclonedxOrganizationalEntityJsonBase64(@Nullable Object value) {
@@ -1380,7 +1434,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         String organizationalEntityJsonBase64,
         String licenseChoice,
         String buildSystemEnvironmentVariable,
-        String externalReferences
+        String externalReferences,
+        String externalReferencesJsonBase64
     ) {
         List<String> fields = new ArrayList<>();
         Collections.addAll(fields, baseFields.split(","));
@@ -1405,7 +1460,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if (buildSystemEnvironmentVariable != null && !buildSystemEnvironmentVariable.isEmpty()) {
             fields.add("build-system-environment-variable");
         }
-        if (externalReferences != null && !externalReferences.isEmpty()) {
+        if (externalReferences != null && !externalReferences.isEmpty() && (externalReferencesJsonBase64 == null || externalReferencesJsonBase64.isEmpty())) {
             fields.add("external-reference-shape");
         }
         return String.join(",", fields);

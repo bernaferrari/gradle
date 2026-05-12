@@ -498,7 +498,13 @@ public class ProjectModelProviderAdapterTest {
         assertTrue(organizationalEntityJson.contains("\"email\":\"security@example.invalid\""));
         assertEquals("SPDX", inputs.get("cyclonedx_license_choice"));
         assertEquals("CI", inputs.get("cyclonedx_build_system_environment_variable"));
-        assertEquals("https://example.invalid/sbom", inputs.get("cyclonedx_external_references"));
+        assertTrue(inputs.get("cyclonedx_external_references").contains("https://example.invalid/sbom"));
+        String externalReferencesJson = new String(Base64.getDecoder().decode(inputs.get("cyclonedx_external_references_json_b64")), StandardCharsets.UTF_8);
+        assertTrue(externalReferencesJson.contains("\"type\":\"website\""));
+        assertTrue(externalReferencesJson.contains("\"url\":\"https://example.invalid/sbom\""));
+        assertTrue(externalReferencesJson.contains("\"comment\":\"SBOM docs\""));
+        assertTrue(externalReferencesJson.contains("\"alg\":\"SHA-256\""));
+        assertTrue(externalReferencesJson.contains("\"content\":\"abc123\""));
         assertEquals("runtimeClasspath", inputs.get("cyclonedx_include_configs"));
         assertEquals(".*[Tt]est.*", inputs.get("cyclonedx_skip_configs"));
         assertEquals(outputJson.getAbsolutePath(), inputs.get("cyclonedx_json_output"));
@@ -513,7 +519,7 @@ public class ProjectModelProviderAdapterTest {
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("organizational-entity-rendering"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("license-choice-rendering"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("build-system-environment-variable"));
-        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("external-reference-shape"));
+        assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("external-reference-shape"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("aggregate-merge-policy"));
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("aggregate-input-contracts"));
         assertEquals("true", inputs.get("requires_jvm_task_execution"));
@@ -587,7 +593,7 @@ public class ProjectModelProviderAdapterTest {
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("organizational-entity-rendering"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("license-choice-rendering"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("build-system-environment-variable"));
-        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("external-reference-shape"));
+        assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("external-reference-shape"));
         assertFalse(inputs.containsKey("sbom_contract_json_b64"));
     }
 
@@ -1905,7 +1911,7 @@ public class ProjectModelProviderAdapterTest {
                 case "getBuildSystemEnvironmentVariable":
                     return new ObjectProvider("CI");
                 case "getExternalReferences":
-                    return new ObjectProvider(Collections.singletonList("https://example.invalid/sbom"));
+                    return new ObjectProvider(Collections.singletonList(new TestExternalReference()));
                 case "getIncludeConfigs":
                     return new ObjectProvider(Collections.singletonList("runtimeClasspath"));
                 case "getSkipConfigs":
@@ -2847,6 +2853,39 @@ public class ProjectModelProviderAdapterTest {
 
         public String getPhone() {
             return "";
+        }
+    }
+
+    public static class TestExternalReference {
+        @Override
+        public String toString() {
+            return getUrl();
+        }
+
+        public String getUrl() {
+            return "https://example.invalid/sbom";
+        }
+
+        public String getType() {
+            return "WEBSITE";
+        }
+
+        public String getComment() {
+            return "SBOM docs";
+        }
+
+        public Iterable<TestHash> getHashes() {
+            return Collections.singletonList(new TestHash());
+        }
+    }
+
+    public static class TestHash {
+        public String getAlgorithm() {
+            return "SHA-256";
+        }
+
+        public String getValue() {
+            return "abc123";
         }
     }
 
