@@ -1525,6 +1525,44 @@ fn merge_parent_pom_metadata(
     if !child.url.is_empty() {
         parent.url = child.url;
     }
+    if !child.inception_year.is_empty() {
+        parent.inception_year = child.inception_year;
+    }
+    replace_if_present(&mut parent.developer_ids, child.developer_ids);
+    replace_if_present(&mut parent.developers, child.developers);
+    replace_if_present(&mut parent.developer_emails, child.developer_emails);
+    replace_if_present(&mut parent.developer_urls, child.developer_urls);
+    replace_if_present(
+        &mut parent.developer_organizations,
+        child.developer_organizations,
+    );
+    replace_if_present(
+        &mut parent.developer_organization_urls,
+        child.developer_organization_urls,
+    );
+    replace_if_present(&mut parent.developer_roles, child.developer_roles);
+    replace_if_present(&mut parent.developer_timezones, child.developer_timezones);
+    replace_if_present(&mut parent.contributors, child.contributors);
+    replace_if_present(&mut parent.contributor_emails, child.contributor_emails);
+    replace_if_present(&mut parent.contributor_urls, child.contributor_urls);
+    replace_if_present(
+        &mut parent.contributor_organizations,
+        child.contributor_organizations,
+    );
+    replace_if_present(
+        &mut parent.contributor_organization_urls,
+        child.contributor_organization_urls,
+    );
+    replace_if_present(&mut parent.contributor_roles, child.contributor_roles);
+    replace_if_present(
+        &mut parent.contributor_timezones,
+        child.contributor_timezones,
+    );
+    replace_if_present(
+        &mut parent.license_distributions,
+        child.license_distributions,
+    );
+    replace_if_present(&mut parent.license_comments, child.license_comments);
     if !child.licenses.is_empty() {
         parent.licenses = child.licenses;
     }
@@ -1540,6 +1578,12 @@ fn merge_parent_pom_metadata(
         }
     }
     normalize_pom_component_metadata(parent)
+}
+
+fn replace_if_present(target: &mut Vec<String>, replacement: Vec<String>) {
+    if !replacement.is_empty() {
+        *target = replacement;
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -3903,9 +3947,16 @@ mod tests {
     <name>Parent Publisher</name>
     <url>https://parent.example.test</url>
   </organization>
+  <developers>
+    <developer>
+      <name>Parent Developer</name>
+      <email>parent@example.test</email>
+    </developer>
+  </developers>
   <licenses>
     <license>
       <name>MIT</name>
+      <comments>Parent license comment</comments>
     </license>
   </licenses>
   <scm>
@@ -3926,7 +3977,20 @@ mod tests {
     <relativePath>../pom.xml</relativePath>
   </parent>
   <name>Child Lib</name>
+  <inceptionYear>2026</inceptionYear>
   <url>https://child.example.test/lib</url>
+  <developers>
+    <developer>
+      <name>Child Developer</name>
+      <email>child@example.test</email>
+    </developer>
+  </developers>
+  <licenses>
+    <license>
+      <name>Apache-2.0</name>
+      <comments>Child license comment</comments>
+    </license>
+  </licenses>
 </project>
 "#,
         )
@@ -3966,12 +4030,28 @@ mod tests {
         assert_eq!("Parent Publisher", component.publisher);
         assert_eq!(
             vec![CycloneDxLicenseChoice::from_license(CycloneDxLicense {
-                id: "MIT".to_string(),
+                id: "Apache-2.0".to_string(),
                 name: String::new(),
-                url: "https://opensource.org/license/mit".to_string(),
+                url: "https://www.apache.org/licenses/LICENSE-2.0".to_string(),
                 text: None,
             })],
             component.licenses
+        );
+        assert_eq!(
+            Some(&"2026".to_string()),
+            component.properties.get("maven:pomInceptionYear")
+        );
+        assert_eq!(
+            Some(&"Child Developer".to_string()),
+            component.properties.get("maven:pomDevelopers")
+        );
+        assert_eq!(
+            Some(&"child@example.test".to_string()),
+            component.properties.get("maven:pomDeveloperEmails")
+        );
+        assert_eq!(
+            Some(&"Child license comment".to_string()),
+            component.properties.get("maven:pomLicenseComments")
         );
         assert!(component.external_references.contains(&external_reference(
             "website",
