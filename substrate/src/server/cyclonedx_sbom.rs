@@ -321,6 +321,19 @@ pub fn validate_captured_task_options(
     if json_output.trim().is_empty() && xml_output.trim().is_empty() {
         missing.push("json-or-xml-output");
     }
+    let include_bom_serial_number =
+        required_cyclonedx_bool(inputs, "cyclonedx_include_bom_serial_number", &mut missing);
+    let include_metadata_resolution = required_cyclonedx_bool(
+        inputs,
+        "cyclonedx_include_metadata_resolution",
+        &mut missing,
+    );
+    let include_build_system =
+        required_cyclonedx_bool(inputs, "cyclonedx_include_build_system", &mut missing);
+    let include_build_environment =
+        required_cyclonedx_bool(inputs, "cyclonedx_include_build_environment", &mut missing);
+    let include_license_text =
+        required_cyclonedx_bool(inputs, "cyclonedx_include_license_text", &mut missing);
     if !missing.is_empty() {
         return Err(format!(
             "CycloneDX captured task options are missing {}",
@@ -336,16 +349,11 @@ pub fn validate_captured_task_options(
         root_component_type,
         timestamp_source_policy: value(inputs, "cyclonedx_timestamp_source_policy").to_string(),
         serial_source_policy: value(inputs, "cyclonedx_serial_source_policy").to_string(),
-        include_bom_serial_number: value(inputs, "cyclonedx_include_bom_serial_number")
-            .eq_ignore_ascii_case("true"),
-        include_metadata_resolution: value(inputs, "cyclonedx_include_metadata_resolution")
-            .eq_ignore_ascii_case("true"),
-        include_build_system: value(inputs, "cyclonedx_include_build_system")
-            .eq_ignore_ascii_case("true"),
-        include_build_environment: value(inputs, "cyclonedx_include_build_environment")
-            .eq_ignore_ascii_case("true"),
-        include_license_text: value(inputs, "cyclonedx_include_license_text")
-            .eq_ignore_ascii_case("true"),
+        include_bom_serial_number,
+        include_metadata_resolution,
+        include_build_system,
+        include_build_environment,
+        include_license_text,
         organizational_entity_present: value(inputs, "cyclonedx_organizational_entity_present")
             .eq_ignore_ascii_case("true"),
         organizational_entity: decode_cyclonedx_organizational_entity(inputs)?,
@@ -364,6 +372,21 @@ pub fn validate_captured_task_options(
         json_output,
         xml_output,
     })
+}
+
+fn required_cyclonedx_bool(
+    inputs: &BTreeMap<String, String>,
+    key: &'static str,
+    missing: &mut Vec<&'static str>,
+) -> bool {
+    match value(inputs, key).trim() {
+        "true" => true,
+        "false" => false,
+        _ => {
+            missing.push(key);
+            false
+        }
+    }
 }
 
 fn decode_cyclonedx_organizational_entity(
@@ -3087,6 +3110,18 @@ mod tests {
                 "true".to_string(),
             ),
             (
+                "cyclonedx_include_build_system".to_string(),
+                "false".to_string(),
+            ),
+            (
+                "cyclonedx_include_build_environment".to_string(),
+                "false".to_string(),
+            ),
+            (
+                "cyclonedx_include_license_text".to_string(),
+                "false".to_string(),
+            ),
+            (
                 "cyclonedx_json_output".to_string(),
                 "/tmp/bom.json".to_string(),
             ),
@@ -3197,6 +3232,18 @@ mod tests {
                 "true".to_string(),
             ),
             (
+                "cyclonedx_include_build_environment".to_string(),
+                "false".to_string(),
+            ),
+            (
+                "cyclonedx_include_metadata_resolution".to_string(),
+                "false".to_string(),
+            ),
+            (
+                "cyclonedx_include_license_text".to_string(),
+                "false".to_string(),
+            ),
+            (
                 "cyclonedx_build_system_environment_variable".to_string(),
                 "CI".to_string(),
             ),
@@ -3298,6 +3345,22 @@ mod tests {
                 "omitted".to_string(),
             ),
             (
+                "cyclonedx_include_build_system".to_string(),
+                "false".to_string(),
+            ),
+            (
+                "cyclonedx_include_build_environment".to_string(),
+                "false".to_string(),
+            ),
+            (
+                "cyclonedx_include_metadata_resolution".to_string(),
+                "false".to_string(),
+            ),
+            (
+                "cyclonedx_include_license_text".to_string(),
+                "false".to_string(),
+            ),
+            (
                 "cyclonedx_json_output".to_string(),
                 "/tmp/bom.json".to_string(),
             ),
@@ -3350,6 +3413,26 @@ mod tests {
                 "omitted".to_string(),
             ),
             (
+                "cyclonedx_include_bom_serial_number".to_string(),
+                "false".to_string(),
+            ),
+            (
+                "cyclonedx_include_build_system".to_string(),
+                "false".to_string(),
+            ),
+            (
+                "cyclonedx_include_build_environment".to_string(),
+                "false".to_string(),
+            ),
+            (
+                "cyclonedx_include_metadata_resolution".to_string(),
+                "false".to_string(),
+            ),
+            (
+                "cyclonedx_include_license_text".to_string(),
+                "false".to_string(),
+            ),
+            (
                 "cyclonedx_json_output".to_string(),
                 "/tmp/bom.json".to_string(),
             ),
@@ -3399,6 +3482,14 @@ mod tests {
             (
                 "cyclonedx_include_build_environment".to_string(),
                 "true".to_string(),
+            ),
+            (
+                "cyclonedx_include_build_system".to_string(),
+                "false".to_string(),
+            ),
+            (
+                "cyclonedx_include_metadata_resolution".to_string(),
+                "false".to_string(),
             ),
             (
                 "cyclonedx_include_license_text".to_string(),
@@ -3471,6 +3562,22 @@ mod tests {
                 "cyclonedx-gradle-random-uuid".to_string(),
             ),
             (
+                "cyclonedx_include_build_system".to_string(),
+                "false".to_string(),
+            ),
+            (
+                "cyclonedx_include_build_environment".to_string(),
+                "false".to_string(),
+            ),
+            (
+                "cyclonedx_include_metadata_resolution".to_string(),
+                "false".to_string(),
+            ),
+            (
+                "cyclonedx_include_license_text".to_string(),
+                "false".to_string(),
+            ),
+            (
                 "cyclonedx_json_output".to_string(),
                 "/tmp/bom.json".to_string(),
             ),
@@ -3499,6 +3606,11 @@ mod tests {
         assert!(err.contains("component-version"));
         assert!(err.contains("project-type"));
         assert!(err.contains("json-or-xml-output"));
+        assert!(err.contains("cyclonedx_include_bom_serial_number"));
+        assert!(err.contains("cyclonedx_include_metadata_resolution"));
+        assert!(err.contains("cyclonedx_include_build_system"));
+        assert!(err.contains("cyclonedx_include_build_environment"));
+        assert!(err.contains("cyclonedx_include_license_text"));
     }
 
     #[test]
