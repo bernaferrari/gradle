@@ -52,7 +52,12 @@ pub struct CycloneDxComponent {
     pub purl: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modified: Option<bool>,
-    #[serde(default)]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_cyclonedx_properties",
+        serialize_with = "serialize_cyclonedx_properties",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
     pub properties: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub licenses: Vec<CycloneDxLicenseChoice>,
@@ -72,6 +77,12 @@ pub struct CycloneDxLicenseChoice {
     pub expression: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub license: Option<CycloneDxLicense>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct CycloneDxProperty {
+    name: String,
+    value: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -969,6 +980,52 @@ pub fn render_json(contract: &CycloneDxSbomContract) -> Result<String, String> {
     contract.validate()?;
     let bom = normalized_bom(contract);
     serde_json::to_string_pretty(&bom).map_err(|err| err.to_string())
+}
+
+fn serialize_cyclonedx_properties<S>(
+    properties: &BTreeMap<String, String>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let properties = properties
+        .iter()
+        .map(|(name, value)| CycloneDxProperty {
+            name: name.clone(),
+            value: value.clone(),
+        })
+        .collect::<Vec<_>>();
+    properties.serialize(serializer)
+}
+
+fn deserialize_cyclonedx_properties<'de, D>(
+    deserializer: D,
+) -> Result<BTreeMap<String, String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::Object(object) => Ok(object
+            .into_iter()
+            .filter_map(|(name, value)| value.as_str().map(|value| (name, value.to_string())))
+            .collect()),
+        serde_json::Value::Array(values) => {
+            let mut properties = BTreeMap::new();
+            for value in values {
+                let property = serde_json::from_value::<CycloneDxProperty>(value)
+                    .map_err(serde::de::Error::custom)?;
+                if !property.name.trim().is_empty() {
+                    properties.insert(property.name, property.value);
+                }
+            }
+            Ok(properties)
+        }
+        _ => Err(serde::de::Error::custom(
+            "CycloneDX properties must be an object or an array",
+        )),
+    }
 }
 
 pub fn draft_contract_from_resolution_graph(
