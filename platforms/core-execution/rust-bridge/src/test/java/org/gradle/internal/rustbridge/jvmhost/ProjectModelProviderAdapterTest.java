@@ -679,6 +679,34 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
+    public void marksCycloneDxUnknownMetadataResolutionPolicyAsMissingContractField() throws IOException {
+        File inputJar = temporaryFolder.newFile("runtime.jar");
+        File outputJson = temporaryFolder.newFile("bom.json");
+        Task cyclonedx = cyclonedxDirectTask(
+            inputJar,
+            outputJson,
+            cyclonedxConfigurationContainer("runtimeClasspath", inputJar),
+            Boolean.FALSE,
+            Boolean.FALSE,
+            null,
+            Collections.singletonList(new TestExternalReference())
+        );
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(cyclonedx, CyclonedxDirectTask.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertFalse(inputs.containsKey("cyclonedx_include_metadata_resolution"));
+        assertEquals("partial", inputs.get("cyclonedx_sbom_contract_status"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("metadata-resolution-policy"));
+        assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("serial-source-policy"));
+        assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("license-text-rendering"));
+        assertEquals("true", inputs.get("requires_jvm_task_execution"));
+        assertFalse(inputs.containsKey("sbom_contract_json_b64"));
+    }
+
+    @org.junit.Test
     public void capturesNativeReadyStartScriptsContractFromTaskModel() throws IOException {
         File jarFile = temporaryFolder.newFile("corpus-app-1.0.jar");
         File outputDir = temporaryFolder.newFolder("build/scripts");
@@ -1952,6 +1980,18 @@ public class ProjectModelProviderAdapterTest {
         Boolean includeLicenseText,
         Iterable<?> externalReferences
     ) {
+        return cyclonedxDirectTask(runtimeJar, outputJson, configurations, includeBomSerialNumber, includeLicenseText, Boolean.FALSE, externalReferences);
+    }
+
+    private static Task cyclonedxDirectTask(
+        File runtimeJar,
+        File outputJson,
+        ConfigurationContainer configurations,
+        Boolean includeBomSerialNumber,
+        Boolean includeLicenseText,
+        Boolean includeMetadataResolution,
+        Iterable<?> externalReferences
+    ) {
         FileCollection inputs = fileCollection(runtimeJar);
         FileCollection outputs = fileCollection(outputJson);
         Project project = proxy(Project.class, (proxy, method, args) -> {
@@ -2011,8 +2051,9 @@ public class ProjectModelProviderAdapterTest {
                     return includeBomSerialNumber == null ? null : new ObjectProvider(includeBomSerialNumber);
                 case "getIncludeBuildSystem":
                 case "getIncludeBuildEnvironment":
-                case "getIncludeMetadataResolution":
                     return new ObjectProvider(false);
+                case "getIncludeMetadataResolution":
+                    return includeMetadataResolution == null ? null : new ObjectProvider(includeMetadataResolution);
                 case "getIncludeLicenseText":
                     return includeLicenseText == null ? null : new ObjectProvider(includeLicenseText);
                 case "getOrganizationalEntity":

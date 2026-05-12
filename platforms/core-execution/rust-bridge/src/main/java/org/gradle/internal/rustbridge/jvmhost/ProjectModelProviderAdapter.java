@@ -1344,7 +1344,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         inputs.put("cyclonedx_sbom_contract_status", resolutionGraphJsonBase64.isEmpty() ? "missing" : "partial");
         inputs.put(
             "cyclonedx_missing_contract_fields",
-            cyclonedxMissingContractFields(missingBaseFields, includeBomSerialNumber, includeLicenseText, organizationalEntityPresent, organizationalEntityJsonBase64, licenseChoice, licenseChoiceJsonBase64, externalReferences, externalReferencesJsonBase64)
+            cyclonedxMissingContractFields(missingBaseFields, includeBomSerialNumber, includeLicenseText, includeMetadataResolution, organizationalEntityPresent, organizationalEntityJsonBase64, licenseChoice, licenseChoiceJsonBase64, externalReferences, externalReferencesJsonBase64)
         );
         inputs.put("requires_jvm_task_execution", "true");
     }
@@ -1567,6 +1567,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         String baseFields,
         String includeBomSerialNumber,
         String includeLicenseText,
+        String includeMetadataResolution,
         String organizationalEntityPresent,
         String organizationalEntityJsonBase64,
         String licenseChoice,
@@ -1581,6 +1582,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         }
         if (!"false".equalsIgnoreCase(includeLicenseText)) {
             fields.add("license-text-rendering");
+        }
+        if (!"true".equalsIgnoreCase(includeMetadataResolution) && !"false".equalsIgnoreCase(includeMetadataResolution)) {
+            fields.add("metadata-resolution-policy");
         }
         if ("true".equalsIgnoreCase(organizationalEntityPresent) && (organizationalEntityJsonBase64 == null || organizationalEntityJsonBase64.isEmpty())) {
             fields.add("organizational-entity-rendering");
