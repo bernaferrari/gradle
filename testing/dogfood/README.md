@@ -27,6 +27,15 @@ Validate the external OSS manifest without cloning:
 python3 tools/dogfood_runner/run.py --manifest testing/dogfood/oss-manifest.json --list
 ```
 
+Fetch pinned external OSS entries into `build/dogfood-oss/sources`:
+
+```bash
+python3 tools/dogfood_runner/run.py \
+  --manifest testing/dogfood/oss-manifest.json \
+  --fetch-only \
+  --output-dir build/dogfood-oss
+```
+
 Execute the dogfood manifest against an installed Gradle-under-test and Rust
 daemon:
 
