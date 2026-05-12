@@ -134,13 +134,14 @@
   `org.gradle.rust.substrate.runbuild.native-ready-default=true` tries Rust
   RunBuild first and delegates back to JVM execution when the selected plan is
   not fully native-ready. The authoritative offline no-fallback corpus now
-  passes 26/26.
+  passes 27/27.
 - `testing/corpus/unsupported-manifest.json` tracks work that must remain
   outside approximate native execution until a complete contract exists. It now
-  covers custom JVM task actions, method-level Test filters, repository regex
-  content filters, dependency substitution, component metadata rules, and
-  detached configurations, artifact views, artifact transforms, and composite
-  substitution.
+  covers custom JVM task actions, repository regex content filters, dependency
+  substitution, component metadata rules, and detached configurations, artifact
+  views, artifact transforms, and composite substitution. Exact method-level
+  Test includes are now represented natively; wildcard or otherwise ambiguous
+  method filters still belong in unsupported gates.
   Contract-only validation covers these known unsupported shapes; the normal
   parity runner intentionally reports
   mismatches for unsupported projects rather than treating approximate native
@@ -361,8 +362,8 @@
 - More task types need native-ready contract capture before broad no-fallback
   execution is realistic, especially arbitrary task actions beyond static
   literal file writes, arbitrary copy filters/actions beyond direct expand,
-  method-level Test filters, Gradle archive metadata edge cases beyond entry
-  inventory, and native symlink copy/archive semantics.
+  wildcard or ambiguous method-level Test filters, Gradle archive metadata edge
+  cases beyond entry inventory, and native symlink copy/archive semantics.
 - External dependency classpaths are now covered by the external corpus through
   Gradle-captured selected task contracts. Project/dependency model capture can
   still be richer, but task execution no longer uses the removed Rust-side
@@ -518,6 +519,10 @@
 - `python3 tools/corpus_runner/run.py --project "$PWD/testing/corpus/test-filters-unsupported-kotlin-dsl" --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-test-filters-native --verbose` passed 1/1, no fallback, 12/12 task parity, output inventory/hash/archive parity, observed wall time upstream=14584ms and substrate=4892ms.
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/external-manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-external-test-filters-native --verbose` passed 2/2, no fallback, 25/25 task parity, output inventory/hash/archive parity, observed wall time upstream=23368ms and substrate=9476ms. The JUnit sample includes a failing legacy test class that must be excluded by the native class-name filter.
 - `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --timeout 300 --output-dir build/corpus-authoritative-test-filters-native --verbose` passed 26/26, no fallback, 232/232 task parity, output inventory/hash/archive parity, observed wall time upstream=147796ms and substrate=83649ms.
+- `./gradlew :rust-bridge:test --tests org.gradle.internal.rustbridge.jvmhost.ProjectModelProviderAdapterTest.capturesExactMethodTestIncludeFilterAsNativeReady --tests org.gradle.internal.rustbridge.jvmhost.ProjectModelProviderAdapterTest.marksWildcardMethodTestFilterAsUnsupported --no-daemon --console=plain -x :rust-bridge:extractIncludeTestProto -x :rust-bridge:generateTestProto` passed after promoting exact method includes and keeping wildcard method filters fail-closed.
+- `cargo test -p gradle-substrate-daemon task_executor::test_exec --lib` passed 40/40 and `cargo test -p gradle-substrate-daemon task_graph --lib` passed 61/61 after lowering exact method includes to JUnit `--select-method` without `--scan-classpath`.
+- `python3 tools/corpus_runner/run.py --project "$PWD/testing/corpus/test-method-filter-unsupported-kotlin-dsl" --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-test-method-filter-native --verbose` passed 1/1, no fallback, 12/12 task parity, output inventory/hash/archive parity, observed wall time upstream=2917ms and substrate=5016ms.
+- `python3 tools/corpus_runner/run.py --manifest testing/corpus/manifest.json --gradle-command "$PWD/build/gradle-under-test/bin/gradle" --daemon-binary target/debug/gradle-substrate-daemon --runbuild-authoritative --tasks clean build --timeout 300 --output-dir build/corpus-method-filter-native --verbose` passed 27/27, no fallback, 244/244 task parity, output inventory/hash/archive parity, observed wall time upstream=131873ms and substrate=81383ms.
 - `cargo test -p gradle-wrapper` passed after adding wrapper-level Rust substrate CLI modes and minimal DAG plus dependency transport/read-through flag injection tests.
 - `cargo build -p gradle-wrapper` built the native wrapper binary, and `GRADLEW_DISTRIBUTION_DIR=$PWD/build/gradle-under-test target/debug/gradlew --rust-substrate-authoritative -p testing/corpus/java-library-kotlin-dsl clean build --no-daemon --console=plain --info` plus the same command with `--rust-substrate` both executed 12 Gradle tasks through Rust RunBuild, skipped the JVM task executor, and finished successfully. `GRADLEW_DISTRIBUTION_DIR=$PWD/build/gradle-under-test target/debug/gradlew --rust-substrate -p testing/corpus/java-junit-kotlin-dsl clean build --no-daemon --console=plain --info` also executed 12 external-dependency-backed tasks through Rust RunBuild with the JVM task executor skipped.
 - `cargo test -p gradle-wrapper` passed after adding Rust wrapper distribution URL validation and local `file:/` distribution copy support.
