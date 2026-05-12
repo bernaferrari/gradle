@@ -637,9 +637,7 @@ mod tests {
         ) else {
             panic!("expected rejection");
         };
-        assert!(rejection
-            .message()
-            .contains("outside component set"));
+        assert!(rejection.message().contains("outside component set"));
     }
 
     #[test]
