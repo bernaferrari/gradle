@@ -1291,9 +1291,137 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "cyclonedx_xml_output", providerFilePath(invokeOptional(task, taskType, "getXmlOutput")));
         putIfPresent(inputs, "cyclonedx_input_sboms", fileCollectionPathString(invokeOptional(task, taskType, "getInputSboms")));
         putIfPresent(inputs, "cyclonedx_resolved_dependencies", fileCollectionPathString(invokeOptional(task, taskType, "getResolvedDependencies")));
-        inputs.put("cyclonedx_sbom_contract_status", "missing");
-        inputs.put("cyclonedx_missing_contract_fields", "resolution-result-edges,component-metadata,license-metadata,purl-qualifiers,aggregate-merge-policy");
+        String resolutionGraphJsonBase64 = cyclonedxResolutionGraphJsonBase64(task, taskType);
+        putIfPresent(inputs, "cyclonedx_resolution_graph_json_b64", resolutionGraphJsonBase64);
+        inputs.put("cyclonedx_sbom_contract_status", resolutionGraphJsonBase64.isEmpty() ? "missing" : "partial");
+        inputs.put(
+            "cyclonedx_missing_contract_fields",
+            resolutionGraphJsonBase64.isEmpty()
+                ? "resolution-result-edges,component-metadata,license-metadata,purl-qualifiers,aggregate-merge-policy"
+                : "component-metadata,license-metadata,purl-qualifiers,aggregate-merge-policy"
+        );
         inputs.put("requires_jvm_task_execution", "true");
+    }
+
+    private static String cyclonedxResolutionGraphJsonBase64(Task task, Class<?> taskType) {
+        List<String> includeConfigs = providerStringValues(invokeOptional(task, taskType, "getIncludeConfigs"));
+        List<String> skipConfigs = providerStringValues(invokeOptional(task, taskType, "getSkipConfigs"));
+        try {
+            ConfigurationContainer configurations = task.getProject().getConfigurations();
+            List<String> targetConfigs = new ArrayList<>(includeConfigs);
+            if (targetConfigs.isEmpty()) {
+                for (Configuration configuration : configurations) {
+                    if (configuration.isCanBeResolved()) {
+                        targetConfigs.add(configuration.getName());
+                    }
+                }
+                Collections.sort(targetConfigs);
+            }
+            List<String> configurationJson = new ArrayList<>();
+            for (String configurationName : targetConfigs) {
+                if (configurationName.isEmpty() || cyclonedxSkippedConfiguration(configurationName, skipConfigs)) {
+                    continue;
+                }
+                Configuration configuration = configurations.findByName(configurationName);
+                if (configuration == null || !configuration.isCanBeResolved()) {
+                    continue;
+                }
+                String captured = cyclonedxConfigurationResolutionGraphJson(configurationName, configuration);
+                if (!captured.isEmpty()) {
+                    configurationJson.add(captured);
+                }
+            }
+            if (configurationJson.isEmpty()) {
+                return "";
+            }
+            String json = "{\"schema\":\"gradle-substrate.cyclonedx-resolution-graph.v1\",\"configurations\":["
+                + String.join(",", configurationJson)
+                + "]}";
+            return Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+        } catch (RuntimeException e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to capture CycloneDX resolution graph for {}", task.getPath(), e);
+            return "";
+        }
+    }
+
+    private static boolean cyclonedxSkippedConfiguration(String configurationName, List<String> skipConfigs) {
+        for (String skipConfig : skipConfigs) {
+            if (!skipConfig.isEmpty() && Pattern.compile(skipConfig).matcher(configurationName).matches()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String cyclonedxConfigurationResolutionGraphJson(String configurationName, Configuration configuration) {
+        Object incoming = invokeOptional(configuration, "getIncoming");
+        Object result = invokeOptional(incoming, "getResolutionResult");
+        if (result == null) {
+            return "";
+        }
+        List<String> components = new ArrayList<>();
+        for (Object component : asCollection(invokeOptional(result, "getAllComponents"))) {
+            String componentJson = cyclonedxResolvedComponentJson(component);
+            if (!componentJson.isEmpty()) {
+                components.add(componentJson);
+            }
+        }
+        List<String> dependencies = new ArrayList<>();
+        for (Object component : asCollection(invokeOptional(result, "getAllComponents"))) {
+            dependencies.addAll(cyclonedxResolvedDependencyJson(component));
+        }
+        Collections.sort(components);
+        Collections.sort(dependencies);
+        return "{\"name\":\"" + escapeJson(configurationName) + "\",\"components\":["
+            + String.join(",", components)
+            + "],\"dependencies\":["
+            + String.join(",", dependencies)
+            + "]}";
+    }
+
+    private static String cyclonedxResolvedComponentJson(@Nullable Object component) {
+        Object id = invokeOptional(component, "getId");
+        String displayName = displayName(id);
+        if (displayName.isEmpty()) {
+            return "";
+        }
+        String group = stringOrEmpty(invokeOptional(id, "getGroup"));
+        String module = stringOrEmpty(invokeOptional(id, "getModule"));
+        String version = stringOrEmpty(invokeOptional(id, "getVersion"));
+        String projectPath = stringOrEmpty(invokeOptional(id, "getProjectPath"));
+        return "{\"id\":\"" + escapeJson(displayName)
+            + "\",\"group\":\"" + escapeJson(group)
+            + "\",\"module\":\"" + escapeJson(module)
+            + "\",\"version\":\"" + escapeJson(version)
+            + "\",\"projectPath\":\"" + escapeJson(projectPath)
+            + "\"}";
+    }
+
+    private static List<String> cyclonedxResolvedDependencyJson(@Nullable Object component) {
+        Object id = invokeOptional(component, "getId");
+        String from = displayName(id);
+        if (from.isEmpty()) {
+            return new ArrayList<>();
+        }
+        List<String> dependencies = new ArrayList<>();
+        for (Object dependency : asCollection(invokeOptional(component, "getDependencies"))) {
+            Object selected = invokeOptional(dependency, "getSelected");
+            Object selectedId = invokeOptional(selected, "getId");
+            String to = displayName(selectedId);
+            String requested = displayName(invokeOptional(dependency, "getRequested"));
+            if (!to.isEmpty()) {
+                dependencies.add("{\"from\":\"" + escapeJson(from)
+                    + "\",\"requested\":\"" + escapeJson(requested)
+                    + "\",\"to\":\"" + escapeJson(to)
+                    + "\"}");
+            }
+        }
+        return dependencies;
+    }
+
+    private static String displayName(@Nullable Object value) {
+        String displayName = stringOrEmpty(invokeOptional(value, "getDisplayName"));
+        return displayName.isEmpty() ? stringOrEmpty(value) : displayName;
     }
 
     private static void captureStaticWriteFileInputs(Task task, Map<String, String> inputs) {
@@ -1722,6 +1850,21 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         Object providerValue = invokeOptional(value, "getOrNull");
         Object candidate = providerValue == null ? value : providerValue;
         return stringList(candidate);
+    }
+
+    private static List<String> providerStringValues(@Nullable Object value) {
+        Object providerValue = invokeOptional(value, "getOrNull");
+        Object candidate = providerValue == null ? value : providerValue;
+        if (!(candidate instanceof Iterable)) {
+            return new ArrayList<>();
+        }
+        List<String> values = new ArrayList<>();
+        for (Object item : (Iterable<?>) candidate) {
+            if (item != null) {
+                values.add(item.toString());
+            }
+        }
+        return values;
     }
 
     private static String enumName(@Nullable Object value) {
