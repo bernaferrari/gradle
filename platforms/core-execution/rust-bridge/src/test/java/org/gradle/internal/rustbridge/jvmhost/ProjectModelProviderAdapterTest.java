@@ -9,7 +9,10 @@ import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.ConfigurationContainer;
+import org.gradle.api.artifacts.ModuleVersionIdentifier;
 import org.gradle.api.artifacts.ResolvableDependencies;
+import org.gradle.api.artifacts.ResolvedArtifact;
+import org.gradle.api.artifacts.ResolvedConfiguration;
 import org.gradle.api.artifacts.VersionConstraint;
 import org.gradle.api.artifacts.component.ComponentSelector;
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
@@ -494,12 +497,12 @@ public class ProjectModelProviderAdapterTest {
 
     @org.junit.Test
     public void capturesCycloneDxResolutionGraphEvidenceWhenConfigurationGraphIsAvailable() throws IOException {
-        File inputJar = temporaryFolder.newFile("runtime.jar");
+        File inputJar = temporaryFolder.newFile("lib-1.1.jar");
         File outputJson = temporaryFolder.newFile("bom.json");
         Task cyclonedx = cyclonedxDirectTask(
             inputJar,
             outputJson,
-            cyclonedxConfigurationContainer("runtimeClasspath")
+            cyclonedxConfigurationContainer("runtimeClasspath", inputJar)
         );
 
         BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(cyclonedx, CyclonedxDirectTask.class);
@@ -515,6 +518,7 @@ public class ProjectModelProviderAdapterTest {
         assertTrue(graphJson.contains("\"name\":\"runtimeClasspath\""));
         assertTrue(graphJson, graphJson.contains("\"id\":\"org.example:app:1.0\""));
         assertTrue(graphJson, graphJson.contains("\"id\":\"org.example:lib:1.1\""));
+        assertTrue(graphJson, graphJson.contains("\"artifactPath\":\"" + inputJar.getAbsolutePath().replace("\\", "\\\\") + "\""));
         assertTrue(graphJson, graphJson.contains("\"from\":\"org.example:app:1.0\""));
         assertTrue(graphJson, graphJson.contains("\"to\":\"org.example:lib:1.1\""));
         assertTrue(graphJson, graphJson.contains("\"requested\":\"org.example:lib:1.+\""));
@@ -1844,7 +1848,7 @@ public class ProjectModelProviderAdapterTest {
         });
     }
 
-    private static ConfigurationContainer cyclonedxConfigurationContainer(String name) {
+    private static ConfigurationContainer cyclonedxConfigurationContainer(String name, File artifactFile) {
         ResolvedComponentResult child = resolvedComponent("org.example", "lib", "1.1");
         ResolvedDependencyResult edge = proxy(ResolvedDependencyResult.class, (proxy, method, args) -> {
             switch (method.getName()) {
@@ -1882,6 +1886,10 @@ public class ProjectModelProviderAdapterTest {
                     return name;
                 case "getIncoming":
                     return incoming;
+                case "getResolvedConfiguration":
+                    return resolvedConfiguration(artifactFile);
+                case "getFiles":
+                    return Collections.singleton(artifactFile);
                 default:
                     return defaultValue(method.getReturnType());
             }
@@ -1891,6 +1899,40 @@ public class ProjectModelProviderAdapterTest {
                 return configuration;
             }
             return defaultValue(method.getReturnType());
+        });
+    }
+
+    private static Object resolvedConfiguration(File artifactFile) {
+        Object artifact = proxy(ResolvedArtifact.class, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "getModuleVersion":
+                    return moduleVersionIdentifier("org.example", "lib", "1.1");
+                case "getFile":
+                    return artifactFile;
+                default:
+                    return defaultValue(method.getReturnType());
+            }
+        });
+        return proxy(ResolvedConfiguration.class, (proxy, method, args) -> {
+            if (method.getName().equals("getResolvedArtifacts")) {
+                return Collections.singleton(artifact);
+            }
+            return defaultValue(method.getReturnType());
+        });
+    }
+
+    private static Object moduleVersionIdentifier(String group, String name, String version) {
+        return proxy(ModuleVersionIdentifier.class, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "getGroup":
+                    return group;
+                case "getName":
+                    return name;
+                case "getVersion":
+                    return version;
+                default:
+                    return defaultValue(method.getReturnType());
+            }
         });
     }
 
