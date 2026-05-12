@@ -1574,7 +1574,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         String externalReferences,
         String externalReferencesJsonBase64
     ) {
-        List<String> fields = new ArrayList<>();
+        Set<String> fields = new LinkedHashSet<>();
         Collections.addAll(fields, baseFields.split(","));
         if (!"false".equalsIgnoreCase(includeBomSerialNumber)) {
             fields.add("serial-source-policy");
