@@ -1269,6 +1269,8 @@ struct PomComponentMetadata {
     contributor_organization_urls: Vec<String>,
     contributor_roles: Vec<String>,
     contributor_timezones: Vec<String>,
+    license_distributions: Vec<String>,
+    license_comments: Vec<String>,
     licenses: Vec<CycloneDxLicenseChoice>,
     external_references: Vec<CycloneDxExternalReference>,
 }
@@ -1376,6 +1378,18 @@ impl PomComponentMetadata {
             properties.push((
                 "maven:pomContributorTimezones".to_string(),
                 self.contributor_timezones.join(","),
+            ));
+        }
+        if !self.license_distributions.is_empty() {
+            properties.push((
+                "maven:pomLicenseDistributions".to_string(),
+                self.license_distributions.join(","),
+            ));
+        }
+        if !self.license_comments.is_empty() {
+            properties.push((
+                "maven:pomLicenseComments".to_string(),
+                self.license_comments.join(","),
             ));
         }
         properties
@@ -1554,6 +1568,8 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
     let mut buf = Vec::new();
     let mut current_license_name = String::new();
     let mut current_license_url = String::new();
+    let mut current_license_distribution = String::new();
+    let mut current_license_comments = String::new();
     let mut current_issue_system = String::new();
     loop {
         match reader.read_event_into(&mut buf) {
@@ -1563,6 +1579,8 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
                 if path.as_slice() == ["project", "licenses", "license"] {
                     current_license_name.clear();
                     current_license_url.clear();
+                    current_license_distribution.clear();
+                    current_license_comments.clear();
                 }
             }
             Ok(Event::Text(event)) => {
@@ -1585,6 +1603,8 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
                     &mut properties,
                     &mut current_license_name,
                     &mut current_license_url,
+                    &mut current_license_distribution,
+                    &mut current_license_comments,
                     &mut current_issue_system,
                 );
             }
@@ -1608,6 +1628,8 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
                     &mut properties,
                     &mut current_license_name,
                     &mut current_license_url,
+                    &mut current_license_distribution,
+                    &mut current_license_comments,
                     &mut current_issue_system,
                 );
             }
@@ -1623,9 +1645,21 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
                                 &current_license_url,
                             )),
                         });
+                        if !current_license_distribution.trim().is_empty() {
+                            metadata
+                                .license_distributions
+                                .push(current_license_distribution.clone());
+                        }
+                        if !current_license_comments.trim().is_empty() {
+                            metadata
+                                .license_comments
+                                .push(current_license_comments.clone());
+                        }
                     }
                     current_license_name.clear();
                     current_license_url.clear();
+                    current_license_distribution.clear();
+                    current_license_comments.clear();
                 }
                 path.pop();
             }
@@ -1688,6 +1722,8 @@ fn apply_pom_metadata_text(
     properties: &mut BTreeMap<String, String>,
     current_license_name: &mut String,
     current_license_url: &mut String,
+    current_license_distribution: &mut String,
+    current_license_comments: &mut String,
     current_issue_system: &mut String,
 ) {
     match path {
@@ -1973,6 +2009,22 @@ fn apply_pom_metadata_text(
         {
             *current_license_url = text;
         }
+        [project, licenses, license, distribution]
+            if project == "project"
+                && licenses == "licenses"
+                && license == "license"
+                && distribution == "distribution" =>
+        {
+            *current_license_distribution = text;
+        }
+        [project, licenses, license, comments]
+            if project == "project"
+                && licenses == "licenses"
+                && license == "license"
+                && comments == "comments" =>
+        {
+            *current_license_comments = text;
+        }
         _ => {}
     }
 }
@@ -2030,6 +2082,12 @@ fn interpolate_pom_component_metadata(
     }
     for timezone in &mut metadata.contributor_timezones {
         *timezone = interpolate_maven_properties(timezone, properties);
+    }
+    for distribution in &mut metadata.license_distributions {
+        *distribution = interpolate_maven_properties(distribution, properties);
+    }
+    for comments in &mut metadata.license_comments {
+        *comments = interpolate_maven_properties(comments, properties);
     }
     for choice in &mut metadata.licenses {
         if let Some(license) = &mut choice.license {
@@ -3530,6 +3588,8 @@ mod tests {
   <licenses>
     <license>
       <name>Apache-2.0</name>
+      <distribution>repo-${project.start}</distribution>
+      <comments>Use with notice ${project.start}</comments>
     </license>
   </licenses>
 </project>
@@ -3647,6 +3707,14 @@ mod tests {
         assert_eq!(
             Some(&"-5".to_string()),
             component.properties.get("maven:pomContributorTimezones")
+        );
+        assert_eq!(
+            Some(&"repo-2024".to_string()),
+            component.properties.get("maven:pomLicenseDistributions")
+        );
+        assert_eq!(
+            Some(&"Use with notice 2024".to_string()),
+            component.properties.get("maven:pomLicenseComments")
         );
         assert_eq!("Useful & small", component.description);
         assert_eq!("Example Foundation", component.publisher);
