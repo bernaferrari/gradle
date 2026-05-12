@@ -438,6 +438,22 @@ class DogfoodRunnerTest(unittest.TestCase):
             ignored,
         )
 
+    def test_prepare_project_run_dir_excludes_build_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source"
+            source.mkdir()
+            (source / "settings.gradle").write_text("", encoding="utf-8")
+            (source / "build").mkdir()
+            (source / "build" / "stale.txt").write_text("stale", encoding="utf-8")
+            (source / ".gradle").mkdir()
+            (source / ".gradle" / "state").write_text("state", encoding="utf-8")
+
+            destination = dogfood_run.prepare_project_run_dir(source, Path(tmp) / "dest")
+
+            self.assertTrue((destination / "settings.gradle").exists())
+            self.assertFalse((destination / "build").exists())
+            self.assertFalse((destination / ".gradle").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
