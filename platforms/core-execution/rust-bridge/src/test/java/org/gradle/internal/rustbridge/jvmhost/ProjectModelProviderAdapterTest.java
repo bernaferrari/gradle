@@ -500,6 +500,8 @@ public class ProjectModelProviderAdapterTest {
         String licenseChoiceJson = new String(Base64.getDecoder().decode(inputs.get("cyclonedx_license_choice_json_b64")), StandardCharsets.UTF_8);
         assertTrue(licenseChoiceJson.contains("\"id\":\"Apache-2.0\""));
         assertTrue(licenseChoiceJson.contains("\"url\":\"https://www.apache.org/licenses/LICENSE-2.0\""));
+        assertTrue(licenseChoiceJson.contains("\"contentType\":\"text/plain\""));
+        assertTrue(licenseChoiceJson.contains("\"content\":\"Apache License text\""));
         assertEquals("CI", inputs.get("cyclonedx_build_system_environment_variable"));
         assertTrue(inputs.get("cyclonedx_external_references").contains("https://example.invalid/sbom"));
         String externalReferencesJson = new String(Base64.getDecoder().decode(inputs.get("cyclonedx_external_references_json_b64")), StandardCharsets.UTF_8);
@@ -2922,6 +2924,24 @@ public class ProjectModelProviderAdapterTest {
 
         public String getUrl() {
             return "https://www.apache.org/licenses/LICENSE-2.0";
+        }
+
+        public TestLicenseText getText() {
+            return new TestLicenseText();
+        }
+    }
+
+    public static class TestLicenseText {
+        public String getContentType() {
+            return "text/plain";
+        }
+
+        public String getEncoding() {
+            return "";
+        }
+
+        public String getContent() {
+            return "Apache License text";
         }
     }
 
