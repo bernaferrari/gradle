@@ -1291,7 +1291,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         String includeBomSerialNumber = providerBooleanString(invokeOptional(task, taskType, "getIncludeBomSerialNumber"));
         putIfPresent(inputs, "cyclonedx_include_bom_serial_number", includeBomSerialNumber);
         putIfPresent(inputs, "cyclonedx_timestamp_source_policy", "cyclonedx-core-metadata-constructor-now");
-        putIfPresent(inputs, "cyclonedx_serial_source_policy", "true".equalsIgnoreCase(includeBomSerialNumber) ? "cyclonedx-gradle-random-uuid" : "omitted");
+        putIfPresent(inputs, "cyclonedx_serial_source_policy", cyclonedxSerialSourcePolicy(includeBomSerialNumber));
         String includeBuildSystem = providerBooleanString(invokeOptional(task, taskType, "getIncludeBuildSystem"));
         putIfPresent(inputs, "cyclonedx_include_build_system", includeBuildSystem);
         String includeBuildEnvironment = providerBooleanString(invokeOptional(task, taskType, "getIncludeBuildEnvironment"));
@@ -1347,6 +1347,16 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             cyclonedxMissingContractFields(missingBaseFields, includeBomSerialNumber, includeLicenseText, organizationalEntityPresent, organizationalEntityJsonBase64, licenseChoice, licenseChoiceJsonBase64, externalReferences, externalReferencesJsonBase64)
         );
         inputs.put("requires_jvm_task_execution", "true");
+    }
+
+    private static String cyclonedxSerialSourcePolicy(String includeBomSerialNumber) {
+        if ("true".equalsIgnoreCase(includeBomSerialNumber)) {
+            return "cyclonedx-gradle-random-uuid";
+        }
+        if ("false".equalsIgnoreCase(includeBomSerialNumber)) {
+            return "omitted";
+        }
+        return "";
     }
 
     private static String cyclonedxLicenseChoiceJsonBase64(@Nullable Object value) {
@@ -1566,7 +1576,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     ) {
         List<String> fields = new ArrayList<>();
         Collections.addAll(fields, baseFields.split(","));
-        if ("true".equalsIgnoreCase(includeBomSerialNumber)) {
+        if (!"false".equalsIgnoreCase(includeBomSerialNumber)) {
             fields.add("serial-source-policy");
         }
         if ("true".equalsIgnoreCase(includeLicenseText)) {
