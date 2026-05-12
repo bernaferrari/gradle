@@ -1287,7 +1287,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "cyclonedx_component_version", providerValue(invokeOptional(task, taskType, "getComponentVersion")));
         putIfPresent(inputs, "cyclonedx_project_type", enumName(invokeOptionalProvider(task, taskType, "getProjectType")));
         putIfPresent(inputs, "cyclonedx_schema_version", enumName(invokeOptionalProvider(task, taskType, "getSchemaVersion")));
-        putIfPresent(inputs, "cyclonedx_include_bom_serial_number", providerBooleanString(invokeOptional(task, taskType, "getIncludeBomSerialNumber")));
+        String includeBomSerialNumber = providerBooleanString(invokeOptional(task, taskType, "getIncludeBomSerialNumber"));
+        putIfPresent(inputs, "cyclonedx_include_bom_serial_number", includeBomSerialNumber);
         putIfPresent(inputs, "cyclonedx_include_build_system", providerBooleanString(invokeOptional(task, taskType, "getIncludeBuildSystem")));
         putIfPresent(inputs, "cyclonedx_include_build_environment", providerBooleanString(invokeOptional(task, taskType, "getIncludeBuildEnvironment")));
         putIfPresent(inputs, "cyclonedx_include_license_text", providerBooleanString(invokeOptional(task, taskType, "getIncludeLicenseText")));
@@ -1307,10 +1308,17 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         inputs.put(
             "cyclonedx_missing_contract_fields",
             resolutionGraphJsonBase64.isEmpty()
-                ? "resolution-result-edges,component-metadata,license-metadata,timestamp-source-policy,aggregate-merge-policy"
-                : "component-metadata,license-metadata,timestamp-source-policy,aggregate-merge-policy"
+                ? cyclonedxMissingContractFields("resolution-result-edges,component-metadata,license-metadata,timestamp-source-policy,aggregate-merge-policy", includeBomSerialNumber)
+                : cyclonedxMissingContractFields("component-metadata,license-metadata,timestamp-source-policy,aggregate-merge-policy", includeBomSerialNumber)
         );
         inputs.put("requires_jvm_task_execution", "true");
+    }
+
+    private static String cyclonedxMissingContractFields(String baseFields, String includeBomSerialNumber) {
+        if ("true".equalsIgnoreCase(includeBomSerialNumber)) {
+            return baseFields + ",serial-source-policy";
+        }
+        return baseFields;
     }
 
     private static String cyclonedxResolutionGraphJsonBase64(Task task, Class<?> taskType) {
