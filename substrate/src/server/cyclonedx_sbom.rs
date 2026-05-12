@@ -1255,7 +1255,13 @@ struct PomComponentMetadata {
     url: String,
     inception_year: String,
     developers: Vec<String>,
+    developer_emails: Vec<String>,
+    developer_organizations: Vec<String>,
+    developer_organization_urls: Vec<String>,
     contributors: Vec<String>,
+    contributor_emails: Vec<String>,
+    contributor_organizations: Vec<String>,
+    contributor_organization_urls: Vec<String>,
     licenses: Vec<CycloneDxLicenseChoice>,
     external_references: Vec<CycloneDxExternalReference>,
 }
@@ -1281,10 +1287,46 @@ impl PomComponentMetadata {
         if !self.developers.is_empty() {
             properties.push(("maven:pomDevelopers".to_string(), self.developers.join(",")));
         }
+        if !self.developer_emails.is_empty() {
+            properties.push((
+                "maven:pomDeveloperEmails".to_string(),
+                self.developer_emails.join(","),
+            ));
+        }
+        if !self.developer_organizations.is_empty() {
+            properties.push((
+                "maven:pomDeveloperOrganizations".to_string(),
+                self.developer_organizations.join(","),
+            ));
+        }
+        if !self.developer_organization_urls.is_empty() {
+            properties.push((
+                "maven:pomDeveloperOrganizationUrls".to_string(),
+                self.developer_organization_urls.join(","),
+            ));
+        }
         if !self.contributors.is_empty() {
             properties.push((
                 "maven:pomContributors".to_string(),
                 self.contributors.join(","),
+            ));
+        }
+        if !self.contributor_emails.is_empty() {
+            properties.push((
+                "maven:pomContributorEmails".to_string(),
+                self.contributor_emails.join(","),
+            ));
+        }
+        if !self.contributor_organizations.is_empty() {
+            properties.push((
+                "maven:pomContributorOrganizations".to_string(),
+                self.contributor_organizations.join(","),
+            ));
+        }
+        if !self.contributor_organization_urls.is_empty() {
+            properties.push((
+                "maven:pomContributorOrganizationUrls".to_string(),
+                self.contributor_organization_urls.join(","),
             ));
         }
         properties
@@ -1659,6 +1701,30 @@ fn apply_pom_metadata_text(
         {
             metadata.developers.push(text);
         }
+        [project, developers, developer, email]
+            if project == "project"
+                && developers == "developers"
+                && developer == "developer"
+                && email == "email" =>
+        {
+            metadata.developer_emails.push(text);
+        }
+        [project, developers, developer, organization]
+            if project == "project"
+                && developers == "developers"
+                && developer == "developer"
+                && organization == "organization" =>
+        {
+            metadata.developer_organizations.push(text);
+        }
+        [project, developers, developer, organization_url]
+            if project == "project"
+                && developers == "developers"
+                && developer == "developer"
+                && organization_url == "organizationUrl" =>
+        {
+            metadata.developer_organization_urls.push(text);
+        }
         [project, contributors, contributor, name]
             if project == "project"
                 && contributors == "contributors"
@@ -1666,6 +1732,30 @@ fn apply_pom_metadata_text(
                 && name == "name" =>
         {
             metadata.contributors.push(text);
+        }
+        [project, contributors, contributor, email]
+            if project == "project"
+                && contributors == "contributors"
+                && contributor == "contributor"
+                && email == "email" =>
+        {
+            metadata.contributor_emails.push(text);
+        }
+        [project, contributors, contributor, organization]
+            if project == "project"
+                && contributors == "contributors"
+                && contributor == "contributor"
+                && organization == "organization" =>
+        {
+            metadata.contributor_organizations.push(text);
+        }
+        [project, contributors, contributor, organization_url]
+            if project == "project"
+                && contributors == "contributors"
+                && contributor == "contributor"
+                && organization_url == "organizationUrl" =>
+        {
+            metadata.contributor_organization_urls.push(text);
         }
         [project, ci, url] if project == "project" && ci == "ciManagement" && url == "url" => {
             push_external_reference(&mut metadata.external_references, "build-system", text);
@@ -1792,8 +1882,26 @@ fn interpolate_pom_component_metadata(
     for developer in &mut metadata.developers {
         *developer = interpolate_maven_properties(developer, properties);
     }
+    for email in &mut metadata.developer_emails {
+        *email = interpolate_maven_properties(email, properties);
+    }
+    for organization in &mut metadata.developer_organizations {
+        *organization = interpolate_maven_properties(organization, properties);
+    }
+    for url in &mut metadata.developer_organization_urls {
+        *url = interpolate_maven_properties(url, properties);
+    }
     for contributor in &mut metadata.contributors {
         *contributor = interpolate_maven_properties(contributor, properties);
+    }
+    for email in &mut metadata.contributor_emails {
+        *email = interpolate_maven_properties(email, properties);
+    }
+    for organization in &mut metadata.contributor_organizations {
+        *organization = interpolate_maven_properties(organization, properties);
+    }
+    for url in &mut metadata.contributor_organization_urls {
+        *url = interpolate_maven_properties(url, properties);
     }
     for choice in &mut metadata.licenses {
         if let Some(license) = &mut choice.license {
@@ -3238,6 +3346,9 @@ mod tests {
   <developers>
     <developer>
       <name>Ada ${project.start}</name>
+      <email>ada-${project.start}@example.test</email>
+      <organization>Example Devs</organization>
+      <organizationUrl>https://devs.example.test/${project.start}</organizationUrl>
     </developer>
     <developer>
       <name>Linus</name>
@@ -3246,6 +3357,9 @@ mod tests {
   <contributors>
     <contributor>
       <name>Grace</name>
+      <email>grace@example.test</email>
+      <organization>Example Contributors</organization>
+      <organizationUrl>https://contributors.example.test</organizationUrl>
     </contributor>
   </contributors>
   <ciManagement>
@@ -3334,8 +3448,38 @@ mod tests {
             component.properties.get("maven:pomDevelopers")
         );
         assert_eq!(
+            Some(&"ada-2024@example.test".to_string()),
+            component.properties.get("maven:pomDeveloperEmails")
+        );
+        assert_eq!(
+            Some(&"Example Devs".to_string()),
+            component.properties.get("maven:pomDeveloperOrganizations")
+        );
+        assert_eq!(
+            Some(&"https://devs.example.test/2024".to_string()),
+            component
+                .properties
+                .get("maven:pomDeveloperOrganizationUrls")
+        );
+        assert_eq!(
             Some(&"Grace".to_string()),
             component.properties.get("maven:pomContributors")
+        );
+        assert_eq!(
+            Some(&"grace@example.test".to_string()),
+            component.properties.get("maven:pomContributorEmails")
+        );
+        assert_eq!(
+            Some(&"Example Contributors".to_string()),
+            component
+                .properties
+                .get("maven:pomContributorOrganizations")
+        );
+        assert_eq!(
+            Some(&"https://contributors.example.test".to_string()),
+            component
+                .properties
+                .get("maven:pomContributorOrganizationUrls")
         );
         assert_eq!("Useful & small", component.description);
         assert_eq!("Example Foundation", component.publisher);
