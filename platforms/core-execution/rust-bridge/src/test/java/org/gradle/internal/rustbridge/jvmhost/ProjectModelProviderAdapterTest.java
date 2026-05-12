@@ -457,13 +457,7 @@ public class ProjectModelProviderAdapterTest {
     public void marksCycloneDxTaskAsMissingSchemaBackedSbomContract() throws IOException {
         File inputJar = temporaryFolder.newFile("runtime.jar");
         File outputJson = temporaryFolder.newFile("bom.json");
-        Task cyclonedx = basicTask(
-            ":cyclonedxDirectBom",
-            "cyclonedxDirectBom",
-            fileCollection(inputJar),
-            fileCollection(outputJson),
-            false
-        );
+        Task cyclonedx = cyclonedxDirectTask(inputJar, outputJson);
 
         BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(cyclonedx, CyclonedxDirectTask.class);
         Map<String, String> inputs = task.getInputSpecsList().stream()
@@ -474,6 +468,16 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("sbom", task.getActionKind());
         assertEquals("process", task.getWorkerIsolation());
         assertEquals("CyclonedxDirectTask", inputs.get("taskType"));
+        assertEquals("org.example", inputs.get("cyclonedx_component_group"));
+        assertEquals("demo", inputs.get("cyclonedx_component_name"));
+        assertEquals("1.0", inputs.get("cyclonedx_component_version"));
+        assertEquals("LIBRARY", inputs.get("cyclonedx_project_type"));
+        assertEquals("VERSION_16", inputs.get("cyclonedx_schema_version"));
+        assertEquals("true", inputs.get("cyclonedx_include_bom_serial_number"));
+        assertEquals("runtimeClasspath", inputs.get("cyclonedx_include_configs"));
+        assertEquals(".*[Tt]est.*", inputs.get("cyclonedx_skip_configs"));
+        assertEquals(outputJson.getAbsolutePath(), inputs.get("cyclonedx_json_output"));
+        assertEquals(inputJar.getAbsolutePath(), inputs.get("cyclonedx_resolved_dependencies"));
         assertEquals("missing", inputs.get("cyclonedx_sbom_contract_status"));
         assertEquals("true", inputs.get("requires_jvm_task_execution"));
         assertFalse(inputs.containsKey("sbom_contract_json_b64"));
@@ -1714,6 +1718,80 @@ public class ProjectModelProviderAdapterTest {
         });
     }
 
+    private static Task cyclonedxDirectTask(File runtimeJar, File outputJson) {
+        FileCollection inputs = fileCollection(runtimeJar);
+        FileCollection outputs = fileCollection(outputJson);
+        Project project = proxy(Project.class, (proxy, method, args) -> {
+            if (method.getName().equals("getPath")) {
+                return ":";
+            }
+            return defaultValue(method.getReturnType());
+        });
+        TaskDependency noDependencies = proxy(TaskDependency.class, (proxy, method, args) -> {
+            if (method.getName().equals("getDependencies")) {
+                return Collections.emptySet();
+            }
+            return defaultValue(method.getReturnType());
+        });
+        return proxy(new Class<?>[] {Task.class, CyclonedxDirectTask.class}, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "getPath":
+                    return ":cyclonedxDirectBom";
+                case "getProject":
+                    return project;
+                case "getName":
+                    return "cyclonedxDirectBom";
+                case "getEnabled":
+                    return true;
+                case "getGroup":
+                case "getDescription":
+                    return "";
+                case "getTaskDependencies":
+                case "getShouldRunAfter":
+                case "getMustRunAfter":
+                case "getFinalizedBy":
+                    return noDependencies;
+                case "getInputs":
+                    return filesOwner(method.getReturnType(), inputs);
+                case "getOutputs":
+                    return filesOwner(method.getReturnType(), outputs);
+                case "getLocalState":
+                case "getDestroyables":
+                    return registeredFilesOwner(method.getReturnType());
+                case "getComponentGroup":
+                    return new ObjectProvider("org.example");
+                case "getComponentName":
+                    return new ObjectProvider("demo");
+                case "getComponentVersion":
+                    return new ObjectProvider("1.0");
+                case "getProjectType":
+                    return new ObjectProvider("LIBRARY");
+                case "getSchemaVersion":
+                    return new ObjectProvider("VERSION_16");
+                case "getIncludeBomSerialNumber":
+                    return new ObjectProvider(true);
+                case "getIncludeBuildSystem":
+                case "getIncludeBuildEnvironment":
+                case "getIncludeMetadataResolution":
+                    return new ObjectProvider(false);
+                case "getIncludeConfigs":
+                    return new ObjectProvider(Collections.singletonList("runtimeClasspath"));
+                case "getSkipConfigs":
+                    return new ObjectProvider(Collections.singletonList(".*[Tt]est.*"));
+                case "getJsonOutput":
+                    return new FileProvider(outputJson);
+                case "getXmlOutput":
+                    return null;
+                case "getResolvedDependencies":
+                    return inputs;
+                case "compareTo":
+                    return 0;
+                default:
+                    return defaultValue(method.getReturnType());
+            }
+        });
+    }
+
     private static Task basicJarTask(FileCollection inputs, FileCollection outputs, File archiveDir, File archiveFile) {
         Project project = proxy(Project.class, (proxy, method, args) -> {
             if (method.getName().equals("getPath")) {
@@ -2371,6 +2449,18 @@ public class ProjectModelProviderAdapterTest {
         }
     }
 
+    public static class ObjectProvider {
+        private final Object value;
+
+        ObjectProvider(Object value) {
+            this.value = value;
+        }
+
+        public Object getOrNull() {
+            return value;
+        }
+    }
+
     public static class PermissionProvider {
         private final int value;
 
@@ -2563,10 +2653,24 @@ public class ProjectModelProviderAdapterTest {
     public static class CreateStartScripts {
     }
 
-    public static class CyclonedxDirectTask {
+    public interface CyclonedxDirectTask {
+        Object getComponentGroup();
+        Object getComponentName();
+        Object getComponentVersion();
+        Object getProjectType();
+        Object getSchemaVersion();
+        Object getIncludeBomSerialNumber();
+        Object getIncludeBuildSystem();
+        Object getIncludeBuildEnvironment();
+        Object getIncludeMetadataResolution();
+        Object getIncludeConfigs();
+        Object getSkipConfigs();
+        Object getJsonOutput();
+        Object getXmlOutput();
+        FileCollection getResolvedDependencies();
     }
 
-    public static class CyclonedxAggregateTask {
+    public interface CyclonedxAggregateTask {
     }
 
     public static class Copy {
