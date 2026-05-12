@@ -78,6 +78,17 @@ pub struct CycloneDxResolvedDependency {
     pub to: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CycloneDxDraftOptions {
+    pub spec_version: String,
+    pub serial_number: String,
+    pub timestamp: String,
+    pub root_group: String,
+    pub root_name: String,
+    pub root_version: String,
+    pub root_component_type: String,
+}
+
 impl CycloneDxSbomContract {
     pub fn validate(&self) -> Result<(), String> {
         if self.schema != CONTRACT_SCHEMA {
@@ -209,6 +220,112 @@ pub fn render_json(contract: &CycloneDxSbomContract) -> Result<String, String> {
     contract.validate()?;
     let bom = normalized_bom(contract);
     serde_json::to_string_pretty(&bom).map_err(|err| err.to_string())
+}
+
+pub fn draft_contract_from_resolution_graph(
+    graph: &CycloneDxResolutionGraphEvidence,
+    options: CycloneDxDraftOptions,
+) -> Result<CycloneDxSbomContract, String> {
+    graph.validate()?;
+    validate_draft_options(&options)?;
+    let root_purl = purl(&options.root_group, &options.root_name, &options.root_version);
+    let root_component = CycloneDxComponent {
+        component_type: options.root_component_type.to_lowercase(),
+        bom_ref: root_purl.clone(),
+        group: options.root_group,
+        name: options.root_name,
+        version: options.root_version,
+        purl: root_purl,
+        properties: BTreeMap::new(),
+    };
+
+    let mut components_by_id = BTreeMap::new();
+    let mut dependencies_by_ref = BTreeMap::<String, BTreeSet<String>>::new();
+    for configuration in &graph.configurations {
+        for component in &configuration.components {
+            if component.group.is_empty() || component.module.is_empty() || component.version.is_empty() {
+                continue;
+            }
+            let bom_ref = purl(&component.group, &component.module, &component.version);
+            components_by_id.insert(component.id.clone(), (component, bom_ref.clone()));
+            dependencies_by_ref.entry(bom_ref).or_default();
+        }
+    }
+
+    let mut root_children = BTreeSet::new();
+    for configuration in &graph.configurations {
+        for dependency in &configuration.dependencies {
+            let Some((_, from_ref)) = components_by_id.get(&dependency.from) else {
+                continue;
+            };
+            let Some((_, to_ref)) = components_by_id.get(&dependency.to) else {
+                continue;
+            };
+            dependencies_by_ref
+                .entry(from_ref.clone())
+                .or_default()
+                .insert(to_ref.clone());
+            root_children.insert(from_ref.clone());
+        }
+    }
+
+    let components = components_by_id
+        .into_values()
+        .map(|(component, bom_ref)| CycloneDxComponent {
+            component_type: "library".to_string(),
+            bom_ref: bom_ref.clone(),
+            group: component.group.clone(),
+            name: component.module.clone(),
+            version: component.version.clone(),
+            purl: bom_ref,
+            properties: BTreeMap::new(),
+        })
+        .collect::<Vec<_>>();
+
+    let mut dependencies = dependencies_by_ref
+        .into_iter()
+        .map(|(reference, depends_on)| CycloneDxDependency {
+            reference,
+            depends_on: depends_on.into_iter().collect(),
+        })
+        .collect::<Vec<_>>();
+    dependencies.push(CycloneDxDependency {
+        reference: root_component.bom_ref.clone(),
+        depends_on: root_children.into_iter().collect(),
+    });
+
+    let contract = CycloneDxSbomContract {
+        schema: CONTRACT_SCHEMA.to_string(),
+        spec_version: options.spec_version,
+        serial_number: options.serial_number,
+        timestamp: options.timestamp,
+        root_component,
+        components,
+        dependencies,
+    };
+    contract.validate()?;
+    Ok(contract)
+}
+
+fn validate_draft_options(options: &CycloneDxDraftOptions) -> Result<(), String> {
+    if options.spec_version.trim().is_empty()
+        || options.serial_number.trim().is_empty()
+        || options.timestamp.trim().is_empty()
+        || options.root_name.trim().is_empty()
+        || options.root_version.trim().is_empty()
+        || options.root_component_type.trim().is_empty()
+    {
+        return Err("CycloneDX draft options are missing spec/root identity fields".to_string());
+    }
+    Ok(())
+}
+
+fn purl(group: &str, name: &str, version: &str) -> String {
+    if group.is_empty() {
+        format!("pkg:maven/{name}@{version}")
+    } else {
+        format!("pkg:maven/{group}/{name}@{version}")
+    }
 }
 
 pub fn render_xml(contract: &CycloneDxSbomContract) -> Result<String, String> {
@@ -454,5 +571,38 @@ mod tests {
             .push(duplicate);
         let err = graph.validate().unwrap_err();
         assert!(err.contains("duplicate component"));
+    }
+
+    #[test]
+    fn drafts_deterministic_contract_from_resolution_graph_evidence() {
+        let contract = draft_contract_from_resolution_graph(
+            &sample_resolution_graph(),
+            CycloneDxDraftOptions {
+                spec_version: "1.6".to_string(),
+                serial_number: "urn:uuid:00000000-0000-0000-0000-000000000002".to_string(),
+                timestamp: "2026-05-12T11:30:00Z".to_string(),
+                root_group: "org.example".to_string(),
+                root_name: "demo".to_string(),
+                root_version: "1.0".to_string(),
+                root_component_type: "application".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(CONTRACT_SCHEMA, contract.schema);
+        assert_eq!("pkg:maven/org.example/demo@1.0", contract.root_component.bom_ref);
+        assert!(contract
+            .components
+            .iter()
+            .any(|component| component.bom_ref == "pkg:maven/org.example/lib@1.1"));
+        assert!(contract.dependencies.iter().any(|dependency| {
+            dependency.reference == "pkg:maven/org.example/app@1.0"
+                && dependency
+                    .depends_on
+                    .contains(&"pkg:maven/org.example/lib@1.1".to_string())
+        }));
+        assert!(render_json(&contract)
+            .unwrap()
+            .contains("pkg:maven/org.example/lib@1.1"));
     }
 }
