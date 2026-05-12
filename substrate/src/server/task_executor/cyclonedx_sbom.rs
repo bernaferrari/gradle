@@ -134,7 +134,13 @@ fn contract_from_input(input: &TaskInput) -> Result<CycloneDxSbomContract, Strin
                 root_name: required_option(input, "aggregate_root_name")?,
                 root_version: required_option(input, "aggregate_root_version")?,
                 root_component_type: required_option(input, "aggregate_root_component_type")?,
-                external_references: Vec::new(),
+                external_references: whitespace_values(
+                    input
+                        .options
+                        .get("aggregate_external_references")
+                        .map(String::as_str)
+                        .unwrap_or_default(),
+                ),
             },
         );
     }
@@ -172,6 +178,14 @@ fn output_files(input: &TaskInput) -> Vec<PathBuf> {
     } else {
         vec![input.target_dir.clone()]
     }
+}
+
+fn whitespace_values(value: &str) -> Vec<String> {
+    value
+        .split_whitespace()
+        .filter(|entry| !entry.trim().is_empty())
+        .map(|entry| entry.to_string())
+        .collect()
 }
 
 #[cfg(test)]
@@ -281,6 +295,10 @@ mod tests {
             "application".to_string(),
         );
         input.options.insert(
+            "aggregate_external_references".to_string(),
+            "https://example.invalid/aggregate".to_string(),
+        );
+        input.options.insert(
             "output_files_json".to_string(),
             serde_json::to_string(&vec![json_output.to_string_lossy().into_owned()]).unwrap(),
         );
@@ -291,5 +309,7 @@ mod tests {
         let json = std::fs::read_to_string(json_output).unwrap();
         assert!(json.contains("pkg:maven/org.example/aggregate@1.0"));
         assert!(json.contains("pkg:maven/org.example/lib@1.0"));
+        assert!(json.contains("\"externalReferences\""));
+        assert!(json.contains("https://example.invalid/aggregate"));
     }
 }

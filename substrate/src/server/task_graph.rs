@@ -2147,6 +2147,12 @@ fn task_options(
             "aggregate_root_component_type",
             "aggregate_root_component_type",
         );
+        insert_input_option(
+            task,
+            &mut options,
+            "aggregate_external_references",
+            "aggregate_external_references",
+        );
     }
     options
 }
@@ -2864,6 +2870,10 @@ mod tests {
             value_input("aggregate_root_name", "aggregate"),
             value_input("aggregate_root_version", "1.0"),
             value_input("aggregate_root_component_type", "application"),
+            value_input(
+                "aggregate_external_references",
+                "https://example.invalid/aggregate",
+            ),
         ];
 
         assert_eq!(executable_task_type(&task), "CycloneDxSbom");
@@ -2879,6 +2889,12 @@ mod tests {
                 .get("aggregate_root_name")
                 .and_then(|value| value.as_str()),
             Some("aggregate")
+        );
+        assert_eq!(
+            options
+                .get("aggregate_external_references")
+                .and_then(|value| value.as_str()),
+            Some("https://example.invalid/aggregate")
         );
     }
 
