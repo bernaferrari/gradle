@@ -143,10 +143,16 @@ def validate_manifest(manifest_path: Path) -> list[str]:
             if not project.checks.get("fail_closed_diagnostic"):
                 errors.append(prefix + "fail-closed entries must name fail_closed_diagnostic")
 
-    if supported_count < 3:
-        errors.append(f"manifest must list at least 3 supported projects, got {supported_count}")
-    if fail_closed_count < 1:
-        errors.append("manifest must list at least 1 fail-closed project")
+    minimum_supported = int(data.get("minimum_supported_projects", 3))
+    minimum_fail_closed = int(data.get("minimum_fail_closed_projects", 1))
+    if supported_count < minimum_supported:
+        errors.append(
+            f"manifest must list at least {minimum_supported} supported projects, got {supported_count}"
+        )
+    if fail_closed_count < minimum_fail_closed:
+        errors.append(
+            f"manifest must list at least {minimum_fail_closed} fail-closed projects, got {fail_closed_count}"
+        )
     return errors
 
 
@@ -290,11 +296,13 @@ def parse_jvm_forwards(output: str) -> int:
 
 def parse_substrate_signals(output: str) -> dict[str, Any]:
     plan_match = re.search(r"\[substrate:run-build\].*? from ([A-Za-z0-9_.-]+)", output)
+    rust_executed_match = re.search(r"\[substrate:run-build\] Rust executed (\d+)", output)
     return {
         "daemon_started": "Daemon started successfully" in output,
         "daemon_reused": "Connecting to existing daemon" in output
         and "Failed to connect to existing daemon" not in output,
         "runbuild_marker": "[substrate:run-build]" in output,
+        "rust_executed_tasks": int(rust_executed_match.group(1)) if rust_executed_match else 0,
         "taskgraph_captured": "[substrate:taskgraph] captured" in output,
         "plan_source": plan_match.group(1) if plan_match else "",
         "jvm_forward_count": parse_jvm_forwards(output),
@@ -410,6 +418,9 @@ def run_project(
             checks["resolved_expectation"] = "supported"
 
     substrate_signals = parse_substrate_signals(substrate.output)
+    if checks.get("resolved_expectation", project.expectation) == "supported":
+        checks["rust_runbuild_executed"] = substrate_signals["rust_executed_tasks"] > 0
+        checks["match"] = checks["match"] and checks["rust_runbuild_executed"]
     result = {
         "name": project.name,
         "path": str(project.path),
@@ -501,6 +512,11 @@ def summarize_execution(results: list[dict[str, Any]]) -> dict[str, Any]:
         "runbuild_marker_count": sum(
             1 for result in results if result.get("substrate_signals", {}).get("runbuild_marker")
         ),
+        "rust_runbuild_executed_count": sum(
+            1
+            for result in results
+            if result.get("substrate_signals", {}).get("rust_executed_tasks", 0) > 0
+        ),
         "taskgraph_capture_count": sum(
             1 for result in results if result.get("substrate_signals", {}).get("taskgraph_captured")
         ),
@@ -526,6 +542,7 @@ def write_markdown_report(output_dir: Path, summary: dict[str, Any], results: li
         f"Observed wall time: upstream={summary['upstream_duration_ms']}ms, substrate={summary['substrate_duration_ms']}ms",
         f"Task totals: upstream={summary['upstream_task_total']}, substrate={summary['substrate_task_total']}",
         f"Rust RunBuild markers: {summary['runbuild_marker_count']}/{summary['project_count']}",
+        f"Rust RunBuild executions: {summary['rust_runbuild_executed_count']}/{summary['project_count']}",
         f"Task-graph captures: {summary['taskgraph_capture_count']}/{summary['project_count']}",
         f"Daemon signals: started={summary['daemon_started_count']}, reused={summary['daemon_reused_count']}",
         "",

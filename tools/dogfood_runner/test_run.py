@@ -172,6 +172,7 @@ class DogfoodRunnerTest(unittest.TestCase):
         self.assertTrue(signals["runbuild_marker"])
         self.assertTrue(signals["taskgraph_captured"])
         self.assertEqual("build-plan-cache", signals["plan_source"])
+        self.assertEqual(3, signals["rust_executed_tasks"])
         self.assertEqual(0, signals["jvm_forward_count"])
 
     def test_summarizes_pass_and_fail_closed_results(self):
@@ -185,6 +186,7 @@ class DogfoodRunnerTest(unittest.TestCase):
                 "checks": {"jvm_forward_count": 0},
                 "substrate_signals": {
                     "runbuild_marker": True,
+                    "rust_executed_tasks": 2,
                     "taskgraph_captured": True,
                     "daemon_started": True,
                     "daemon_reused": False,
@@ -199,6 +201,7 @@ class DogfoodRunnerTest(unittest.TestCase):
                 "checks": {"fail_closed_message": True},
                 "substrate_signals": {
                     "runbuild_marker": True,
+                    "rust_executed_tasks": 0,
                     "taskgraph_captured": True,
                     "daemon_started": False,
                     "daemon_reused": True,
@@ -213,6 +216,7 @@ class DogfoodRunnerTest(unittest.TestCase):
                 "checks": {"jvm_forward_count": 1},
                 "substrate_signals": {
                     "runbuild_marker": False,
+                    "rust_executed_tasks": 0,
                     "taskgraph_captured": False,
                     "daemon_started": False,
                     "daemon_reused": False,
@@ -226,6 +230,7 @@ class DogfoodRunnerTest(unittest.TestCase):
         self.assertEqual(2, summary["matched_project_count"])
         self.assertEqual(1, summary["zero_jvm_forward_supported_count"])
         self.assertEqual(2, summary["runbuild_marker_count"])
+        self.assertEqual(1, summary["rust_runbuild_executed_count"])
         self.assertEqual(1, summary["daemon_started_count"])
         self.assertEqual(1, summary["daemon_reused_count"])
         self.assertEqual(["drift"], summary["failed_projects"])
