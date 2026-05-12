@@ -385,6 +385,39 @@ impl DependencyResolutionServiceImpl {
         req
     }
 
+    fn repository_resource_url(repo: &RepositoryDescriptor, path: &str) -> Result<String, String> {
+        let base = repo.url.trim();
+        if base.starts_with("file:") {
+            let base = if base.ends_with('/') {
+                base.to_string()
+            } else {
+                format!("{base}/")
+            };
+            let joined = reqwest::Url::parse(&base)
+                .map_err(|e| format!("Invalid file repository URL '{}': {}", repo.url, e))?
+                .join(path)
+                .map_err(|e| format!("Invalid file repository resource '{}': {}", path, e))?;
+            return Ok(joined.to_string());
+        }
+        Ok(format!("{}/{}", base.trim_end_matches('/'), path))
+    }
+
+    fn file_repository_resource_path(
+        repo: &RepositoryDescriptor,
+        path: &str,
+    ) -> Result<Option<PathBuf>, String> {
+        let url = Self::repository_resource_url(repo, path)?;
+        if !url.starts_with("file:") {
+            return Ok(None);
+        }
+        let parsed = reqwest::Url::parse(&url)
+            .map_err(|e| format!("Invalid file repository resource URL '{url}': {e}"))?;
+        parsed
+            .to_file_path()
+            .map(Some)
+            .map_err(|_| format!("File repository resource URL is not a local path: {url}"))
+    }
+
     /// Parse maven-metadata.xml using quick-xml.
     fn parse_maven_metadata(xml: &str) -> Result<MavenMetadata, String> {
         maven_metadata::parse_maven_metadata(xml)
@@ -404,12 +437,7 @@ impl DependencyResolutionServiceImpl {
         let cache_path = self.module_metadata_path(repo, group, name, extension);
         let group_path = Self::group_to_path(group);
         let path = format!("{}/{}/maven-metadata.xml", group_path, name);
-        let url = self
-            .build_request(repo, &path)
-            .build()
-            .map_err(|e| format!("Failed to build maven-metadata.xml request: {}", e))?
-            .url()
-            .to_string();
+        let url = Self::repository_resource_url(repo, &path)?;
         let url_key = Self::metadata_url_cache_key(&url, extension);
         let url_cache_path = self.metadata_url_path(&url, extension);
         if let Some(cached) = self
@@ -441,6 +469,40 @@ impl DependencyResolutionServiceImpl {
         {
             tracing::info!(group = %group, name = %name, source = "url_cache", "Metadata cache hit");
             return Self::parse_maven_metadata(&cached);
+        }
+
+        if let Some(file_path) = Self::file_repository_resource_path(repo, &path)? {
+            if !file_path.is_file() {
+                return Err("maven-metadata.xml not found".to_string());
+            }
+            let body = tokio::fs::read_to_string(&file_path)
+                .await
+                .map_err(|e| format!("Failed to read maven-metadata.xml from file repo: {e}"))?;
+            self.persist_text_artifact(
+                &key,
+                &cache_path,
+                group,
+                name,
+                version,
+                classifier,
+                extension,
+                &body,
+            )
+            .await?;
+            self.persist_text_artifact_alias(
+                &url_key,
+                &url_cache_path,
+                &cache_path,
+                group,
+                name,
+                version,
+                classifier,
+                extension,
+                &body,
+            )
+            .await?;
+            tracing::info!(group = %group, name = %name, source = "file_repo", path = %file_path.display(), "Metadata fetched from file repository");
+            return Self::parse_maven_metadata(&body);
         }
 
         let resp = self
@@ -749,12 +811,7 @@ impl DependencyResolutionServiceImpl {
             "{}/{}/{}/{}-{}.pom",
             group_path, name, version, name, version
         );
-        let url = self
-            .build_request(repo, &path)
-            .build()
-            .map_err(|e| format!("Failed to build POM request: {}", e))?
-            .url()
-            .to_string();
+        let url = Self::repository_resource_url(repo, &path)?;
         let url_key = Self::metadata_url_cache_key(&url, extension);
         let url_cache_path = self.metadata_url_path(&url, extension);
         if let Some(cached) = self
@@ -786,6 +843,40 @@ impl DependencyResolutionServiceImpl {
         {
             tracing::info!(group = %group, name = %name, version = %version, source = "url_cache", "POM cache hit");
             return Ok(cached);
+        }
+
+        if let Some(file_path) = Self::file_repository_resource_path(repo, &path)? {
+            if !file_path.is_file() {
+                return Err(format!("POM not found: {}-{}.pom", name, version));
+            }
+            let content = tokio::fs::read_to_string(&file_path)
+                .await
+                .map_err(|e| format!("Failed to read POM from file repo: {e}"))?;
+            self.persist_text_artifact(
+                &key,
+                &cache_path,
+                group,
+                name,
+                version,
+                classifier,
+                extension,
+                &content,
+            )
+            .await?;
+            self.persist_text_artifact_alias(
+                &url_key,
+                &url_cache_path,
+                &cache_path,
+                group,
+                name,
+                version,
+                classifier,
+                extension,
+                &content,
+            )
+            .await?;
+            tracing::info!(group = %group, name = %name, version = %version, source = "file_repo", path = %file_path.display(), "POM fetched from file repository");
+            return Ok(content);
         }
 
         let response = self
@@ -847,12 +938,7 @@ impl DependencyResolutionServiceImpl {
             "{}/{}/{}/{}-{}.module",
             group_path, name, version, name, version
         );
-        let url = self
-            .build_request(repo, &path)
-            .build()
-            .map_err(|e| format!("Failed to build Gradle Module Metadata request: {e}"))?
-            .url()
-            .to_string();
+        let url = Self::repository_resource_url(repo, &path)?;
         let url_key = Self::metadata_url_cache_key(&url, extension);
         let url_cache_path = self.metadata_url_path(&url, extension);
         if self.module_metadata_misses.contains_key(&key)
@@ -890,6 +976,42 @@ impl DependencyResolutionServiceImpl {
         {
             tracing::info!(group = %group, name = %name, version = %version, source = "url_cache", "Gradle Module Metadata cache hit");
             return Ok(Some(cached));
+        }
+
+        if let Some(file_path) = Self::file_repository_resource_path(repo, &path)? {
+            if !file_path.is_file() {
+                self.module_metadata_misses.insert(key, ());
+                self.module_metadata_misses.insert(url_key, ());
+                return Ok(None);
+            }
+            let content = tokio::fs::read_to_string(&file_path).await.map_err(|e| {
+                format!("Failed to read Gradle Module Metadata from file repo: {e}")
+            })?;
+            self.persist_text_artifact(
+                &key,
+                &cache_path,
+                group,
+                name,
+                version,
+                classifier,
+                extension,
+                &content,
+            )
+            .await?;
+            self.persist_text_artifact_alias(
+                &url_key,
+                &url_cache_path,
+                &cache_path,
+                group,
+                name,
+                version,
+                classifier,
+                extension,
+                &content,
+            )
+            .await?;
+            tracing::info!(group = %group, name = %name, version = %version, source = "file_repo", path = %file_path.display(), "Gradle Module Metadata fetched from file repository");
+            return Ok(Some(content));
         }
 
         let response = self
@@ -1023,6 +1145,59 @@ impl DependencyResolutionServiceImpl {
             tracing::info!(
                 artifact = %format!("{}:{}:{}", group, name, version),
                 cache_hit = true,
+                duration_ms = dl_start.elapsed().as_millis() as u64,
+                "Artifact resolved"
+            );
+            return Ok((size, sha256));
+        }
+
+        if artifact_url.starts_with("file:") {
+            let file_path = reqwest::Url::parse(artifact_url)
+                .map_err(|e| format!("Invalid file artifact URL {artifact_url}: {e}"))?
+                .to_file_path()
+                .map_err(|_| format!("File artifact URL is not a local path: {artifact_url}"))?;
+            let bytes = tokio::fs::read(&file_path)
+                .await
+                .map_err(|e| format!("Failed to read file artifact {artifact_url}: {e}"))?;
+            if let Some(parent) = store_path.parent() {
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .map_err(|e| format!("Failed to create artifact store directory: {e}"))?;
+            }
+            let tmp_path = PathBuf::from(format!("{}.part", store_path.to_string_lossy()));
+            tokio::fs::write(&tmp_path, &bytes)
+                .await
+                .map_err(|e| format!("Failed to write artifact cache file: {e}"))?;
+            tokio::fs::rename(&tmp_path, &store_path)
+                .await
+                .map_err(|e| format!("Failed to commit artifact cache file: {e}"))?;
+
+            let sha256 = Self::compute_sha256(&bytes);
+            if let Err(e) = Self::write_sha256_sidecar(&store_path, &sha256).await {
+                tracing::warn!(path = %store_path.display(), error = %e, "Failed to write prefetched file artifact checksum sidecar");
+            }
+            let size = bytes.len() as i64;
+            self.artifact_cache.insert(
+                key,
+                CachedArtifact {
+                    group: group.to_string(),
+                    name: name.to_string(),
+                    version: version.to_string(),
+                    classifier: classifier.to_string(),
+                    extension,
+                    sha256: sha256.clone(),
+                    local_path: store_path.to_string_lossy().into_owned(),
+                    size,
+                    cached_at_ms: Self::now_ms(),
+                },
+            );
+            self.resolution_stats
+                .total_resolutions
+                .fetch_add(1, Ordering::Relaxed);
+            tracing::info!(
+                artifact = %format!("{}:{}:{}", group, name, version),
+                source = "file_repo",
+                path = %file_path.display(),
                 duration_ms = dl_start.elapsed().as_millis() as u64,
                 "Artifact resolved"
             );
@@ -2099,6 +2274,166 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                 }
             }
 
+            if url.starts_with("file:") {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+                let file_path = match reqwest::Url::parse(&url)
+                    .map_err(|e| format!("Invalid file artifact URL {url}: {e}"))
+                    .and_then(|parsed| parsed.to_file_path().map_err(|_| format!("File artifact URL is not a local path: {url}"))) {
+                    Ok(path) => path,
+                    Err(e) => {
+                        yield Ok(crate::proto::DownloadArtifactChunk {
+                            data: Vec::new(),
+                            offset: 0,
+                            total_size: 0,
+                            is_last: true,
+                            error_message: e,
+                        });
+                        return;
+                    }
+                };
+                let mut source = match tokio::fs::File::open(&file_path).await {
+                    Ok(file) => file,
+                    Err(e) => {
+                        yield Ok(crate::proto::DownloadArtifactChunk {
+                            data: Vec::new(),
+                            offset: 0,
+                            total_size: 0,
+                            is_last: true,
+                            error_message: format!("Failed to open file artifact {}: {}", file_path.display(), e),
+                        });
+                        return;
+                    }
+                };
+                let total_size = source.metadata().await.map(|m| m.len() as i64).unwrap_or(-1);
+                let tmp_path = if store_path.as_os_str().is_empty() {
+                    PathBuf::new()
+                } else {
+                    PathBuf::from(format!("{}.part", store_path.to_string_lossy()))
+                };
+                let mut cache_file = if store_path.as_os_str().is_empty() {
+                    None
+                } else {
+                    if let Some(parent) = store_path.parent() {
+                        if let Err(e) = tokio::fs::create_dir_all(parent).await {
+                            yield Ok(crate::proto::DownloadArtifactChunk {
+                                data: Vec::new(),
+                                offset: 0,
+                                total_size,
+                                is_last: true,
+                                error_message: format!("Failed to create artifact store directory: {}", e),
+                            });
+                            return;
+                        }
+                    }
+                    match tokio::fs::File::create(&tmp_path).await {
+                        Ok(file) => Some(file),
+                        Err(e) => {
+                            yield Ok(crate::proto::DownloadArtifactChunk {
+                                data: Vec::new(),
+                                offset: 0,
+                                total_size,
+                                is_last: true,
+                                error_message: format!("Failed to create artifact cache file: {}", e),
+                            });
+                            return;
+                        }
+                    }
+                };
+                let mut offset = 0u64;
+                let mut hasher = Sha256::new();
+                let mut buffer = vec![0u8; 64 * 1024];
+                loop {
+                    match source.read(&mut buffer).await {
+                        Ok(0) => break,
+                        Ok(read) => {
+                            let bytes = &buffer[..read];
+                            if let Some(file) = cache_file.as_mut() {
+                                if let Err(e) = file.write_all(bytes).await {
+                                    let _ = tokio::fs::remove_file(&tmp_path).await;
+                                    yield Ok(crate::proto::DownloadArtifactChunk {
+                                        data: Vec::new(),
+                                        offset: offset as i64,
+                                        total_size,
+                                        is_last: true,
+                                        error_message: format!("Failed to write artifact cache file: {}", e),
+                                    });
+                                    return;
+                                }
+                            }
+                            hasher.update(bytes);
+                            yield Ok(crate::proto::DownloadArtifactChunk {
+                                data: bytes.to_vec(),
+                                offset: offset as i64,
+                                total_size,
+                                is_last: false,
+                                error_message: String::new(),
+                            });
+                            offset += read as u64;
+                        }
+                        Err(e) => {
+                            let _ = tokio::fs::remove_file(&tmp_path).await;
+                            yield Ok(crate::proto::DownloadArtifactChunk {
+                                data: Vec::new(),
+                                offset: offset as i64,
+                                total_size,
+                                is_last: true,
+                                error_message: format!("Failed to read file artifact: {}", e),
+                            });
+                            return;
+                        }
+                    }
+                }
+                let sha256 = format!("{:x}", hasher.finalize());
+                if let Some(mut file) = cache_file {
+                    if let Err(e) = file.flush().await {
+                        let _ = tokio::fs::remove_file(&tmp_path).await;
+                        yield Ok(crate::proto::DownloadArtifactChunk {
+                            data: Vec::new(),
+                            offset: offset as i64,
+                            total_size,
+                            is_last: true,
+                            error_message: format!("Failed to flush artifact cache file: {}", e),
+                        });
+                        return;
+                    }
+                    drop(file);
+                    if let Err(e) = tokio::fs::rename(&tmp_path, &store_path).await {
+                        let _ = tokio::fs::remove_file(&tmp_path).await;
+                        yield Ok(crate::proto::DownloadArtifactChunk {
+                            data: Vec::new(),
+                            offset: offset as i64,
+                            total_size,
+                            is_last: true,
+                            error_message: format!("Failed to commit artifact cache file: {}", e),
+                        });
+                        return;
+                    }
+                    if let Err(e) = Self::write_sha256_sidecar(&store_path, &sha256).await {
+                        tracing::warn!(path = %store_path.display(), error = %e, "Failed to write file artifact checksum sidecar");
+                    }
+                    artifact_cache.insert(cache_key.clone(), CachedArtifact {
+                        group: cache_group.clone(),
+                        name: cache_name.clone(),
+                        version: cache_version.clone(),
+                        classifier: cache_classifier.clone(),
+                        extension: cache_extension.clone(),
+                        sha256: sha256.clone(),
+                        local_path: store_path.to_string_lossy().into_owned(),
+                        size: offset as i64,
+                        cached_at_ms: Self::now_ms(),
+                    });
+                }
+                yield Ok(crate::proto::DownloadArtifactChunk {
+                    data: Vec::new(),
+                    offset: offset as i64,
+                    total_size,
+                    is_last: true,
+                    error_message: String::new(),
+                });
+                return;
+            }
+
             let mut attempt = 0u32;
             let max_retries = 3u32;
 
@@ -2653,6 +2988,24 @@ mod tests {
             include_module_versions: Vec::new(),
             exclude_module_versions: Vec::new(),
         }
+    }
+
+    async fn write_local_maven_module(
+        repo: &Path,
+        group: &str,
+        name: &str,
+        version: &str,
+        pom_body: &str,
+        jar_body: &[u8],
+    ) -> PathBuf {
+        let module_dir = repo.join(group.replace('.', "/")).join(name).join(version);
+        tokio::fs::create_dir_all(&module_dir).await.unwrap();
+        tokio::fs::write(module_dir.join(format!("{name}-{version}.pom")), pom_body)
+            .await
+            .unwrap();
+        let jar_path = module_dir.join(format!("{name}-{version}.jar"));
+        tokio::fs::write(&jar_path, jar_body).await.unwrap();
+        jar_path
     }
 
     fn resolved_dep(group: &str, name: &str, scope: &str) -> ResolvedDependency {
@@ -3664,6 +4017,103 @@ mod tests {
             .into_inner();
         assert!(cache_hit.cached);
         assert_eq!(cache_hit.local_path, stored.to_string_lossy().to_string());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_dependencies_reads_file_maven_repository() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        let pom = r#"
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.example</groupId>
+  <artifactId>demo</artifactId>
+  <version>1.0</version>
+</project>
+"#;
+        let jar = b"local file repo artifact";
+        write_local_maven_module(repo_dir.path(), "org.example", "demo", "1.0", pom, jar).await;
+        let repo_url = reqwest::Url::from_directory_path(repo_dir.path())
+            .unwrap()
+            .to_string();
+
+        let store = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+        let response = svc
+            .resolve_dependencies(Request::new(ResolveDependenciesRequest {
+                configuration_name: "compileClasspath".to_string(),
+                dependencies: vec![make_dep("org.example", "demo", "1.0")],
+                repositories: vec![make_repo("file-repo", &repo_url)],
+                attributes: vec![],
+                lenient: false,
+                prefetch_artifacts: true,
+                constraints: Vec::new(),
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(response.success, "{}", response.error_message);
+        assert_eq!(response.resolved_dependencies.len(), 1);
+        assert_eq!(response.total_artifacts, 1);
+        assert_eq!(response.total_download_size, jar.len() as i64);
+        assert_eq!(
+            response.resolved_dependencies[0].artifact_sha256,
+            DependencyResolutionServiceImpl::compute_sha256(jar)
+        );
+        let cache_hit = svc
+            .check_artifact_cache(Request::new(CheckArtifactCacheRequest {
+                group: "org.example".to_string(),
+                name: "demo".to_string(),
+                version: "1.0".to_string(),
+                classifier: String::new(),
+                extension: "jar".to_string(),
+                sha256: DependencyResolutionServiceImpl::compute_sha256(jar),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(cache_hit.cached);
+        assert_eq!(tokio::fs::read(cache_hit.local_path).await.unwrap(), jar);
+    }
+
+    #[tokio::test]
+    async fn test_file_repository_reads_gradle_module_metadata_and_maven_metadata() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        let module_dir = repo_dir.path().join("org/example/demo/1.0");
+        tokio::fs::create_dir_all(&module_dir).await.unwrap();
+        tokio::fs::write(
+            module_dir.join("demo-1.0.module"),
+            r#"{"formatVersion":"1.1","component":{"group":"org.example","module":"demo","version":"1.0"},"variants":[]}"#,
+        )
+        .await
+        .unwrap();
+        let metadata_dir = repo_dir.path().join("org/example/demo");
+        tokio::fs::write(
+            metadata_dir.join("maven-metadata.xml"),
+            r#"<metadata><groupId>org.example</groupId><artifactId>demo</artifactId><versioning><latest>1.0</latest><release>1.0</release><versions><version>1.0</version></versions></versioning></metadata>"#,
+        )
+        .await
+        .unwrap();
+        let repo_url = reqwest::Url::from_directory_path(repo_dir.path())
+            .unwrap()
+            .to_string();
+        let repo = make_repo("file-repo", &repo_url);
+        let store = tempfile::tempdir().unwrap();
+        let svc = DependencyResolutionServiceImpl::new(store.path().to_path_buf());
+
+        let module = svc
+            .fetch_gradle_module_metadata("org.example", "demo", "1.0", &repo)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(module.contains("\"module\":\"demo\""));
+
+        let metadata = svc
+            .fetch_maven_metadata("org.example", "demo", &repo)
+            .await
+            .unwrap();
+        assert_eq!(metadata.versioning.latest.as_deref(), Some("1.0"));
     }
 
     #[tokio::test]
