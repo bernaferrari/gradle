@@ -72,11 +72,21 @@ struct ShadowProject {
 #[derive(Debug, Deserialize)]
 struct ShadowTask {
     #[serde(default)]
+    input_specs: Vec<ShadowInputSpec>,
+    #[serde(default)]
     outputs: Vec<String>,
     #[serde(default)]
     local_state: Vec<String>,
     #[serde(default)]
     destroyables: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ShadowInputSpec {
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    value: String,
 }
 
 #[tokio::main]
@@ -107,6 +117,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if !args.skip_invalidation {
         validate_build_definition_mtimes(Path::new(&project_dir), artifact.stored_at_ms)?;
+        validate_task_input_mtimes(&artifact, Path::new(&project_dir), artifact.stored_at_ms)?;
     }
 
     let channel = connect_tcp(&args.endpoint).await?;
@@ -289,6 +300,60 @@ fn validate_build_definition_mtimes(
     Ok(())
 }
 
+fn validate_task_input_mtimes(
+    artifact: &ShadowArtifact,
+    project_dir: &Path,
+    stored_at_ms: i64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let produced_paths = captured_produced_paths(artifact);
+    for task in &artifact.plan.tasks {
+        for input in &task.input_specs {
+            if input.kind != "path" {
+                continue;
+            }
+            let path = Path::new(&input.value);
+            if !path.is_absolute() || !path.starts_with(project_dir) || !path.exists() {
+                continue;
+            }
+            if produced_paths
+                .iter()
+                .any(|produced| path == produced || path.starts_with(produced))
+            {
+                continue;
+            }
+            let modified_ms = newest_modified_ms(path)?;
+            if modified_ms > stored_at_ms {
+                return Err(format!(
+                    "cached build-plan artifact is stale: task input '{}' was modified at {}ms after artifact stored_at_ms {}",
+                    path.display(),
+                    modified_ms,
+                    stored_at_ms
+                )
+                .into());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn captured_produced_paths(artifact: &ShadowArtifact) -> Vec<PathBuf> {
+    artifact
+        .plan
+        .tasks
+        .iter()
+        .flat_map(|task| {
+            task.outputs
+                .iter()
+                .chain(task.local_state.iter())
+                .chain(task.destroyables.iter())
+        })
+        .filter_map(|value| {
+            let path = Path::new(value);
+            path.is_absolute().then(|| path.to_path_buf())
+        })
+        .collect()
+}
+
 fn tracked_build_definition_files(project_dir: &Path) -> Vec<PathBuf> {
     [
         "build.gradle",
@@ -310,6 +375,21 @@ fn file_modified_ms(path: &Path) -> Result<i64, Box<dyn std::error::Error>> {
         .modified()?
         .duration_since(UNIX_EPOCH)?
         .as_millis() as i64)
+}
+
+fn newest_modified_ms(path: &Path) -> Result<i64, Box<dyn std::error::Error>> {
+    let metadata = path.metadata()?;
+    if metadata.is_file() {
+        return file_modified_ms(path);
+    }
+    let mut newest = file_modified_ms(path)?;
+    if metadata.is_dir() {
+        for entry in std::fs::read_dir(path)? {
+            let child = entry?.path();
+            newest = newest.max(newest_modified_ms(&child)?);
+        }
+    }
+    Ok(newest)
 }
 
 async fn connect_tcp(
