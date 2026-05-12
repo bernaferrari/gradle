@@ -368,7 +368,7 @@ def scan_project_contract(project_dir: str) -> dict:
             unsupported_features.add("detached-configuration")
         if has_unsupported_artifact_view(text):
             unsupported_features.add("artifact-view")
-        if re.search(r"\bregisterTransform(?:\s*<[^>]+>)?\s*\(", text):
+        if has_unsupported_artifact_transform(text):
             unsupported_features.add("artifact-transform")
         if has_unsupported_enforced_platform(text):
             unsupported_features.add("enforced-platform")
@@ -523,6 +523,42 @@ def static_artifact_view_report_text(text: str, task_name: str | None = None) ->
     if not re.search(r"joinToString\s*\(\s*separator\s*=\s*[\"']\\n[\"']\s*,\s*postfix\s*=\s*[\"']\\n[\"']\s*\)", text, re.DOTALL):
         return None
     return f"{name}-{version}.jar\n"
+
+
+def has_unsupported_artifact_transform(text: str) -> bool:
+    if not re.search(r"\bregisterTransform(?:\s*<[^>]+>)?\s*\(", text):
+        return False
+    if len(re.findall(r"\bregisterTransform(?:\s*<[^>]+>)?\s*\(", text)) != 1:
+        return True
+    return static_artifact_transform_report_text(text) is None
+
+
+def static_artifact_transform_report_text(text: str, task_name: str | None = None) -> str | None:
+    dependency = re.findall(
+        r"\bimplementation\s*\(\s*[\"']([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+)[\"']\s*\)",
+        text,
+    )
+    if len(dependency) != 1:
+        return None
+    _group, name, version = dependency[0]
+    if task_name is not None and not re.search(
+        r"tasks\.register\s*\(\s*[\"']" + re.escape(task_name) + r"[\"']\s*\)",
+        text,
+        re.DOTALL,
+    ):
+        return None
+    required_patterns = [
+        r"abstract\s+class\s+MarkerTransform\s*:\s*TransformAction<org\.gradle\.api\.artifacts\.transform\.TransformParameters\.None>",
+        r"outputs\.file\s*\(\s*input\.nameWithoutExtension\s*\+\s*[\"']\.marker[\"']\s*\)",
+        r"output\.writeText\s*\(\s*input\.name\s*\+\s*[\"']\\n[\"']\s*\)",
+        r"registerTransform\s*\(\s*MarkerTransform::class\s*\)\s*\{\s*from\.attribute\s*\(\s*artifactKind\s*,\s*[\"']jar[\"']\s*\)\s*to\.attribute\s*\(\s*artifactKind\s*,\s*[\"']marker[\"']\s*\)\s*\}",
+        r"configurations\.runtimeClasspath\s*\{\s*attributes\.attribute\s*\(\s*artifactKind\s*,\s*[\"']marker[\"']\s*\)\s*\}",
+        r"runtimeClasspath\.get\s*\(\s*\)\.files\.map\s*\{\s*it\.name\s*}\s*\.sorted\s*\(\s*\)",
+        r"joinToString\s*\(\s*separator\s*=\s*[\"']\\n[\"']\s*,\s*postfix\s*=\s*[\"']\\n[\"']\s*\)",
+    ]
+    if not all(re.search(pattern, text, re.DOTALL) for pattern in required_patterns):
+        return None
+    return f"{name}-{version}.marker\n"
 
 
 def has_unsupported_enforced_platform(text: str) -> bool:

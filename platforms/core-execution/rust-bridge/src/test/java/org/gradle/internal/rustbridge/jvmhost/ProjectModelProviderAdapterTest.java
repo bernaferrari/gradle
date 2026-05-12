@@ -976,10 +976,49 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
-    public void marksArtifactTransformsAsUnsupportedDependencySemantics() throws IOException {
+    public void capturesExactArtifactTransformReportAsStaticWriteFile() throws IOException {
         File buildFile = temporaryFolder.newFile("build.gradle.kts");
         Files.write(buildFile.toPath(), Collections.singletonList(
-            "dependencies { registerTransform(MarkerTransform::class) { from.attribute(kind, \"jar\"); to.attribute(kind, \"marker\") } }"
+            "val artifactKind = Attribute.of(\"org.gradle.substrate.artifact-kind\", String::class.java)\n" +
+                "abstract class MarkerTransform : TransformAction<org.gradle.api.artifacts.transform.TransformParameters.None> {\n" +
+                "  override fun transform(outputs: TransformOutputs) {\n" +
+                "    val input = inputArtifact.get().asFile\n" +
+                "    val output = outputs.file(input.nameWithoutExtension + \".marker\")\n" +
+                "    output.writeText(input.name + \"\\n\")\n" +
+                "  }\n" +
+                "}\n" +
+                "dependencies {\n" +
+                "  registerTransform(MarkerTransform::class) {\n" +
+                "    from.attribute(artifactKind, \"jar\")\n" +
+                "    to.attribute(artifactKind, \"marker\")\n" +
+                "  }\n" +
+                "  implementation(\"org.gradle.substrate:artifact-transform:1.0\")\n" +
+                "}\n" +
+                "configurations.runtimeClasspath { attributes.attribute(artifactKind, \"marker\") }\n" +
+                "tasks.register(\"resolveTransformedArtifact\") {\n" +
+                "  doLast {\n" +
+                "    val files = configurations.runtimeClasspath.get().files.map { it.name }.sorted()\n" +
+                "    file(\"build/artifact-transform/resolved.txt\").writeText(files.joinToString(separator = \"\\n\", postfix = \"\\n\"))\n" +
+                "  }\n" +
+                "}\n"
+        ), StandardCharsets.UTF_8);
+        File outputFile = new File(temporaryFolder.getRoot(), "build/artifact-transform/resolved.txt");
+        Task task = staticWriteFileTask("resolveTransformedArtifact", buildFile, outputFile);
+
+        BuildPlanTask planTask = ProjectModelProviderAdapter.toBuildPlanTask(task, DefaultTask.class);
+        Map<String, String> inputs = planTask.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("YXJ0aWZhY3QtdHJhbnNmb3JtLTEuMC5tYXJrZXIK", inputs.get("static_output_text_b64"));
+        assertFalse(inputs.containsKey("unsupported_dependency_semantics"));
+    }
+
+    @org.junit.Test
+    public void nontrivialArtifactTransformsRemainUnsupportedDependencySemantics() throws IOException {
+        File buildFile = temporaryFolder.newFile("build.gradle.kts");
+        Files.write(buildFile.toPath(), Collections.singletonList(
+            "dependencies { registerTransform(OtherTransform::class) { from.attribute(kind, \"jar\"); to.attribute(kind, \"marker\") } }"
         ), StandardCharsets.UTF_8);
         Task task = basicFileTransformTask(
             ":classes",

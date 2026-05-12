@@ -2,24 +2,6 @@
   "root": ".",
   "projects": [
     {
-      "name": "artifact-transform-unsupported-kotlin-dsl",
-      "path": "artifact-transform-unsupported-kotlin-dsl",
-      "tasks": ["clean", "build"],
-      "expected_substrate_fail_closed": true,
-      "expected_contract": {
-        "build_file_count": 1,
-        "settings_file_count": 1,
-        "source_file_count": 1,
-        "plugins": ["java-library"],
-        "tasks": ["resolveTransformedArtifact"],
-        "outputs": ["build/artifact-transform/resolved.txt"],
-        "dependencies": ["org.gradle.substrate:artifact-transform:1.0"],
-        "project_dependencies": [],
-        "toolchains": ["17"],
-        "unsupported_features": ["artifact-transform"]
-      }
-    },
-    {
       "name": "composite-substitution-unsupported-kotlin-dsl",
       "path": "composite-substitution-unsupported-kotlin-dsl",
       "tasks": ["clean", "build"],

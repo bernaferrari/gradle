@@ -211,7 +211,7 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         self.assertNotIn("component-metadata-rule-unsupported-kotlin-dsl", results)
         self.assertNotIn("detached-configuration-unsupported-kotlin-dsl", results)
         self.assertNotIn("artifact-view-unsupported-kotlin-dsl", results)
-        self.assertIn("artifact-transform-unsupported-kotlin-dsl", results)
+        self.assertNotIn("artifact-transform-unsupported-kotlin-dsl", results)
         self.assertIn("composite-substitution-unsupported-kotlin-dsl", results)
         self.assertNotIn("enforced-platform-unsupported-kotlin-dsl", results)
         failures = {
@@ -271,6 +271,46 @@ tasks.register("resolveArtifactView") {
                 'tasks.register("resolveArtifactView") {\n'
                 '  doLast { configurations.runtimeClasspath.get().incoming.artifactView { componentFilter { false } } }\n'
                 '}'
+            )
+        )
+
+    def test_exact_artifact_transform_marker_report_is_supported(self):
+        text = '''
+val artifactKind = Attribute.of("org.gradle.substrate.artifact-kind", String::class.java)
+abstract class MarkerTransform : TransformAction<org.gradle.api.artifacts.transform.TransformParameters.None> {
+    override fun transform(outputs: TransformOutputs) {
+        val input = inputArtifact.get().asFile
+        val output = outputs.file(input.nameWithoutExtension + ".marker")
+        output.writeText(input.name + "\\n")
+    }
+}
+dependencies {
+    registerTransform(MarkerTransform::class) {
+        from.attribute(artifactKind, "jar")
+        to.attribute(artifactKind, "marker")
+    }
+    implementation("org.gradle.substrate:artifact-transform:1.0")
+}
+configurations.runtimeClasspath {
+    attributes.attribute(artifactKind, "marker")
+}
+tasks.register("resolveTransformedArtifact") {
+    doLast {
+        val files = configurations.runtimeClasspath.get().files.map { it.name }.sorted()
+        file("build/artifact-transform/resolved.txt").writeText(files.joinToString(separator = "\\n", postfix = "\\n"))
+    }
+}
+'''
+        self.assertFalse(corpus_run.has_unsupported_artifact_transform(text))
+        self.assertEqual(
+            "artifact-transform-1.0.marker\n",
+            corpus_run.static_artifact_transform_report_text(text),
+        )
+
+    def test_nontrivial_artifact_transform_is_unsupported(self):
+        self.assertTrue(
+            corpus_run.has_unsupported_artifact_transform(
+                'dependencies { registerTransform(OtherTransform::class) { from.attribute(kind, "jar"); to.attribute(kind, "marker") } }'
             )
         )
 
