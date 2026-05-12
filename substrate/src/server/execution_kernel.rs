@@ -812,6 +812,11 @@ mod tests {
         assert!(message.contains("captured task options"));
         assert!(message.contains("component-name"));
         assert!(message.contains("json-or-xml-output"));
+        assert!(message.contains("cyclonedx_include_bom_serial_number"));
+        assert!(message.contains("cyclonedx_include_build_system"));
+        assert!(message.contains("cyclonedx_include_build_environment"));
+        assert!(message.contains("cyclonedx_include_metadata_resolution"));
+        assert!(message.contains("cyclonedx_include_license_text"));
     }
 
     #[test]
