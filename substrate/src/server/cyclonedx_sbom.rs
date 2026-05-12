@@ -1561,6 +1561,9 @@ fn read_pom_component_metadata(artifact_path: &Path) -> Option<PomComponentMetad
     if let Some((pom_path, pom)) = read_adjacent_pom(artifact_path) {
         return Some(read_effective_pom_component_metadata(&pom_path, &pom, 0));
     }
+    if let Some((pom_path, pom)) = read_gradle_module_cache_pom(artifact_path) {
+        return Some(read_effective_pom_component_metadata(&pom_path, &pom, 0));
+    }
     let pom = read_embedded_maven_pom(artifact_path)?;
     Some(parse_pom_component_metadata(&pom).metadata)
 }
@@ -1570,6 +1573,22 @@ fn read_adjacent_pom(artifact_path: &Path) -> Option<(std::path::PathBuf, String
     let pom_path = artifact_path.with_file_name(format!("{file_stem}.pom"));
     let pom = std::fs::read_to_string(&pom_path).ok()?;
     Some((pom_path, pom))
+}
+
+fn read_gradle_module_cache_pom(artifact_path: &Path) -> Option<(std::path::PathBuf, String)> {
+    let hash_dir = artifact_path.parent()?;
+    let version_dir = hash_dir.parent()?;
+    let version = version_dir.file_name()?.to_str()?;
+    let module = version_dir.parent()?.file_name()?.to_str()?;
+    let expected_name = format!("{module}-{version}.pom");
+    for entry in std::fs::read_dir(version_dir).ok()?.flatten() {
+        let candidate = entry.path().join(&expected_name);
+        if candidate.is_file() {
+            let pom = std::fs::read_to_string(&candidate).ok()?;
+            return Some((candidate, pom));
+        }
+    }
+    None
 }
 
 fn read_embedded_maven_pom(artifact_path: &Path) -> Option<String> {
@@ -1789,7 +1808,7 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
                 }
             }
             Ok(Event::Text(event)) => {
-                let text = event.unescape().unwrap_or_default().trim().to_string();
+                let text = normalize_pom_text(&event.unescape().unwrap_or_default());
                 if text.is_empty() {
                     buf.clear();
                     continue;
@@ -1814,7 +1833,7 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
                 );
             }
             Ok(Event::CData(event)) => {
-                let text = String::from_utf8_lossy(event.as_ref()).trim().to_string();
+                let text = normalize_pom_text(&String::from_utf8_lossy(event.as_ref()));
                 if text.is_empty() {
                     buf.clear();
                     continue;
@@ -1910,6 +1929,10 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
         parent_artifact,
         parent_version,
     }
+}
+
+fn normalize_pom_text(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2181,18 +2204,6 @@ fn apply_pom_metadata_text(
         [project, scm, url] if project == "project" && scm == "scm" && url == "url" => {
             push_external_reference(&mut metadata.external_references, "vcs", text);
         }
-        [project, scm, connection]
-            if project == "project" && scm == "scm" && connection == "connection" =>
-        {
-            push_external_reference(&mut metadata.external_references, "vcs", text);
-        }
-        [project, scm, developer_connection]
-            if project == "project"
-                && scm == "scm"
-                && developer_connection == "developerConnection" =>
-        {
-            push_external_reference(&mut metadata.external_references, "vcs", text);
-        }
         [project, properties_element, property_name]
             if project == "project" && properties_element == "properties" =>
         {
@@ -2296,6 +2307,12 @@ fn interpolate_pom_component_metadata(
     }
     for choice in &mut metadata.licenses {
         if let Some(license) = &mut choice.license {
+            if !license.id.trim().is_empty()
+                && license.name.trim().is_empty()
+                && license.url.trim().is_empty()
+            {
+                continue;
+            }
             license.name = interpolate_maven_properties(&license.name, properties);
             license.url = interpolate_maven_properties(&license.url, properties);
             *license = resolve_cyclonedx_license(&license.name, &license.url);
@@ -2352,7 +2369,7 @@ fn normalize_pom_component_metadata(mut metadata: PomComponentMetadata) -> PomCo
         .dedup_by(|a, b| license_choice_sort_key(a) == license_choice_sort_key(b));
     metadata
         .external_references
-        .sort_by(|a, b| (&a.reference_type, &a.url).cmp(&(&b.reference_type, &b.url)));
+        .sort_by(|a, b| external_reference_sort_key(a).cmp(&external_reference_sort_key(b)));
     metadata.external_references.dedup();
     metadata
 }
@@ -2376,11 +2393,11 @@ fn license_choice_sort_key(choice: &CycloneDxLicenseChoice) -> (String, String, 
 fn resolve_cyclonedx_license(name: &str, url: &str) -> CycloneDxLicense {
     let trimmed_name = name.trim();
     let trimmed_url = url.trim();
-    if let Some((id, see_also)) = resolve_spdx_license(trimmed_name, trimmed_url) {
+    if let Some((id, _see_also)) = resolve_spdx_license(trimmed_name, trimmed_url) {
         return CycloneDxLicense {
             id: id.to_string(),
             name: String::new(),
-            url: see_also.unwrap_or(trimmed_url).to_string(),
+            url: String::new(),
             text: None,
         };
     }
@@ -2467,11 +2484,15 @@ const SPDX_LICENSE_MATCHES: &[(&str, &str, &[&str], &[&str])] = &[
         "BSD-3-Clause",
         "BSD 3-Clause \"New\" or \"Revised\" License",
         &[
+            "BSD License",
             "BSD 3-Clause License",
             "New BSD License",
             "Modified BSD License",
         ],
-        &["https://opensource.org/license/bsd-3-clause"],
+        &[
+            "https://opensource.org/license/bsd-3-clause",
+            "http://www.antlr.org/license.html",
+        ],
     ),
     (
         "EPL-2.0",
@@ -2611,7 +2632,7 @@ fn normalized_bom(contract: &CycloneDxSbomContract) -> CycloneDxBom<'_> {
     dependencies.sort_by(|a, b| a.reference.cmp(&b.reference));
     let mut external_references = contract.external_references.clone();
     external_references
-        .sort_by(|a, b| (&a.reference_type, &a.url).cmp(&(&b.reference_type, &b.url)));
+        .sort_by(|a, b| external_reference_sort_key(a).cmp(&external_reference_sort_key(b)));
     CycloneDxBom {
         bom_format: "CycloneDX",
         spec_version: &contract.spec_version,
@@ -2635,6 +2656,19 @@ fn normalized_bom(contract: &CycloneDxSbomContract) -> CycloneDxBom<'_> {
         dependencies,
         external_references,
     }
+}
+
+fn external_reference_sort_key(reference: &CycloneDxExternalReference) -> (u8, &str, &str) {
+    let rank = match reference.reference_type.as_str() {
+        "website" => 0,
+        "vcs" => 1,
+        _ => 2,
+    };
+    (
+        rank,
+        reference.reference_type.as_str(),
+        reference.url.as_str(),
+    )
 }
 
 fn write_organizational_entity(
@@ -3830,7 +3864,10 @@ mod tests {
     <project.start>2024</project.start>
   </properties>
   <name>Example Lib</name>
-  <description>Useful &amp; small</description>
+  <description>
+    Useful &amp;
+    small
+  </description>
   <inceptionYear>${project.start}</inceptionYear>
   <url>https://example.test/lib</url>
   <organization>
@@ -4068,11 +4105,11 @@ mod tests {
         assert!(component
             .external_references
             .contains(&external_reference("vcs", "https://git.example.test/lib")));
-        assert!(component.external_references.contains(&external_reference(
+        assert!(!component.external_references.contains(&external_reference(
             "vcs",
             "scm:git:https://git.example.test/lib.git"
         )));
-        assert!(component.external_references.contains(&external_reference(
+        assert!(!component.external_references.contains(&external_reference(
             "vcs",
             "scm:git:ssh://git@example.test/lib.git"
         )));
@@ -4080,7 +4117,7 @@ mod tests {
             vec![CycloneDxLicenseChoice::from_license(CycloneDxLicense {
                 id: "Apache-2.0".to_string(),
                 name: String::new(),
-                url: "https://www.apache.org/licenses/LICENSE-2.0".to_string(),
+                url: String::new(),
                 text: None,
             })],
             component.licenses
@@ -4145,7 +4182,7 @@ mod tests {
             vec![CycloneDxLicenseChoice::from_license(CycloneDxLicense {
                 id: "Apache-2.0".to_string(),
                 name: String::new(),
-                url: "https://www.apache.org/licenses/LICENSE-2.0".to_string(),
+                url: String::new(),
                 text: None,
             })],
             metadata.licenses
@@ -4187,7 +4224,7 @@ mod tests {
             vec![CycloneDxLicenseChoice::from_license(CycloneDxLicense {
                 id: "MIT".to_string(),
                 name: String::new(),
-                url: "https://opensource.org/license/mit".to_string(),
+                url: String::new(),
                 text: None,
             })],
             metadata.licenses
@@ -4298,7 +4335,7 @@ mod tests {
             vec![CycloneDxLicenseChoice::from_license(CycloneDxLicense {
                 id: "Apache-2.0".to_string(),
                 name: String::new(),
-                url: "https://www.apache.org/licenses/LICENSE-2.0".to_string(),
+                url: String::new(),
                 text: None,
             })],
             component.licenses
@@ -4346,6 +4383,10 @@ mod tests {
       <url>https://opensource.org/license/mit/</url>
     </license>
     <license>
+      <name>BSD License</name>
+      <url>http://www.antlr.org/license.html</url>
+    </license>
+    <license>
       <name>Custom License</name>
       <url>https://licenses.example.test/custom</url>
     </license>
@@ -4359,7 +4400,7 @@ mod tests {
             .contains(&CycloneDxLicenseChoice::from_license(CycloneDxLicense {
                 id: "Apache-2.0".to_string(),
                 name: String::new(),
-                url: "https://www.apache.org/licenses/LICENSE-2.0".to_string(),
+                url: String::new(),
                 text: None,
             })));
         assert!(metadata
@@ -4367,7 +4408,15 @@ mod tests {
             .contains(&CycloneDxLicenseChoice::from_license(CycloneDxLicense {
                 id: "MIT".to_string(),
                 name: String::new(),
-                url: "https://opensource.org/license/mit".to_string(),
+                url: String::new(),
+                text: None,
+            })));
+        assert!(metadata
+            .licenses
+            .contains(&CycloneDxLicenseChoice::from_license(CycloneDxLicense {
+                id: "BSD-3-Clause".to_string(),
+                name: String::new(),
+                url: String::new(),
                 text: None,
             })));
         assert!(metadata
@@ -4443,7 +4492,7 @@ mod tests {
             vec![CycloneDxLicenseChoice::from_license(CycloneDxLicense {
                 id: "MIT".to_string(),
                 name: String::new(),
-                url: "https://opensource.org/license/mit".to_string(),
+                url: String::new(),
                 text: None,
             })],
             metadata.licenses
