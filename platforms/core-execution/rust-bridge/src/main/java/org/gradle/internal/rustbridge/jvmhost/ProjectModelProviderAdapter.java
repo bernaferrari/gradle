@@ -1364,10 +1364,16 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
                 if (id.isEmpty() && name.isEmpty()) {
                     continue;
                 }
-                choices.add("{\"license\":{\"id\":\"" + escapeJson(id)
-                    + "\",\"name\":\"" + escapeJson(name)
-                    + "\",\"url\":\"" + escapeJson(url)
-                    + "\"}}");
+                StringBuilder choice = new StringBuilder();
+                choice.append("{\"license\":{\"id\":\"").append(escapeJson(id))
+                    .append("\",\"name\":\"").append(escapeJson(name))
+                    .append("\",\"url\":\"").append(escapeJson(url)).append("\"");
+                String textJson = cyclonedxLicenseTextJson(invokeOptional(license, "getText"));
+                if (!textJson.isEmpty()) {
+                    choice.append(",\"text\":").append(textJson);
+                }
+                choice.append("}}");
+                choices.add(choice.toString());
             }
         }
         if (choices.isEmpty()) {
@@ -1375,6 +1381,27 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         }
         String json = "[" + String.join(",", choices) + "]";
         return Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String cyclonedxLicenseTextJson(@Nullable Object value) {
+        if (value == null) {
+            return "";
+        }
+        Object providerValue = invokeOptional(value, "getOrNull");
+        Object text = providerValue == null ? value : providerValue;
+        String content = stringOrEmpty(invokeOptional(text, "getContent"));
+        if (content.isEmpty() && text instanceof CharSequence) {
+            content = text.toString();
+        }
+        if (content.isEmpty()) {
+            return "";
+        }
+        String contentType = stringOrEmpty(invokeOptional(text, "getContentType"));
+        String encoding = stringOrEmpty(invokeOptional(text, "getEncoding"));
+        return "{\"contentType\":\"" + escapeJson(contentType)
+            + "\",\"encoding\":\"" + escapeJson(encoding)
+            + "\",\"content\":\"" + escapeJson(content)
+            + "\"}";
     }
 
     private static String cyclonedxBuildSystemUrl(String configuredEnvironmentVariable) {
