@@ -68,6 +68,8 @@ pub struct CycloneDxResolvedComponent {
     pub version: String,
     #[serde(default, rename = "projectPath")]
     pub project_path: String,
+    #[serde(default, rename = "artifactPath")]
+    pub artifact_path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -271,14 +273,23 @@ pub fn draft_contract_from_resolution_graph(
 
     let components = components_by_id
         .into_values()
-        .map(|(component, bom_ref)| CycloneDxComponent {
-            component_type: "library".to_string(),
-            bom_ref: bom_ref.clone(),
-            group: component.group.clone(),
-            name: component.module.clone(),
-            version: component.version.clone(),
-            purl: bom_ref,
-            properties: BTreeMap::new(),
+        .map(|(component, bom_ref)| {
+            let mut properties = BTreeMap::new();
+            if !component.artifact_path.is_empty() {
+                properties.insert(
+                    "gradle:artifactPath".to_string(),
+                    component.artifact_path.clone(),
+                );
+            }
+            CycloneDxComponent {
+                component_type: "library".to_string(),
+                bom_ref: bom_ref.clone(),
+                group: component.group.clone(),
+                name: component.module.clone(),
+                version: component.version.clone(),
+                purl: bom_ref,
+                properties,
+            }
         })
         .collect::<Vec<_>>();
 
@@ -505,6 +516,7 @@ mod tests {
                         module: "app".to_string(),
                         version: "1.0".to_string(),
                         project_path: String::new(),
+                        artifact_path: String::new(),
                     },
                     CycloneDxResolvedComponent {
                         id: "org.example:lib:1.1".to_string(),
@@ -512,6 +524,7 @@ mod tests {
                         module: "lib".to_string(),
                         version: "1.1".to_string(),
                         project_path: String::new(),
+                        artifact_path: "/repo/lib-1.1.jar".to_string(),
                     },
                 ],
                 dependencies: vec![CycloneDxResolvedDependency {
@@ -595,6 +608,14 @@ mod tests {
             .components
             .iter()
             .any(|component| component.bom_ref == "pkg:maven/org.example/lib@1.1"));
+        assert!(contract.components.iter().any(|component| {
+            component.bom_ref == "pkg:maven/org.example/lib@1.1"
+                && component
+                    .properties
+                    .get("gradle:artifactPath")
+                    .map(|path| path == "/repo/lib-1.1.jar")
+                    .unwrap_or(false)
+        }));
         assert!(contract.dependencies.iter().any(|dependency| {
             dependency.reference == "pkg:maven/org.example/app@1.0"
                 && dependency

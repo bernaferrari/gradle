@@ -1359,9 +1359,11 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if (result == null) {
             return "";
         }
+        Map<String, String> artifactPaths = cyclonedxResolvedArtifactPaths(configuration);
+        List<File> artifactFiles = cyclonedxConfigurationFiles(configuration);
         List<String> components = new ArrayList<>();
         for (Object component : asCollection(invokeOptional(result, "getAllComponents"))) {
-            String componentJson = cyclonedxResolvedComponentJson(component);
+            String componentJson = cyclonedxResolvedComponentJson(component, artifactPaths, artifactFiles);
             if (!componentJson.isEmpty()) {
                 components.add(componentJson);
             }
@@ -1379,7 +1381,43 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             + "]}";
     }
 
-    private static String cyclonedxResolvedComponentJson(@Nullable Object component) {
+    private static Map<String, String> cyclonedxResolvedArtifactPaths(Configuration configuration) {
+        Map<String, String> paths = new LinkedHashMap<>();
+        Object resolvedConfiguration = invokeOptional(configuration, "getResolvedConfiguration");
+        for (Object artifact : asCollection(invokeOptional(resolvedConfiguration, "getResolvedArtifacts"))) {
+            Object moduleVersion = invokeOptional(artifact, "getModuleVersion");
+            String componentId = displayName(invokeOptional(moduleVersion, "getId"));
+            if (componentId.isEmpty()) {
+                String group = stringOrEmpty(invokeOptional(moduleVersion, "getGroup"));
+                String name = stringOrEmpty(invokeOptional(moduleVersion, "getName"));
+                String version = stringOrEmpty(invokeOptional(moduleVersion, "getVersion"));
+                if (!group.isEmpty() && !name.isEmpty() && !version.isEmpty()) {
+                    componentId = group + ":" + name + ":" + version;
+                }
+            }
+            String filePath = filePath(invokeOptional(artifact, "getFile"));
+            if (!componentId.isEmpty() && !filePath.isEmpty()) {
+                paths.put(componentId, filePath);
+            }
+        }
+        return paths;
+    }
+
+    private static List<File> cyclonedxConfigurationFiles(Configuration configuration) {
+        List<File> files = new ArrayList<>();
+        try {
+            files.addAll(configuration.getFiles());
+        } catch (RuntimeException e) {
+            LOGGER.debug("[substrate-jvmhost] Failed to read CycloneDX configuration artifact files from {}", configuration.getName(), e);
+        }
+        return files;
+    }
+
+    private static String cyclonedxResolvedComponentJson(
+        @Nullable Object component,
+        Map<String, String> artifactPaths,
+        List<File> artifactFiles
+    ) {
         Object id = invokeOptional(component, "getId");
         String displayName = displayName(id);
         if (displayName.isEmpty()) {
@@ -1389,12 +1427,30 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         String module = stringOrEmpty(invokeOptional(id, "getModule"));
         String version = stringOrEmpty(invokeOptional(id, "getVersion"));
         String projectPath = stringOrEmpty(invokeOptional(id, "getProjectPath"));
+        String artifactPath = artifactPaths.getOrDefault(displayName, "");
+        if (artifactPath.isEmpty()) {
+            artifactPath = cyclonedxArtifactPathFromFiles(module, version, artifactFiles);
+        }
         return "{\"id\":\"" + escapeJson(displayName)
             + "\",\"group\":\"" + escapeJson(group)
             + "\",\"module\":\"" + escapeJson(module)
             + "\",\"version\":\"" + escapeJson(version)
             + "\",\"projectPath\":\"" + escapeJson(projectPath)
+            + "\",\"artifactPath\":\"" + escapeJson(artifactPath)
             + "\"}";
+    }
+
+    private static String cyclonedxArtifactPathFromFiles(String module, String version, List<File> artifactFiles) {
+        if (module.isEmpty() || version.isEmpty()) {
+            return "";
+        }
+        String marker = module + "-" + version;
+        for (File artifactFile : artifactFiles) {
+            if (artifactFile.getName().contains(marker)) {
+                return artifactFile.getAbsolutePath();
+            }
+        }
+        return "";
     }
 
     private static List<String> cyclonedxResolvedDependencyJson(@Nullable Object component) {
