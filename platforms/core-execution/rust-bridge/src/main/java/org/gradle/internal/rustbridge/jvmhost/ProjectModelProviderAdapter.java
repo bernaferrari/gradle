@@ -1320,7 +1320,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "cyclonedx_xml_output", providerFilePath(invokeOptional(task, taskType, "getXmlOutput")));
         putIfPresent(inputs, "cyclonedx_input_sboms", fileCollectionPathString(invokeOptional(task, taskType, "getInputSboms")));
         putIfPresent(inputs, "cyclonedx_resolved_dependencies", fileCollectionPathString(invokeOptional(task, taskType, "getResolvedDependencies")));
-        String resolutionGraphJsonBase64 = cyclonedxResolutionGraphJsonBase64(task, taskType);
+        String resolutionGraphJsonBase64 = cyclonedxResolutionGraphJsonBase64(task, taskType, includeBuildEnvironment);
         putIfPresent(inputs, "cyclonedx_resolution_graph_json_b64", resolutionGraphJsonBase64);
         boolean aggregateTask = isCycloneDxAggregateTask(taskType.getName(), taskType.getSimpleName());
         String missingBaseFields = resolutionGraphJsonBase64.isEmpty()
@@ -1334,7 +1334,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         inputs.put("cyclonedx_sbom_contract_status", resolutionGraphJsonBase64.isEmpty() ? "missing" : "partial");
         inputs.put(
             "cyclonedx_missing_contract_fields",
-            cyclonedxMissingContractFields(missingBaseFields, includeBomSerialNumber, includeBuildEnvironment, includeLicenseText, organizationalEntityPresent, organizationalEntityJsonBase64, licenseChoice, externalReferences, externalReferencesJsonBase64)
+            cyclonedxMissingContractFields(missingBaseFields, includeBomSerialNumber, includeLicenseText, organizationalEntityPresent, organizationalEntityJsonBase64, licenseChoice, externalReferences, externalReferencesJsonBase64)
         );
         inputs.put("requires_jvm_task_execution", "true");
     }
@@ -1483,7 +1483,6 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     private static String cyclonedxMissingContractFields(
         String baseFields,
         String includeBomSerialNumber,
-        String includeBuildEnvironment,
         String includeLicenseText,
         String organizationalEntityPresent,
         String organizationalEntityJsonBase64,
@@ -1495,9 +1494,6 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         Collections.addAll(fields, baseFields.split(","));
         if ("true".equalsIgnoreCase(includeBomSerialNumber)) {
             fields.add("serial-source-policy");
-        }
-        if ("true".equalsIgnoreCase(includeBuildEnvironment)) {
-            fields.add("build-environment-rendering");
         }
         if ("true".equalsIgnoreCase(includeLicenseText)) {
             fields.add("license-text-rendering");
@@ -1514,7 +1510,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         return String.join(",", fields);
     }
 
-    private static String cyclonedxResolutionGraphJsonBase64(Task task, Class<?> taskType) {
+    private static String cyclonedxResolutionGraphJsonBase64(Task task, Class<?> taskType, String includeBuildEnvironment) {
         List<String> includeConfigs = providerStringValues(invokeOptional(task, taskType, "getIncludeConfigs"));
         List<String> skipConfigs = providerStringValues(invokeOptional(task, taskType, "getSkipConfigs"));
         try {
@@ -1540,6 +1536,26 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
                 String captured = cyclonedxConfigurationResolutionGraphJson(configurationName, configuration);
                 if (!captured.isEmpty()) {
                     configurationJson.add(captured);
+                }
+            }
+            if ("true".equalsIgnoreCase(includeBuildEnvironment)) {
+                Object buildscript = invokeOptional(task.getProject(), "getBuildscript");
+                Object buildscriptConfigurations = invokeOptional(buildscript, "getConfigurations");
+                if (buildscriptConfigurations instanceof Iterable) {
+                    for (Object candidate : (Iterable<?>) buildscriptConfigurations) {
+                        if (!(candidate instanceof Configuration)) {
+                            continue;
+                        }
+                        Configuration configuration = (Configuration) candidate;
+                        String configurationName = configuration.getName();
+                        if (configurationName.isEmpty() || cyclonedxSkippedConfiguration(configurationName, skipConfigs) || !configuration.isCanBeResolved()) {
+                            continue;
+                        }
+                        String captured = cyclonedxConfigurationResolutionGraphJson(configurationName, configuration);
+                        if (!captured.isEmpty()) {
+                            configurationJson.add(captured);
+                        }
+                    }
                 }
             }
             if (configurationJson.isEmpty()) {
