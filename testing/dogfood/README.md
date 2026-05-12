@@ -5,6 +5,10 @@ corpus. It groups realistic Gradle build shapes that should be meaningful in
 the first minute of use and records whether each project is expected to run
 through the Rust kernel or fail closed before execution.
 
+The checked-in local manifest currently includes supported Java lifecycle,
+multi-project, external dependency, `JavaExec`, and `Javadoc` slices plus one
+fail-closed composite-substitution gate.
+
 `testing/dogfood/oss-manifest.json` is the next layer after that: pinned
 external OSS repositories. It currently includes a supported Spring guide
 `clean assemble` slice, a supported Spring PetClinic `clean compileJava` slice,
