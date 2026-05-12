@@ -208,7 +208,6 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         results = corpus_run.run_manifest_contracts(str(manifest))
 
         self.assertIn("custom-task-unsupported-kotlin-dsl", results)
-        self.assertIn("test-method-filter-unsupported-kotlin-dsl", results)
         self.assertIn("repository-regex-filter-unsupported-kotlin-dsl", results)
         self.assertIn("dependency-substitution-unsupported-kotlin-dsl", results)
         self.assertIn("component-metadata-rule-unsupported-kotlin-dsl", results)

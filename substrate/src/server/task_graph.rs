@@ -1946,6 +1946,12 @@ fn task_options(
         insert_input_option(
             task,
             &mut options,
+            "test_method_includes",
+            "test_method_includes",
+        );
+        insert_input_option(
+            task,
+            &mut options,
             "test_filter_includes",
             "test_filter_includes",
         );
@@ -3586,6 +3592,13 @@ mod tests {
                     optional: false,
                 },
                 super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "test_method_includes".to_string(),
+                    kind: "value".to_string(),
+                    value: "example.AppTest.someMethod".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
                     name: "include_tags".to_string(),
                     kind: "value".to_string(),
                     value: "fast,integration".to_string(),
@@ -3627,6 +3640,10 @@ mod tests {
         assert_eq!(
             context["options"]["test_filter_excludes"],
             "example.Legacy*"
+        );
+        assert_eq!(
+            context["options"]["test_method_includes"],
+            "example.AppTest.someMethod"
         );
         assert_eq!(context["options"]["include_tags"], "fast,integration");
         assert_eq!(context["options"]["exclude_tags"], "slow");

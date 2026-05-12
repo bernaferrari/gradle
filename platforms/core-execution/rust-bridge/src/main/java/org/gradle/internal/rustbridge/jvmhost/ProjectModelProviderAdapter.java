@@ -1031,6 +1031,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             putIfPresent(inputs, "test_filter_includes", String.join(",", includes));
             putIfPresent(inputs, "test_filter_excludes", String.join(",", excludes));
             inputs.put("test_unsupported_filters", "false");
+        } else if (excludes.isEmpty() && testFilterPatternsAreExactMethods(includes)) {
+            putIfPresent(inputs, "test_method_includes", String.join(",", includes));
+            inputs.put("test_unsupported_filters", "false");
         } else {
             putIfPresent(inputs, "test_filter_includes", String.join(",", includes));
             putIfPresent(inputs, "test_filter_excludes", String.join(",", excludes));
@@ -1061,6 +1064,39 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         }
         char first = lastSegment.charAt(0);
         return first == '*' || first == '?' || Character.isUpperCase(first);
+    }
+
+    private static boolean testFilterPatternsAreExactMethods(List<String> patterns) {
+        if (patterns.isEmpty()) {
+            return false;
+        }
+        for (String pattern : patterns) {
+            if (!testFilterPatternIsExactMethod(pattern)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean testFilterPatternIsExactMethod(String pattern) {
+        if (pattern == null || pattern.isEmpty() || pattern.indexOf('#') >= 0 || pattern.indexOf(' ') >= 0) {
+            return false;
+        }
+        if (pattern.indexOf('*') >= 0 || pattern.indexOf('?') >= 0) {
+            return false;
+        }
+        int lastDot = pattern.lastIndexOf('.');
+        if (lastDot <= 0 || lastDot == pattern.length() - 1) {
+            return false;
+        }
+        String method = pattern.substring(lastDot + 1);
+        if (method.isEmpty() || !Character.isLowerCase(method.charAt(0))) {
+            return false;
+        }
+        String className = pattern.substring(0, lastDot);
+        int classDot = className.lastIndexOf('.');
+        String simpleClassName = classDot >= 0 ? className.substring(classDot + 1) : className;
+        return !simpleClassName.isEmpty() && Character.isUpperCase(simpleClassName.charAt(0));
     }
 
     private static void captureExecInputs(Task task, Map<String, String> inputs) {

@@ -91,6 +91,7 @@ impl TestExecExecutor {
     /// - `test_filter`: legacy single Gradle class-name glob pattern (e.g. "com.foo.*Test")
     /// - `test_filter_includes`: comma-separated Gradle class-name glob patterns
     /// - `test_filter_excludes`: comma-separated Gradle class-name glob patterns
+    /// - `test_method_includes`: comma-separated exact Gradle method patterns (e.g. "com.foo.FooTest.someMethod")
     /// - `include_engines`: comma-separated JUnit 5 engine IDs (default: "junit-jupiter")
     /// - `exclude_tags`: comma-separated JUnit 5 tags to exclude
     /// - `include_tags`: comma-separated JUnit 5 tags to include
@@ -183,8 +184,11 @@ impl TestExecExecutor {
         }
 
         self.append_classname_filters(&mut args, input);
+        self.append_method_selectors(&mut args, input);
 
         // Test classes (positional args to ConsoleLauncher)
+        let has_method_selectors =
+            !option_csv_list(&input.options, "test_method_includes").is_empty();
         if let Some(test_classes) = input.options.get("test_classes") {
             for class in test_classes.split(',') {
                 let class = class.trim();
@@ -193,10 +197,11 @@ impl TestExecExecutor {
                     args.push(class.to_string());
                 }
             }
-        } else if input
-            .options
-            .get("scan_classpath")
-            .is_some_and(|value| value == "true")
+        } else if !has_method_selectors
+            && input
+                .options
+                .get("scan_classpath")
+                .is_some_and(|value| value == "true")
         {
             args.push("--scan-classpath".to_string());
         }
@@ -233,6 +238,15 @@ impl TestExecExecutor {
         for exclude in option_csv_list(&input.options, "test_filter_excludes") {
             args.push("--exclude-classname".to_string());
             args.push(gradle_test_pattern_to_regex(&exclude));
+        }
+    }
+
+    fn append_method_selectors(&self, args: &mut Vec<String>, input: &TaskInput) {
+        for method in option_csv_list(&input.options, "test_method_includes") {
+            if let Some(selector) = gradle_test_method_pattern_to_selector(&method) {
+                args.push("--select-method".to_string());
+                args.push(selector);
+            }
         }
     }
 
@@ -596,6 +610,17 @@ fn gradle_test_pattern_to_regex(pattern: &str) -> String {
     }
     regex.push('$');
     regex
+}
+
+fn gradle_test_method_pattern_to_selector(pattern: &str) -> Option<String> {
+    if pattern.contains('*') || pattern.contains('?') || pattern.contains('#') {
+        return None;
+    }
+    let (class_name, method_name) = pattern.rsplit_once('.')?;
+    if class_name.is_empty() || method_name.is_empty() {
+        return None;
+    }
+    Some(format!("{class_name}#{method_name}"))
 }
 
 fn normalize_gradle_junit_reports(report_dir: &Path) {
@@ -1032,6 +1057,50 @@ mod tests {
         assert!(exclude_idx.is_some());
         assert_eq!(args[include_idx.unwrap() + 1], "^com\\.example\\..*Test$");
         assert_eq!(args[exclude_idx.unwrap() + 1], "^com\\.example\\.Legacy.*$");
+    }
+
+    #[test]
+    fn test_build_command_exact_method_filter() {
+        let executor = TestExecExecutor::new();
+        let mut input = make_test_input();
+        input.options.insert(
+            "test_method_includes".to_string(),
+            "com.example.AppTest.someMethod".to_string(),
+        );
+        let java = PathBuf::from("/usr/lib/jvm/java-17/bin/java");
+        let cmd = executor.build_command(&java, &input);
+
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
+        let method_idx = args.iter().position(|a| a == "--select-method");
+        assert!(method_idx.is_some());
+        assert_eq!(
+            args[method_idx.unwrap() + 1],
+            "com.example.AppTest#someMethod"
+        );
+        assert!(
+            !args.iter().any(|arg| arg == "--scan-classpath"),
+            "JUnit ConsoleLauncher rejects scan-classpath with explicit method selectors"
+        );
+    }
+
+    #[test]
+    fn test_gradle_test_method_pattern_to_selector_rejects_wildcards() {
+        assert_eq!(
+            gradle_test_method_pattern_to_selector("com.example.AppTest.someMethod"),
+            Some("com.example.AppTest#someMethod".to_string())
+        );
+        assert_eq!(
+            gradle_test_method_pattern_to_selector("com.example.AppTest.some*"),
+            None
+        );
+        assert_eq!(
+            gradle_test_method_pattern_to_selector("com.example.AppTest#someMethod"),
+            None
+        );
     }
 
     #[test]

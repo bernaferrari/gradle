@@ -275,6 +275,65 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
+    public void capturesExactMethodTestIncludeFilterAsNativeReady() throws IOException {
+        File testClassesDir = temporaryFolder.newFolder("build/classes/java/test");
+        File runtimeJar = temporaryFolder.newFile("junit-platform-console-standalone.jar");
+        File reportsDir = temporaryFolder.newFolder("build/test-results/test");
+        File workingDir = temporaryFolder.newFolder("work");
+
+        Task test = testTask(
+            testClassesDir,
+            runtimeJar,
+            reportsDir,
+            workingDir,
+            null,
+            new TestFilterSpec(
+                new LinkedHashSet<>(Arrays.asList("com.example.AppTest.someMethod")),
+                Collections.emptySet()
+            )
+        );
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(test, Test.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("com.example.AppTest.someMethod", inputs.get("test_method_includes"));
+        assertFalse(inputs.containsKey("test_filter"));
+        assertFalse(inputs.containsKey("test_filter_includes"));
+        assertEquals("false", inputs.get("test_unsupported_filters"));
+    }
+
+    @org.junit.Test
+    public void marksWildcardMethodTestFilterAsUnsupported() throws IOException {
+        File testClassesDir = temporaryFolder.newFolder("build/classes/java/test");
+        File runtimeJar = temporaryFolder.newFile("junit-platform-console-standalone.jar");
+        File reportsDir = temporaryFolder.newFolder("build/test-results/test");
+        File workingDir = temporaryFolder.newFolder("work");
+
+        Task test = testTask(
+            testClassesDir,
+            runtimeJar,
+            reportsDir,
+            workingDir,
+            null,
+            new TestFilterSpec(
+                new LinkedHashSet<>(Arrays.asList("com.example.AppTest.some*")),
+                Collections.emptySet()
+            )
+        );
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(test, Test.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("true", inputs.get("test_unsupported_filters"));
+        assertEquals("com.example.AppTest.some*", inputs.get("test_filter_includes"));
+        assertFalse(inputs.containsKey("test_method_includes"));
+    }
+
+    @org.junit.Test
     public void augmentsStandardTestClasspathFromResolvableConfiguration() throws IOException {
         File testClassesDir = temporaryFolder.newFolder("build/classes/java/test");
         File runtimeJar = temporaryFolder.newFile("junit-platform-console-standalone.jar");
