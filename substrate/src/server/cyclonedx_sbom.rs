@@ -1687,6 +1687,22 @@ fn apply_pom_metadata_text(
         {
             push_external_reference(&mut metadata.external_references, "mailing-list", text);
         }
+        [project, mailing_lists, mailing_list, unsubscribe]
+            if project == "project"
+                && mailing_lists == "mailingLists"
+                && mailing_list == "mailingList"
+                && unsubscribe == "unsubscribe" =>
+        {
+            push_external_reference(&mut metadata.external_references, "mailing-list", text);
+        }
+        [project, mailing_lists, mailing_list, post]
+            if project == "project"
+                && mailing_lists == "mailingLists"
+                && mailing_list == "mailingList"
+                && post == "post" =>
+        {
+            push_external_reference(&mut metadata.external_references, "mailing-list", text);
+        }
         [project, scm, url] if project == "project" && scm == "scm" && url == "url" => {
             push_external_reference(&mut metadata.external_references, "vcs", text);
         }
@@ -3187,6 +3203,9 @@ mod tests {
   <mailingLists>
     <mailingList>
       <archive>https://lists.example.test/lib</archive>
+      <subscribe>mailto:lib-subscribe@example.test</subscribe>
+      <unsubscribe>mailto:lib-unsubscribe@example.test</unsubscribe>
+      <post>mailto:lib@example.test</post>
     </mailingList>
   </mailingLists>
   <scm>
@@ -3272,6 +3291,18 @@ mod tests {
         assert!(component.external_references.contains(&external_reference(
             "mailing-list",
             "https://lists.example.test/lib"
+        )));
+        assert!(component.external_references.contains(&external_reference(
+            "mailing-list",
+            "mailto:lib-subscribe@example.test"
+        )));
+        assert!(component.external_references.contains(&external_reference(
+            "mailing-list",
+            "mailto:lib-unsubscribe@example.test"
+        )));
+        assert!(component.external_references.contains(&external_reference(
+            "mailing-list",
+            "mailto:lib@example.test"
         )));
         assert!(component
             .external_references
