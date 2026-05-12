@@ -154,13 +154,6 @@ impl TaskGraphServiceImpl {
         self.tasks.iter().any(|entry| entry.key().0 == *build_id)
     }
 
-    fn contexts_declare_composite_build(&self, build_id: &BuildId) -> bool {
-        self.tasks
-            .iter()
-            .filter(|entry| entry.key().0 == *build_id)
-            .any(|entry| execution_context_declares_composite_build(&entry.execution_context_json))
-    }
-
     fn hydrate_from_shadow_plan(
         &self,
         build_id: &BuildId,
@@ -188,7 +181,7 @@ impl TaskGraphServiceImpl {
         }
 
         let plan_dependencies = artifact.plan.dependencies.clone();
-        let composite_build_project_paths = composite_build_project_paths(&artifact.plan.projects);
+        let included_build_project_paths = included_build_project_paths(&artifact.plan.projects);
         let mut plan_tasks = artifact.plan.tasks;
         let task_outputs: HashMap<String, Vec<String>> = plan_tasks
             .iter()
@@ -203,7 +196,7 @@ impl TaskGraphServiceImpl {
 
         let mut loaded = 0usize;
         for mut task in plan_tasks.drain(..) {
-            if composite_build_project_paths.contains(&task.project_path) {
+            if included_build_project_paths.contains(&task.project_path) {
                 task.inputs.insert(
                     "unsupported_dependency_semantics".to_string(),
                     "true".to_string(),
@@ -275,9 +268,7 @@ impl TaskGraphServiceImpl {
                 return Vec::new();
             }
         };
-        let has_composite_substitution =
-            !composite_build_project_paths(&artifact.plan.projects).is_empty();
-        let mut dependencies = artifact
+        artifact
             .plan
             .dependencies
             .into_iter()
@@ -309,21 +300,7 @@ impl TaskGraphServiceImpl {
                     .collect(),
                 unsupported_features: dependency.unsupported_features,
             })
-            .collect::<Vec<_>>();
-        if has_composite_substitution {
-            for dependency in &mut dependencies {
-                if !dependency
-                    .unsupported_features
-                    .iter()
-                    .any(|feature| feature == "composite-substitution:settings")
-                {
-                    dependency
-                        .unsupported_features
-                        .push("composite-substitution:settings".to_string());
-                }
-            }
-        }
-        dependencies
+            .collect::<Vec<_>>()
     }
 
     /// Kahn's algorithm for topological sort with parallel scheduling.
@@ -607,69 +584,59 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
     }
 }
 
-fn composite_build_project_paths(projects: &[CanonicalBuildPlanProject]) -> HashSet<String> {
-    let composite_roots = projects
+fn included_build_project_paths(projects: &[CanonicalBuildPlanProject]) -> HashSet<String> {
+    let included_dirs = projects
         .iter()
-        .filter(|project| settings_declares_included_build(&project.project_dir))
-        .map(|project| project.path.as_str())
-        .collect::<HashSet<_>>();
-    if composite_roots.is_empty() {
+        .flat_map(|project| included_build_dirs(&project.project_dir))
+        .collect::<Vec<_>>();
+    if included_dirs.is_empty() {
         return HashSet::new();
     }
-
     projects
         .iter()
         .filter(|project| {
-            composite_roots.iter().any(|root_path| {
-                project.path == *root_path
-                    || (*root_path == ":" && !project.path.starts_with(":included"))
-                    || (root_path != &":" && project.path.starts_with(&format!("{}:", root_path)))
-            })
+            included_dirs
+                .iter()
+                .any(|dir| Path::new(&project.project_dir).starts_with(dir))
         })
         .map(|project| project.path.clone())
         .collect()
 }
 
-fn settings_declares_included_build(project_dir: &str) -> bool {
+fn included_build_dirs(project_dir: &str) -> Vec<std::path::PathBuf> {
     let dir = Path::new(project_dir);
     ["settings.gradle.kts", "settings.gradle"]
         .iter()
         .map(|name| dir.join(name))
-        .any(|path| {
-            std::fs::read_to_string(path)
-                .map(|text| text.contains("includeBuild(") || text.contains("includeBuild ("))
-                .unwrap_or(false)
-        })
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .flat_map(|text| parse_include_build_paths(&text))
+        .map(|path| dir.join(path))
+        .collect()
 }
 
-fn execution_context_declares_composite_build(context_json: &str) -> bool {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(context_json) else {
-        return false;
-    };
-    ["source_files", "output_files"]
-        .iter()
-        .filter_map(|key| value.get(*key))
-        .filter_map(|paths| paths.as_array())
-        .flat_map(|paths| paths.iter())
-        .filter_map(|path| path.as_str())
-        .filter_map(project_dir_from_context_path)
-        .any(|project_dir| settings_declares_included_build(&project_dir))
-}
-
-fn project_dir_from_context_path(path: &str) -> Option<String> {
-    let path = Path::new(path);
-    let start = if path.is_dir() {
-        path
-    } else {
-        path.parent().unwrap_or(path)
-    };
-    start
-        .ancestors()
-        .find(|ancestor| {
-            ancestor.join("settings.gradle.kts").is_file()
-                || ancestor.join("settings.gradle").is_file()
+fn parse_include_build_paths(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if !trimmed.starts_with("includeBuild") {
+                return None;
+            }
+            let rest = trimmed.trim_start_matches("includeBuild").trim();
+            let quoted = rest
+                .strip_prefix('(')
+                .and_then(|rest| rest.strip_suffix(')'))
+                .unwrap_or(rest)
+                .trim();
+            quoted
+                .strip_prefix('"')
+                .and_then(|rest| rest.split_once('"').map(|(value, _)| value.to_string()))
+                .or_else(|| {
+                    quoted
+                        .strip_prefix('\'')
+                        .and_then(|rest| rest.split_once('\'').map(|(value, _)| value.to_string()))
+                })
         })
-        .map(|ancestor| ancestor.to_string_lossy().into_owned())
+        .collect()
 }
 
 fn logical_gradle_task_type(simple: &str) -> String {
@@ -2231,25 +2198,7 @@ impl TaskGraphService for TaskGraphServiceImpl {
         };
 
         let (execution_order, critical_path_ms, has_cycles) = self.resolve_plan(&build_id);
-        let mut plan_dependencies = self.load_shadow_plan_dependencies(&req.build_id, plan_source);
-        if self.contexts_declare_composite_build(&build_id)
-            && !plan_dependencies.iter().any(|dependency| {
-                dependency
-                    .unsupported_features
-                    .iter()
-                    .any(|feature| feature == "composite-substitution:settings")
-            })
-        {
-            plan_dependencies.push(BuildPlanDependency {
-                project_path: ":".to_string(),
-                configuration: "composite-build".to_string(),
-                notation: "includeBuild".to_string(),
-                kind: "dependency".to_string(),
-                repositories: Vec::new(),
-                unsupported_features: vec!["composite-substitution:settings".to_string()],
-            });
-        }
-
+        let plan_dependencies = self.load_shadow_plan_dependencies(&req.build_id, plan_source);
         let total = self.tasks.iter().filter(|e| e.key().0 == build_id).count() as i32;
         let skipped = self
             .tasks
@@ -2523,66 +2472,50 @@ mod tests {
     }
 
     #[test]
-    fn test_execution_context_detects_composite_build_settings() {
+    fn test_include_build_dirs_parse_settings_entries() {
         let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("included")).unwrap();
         std::fs::write(
             temp.path().join("settings.gradle.kts"),
             "includeBuild(\"included\")",
         )
         .unwrap();
-        let output = temp
-            .path()
-            .join("build/classes/java/main/App.class")
-            .to_string_lossy()
-            .into_owned();
-        let context = serde_json::json!({
-            "output_files": [output]
-        })
-        .to_string();
 
-        assert!(execution_context_declares_composite_build(&context));
+        assert_eq!(
+            included_build_dirs(temp.path().to_string_lossy().as_ref()),
+            vec![temp.path().join("included")]
+        );
     }
 
     #[test]
-    fn test_project_dir_from_context_path_uses_nearest_settings_directory() {
+    fn test_included_build_project_paths_excludes_root_project_with_include_build() {
         let temp = tempfile::tempdir().unwrap();
         let repo = temp.path().join("repo");
-        std::fs::create_dir_all(&repo).unwrap();
+        let included = repo.join("tools");
+        std::fs::create_dir_all(&included).unwrap();
         std::fs::write(repo.join("settings.gradle.kts"), "includeBuild(\"tools\")").unwrap();
-        let outer = repo.join("build/dogfood/project");
-        std::fs::create_dir_all(&outer).unwrap();
-        std::fs::write(
-            outer.join("settings.gradle.kts"),
-            "rootProject.name = \"project\"",
-        )
-        .unwrap();
-        let output = outer
-            .join("build/classes/java/main/App.class")
-            .to_string_lossy()
-            .into_owned();
-        let source = outer
-            .join("src/main/java/App.java")
-            .to_string_lossy()
-            .into_owned();
+        let projects = vec![
+            CanonicalBuildPlanProject {
+                path: ":".to_string(),
+                name: "root".to_string(),
+                project_dir: repo.to_string_lossy().into_owned(),
+            },
+            CanonicalBuildPlanProject {
+                path: ":app".to_string(),
+                name: "app".to_string(),
+                project_dir: repo.join("app").to_string_lossy().into_owned(),
+            },
+            CanonicalBuildPlanProject {
+                path: ":tools".to_string(),
+                name: "tools".to_string(),
+                project_dir: included.to_string_lossy().into_owned(),
+            },
+        ];
 
-        assert_eq!(
-            project_dir_from_context_path(&output).as_deref(),
-            Some(outer.to_string_lossy().as_ref())
-        );
-        assert_eq!(
-            project_dir_from_context_path(&source).as_deref(),
-            Some(outer.to_string_lossy().as_ref())
-        );
-
-        let context = serde_json::json!({
-            "source_files": [source],
-            "output_files": [output]
-        })
-        .to_string();
-        assert!(
-            !execution_context_declares_composite_build(&context),
-            "outer checkout settings must not make copied dogfood projects look composite"
-        );
+        let paths = included_build_project_paths(&projects);
+        assert!(!paths.contains(":"));
+        assert!(!paths.contains(":app"));
+        assert!(paths.contains(":tools"));
     }
 
     #[test]

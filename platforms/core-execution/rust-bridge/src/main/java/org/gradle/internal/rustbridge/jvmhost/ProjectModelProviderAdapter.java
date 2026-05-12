@@ -485,9 +485,6 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         }
         unsupportedFeatures.addAll(unsupportedStartParameterDependencyFeatures(project));
         unsupportedFeatures.addAll(unsupportedProxyDependencyFeatures());
-        if (projectSettingsHasIncludedBuild(project)) {
-            unsupportedFeatures.add("composite-substitution:settings");
-        }
         return new ArrayList<>(new LinkedHashSet<>(unsupportedFeatures));
     }
 
@@ -552,10 +549,6 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         return projectBuildScriptMatches(project, "\\benforcedPlatform\\s*\\(");
     }
 
-    private static boolean projectSettingsHasIncludedBuild(Project project) {
-        return projectSettingsMatches(project, "\\bincludeBuild\\s*\\(");
-    }
-
     private static boolean projectBuildScriptMatches(Project project, String pattern) {
         File buildFile = project.getBuildFile();
         if (buildFile == null || !buildFile.isFile()) {
@@ -570,28 +563,6 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             LOGGER.debug("[substrate-jvmhost] Failed to inspect build script for unsupported native dependency semantics", e);
             return false;
         }
-    }
-
-    private static boolean projectSettingsMatches(Project project, String pattern) {
-        try {
-            Project rootProject = project.getRootProject();
-            File rootDir = rootProject == null ? null : rootProject.getProjectDir();
-            if (rootDir == null || !rootDir.isDirectory()) {
-                return false;
-            }
-            for (String settingsName : new String[] {"settings.gradle.kts", "settings.gradle"}) {
-                File settingsFile = new File(rootDir, settingsName);
-                if (settingsFile.isFile()) {
-                    String text = new String(Files.readAllBytes(settingsFile.toPath()), StandardCharsets.UTF_8);
-                    if (Pattern.compile(pattern).matcher(text).find()) {
-                        return true;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            LOGGER.debug("[substrate-jvmhost] Failed to inspect settings script for unsupported native dependency semantics", e);
-        }
-        return false;
     }
 
     private static void captureJavaCompileInputs(Task task, Class<?> taskType, Map<String, String> inputs) {
