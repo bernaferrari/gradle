@@ -33,8 +33,22 @@ const SHADOWED_CONFIGURATIONS: &[&str] = &[
 pub struct BuildPlanShadowArtifact {
     pub plan: CanonicalBuildPlan,
     pub fingerprint_sha256: String,
+    #[serde(default)]
+    pub input_fingerprints: Vec<BuildPlanShadowInputFingerprint>,
     pub stored_at_ms: i64,
     pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BuildPlanShadowInputFingerprint {
+    pub task_path: String,
+    pub input_name: String,
+    pub path: String,
+    pub kind: String,
+    pub exists: bool,
+    pub size: u64,
+    pub modified_ms: i64,
+    pub sha256: String,
 }
 
 #[derive(Debug, Clone)]
@@ -98,10 +112,12 @@ impl BuildPlanShadowStore {
         let mut normalized = plan.clone();
         normalized.normalize_mut();
         let fingerprint = fingerprint_normalized(&normalized)?;
+        let input_fingerprints = fingerprint_plan_inputs(&normalized)?;
 
         let artifact = BuildPlanShadowArtifact {
             plan: normalized,
             fingerprint_sha256: fingerprint,
+            input_fingerprints,
             stored_at_ms: now_ms(),
             source: source.to_string(),
         };
@@ -905,6 +921,173 @@ fn output_specs_from_paths(paths: &[String]) -> Vec<CanonicalBuildPlanTaskOutput
         .collect()
 }
 
+fn fingerprint_plan_inputs(
+    plan: &CanonicalBuildPlan,
+) -> Result<Vec<BuildPlanShadowInputFingerprint>, Box<dyn std::error::Error + Send + Sync>> {
+    let produced_paths = captured_produced_paths(plan);
+    let mut fingerprints = Vec::new();
+    for task in &plan.tasks {
+        for input in &task.input_specs {
+            if input.kind != "path" {
+                continue;
+            }
+            let path = Path::new(&input.value);
+            if !path.is_absolute() {
+                continue;
+            }
+            if produced_paths
+                .iter()
+                .any(|produced| path == produced || path.starts_with(produced))
+            {
+                continue;
+            }
+            fingerprints.push(fingerprint_input_path(task, input, path)?);
+        }
+    }
+    fingerprints.sort_unstable_by(|a, b| {
+        (&a.task_path, &a.input_name, &a.path).cmp(&(&b.task_path, &b.input_name, &b.path))
+    });
+    fingerprints.dedup_by(|a, b| {
+        a.task_path == b.task_path && a.input_name == b.input_name && a.path == b.path
+    });
+    Ok(fingerprints)
+}
+
+fn captured_produced_paths(plan: &CanonicalBuildPlan) -> Vec<PathBuf> {
+    plan.tasks
+        .iter()
+        .flat_map(|task| {
+            task.outputs
+                .iter()
+                .chain(task.local_state.iter())
+                .chain(task.destroyables.iter())
+        })
+        .filter_map(|value| {
+            let path = Path::new(value);
+            path.is_absolute().then(|| path.to_path_buf())
+        })
+        .collect()
+}
+
+fn fingerprint_input_path(
+    task: &CanonicalBuildPlanTask,
+    input: &CanonicalBuildPlanTaskInputSpec,
+    path: &Path,
+) -> Result<BuildPlanShadowInputFingerprint, Box<dyn std::error::Error + Send + Sync>> {
+    if !path.exists() {
+        return Ok(BuildPlanShadowInputFingerprint {
+            task_path: task.path.clone(),
+            input_name: input.name.clone(),
+            path: path.to_string_lossy().into_owned(),
+            kind: "missing".to_string(),
+            exists: false,
+            size: 0,
+            modified_ms: 0,
+            sha256: String::new(),
+        });
+    }
+
+    let metadata = std::fs::metadata(path)?;
+    let modified_ms = metadata_modified_ms(&metadata)?;
+    if metadata.is_file() {
+        return Ok(BuildPlanShadowInputFingerprint {
+            task_path: task.path.clone(),
+            input_name: input.name.clone(),
+            path: path.to_string_lossy().into_owned(),
+            kind: "file".to_string(),
+            exists: true,
+            size: metadata.len(),
+            modified_ms,
+            sha256: sha256_file(path)?,
+        });
+    }
+
+    if metadata.is_dir() {
+        let (size, newest_modified_ms, sha256) = fingerprint_directory(path)?;
+        return Ok(BuildPlanShadowInputFingerprint {
+            task_path: task.path.clone(),
+            input_name: input.name.clone(),
+            path: path.to_string_lossy().into_owned(),
+            kind: "directory".to_string(),
+            exists: true,
+            size,
+            modified_ms: newest_modified_ms.max(modified_ms),
+            sha256,
+        });
+    }
+
+    Ok(BuildPlanShadowInputFingerprint {
+        task_path: task.path.clone(),
+        input_name: input.name.clone(),
+        path: path.to_string_lossy().into_owned(),
+        kind: "other".to_string(),
+        exists: true,
+        size: 0,
+        modified_ms,
+        sha256: String::new(),
+    })
+}
+
+fn fingerprint_directory(
+    path: &Path,
+) -> Result<(u64, i64, String), Box<dyn std::error::Error + Send + Sync>> {
+    let mut files = Vec::new();
+    collect_directory_files(path, path, &mut files)?;
+    let mut hasher = Sha256::new();
+    let mut total_size = 0;
+    let mut newest_modified_ms = metadata_modified_ms(&std::fs::metadata(path)?)?;
+    for (relative_path, file_path) in files {
+        let metadata = std::fs::metadata(&file_path)?;
+        total_size += metadata.len();
+        newest_modified_ms = newest_modified_ms.max(metadata_modified_ms(&metadata)?);
+        hasher.update(relative_path.as_bytes());
+        hasher.update([0]);
+        hasher.update(sha256_file(&file_path)?.as_bytes());
+        hasher.update([0]);
+    }
+    Ok((
+        total_size,
+        newest_modified_ms,
+        format!("{:x}", hasher.finalize()),
+    ))
+}
+
+fn collect_directory_files(
+    root: &Path,
+    path: &Path,
+    files: &mut Vec<(String, PathBuf)>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    for entry in std::fs::read_dir(path)? {
+        let child = entry?.path();
+        let metadata = std::fs::metadata(&child)?;
+        if metadata.is_dir() {
+            collect_directory_files(root, &child, files)?;
+        } else if metadata.is_file() {
+            let relative_path = child
+                .strip_prefix(root)?
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            files.push((relative_path, child));
+        }
+    }
+    files.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    Ok(())
+}
+
+fn sha256_file(path: &Path) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let bytes = std::fs::read(path)?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
+fn metadata_modified_ms(
+    metadata: &std::fs::Metadata,
+) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
+    Ok(metadata
+        .modified()?
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_millis() as i64)
+}
+
 fn qualify_task_path(project_path: &str, task_ref: &str) -> String {
     let trimmed = task_ref.trim();
     if trimmed.starts_with(':') {
@@ -1544,6 +1727,131 @@ mod tests {
     }
 
     #[test]
+    fn persist_shadow_artifact_records_content_fingerprints_for_path_inputs() {
+        let temp = tempfile::tempdir().unwrap();
+        let source_dir = temp.path().join("src/main/java/example");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        let source_file = source_dir.join("PublicApi.java");
+        std::fs::write(&source_file, "class PublicApi {}\n").unwrap();
+
+        let store = BuildPlanShadowStore::new(temp.path().join("cache"));
+        let plan = CanonicalBuildPlan {
+            schema_version: BUILD_PLAN_SCHEMA_VERSION,
+            build_id: "build:fingerprints".to_string(),
+            projects: vec![CanonicalBuildPlanProject {
+                path: ":".to_string(),
+                name: "root".to_string(),
+                project_dir: temp.path().to_string_lossy().into_owned(),
+            }],
+            tasks: vec![CanonicalBuildPlanTask {
+                path: ":compileJava".to_string(),
+                project_path: ":".to_string(),
+                implementation_id: "org.gradle.api.tasks.compile.JavaCompile".to_string(),
+                depends_on: Vec::new(),
+                inputs: BTreeMap::new(),
+                outputs: vec![temp
+                    .path()
+                    .join("build/classes/java/main")
+                    .to_string_lossy()
+                    .into_owned()],
+                worker_isolation: "process".to_string(),
+                should_run_after: Vec::new(),
+                must_run_after: Vec::new(),
+                finalized_by: Vec::new(),
+                cacheability: "unknown".to_string(),
+                local_state: Vec::new(),
+                destroyables: Vec::new(),
+                action_kind: "compile".to_string(),
+                input_specs: vec![CanonicalBuildPlanTaskInputSpec {
+                    name: "source".to_string(),
+                    kind: "path".to_string(),
+                    value: source_file.to_string_lossy().into_owned(),
+                    normalization: "relative".to_string(),
+                    optional: false,
+                }],
+                output_specs: Vec::new(),
+                environment_inputs: Vec::new(),
+                system_property_inputs: Vec::new(),
+                diagnostics: Vec::new(),
+            }],
+            dependencies: Vec::new(),
+            toolchains: Vec::new(),
+            metadata: BTreeMap::new(),
+        };
+
+        let path = store.persist_plan(&plan, "test").unwrap();
+        let artifact: BuildPlanShadowArtifact =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+
+        assert_eq!(artifact.input_fingerprints.len(), 1);
+        let fingerprint = &artifact.input_fingerprints[0];
+        assert_eq!(fingerprint.task_path, ":compileJava");
+        assert_eq!(fingerprint.input_name, "source");
+        assert_eq!(fingerprint.path, source_file.to_string_lossy());
+        assert_eq!(fingerprint.kind, "file");
+        assert!(fingerprint.exists);
+        assert_eq!(fingerprint.size, "class PublicApi {}\n".len() as u64);
+        assert_eq!(
+            fingerprint.sha256,
+            format!("{:x}", Sha256::digest("class PublicApi {}\n"))
+        );
+    }
+
+    #[test]
+    fn persist_shadow_artifact_excludes_captured_producer_outputs_from_input_fingerprints() {
+        let temp = tempfile::tempdir().unwrap();
+        let generated_classes = temp.path().join("build/classes/java/main");
+        std::fs::create_dir_all(&generated_classes).unwrap();
+        std::fs::write(generated_classes.join("PublicApi.class"), b"class").unwrap();
+
+        let store = BuildPlanShadowStore::new(temp.path().join("cache"));
+        let produced_path = generated_classes.to_string_lossy().into_owned();
+        let plan = CanonicalBuildPlan {
+            schema_version: BUILD_PLAN_SCHEMA_VERSION,
+            build_id: "build:producer-output".to_string(),
+            projects: Vec::new(),
+            tasks: vec![CanonicalBuildPlanTask {
+                path: ":compileJava".to_string(),
+                project_path: ":".to_string(),
+                implementation_id: "org.gradle.api.tasks.compile.JavaCompile".to_string(),
+                depends_on: Vec::new(),
+                inputs: BTreeMap::new(),
+                outputs: vec![produced_path.clone()],
+                worker_isolation: "process".to_string(),
+                should_run_after: Vec::new(),
+                must_run_after: Vec::new(),
+                finalized_by: Vec::new(),
+                cacheability: "unknown".to_string(),
+                local_state: Vec::new(),
+                destroyables: Vec::new(),
+                action_kind: "compile".to_string(),
+                input_specs: vec![CanonicalBuildPlanTaskInputSpec {
+                    name: "classes".to_string(),
+                    kind: "path".to_string(),
+                    value: produced_path,
+                    normalization: "classpath".to_string(),
+                    optional: false,
+                }],
+                output_specs: Vec::new(),
+                environment_inputs: Vec::new(),
+                system_property_inputs: Vec::new(),
+                diagnostics: Vec::new(),
+            }],
+            dependencies: Vec::new(),
+            toolchains: Vec::new(),
+            metadata: BTreeMap::new(),
+        };
+
+        let artifact = store.load_plan("build:producer-output").unwrap();
+        assert!(artifact.is_none());
+        let path = store.persist_plan(&plan, "test").unwrap();
+        let artifact: BuildPlanShadowArtifact =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+
+        assert!(artifact.input_fingerprints.is_empty());
+    }
+
+    #[test]
     fn load_plan_quarantines_corrupt_shadow_artifact() {
         let temp = tempfile::tempdir().unwrap();
         let store = BuildPlanShadowStore::new(temp.path().to_path_buf());
@@ -1675,6 +1983,7 @@ mod tests {
         let mut artifact = BuildPlanShadowArtifact {
             plan: expected.clone(),
             fingerprint_sha256: fingerprint_sha256_hex(&expected).unwrap(),
+            input_fingerprints: Vec::new(),
             stored_at_ms: 0,
             source: "test".to_string(),
         };
