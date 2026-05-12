@@ -503,6 +503,10 @@ public class ProjectModelProviderAdapterTest {
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("component-metadata"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("timestamp-source-policy"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("serial-source-policy"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("license-text-rendering"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("license-choice-rendering"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("build-system-environment-variable"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("external-reference-shape"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("aggregate-merge-policy"));
         assertEquals("true", inputs.get("requires_jvm_task_execution"));
         assertFalse(inputs.containsKey("sbom_contract_json_b64"));
@@ -543,6 +547,10 @@ public class ProjectModelProviderAdapterTest {
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("component-metadata"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("timestamp-source-policy"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("serial-source-policy"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("license-text-rendering"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("license-choice-rendering"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("build-system-environment-variable"));
+        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("external-reference-shape"));
         assertFalse(inputs.containsKey("sbom_contract_json_b64"));
     }
 
