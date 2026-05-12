@@ -944,9 +944,32 @@ fn maybe_synthesize_cyclonedx_sbom_contract(task: &mut CanonicalBuildPlanTask, b
         .filter(|input| input.kind == "value" && input.name.starts_with("cyclonedx_"))
         .map(|input| (input.name.clone(), input.value.clone()))
         .collect::<BTreeMap<_, _>>();
-    let Ok(contract) = draft_contract_from_captured_inputs(&captured, build_id, timestamp_ms)
-    else {
-        return;
+    let contract = match draft_contract_from_captured_inputs(&captured, build_id, timestamp_ms) {
+        Ok(contract) => contract,
+        Err(error) => {
+            set_value_input(
+                task,
+                "cyclonedx_sbom_contract_status",
+                "partial",
+                "cyclonedx-sbom-contract-synthesis-failed",
+                "scalar",
+            );
+            set_value_input(
+                task,
+                "cyclonedx_missing_contract_fields",
+                "rust-synthesis-error",
+                "cyclonedx-sbom-contract-synthesis-failed",
+                "scalar",
+            );
+            set_value_input(
+                task,
+                "cyclonedx_rust_synthesis_error",
+                &error,
+                "cyclonedx-sbom-contract-synthesis-failed",
+                "scalar",
+            );
+            return;
+        }
     };
     let Ok(contract_json) = serde_json::to_string(&contract) else {
         return;
@@ -3264,6 +3287,53 @@ mod tests {
             input_value(&task, "requires_jvm_task_execution").as_deref(),
             Some("false")
         );
+    }
+
+    #[test]
+    fn test_cyclonedx_direct_synthesis_failure_records_precise_error() {
+        let encoded_graph = STANDARD.encode("{not-json");
+        let mut task = canonical_task(
+            ":cyclonedxDirectBom",
+            "org.cyclonedx.gradle.CyclonedxDirectTask",
+            Vec::new(),
+            vec!["/repo/build/bom.json".to_string()],
+        );
+        task.input_specs = vec![
+            value_input("cyclonedx_resolution_graph_json_b64", &encoded_graph),
+            value_input("cyclonedx_identity_task_path", ":cyclonedxDirectBom"),
+            value_input("cyclonedx_schema_version", "VERSION_16"),
+            value_input("cyclonedx_component_group", "org.example"),
+            value_input("cyclonedx_component_name", "app"),
+            value_input("cyclonedx_component_version", "1.0"),
+            value_input("cyclonedx_project_type", "APPLICATION"),
+            value_input("cyclonedx_json_output", "/repo/build/bom.json"),
+            value_input("cyclonedx_include_bom_serial_number", "false"),
+            value_input("cyclonedx_serial_source_policy", "omitted"),
+            value_input(
+                "cyclonedx_timestamp_source_policy",
+                "gradle-substrate-explicit-epoch-ms",
+            ),
+            value_input("cyclonedx_timestamp_epoch_ms", "1778595445123"),
+            value_input("cyclonedx_include_build_system", "false"),
+            value_input("cyclonedx_include_build_environment", "false"),
+            value_input("cyclonedx_include_license_text", "false"),
+            value_input("cyclonedx_include_metadata_resolution", "false"),
+        ];
+
+        maybe_synthesize_cyclonedx_sbom_contract(&mut task, "build-123");
+
+        assert!(input_value(&task, "sbom_contract_json_b64").is_none());
+        assert_eq!(
+            input_value(&task, "cyclonedx_sbom_contract_status").as_deref(),
+            Some("partial")
+        );
+        assert_eq!(
+            input_value(&task, "cyclonedx_missing_contract_fields").as_deref(),
+            Some("rust-synthesis-error")
+        );
+        assert!(input_value(&task, "cyclonedx_rust_synthesis_error")
+            .unwrap()
+            .contains("Invalid CycloneDX resolution graph evidence"));
     }
 
     #[test]
