@@ -213,7 +213,7 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         self.assertIn("artifact-view-unsupported-kotlin-dsl", results)
         self.assertIn("artifact-transform-unsupported-kotlin-dsl", results)
         self.assertIn("composite-substitution-unsupported-kotlin-dsl", results)
-        self.assertIn("enforced-platform-unsupported-kotlin-dsl", results)
+        self.assertNotIn("enforced-platform-unsupported-kotlin-dsl", results)
         failures = {
             name: result["mismatches"]
             for name, result in results.items()
@@ -253,6 +253,20 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         self.assertTrue(
             corpus_run.has_unsupported_dependency_substitution(
                 'configurations.configureEach { resolutionStrategy.dependencySubstitution { substitute(module("org.example:original")).using(project(":replacement")) } }'
+            )
+        )
+
+    def test_exact_static_enforced_platform_is_supported(self):
+        self.assertFalse(
+            corpus_run.has_unsupported_enforced_platform(
+                'dependencies { implementation(enforcedPlatform("org.example:platform:1.0")) }'
+            )
+        )
+
+    def test_dynamic_enforced_platform_is_unsupported(self):
+        self.assertTrue(
+            corpus_run.has_unsupported_enforced_platform(
+                'dependencies { implementation(enforcedPlatform("org.example:platform:1.+")) }'
             )
         )
 

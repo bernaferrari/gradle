@@ -75,10 +75,11 @@ admission, or an explicit unsupported corpus gate. The preview does not support:
 - arbitrary `buildSrc` execution in Rust;
 - DSL evaluation in Rust;
 - rich dependency semantics not represented by the native contract, including
-  unsupported dynamic selectors, dependency substitution, component metadata
-  rules, artifact transforms/views, repository auth/proxy/offline/refresh
-  semantics outside the checked-in contract, and unsupported Gradle Module
-  Metadata fields;
+  unsupported dynamic selectors, non-module dependency substitution, richer
+  enforced-platform forms outside exact static `enforcedPlatform("g:n:v")`,
+  component metadata rules, artifact transforms/views, repository
+  auth/proxy/offline/refresh semantics outside the checked-in contract, and
+  unsupported Gradle Module Metadata fields;
 - task-by-task fallback inside an admitted Rust-authoritative run.
 
 Unsupported fixtures belong in `testing/corpus/unsupported-manifest.json` or in

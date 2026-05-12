@@ -370,7 +370,7 @@ def scan_project_contract(project_dir: str) -> dict:
             unsupported_features.add("artifact-view")
         if re.search(r"\bregisterTransform(?:\s*<[^>]+>)?\s*\(", text):
             unsupported_features.add("artifact-transform")
-        if re.search(r"\benforcedPlatform\s*\(", text):
+        if has_unsupported_enforced_platform(text):
             unsupported_features.add("enforced-platform")
         if re.search(r"\bincludeBuild\s*\(", text):
             unsupported_features.add("composite-substitution")
@@ -424,6 +424,16 @@ def has_unsupported_dependency_substitution(text: str) -> bool:
         if remaining:
             return True
     return False
+
+
+def has_unsupported_enforced_platform(text: str) -> bool:
+    if not re.search(r"\benforcedPlatform\s*\(", text):
+        return False
+    supported = re.compile(
+        r"\b[A-Za-z_][A-Za-z0-9_]*\s*\(\s*enforcedPlatform\s*\(\s*[\"'][A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+[\"']\s*\)\s*\)"
+    )
+    remaining = supported.sub("", text)
+    return re.search(r"\benforcedPlatform\s*\(", remaining) is not None
 
 
 def gradle_string_literal_value(value: str) -> str:

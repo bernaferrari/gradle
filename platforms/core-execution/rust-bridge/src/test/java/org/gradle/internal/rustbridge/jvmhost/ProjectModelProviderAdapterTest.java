@@ -833,10 +833,36 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
-    public void marksEnforcedPlatformsAsUnsupportedDependencySemantics() throws IOException {
+    public void exactStaticEnforcedPlatformIsNativeReady() throws IOException {
         File buildFile = temporaryFolder.newFile("build.gradle.kts");
         Files.write(buildFile.toPath(), Collections.singletonList(
             "dependencies { implementation(enforcedPlatform(\"org.example:platform:1.0\")) }"
+        ), StandardCharsets.UTF_8);
+        Task task = basicFileTransformTask(
+            ":classes",
+            "classes",
+            fileCollection(),
+            fileCollection(),
+            Collections.emptyMap(),
+            false,
+            false,
+            buildFile
+        );
+
+        BuildPlanTask planTask = ProjectModelProviderAdapter.toBuildPlanTask(task, DefaultTask.class);
+        Map<String, String> inputs = planTask.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertFalse(inputs.containsKey("unsupported_dependency_semantics"));
+        assertFalse(inputs.getOrDefault("unsupported_repository_features", "").contains("enforced-platform"));
+    }
+
+    @org.junit.Test
+    public void dynamicEnforcedPlatformRemainsUnsupportedDependencySemantics() throws IOException {
+        File buildFile = temporaryFolder.newFile("build.gradle.kts");
+        Files.write(buildFile.toPath(), Collections.singletonList(
+            "dependencies { implementation(enforcedPlatform(\"org.example:platform:1.+\")) }"
         ), StandardCharsets.UTF_8);
         Task task = basicFileTransformTask(
             ":classes",

@@ -474,7 +474,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if (projectBuildScriptHasArtifactTransform(project)) {
             unsupportedFeatures.add("artifact-transform:build-script");
         }
-        if (projectBuildScriptHasEnforcedPlatform(project)) {
+        if (projectBuildScriptHasUnsupportedEnforcedPlatform(project)) {
             unsupportedFeatures.add("enforced-platform:build-script");
         }
         unsupportedFeatures.addAll(unsupportedStartParameterDependencyFeatures(project));
@@ -549,8 +549,16 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         return projectBuildScriptMatches(project, "\\bregisterTransform(?:\\s*<[^>]+>)?\\s*\\(");
     }
 
-    private static boolean projectBuildScriptHasEnforcedPlatform(Project project) {
-        return projectBuildScriptMatches(project, "\\benforcedPlatform\\s*\\(");
+    private static boolean projectBuildScriptHasUnsupportedEnforcedPlatform(Project project) {
+        String text = projectBuildScriptText(project);
+        if (text == null || !Pattern.compile("\\benforcedPlatform\\s*\\(").matcher(text).find()) {
+            return false;
+        }
+        Pattern supported = Pattern.compile(
+            "\\b[A-Za-z_][A-Za-z0-9_]*\\s*\\(\\s*enforcedPlatform\\s*\\(\\s*\"[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+\"\\s*\\)\\s*\\)"
+        );
+        String remaining = supported.matcher(text).replaceAll("");
+        return Pattern.compile("\\benforcedPlatform\\s*\\(").matcher(remaining).find();
     }
 
     private static boolean projectBuildScriptMatches(Project project, String pattern) {
