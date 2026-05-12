@@ -11,6 +11,7 @@ import argparse
 import importlib.util
 import json
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -150,6 +151,112 @@ def validate_manifest(manifest_path: Path) -> list[str]:
 
 def is_immutable_git_ref(ref: str) -> bool:
     return bool(re.fullmatch(r"[0-9a-fA-F]{40}", ref))
+
+
+def git_fetch_commands(project: DogfoodProject, source_cache_dir: Path) -> list[list[str]]:
+    source = project.source
+    clone_dir = source_cache_dir / project.name
+    url = str(source["url"])
+    ref = str(source["ref"])
+    return [
+        ["git", "clone", "--no-checkout", url, str(clone_dir)],
+        ["git", "-C", str(clone_dir), "fetch", "--depth", "1", "origin", ref],
+        ["git", "-C", str(clone_dir), "checkout", "--detach", ref],
+    ]
+
+
+def fetch_git_project(project: DogfoodProject, source_cache_dir: Path) -> dict[str, Any]:
+    if project.source.get("kind") != "git":
+        return {
+            "name": project.name,
+            "source_kind": project.source.get("kind", ""),
+            "path": str(project.path),
+            "fetched": False,
+            "cached": False,
+            "success": True,
+            "message": "checked-in source does not require fetch",
+        }
+
+    clone_dir = source_cache_dir / project.name
+    ref = str(project.source["ref"])
+    source_cache_dir.mkdir(parents=True, exist_ok=True)
+    commands = git_fetch_commands(project, source_cache_dir)
+    try:
+        if not (clone_dir / ".git").exists():
+            subprocess.run(commands[0], check=True, capture_output=True, text=True)
+            fetched = True
+        else:
+            fetched = False
+        subprocess.run(commands[1], check=True, capture_output=True, text=True)
+        subprocess.run(commands[2], check=True, capture_output=True, text=True)
+        actual_ref = subprocess.check_output(
+            ["git", "-C", str(clone_dir), "rev-parse", "HEAD"],
+            text=True,
+        ).strip()
+        if actual_ref.lower() != ref.lower():
+            return {
+                "name": project.name,
+                "source_kind": "git",
+                "path": str(clone_dir),
+                "fetched": fetched,
+                "cached": not fetched,
+                "success": False,
+                "message": f"checked out {actual_ref}, expected {ref}",
+            }
+        return {
+            "name": project.name,
+            "source_kind": "git",
+            "path": str(clone_dir),
+            "fetched": fetched,
+            "cached": not fetched,
+            "success": True,
+            "message": "fetched",
+        }
+    except subprocess.CalledProcessError as error:
+        return {
+            "name": project.name,
+            "source_kind": "git",
+            "path": str(clone_dir),
+            "fetched": False,
+            "cached": False,
+            "success": False,
+            "message": (error.stderr or error.stdout or str(error)).strip(),
+        }
+
+
+def materialized_project(project: DogfoodProject, source_cache_dir: Path) -> DogfoodProject:
+    if project.source.get("kind") != "git":
+        return project
+    subdir = str(project.source.get("subdir", "."))
+    path = source_cache_dir / project.name
+    if subdir and subdir != ".":
+        path = path / subdir
+    return DogfoodProject(
+        name=project.name,
+        path=path.resolve(),
+        tasks=project.tasks,
+        mode=project.mode,
+        expectation=project.expectation,
+        timeout_seconds=project.timeout_seconds,
+        reason=project.reason,
+        checks=project.checks,
+        source=project.source,
+    )
+
+
+def fetch_manifest(manifest_path: Path, source_cache_dir: Path) -> dict[str, Any]:
+    errors = validate_manifest(manifest_path)
+    if errors:
+        return {"valid": False, "errors": errors, "fetches": []}
+    _data, projects = load_manifest(manifest_path)
+    fetches = [fetch_git_project(project, source_cache_dir) for project in projects]
+    return {
+        "valid": True,
+        "errors": [],
+        "source_cache_dir": str(source_cache_dir.resolve()),
+        "fetches": fetches,
+        "success": all(fetch["success"] for fetch in fetches),
+    }
 
 
 def enumerate_manifest(manifest_path: Path) -> dict[str, Any]:
@@ -351,6 +458,17 @@ def execute_manifest(
         return {"valid": False, "errors": errors, "results": [], "summary": {}}
     output_dir.mkdir(parents=True, exist_ok=True)
     _data, projects = load_manifest(manifest_path)
+    source_cache_dir = output_dir / "sources"
+    fetch_payload = fetch_manifest(manifest_path, source_cache_dir)
+    if not fetch_payload.get("success", False):
+        return {
+            "valid": True,
+            "errors": ["fetch failed"],
+            "fetch": fetch_payload,
+            "results": [],
+            "summary": {},
+        }
+    projects = [materialized_project(project, source_cache_dir) for project in projects]
     results = [
         run_project(project, output_dir, gradle_command, daemon_binary, verbose=verbose)
         for project in projects
@@ -364,6 +482,7 @@ def execute_manifest(
         "output_dir": str(output_dir.resolve()),
         "report": str(report_path.resolve()),
         "summary": summary,
+        "fetch": fetch_payload,
         "results": results,
     }
     (output_dir / "dogfood-results.json").write_text(
@@ -380,7 +499,9 @@ def create_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", help="Emit JSON")
     parser.add_argument("--validate-only", action="store_true", help="Validate the manifest and exit")
     parser.add_argument("--execute", action="store_true", help="Execute upstream and Rust substrate dogfood runs")
+    parser.add_argument("--fetch-only", action="store_true", help="Fetch pinned external sources without executing Gradle")
     parser.add_argument("--output-dir", default="build/dogfood", help="Directory for execution results")
+    parser.add_argument("--source-cache-dir", default=None, help="Directory for fetched external sources")
     parser.add_argument("--gradle-command", default=None, help="Gradle-under-test executable")
     parser.add_argument("--daemon-binary", default="target/debug/gradle-substrate-daemon", help="Rust daemon binary")
     parser.add_argument("--verbose", action="store_true", help="Print per-project execution status")
@@ -407,6 +528,17 @@ def print_table(summary: dict[str, Any]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = create_arg_parser().parse_args(argv)
+    if args.fetch_only:
+        source_cache_dir = Path(args.source_cache_dir) if args.source_cache_dir else Path(args.output_dir) / "sources"
+        payload = fetch_manifest(Path(args.manifest), source_cache_dir)
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            for fetch in payload.get("fetches", []):
+                status = "PASS" if fetch["success"] else "FAIL"
+                print(f"{status} {fetch['name']}: {fetch['message']}")
+        return 0 if payload.get("success", False) else 1
+
     if args.execute:
         payload = execute_manifest(
             Path(args.manifest),

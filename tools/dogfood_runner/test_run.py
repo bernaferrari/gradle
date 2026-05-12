@@ -109,6 +109,52 @@ class DogfoodRunnerTest(unittest.TestCase):
 
         self.assertIn("floating: git source requires immutable 40-character ref", errors)
 
+    def test_builds_git_fetch_commands(self):
+        project = dogfood_run.DogfoodProject(
+            name="sample",
+            path=Path("/unused"),
+            tasks=["help"],
+            mode="native-ready-default",
+            expectation="supported-or-fail-closed",
+            timeout_seconds=1,
+            reason="test",
+            checks={},
+            source={
+                "kind": "git",
+                "url": "https://example.invalid/repo.git",
+                "ref": "0123456789abcdef0123456789abcdef01234567",
+                "subdir": ".",
+            },
+        )
+
+        commands = dogfood_run.git_fetch_commands(project, Path("/tmp/cache"))
+
+        self.assertEqual(
+            ["git", "clone", "--no-checkout", "https://example.invalid/repo.git", "/tmp/cache/sample"],
+            commands[0],
+        )
+        self.assertEqual(
+            ["git", "-C", "/tmp/cache/sample", "fetch", "--depth", "1", "origin", "0123456789abcdef0123456789abcdef01234567"],
+            commands[1],
+        )
+
+    def test_materializes_git_subdir_under_source_cache(self):
+        project = dogfood_run.DogfoodProject(
+            name="sample",
+            path=Path("/unused"),
+            tasks=["help"],
+            mode="native-ready-default",
+            expectation="supported-or-fail-closed",
+            timeout_seconds=1,
+            reason="test",
+            checks={},
+            source={"kind": "git", "subdir": "complete"},
+        )
+
+        materialized = dogfood_run.materialized_project(project, Path("/tmp/cache"))
+
+        self.assertEqual(Path("/tmp/cache/sample/complete").resolve(), materialized.path)
+
     def test_parse_jvm_forwards_from_runbuild_output(self):
         self.assertEqual(7, dogfood_run.parse_jvm_forwards("failed jvmForwarded=7"))
         self.assertEqual(0, dogfood_run.parse_jvm_forwards("JVM forwarding disabled"))
