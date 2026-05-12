@@ -87,6 +87,14 @@ closure, 14 tasks, zero JVM forwards, and `build-plan-shadow` as the plan
 source. Unqualified task names, unknown task paths, incomplete dependency
 graphs, and ambiguous artifact matches reject before daemon execution.
 
+The direct warm path is now included in the first-60s demo evidence. The latest
+`tools/demo/first_60_seconds.py --mode fast` run wrote
+`build/first60-warm-direct.json` and `build/first60-warm-direct.md`; the new
+`warm_direct_runbuild` metric passed with 552.7 ms wall time, 48 ms reported
+Rust `RunBuild` duration, 14 Rust-executed tasks, 6 validated input
+fingerprints, `build-plan-shadow` as the plan source, configuration skipped,
+and zero JVM forwards.
+
 ## Boundaries
 
 Rust owns the admitted post-configuration path in this report: build-plan

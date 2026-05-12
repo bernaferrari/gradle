@@ -25,6 +25,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import socketserver
 import subprocess
 import sys
@@ -37,6 +38,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DAEMON = ROOT / "target" / "debug" / "gradle-substrate-daemon"
+RUNBUILD = ROOT / "target" / "debug" / "gradle-substrate-runbuild"
 DAEMON_READY_THRESHOLD_MS = 2000
 FILE_WATCH_FIRST_EVENT_THRESHOLD_MS = 250
 DEPENDENCY_READTHROUGH_THRESHOLD_MS = 60000
@@ -44,6 +46,7 @@ DEPENDENCY_REMOTE_REQUESTS_AVOIDED_MIN = 3
 AUTHORITATIVE_DAG_TOTAL_THRESHOLD_MS = 60000
 AUTHORITATIVE_DAG_COLD_THRESHOLD_MS = 30000
 AUTHORITATIVE_DAG_WARM_THRESHOLD_MS = 10000
+DIRECT_RUNBUILD_WARM_THRESHOLD_MS = 10000
 
 
 def run(
@@ -65,9 +68,9 @@ def run(
 
 
 def daemon_binary_is_current() -> bool:
-    if not DAEMON.exists():
+    if not DAEMON.exists() or not RUNBUILD.exists():
         return False
-    binary_mtime = DAEMON.stat().st_mtime
+    binary_mtime = min(DAEMON.stat().st_mtime, RUNBUILD.stat().st_mtime)
     inputs = [ROOT / "Cargo.toml", ROOT / "substrate" / "Cargo.toml"]
     inputs.extend((ROOT / "substrate" / "src").rglob("*.rs"))
     return all(path.stat().st_mtime <= binary_mtime for path in inputs if path.exists())
@@ -78,8 +81,8 @@ def ensure_daemon_built(skip_build: bool) -> None:
         return
     if skip_build:
         raise SystemExit(f"Missing or stale daemon binary: {DAEMON}")
-    print("Building Rust daemon once if needed; build time is not included in readiness numbers.")
-    completed = run(["cargo", "build", "-q", "-p", "gradle-substrate-daemon"], timeout=180)
+    print("Building Rust daemon/tools once if needed; build time is not included in readiness numbers.")
+    completed = run(["cargo", "build", "-q", "-p", "gradle-substrate-daemon", "--bins"], timeout=180)
     if completed.returncode != 0:
         sys.stdout.write(completed.stdout)
         sys.stderr.write(completed.stderr)
@@ -701,6 +704,171 @@ def measure_authoritative_runbuild_fast(timeout: int = 90) -> dict[str, object]:
         shutil.rmtree(temp, ignore_errors=True)
 
 
+def wait_for_tcp(port: int, timeout: float = 10.0) -> bool:
+    deadline = time.perf_counter() + timeout
+    while time.perf_counter() < deadline:
+        try:
+            with socket.socket() as sock:
+                sock.settimeout(0.1)
+                sock.connect(("127.0.0.1", port))
+                return True
+        except OSError:
+            time.sleep(0.05)
+    return False
+
+
+def free_tcp_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def measure_warm_direct_runbuild(timeout: int = 90) -> dict[str, object]:
+    gradle = resolve_gradle_under_test()
+    if gradle is None:
+        return {
+            "name": "warm_direct_runbuild",
+            "ok": False,
+            "skipped": True,
+            "elapsed_ms": 0,
+            "threshold_ms": DIRECT_RUNBUILD_WARM_THRESHOLD_MS,
+            "tail": "Skipped: build/gradle-under-test/bin/gradle was not found. Build :distributions-full:install or set GRADLE_UNDER_TEST_BIN.",
+        }
+
+    source_project = ROOT / "testing" / "corpus" / "oss-style-java-library-kotlin-dsl"
+    temp = Path(tempfile.mkdtemp(prefix="gradle-rust-direct-runbuild."))
+    project = temp / "project"
+    state_dir = temp / "substrate-state"
+    state_root = state_dir / "state"
+    port = free_tcp_port()
+    endpoint = f"tcp://127.0.0.1:{port}"
+    daemon: subprocess.Popen[str] | None = None
+
+    try:
+        shutil.copytree(source_project, project, ignore=shutil.ignore_patterns(".gradle", "build"))
+        capture = subprocess.run(
+            [
+                str(gradle),
+                "-p",
+                str(project),
+                "clean",
+                "build",
+                "--no-daemon",
+                "--console=plain",
+                "--info",
+                f"--gradle-user-home={temp / 'gradle-home'}",
+                "-Dorg.gradle.rust.substrate.enabled=true",
+                "-Dorg.gradle.rust.substrate.taskgraph.enabled=true",
+                "-Dorg.gradle.rust.substrate.runbuild.enabled=true",
+                "-Dorg.gradle.rust.substrate.execution.kernel=true",
+                f"-Dorg.gradle.rust.substrate.daemon.path={DAEMON}",
+                f"-Dorg.gradle.rust.substrate.state.dir={state_dir}",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+
+        daemon = subprocess.Popen(
+            [
+                str(DAEMON),
+                "--socket-path",
+                str(temp / "direct.sock"),
+                "--tcp-address",
+                f"127.0.0.1:{port}",
+                "--cache-dir",
+                str(state_root / "cache"),
+                "--history-dir",
+                str(state_root / "history"),
+                "--config-cache-dir",
+                str(state_root / "config-cache"),
+                "--toolchain-dir",
+                str(state_root / "toolchains"),
+                "--artifact-store-dir",
+                str(state_root / "artifacts"),
+                "--log-level",
+                "warn",
+            ],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        daemon_ready = wait_for_tcp(port)
+        started = time.perf_counter()
+        direct = subprocess.run(
+            [
+                str(RUNBUILD),
+                "--endpoint",
+                endpoint,
+                "--state-dir",
+                str(state_dir),
+                "--project-dir",
+                str(project),
+                "--task",
+                ":build",
+                "--max-parallelism",
+                "4",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+        output = direct.stdout + direct.stderr
+        duration_match = re.search(r"duration_ms=(\d+)", output)
+        tasks_match = re.search(r"tasks=(\d+)", output)
+        jvm_match = re.search(r"jvm_forwarded=(\d+)", output)
+        plan_match = re.search(r"plan_source=([^\s]+)", output)
+        fingerprint_count = 0
+        shadow_root = state_root / "config-cache" / "build-plan-shadow"
+        for artifact in shadow_root.glob("*.json"):
+            try:
+                fingerprint_count += len(json.loads(artifact.read_text()).get("input_fingerprints", []))
+            except (OSError, json.JSONDecodeError):
+                pass
+        ok = (
+            capture.returncode == 0
+            and daemon_ready
+            and direct.returncode == 0
+            and jvm_match is not None
+            and int(jvm_match.group(1)) == 0
+            and plan_match is not None
+            and plan_match.group(1) == "build-plan-shadow"
+            and fingerprint_count > 0
+            and elapsed_ms <= DIRECT_RUNBUILD_WARM_THRESHOLD_MS
+        )
+        return {
+            "name": "warm_direct_runbuild",
+            "ok": ok,
+            "elapsed_ms": elapsed_ms,
+            "threshold_ms": DIRECT_RUNBUILD_WARM_THRESHOLD_MS,
+            "capture_exit_code": capture.returncode,
+            "daemon_ready": daemon_ready,
+            "configuration_skipped": True,
+            "invalidation": "content-fingerprint",
+            "input_fingerprint_count": fingerprint_count,
+            "runbuild_duration_ms": int(duration_match.group(1)) if duration_match else None,
+            "rust_executed_tasks": int(tasks_match.group(1)) if tasks_match else 0,
+            "tasks_forwarded_to_jvm": int(jvm_match.group(1)) if jvm_match else None,
+            "plan_source": plan_match.group(1) if plan_match else "",
+            "tail": "\n".join((capture.stdout + capture.stderr + "\n--- direct runbuild ---\n" + output).strip().splitlines()[-20:]),
+        }
+    finally:
+        if daemon is not None:
+            daemon.terminate()
+            try:
+                daemon.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                daemon.kill()
+                daemon.communicate(timeout=5)
+        shutil.rmtree(temp, ignore_errors=True)
+
+
 def write_report(path: Path, results: list[dict[str, object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"results": results}, indent=2) + "\n", encoding="utf-8")
@@ -728,6 +896,11 @@ def write_markdown_report(path: Path, results: list[dict[str, object]]) -> None:
                 f"cold {result.get('first_elapsed_ms')} ms, warm {result.get('warm_elapsed_ms')} ms, "
                 f"plan `{result.get('warm_plan_source')}`, JVM forwards {result.get('tasks_forwarded_to_jvm')}, "
                 f"output `{result.get('output_sha256')}`"
+            )
+        elif result["name"] == "warm_direct_runbuild" and not result.get("skipped"):
+            evidence = (
+                f"direct {result.get('runbuild_duration_ms')} ms, tasks {result.get('rust_executed_tasks')}, "
+                f"fingerprints {result.get('input_fingerprint_count')}, JVM forwards {result.get('tasks_forwarded_to_jvm')}"
             )
         elif result["name"] == "real_build_dependency_readthrough" and not result.get("skipped"):
             evidence = (
@@ -780,6 +953,13 @@ def print_summary(results: list[dict[str, object]]) -> None:
                 f"JVM forwards {result['tasks_forwarded_to_jvm']}, "
                 f"output {result['output_sha256']}"
             )
+        elif result["name"] == "warm_direct_runbuild" and not result.get("skipped"):
+            extra = (
+                f", direct {result['runbuild_duration_ms']}ms/{result['rust_executed_tasks']} tasks, "
+                f"config skipped {result['configuration_skipped']}, "
+                f"invalidation {result['invalidation']} ({result['input_fingerprint_count']} inputs), "
+                f"plan {result['plan_source']}, JVM forwards {result['tasks_forwarded_to_jvm']}"
+            )
         elif result["name"] == "real_build_dependency_readthrough" and not result.get("skipped"):
             extra = (
                 f", remote avoided {result['remote_requests_avoided']}/"
@@ -796,6 +976,7 @@ def print_summary(results: list[dict[str, object]]) -> None:
     explanations = {
         "daemon_socket_ready": "the time before Gradle can send work to the Rust sidecar",
         "authoritative_rust_dag": "cold and warm real Gradle invocations handing a Java-library build to Rust RunBuild with zero JVM task forwards",
+        "warm_direct_runbuild": "a cached supported build running directly through the Rust daemon without invoking Gradle configuration",
         "real_build_dependency_readthrough": "a real Gradle build warming Rust over HTTP, including listener static prefetch, then rerunning from a fresh Gradle user home with fewer remote requests",
         "file_watch_first_event": "the delay before source edits become observable",
         "dependency_transport_store_checksum": "the bounded Rust path for Maven bytes, local store, cache-first transport reuse, cache hit, and checksum verification",
@@ -830,6 +1011,7 @@ def main() -> int:
         return [
             measure_daemon_readiness(),
             measure_authoritative_runbuild_fast(),
+            measure_warm_direct_runbuild(),
             measure_real_build_dependency_readthrough(),
             measure_cargo_test(
                 "file_watch_first_event",
