@@ -1,0 +1,107 @@
+{
+  "schema": "gradle-substrate.dogfood-manifest.v1",
+  "root": "../corpus",
+  "description": "Real-build dogfood plan for the Rust substrate preview. Entries are deliberately higher-level than the unit corpus: they group realistic Gradle build shapes that should feel meaningful in the first minute of use.",
+  "projects": [
+    {
+      "name": "oss-style-java-library",
+      "path": "oss-style-java-library-kotlin-dsl",
+      "source": {
+        "kind": "checked-in-local",
+        "description": "Checked-in OSS-style Java library fixture with sources JAR, Javadoc, reports, and standard lifecycle tasks."
+      },
+      "tasks": ["clean", "build"],
+      "mode": "strict",
+      "expectation": "supported",
+      "timeout_seconds": 300,
+      "reason": "Represents the simplest externally showable Java library shape: compile, resources, jar, sources, javadoc, tests/report-like outputs.",
+      "checks": {
+        "task_parity": true,
+        "output_inventory": true,
+        "output_hashes": true,
+        "archive_entries": true,
+        "no_jvm_forwards": true
+      }
+    },
+    {
+      "name": "java-multiproject",
+      "path": "java-multiproject-kotlin-dsl",
+      "source": {
+        "kind": "checked-in-local",
+        "description": "Checked-in multi-project Java application/library fixture."
+      },
+      "tasks": ["clean", "build"],
+      "mode": "strict",
+      "expectation": "supported",
+      "timeout_seconds": 300,
+      "reason": "Exercises project dependency wiring and selected DAG materialization across multiple projects.",
+      "checks": {
+        "task_parity": true,
+        "output_inventory": true,
+        "output_hashes": true,
+        "archive_entries": true,
+        "no_jvm_forwards": true
+      }
+    },
+    {
+      "name": "external-junit-library",
+      "path": "java-junit-kotlin-dsl",
+      "source": {
+        "kind": "checked-in-local",
+        "description": "Checked-in project using pinned JUnit Platform dependencies from Maven Central or a warm Gradle cache."
+      },
+      "tasks": ["clean", "build"],
+      "mode": "strict",
+      "expectation": "supported",
+      "timeout_seconds": 300,
+      "reason": "Visible dependency resolution plus real JUnit Platform test execution is a first-minute credibility gate.",
+      "checks": {
+        "task_parity": true,
+        "resolved_dependency_graph": true,
+        "output_inventory": true,
+        "output_hashes": true,
+        "archive_entries": true,
+        "no_jvm_forwards": true
+      }
+    },
+    {
+      "name": "external-bom-and-conflict",
+      "path": "dependency-platform-bom-kotlin-dsl",
+      "source": {
+        "kind": "checked-in-local",
+        "description": "Checked-in external dependency project with a Maven BOM/platform-managed graph."
+      },
+      "tasks": ["clean", "build"],
+      "mode": "strict",
+      "expectation": "supported",
+      "timeout_seconds": 300,
+      "reason": "Proves a bounded but important Rust-owned dependency solver slice beyond direct static coordinates.",
+      "checks": {
+        "task_parity": true,
+        "declared_dependency_graph": true,
+        "resolved_dependency_graph": true,
+        "output_inventory": true,
+        "output_hashes": true,
+        "archive_entries": true,
+        "no_jvm_forwards": true
+      }
+    },
+    {
+      "name": "unsupported-custom-task",
+      "path": "custom-task-unsupported-kotlin-dsl",
+      "source": {
+        "kind": "checked-in-local",
+        "description": "Checked-in unsupported fixture with arbitrary JVM task action semantics."
+      },
+      "tasks": ["clean", "build"],
+      "mode": "native-ready-default",
+      "expectation": "fail-closed",
+      "timeout_seconds": 300,
+      "reason": "Demonstrates that the preview rejects unsupported JVM task semantics at admission instead of hiding task-by-task fallback.",
+      "checks": {
+        "fail_closed_diagnostic": "custom-task-action",
+        "no_task_by_task_fallback": true
+      }
+    }
+  ]
+}
