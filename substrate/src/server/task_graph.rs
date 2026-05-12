@@ -24,7 +24,9 @@ use super::build_plan_ir::{
     CanonicalBuildPlanDependency, CanonicalBuildPlanProject, CanonicalBuildPlanTask,
 };
 use super::build_plan_shadow::BuildPlanShadowStore;
-use super::cyclonedx_sbom::draft_contract_from_captured_inputs;
+use super::cyclonedx_sbom::{
+    draft_contract_from_captured_inputs, CycloneDxIdentityPolicy, CycloneDxSbomContract,
+};
 use super::execution_history::ExecutionHistoryServiceImpl;
 use super::scopes::BuildId;
 
@@ -198,8 +200,7 @@ impl TaskGraphServiceImpl {
             .map(|task| task.path.clone())
             .collect();
 
-        let mut loaded = 0usize;
-        for mut task in plan_tasks.drain(..) {
+        for task in &mut plan_tasks {
             if included_build_project_paths.contains(&task.project_path) {
                 task.inputs.insert(
                     "unsupported_dependency_semantics".to_string(),
@@ -210,8 +211,20 @@ impl TaskGraphServiceImpl {
                     "composite-substitution:settings".to_string(),
                 );
             }
-            enrich_task_contract_from_graph(&mut task, &task_outputs, &plan_dependencies);
-            maybe_synthesize_cyclonedx_sbom_contract(&mut task, &build_id_str);
+            enrich_task_contract_from_graph(task, &task_outputs, &plan_dependencies);
+            maybe_synthesize_cyclonedx_sbom_contract(task, &build_id_str);
+        }
+        let cyclonedx_contracts_by_output = cyclonedx_contracts_by_output(&plan_tasks);
+        for task in &mut plan_tasks {
+            maybe_synthesize_cyclonedx_aggregate_contract(
+                task,
+                &build_id_str,
+                &cyclonedx_contracts_by_output,
+            );
+        }
+
+        let mut loaded = 0usize;
+        for mut task in plan_tasks.drain(..) {
             if !clean_tasks.is_empty() && !is_clean_task_path(&task.path) {
                 for clean_task in &clean_tasks {
                     if !task.depends_on.contains(clean_task) {
@@ -905,6 +918,200 @@ fn maybe_synthesize_cyclonedx_sbom_contract(task: &mut CanonicalBuildPlanTask, b
         "cyclonedx-sbom-contract-synthesized",
         "scalar",
     );
+}
+
+fn cyclonedx_contracts_by_output(
+    tasks: &[CanonicalBuildPlanTask],
+) -> HashMap<String, CycloneDxSbomContract> {
+    let mut contracts = HashMap::new();
+    for task in tasks {
+        let Some(encoded) = input_value(task, "sbom_contract_json_b64") else {
+            continue;
+        };
+        let Ok(bytes) = STANDARD.decode(encoded) else {
+            continue;
+        };
+        let Ok(contract) = serde_json::from_slice::<CycloneDxSbomContract>(&bytes) else {
+            continue;
+        };
+        for output in &task.outputs {
+            contracts.insert(output.clone(), contract.clone());
+        }
+    }
+    contracts
+}
+
+fn maybe_synthesize_cyclonedx_aggregate_contract(
+    task: &mut CanonicalBuildPlanTask,
+    build_id: &str,
+    contracts_by_output: &HashMap<String, CycloneDxSbomContract>,
+) {
+    let simple = task
+        .implementation_id
+        .rsplit('.')
+        .next()
+        .unwrap_or(task.implementation_id.as_str());
+    if simple != "CyclonedxAggregateTask"
+        || has_input_value(task, "aggregate_input_contracts_json_b64")
+    {
+        return;
+    }
+    let Some(timestamp_ms) = input_value(task, "cyclonedx_timestamp_epoch_ms")
+        .and_then(|value| value.parse::<i64>().ok())
+    else {
+        return;
+    };
+    let input_contracts = cyclonedx_input_sbom_paths(task)
+        .into_iter()
+        .filter_map(|path| contracts_by_output.get(&path).cloned())
+        .collect::<Vec<_>>();
+    if input_contracts.is_empty() {
+        return;
+    }
+    let root_name = input_value(task, "cyclonedx_component_name").unwrap_or_default();
+    let root_version = input_value(task, "cyclonedx_component_version").unwrap_or_default();
+    let root_component_type = input_value(task, "cyclonedx_project_type")
+        .unwrap_or_default()
+        .to_lowercase();
+    if root_name.trim().is_empty()
+        || root_version.trim().is_empty()
+        || root_component_type.trim().is_empty()
+    {
+        return;
+    }
+    let spec_version = input_value(task, "cyclonedx_schema_version")
+        .map(|value| normalize_cyclonedx_schema_version(&value))
+        .unwrap_or_else(|| input_contracts[0].spec_version.clone());
+    let root_group = input_value(task, "cyclonedx_component_group").unwrap_or_default();
+    let policy = CycloneDxIdentityPolicy {
+        build_id: build_id.to_string(),
+        task_path: task.path.clone(),
+        root_group: root_group.clone(),
+        root_name: root_name.clone(),
+        root_version: root_version.clone(),
+        schema_version: spec_version.clone(),
+        timestamp_ms,
+    };
+    let Ok(timestamp) = policy.timestamp() else {
+        return;
+    };
+    let include_bom_serial_number = input_value(task, "cyclonedx_include_bom_serial_number")
+        .map(|value| value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let serial_number = if include_bom_serial_number {
+        if input_value(task, "cyclonedx_serial_source_policy").as_deref()
+            != Some("gradle-substrate-deterministic-identity")
+        {
+            return;
+        }
+        policy.serial_number()
+    } else {
+        String::new()
+    };
+    let Ok(json) = serde_json::to_string(&input_contracts) else {
+        return;
+    };
+    let encoded = STANDARD.encode(json);
+    set_value_input(
+        task,
+        "aggregate_input_contracts_json_b64",
+        &encoded,
+        "cyclonedx-aggregate-contracts-synthesized",
+        "scalar",
+    );
+    set_value_input(
+        task,
+        "aggregate_spec_version",
+        &spec_version,
+        "cyclonedx-aggregate-contracts-synthesized",
+        "scalar",
+    );
+    set_value_input(
+        task,
+        "aggregate_serial_number",
+        &serial_number,
+        "cyclonedx-aggregate-contracts-synthesized",
+        "scalar",
+    );
+    set_value_input(
+        task,
+        "aggregate_timestamp",
+        &timestamp,
+        "cyclonedx-aggregate-contracts-synthesized",
+        "scalar",
+    );
+    set_value_input(
+        task,
+        "aggregate_root_group",
+        &root_group,
+        "cyclonedx-aggregate-contracts-synthesized",
+        "scalar",
+    );
+    set_value_input(
+        task,
+        "aggregate_root_name",
+        &root_name,
+        "cyclonedx-aggregate-contracts-synthesized",
+        "scalar",
+    );
+    set_value_input(
+        task,
+        "aggregate_root_version",
+        &root_version,
+        "cyclonedx-aggregate-contracts-synthesized",
+        "scalar",
+    );
+    set_value_input(
+        task,
+        "aggregate_root_component_type",
+        &root_component_type,
+        "cyclonedx-aggregate-contracts-synthesized",
+        "scalar",
+    );
+    set_value_input(
+        task,
+        "cyclonedx_sbom_contract_status",
+        "complete",
+        "cyclonedx-aggregate-contracts-synthesized",
+        "scalar",
+    );
+    set_value_input(
+        task,
+        "cyclonedx_missing_contract_fields",
+        "",
+        "cyclonedx-aggregate-contracts-synthesized",
+        "scalar",
+    );
+    set_value_input(
+        task,
+        "requires_jvm_task_execution",
+        "false",
+        "cyclonedx-aggregate-contracts-synthesized",
+        "scalar",
+    );
+}
+
+fn cyclonedx_input_sbom_paths(task: &CanonicalBuildPlanTask) -> Vec<String> {
+    let Some(value) = input_value(task, "cyclonedx_input_sboms") else {
+        return Vec::new();
+    };
+    std::env::split_paths(&value)
+        .map(|path| path.to_string_lossy().into_owned())
+        .filter(|path| !path.trim().is_empty())
+        .collect()
+}
+
+fn normalize_cyclonedx_schema_version(value: &str) -> String {
+    let trimmed = value.trim();
+    let version = trimmed.strip_prefix("VERSION_").unwrap_or(trimmed);
+    let digits = version.replace('_', ".");
+    if digits.contains('.') {
+        digits
+    } else if digits.len() == 2 {
+        format!("{}.{}", &digits[0..1], &digits[1..])
+    } else {
+        digits
+    }
 }
 
 fn add_archive_convention_dependencies(
@@ -3024,6 +3231,101 @@ mod tests {
                 .get("aggregate_external_references")
                 .and_then(|value| value.as_str()),
             Some("https://example.invalid/aggregate")
+        );
+    }
+
+    #[test]
+    fn test_cyclonedx_aggregate_synthesizes_input_contracts_from_direct_outputs() {
+        let graph_json = serde_json::json!({
+            "schema": "gradle-substrate.cyclonedx-resolution-graph.v1",
+            "configurations": [{
+                "name": "runtimeClasspath",
+                "components": [{
+                    "id": "org.example:lib:1.0",
+                    "group": "org.example",
+                    "module": "lib",
+                    "version": "1.0"
+                }],
+                "dependencies": []
+            }]
+        })
+        .to_string();
+        let encoded_graph = STANDARD.encode(graph_json);
+        let mut direct = canonical_task(
+            ":lib:cyclonedxDirectBom",
+            "org.cyclonedx.gradle.CyclonedxDirectTask",
+            Vec::new(),
+            vec!["/repo/lib/build/bom.json".to_string()],
+        );
+        direct.input_specs = vec![
+            value_input("cyclonedx_resolution_graph_json_b64", &encoded_graph),
+            value_input("cyclonedx_identity_task_path", ":lib:cyclonedxDirectBom"),
+            value_input("cyclonedx_schema_version", "VERSION_16"),
+            value_input("cyclonedx_component_group", "org.example"),
+            value_input("cyclonedx_component_name", "lib"),
+            value_input("cyclonedx_component_version", "1.0"),
+            value_input("cyclonedx_project_type", "LIBRARY"),
+            value_input("cyclonedx_json_output", "/repo/lib/build/bom.json"),
+            value_input("cyclonedx_include_bom_serial_number", "false"),
+            value_input("cyclonedx_serial_source_policy", "omitted"),
+            value_input(
+                "cyclonedx_timestamp_source_policy",
+                "gradle-substrate-explicit-epoch-ms",
+            ),
+            value_input("cyclonedx_timestamp_epoch_ms", "1778595445123"),
+            value_input("cyclonedx_include_build_system", "false"),
+            value_input("cyclonedx_include_build_environment", "false"),
+            value_input("cyclonedx_include_license_text", "false"),
+            value_input("cyclonedx_include_metadata_resolution", "false"),
+        ];
+        maybe_synthesize_cyclonedx_sbom_contract(&mut direct, "build-123");
+        let contracts_by_output = cyclonedx_contracts_by_output(&[direct]);
+
+        let mut aggregate = canonical_task(
+            ":cyclonedxBom",
+            "org.cyclonedx.gradle.CyclonedxAggregateTask",
+            Vec::new(),
+            vec!["/repo/build/aggregate.json".to_string()],
+        );
+        aggregate.input_specs = vec![
+            value_input("cyclonedx_input_sboms", "/repo/lib/build/bom.json"),
+            value_input("cyclonedx_schema_version", "VERSION_16"),
+            value_input("cyclonedx_component_group", "org.example"),
+            value_input("cyclonedx_component_name", "aggregate"),
+            value_input("cyclonedx_component_version", "1.0"),
+            value_input("cyclonedx_project_type", "APPLICATION"),
+            value_input("cyclonedx_json_output", "/repo/build/aggregate.json"),
+            value_input("cyclonedx_include_bom_serial_number", "false"),
+            value_input("cyclonedx_serial_source_policy", "omitted"),
+            value_input(
+                "cyclonedx_timestamp_source_policy",
+                "gradle-substrate-explicit-epoch-ms",
+            ),
+            value_input("cyclonedx_timestamp_epoch_ms", "1778595445123"),
+        ];
+
+        maybe_synthesize_cyclonedx_aggregate_contract(
+            &mut aggregate,
+            "build-123",
+            &contracts_by_output,
+        );
+
+        assert_eq!(executable_task_type(&aggregate), "CycloneDxSbom");
+        let encoded = input_value(&aggregate, "aggregate_input_contracts_json_b64").unwrap();
+        let decoded = STANDARD.decode(encoded).unwrap();
+        let contracts: Vec<serde_json::Value> = serde_json::from_slice(&decoded).unwrap();
+        assert_eq!(contracts.len(), 1);
+        assert_eq!(
+            input_value(&aggregate, "aggregate_spec_version").as_deref(),
+            Some("1.6")
+        );
+        assert_eq!(
+            input_value(&aggregate, "aggregate_timestamp").as_deref(),
+            Some("2026-05-12T14:17:25Z")
+        );
+        assert_eq!(
+            input_value(&aggregate, "requires_jvm_task_execution").as_deref(),
+            Some("false")
         );
     }
 

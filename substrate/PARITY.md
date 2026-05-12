@@ -619,6 +619,11 @@ not yet captured.
 Bridge coverage now includes the exact direct-task prerequisite shape for that
 Rust synthesis path: captured resolution graph evidence, explicit epoch
 timestamp, safe boolean policies, and no schema-backed contract emitted by Java.
+Rust task-graph lowering can also synthesize aggregate input contracts from
+already-synthesized direct CycloneDX contracts whose output paths match the
+aggregate task's `cyclonedx_input_sboms`. Aggregate promotion still requires the
+same explicit deterministic timestamp path and does not read generated BOM files
+from disk during admission.
 
 Audit of closed roadmap (dyy.1-dyy.20): 18/21 verified against committed code and
 corpus parity, 3/21 partially verified (dependency solver complex scenarios,
