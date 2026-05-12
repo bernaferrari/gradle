@@ -497,6 +497,9 @@ public class ProjectModelProviderAdapterTest {
         assertTrue(organizationalEntityJson.contains("\"url\":[\"https://security.example.invalid\"]"));
         assertTrue(organizationalEntityJson.contains("\"email\":\"security@example.invalid\""));
         assertEquals("SPDX", inputs.get("cyclonedx_license_choice"));
+        String licenseChoiceJson = new String(Base64.getDecoder().decode(inputs.get("cyclonedx_license_choice_json_b64")), StandardCharsets.UTF_8);
+        assertTrue(licenseChoiceJson.contains("\"id\":\"Apache-2.0\""));
+        assertTrue(licenseChoiceJson.contains("\"url\":\"https://www.apache.org/licenses/LICENSE-2.0\""));
         assertEquals("CI", inputs.get("cyclonedx_build_system_environment_variable"));
         assertTrue(inputs.get("cyclonedx_external_references").contains("https://example.invalid/sbom"));
         String externalReferencesJson = new String(Base64.getDecoder().decode(inputs.get("cyclonedx_external_references_json_b64")), StandardCharsets.UTF_8);
@@ -519,7 +522,7 @@ public class ProjectModelProviderAdapterTest {
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("build-system-rendering"));
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("build-environment-rendering"));
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("organizational-entity-rendering"));
-        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("license-choice-rendering"));
+        assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("license-choice-rendering"));
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("build-system-environment-variable"));
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("external-reference-shape"));
         assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("aggregate-merge-policy"));
@@ -595,7 +598,7 @@ public class ProjectModelProviderAdapterTest {
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("build-system-rendering"));
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("build-environment-rendering"));
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("organizational-entity-rendering"));
-        assertTrue(inputs.get("cyclonedx_missing_contract_fields").contains("license-choice-rendering"));
+        assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("license-choice-rendering"));
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("build-system-environment-variable"));
         assertFalse(inputs.get("cyclonedx_missing_contract_fields").contains("external-reference-shape"));
         assertFalse(inputs.containsKey("sbom_contract_json_b64"));
@@ -1911,7 +1914,7 @@ public class ProjectModelProviderAdapterTest {
                 case "getOrganizationalEntity":
                     return new ObjectProvider(new TestOrganizationalEntity());
                 case "getLicenseChoice":
-                    return new ObjectProvider("SPDX");
+                    return new ObjectProvider(new TestLicenseChoice());
                 case "getBuildSystemEnvironmentVariable":
                     return new ObjectProvider("CI");
                 case "getExternalReferences":
@@ -2890,6 +2893,35 @@ public class ProjectModelProviderAdapterTest {
 
         public String getValue() {
             return "abc123";
+        }
+    }
+
+    public static class TestLicenseChoice {
+        @Override
+        public String toString() {
+            return "SPDX";
+        }
+
+        public Object getExpression() {
+            return null;
+        }
+
+        public Iterable<TestLicense> getLicenses() {
+            return Collections.singletonList(new TestLicense());
+        }
+    }
+
+    public static class TestLicense {
+        public String getId() {
+            return "Apache-2.0";
+        }
+
+        public String getName() {
+            return "";
+        }
+
+        public String getUrl() {
+            return "https://www.apache.org/licenses/LICENSE-2.0";
         }
     }
 
