@@ -1668,6 +1668,18 @@ fn apply_pom_metadata_text(
         [project, scm, url] if project == "project" && scm == "scm" && url == "url" => {
             push_external_reference(&mut metadata.external_references, "vcs", text);
         }
+        [project, scm, connection]
+            if project == "project" && scm == "scm" && connection == "connection" =>
+        {
+            push_external_reference(&mut metadata.external_references, "vcs", text);
+        }
+        [project, scm, developer_connection]
+            if project == "project"
+                && scm == "scm"
+                && developer_connection == "developerConnection" =>
+        {
+            push_external_reference(&mut metadata.external_references, "vcs", text);
+        }
         [project, properties_element, property_name]
             if project == "project" && properties_element == "properties" =>
         {
@@ -3136,6 +3148,8 @@ mod tests {
   </mailingLists>
   <scm>
     <url>https://git.example.test/lib</url>
+    <connection>scm:git:https://git.example.test/lib.git</connection>
+    <developerConnection>scm:git:ssh://git@example.test/lib.git</developerConnection>
   </scm>
   <licenses>
     <license>
@@ -3212,6 +3226,14 @@ mod tests {
         assert!(component
             .external_references
             .contains(&external_reference("vcs", "https://git.example.test/lib")));
+        assert!(component.external_references.contains(&external_reference(
+            "vcs",
+            "scm:git:https://git.example.test/lib.git"
+        )));
+        assert!(component.external_references.contains(&external_reference(
+            "vcs",
+            "scm:git:ssh://git@example.test/lib.git"
+        )));
         assert_eq!(
             vec![CycloneDxLicenseChoice::from_license(CycloneDxLicense {
                 id: "Apache-2.0".to_string(),
