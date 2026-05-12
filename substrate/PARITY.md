@@ -616,6 +616,9 @@ task contract complete, and clears the JVM-required marker. This is an explicit
 opt-in path only; default CycloneDX tasks still fail closed because Gradle's
 normal timestamp policy is not deterministic and aggregate input contracts are
 not yet captured.
+Bridge coverage now includes the exact direct-task prerequisite shape for that
+Rust synthesis path: captured resolution graph evidence, explicit epoch
+timestamp, safe boolean policies, and no schema-backed contract emitted by Java.
 
 Audit of closed roadmap (dyy.1-dyy.20): 18/21 verified against committed code and
 corpus parity, 3/21 partially verified (dependency solver complex scenarios,
