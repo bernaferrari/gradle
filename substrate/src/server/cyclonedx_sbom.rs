@@ -1,5 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
 
+use quick_xml::events::Event;
 use serde::{Deserialize, Serialize};
 
 pub const CONTRACT_SCHEMA: &str = "gradle-substrate.cyclonedx-sbom.v1";
@@ -31,6 +35,18 @@ pub struct CycloneDxComponent {
     pub purl: String,
     #[serde(default)]
     pub properties: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub licenses: Vec<CycloneDxLicenseChoice>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CycloneDxLicenseChoice {
+    pub license: CycloneDxLicense,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CycloneDxLicense {
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,6 +148,11 @@ impl CycloneDxComponent {
                 "CycloneDX {label} is missing type, bom-ref, name, or version"
             ));
         }
+        for license in &self.licenses {
+            if license.license.name.trim().is_empty() {
+                return Err(format!("CycloneDX {label} has an empty license name"));
+            }
+        }
         Ok(())
     }
 }
@@ -187,7 +208,8 @@ impl CycloneDxResolutionConfiguration {
                     self.name
                 ));
             }
-            if !component_ids.contains(&dependency.from) || !component_ids.contains(&dependency.to) {
+            if !component_ids.contains(&dependency.from) || !component_ids.contains(&dependency.to)
+            {
                 return Err(format!(
                     "CycloneDX resolution graph configuration '{}' has dependency edge '{} -> {}' outside component set",
                     self.name, dependency.from, dependency.to
@@ -230,7 +252,11 @@ pub fn draft_contract_from_resolution_graph(
 ) -> Result<CycloneDxSbomContract, String> {
     graph.validate()?;
     validate_draft_options(&options)?;
-    let root_purl = purl(&options.root_group, &options.root_name, &options.root_version);
+    let root_purl = purl(
+        &options.root_group,
+        &options.root_name,
+        &options.root_version,
+    );
     let root_component = CycloneDxComponent {
         component_type: options.root_component_type.to_lowercase(),
         bom_ref: root_purl.clone(),
@@ -239,13 +265,17 @@ pub fn draft_contract_from_resolution_graph(
         version: options.root_version,
         purl: root_purl,
         properties: BTreeMap::new(),
+        licenses: Vec::new(),
     };
 
     let mut components_by_id = BTreeMap::new();
     let mut dependencies_by_ref = BTreeMap::<String, BTreeSet<String>>::new();
     for configuration in &graph.configurations {
         for component in &configuration.components {
-            if component.group.is_empty() || component.module.is_empty() || component.version.is_empty() {
+            if component.group.is_empty()
+                || component.module.is_empty()
+                || component.version.is_empty()
+            {
                 continue;
             }
             let bom_ref = purl(&component.group, &component.module, &component.version);
@@ -281,6 +311,14 @@ pub fn draft_contract_from_resolution_graph(
                     component.artifact_path.clone(),
                 );
             }
+            let metadata = if component.artifact_path.is_empty() {
+                PomComponentMetadata::default()
+            } else {
+                read_pom_component_metadata(Path::new(&component.artifact_path)).unwrap_or_default()
+            };
+            for (key, value) in metadata.properties() {
+                properties.insert(key, value);
+            }
             CycloneDxComponent {
                 component_type: "library".to_string(),
                 bom_ref: bom_ref.clone(),
@@ -289,6 +327,7 @@ pub fn draft_contract_from_resolution_graph(
                 version: component.version.clone(),
                 purl: bom_ref,
                 properties,
+                licenses: metadata.licenses,
             }
         })
         .collect::<Vec<_>>();
@@ -337,6 +376,123 @@ fn purl(group: &str, name: &str, version: &str) -> String {
     } else {
         format!("pkg:maven/{group}/{name}@{version}")
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct PomComponentMetadata {
+    name: String,
+    description: String,
+    url: String,
+    licenses: Vec<CycloneDxLicenseChoice>,
+}
+
+impl PomComponentMetadata {
+    fn properties(&self) -> Vec<(String, String)> {
+        let mut properties = Vec::new();
+        if !self.name.is_empty() {
+            properties.push(("maven:pomName".to_string(), self.name.clone()));
+        }
+        if !self.description.is_empty() {
+            properties.push(("maven:pomDescription".to_string(), self.description.clone()));
+        }
+        if !self.url.is_empty() {
+            properties.push(("maven:pomUrl".to_string(), self.url.clone()));
+        }
+        properties
+    }
+}
+
+fn read_pom_component_metadata(artifact_path: &Path) -> Option<PomComponentMetadata> {
+    let pom =
+        read_adjacent_pom(artifact_path).or_else(|| read_embedded_maven_pom(artifact_path))?;
+    Some(parse_pom_component_metadata(&pom))
+}
+
+fn read_adjacent_pom(artifact_path: &Path) -> Option<String> {
+    let file_stem = artifact_path.file_stem()?.to_str()?;
+    let pom_path = artifact_path.with_file_name(format!("{file_stem}.pom"));
+    std::fs::read_to_string(pom_path).ok()
+}
+
+fn read_embedded_maven_pom(artifact_path: &Path) -> Option<String> {
+    if artifact_path.extension().and_then(|ext| ext.to_str()) != Some("jar") {
+        return None;
+    }
+    let file = File::open(artifact_path).ok()?;
+    let mut archive = zip::ZipArchive::new(file).ok()?;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).ok()?;
+        let name = entry.name().to_string();
+        if name.starts_with("META-INF/maven/") && name.ends_with("/pom.xml") {
+            let mut contents = String::new();
+            if entry.read_to_string(&mut contents).is_ok() {
+                return Some(contents);
+            }
+        }
+    }
+    None
+}
+
+fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadata {
+    let mut reader = quick_xml::Reader::from_str(pom);
+    reader.trim_text(true);
+
+    let mut metadata = PomComponentMetadata::default();
+    let mut path = Vec::<String>::new();
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(event)) => {
+                let name = String::from_utf8_lossy(event.name().local_name().as_ref()).to_string();
+                path.push(name);
+            }
+            Ok(Event::Text(event)) => {
+                let text = event.unescape().unwrap_or_default().trim().to_string();
+                if text.is_empty() {
+                    buf.clear();
+                    continue;
+                }
+                match path.as_slice() {
+                    [project, name] if project == "project" && name == "name" => {
+                        metadata.name = text;
+                    }
+                    [project, description]
+                        if project == "project" && description == "description" =>
+                    {
+                        metadata.description = text;
+                    }
+                    [project, url] if project == "project" && url == "url" => {
+                        metadata.url = text;
+                    }
+                    [project, licenses, license, name]
+                        if project == "project"
+                            && licenses == "licenses"
+                            && license == "license"
+                            && name == "name" =>
+                    {
+                        metadata.licenses.push(CycloneDxLicenseChoice {
+                            license: CycloneDxLicense { name: text },
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::End(_)) => {
+                path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => return PomComponentMetadata::default(),
+            _ => {}
+        }
+        buf.clear();
+    }
+    metadata
+        .licenses
+        .sort_by(|a, b| a.license.name.cmp(&b.license.name));
+    metadata
+        .licenses
+        .dedup_by(|a, b| a.license.name == b.license.name);
+    metadata
 }
 
 pub fn render_xml(contract: &CycloneDxSbomContract) -> Result<String, String> {
@@ -432,6 +588,16 @@ fn write_component(xml: &mut String, indent: &str, component: &CycloneDxComponen
             xml_escape(&component.purl)
         ));
     }
+    if !component.licenses.is_empty() {
+        xml.push_str(&format!("{indent}  <licenses>\n"));
+        for license in &component.licenses {
+            xml.push_str(&format!(
+                "{indent}    <license><name>{}</name></license>\n",
+                xml_escape(&license.license.name)
+            ));
+        }
+        xml.push_str(&format!("{indent}  </licenses>\n"));
+    }
     if !component.properties.is_empty() {
         xml.push_str(&format!("{indent}  <properties>\n"));
         for (name, value) in &component.properties {
@@ -473,6 +639,7 @@ mod tests {
                 version: "1.0.0".to_string(),
                 purl: "pkg:maven/org.example/app@1.0.0".to_string(),
                 properties: BTreeMap::new(),
+                licenses: Vec::new(),
             },
             components: vec![
                 CycloneDxComponent {
@@ -483,6 +650,7 @@ mod tests {
                     version: "1.0.0".to_string(),
                     purl: "pkg:maven/org.example/b@1.0.0?type=jar".to_string(),
                     properties: BTreeMap::new(),
+                    licenses: Vec::new(),
                 },
                 CycloneDxComponent {
                     component_type: "library".to_string(),
@@ -492,6 +660,7 @@ mod tests {
                     version: "1.0.0".to_string(),
                     purl: "pkg:maven/org.example/a@1.0.0?type=jar".to_string(),
                     properties: BTreeMap::new(),
+                    licenses: Vec::new(),
                 },
             ],
             dependencies: vec![CycloneDxDependency {
@@ -547,10 +716,19 @@ mod tests {
 
     #[test]
     fn renders_deterministic_xml_from_explicit_contract() {
-        let xml = render_xml(&sample_contract()).unwrap();
+        let mut contract = sample_contract();
+        contract.components[0]
+            .licenses
+            .push(CycloneDxLicenseChoice {
+                license: CycloneDxLicense {
+                    name: "Apache-2.0".to_string(),
+                },
+            });
+        let xml = render_xml(&contract).unwrap();
         assert!(xml.contains("http://cyclonedx.org/schema/bom/1.6"));
         assert!(xml.contains("<metadata>"));
         assert!(xml.find("org.example/a").unwrap() < xml.find("org.example/b").unwrap());
+        assert!(xml.contains("<license><name>Apache-2.0</name></license>"));
         assert!(xml.contains("<dependencies>"));
     }
 
@@ -579,9 +757,7 @@ mod tests {
     fn rejects_duplicate_resolution_graph_components() {
         let mut graph = sample_resolution_graph();
         let duplicate = graph.configurations[0].components[0].clone();
-        graph.configurations[0]
-            .components
-            .push(duplicate);
+        graph.configurations[0].components.push(duplicate);
         let err = graph.validate().unwrap_err();
         assert!(err.contains("duplicate component"));
     }
@@ -603,7 +779,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(CONTRACT_SCHEMA, contract.schema);
-        assert_eq!("pkg:maven/org.example/demo@1.0", contract.root_component.bom_ref);
+        assert_eq!(
+            "pkg:maven/org.example/demo@1.0",
+            contract.root_component.bom_ref
+        );
         assert!(contract
             .components
             .iter()
@@ -625,5 +804,77 @@ mod tests {
         assert!(render_json(&contract)
             .unwrap()
             .contains("pkg:maven/org.example/lib@1.1"));
+    }
+
+    #[test]
+    fn drafts_contract_with_adjacent_pom_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let jar_path = dir.path().join("lib-1.1.jar");
+        let pom_path = dir.path().join("lib-1.1.pom");
+        std::fs::write(&jar_path, b"not-a-real-jar").unwrap();
+        std::fs::write(
+            &pom_path,
+            r#"
+<project>
+  <name>Example Lib</name>
+  <description>Useful &amp; small</description>
+  <url>https://example.test/lib</url>
+  <licenses>
+    <license>
+      <name>Apache-2.0</name>
+    </license>
+  </licenses>
+</project>
+"#,
+        )
+        .unwrap();
+
+        let mut graph = sample_resolution_graph();
+        graph.configurations[0].components[1].artifact_path =
+            jar_path.to_string_lossy().to_string();
+
+        let contract = draft_contract_from_resolution_graph(
+            &graph,
+            CycloneDxDraftOptions {
+                spec_version: "1.6".to_string(),
+                serial_number: "urn:uuid:00000000-0000-0000-0000-000000000003".to_string(),
+                timestamp: "2026-05-12T12:00:00Z".to_string(),
+                root_group: "org.example".to_string(),
+                root_name: "demo".to_string(),
+                root_version: "1.0".to_string(),
+                root_component_type: "application".to_string(),
+            },
+        )
+        .unwrap();
+
+        let component = contract
+            .components
+            .iter()
+            .find(|component| component.bom_ref == "pkg:maven/org.example/lib@1.1")
+            .unwrap();
+        assert_eq!(
+            Some(&jar_path.to_string_lossy().to_string()),
+            component.properties.get("gradle:artifactPath")
+        );
+        assert_eq!(
+            Some(&"Example Lib".to_string()),
+            component.properties.get("maven:pomName")
+        );
+        assert_eq!(
+            Some(&"Useful & small".to_string()),
+            component.properties.get("maven:pomDescription")
+        );
+        assert_eq!(
+            Some(&"https://example.test/lib".to_string()),
+            component.properties.get("maven:pomUrl")
+        );
+        assert_eq!(
+            vec![CycloneDxLicenseChoice {
+                license: CycloneDxLicense {
+                    name: "Apache-2.0".to_string(),
+                },
+            }],
+            component.licenses
+        );
     }
 }
