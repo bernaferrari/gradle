@@ -116,6 +116,10 @@ pub struct CycloneDxExternalReference {
     #[serde(rename = "type")]
     pub reference_type: String,
     pub url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub comment: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hashes: Vec<CycloneDxHash>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -224,7 +228,8 @@ pub struct CycloneDxCapturedTaskOptions {
     pub organizational_entity: Option<CycloneDxOrganizationalEntity>,
     pub license_choice: String,
     pub build_system_environment_variable: String,
-    pub external_references: Vec<String>,
+    pub raw_external_references_present: bool,
+    pub external_references: Vec<CycloneDxExternalReference>,
     pub json_output: String,
     pub xml_output: String,
 }
@@ -327,7 +332,10 @@ pub fn validate_captured_task_options(
             "cyclonedx_build_system_environment_variable",
         )
         .to_string(),
-        external_references: whitespace_values(value(inputs, "cyclonedx_external_references")),
+        raw_external_references_present: !value(inputs, "cyclonedx_external_references")
+            .trim()
+            .is_empty(),
+        external_references: decode_cyclonedx_external_references(inputs)?,
         json_output,
         xml_output,
     })
@@ -347,6 +355,27 @@ fn decode_cyclonedx_organizational_entity(
         .map_err(|error| format!("Invalid CycloneDX organizational entity: {error}"))?;
     entity.validate()?;
     Ok(Some(entity))
+}
+
+fn decode_cyclonedx_external_references(
+    inputs: &BTreeMap<String, String>,
+) -> Result<Vec<CycloneDxExternalReference>, String> {
+    let encoded = value(inputs, "cyclonedx_external_references_json_b64");
+    if encoded.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|error| format!("Invalid cyclonedx_external_references_json_b64: {error}"))?;
+    let references = serde_json::from_slice::<Vec<CycloneDxExternalReference>>(&bytes)
+        .map_err(|error| format!("Invalid CycloneDX external references: {error}"))?;
+    for reference in &references {
+        if reference.reference_type.trim().is_empty() || reference.url.trim().is_empty() {
+            return Err("CycloneDX external reference is missing type or url".to_string());
+        }
+        validate_cyclonedx_hashes(&reference.hashes, "external reference")?;
+    }
+    Ok(references)
 }
 
 pub fn draft_contract_from_captured_inputs(
@@ -395,9 +424,10 @@ pub fn draft_contract_from_captured_inputs(
             root_version: options.root_version,
             root_component_type: options.root_component_type,
             include_metadata_resolution: options.include_metadata_resolution,
-            external_references: options.external_references,
+            external_references: Vec::new(),
         },
     )?;
+    contract.external_references = options.external_references;
     contract.organizational_entity = options.organizational_entity;
     contract.validate()?;
     Ok(contract)
@@ -425,7 +455,7 @@ fn reject_unsupported_captured_options(
     if !options.build_system_environment_variable.trim().is_empty() {
         unsupported.push("build-system-environment-variable");
     }
-    if !options.external_references.is_empty() {
+    if options.raw_external_references_present && options.external_references.is_empty() {
         unsupported.push("external-references");
     }
     if unsupported.is_empty() {
@@ -512,6 +542,8 @@ pub fn aggregate_contracts(
             .map(|url| CycloneDxExternalReference {
                 reference_type: "other".to_string(),
                 url,
+                comment: String::new(),
+                hashes: Vec::new(),
             })
             .collect(),
         organizational_entity: None,
@@ -546,6 +578,7 @@ impl CycloneDxSbomContract {
             {
                 return Err("CycloneDX external reference is missing type or url".to_string());
             }
+            validate_cyclonedx_hashes(&external_reference.hashes, "external reference")?;
         }
         if let Some(entity) = &self.organizational_entity {
             entity.validate()?;
@@ -614,9 +647,21 @@ impl CycloneDxComponent {
                     "CycloneDX {label} has an external reference missing type or url"
                 ));
             }
+            validate_cyclonedx_hashes(&external_reference.hashes, "component external reference")?;
         }
         Ok(())
     }
+}
+
+fn validate_cyclonedx_hashes(hashes: &[CycloneDxHash], label: &str) -> Result<(), String> {
+    for hash in hashes {
+        if hash.algorithm.trim().is_empty() || hash.content.trim().is_empty() {
+            return Err(format!(
+                "CycloneDX {label} has an empty hash algorithm or content"
+            ));
+        }
+    }
+    Ok(())
 }
 
 impl CycloneDxResolutionGraphEvidence {
@@ -702,14 +747,6 @@ impl CycloneDxResolutionConfiguration {
 
 fn value<'a>(inputs: &'a BTreeMap<String, String>, key: &str) -> &'a str {
     inputs.get(key).map(String::as_str).unwrap_or_default()
-}
-
-fn whitespace_values(value: &str) -> Vec<String> {
-    value
-        .split_whitespace()
-        .filter(|entry| !entry.trim().is_empty())
-        .map(|entry| entry.to_string())
-        .collect()
 }
 
 fn normalize_schema_version(value: &str) -> String {
@@ -966,6 +1003,8 @@ pub fn draft_contract_from_resolution_graph(
             .map(|url| CycloneDxExternalReference {
                 reference_type: "other".to_string(),
                 url,
+                comment: String::new(),
+                hashes: Vec::new(),
             })
             .collect(),
         organizational_entity: None,
@@ -1696,6 +1735,8 @@ fn push_external_reference(
     references.push(CycloneDxExternalReference {
         reference_type: reference_type.to_string(),
         url: trimmed.to_string(),
+        comment: String::new(),
+        hashes: Vec::new(),
     });
 }
 
@@ -1751,11 +1792,7 @@ pub fn render_xml(contract: &CycloneDxSbomContract) -> Result<String, String> {
     if !bom.external_references.is_empty() {
         xml.push_str("  <externalReferences>\n");
         for reference in &bom.external_references {
-            xml.push_str(&format!(
-                "    <reference type=\"{}\"><url>{}</url></reference>\n",
-                xml_escape(&reference.reference_type),
-                xml_escape(&reference.url)
-            ));
+            write_external_reference(&mut xml, "    ", reference);
         }
         xml.push_str("  </externalReferences>\n");
     }
@@ -1837,6 +1874,39 @@ fn write_organizational_entity(
     xml.push_str(&format!("{indent}</{tag}>\n"));
 }
 
+fn write_external_reference(
+    xml: &mut String,
+    indent: &str,
+    reference: &CycloneDxExternalReference,
+) {
+    xml.push_str(&format!(
+        "{indent}<reference type=\"{}\">\n",
+        xml_escape(&reference.reference_type)
+    ));
+    xml.push_str(&format!(
+        "{indent}  <url>{}</url>\n",
+        xml_escape(&reference.url)
+    ));
+    if !reference.comment.is_empty() {
+        xml.push_str(&format!(
+            "{indent}  <comment>{}</comment>\n",
+            xml_escape(&reference.comment)
+        ));
+    }
+    if !reference.hashes.is_empty() {
+        xml.push_str(&format!("{indent}  <hashes>\n"));
+        for hash in &reference.hashes {
+            xml.push_str(&format!(
+                "{indent}    <hash alg=\"{}\">{}</hash>\n",
+                xml_escape(&hash.algorithm),
+                xml_escape(&hash.content)
+            ));
+        }
+        xml.push_str(&format!("{indent}  </hashes>\n"));
+    }
+    xml.push_str(&format!("{indent}</reference>\n"));
+}
+
 fn write_component(xml: &mut String, indent: &str, component: &CycloneDxComponent) {
     xml.push_str(&format!(
         "{indent}<component type=\"{}\" bom-ref=\"{}\">\n",
@@ -1915,11 +1985,7 @@ fn write_component(xml: &mut String, indent: &str, component: &CycloneDxComponen
     if !component.external_references.is_empty() {
         xml.push_str(&format!("{indent}  <externalReferences>\n"));
         for reference in &component.external_references {
-            xml.push_str(&format!(
-                "{indent}    <reference type=\"{}\"><url>{}</url></reference>\n",
-                xml_escape(&reference.reference_type),
-                xml_escape(&reference.url)
-            ));
+            write_external_reference(xml, &format!("{indent}    "), reference);
         }
         xml.push_str(&format!("{indent}  </externalReferences>\n"));
     }
@@ -1949,6 +2015,15 @@ fn xml_escape(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn external_reference(reference_type: &str, url: &str) -> CycloneDxExternalReference {
+        CycloneDxExternalReference {
+            reference_type: reference_type.to_string(),
+            url: url.to_string(),
+            comment: String::new(),
+            hashes: Vec::new(),
+        }
+    }
 
     fn sample_contract() -> CycloneDxSbomContract {
         CycloneDxSbomContract {
@@ -2064,6 +2139,11 @@ mod tests {
             .push(CycloneDxExternalReference {
                 reference_type: "website".to_string(),
                 url: "https://example.invalid/app".to_string(),
+                comment: "Application docs".to_string(),
+                hashes: vec![CycloneDxHash {
+                    algorithm: "SHA-256".to_string(),
+                    content: "abc123".to_string(),
+                }],
             });
         let json = render_json(&contract).unwrap();
         assert!(json.contains("\"bomFormat\": \"CycloneDX\""));
@@ -2074,6 +2154,7 @@ mod tests {
         assert!(json.contains("\"content\": \"0123456789abcdef\""));
         assert!(json.contains("\"type\": \"website\""));
         assert!(json.contains("\"url\": \"https://example.invalid/app\""));
+        assert!(json.contains("\"comment\": \"Application docs\""));
         contract.components[0].description = "Library B".to_string();
         contract.components[0].publisher = "Example Org".to_string();
         contract.components[0]
@@ -2081,6 +2162,8 @@ mod tests {
             .push(CycloneDxExternalReference {
                 reference_type: "vcs".to_string(),
                 url: "https://example.invalid/repo".to_string(),
+                comment: String::new(),
+                hashes: Vec::new(),
             });
         let json = render_json(&contract).unwrap();
         assert!(json.contains("\"description\": \"Library B\""));
@@ -2111,6 +2194,11 @@ mod tests {
             .push(CycloneDxExternalReference {
                 reference_type: "website".to_string(),
                 url: "https://example.invalid/app".to_string(),
+                comment: "Application docs".to_string(),
+                hashes: vec![CycloneDxHash {
+                    algorithm: "SHA-256".to_string(),
+                    content: "abc123".to_string(),
+                }],
             });
         contract.components[0].hashes.push(CycloneDxHash {
             algorithm: "SHA-256".to_string(),
@@ -2123,21 +2211,22 @@ mod tests {
             .push(CycloneDxExternalReference {
                 reference_type: "vcs".to_string(),
                 url: "https://example.invalid/repo".to_string(),
+                comment: String::new(),
+                hashes: Vec::new(),
             });
         let xml = render_xml(&contract).unwrap();
         assert!(xml.contains("http://cyclonedx.org/schema/bom/1.6"));
         assert!(xml.contains("<metadata>"));
         assert!(xml.contains("<externalReferences>"));
-        assert!(xml.contains(
-            "<reference type=\"website\"><url>https://example.invalid/app</url></reference>"
-        ));
+        assert!(xml.contains("<reference type=\"website\">"));
+        assert!(xml.contains("<url>https://example.invalid/app</url>"));
+        assert!(xml.contains("<comment>Application docs</comment>"));
+        assert!(xml.contains("<hash alg=\"SHA-256\">abc123</hash>"));
         assert!(xml.contains("<hashes>"));
         assert!(xml.contains("<hash alg=\"SHA-256\">0123456789abcdef</hash>"));
         assert!(xml.contains("<description>Library B</description>"));
         assert!(xml.contains("<publisher>Example Org</publisher>"));
-        assert!(xml.contains(
-            "<reference type=\"vcs\"><url>https://example.invalid/repo</url></reference>"
-        ));
+        assert!(xml.contains("<reference type=\"vcs\">"));
         assert!(xml.find("org.example/a").unwrap() < xml.find("org.example/b").unwrap());
         assert!(xml.contains(
             "<license><id>Apache-2.0</id><url>https://www.apache.org/licenses/LICENSE-2.0</url></license>"
@@ -2710,40 +2799,26 @@ mod tests {
         assert_eq!("Example Foundation", component.publisher);
         assert!(component
             .external_references
-            .contains(&CycloneDxExternalReference {
-                reference_type: "website".to_string(),
-                url: "https://example.test".to_string(),
-            }));
+            .contains(&external_reference("website", "https://example.test")));
+        assert!(component.external_references.contains(&external_reference(
+            "build-system",
+            "https://ci.example.test/lib"
+        )));
+        assert!(component.external_references.contains(&external_reference(
+            "distribution",
+            "https://downloads.example.test/lib"
+        )));
+        assert!(component.external_references.contains(&external_reference(
+            "issue-tracker",
+            "https://issues.example.test/lib"
+        )));
+        assert!(component.external_references.contains(&external_reference(
+            "mailing-list",
+            "https://lists.example.test/lib"
+        )));
         assert!(component
             .external_references
-            .contains(&CycloneDxExternalReference {
-                reference_type: "build-system".to_string(),
-                url: "https://ci.example.test/lib".to_string(),
-            }));
-        assert!(component
-            .external_references
-            .contains(&CycloneDxExternalReference {
-                reference_type: "distribution".to_string(),
-                url: "https://downloads.example.test/lib".to_string(),
-            }));
-        assert!(component
-            .external_references
-            .contains(&CycloneDxExternalReference {
-                reference_type: "issue-tracker".to_string(),
-                url: "https://issues.example.test/lib".to_string(),
-            }));
-        assert!(component
-            .external_references
-            .contains(&CycloneDxExternalReference {
-                reference_type: "mailing-list".to_string(),
-                url: "https://lists.example.test/lib".to_string(),
-            }));
-        assert!(component
-            .external_references
-            .contains(&CycloneDxExternalReference {
-                reference_type: "vcs".to_string(),
-                url: "https://git.example.test/lib".to_string(),
-            }));
+            .contains(&external_reference("vcs", "https://git.example.test/lib")));
         assert_eq!(
             vec![CycloneDxLicenseChoice::from_license(CycloneDxLicense {
                 id: "Apache-2.0".to_string(),
@@ -2841,18 +2916,14 @@ mod tests {
             })],
             component.licenses
         );
-        assert!(component
-            .external_references
-            .contains(&CycloneDxExternalReference {
-                reference_type: "website".to_string(),
-                url: "https://parent.example.test".to_string(),
-            }));
-        assert!(component
-            .external_references
-            .contains(&CycloneDxExternalReference {
-                reference_type: "vcs".to_string(),
-                url: "https://git.parent.example.test/root".to_string(),
-            }));
+        assert!(component.external_references.contains(&external_reference(
+            "website",
+            "https://parent.example.test"
+        )));
+        assert!(component.external_references.contains(&external_reference(
+            "vcs",
+            "https://git.parent.example.test/root"
+        )));
         assert_eq!(
             Some(&"https://child.example.test/lib".to_string()),
             component.properties.get("maven:pomUrl")
