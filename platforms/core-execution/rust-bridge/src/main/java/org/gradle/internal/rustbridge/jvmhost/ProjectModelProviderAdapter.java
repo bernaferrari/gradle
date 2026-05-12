@@ -553,13 +553,6 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
     }
 
     private static boolean projectSettingsHasIncludedBuild(Project project) {
-        try {
-            if (!project.getGradle().getIncludedBuilds().isEmpty()) {
-                return true;
-            }
-        } catch (Exception e) {
-            LOGGER.debug("[substrate-jvmhost] Failed to inspect included builds for unsupported native dependency semantics", e);
-        }
         return projectSettingsMatches(project, "\\bincludeBuild\\s*\\(");
     }
 

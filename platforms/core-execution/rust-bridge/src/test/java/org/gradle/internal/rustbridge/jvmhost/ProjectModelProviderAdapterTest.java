@@ -748,6 +748,62 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
+    public void marksExplicitSettingsIncludeBuildAsUnsupportedDependencySemantics() throws IOException {
+        File rootDir = temporaryFolder.newFolder("explicit-composite");
+        File buildFile = new File(rootDir, "build.gradle.kts");
+        Files.write(buildFile.toPath(), Collections.singletonList("plugins { java }"), StandardCharsets.UTF_8);
+        Files.write(new File(rootDir, "settings.gradle.kts").toPath(), Collections.singletonList("includeBuild(\"included\")"), StandardCharsets.UTF_8);
+        Task task = basicFileTransformTask(
+            ":classes",
+            "classes",
+            fileCollection(),
+            fileCollection(),
+            Collections.emptyMap(),
+            false,
+            false,
+            buildFile,
+            null,
+            rootDir
+        );
+
+        BuildPlanTask planTask = ProjectModelProviderAdapter.toBuildPlanTask(task, DefaultTask.class);
+        Map<String, String> inputs = planTask.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("true", inputs.get("unsupported_dependency_semantics"));
+        assertTrue(inputs.get("unsupported_repository_features").contains("composite-substitution:settings"));
+    }
+
+    @org.junit.Test
+    public void doesNotMarkIncludedBuildApiWithoutExplicitSettingsIncludeBuild() throws IOException {
+        File rootDir = temporaryFolder.newFolder("configuration-only-build-logic");
+        File buildFile = new File(rootDir, "build.gradle.kts");
+        Files.write(buildFile.toPath(), Collections.singletonList("plugins { java }"), StandardCharsets.UTF_8);
+        Files.write(new File(rootDir, "settings.gradle.kts").toPath(), Collections.singletonList("rootProject.name = \"configuration-only\""), StandardCharsets.UTF_8);
+        Task task = basicFileTransformTask(
+            ":classes",
+            "classes",
+            fileCollection(),
+            fileCollection(),
+            Collections.emptyMap(),
+            false,
+            false,
+            buildFile,
+            gradleWithSyntheticIncludedBuild(),
+            rootDir
+        );
+
+        BuildPlanTask planTask = ProjectModelProviderAdapter.toBuildPlanTask(task, DefaultTask.class);
+        Map<String, String> inputs = planTask.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertFalse(inputs.containsKey("unsupported_dependency_semantics"));
+        assertFalse(inputs.getOrDefault("unsupported_repository_features", "").contains("composite-substitution:settings"));
+    }
+
+    @org.junit.Test
     public void marksMavenLocalAsUnsupportedDependencySemantics() throws IOException {
         File buildFile = temporaryFolder.newFile("build.gradle.kts");
         Files.write(buildFile.toPath(), Collections.singletonList(
@@ -1496,6 +1552,21 @@ public class ProjectModelProviderAdapterTest {
         File buildFile,
         StartParameter startParameter
     ) {
+        return basicFileTransformTask(path, name, inputs, outputs, inputProperties, customActions, supportedCustomActions, buildFile, startParameter == null ? null : gradle(startParameter), null);
+    }
+
+    private static Task basicFileTransformTask(
+        String path,
+        String name,
+        FileCollection inputs,
+        FileCollection outputs,
+        Map<String, String> inputProperties,
+        boolean customActions,
+        boolean supportedCustomActions,
+        File buildFile,
+        Gradle gradle,
+        File rootDir
+    ) {
         Project project = proxy(Project.class, (proxy, method, args) -> {
             if (method.getName().equals("getPath")) {
                 return ":";
@@ -1503,8 +1574,14 @@ public class ProjectModelProviderAdapterTest {
             if (method.getName().equals("getBuildFile")) {
                 return buildFile;
             }
-            if (method.getName().equals("getGradle") && startParameter != null) {
-                return gradle(startParameter);
+            if (method.getName().equals("getGradle") && gradle != null) {
+                return gradle;
+            }
+            if (method.getName().equals("getRootProject")) {
+                return proxy;
+            }
+            if (method.getName().equals("getProjectDir") && rootDir != null) {
+                return rootDir;
             }
             return defaultValue(method.getReturnType());
         });
@@ -1548,6 +1625,15 @@ public class ProjectModelProviderAdapterTest {
                 default:
                     return defaultValue(method.getReturnType());
             }
+        });
+    }
+
+    private static Gradle gradleWithSyntheticIncludedBuild() {
+        return proxy(Gradle.class, (proxy, method, args) -> {
+            if (method.getName().equals("getIncludedBuilds")) {
+                return Collections.singleton(new Object());
+            }
+            return defaultValue(method.getReturnType());
         });
     }
 

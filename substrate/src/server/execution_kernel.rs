@@ -299,7 +299,7 @@ fn kernel_task_contract_rejection(
 fn context_declares_composite_build(value: &serde_json::Value) -> bool {
     context_paths(value)
         .into_iter()
-        .filter_map(|path| project_dir_from_build_path(&path))
+        .filter_map(|path| project_dir_from_context_path(&path))
         .any(|project_dir| settings_declares_included_build(&project_dir))
 }
 
@@ -314,13 +314,20 @@ fn context_paths(value: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
-fn project_dir_from_build_path(path: &str) -> Option<String> {
-    let parts = path.split('/').collect::<Vec<_>>();
-    let build_index = parts.iter().position(|part| *part == "build")?;
-    if build_index == 0 {
-        return None;
-    }
-    Some(parts[..build_index].join("/"))
+fn project_dir_from_context_path(path: &str) -> Option<String> {
+    let path = std::path::Path::new(path);
+    let start = if path.is_dir() {
+        path
+    } else {
+        path.parent().unwrap_or(path)
+    };
+    start
+        .ancestors()
+        .find(|ancestor| {
+            ancestor.join("settings.gradle.kts").is_file()
+                || ancestor.join("settings.gradle").is_file()
+        })
+        .map(|ancestor| ancestor.to_string_lossy().into_owned())
 }
 
 fn settings_declares_included_build(project_dir: &str) -> bool {
@@ -383,8 +390,9 @@ mod tests {
     use std::collections::HashSet;
 
     use super::{
-        admit_build_plan, KernelAdmission, KernelBuildPlan, KernelDependencyConfiguration,
-        KernelDependencyGraph, KernelDependencyRequest, KernelRepository, KernelTaskPlan,
+        admit_build_plan, context_declares_composite_build, KernelAdmission, KernelBuildPlan,
+        KernelDependencyConfiguration, KernelDependencyGraph, KernelDependencyRequest,
+        KernelRepository, KernelTaskPlan,
     };
 
     fn native_types(types: &[&str]) -> HashSet<String> {
@@ -580,6 +588,36 @@ mod tests {
             .message()
             .contains("settings/includeBuild/buildSrc"));
         assert!(rejection.message().contains("selected root task execution"));
+    }
+
+    #[test]
+    fn context_paths_use_nearest_settings_directory_for_dogfood_workdirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::write(repo.join("settings.gradle.kts"), "includeBuild(\"tools\")").unwrap();
+        let project = repo.join("build/dogfood/project");
+        std::fs::create_dir_all(project.join("src/main/java")).unwrap();
+        std::fs::write(
+            project.join("settings.gradle.kts"),
+            "rootProject.name = \"project\"",
+        )
+        .unwrap();
+        let source = project
+            .join("src/main/java/Example.java")
+            .to_string_lossy()
+            .into_owned();
+        let output = project
+            .join("build/classes/java/main/Example.class")
+            .to_string_lossy()
+            .into_owned();
+
+        let context = serde_json::json!({
+            "source_files": [source],
+            "output_files": [output]
+        });
+
+        assert!(!context_declares_composite_build(&context));
     }
 
     #[test]
