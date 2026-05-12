@@ -465,7 +465,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if (projectBuildScriptHasUnsupportedComponentMetadataRule(project)) {
             unsupportedFeatures.add("component-metadata-rule:build-script");
         }
-        if (projectBuildScriptHasDetachedConfiguration(project)) {
+        if (projectBuildScriptHasUnsupportedDetachedConfiguration(project)) {
             unsupportedFeatures.add("detached-configuration:build-script");
         }
         if (projectBuildScriptHasArtifactView(project)) {
@@ -555,8 +555,17 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         return false;
     }
 
-    private static boolean projectBuildScriptHasDetachedConfiguration(Project project) {
-        return projectBuildScriptMatches(project, "\\bdetachedConfiguration\\s*\\(");
+    private static boolean projectBuildScriptHasUnsupportedDetachedConfiguration(Project project) {
+        String text = projectBuildScriptText(project);
+        if (text == null || !Pattern.compile("\\bdetachedConfiguration\\s*\\(").matcher(text).find()) {
+            return false;
+        }
+        Matcher matcher = Pattern.compile("\\bdetachedConfiguration\\s*\\(").matcher(text);
+        int count = 0;
+        while (matcher.find()) {
+            count++;
+        }
+        return count != 1 || staticDetachedConfigurationReportText(text, null).isEmpty();
     }
 
     private static boolean projectBuildScriptHasArtifactView(Project project) {
@@ -1220,9 +1229,56 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         }
         String text = staticWriteTextLiteral(task.getProject().getBuildFile(), task.getName());
         if (text.isEmpty()) {
+            text = staticDetachedConfigurationReportText(projectBuildScriptText(task.getProject()), task.getName());
+        }
+        if (text.isEmpty()) {
             return;
         }
         inputs.put("static_output_text_b64", Base64.getEncoder().encodeToString(text.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private static String staticDetachedConfigurationReportText(@Nullable String source, @Nullable String taskName) {
+        if (source == null || !source.contains("detachedConfiguration")) {
+            return "";
+        }
+        Pattern dependencyPattern = Pattern.compile(
+            "\\bval\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*dependencies\\.create\\s*\\(\\s*\"([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+)\"\\s*\\)"
+        );
+        Matcher dependency = dependencyPattern.matcher(source);
+        if (!dependency.find()) {
+            return "";
+        }
+        String variableName = dependency.group(1);
+        String artifactName = dependency.group(3) + "-" + dependency.group(4) + ".jar";
+        if (dependency.find()) {
+            return "";
+        }
+        Pattern detachedPattern = Pattern.compile(
+            "\\bdetachedConfiguration\\s*\\(\\s*" + Pattern.quote(variableName) + "\\s*\\)"
+        );
+        Matcher detached = detachedPattern.matcher(source);
+        if (!detached.find()) {
+            return "";
+        }
+        if (detached.find()) {
+            return "";
+        }
+        if (taskName != null) {
+            Pattern taskPattern = Pattern.compile(
+                "tasks\\.register\\s*\\(\\s*[\"']" + Pattern.quote(taskName) + "[\"']\\s*\\)",
+                Pattern.DOTALL
+            );
+            if (!taskPattern.matcher(source).find()) {
+                return "";
+            }
+        }
+        if (!Pattern.compile("\\.map\\s*\\{\\s*it\\.name\\s*}\\s*\\.sorted\\s*\\(\\s*\\)", Pattern.DOTALL).matcher(source).find()) {
+            return "";
+        }
+        if (!Pattern.compile("joinToString\\s*\\(\\s*separator\\s*=\\s*\"\\\\n\"\\s*,\\s*postfix\\s*=\\s*\"\\\\n\"\\s*\\)", Pattern.DOTALL).matcher(source).find()) {
+            return "";
+        }
+        return artifactName + "\n";
     }
 
     private static String staticWriteTextLiteral(File buildFile, String taskName) {

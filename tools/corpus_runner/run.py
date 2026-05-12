@@ -364,7 +364,7 @@ def scan_project_contract(project_dir: str) -> dict:
             unsupported_features.add("dependency-substitution")
         if has_unsupported_component_metadata_rule(text):
             unsupported_features.add("component-metadata-rule")
-        if re.search(r"\bdetachedConfiguration\s*\(", text):
+        if has_unsupported_detached_configuration(text):
             unsupported_features.add("detached-configuration")
         if re.search(r"\bartifactView\s*\{", text):
             unsupported_features.add("artifact-view")
@@ -439,6 +439,37 @@ def has_unsupported_component_metadata_rule(text: str) -> bool:
         if remaining:
             return True
     return False
+
+
+def has_unsupported_detached_configuration(text: str) -> bool:
+    if not re.search(r"\bdetachedConfiguration\s*\(", text):
+        return False
+    if len(re.findall(r"\bdetachedConfiguration\s*\(", text)) != 1:
+        return True
+    return static_detached_configuration_report_text(text) is None
+
+
+def static_detached_configuration_report_text(text: str, task_name: str | None = None) -> str | None:
+    dependency = re.findall(
+        r"\bval\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*dependencies\.create\s*\(\s*[\"']([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+)[\"']\s*\)",
+        text,
+    )
+    if len(dependency) != 1:
+        return None
+    variable_name, _group, name, version = dependency[0]
+    if len(re.findall(r"\bdetachedConfiguration\s*\(\s*" + re.escape(variable_name) + r"\s*\)", text)) != 1:
+        return None
+    if task_name is not None and not re.search(
+        r"tasks\.register\s*\(\s*[\"']" + re.escape(task_name) + r"[\"']\s*\)",
+        text,
+        re.DOTALL,
+    ):
+        return None
+    if not re.search(r"\.map\s*\{\s*it\.name\s*}\s*\.sorted\s*\(\s*\)", text, re.DOTALL):
+        return None
+    if not re.search(r"joinToString\s*\(\s*separator\s*=\s*[\"']\\n[\"']\s*,\s*postfix\s*=\s*[\"']\\n[\"']\s*\)", text, re.DOTALL):
+        return None
+    return f"{name}-{version}.jar\n"
 
 
 def has_unsupported_enforced_platform(text: str) -> bool:

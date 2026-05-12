@@ -209,7 +209,7 @@ class CorpusRunnerCommandTest(unittest.TestCase):
 
         self.assertIn("custom-task-unsupported-kotlin-dsl", results)
         self.assertNotIn("component-metadata-rule-unsupported-kotlin-dsl", results)
-        self.assertIn("detached-configuration-unsupported-kotlin-dsl", results)
+        self.assertNotIn("detached-configuration-unsupported-kotlin-dsl", results)
         self.assertIn("artifact-view-unsupported-kotlin-dsl", results)
         self.assertIn("artifact-transform-unsupported-kotlin-dsl", results)
         self.assertIn("composite-substitution-unsupported-kotlin-dsl", results)
@@ -267,6 +267,28 @@ class CorpusRunnerCommandTest(unittest.TestCase):
         self.assertTrue(
             corpus_run.has_unsupported_component_metadata_rule(
                 'dependencies { components { all { status = "integration" } } }'
+            )
+        )
+
+    def test_exact_detached_configuration_report_is_supported(self):
+        text = '''
+val detachedDependency = dependencies.create("org.example:detached:1.0")
+tasks.register("resolveDetached") {
+    val detached = configurations.detachedConfiguration(detachedDependency)
+    doLast {
+        val files = detached.resolve().map { it.name }.sorted()
+        file("build/detached/resolved.txt").writeText(files.joinToString(separator = "\\n", postfix = "\\n"))
+    }
+}
+'''
+        self.assertFalse(corpus_run.has_unsupported_detached_configuration(text))
+        self.assertEqual("detached-1.0.jar\n", corpus_run.static_detached_configuration_report_text(text))
+
+    def test_dynamic_detached_configuration_is_unsupported(self):
+        self.assertTrue(
+            corpus_run.has_unsupported_detached_configuration(
+                'val dep = dependencies.create("org.example:detached:1.+")\n'
+                'tasks.register("resolveDetached") { val detached = configurations.detachedConfiguration(dep) }'
             )
         )
 

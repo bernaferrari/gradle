@@ -19,24 +19,6 @@
       }
     },
     {
-      "name": "detached-configuration-unsupported-kotlin-dsl",
-      "path": "detached-configuration-unsupported-kotlin-dsl",
-      "tasks": ["clean", "build"],
-      "expected_substrate_fail_closed": true,
-      "expected_contract": {
-        "build_file_count": 1,
-        "settings_file_count": 1,
-        "source_file_count": 1,
-        "plugins": ["java-library"],
-        "tasks": ["resolveDetached"],
-        "outputs": ["build/detached/resolved.txt"],
-        "dependencies": ["org.gradle.substrate:detached:1.0"],
-        "project_dependencies": [],
-        "toolchains": ["17"],
-        "unsupported_features": ["detached-configuration"]
-      }
-    },
-    {
       "name": "artifact-view-unsupported-kotlin-dsl",
       "path": "artifact-view-unsupported-kotlin-dsl",
       "tasks": ["clean", "build"],

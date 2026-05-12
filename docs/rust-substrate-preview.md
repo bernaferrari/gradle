@@ -54,6 +54,8 @@ The supported preview corpus is intentionally narrow and explicit:
 - resource processing, `Copy`, `Sync`, `Jar`, `Zip`, `War`, `Ear`, `Tar`,
   `Exec`, `JavaExec`, `Javadoc`, and JUnit Platform `Test` shapes covered by
   checked-in corpus fixtures;
+- exact detached-configuration resolved-file reports covered by the checked-in
+  static fixture;
 - Maven-layout external dependencies with static selectors, representative BOM
   and dependency-constraint cases, selected Gradle Module Metadata cases, and
   artifact classifier/extension cases covered by the external corpus;
@@ -78,9 +80,10 @@ admission, or an explicit unsupported corpus gate. The preview does not support:
   unsupported dynamic selectors, non-module dependency substitution, richer
   enforced-platform forms outside exact static `enforcedPlatform("g:n:v")`,
   component metadata rules outside exact `components { all { status = "release" } }`
-  normalization, artifact transforms/views, repository auth/proxy/offline/refresh
-  semantics outside the checked-in contract, and unsupported Gradle Module Metadata
-  fields;
+  normalization, detached-configuration semantics outside the exact resolved-file
+  report fixture, artifact transforms/views, repository auth/proxy/offline/refresh
+  semantics outside the checked-in contract, and unsupported Gradle Module
+  Metadata fields;
 - task-by-task fallback inside an admitted Rust-authoritative run.
 
 Unsupported fixtures belong in `testing/corpus/unsupported-manifest.json` or in
