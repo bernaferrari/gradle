@@ -195,11 +195,13 @@ uses `--project-dir` plus absolute task paths to find exactly one matching
 artifact under `--state-dir`. It fails closed when no artifact matches or when
 multiple artifacts match without `--build-id` or explicit `--artifact`.
 Promoting this to a user-facing warm path still requires stable build identity,
-full source/input fingerprint checks, and selected-task compatibility checks.
-The prototype already fails closed when tracked build-definition files
-(`build.gradle(.kts)`, `settings.gradle(.kts)`, `gradle.properties`, or
-`gradle/libs.versions.toml`) are newer than the cached artifact. Use
-`--skip-invalidation` only for debugging stale artifacts.
+content fingerprints, and selected-task compatibility checks. The prototype
+already fails closed when tracked build-definition files (`build.gradle(.kts)`,
+`settings.gradle(.kts)`, `gradle.properties`, or `gradle/libs.versions.toml`)
+or captured absolute project input paths are newer than the cached artifact.
+Captured producer outputs, local state, and destroyables are excluded so normal
+producer-consumer paths under `build/` do not invalidate an otherwise unchanged
+plan. Use `--skip-invalidation` only for debugging stale artifacts.
 
 ## Ship Gates
 
