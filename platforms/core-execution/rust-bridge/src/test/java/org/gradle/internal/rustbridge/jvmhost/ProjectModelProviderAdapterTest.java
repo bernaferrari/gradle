@@ -579,9 +579,11 @@ public class ProjectModelProviderAdapterTest {
         assertTrue(missing.contains("aggregate-merge-policy"));
         assertTrue(missing.contains("serial-source-policy"));
         assertTrue(missing.contains("build-system-policy"));
-        assertTrue(missing.contains("build-environment-policy"));
+        assertEquals("false", inputs.get("cyclonedx_include_build_environment"));
+        assertFalse(missing.contains("build-environment-policy"));
         assertTrue(missing.contains("license-text-rendering"));
-        assertTrue(missing.contains("metadata-resolution-policy"));
+        assertEquals("false", inputs.get("cyclonedx_include_metadata_resolution"));
+        assertFalse(missing.contains("metadata-resolution-policy"));
         assertFalse(inputs.containsKey("aggregate_input_contracts_json_b64"));
         assertFalse(inputs.containsKey("sbom_contract_json_b64"));
     }
@@ -619,6 +621,43 @@ public class ProjectModelProviderAdapterTest {
             assertFalse(missing.contains("license-text-rendering"));
             assertEquals("true", inputs.get("requires_jvm_task_execution"));
             assertFalse(inputs.containsKey("aggregate_input_contracts_json_b64"));
+        } finally {
+            if (previous == null) {
+                System.clearProperty("org.gradle.rust.substrate.cyclonedx.timestamp.ms");
+            } else {
+                System.setProperty("org.gradle.rust.substrate.cyclonedx.timestamp.ms", previous);
+            }
+        }
+    }
+
+    @org.junit.Test
+    public void capturesCycloneDxAggregateDeterministicSerialPolicyWhenTimestampIsExplicit() throws IOException {
+        String previous = System.getProperty("org.gradle.rust.substrate.cyclonedx.timestamp.ms");
+        System.setProperty("org.gradle.rust.substrate.cyclonedx.timestamp.ms", "1778595445123");
+        try {
+            File inputJson = temporaryFolder.newFile("direct-bom.json");
+            File outputJson = temporaryFolder.newFile("aggregate-bom.json");
+            Task cyclonedx = cyclonedxAggregateTask(
+                inputJson,
+                outputJson,
+                Boolean.TRUE,
+                Boolean.FALSE,
+                Boolean.FALSE,
+                Boolean.FALSE,
+                Boolean.FALSE
+            );
+
+            BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(cyclonedx, CyclonedxAggregateTask.class);
+            Map<String, String> inputs = task.getInputSpecsList().stream()
+                .filter(input -> input.getKind().equals("value"))
+                .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+            assertEquals("true", inputs.get("cyclonedx_include_bom_serial_number"));
+            assertEquals("gradle-substrate-deterministic-identity", inputs.get("cyclonedx_serial_source_policy"));
+            String missing = inputs.get("cyclonedx_missing_contract_fields");
+            assertFalse(missing.contains("timestamp-source-policy"));
+            assertFalse(missing.contains("serial-source-policy"));
+            assertEquals("true", inputs.get("requires_jvm_task_execution"));
         } finally {
             if (previous == null) {
                 System.clearProperty("org.gradle.rust.substrate.cyclonedx.timestamp.ms");
@@ -787,6 +826,46 @@ public class ProjectModelProviderAdapterTest {
             assertFalse(missing.contains("timestamp-source-policy"));
             assertFalse(missing.contains("serial-source-policy"));
             assertFalse(missing.contains("license-text-rendering"));
+            assertFalse(inputs.containsKey("sbom_contract_json_b64"));
+        } finally {
+            if (previous == null) {
+                System.clearProperty("org.gradle.rust.substrate.cyclonedx.timestamp.ms");
+            } else {
+                System.setProperty("org.gradle.rust.substrate.cyclonedx.timestamp.ms", previous);
+            }
+        }
+    }
+
+    @org.junit.Test
+    public void capturesCycloneDxDirectDeterministicSerialPolicyWhenTimestampIsExplicit() throws IOException {
+        String previous = System.getProperty("org.gradle.rust.substrate.cyclonedx.timestamp.ms");
+        System.setProperty("org.gradle.rust.substrate.cyclonedx.timestamp.ms", "1778595445123");
+        try {
+            File inputJar = temporaryFolder.newFile("lib-1.1.jar");
+            File outputJson = temporaryFolder.newFile("bom.json");
+            Task cyclonedx = cyclonedxDirectTask(
+                inputJar,
+                outputJson,
+                cyclonedxConfigurationContainer("runtimeClasspath", inputJar),
+                Boolean.TRUE,
+                Boolean.FALSE,
+                Boolean.FALSE,
+                Boolean.FALSE,
+                Boolean.FALSE,
+                Collections.emptyList()
+            );
+
+            BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(cyclonedx, CyclonedxDirectTask.class);
+            Map<String, String> inputs = task.getInputSpecsList().stream()
+                .filter(input -> input.getKind().equals("value"))
+                .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+            assertEquals("true", inputs.get("cyclonedx_include_bom_serial_number"));
+            assertEquals("gradle-substrate-deterministic-identity", inputs.get("cyclonedx_serial_source_policy"));
+            String missing = inputs.get("cyclonedx_missing_contract_fields");
+            assertFalse(missing.contains("timestamp-source-policy"));
+            assertFalse(missing.contains("serial-source-policy"));
+            assertFalse(missing.contains("license-choice-rendering"));
             assertFalse(inputs.containsKey("sbom_contract_json_b64"));
         } finally {
             if (previous == null) {

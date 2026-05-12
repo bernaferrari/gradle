@@ -854,11 +854,73 @@ fn enrich_task_contract_from_graph(
         }
     }
 
+    if is_process_resources_task(task) {
+        add_generated_sbom_resource_mapping(task, task_outputs);
+    }
+
     if is_archive_task(task) {
         add_archive_convention_dependencies(task, task_outputs);
     }
     if is_resolve_main_class_name_task(task) {
         infer_resolved_main_class_output(task);
+    }
+}
+
+fn add_generated_sbom_resource_mapping(
+    task: &mut CanonicalBuildPlanTask,
+    task_outputs: &HashMap<String, Vec<String>>,
+) {
+    let Some(resources_dir) = output_paths(task).into_iter().next() else {
+        return;
+    };
+    let generated_sboms = task
+        .depends_on
+        .iter()
+        .filter_map(|dependency| task_outputs.get(dependency))
+        .flat_map(|outputs| outputs.iter())
+        .filter(|output| {
+            output
+                .replace('\\', "/")
+                .ends_with("/build/reports/cyclonedx/application.cdx.json")
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if generated_sboms.is_empty() {
+        return;
+    }
+
+    let mut mappings = input_value(task, "copy_file_mappings").unwrap_or_default();
+    let mut changed = false;
+    for source in generated_sboms {
+        let relative = "META-INF/sbom/application.cdx.json";
+        let entry = format!(
+            "{}>{}>F",
+            URL_SAFE_NO_PAD.encode(source.as_bytes()),
+            URL_SAFE_NO_PAD.encode(relative.as_bytes())
+        );
+        if !mappings.split(',').any(|existing| existing == entry) {
+            if !mappings.trim().is_empty() {
+                mappings.push(',');
+            }
+            mappings.push_str(&entry);
+            changed = true;
+        }
+    }
+    if changed {
+        set_value_input(
+            task,
+            "copy_file_mappings",
+            &mappings,
+            "graph-inferred-generated-sbom-resource",
+            "copy_file_mappings",
+        );
+        set_value_input(
+            task,
+            "generated_sbom_resource_dir",
+            &resources_dir,
+            "graph-inferred-generated-sbom-resource",
+            "directory",
+        );
     }
 }
 
@@ -5125,6 +5187,70 @@ mod tests {
         };
 
         assert_eq!(executable_task_type(&task), "Copy");
+    }
+
+    #[test]
+    fn test_process_resources_maps_generated_cyclonedx_sbom_resource() {
+        let temp = tempfile::tempdir().unwrap();
+        let resources_dir = temp.path().join("src/main/resources");
+        let output_dir = temp.path().join("build/resources/main");
+        let sbom = temp
+            .path()
+            .join("build/reports/cyclonedx/application.cdx.json");
+        std::fs::create_dir_all(&resources_dir).unwrap();
+
+        let mut task = super::super::build_plan_ir::CanonicalBuildPlanTask {
+            path: ":processResources".to_string(),
+            project_path: ":".to_string(),
+            implementation_id: "org.gradle.language.jvm.tasks.ProcessResources".to_string(),
+            depends_on: vec![":cyclonedxBom".to_string()],
+            inputs: Default::default(),
+            outputs: Vec::new(),
+            worker_isolation: "in-process".to_string(),
+            should_run_after: Vec::new(),
+            must_run_after: Vec::new(),
+            finalized_by: Vec::new(),
+            cacheability: "declared-outputs".to_string(),
+            local_state: Vec::new(),
+            destroyables: Vec::new(),
+            action_kind: "file-transform".to_string(),
+            input_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "input0".to_string(),
+                    kind: "path".to_string(),
+                    value: resources_dir.to_string_lossy().into_owned(),
+                    normalization: "absolute-path".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "copy_file_mappings".to_string(),
+                    kind: "value".to_string(),
+                    value: String::new(),
+                    normalization: "copy_file_mappings".to_string(),
+                    optional: false,
+                },
+            ],
+            output_specs: vec![
+                super::super::build_plan_ir::CanonicalBuildPlanTaskOutputSpec {
+                    name: "destination".to_string(),
+                    kind: "directory".to_string(),
+                    path: output_dir.to_string_lossy().into_owned(),
+                },
+            ],
+            environment_inputs: Vec::new(),
+            system_property_inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+        let task_outputs = HashMap::from([(
+            ":cyclonedxBom".to_string(),
+            vec![sbom.to_string_lossy().into_owned()],
+        )]);
+
+        enrich_task_contract_from_graph(&mut task, &task_outputs, &[]);
+
+        let mappings = input_value(&task, "copy_file_mappings").unwrap();
+        assert!(mappings.contains(&URL_SAFE_NO_PAD.encode(sbom.to_string_lossy().as_bytes())));
+        assert!(mappings.contains(&URL_SAFE_NO_PAD.encode("META-INF/sbom/application.cdx.json")));
     }
 
     #[test]

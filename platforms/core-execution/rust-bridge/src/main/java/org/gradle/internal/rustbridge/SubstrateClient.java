@@ -3,6 +3,7 @@ package org.gradle.internal.rustbridge;
 import io.grpc.ManagedChannel;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
 import io.grpc.netty.shaded.io.netty.channel.unix.DomainSocketAddress;
+import io.grpc.stub.AbstractStub;
 import gradle.substrate.v1.*;
 import org.gradle.internal.service.scopes.Scope;
 import org.gradle.internal.service.scopes.ServiceScope;
@@ -25,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 public class SubstrateClient implements Closeable {
 
     private static final String CLIENT_PROTOCOL_VERSION = "1.0.0";
+    private static final int MAX_GRPC_MESSAGE_BYTES = 64 * 1024 * 1024;
 
     private final ManagedChannel channel;
     private final boolean noop;
@@ -156,46 +158,52 @@ public class SubstrateClient implements Closeable {
             this.fileTreeStub = null;
             this.versionCatalogStub = null;
         } else {
-            this.controlStub = ControlServiceGrpc.newBlockingStub(channel);
-            this.hashStub = HashServiceGrpc.newBlockingStub(channel);
-            this.cacheStub = CacheServiceGrpc.newBlockingStub(channel);
-            this.cacheAsyncStub = CacheServiceGrpc.newStub(channel);
-            this.execStub = ExecServiceGrpc.newBlockingStub(channel);
-            this.workStub = WorkServiceGrpc.newBlockingStub(channel);
-            this.executionPlanStub = ExecutionPlanServiceGrpc.newBlockingStub(channel);
-            this.dagExecutorStub = DagExecutorServiceGrpc.newBlockingStub(channel);
-            this.executionHistoryStub = ExecutionHistoryServiceGrpc.newBlockingStub(channel);
-            this.cacheOrchestrationStub = BuildCacheOrchestrationServiceGrpc.newBlockingStub(channel);
-            this.fileFingerprintStub = FileFingerprintServiceGrpc.newBlockingStub(channel);
-            this.valueSnapshotStub = ValueSnapshotServiceGrpc.newBlockingStub(channel);
-            this.taskGraphStub = TaskGraphServiceGrpc.newBlockingStub(channel);
-            this.configurationStub = ConfigurationServiceGrpc.newBlockingStub(channel);
-            this.pluginStub = PluginServiceGrpc.newBlockingStub(channel);
-            this.buildOperationsStub = BuildOperationsServiceGrpc.newBlockingStub(channel);
-            this.bootstrapStub = BootstrapServiceGrpc.newBlockingStub(channel);
-            this.dependencyResolutionStub = DependencyResolutionServiceGrpc.newBlockingStub(channel);
-            this.fileWatchStub = FileWatchServiceGrpc.newBlockingStub(channel);
-            this.configCacheStub = ConfigurationCacheServiceGrpc.newBlockingStub(channel);
-            this.toolchainStub = ToolchainServiceGrpc.newBlockingStub(channel);
-            this.buildEventStreamStub = BuildEventStreamServiceGrpc.newBlockingStub(channel);
-            this.workerProcessStub = WorkerProcessServiceGrpc.newBlockingStub(channel);
-            this.buildLayoutStub = BuildLayoutServiceGrpc.newBlockingStub(channel);
-            this.buildResultStub = BuildResultServiceGrpc.newBlockingStub(channel);
-            this.problemReportingStub = ProblemReportingServiceGrpc.newBlockingStub(channel);
-            this.resourceManagementStub = ResourceManagementServiceGrpc.newBlockingStub(channel);
-            this.buildComparisonStub = BuildComparisonServiceGrpc.newBlockingStub(channel);
-            this.consoleStub = ConsoleServiceGrpc.newBlockingStub(channel);
-            this.testExecutionStub = TestExecutionServiceGrpc.newBlockingStub(channel);
-            this.artifactPublishingStub = ArtifactPublishingServiceGrpc.newBlockingStub(channel);
-            this.buildInitStub = BuildInitServiceGrpc.newBlockingStub(channel);
-            this.incrementalCompilationStub = IncrementalCompilationServiceGrpc.newBlockingStub(channel);
-            this.buildMetricsStub = BuildMetricsServiceGrpc.newBlockingStub(channel);
-            this.garbageCollectionStub = GarbageCollectionServiceGrpc.newBlockingStub(channel);
-            this.parserStub = ParserServiceGrpc.newBlockingStub(channel);
-            this.classpathStub = ClasspathServiceGrpc.newBlockingStub(channel);
-            this.fileTreeStub = FileTreeServiceGrpc.newBlockingStub(channel);
-            this.versionCatalogStub = VersionCatalogServiceGrpc.newBlockingStub(channel);
+            this.controlStub = configureStub(ControlServiceGrpc.newBlockingStub(channel));
+            this.hashStub = configureStub(HashServiceGrpc.newBlockingStub(channel));
+            this.cacheStub = configureStub(CacheServiceGrpc.newBlockingStub(channel));
+            this.cacheAsyncStub = configureStub(CacheServiceGrpc.newStub(channel));
+            this.execStub = configureStub(ExecServiceGrpc.newBlockingStub(channel));
+            this.workStub = configureStub(WorkServiceGrpc.newBlockingStub(channel));
+            this.executionPlanStub = configureStub(ExecutionPlanServiceGrpc.newBlockingStub(channel));
+            this.dagExecutorStub = configureStub(DagExecutorServiceGrpc.newBlockingStub(channel));
+            this.executionHistoryStub = configureStub(ExecutionHistoryServiceGrpc.newBlockingStub(channel));
+            this.cacheOrchestrationStub = configureStub(BuildCacheOrchestrationServiceGrpc.newBlockingStub(channel));
+            this.fileFingerprintStub = configureStub(FileFingerprintServiceGrpc.newBlockingStub(channel));
+            this.valueSnapshotStub = configureStub(ValueSnapshotServiceGrpc.newBlockingStub(channel));
+            this.taskGraphStub = configureStub(TaskGraphServiceGrpc.newBlockingStub(channel));
+            this.configurationStub = configureStub(ConfigurationServiceGrpc.newBlockingStub(channel));
+            this.pluginStub = configureStub(PluginServiceGrpc.newBlockingStub(channel));
+            this.buildOperationsStub = configureStub(BuildOperationsServiceGrpc.newBlockingStub(channel));
+            this.bootstrapStub = configureStub(BootstrapServiceGrpc.newBlockingStub(channel));
+            this.dependencyResolutionStub = configureStub(DependencyResolutionServiceGrpc.newBlockingStub(channel));
+            this.fileWatchStub = configureStub(FileWatchServiceGrpc.newBlockingStub(channel));
+            this.configCacheStub = configureStub(ConfigurationCacheServiceGrpc.newBlockingStub(channel));
+            this.toolchainStub = configureStub(ToolchainServiceGrpc.newBlockingStub(channel));
+            this.buildEventStreamStub = configureStub(BuildEventStreamServiceGrpc.newBlockingStub(channel));
+            this.workerProcessStub = configureStub(WorkerProcessServiceGrpc.newBlockingStub(channel));
+            this.buildLayoutStub = configureStub(BuildLayoutServiceGrpc.newBlockingStub(channel));
+            this.buildResultStub = configureStub(BuildResultServiceGrpc.newBlockingStub(channel));
+            this.problemReportingStub = configureStub(ProblemReportingServiceGrpc.newBlockingStub(channel));
+            this.resourceManagementStub = configureStub(ResourceManagementServiceGrpc.newBlockingStub(channel));
+            this.buildComparisonStub = configureStub(BuildComparisonServiceGrpc.newBlockingStub(channel));
+            this.consoleStub = configureStub(ConsoleServiceGrpc.newBlockingStub(channel));
+            this.testExecutionStub = configureStub(TestExecutionServiceGrpc.newBlockingStub(channel));
+            this.artifactPublishingStub = configureStub(ArtifactPublishingServiceGrpc.newBlockingStub(channel));
+            this.buildInitStub = configureStub(BuildInitServiceGrpc.newBlockingStub(channel));
+            this.incrementalCompilationStub = configureStub(IncrementalCompilationServiceGrpc.newBlockingStub(channel));
+            this.buildMetricsStub = configureStub(BuildMetricsServiceGrpc.newBlockingStub(channel));
+            this.garbageCollectionStub = configureStub(GarbageCollectionServiceGrpc.newBlockingStub(channel));
+            this.parserStub = configureStub(ParserServiceGrpc.newBlockingStub(channel));
+            this.classpathStub = configureStub(ClasspathServiceGrpc.newBlockingStub(channel));
+            this.fileTreeStub = configureStub(FileTreeServiceGrpc.newBlockingStub(channel));
+            this.versionCatalogStub = configureStub(VersionCatalogServiceGrpc.newBlockingStub(channel));
         }
+    }
+
+    private static <T extends AbstractStub<T>> T configureStub(T stub) {
+        return stub
+            .withMaxInboundMessageSize(MAX_GRPC_MESSAGE_BYTES)
+            .withMaxOutboundMessageSize(MAX_GRPC_MESSAGE_BYTES);
     }
 
     /**
@@ -238,11 +246,13 @@ public class SubstrateClient implements Closeable {
             return NettyChannelBuilder
                 .forAddress(host, port)
                 .usePlaintext()
+                .maxInboundMessageSize(MAX_GRPC_MESSAGE_BYTES)
                 .build();
         }
         return NettyChannelBuilder
             .forAddress(new DomainSocketAddress(endpoint))
             .usePlaintext()
+            .maxInboundMessageSize(MAX_GRPC_MESSAGE_BYTES)
             .build();
     }
 

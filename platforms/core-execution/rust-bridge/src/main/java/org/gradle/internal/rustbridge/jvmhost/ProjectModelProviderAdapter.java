@@ -1296,18 +1296,26 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "cyclonedx_component_version", componentVersion);
         putIfPresent(inputs, "cyclonedx_project_type", projectType);
         putIfPresent(inputs, "cyclonedx_schema_version", schemaVersion);
+        boolean aggregateTask = isCycloneDxAggregateTask(taskType.getName(), taskType.getSimpleName());
         String includeBomSerialNumber = providerBooleanString(invokeOptional(task, taskType, "getIncludeBomSerialNumber"));
         putIfPresent(inputs, "cyclonedx_include_bom_serial_number", includeBomSerialNumber);
         putIfPresent(inputs, "cyclonedx_timestamp_source_policy", timestampSourcePolicy);
         putIfPresent(inputs, "cyclonedx_timestamp_epoch_ms", timestampEpochMs);
-        putIfPresent(inputs, "cyclonedx_serial_source_policy", cyclonedxSerialSourcePolicy(includeBomSerialNumber));
+        String serialSourcePolicy = cyclonedxSerialSourcePolicy(includeBomSerialNumber, timestampEpochMs);
+        putIfPresent(inputs, "cyclonedx_serial_source_policy", serialSourcePolicy);
         String includeBuildSystem = providerBooleanString(invokeOptional(task, taskType, "getIncludeBuildSystem"));
         putIfPresent(inputs, "cyclonedx_include_build_system", includeBuildSystem);
         String includeBuildEnvironment = providerBooleanString(invokeOptional(task, taskType, "getIncludeBuildEnvironment"));
+        if (aggregateTask && includeBuildEnvironment.isEmpty()) {
+            includeBuildEnvironment = "false";
+        }
         putIfPresent(inputs, "cyclonedx_include_build_environment", includeBuildEnvironment);
         String includeLicenseText = providerBooleanString(invokeOptional(task, taskType, "getIncludeLicenseText"));
         putIfPresent(inputs, "cyclonedx_include_license_text", includeLicenseText);
         String includeMetadataResolution = providerBooleanString(invokeOptional(task, taskType, "getIncludeMetadataResolution"));
+        if (aggregateTask && includeMetadataResolution.isEmpty()) {
+            includeMetadataResolution = "false";
+        }
         putIfPresent(inputs, "cyclonedx_include_metadata_resolution", includeMetadataResolution);
         Object organizationalEntityProvider = invokeOptional(task, taskType, "getOrganizationalEntity");
         String organizationalEntityPresent = providerPresentString(organizationalEntityProvider);
@@ -1315,8 +1323,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         String organizationalEntityJsonBase64 = cyclonedxOrganizationalEntityJsonBase64(organizationalEntityProvider);
         putIfPresent(inputs, "cyclonedx_organizational_entity_json_b64", organizationalEntityJsonBase64);
         String licenseChoice = enumName(invokeOptionalProvider(task, taskType, "getLicenseChoice"));
-        putIfPresent(inputs, "cyclonedx_license_choice", licenseChoice);
         String licenseChoiceJsonBase64 = cyclonedxLicenseChoiceJsonBase64(invokeOptional(task, taskType, "getLicenseChoice"));
+        String licenseChoiceForPolicy = cyclonedxLicenseChoiceForPolicy(licenseChoice, licenseChoiceJsonBase64);
+        putIfPresent(inputs, "cyclonedx_license_choice", licenseChoiceForPolicy);
         putIfPresent(inputs, "cyclonedx_license_choice_json_b64", licenseChoiceJsonBase64);
         String buildSystemEnvironmentVariable = providerValue(invokeOptional(task, taskType, "getBuildSystemEnvironmentVariable"));
         putIfPresent(inputs, "cyclonedx_build_system_environment_variable", buildSystemEnvironmentVariable);
@@ -1338,7 +1347,6 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "cyclonedx_resolved_dependencies", fileCollectionPathString(invokeOptional(task, taskType, "getResolvedDependencies")));
         String resolutionGraphJsonBase64 = cyclonedxResolutionGraphJsonBase64(task, taskType, includeBuildEnvironment);
         putIfPresent(inputs, "cyclonedx_resolution_graph_json_b64", resolutionGraphJsonBase64);
-        boolean aggregateTask = isCycloneDxAggregateTask(taskType.getName(), taskType.getSimpleName());
         String missingBaseFields;
         String timestampField = timestampEpochMs.isEmpty() ? "timestamp-source-policy" : "";
         if (resolutionGraphJsonBase64.isEmpty()) {
@@ -1356,19 +1364,35 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         inputs.put("cyclonedx_sbom_contract_status", resolutionGraphJsonBase64.isEmpty() ? "missing" : "partial");
         inputs.put(
             "cyclonedx_missing_contract_fields",
-            cyclonedxMissingContractFields(missingBaseFields, componentName, componentVersion, projectType, schemaVersion, jsonOutput, xmlOutput, includeBomSerialNumber, includeBuildSystem, includeBuildEnvironment, includeLicenseText, includeMetadataResolution, organizationalEntityPresent, organizationalEntityJsonBase64, licenseChoice, licenseChoiceJsonBase64, externalReferences, externalReferencesJsonBase64)
+            cyclonedxMissingContractFields(missingBaseFields, componentName, componentVersion, projectType, schemaVersion, jsonOutput, xmlOutput, includeBomSerialNumber, serialSourcePolicy, includeBuildSystem, includeBuildEnvironment, includeLicenseText, includeMetadataResolution, organizationalEntityPresent, organizationalEntityJsonBase64, licenseChoiceForPolicy, licenseChoiceJsonBase64, externalReferences, externalReferencesJsonBase64)
         );
         inputs.put("requires_jvm_task_execution", "true");
     }
 
-    private static String cyclonedxSerialSourcePolicy(String includeBomSerialNumber) {
+    private static String cyclonedxSerialSourcePolicy(String includeBomSerialNumber, String timestampEpochMs) {
         if ("true".equalsIgnoreCase(includeBomSerialNumber)) {
+            if (timestampEpochMs != null && !timestampEpochMs.isEmpty()) {
+                return "gradle-substrate-deterministic-identity";
+            }
             return "cyclonedx-gradle-random-uuid";
         }
         if ("false".equalsIgnoreCase(includeBomSerialNumber)) {
             return "omitted";
         }
         return "";
+    }
+
+    private static String cyclonedxLicenseChoiceForPolicy(String licenseChoice, String licenseChoiceJsonBase64) {
+        if (licenseChoiceJsonBase64 != null && !licenseChoiceJsonBase64.isEmpty()) {
+            return licenseChoice;
+        }
+        if (licenseChoice == null || licenseChoice.isEmpty()) {
+            return "";
+        }
+        if (licenseChoice.startsWith("task '") && licenseChoice.contains("' property 'licenseChoice'")) {
+            return "";
+        }
+        return licenseChoice;
     }
 
     private static String cyclonedxExplicitTimestampEpochMillis() {
@@ -1608,6 +1632,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         String jsonOutput,
         String xmlOutput,
         String includeBomSerialNumber,
+        String serialSourcePolicy,
         String includeBuildSystem,
         String includeBuildEnvironment,
         String includeLicenseText,
@@ -1640,7 +1665,11 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if (isBlank(jsonOutput) && isBlank(xmlOutput)) {
             fields.add("json-or-xml-output");
         }
-        if (!"false".equalsIgnoreCase(includeBomSerialNumber)) {
+        if ("true".equalsIgnoreCase(includeBomSerialNumber)) {
+            if (!"gradle-substrate-deterministic-identity".equals(serialSourcePolicy)) {
+                fields.add("serial-source-policy");
+            }
+        } else if (!"false".equalsIgnoreCase(includeBomSerialNumber)) {
             fields.add("serial-source-policy");
         }
         if (!"true".equalsIgnoreCase(includeBuildSystem) && !"false".equalsIgnoreCase(includeBuildSystem)) {
