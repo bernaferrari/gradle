@@ -616,6 +616,32 @@ impl DagExecutorServiceImpl {
     }
 }
 
+fn kernel_plan_from_execution_nodes(
+    build_id: &str,
+    execution_order: &[crate::proto::ExecutionNode],
+    plan_dependencies: &[crate::proto::BuildPlanDependency],
+) -> KernelBuildPlan {
+    let mut tasks = execution_order
+        .iter()
+        .map(|node| KernelTaskPlan {
+            task_path: node.task_path.clone(),
+            task_type: node.task_type.clone(),
+            dependencies: node.dependencies.clone(),
+            execution_context_json: if node.execution_context_json.is_empty() {
+                None
+            } else {
+                Some(node.execution_context_json.clone())
+            },
+        })
+        .collect::<Vec<_>>();
+    tasks.sort_by(|a, b| a.task_path.cmp(&b.task_path));
+    KernelBuildPlan {
+        build_id: build_id.to_string(),
+        tasks,
+        dependency_graph: kernel_dependency_graph_from_plan_dependencies(plan_dependencies),
+    }
+}
+
 fn kernel_dependency_graph_from_plan_dependencies(
     plan_dependencies: &[crate::proto::BuildPlanDependency],
 ) -> Option<KernelDependencyGraph> {
@@ -797,6 +823,29 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 ),
                 total_tasks: 0,
                 critical_path_ms: 0,
+                plan_source: plan_response.plan_source,
+                plan_dependencies: plan_response.plan_dependencies,
+            }));
+        }
+
+        let kernel_plan = kernel_plan_from_execution_nodes(
+            &req.build_id,
+            &plan_response.execution_order,
+            &plan_response.plan_dependencies,
+        );
+        let native_executor_types = plan_response
+            .execution_order
+            .iter()
+            .map(|node| node.task_type.clone())
+            .collect();
+        if let KernelAdmission::Rejected(rejection) =
+            admit_build_plan(&kernel_plan, &native_executor_types)
+        {
+            return Ok(Response::new(StartBuildResponse {
+                accepted: false,
+                error_message: rejection.message(),
+                total_tasks: plan_response.total_tasks,
+                critical_path_ms: plan_response.critical_path_ms,
                 plan_source: plan_response.plan_source,
                 plan_dependencies: plan_response.plan_dependencies,
             }));

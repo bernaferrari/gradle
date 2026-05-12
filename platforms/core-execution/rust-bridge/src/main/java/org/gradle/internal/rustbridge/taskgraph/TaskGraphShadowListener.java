@@ -108,7 +108,7 @@ public class TaskGraphShadowListener implements TaskExecutionGraphListener {
         }
 
         BuildPlan.Builder plan = BuildPlan.newBuilder()
-            .setSchemaVersion(3)
+            .setSchemaVersion(4)
             .setBuildId(buildId)
             .addAllTasks(taskContracts)
             .putMetadata("source", "task-graph-listener-inline")

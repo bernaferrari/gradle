@@ -425,6 +425,29 @@ impl TaskGraphServiceImpl {
             .collect();
         if visited_count != participating.len() {
             has_cycles = true;
+            let ordered = execution_order
+                .iter()
+                .map(|node| node.task_path.as_str())
+                .collect::<HashSet<_>>();
+            let mut unresolved_marked = participating
+                .iter()
+                .filter(|task| !ordered.contains(task.as_str()))
+                .filter_map(|task| self.tasks.get(&(build_id.clone(), task.clone())))
+                .filter(|entry| task_context_has_unsupported_marker(&entry.execution_context_json))
+                .map(|entry| entry.clone())
+                .collect::<Vec<_>>();
+            unresolved_marked.sort_by(|a, b| a.task_path.cmp(&b.task_path));
+            for entry in unresolved_marked {
+                order += 1;
+                execution_order.push(ExecutionNode {
+                    task_path: entry.task_path.clone(),
+                    dependencies: entry.depends_on.clone(),
+                    execution_order: order,
+                    estimated_duration_ms: entry.estimated_duration_ms,
+                    task_type: entry.task_type.clone(),
+                    execution_context_json: entry.execution_context_json.clone(),
+                });
+            }
         }
 
         // Calculate critical path (longest path through DAG)
@@ -495,6 +518,38 @@ impl TaskGraphServiceImpl {
 
         longest.values().copied().max().unwrap_or(0)
     }
+}
+
+fn task_context_has_unsupported_marker(context_json: &str) -> bool {
+    if context_json.contains("\"unsupported_dependency_semantics\":\"true\"")
+        || context_json.contains("\"input.unsupported_dependency_semantics\":\"true\"")
+        || context_json.contains("\"input_value.unsupported_dependency_semantics\":\"true\"")
+        || context_json.contains("\"requires_jvm_task_execution\":true")
+        || context_json.contains("\"copy_unsupported_custom_actions\":true")
+        || context_json.contains("\"test_unsupported_filters\":true")
+        || context_json.contains("\"unsupported_archive_semantics\":true")
+    {
+        return true;
+    }
+    serde_json::from_str::<serde_json::Value>(context_json)
+        .ok()
+        .and_then(|value| value.get("input_properties").cloned())
+        .and_then(|value| value.as_object().cloned())
+        .map(|properties| {
+            properties
+                .get("unsupported_dependency_semantics")
+                .and_then(|value| value.as_str())
+                == Some("true")
+                || properties
+                    .get("input.unsupported_dependency_semantics")
+                    .and_then(|value| value.as_str())
+                    == Some("true")
+                || properties
+                    .get("input_value.unsupported_dependency_semantics")
+                    .and_then(|value| value.as_str())
+                    == Some("true")
+        })
+        .unwrap_or(false)
 }
 
 fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
