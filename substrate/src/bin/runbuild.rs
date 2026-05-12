@@ -7,6 +7,7 @@ use gradle_substrate_daemon::proto::bootstrap_service_client::BootstrapServiceCl
 use gradle_substrate_daemon::proto::dag_executor_service_client::DagExecutorServiceClient;
 use gradle_substrate_daemon::proto::{CompleteBuildRequest, InitBuildRequest, RunBuildRequest};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use tonic::transport::Endpoint;
 
 #[derive(Parser, Debug)]
@@ -52,6 +53,8 @@ struct Args {
 struct ShadowArtifact {
     plan: ShadowPlan,
     stored_at_ms: i64,
+    #[serde(default)]
+    input_fingerprints: Vec<ShadowInputFingerprint>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -89,6 +92,26 @@ struct ShadowInputSpec {
     value: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct ShadowInputFingerprint {
+    #[serde(default)]
+    task_path: String,
+    #[serde(default)]
+    input_name: String,
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    exists: bool,
+    #[serde(default)]
+    size: u64,
+    #[serde(default)]
+    modified_ms: i64,
+    #[serde(default)]
+    sha256: String,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
@@ -118,6 +141,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !args.skip_invalidation {
         validate_build_definition_mtimes(Path::new(&project_dir), artifact.stored_at_ms)?;
         validate_task_input_mtimes(&artifact, Path::new(&project_dir), artifact.stored_at_ms)?;
+        validate_input_fingerprints(&artifact, Path::new(&project_dir))?;
     }
 
     let channel = connect_tcp(&args.endpoint).await?;
@@ -354,6 +378,176 @@ fn captured_produced_paths(artifact: &ShadowArtifact) -> Vec<PathBuf> {
         .collect()
 }
 
+fn validate_input_fingerprints(
+    artifact: &ShadowArtifact,
+    project_dir: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if artifact.input_fingerprints.is_empty() && has_project_path_inputs(artifact, project_dir) {
+        return Err(
+            "cached build-plan artifact is unsafe for direct RunBuild: missing input_fingerprints"
+                .into(),
+        );
+    }
+
+    for expected in &artifact.input_fingerprints {
+        let path = Path::new(&expected.path);
+        if !path.is_absolute() || !path.starts_with(project_dir) {
+            return Err(format!(
+                "cached build-plan artifact has unsupported input fingerprint outside project: task '{}' input '{}' path '{}'",
+                expected.task_path, expected.input_name, expected.path
+            )
+            .into());
+        }
+        let actual = fingerprint_input_path(path)?;
+        if actual.kind != expected.kind
+            || actual.exists != expected.exists
+            || actual.size != expected.size
+            || actual.sha256 != expected.sha256
+        {
+            return Err(format!(
+                "cached build-plan artifact is stale: task '{}' input '{}' path '{}' fingerprint changed (expected kind={} exists={} size={} sha256={} modified_ms={}, actual kind={} exists={} size={} sha256={} modified_ms={})",
+                expected.task_path,
+                expected.input_name,
+                expected.path,
+                expected.kind,
+                expected.exists,
+                expected.size,
+                expected.sha256,
+                expected.modified_ms,
+                actual.kind,
+                actual.exists,
+                actual.size,
+                actual.sha256,
+                actual.modified_ms
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
+fn has_project_path_inputs(artifact: &ShadowArtifact, project_dir: &Path) -> bool {
+    let produced_paths = captured_produced_paths(artifact);
+    artifact.plan.tasks.iter().any(|task| {
+        task.input_specs.iter().any(|input| {
+            if input.kind != "path" {
+                return false;
+            }
+            let path = Path::new(&input.value);
+            path.is_absolute()
+                && path.starts_with(project_dir)
+                && !produced_paths
+                    .iter()
+                    .any(|produced| path == produced || path.starts_with(produced))
+        })
+    })
+}
+
+struct CurrentInputFingerprint {
+    kind: String,
+    exists: bool,
+    size: u64,
+    modified_ms: i64,
+    sha256: String,
+}
+
+fn fingerprint_input_path(
+    path: &Path,
+) -> Result<CurrentInputFingerprint, Box<dyn std::error::Error>> {
+    if !path.exists() {
+        return Ok(CurrentInputFingerprint {
+            kind: "missing".to_string(),
+            exists: false,
+            size: 0,
+            modified_ms: 0,
+            sha256: String::new(),
+        });
+    }
+
+    let metadata = path.metadata()?;
+    let modified_ms = metadata_modified_ms(&metadata)?;
+    if metadata.is_file() {
+        return Ok(CurrentInputFingerprint {
+            kind: "file".to_string(),
+            exists: true,
+            size: metadata.len(),
+            modified_ms,
+            sha256: sha256_file(path)?,
+        });
+    }
+    if metadata.is_dir() {
+        let (size, newest_modified_ms, sha256) = fingerprint_directory(path)?;
+        return Ok(CurrentInputFingerprint {
+            kind: "directory".to_string(),
+            exists: true,
+            size,
+            modified_ms: newest_modified_ms.max(modified_ms),
+            sha256,
+        });
+    }
+
+    Ok(CurrentInputFingerprint {
+        kind: "other".to_string(),
+        exists: true,
+        size: 0,
+        modified_ms,
+        sha256: String::new(),
+    })
+}
+
+fn fingerprint_directory(path: &Path) -> Result<(u64, i64, String), Box<dyn std::error::Error>> {
+    let mut files = Vec::new();
+    collect_directory_files(path, path, &mut files)?;
+    let mut hasher = Sha256::new();
+    let mut total_size = 0;
+    let mut newest_modified_ms = metadata_modified_ms(&path.metadata()?)?;
+    for (relative_path, file_path) in files {
+        let metadata = file_path.metadata()?;
+        total_size += metadata.len();
+        newest_modified_ms = newest_modified_ms.max(metadata_modified_ms(&metadata)?);
+        hasher.update(relative_path.as_bytes());
+        hasher.update([0]);
+        hasher.update(sha256_file(&file_path)?.as_bytes());
+        hasher.update([0]);
+    }
+    Ok((
+        total_size,
+        newest_modified_ms,
+        format!("{:x}", hasher.finalize()),
+    ))
+}
+
+fn collect_directory_files(
+    root: &Path,
+    path: &Path,
+    files: &mut Vec<(String, PathBuf)>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for entry in std::fs::read_dir(path)? {
+        let child = entry?.path();
+        let metadata = child.metadata()?;
+        if metadata.is_dir() {
+            collect_directory_files(root, &child, files)?;
+        } else if metadata.is_file() {
+            let relative_path = child
+                .strip_prefix(root)?
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            files.push((relative_path, child));
+        }
+    }
+    files.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    Ok(())
+}
+
+fn sha256_file(path: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    let bytes = std::fs::read(path)?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
+fn metadata_modified_ms(metadata: &std::fs::Metadata) -> Result<i64, Box<dyn std::error::Error>> {
+    Ok(metadata.modified()?.duration_since(UNIX_EPOCH)?.as_millis() as i64)
+}
+
 fn tracked_build_definition_files(project_dir: &Path) -> Vec<PathBuf> {
     [
         "build.gradle",
@@ -411,4 +605,96 @@ fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn artifact_with_path_input(
+        path: &Path,
+        fingerprints: Vec<ShadowInputFingerprint>,
+    ) -> ShadowArtifact {
+        ShadowArtifact {
+            plan: ShadowPlan {
+                build_id: "build:test".to_string(),
+                projects: Vec::new(),
+                tasks: vec![ShadowTask {
+                    input_specs: vec![ShadowInputSpec {
+                        kind: "path".to_string(),
+                        value: path.to_string_lossy().into_owned(),
+                    }],
+                    outputs: Vec::new(),
+                    local_state: Vec::new(),
+                    destroyables: Vec::new(),
+                }],
+            },
+            stored_at_ms: 0,
+            input_fingerprints: fingerprints,
+        }
+    }
+
+    #[test]
+    fn validates_matching_file_fingerprint() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("src/Main.java");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "class Main {}\n").unwrap();
+        let current = fingerprint_input_path(&file).unwrap();
+        let artifact = artifact_with_path_input(
+            &file,
+            vec![ShadowInputFingerprint {
+                task_path: ":compileJava".to_string(),
+                input_name: "source".to_string(),
+                path: file.to_string_lossy().into_owned(),
+                kind: current.kind,
+                exists: current.exists,
+                size: current.size,
+                modified_ms: current.modified_ms,
+                sha256: current.sha256,
+            }],
+        );
+
+        validate_input_fingerprints(&artifact, temp.path()).unwrap();
+    }
+
+    #[test]
+    fn rejects_changed_file_content_even_when_path_still_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("src/Main.java");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "class Main {}\n").unwrap();
+        let current = fingerprint_input_path(&file).unwrap();
+        let artifact = artifact_with_path_input(
+            &file,
+            vec![ShadowInputFingerprint {
+                task_path: ":compileJava".to_string(),
+                input_name: "source".to_string(),
+                path: file.to_string_lossy().into_owned(),
+                kind: current.kind,
+                exists: current.exists,
+                size: current.size,
+                modified_ms: current.modified_ms,
+                sha256: current.sha256,
+            }],
+        );
+
+        std::fs::write(&file, "class Main { String changed; }\n").unwrap();
+        let error = validate_input_fingerprints(&artifact, temp.path()).unwrap_err();
+
+        assert!(error.to_string().contains("fingerprint changed"));
+    }
+
+    #[test]
+    fn rejects_missing_fingerprints_for_project_path_inputs() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("src/Main.java");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "class Main {}\n").unwrap();
+        let artifact = artifact_with_path_input(&file, Vec::new());
+
+        let error = validate_input_fingerprints(&artifact, temp.path()).unwrap_err();
+
+        assert!(error.to_string().contains("missing input_fingerprints"));
+    }
 }
