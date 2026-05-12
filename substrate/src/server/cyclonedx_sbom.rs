@@ -15,6 +15,7 @@ pub const RESOLUTION_GRAPH_SCHEMA: &str = "gradle-substrate.cyclonedx-resolution
 pub struct CycloneDxSbomContract {
     pub schema: String,
     pub spec_version: String,
+    #[serde(default)]
     pub serial_number: String,
     pub timestamp: String,
     pub root_component: CycloneDxComponent,
@@ -241,11 +242,16 @@ pub fn draft_contract_from_captured_inputs(
         timestamp_ms,
     };
     let timestamp = policy.timestamp()?;
+    let serial_number = if options.include_bom_serial_number {
+        policy.serial_number()
+    } else {
+        String::new()
+    };
     draft_contract_from_resolution_graph(
         &graph,
         CycloneDxDraftOptions {
             spec_version: options.spec_version,
-            serial_number: policy.serial_number(),
+            serial_number,
             timestamp,
             root_group: options.root_group,
             root_name: options.root_name,
@@ -332,14 +338,8 @@ impl CycloneDxSbomContract {
                 self.schema, CONTRACT_SCHEMA
             ));
         }
-        if self.spec_version.trim().is_empty()
-            || self.serial_number.trim().is_empty()
-            || self.timestamp.trim().is_empty()
-        {
-            return Err(
-                "CycloneDX contract is missing spec_version, serial_number, or timestamp"
-                    .to_string(),
-            );
+        if self.spec_version.trim().is_empty() || self.timestamp.trim().is_empty() {
+            return Err("CycloneDX contract is missing spec_version or timestamp".to_string());
         }
         self.root_component.validate("root component")?;
         for component in &self.components {
@@ -463,7 +463,7 @@ struct CycloneDxBom<'a> {
     bom_format: &'static str,
     #[serde(rename = "specVersion")]
     spec_version: &'a str,
-    #[serde(rename = "serialNumber")]
+    #[serde(rename = "serialNumber", skip_serializing_if = "str::is_empty")]
     serial_number: &'a str,
     version: u32,
     metadata: CycloneDxMetadata<'a>,
@@ -614,7 +614,6 @@ pub fn draft_contract_from_resolution_graph(
 
 fn validate_draft_options(options: &CycloneDxDraftOptions) -> Result<(), String> {
     if options.spec_version.trim().is_empty()
-        || options.serial_number.trim().is_empty()
         || options.timestamp.trim().is_empty()
         || options.root_name.trim().is_empty()
         || options.root_version.trim().is_empty()
@@ -627,7 +626,6 @@ fn validate_draft_options(options: &CycloneDxDraftOptions) -> Result<(), String>
 
 fn validate_aggregate_options(options: &CycloneDxAggregateOptions) -> Result<(), String> {
     if options.spec_version.trim().is_empty()
-        || options.serial_number.trim().is_empty()
         || options.timestamp.trim().is_empty()
         || options.root_name.trim().is_empty()
         || options.root_version.trim().is_empty()
@@ -897,12 +895,20 @@ pub fn render_xml(contract: &CycloneDxSbomContract) -> Result<String, String> {
     let bom = normalized_bom(contract);
     let mut xml = String::new();
     xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    xml.push_str(&format!(
-        "<bom xmlns=\"http://cyclonedx.org/schema/bom/{}\" serialNumber=\"{}\" version=\"{}\">\n",
-        xml_escape(bom.spec_version),
-        xml_escape(bom.serial_number),
-        bom.version
-    ));
+    if bom.serial_number.is_empty() {
+        xml.push_str(&format!(
+            "<bom xmlns=\"http://cyclonedx.org/schema/bom/{}\" version=\"{}\">\n",
+            xml_escape(bom.spec_version),
+            bom.version
+        ));
+    } else {
+        xml.push_str(&format!(
+            "<bom xmlns=\"http://cyclonedx.org/schema/bom/{}\" serialNumber=\"{}\" version=\"{}\">\n",
+            xml_escape(bom.spec_version),
+            xml_escape(bom.serial_number),
+            bom.version
+        ));
+    }
     xml.push_str("  <metadata>\n");
     xml.push_str(&format!(
         "    <timestamp>{}</timestamp>\n",
@@ -1268,6 +1274,54 @@ mod tests {
             .components
             .iter()
             .any(|component| component.bom_ref == "pkg:maven/org.example/lib@1.1"));
+    }
+
+    #[test]
+    fn omits_serial_when_captured_option_disables_bom_serial_number() {
+        let graph_json = serde_json::to_vec(&sample_resolution_graph()).unwrap();
+        let encoded_graph = base64::engine::general_purpose::STANDARD.encode(graph_json);
+        let inputs = BTreeMap::from([
+            (
+                "cyclonedx_resolution_graph_json_b64".to_string(),
+                encoded_graph,
+            ),
+            (
+                "cyclonedx_schema_version".to_string(),
+                "VERSION_16".to_string(),
+            ),
+            (
+                "cyclonedx_component_group".to_string(),
+                "org.example".to_string(),
+            ),
+            ("cyclonedx_component_name".to_string(), "demo".to_string()),
+            ("cyclonedx_component_version".to_string(), "1.0".to_string()),
+            (
+                "cyclonedx_project_type".to_string(),
+                "APPLICATION".to_string(),
+            ),
+            (
+                "cyclonedx_include_bom_serial_number".to_string(),
+                "false".to_string(),
+            ),
+            (
+                "cyclonedx_json_output".to_string(),
+                "/tmp/bom.json".to_string(),
+            ),
+            (
+                "cyclonedx_identity_task_path".to_string(),
+                ":cyclonedxDirectBom".to_string(),
+            ),
+        ]);
+
+        let contract =
+            draft_contract_from_captured_inputs(&inputs, "build-123", 1_778_595_445_123).unwrap();
+        let json = render_json(&contract).unwrap();
+        let xml = render_xml(&contract).unwrap();
+
+        assert_eq!("", contract.serial_number);
+        assert!(!json.contains("serialNumber"));
+        assert!(!xml.contains("serialNumber="));
+        assert!(xml.contains("<bom xmlns=\"http://cyclonedx.org/schema/bom/1.6\" version=\"1\">"));
     }
 
     #[test]
