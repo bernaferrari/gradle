@@ -399,9 +399,9 @@ fn validate_input_fingerprints(
 
     for expected in &artifact.input_fingerprints {
         let path = Path::new(&expected.path);
-        if !path.is_absolute() || !path.starts_with(project_dir) {
+        if !path.is_absolute() {
             return Err(format!(
-                "cached build-plan artifact has unsupported input fingerprint outside project: task '{}' input '{}' path '{}'",
+                "cached build-plan artifact has unsupported non-absolute input fingerprint: task '{}' input '{}' path '{}'",
                 expected.task_path, expected.input_name, expected.path
             )
             .into());
@@ -793,6 +793,32 @@ mod tests {
         let error = validate_input_fingerprints(&artifact, temp.path()).unwrap_err();
 
         assert!(error.to_string().contains("missing input_fingerprints"));
+    }
+
+    #[test]
+    fn validates_fingerprinted_external_cache_inputs() {
+        let temp = tempfile::tempdir().unwrap();
+        let project_dir = temp.path().join("project");
+        let cache_file = temp.path().join("gradle-cache/module.jar");
+        std::fs::create_dir_all(&project_dir).unwrap();
+        std::fs::create_dir_all(cache_file.parent().unwrap()).unwrap();
+        std::fs::write(&cache_file, "jar bytes").unwrap();
+        let current = fingerprint_input_path(&cache_file).unwrap();
+        let artifact = artifact_with_path_input(
+            &cache_file,
+            vec![ShadowInputFingerprint {
+                task_path: ":compileJava".to_string(),
+                input_name: "classpath".to_string(),
+                path: cache_file.to_string_lossy().into_owned(),
+                kind: current.kind,
+                exists: current.exists,
+                size: current.size,
+                modified_ms: current.modified_ms,
+                sha256: current.sha256,
+            }],
+        );
+
+        validate_input_fingerprints(&artifact, &project_dir).unwrap();
     }
 
     #[test]

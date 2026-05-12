@@ -95,6 +95,18 @@ Rust `RunBuild` duration, 14 Rust-executed tasks, 6 validated input
 fingerprints, `build-plan-shadow` as the plan source, configuration skipped,
 and zero JVM forwards.
 
+Direct warm coverage has also been expanded from one fixture to the supported
+local dogfood set. `tools/dogfood_runner/direct_warm.py` performs one strict
+Gradle/JVM capture per supported dogfood project and then runs the cached plan
+directly through `gradle-substrate-runbuild`. The latest checked run wrote
+`build/direct-warm-dogfood-current/direct-warm-results.json` and
+`build/direct-warm-dogfood-current/direct-warm-summary.md`; all 6 supported
+local dogfood projects passed direct warm execution with zero JVM forwards:
+OSS-style Java library, Java multiproject, external JUnit library, external
+BOM/conflict, JavaExec process launch, and Javadoc process launch. Total direct
+warm wall time was 4442.7 ms across the six projects, with every project using
+`build-plan-shadow` and validated input fingerprints.
+
 ## Boundaries
 
 Rust owns the admitted post-configuration path in this report: build-plan
