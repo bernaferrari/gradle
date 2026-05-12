@@ -259,6 +259,15 @@ impl FileWatchService for FileWatchServiceImpl {
         let req = request.into_inner();
         let root_path = req.root_path.clone();
 
+        if let Ok(metadata) = std::fs::metadata(&root_path) {
+            let file_type = metadata.file_type();
+            if !file_type.is_dir() && !file_type.is_file() {
+                return Err(Status::failed_precondition(format!(
+                    "unsupported file-watch root type: {root_path}"
+                )));
+            }
+        }
+
         let watch_id = format!(
             "watch-{}",
             self.next_watch_id.fetch_add(1, Ordering::Relaxed)
@@ -1444,6 +1453,37 @@ mod tests {
         }))
         .await
         .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_special_file_root_fails_closed() {
+        let svc = FileWatchServiceImpl::new();
+        let dir = tempfile::tempdir().unwrap();
+        let fifo_path = dir.path().join("named-pipe");
+        let fifo_cstring =
+            std::ffi::CString::new(fifo_path.to_string_lossy().as_bytes()).unwrap();
+
+        let created = unsafe { libc::mkfifo(fifo_cstring.as_ptr(), 0o600) };
+        assert_eq!(created, 0, "mkfifo should create a special file root");
+
+        let status = svc
+            .start_watching(Request::new(StartWatchingRequest {
+                root_path: fifo_path.to_string_lossy().to_string(),
+                include_patterns: vec![],
+                exclude_patterns: vec![],
+                debounce_ms: 0,
+                follow_symlinks: true,
+            }))
+            .await
+            .unwrap_err();
+
+        assert_eq!(status.code(), tonic::Code::FailedPrecondition);
+        assert!(
+            status.message().contains("unsupported file-watch root type"),
+            "diagnostic should explain why Rust refused the root: {}",
+            status.message()
+        );
     }
 
     /// Test that network FS detection returns false for local paths.

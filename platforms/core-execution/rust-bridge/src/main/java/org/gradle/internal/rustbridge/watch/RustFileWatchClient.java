@@ -11,8 +11,12 @@ import gradle.substrate.v1.StopWatchingRequest;
 import gradle.substrate.v1.StopWatchingResponse;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 import org.slf4j.Logger;
 
+import java.io.Closeable;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
@@ -22,7 +26,8 @@ import java.util.List;
  * Client for the Rust file watching service.
  * Manages filesystem watchers and polls for change events.
  */
-public class RustFileWatchClient {
+@ServiceScope(Scope.UserHome.class)
+public class RustFileWatchClient implements Closeable {
 
     private static final Logger LOGGER = Logging.getLogger(RustFileWatchClient.class);
 
@@ -30,6 +35,15 @@ public class RustFileWatchClient {
 
     public RustFileWatchClient(SubstrateClient client) {
         this.client = client;
+    }
+
+    public boolean isNoop() {
+        return client.isNoop();
+    }
+
+    @Override
+    public void close() throws IOException {
+        client.close();
     }
 
     /**

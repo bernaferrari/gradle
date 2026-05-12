@@ -21,6 +21,9 @@ inspect a profiler:
 - hashing/fingerprinting: whether installed Gradle can run with Rust
   build-session hashing plus file-collection snapshot/fingerprint support
 - file watching: how quickly an edit becomes observable
+- installed file watching: whether a real Gradle-under-test install can route
+  user-home VFS file watching through the Rust daemon without build-session
+  service leakage
 
 Run:
 
@@ -71,6 +74,9 @@ Fast mode reports:
   deterministic output hash
 - `real_build_dependency_readthrough`: an installed Gradle-under-test build resolving a local HTTP Maven `1.+` dependency plus a static Maven graph-only dependency with a transitive child and isolated Rust state; the first run warms dynamic metadata/artifact stores and listener-prefetches the static direct/transitive artifacts, while the second run deletes `build/`, uses a fresh Gradle user home, materializes all artifacts again, and reports remote requests avoided
 - `file_watch_first_event`: native file watcher latency from write to event
+- `installed_authoritative_file_watch`: an installed Gradle-under-test `help
+  --watch-fs` invocation with authoritative Rust file watching enabled through
+  the user-home VFS wiring
 
 Fast mode is also a local regression gate. It exits nonzero when a required
 metric fails or when any headline budget regresses beyond the allowed band:
@@ -83,7 +89,10 @@ metric fails or when any headline budget regresses beyond the allowed band:
   report zero JVM forwards;
 - real-build dependency read-through must avoid at least 3 first-run remote
   requests on the second run and complete at or below 60000 ms;
-- file-watch first event latency must be at or below 250 ms.
+- file-watch first event latency must be at or below 250 ms;
+- installed authoritative file watching must observe Rust daemon startup or
+  connection, report Gradle file-system watching active, and complete at or
+  below 30000 ms.
 
 Proof mode keeps the heavier subsystem checks out of the default visible demo:
 
@@ -118,11 +127,25 @@ Current all-mode proof evidence:
 python3 tools/demo/first_60_seconds.py --mode all --skip-build --output build/first60-current-all.json
 ```
 
-The latest local run passed all 10 checks: daemon ready in 676.8ms,
+The latest all-mode proof run passed all 10 checks: daemon ready in 676.8ms,
 authoritative Rust DAG in 15566.9ms with zero JVM forwards, real-build
 dependency read-through in 7467.8ms with 3/5 remote requests avoided,
 file-watch first event in 11ms, and all dependency transport/cache/read-through
 proof checks under their budgets.
+
+Current fast-mode evidence after installing Rust-backed user-home file-watch
+wiring:
+
+```bash
+python3 tools/demo/first_60_seconds.py --mode fast --skip-build --output build/first60-filewatch-userhome-final.json
+```
+
+The latest local fast run passed all 5 checks: daemon ready in 16.8ms,
+authoritative Rust DAG in 14936.8ms with cold 12194.3ms, warm 2739.1ms,
+configuration-cache reuse, 7 warm up-to-date skips, 4 warm skipped/no-source
+tasks, zero JVM forwards, real-build dependency read-through in 7611.0ms with
+3/5 remote requests avoided, file-watch first event in 11ms, and installed
+authoritative file watching in 3227.4ms.
 
 The real-build read-through metric runs when `build/gradle-under-test/bin/gradle`
 exists, or when `GRADLE_UNDER_TEST_BIN`/`GRADLE_UNDER_TEST` points at a local

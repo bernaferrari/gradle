@@ -35,6 +35,7 @@ import org.gradle.internal.rustbridge.taskgraph.RustTaskGraphClient;
 import org.gradle.internal.rustbridge.taskgraph.TaskGraphShadowListener;
 import org.gradle.internal.rustbridge.taskgraph.TaskGraphShadowReporter;
 import org.gradle.internal.rustbridge.testexec.TestExecutionShadowListener;
+import org.gradle.internal.rustbridge.watch.RustFileWatchClient;
 import org.gradle.internal.service.PrivateService;
 import org.gradle.internal.service.Provides;
 import org.gradle.internal.service.ServiceRegistration;
@@ -45,6 +46,7 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 import java.io.File;
+import java.util.Locale;
 
 /**
  * Minimal compile-safe service wiring for the Rust bridge.
@@ -86,6 +88,7 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
 
     @Override
     public void registerGradleUserHomeServices(ServiceRegistration registration) {
+        registration.addProvider(new GradleUserHomeServices());
     }
 
     @Override
@@ -165,6 +168,92 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
         @Provides
         HashMismatchReporter createHashMismatchReporter() {
             return new HashMismatchReporter(true);
+        }
+    }
+
+    private static class GradleUserHomeServices implements ServiceRegistrationProvider {
+        @Provides
+        RustFileWatchClient createRustFileWatchClient() {
+            if (!isUserHomeFileWatchEnabled()) {
+                return new RustFileWatchClient(SubstrateClient.noop("file-watch-disabled"));
+            }
+
+            try {
+                SubstrateClient client = createUserHomeSubstrateClient();
+                if (client.isNoop()) {
+                    return new RustFileWatchClient(client);
+                }
+                return new RustFileWatchClient(client);
+            } catch (Exception e) {
+                if (isUserHomeFileWatchAuthoritative()) {
+                    throw new SubstrateException("Rust file watcher is authoritative but unavailable", e);
+                }
+                LOGGER.warn("[substrate:watch] Rust file watcher disabled in user-home scope: {}", e.getMessage());
+                return new RustFileWatchClient(SubstrateClient.noop("file-watch-unavailable:" + e.getMessage()));
+            }
+        }
+
+        private static SubstrateClient createUserHomeSubstrateClient() throws java.io.IOException {
+            String binaryPath = systemProperty(RustSubstrateOptions.DAEMON_BINARY_PATH);
+            File daemonBinary;
+            if (binaryPath.isEmpty()) {
+                String javaHome = System.getProperty("java.home");
+                File installDir = new File(javaHome).getParentFile();
+                if (installDir == null) {
+                    throw new SubstrateException("daemon-install-dir-unavailable:" + javaHome);
+                }
+                daemonBinary = DaemonLauncher.resolveBinary(installDir);
+            } else {
+                daemonBinary = new File(binaryPath);
+            }
+
+            String configuredStateDir = systemProperty(RustSubstrateOptions.STATE_DIRECTORY).trim();
+            File socketDirectory = configuredStateDir.isEmpty()
+                ? new File(System.getProperty("user.home"), ".gradle-substrate")
+                : new File(configuredStateDir);
+            return DaemonLauncher.of(daemonBinary, socketDirectory).launchOrConnect();
+        }
+
+        private static boolean isUserHomeFileWatchEnabled() {
+            RustSubstrateOptions.SubstrateMode mode = systemMode();
+            if (mode != null) {
+                return mode != RustSubstrateOptions.SubstrateMode.OFF;
+            }
+            return isSystemPropertyEnabled(RustSubstrateOptions.ENABLE_SUBSTRATE)
+                && isSystemPropertyEnabled(RustSubstrateOptions.ENABLE_RUST_FILE_WATCH);
+        }
+
+        private static boolean isUserHomeFileWatchAuthoritative() {
+            RustSubstrateOptions.SubstrateMode mode = systemMode();
+            if (mode == RustSubstrateOptions.SubstrateMode.AUTHORITATIVE) {
+                return true;
+            }
+            if (mode == RustSubstrateOptions.SubstrateMode.OFF) {
+                return false;
+            }
+            return isSystemPropertyEnabled(RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_FILE_WATCH);
+        }
+
+        private static RustSubstrateOptions.SubstrateMode systemMode() {
+            String value = System.getProperty(RustSubstrateOptions.SUBSTRATE_MODE.getPropertyName());
+            if (value == null || value.trim().isEmpty()) {
+                return null;
+            }
+            try {
+                return RustSubstrateOptions.SubstrateMode.valueOf(value.trim().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException e) {
+                return null;
+            }
+        }
+
+        private static boolean isSystemPropertyEnabled(org.gradle.internal.buildoption.InternalOption<Boolean> option) {
+            String value = System.getProperty(option.getPropertyName());
+            return value != null && Boolean.parseBoolean(value);
+        }
+
+        private static String systemProperty(org.gradle.internal.buildoption.InternalOption<String> option) {
+            String value = System.getProperty(option.getPropertyName());
+            return value == null ? "" : value;
         }
     }
 
