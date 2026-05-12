@@ -89,21 +89,22 @@ Summary from `build/dogfood-oss/dogfood-summary.md`:
 
 | Metric | Result |
 | --- | ---: |
-| Projects matched | 4/4 |
-| Supported projects matched | 1/1 |
+| Projects matched | 5/5 |
+| Supported projects matched | 2/2 |
 | Fail-closed projects matched | 3/3 |
-| Supported projects with zero JVM forwards | 1/1 |
-| Rust RunBuild markers | 4/4 |
-| Rust RunBuild executions | 1/4 |
-| Task-graph captures | 4/4 |
-| Upstream observed wall time | 33284 ms |
-| Rust substrate observed wall time | 107128 ms |
-| Upstream task total | 33 |
-| Rust substrate task total | 11 |
+| Supported projects with zero JVM forwards | 2/2 |
+| Rust RunBuild markers | 5/5 |
+| Rust RunBuild executions | 2/5 |
+| Task-graph captures | 5/5 |
+| Upstream observed wall time | 31583 ms |
+| Rust substrate observed wall time | 109086 ms |
+| Upstream task total | 35 |
+| Rust substrate task total | 13 |
 
-`spring-petclinic` now runs the selected `clean compileJava` slice through
-strict Rust RunBuild with `build-plan-cache` as the plan source, two Rust
-executed tasks, zero JVM forwards, and task/output/hash parity.
+`spring-gs-rest-service-complete` and `spring-petclinic` now run selected
+`clean compileJava` slices through strict Rust RunBuild with `build-plan-cache`
+as the plan source, two Rust-executed tasks each, zero JVM forwards, and
+task/output/hash parity.
 `spring-petclinic-testclasses` is a separate strict fail-closed gate for the
 broader `clean testClasses` slice: it now rejects with a precise CycloneDX SBOM
 diagnostic because `:cyclonedxBom` and `:cyclonedxDirectBom` declare SBOM

@@ -1,11 +1,34 @@
 {
   "schema": "gradle-substrate.dogfood-manifest.v1",
   "root": ".",
-  "minimum_projects": 4,
-  "minimum_supported_projects": 1,
+  "minimum_projects": 5,
+  "minimum_supported_projects": 2,
   "minimum_fail_closed_projects": 3,
   "description": "Pinned external OSS Gradle projects for the next Rust substrate dogfood layer. These entries are not vendored into the repository; a fetch/cache runner should clone them under build/dogfood-oss before execution.",
   "projects": [
+    {
+      "name": "spring-gs-rest-service-complete",
+      "path": "spring-gs-rest-service-complete",
+      "source": {
+        "kind": "git",
+        "url": "https://github.com/spring-guides/gs-rest-service.git",
+        "ref": "e9efc9dfa0abe8cf8e15cf0e71830b5125322cae",
+        "subdir": "complete",
+        "description": "Spring guide REST service complete sample pinned to an immutable commit."
+      },
+      "tasks": ["clean", "compileJava"],
+      "mode": "strict",
+      "expectation": "supported",
+      "timeout_seconds": 300,
+      "reason": "Recognizable Spring guide Java build. This second supported external entry proves the Rust RunBuild path is not limited to Spring PetClinic.",
+      "checks": {
+        "task_parity": true,
+        "output_inventory": true,
+        "output_hashes": true,
+        "archive_entries": true,
+        "no_jvm_forwards": true
+      }
+    },
     {
       "name": "spring-petclinic",
       "path": "spring-petclinic",
