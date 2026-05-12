@@ -5,6 +5,7 @@ use std::path::Path;
 
 use quick_xml::events::Event;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 pub const CONTRACT_SCHEMA: &str = "gradle-substrate.cyclonedx-sbom.v1";
 pub const RESOLUTION_GRAPH_SCHEMA: &str = "gradle-substrate.cyclonedx-resolution-graph.v1";
@@ -134,6 +135,34 @@ pub struct CycloneDxAggregateOptions {
     pub root_name: String,
     pub root_version: String,
     pub root_component_type: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CycloneDxIdentityPolicy {
+    pub build_id: String,
+    pub task_path: String,
+    pub root_group: String,
+    pub root_name: String,
+    pub root_version: String,
+    pub schema_version: String,
+    pub timestamp_ms: i64,
+}
+
+impl CycloneDxIdentityPolicy {
+    pub fn serial_number(&self) -> String {
+        deterministic_serial_number(&[
+            &self.build_id,
+            &self.task_path,
+            &self.root_group,
+            &self.root_name,
+            &self.root_version,
+            &self.schema_version,
+        ])
+    }
+
+    pub fn timestamp(&self) -> Result<String, String> {
+        timestamp_from_epoch_millis(self.timestamp_ms)
+    }
 }
 
 pub fn validate_captured_task_options(
@@ -565,6 +594,44 @@ fn validate_aggregate_options(options: &CycloneDxAggregateOptions) -> Result<(),
         );
     }
     Ok(())
+}
+
+fn deterministic_serial_number(parts: &[&str]) -> String {
+    let mut hasher = Sha256::new();
+    for part in parts {
+        hasher.update(part.as_bytes());
+        hasher.update([0]);
+    }
+    let digest = hasher.finalize();
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    format!(
+        "urn:uuid:{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0],
+        bytes[1],
+        bytes[2],
+        bytes[3],
+        bytes[4],
+        bytes[5],
+        bytes[6],
+        bytes[7],
+        bytes[8],
+        bytes[9],
+        bytes[10],
+        bytes[11],
+        bytes[12],
+        bytes[13],
+        bytes[14],
+        bytes[15],
+    )
+}
+
+fn timestamp_from_epoch_millis(timestamp_ms: i64) -> Result<String, String> {
+    let timestamp = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(timestamp_ms)
+        .ok_or_else(|| format!("invalid CycloneDX timestamp millis '{timestamp_ms}'"))?;
+    Ok(timestamp.format("%Y-%m-%dT%H:%M:%SZ").to_string())
 }
 
 fn merge_component(
@@ -1085,6 +1152,27 @@ mod tests {
         assert_eq!("library", options.root_component_type);
         assert!(options.include_bom_serial_number);
         assert_eq!("/tmp/bom.json", options.json_output);
+    }
+
+    #[test]
+    fn derives_stable_serial_and_timestamp_for_cyclonedx_identity() {
+        let policy = CycloneDxIdentityPolicy {
+            build_id: "build-123".to_string(),
+            task_path: ":cyclonedxDirectBom".to_string(),
+            root_group: "org.example".to_string(),
+            root_name: "demo".to_string(),
+            root_version: "1.0".to_string(),
+            schema_version: "1.6".to_string(),
+            timestamp_ms: 1_778_595_445_123,
+        };
+
+        assert_eq!(policy.serial_number(), policy.serial_number());
+        assert!(policy.serial_number().starts_with("urn:uuid:"));
+        assert_eq!("2026-05-12T14:17:25Z", policy.timestamp().unwrap());
+
+        let mut other = policy.clone();
+        other.task_path = ":cyclonedxBom".to_string();
+        assert_ne!(policy.serial_number(), other.serial_number());
     }
 
     #[test]
