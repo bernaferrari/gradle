@@ -167,6 +167,35 @@ Rust-owned preview surfaces after admission:
   hidden in-daemon fallback;
 - first-60s metrics and no-fallback execution evidence.
 
+## Warm Cached-Plan Prototype
+
+The preview now has a narrow Rust-only warm execution prototype:
+`gradle-substrate-runbuild`. It connects to an already-running
+`gradle-substrate-daemon`, reads one validated build-plan shadow artifact, calls
+`InitBuild` to register the build scope, then calls `RunBuild` directly without
+starting Gradle or evaluating the DSL again.
+
+Example:
+
+```bash
+cargo build -p gradle-substrate-daemon --bin gradle-substrate-runbuild
+
+target/debug/gradle-substrate-runbuild \
+  --endpoint tcp://127.0.0.1:58276 \
+  --artifact build/dogfood-overhead-probe/shared-substrate-state/state/config-cache/build-plan-shadow/<artifact>.json \
+  --project-dir "$PWD/testing/corpus/oss-style-java-library-kotlin-dsl" \
+  --max-parallelism 4
+```
+
+This is not a public replacement CLI yet. It is a proof seam for the next
+architecture step: after Gradle/JVM has produced and validated a supported
+build-plan artifact once, Rust can execute that cached plan directly. Current
+shadow artifacts may have an empty canonical `project_dir`, so the prototype
+requires `--project-dir` for those artifacts. Promoting this to a user-facing
+warm path requires stable build identity, invalidation/fingerprint checks
+against source/settings/build files, selected-task compatibility checks, and a
+safe way to locate the right artifact without asking the user for a path.
+
 ## Ship Gates
 
 Gate 1, product contract and non-goals (`gradle-fork-wx9j`):
