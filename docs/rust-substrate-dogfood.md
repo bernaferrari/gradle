@@ -68,14 +68,14 @@ work should therefore target skipping or amortizing JVM-side configuration for
 warm supported runs, not micro-optimizing individual Rust task executors first.
 
 A direct cached-plan prototype now proves that seam for one supported fixture.
-Using `gradle-substrate-runbuild` against an existing
-`oss-style-java-library` build-plan shadow artifact ran the cached Rust plan in
-586 ms with 15 tasks, zero JVM forwards, and `build-plan-shadow` as the plan
-source. The resulting build outputs matched the upstream dogfood output file
-inventory, non-archive hashes, and archive entries. This is still a prototype:
-it requires a previously generated shadow artifact and explicit project
-directory, and it does not yet implement the user-facing artifact lookup or
-invalidation policy needed for a safe warm CLI path.
+Using `gradle-substrate-runbuild --state-dir ... --project-dir ...` against an
+existing `oss-style-java-library` build-plan shadow store found the matching
+artifact and ran the cached Rust plan in 717 ms with 15 tasks, zero JVM
+forwards, and `build-plan-shadow` as the plan source. The resulting build
+outputs matched the upstream dogfood output file inventory, non-archive hashes,
+and archive entries. This is still a prototype: it requires a previously
+generated shadow store and explicit project directory, and it does not yet
+implement the invalidation policy needed for a safe warm CLI path.
 
 ## Boundaries
 
