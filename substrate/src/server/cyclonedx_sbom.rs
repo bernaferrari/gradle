@@ -1437,6 +1437,9 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
     let mut parent_group = String::new();
     let mut parent_artifact = String::new();
     let mut parent_version = String::new();
+    let mut project_group = String::new();
+    let mut project_artifact = String::new();
+    let mut project_version = String::new();
     let mut properties = BTreeMap::new();
     let mut path = Vec::<String>::new();
     let mut buf = Vec::new();
@@ -1469,6 +1472,17 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
                     }
                     [project, url] if project == "project" && url == "url" => {
                         metadata.url = text;
+                    }
+                    [project, group_id] if project == "project" && group_id == "groupId" => {
+                        project_group = text;
+                    }
+                    [project, artifact_id]
+                        if project == "project" && artifact_id == "artifactId" =>
+                    {
+                        project_artifact = text;
+                    }
+                    [project, version] if project == "project" && version == "version" => {
+                        project_version = text;
                     }
                     [project, parent, relative_path]
                         if project == "project"
@@ -1636,6 +1650,22 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
     properties.insert("pom.description".to_string(), metadata.description.clone());
     properties.insert("project.url".to_string(), metadata.url.clone());
     properties.insert("pom.url".to_string(), metadata.url.clone());
+    let effective_group = if project_group.trim().is_empty() {
+        parent_group.clone()
+    } else {
+        project_group
+    };
+    let effective_version = if project_version.trim().is_empty() {
+        parent_version.clone()
+    } else {
+        project_version
+    };
+    properties.insert("project.groupId".to_string(), effective_group.clone());
+    properties.insert("pom.groupId".to_string(), effective_group);
+    properties.insert("project.artifactId".to_string(), project_artifact.clone());
+    properties.insert("pom.artifactId".to_string(), project_artifact);
+    properties.insert("project.version".to_string(), effective_version.clone());
+    properties.insert("pom.version".to_string(), effective_version);
     interpolate_pom_component_metadata(&mut metadata, &properties);
     PomComponentMetadataDocument {
         metadata: normalize_pom_component_metadata(metadata),
@@ -1668,6 +1698,18 @@ fn interpolate_pom_component_metadata(
 }
 
 fn interpolate_maven_properties(value: &str, properties: &BTreeMap<String, String>) -> String {
+    let mut current = value.to_string();
+    for _ in 0..8 {
+        let next = interpolate_maven_properties_once(&current, properties);
+        if next == current {
+            return next;
+        }
+        current = next;
+    }
+    current
+}
+
+fn interpolate_maven_properties_once(value: &str, properties: &BTreeMap<String, String>) -> String {
     let mut output = String::with_capacity(value.len());
     let mut remainder = value;
     while let Some(start) = remainder.find("${") {
@@ -3171,9 +3213,15 @@ mod tests {
 <project>
   <properties>
     <display.name>Interpolated Lib</display.name>
-    <site.url>https://metadata.example.test/lib</site.url>
+    <site.url>https://metadata.example.test/${project.groupId}/${project.artifactId}/${project.version}</site.url>
     <license.name>The Apache Software License, Version 2.0</license.name>
   </properties>
+  <parent>
+    <groupId>org.parent</groupId>
+    <artifactId>parent</artifactId>
+    <version>9.9</version>
+  </parent>
+  <artifactId>interpolated-lib</artifactId>
   <name>${display.name}</name>
   <description>${display.name} docs at ${site.url}</description>
   <url>${site.url}</url>
@@ -3196,18 +3244,21 @@ mod tests {
 
         assert_eq!("Interpolated Lib", metadata.name);
         assert_eq!(
-            "Interpolated Lib docs at https://metadata.example.test/lib",
+            "Interpolated Lib docs at https://metadata.example.test/org.parent/interpolated-lib/9.9",
             metadata.description
         );
-        assert_eq!("https://metadata.example.test/lib", metadata.url);
+        assert_eq!(
+            "https://metadata.example.test/org.parent/interpolated-lib/9.9",
+            metadata.url
+        );
         assert_eq!("Interpolated Lib Foundation", metadata.publisher);
         assert!(metadata.external_references.contains(&external_reference(
             "website",
-            "https://metadata.example.test/lib/org"
+            "https://metadata.example.test/org.parent/interpolated-lib/9.9/org"
         )));
         assert!(metadata.external_references.contains(&external_reference(
             "vcs",
-            "https://metadata.example.test/lib/git"
+            "https://metadata.example.test/org.parent/interpolated-lib/9.9/git"
         )));
         assert_eq!(
             vec![CycloneDxLicenseChoice::from_license(CycloneDxLicense {
