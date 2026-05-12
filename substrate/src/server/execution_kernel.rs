@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use base64::Engine as _;
 
-use super::cyclonedx_sbom::CycloneDxSbomContract;
+use super::cyclonedx_sbom::{CycloneDxResolutionGraphEvidence, CycloneDxSbomContract};
 use super::dependency_solver::graph_builder;
 
 /// Whole-build plan admitted into the Rust execution kernel after JVM
@@ -367,6 +367,9 @@ fn cyclonedx_contract_rejection(value: &serde_json::Value) -> Option<String> {
     let Some(properties) = value.get("input_properties").and_then(|v| v.as_object()) else {
         return Some("CycloneDX task is missing schema-backed SBOM contract".to_string());
     };
+    if let Some(graph_rejection) = cyclonedx_resolution_graph_rejection(properties) {
+        return Some(graph_rejection);
+    }
     let encoded = properties
         .get("input_value.sbom_contract_json_b64")
         .or_else(|| properties.get("input.sbom_contract_json_b64"))
@@ -391,6 +394,34 @@ fn cyclonedx_contract_rejection(value: &serde_json::Value) -> Option<String> {
         }
     };
     contract.validate().err()
+}
+
+fn cyclonedx_resolution_graph_rejection(
+    properties: &serde_json::Map<String, serde_json::Value>,
+) -> Option<String> {
+    let encoded = properties
+        .get("input_value.cyclonedx_resolution_graph_json_b64")
+        .or_else(|| properties.get("input.cyclonedx_resolution_graph_json_b64"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())?;
+    let decoded = match base64::engine::general_purpose::STANDARD.decode(encoded) {
+        Ok(decoded) => decoded,
+        Err(err) => {
+            return Some(format!(
+                "CycloneDX resolution graph evidence is not valid base64: {err}"
+            ));
+        }
+    };
+    let graph = match serde_json::from_slice::<CycloneDxResolutionGraphEvidence>(&decoded) {
+        Ok(graph) => graph,
+        Err(err) => {
+            return Some(format!(
+                "CycloneDX resolution graph evidence is not valid JSON: {err}"
+            ));
+        }
+    };
+    graph.validate().err()
 }
 
 fn unsupported_contract_marker_reason(
@@ -560,6 +591,55 @@ mod tests {
         assert!(rejection
             .message()
             .contains("CycloneDX task is missing schema-backed SBOM contract"));
+    }
+
+    #[test]
+    fn rejects_malformed_cyclonedx_resolution_graph_before_missing_contract() {
+        let graph_json = serde_json::json!({
+            "schema": "gradle-substrate.cyclonedx-resolution-graph.v1",
+            "configurations": [{
+                "name": "runtimeClasspath",
+                "components": [{
+                    "id": "org.example:app:1.0",
+                    "group": "org.example",
+                    "module": "app",
+                    "version": "1.0"
+                }],
+                "dependencies": [{
+                    "from": "org.example:app:1.0",
+                    "requested": "org.example:missing:1.0",
+                    "to": "org.example:missing:1.0"
+                }]
+            }]
+        })
+        .to_string();
+        let encoded = base64::engine::general_purpose::STANDARD.encode(graph_json);
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![task(
+                ":cyclonedxDirectBom",
+                "org.cyclonedx.gradle.CyclonedxDirectTask",
+                Some(
+                    serde_json::json!({
+                        "input_properties": {
+                            "input_value.cyclonedx_resolution_graph_json_b64": encoded
+                        }
+                    })
+                    .to_string(),
+                ),
+            )],
+        };
+
+        let KernelAdmission::Rejected(rejection) = admit_build_plan(
+            &plan,
+            &native_types(&["org.cyclonedx.gradle.CyclonedxDirectTask"]),
+        ) else {
+            panic!("expected rejection");
+        };
+        assert!(rejection
+            .message()
+            .contains("outside component set"));
     }
 
     #[test]
