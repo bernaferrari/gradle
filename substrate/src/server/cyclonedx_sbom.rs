@@ -29,6 +29,8 @@ pub struct CycloneDxSbomContract {
     pub dependencies: Vec<CycloneDxDependency>,
     #[serde(default)]
     pub external_references: Vec<CycloneDxExternalReference>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organizational_entity: Option<CycloneDxOrganizationalEntity>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,6 +116,26 @@ pub struct CycloneDxExternalReference {
     #[serde(rename = "type")]
     pub reference_type: String,
     pub url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CycloneDxOrganizationalEntity {
+    #[serde(default, rename = "bom-ref", skip_serializing_if = "String::is_empty")]
+    pub bom_ref: String,
+    pub name: String,
+    #[serde(default, rename = "url", skip_serializing_if = "Vec::is_empty")]
+    pub urls: Vec<String>,
+    #[serde(default, rename = "contact", skip_serializing_if = "Vec::is_empty")]
+    pub contacts: Vec<CycloneDxOrganizationalContact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CycloneDxOrganizationalContact {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub email: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub phone: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -461,6 +483,7 @@ pub fn aggregate_contracts(
                 url,
             })
             .collect(),
+        organizational_entity: None,
     };
     contract.validate()?;
     Ok(contract)
@@ -491,6 +514,28 @@ impl CycloneDxSbomContract {
                 || external_reference.url.trim().is_empty()
             {
                 return Err("CycloneDX external reference is missing type or url".to_string());
+            }
+        }
+        if let Some(entity) = &self.organizational_entity {
+            entity.validate()?;
+        }
+        Ok(())
+    }
+}
+
+impl CycloneDxOrganizationalEntity {
+    fn validate(&self) -> Result<(), String> {
+        if self.name.trim().is_empty() {
+            return Err("CycloneDX organizational entity is missing name".to_string());
+        }
+        for url in &self.urls {
+            if url.trim().is_empty() {
+                return Err("CycloneDX organizational entity has an empty url".to_string());
+            }
+        }
+        for contact in &self.contacts {
+            if contact.name.trim().is_empty() {
+                return Err("CycloneDX organizational contact is missing name".to_string());
             }
         }
         Ok(())
@@ -729,6 +774,8 @@ struct CycloneDxBom<'a> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct CycloneDxMetadata<'a> {
     timestamp: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    supplier: Option<CycloneDxOrganizationalEntity>,
     component: &'a CycloneDxComponent,
 }
 
@@ -890,6 +937,7 @@ pub fn draft_contract_from_resolution_graph(
                 url,
             })
             .collect(),
+        organizational_entity: None,
     };
     contract.validate()?;
     Ok(contract)
@@ -1644,6 +1692,9 @@ pub fn render_xml(contract: &CycloneDxSbomContract) -> Result<String, String> {
         "    <timestamp>{}</timestamp>\n",
         xml_escape(bom.metadata.timestamp)
     ));
+    if let Some(supplier) = &bom.metadata.supplier {
+        write_organizational_entity(&mut xml, "    ", "supplier", supplier);
+    }
     write_component(&mut xml, "    ", bom.metadata.component);
     xml.push_str("  </metadata>\n");
     xml.push_str("  <components>\n");
@@ -1702,12 +1753,57 @@ fn normalized_bom(contract: &CycloneDxSbomContract) -> CycloneDxBom<'_> {
         version: 1,
         metadata: CycloneDxMetadata {
             timestamp: &contract.timestamp,
+            supplier: contract.organizational_entity.clone(),
             component: &contract.root_component,
         },
         components,
         dependencies,
         external_references,
     }
+}
+
+fn write_organizational_entity(
+    xml: &mut String,
+    indent: &str,
+    tag: &str,
+    entity: &CycloneDxOrganizationalEntity,
+) {
+    if entity.bom_ref.is_empty() {
+        xml.push_str(&format!("{indent}<{tag}>\n"));
+    } else {
+        xml.push_str(&format!(
+            "{indent}<{tag} bom-ref=\"{}\">\n",
+            xml_escape(&entity.bom_ref)
+        ));
+    }
+    xml.push_str(&format!(
+        "{indent}  <name>{}</name>\n",
+        xml_escape(&entity.name)
+    ));
+    for url in &entity.urls {
+        xml.push_str(&format!("{indent}  <url>{}</url>\n", xml_escape(url)));
+    }
+    for contact in &entity.contacts {
+        xml.push_str(&format!("{indent}  <contact>\n"));
+        xml.push_str(&format!(
+            "{indent}    <name>{}</name>\n",
+            xml_escape(&contact.name)
+        ));
+        if !contact.email.is_empty() {
+            xml.push_str(&format!(
+                "{indent}    <email>{}</email>\n",
+                xml_escape(&contact.email)
+            ));
+        }
+        if !contact.phone.is_empty() {
+            xml.push_str(&format!(
+                "{indent}    <phone>{}</phone>\n",
+                xml_escape(&contact.phone)
+            ));
+        }
+        xml.push_str(&format!("{indent}  </contact>\n"));
+    }
+    xml.push_str(&format!("{indent}</{tag}>\n"));
 }
 
 fn write_component(xml: &mut String, indent: &str, component: &CycloneDxComponent) {
@@ -1881,6 +1977,7 @@ mod tests {
                 ],
             }],
             external_references: Vec::new(),
+            organizational_entity: None,
         }
     }
 
@@ -2016,6 +2113,33 @@ mod tests {
         ));
         assert!(xml.contains("<expression>(Apache-2.0 OR MIT)</expression>"));
         assert!(xml.contains("<dependencies>"));
+    }
+
+    #[test]
+    fn renders_organizational_entity_in_explicit_contract_metadata() {
+        let mut contract = sample_contract();
+        contract.organizational_entity = Some(CycloneDxOrganizationalEntity {
+            bom_ref: "org:example".to_string(),
+            name: "Example Security".to_string(),
+            urls: vec!["https://security.example.test".to_string()],
+            contacts: vec![CycloneDxOrganizationalContact {
+                name: "Security Team".to_string(),
+                email: "security@example.test".to_string(),
+                phone: String::new(),
+            }],
+        });
+
+        let json = render_json(&contract).unwrap();
+        assert!(json.contains("\"supplier\""));
+        assert!(json.contains("\"bom-ref\": \"org:example\""));
+        assert!(json.contains("\"name\": \"Example Security\""));
+        assert!(json.contains("\"email\": \"security@example.test\""));
+
+        let xml = render_xml(&contract).unwrap();
+        assert!(xml.contains("<supplier bom-ref=\"org:example\">"));
+        assert!(xml.contains("<name>Example Security</name>"));
+        assert!(xml.contains("<url>https://security.example.test</url>"));
+        assert!(xml.contains("<email>security@example.test</email>"));
     }
 
     #[test]
