@@ -729,6 +729,49 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
+    public void capturesValBackedStaticWriteFileDefaultTaskContract() throws IOException {
+        File buildFile = temporaryFolder.newFile("build.gradle.kts");
+        Files.write(buildFile.toPath(), Collections.singletonList(
+            "tasks.register(\"customJvmTask\") {\n" +
+                "  val message = \"custom JVM task requires compatibility execution\\n\"\n" +
+                "  doLast { output.writeText(message) }\n" +
+                "}\n"
+        ), StandardCharsets.UTF_8);
+        File outputFile = new File(temporaryFolder.getRoot(), "build/custom/task.txt");
+        Task report = staticWriteFileTask("customJvmTask", buildFile, outputFile);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(report, DefaultTask.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("jvm-task", task.getActionKind());
+        assertEquals("1", inputs.get("action_count"));
+        assertEquals("Y3VzdG9tIEpWTSB0YXNrIHJlcXVpcmVzIGNvbXBhdGliaWxpdHkgZXhlY3V0aW9uCg==", inputs.get("static_output_text_b64"));
+    }
+
+    @org.junit.Test
+    public void dynamicWriteFileDefaultTaskDoesNotCaptureStaticContract() throws IOException {
+        File buildFile = temporaryFolder.newFile("build.gradle.kts");
+        Files.write(buildFile.toPath(), Collections.singletonList(
+            "tasks.register(\"customJvmTask\") {\n" +
+                "  val message = System.getenv(\"MESSAGE\") ?: \"fallback\"\n" +
+                "  doLast { output.writeText(message) }\n" +
+                "}\n"
+        ), StandardCharsets.UTF_8);
+        File outputFile = new File(temporaryFolder.getRoot(), "build/custom/task.txt");
+        Task report = staticWriteFileTask("customJvmTask", buildFile, outputFile);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(report, DefaultTask.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("jvm-task", task.getActionKind());
+        assertFalse(inputs.containsKey("static_output_text_b64"));
+    }
+
+    @org.junit.Test
     public void capturesExactDetachedConfigurationReportAsStaticWriteFile() throws IOException {
         File buildFile = temporaryFolder.newFile("build.gradle.kts");
         Files.write(buildFile.toPath(), Collections.singletonList(
@@ -1677,6 +1720,10 @@ public class ProjectModelProviderAdapterTest {
     }
 
     private static Task staticWriteFileTask(File buildFile, File outputFile) {
+        return staticWriteFileTask("apiContractReport", buildFile, outputFile);
+    }
+
+    private static Task staticWriteFileTask(String taskName, File buildFile, File outputFile) {
         FileCollection outputs = fileCollection(outputFile);
         Project project = proxy(Project.class, (proxy, method, args) -> {
             if (method.getName().equals("getPath")) {
@@ -1696,11 +1743,11 @@ public class ProjectModelProviderAdapterTest {
         return proxy(new Class<?>[] {Task.class, FileTransformTaskContract.class}, (proxy, method, args) -> {
             switch (method.getName()) {
                 case "getPath":
-                    return ":apiContractReport";
+                    return ":" + taskName;
                 case "getProject":
                     return project;
                 case "getName":
-                    return "apiContractReport";
+                    return taskName;
                 case "getEnabled":
                     return true;
                 case "getGroup":

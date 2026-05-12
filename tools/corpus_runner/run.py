@@ -472,6 +472,24 @@ def static_detached_configuration_report_text(text: str, task_name: str | None =
     return f"{name}-{version}.jar\n"
 
 
+def static_write_text_task_text(text: str, task_name: str) -> str | None:
+    literal = re.search(
+        r"tasks\.register\s*\(\s*[\"']" + re.escape(task_name) + r"[\"']\s*\)\s*\{.*?writeText\s*\(\s*[\"']((?:\\.|[^\"\\])*)[\"']\s*\)",
+        text,
+        re.DOTALL,
+    )
+    if literal:
+        return decode_gradle_string_literal(literal.group(1))
+    variable = re.search(
+        r"tasks\.register\s*\(\s*[\"']" + re.escape(task_name) + r"[\"']\s*\)\s*\{.*?\bval\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*[\"']((?:\\.|[^\"\\])*)[\"'].*?writeText\s*\(\s*\1\s*\)",
+        text,
+        re.DOTALL,
+    )
+    if variable:
+        return decode_gradle_string_literal(variable.group(2))
+    return None
+
+
 def has_unsupported_enforced_platform(text: str) -> bool:
     if not re.search(r"\benforcedPlatform\s*\(", text):
         return False
@@ -484,6 +502,20 @@ def has_unsupported_enforced_platform(text: str) -> bool:
 
 def gradle_string_literal_value(value: str) -> str:
     return value.replace("\\\\", "\\")
+
+
+def decode_gradle_string_literal(value: str) -> str:
+    replacements = {
+        "\\n": "\n",
+        "\\r": "\r",
+        "\\t": "\t",
+        '\\"': '"',
+        "\\\\": "\\",
+    }
+    decoded = value
+    for escaped, replacement in replacements.items():
+        decoded = decoded.replace(escaped, replacement)
+    return decoded
 
 
 def literal_group_from_regex(pattern: str) -> str | None:
