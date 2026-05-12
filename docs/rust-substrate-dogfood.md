@@ -94,14 +94,14 @@ Summary from `build/dogfood-oss/dogfood-summary.md`:
 | Supported projects with zero JVM forwards | 3/3 |
 | Rust RunBuild markers | 3/3 |
 | Task-graph captures | 3/3 |
-| Upstream observed wall time | 21331 ms |
-| Rust substrate observed wall time | 29769 ms |
-| Upstream task total | 28 |
-| Rust substrate task total | 28 |
+| Upstream observed wall time | 19639 ms |
+| Rust substrate observed wall time | 26679 ms |
+| Upstream task total | 31 |
+| Rust substrate task total | 31 |
 
 Passing external entries are `spring-petclinic`, `mockito-main`, and
 `okio-root`, all in `native-ready-default` mode. `spring-petclinic` now runs
-`clean classes`; the runner verifies task/output inventory and hashes while
+`clean testClasses`; the runner verifies task/output inventory and hashes while
 allowlisting the generated SBOM JSON hash as nondeterministic metadata.
 `mockito-main` and `okio-root` remain `help`-level smokes. This proves Rust
 kernel admission and no-forward execution for the selected tasks, not full
