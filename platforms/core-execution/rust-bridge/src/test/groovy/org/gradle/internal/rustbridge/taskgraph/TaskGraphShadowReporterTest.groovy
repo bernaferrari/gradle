@@ -46,6 +46,12 @@ class TaskGraphShadowReporterTest extends Specification {
         reporter.runBuildAuthoritative
     }
 
+    def "display plan source names persisted shadow as build plan cache"() {
+        expect:
+        TaskGraphShadowReporter.displayPlanSource("build-plan-shadow") == "build-plan-cache"
+        TaskGraphShadowReporter.displayPlanSource("registered-tasks") == "registered-tasks"
+    }
+
     def "compareExecutionGraph with empty taskPaths returns immediately"() {
         given:
         def rustClient = Mock(RustTaskGraphClient)

@@ -70,8 +70,8 @@ Fast mode reports:
   explicit authoritative Rust `RunBuild`, then invoked again over the same
   Rust state and Gradle configuration-cache state with no source changes,
   including cold/warm timings, configuration-cache reuse, Rust task counts,
-  Rust up-to-date skips, Rust no-source/skipped counts, JVM forwards, and
-  deterministic output hash
+  Rust up-to-date skips, Rust no-source/skipped counts, cached build-plan
+  source, JVM forwards, and deterministic output hash
 - `real_build_dependency_readthrough`: an installed Gradle-under-test build resolving a local HTTP Maven `1.+` dependency plus a static Maven graph-only dependency with a transitive child and isolated Rust state; the first run warms dynamic metadata/artifact stores and listener-prefetches the static direct/transitive artifacts, while the second run deletes `build/`, uses a fresh Gradle user home, materializes all artifacts again, and reports remote requests avoided
 - `file_watch_first_event`: native file watcher latency from write to event
 - `installed_authoritative_file_watch`: an installed Gradle-under-test `help
@@ -85,8 +85,9 @@ metric fails or when any headline budget regresses beyond the allowed band:
 - authoritative Rust DAG must complete the cold run at or below 30000 ms, the
   warm run at or below 10000 ms, and the combined cold+warm check at or below
   60000 ms;
-- the warm Rust DAG run must be faster than the cold run and both runs must
-  report zero JVM forwards;
+- the warm Rust DAG run must be faster than the cold run, report
+  `build-plan-cache` as its plan source, and both runs must report zero JVM
+  forwards;
 - real-build dependency read-through must avoid at least 3 first-run remote
   requests on the second run and complete at or below 60000 ms;
 - file-watch first event latency must be at or below 250 ms;
@@ -140,12 +141,13 @@ wiring:
 python3 tools/demo/first_60_seconds.py --mode fast --skip-build --output build/first60-filewatch-userhome-final.json
 ```
 
-The latest local fast run passed all 5 checks: daemon ready in 16.8ms,
-authoritative Rust DAG in 14936.8ms with cold 12194.3ms, warm 2739.1ms,
-configuration-cache reuse, 7 warm up-to-date skips, 4 warm skipped/no-source
-tasks, zero JVM forwards, real-build dependency read-through in 7611.0ms with
-3/5 remote requests avoided, file-watch first event in 11ms, and installed
-authoritative file watching in 3227.4ms.
+The latest local fast run passed all 5 checks: daemon ready in 16.9ms,
+authoritative Rust DAG in 14332.5ms with cold 11457.1ms, warm 2872.3ms,
+configuration-cache reuse, warm plan source `build-plan-cache`, 7 warm
+up-to-date skips, 4 warm skipped/no-source tasks, zero JVM forwards,
+real-build dependency read-through in 8256.6ms with 3/5 remote requests
+avoided, file-watch first event in 14ms, and installed authoritative file
+watching in 10397.3ms.
 
 The real-build read-through metric runs when `build/gradle-under-test/bin/gradle`
 exists, or when `GRADLE_UNDER_TEST_BIN`/`GRADLE_UNDER_TEST` points at a local

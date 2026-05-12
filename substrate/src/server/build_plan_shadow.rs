@@ -1605,6 +1605,35 @@ mod tests {
     }
 
     #[test]
+    fn load_plan_quarantines_schema_version_mismatch() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = BuildPlanShadowStore::new(temp.path().to_path_buf());
+        let plan = CanonicalBuildPlan {
+            schema_version: BUILD_PLAN_SCHEMA_VERSION,
+            build_id: "build:schema".to_string(),
+            projects: Vec::new(),
+            tasks: Vec::new(),
+            dependencies: Vec::new(),
+            toolchains: Vec::new(),
+            metadata: std::collections::BTreeMap::new(),
+        };
+        let path = store.persist_plan(&plan, "test").unwrap();
+        let mut artifact: BuildPlanShadowArtifact =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        artifact.plan.schema_version = BUILD_PLAN_SCHEMA_VERSION + 1;
+        std::fs::write(&path, serde_json::to_vec_pretty(&artifact).unwrap()).unwrap();
+
+        let error = store.load_plan("build:schema").unwrap_err();
+
+        assert!(
+            error.to_string().contains("schema validation failed"),
+            "unexpected error: {}",
+            error
+        );
+        assert!(!path.exists(), "schema-mismatched artifact should be quarantined");
+    }
+
+    #[test]
     fn dependency_notation_preserves_classifier_and_extension() {
         assert_eq!(
             dependency_notation("org.example", "demo", "1.2.3", "", "jar"),
