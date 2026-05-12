@@ -173,6 +173,20 @@ fn build_task_input(task_type: &str, context_json: Option<&String>) -> TaskInput
                         .collect();
                 }
             }
+            if let Some(v) = map.get("output_files") {
+                if let Some(arr) = v.as_array() {
+                    let values = arr
+                        .iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect::<Vec<_>>();
+                    if !values.is_empty() {
+                        input.options.insert(
+                            "output_files_json".to_string(),
+                            serde_json::to_string(&values).unwrap_or_default(),
+                        );
+                    }
+                }
+            }
         }
     }
     input

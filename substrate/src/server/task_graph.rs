@@ -632,6 +632,11 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
         ("documentation", "Javadoc") | (_, "Javadoc") => {
             compat_task_type(task, "org.gradle.api.tasks.javadoc.Javadoc")
         }
+        (_, "CyclonedxDirectTask") | (_, "CyclonedxAggregateTask")
+            if cyclonedx_sbom_contract_complete(task) =>
+        {
+            "CycloneDxSbom".to_string()
+        }
         (_, "ResolveMainClassName") if static_write_file_contract_complete(task) => {
             "WriteFile".to_string()
         }
@@ -1861,6 +1866,10 @@ fn static_write_file_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
     has_input_value(task, "static_output_text_b64") && task.outputs.len() == 1
 }
 
+fn cyclonedx_sbom_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
+    has_input_value(task, "sbom_contract_json_b64") && !task.outputs.is_empty()
+}
+
 fn compat_task_type(task: &CanonicalBuildPlanTask, fallback: &str) -> String {
     if task.implementation_id.contains('.') {
         task.implementation_id.clone()
@@ -2080,6 +2089,13 @@ fn task_options(
             &mut options,
             "static_output_text_b64",
             "static_output_text_b64",
+        );
+    } else if task_type == "CycloneDxSbom" {
+        insert_input_option(
+            task,
+            &mut options,
+            "sbom_contract_json_b64",
+            "sbom_contract_json_b64",
         );
     }
     options
