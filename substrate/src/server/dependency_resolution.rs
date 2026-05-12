@@ -19,9 +19,14 @@ use crate::proto::{
 
 use super::dependency_solver::gradle_module_metadata;
 use super::dependency_solver::graph_builder;
+#[cfg(test)]
 use super::dependency_solver::ivyresolve::strategy::compare_versions;
-use super::dependency_solver::maven_metadata::{self, MavenMetadata, MavenVersioning};
-use super::dependency_solver::maven_pom::{self, ParentPom};
+use super::dependency_solver::maven_metadata::{self, MavenMetadata};
+#[cfg(test)]
+use super::dependency_solver::maven_metadata::MavenVersioning;
+use super::dependency_solver::maven_pom;
+#[cfg(test)]
+use super::dependency_solver::maven_pom::ParentPom;
 pub use super::dependency_solver::maven_pom::{ManagedDependency, PomDependency};
 pub use super::dependency_solver::resolveengine::graph::conflicts::ResolutionStrategy;
 use super::dependency_solver::resolveengine::graph::conflicts::{
@@ -145,6 +150,7 @@ impl DependencyResolutionServiceImpl {
         crate::server::dependency_solver::resolved_graph::first_unresolved_reason(dependencies)
     }
 
+    #[cfg(test)]
     fn maven_artifact_shape(classifier: &str, type_field: &str) -> (String, String) {
         crate::server::dependency_solver::artifact_selection::maven_artifact_shape(
             classifier, type_field,
@@ -1161,10 +1167,12 @@ impl DependencyResolutionServiceImpl {
         maven_pom::parse_dependency_management(pom_content)
     }
 
+    #[cfg(test)]
     fn managed_default_scope(dep: &PomDependency, managed: Option<&ManagedDependency>) -> String {
         maven_pom::managed_default_scope(dep, managed)
     }
 
+    #[cfg(test)]
     fn effective_exclusions(
         dep: &PomDependency,
         managed: Option<&ManagedDependency>,
@@ -1204,6 +1212,7 @@ impl DependencyResolutionServiceImpl {
     /// Check if a dependency matches an exclusion pattern.
     /// An exclusion with group "*" matches any group; artifactId "*" matches any artifact.
     /// Both must match for the exclusion to apply.
+    #[cfg(test)]
     fn matches_exclusion(
         dep_group: &str,
         dep_name: &str,
@@ -1213,12 +1222,14 @@ impl DependencyResolutionServiceImpl {
         maven_pom::matches_exclusion(dep_group, dep_name, excl_group, excl_name)
     }
 
+    #[cfg(test)]
     fn is_dependency_excluded(dep: &PomDependency, exclusions: &[(String, String)]) -> bool {
         maven_pom::is_dependency_excluded(dep, exclusions)
     }
 
     /// Parse the <parent> section from a POM file.
     /// Returns None if no parent section exists.
+    #[cfg(test)]
     fn parse_parent_pom(pom_content: &str) -> Option<ParentPom> {
         maven_pom::parse_parent_pom(pom_content)
     }
@@ -1239,6 +1250,7 @@ impl DependencyResolutionServiceImpl {
     /// Resolve a version range to a concrete version.
     /// Supports: exact ("1.0"), soft range ("[1.0,2.0)", "(1.0,]", "[1.0]"), and "latest.release".
     /// Also supports "LATEST" and "RELEASE" via MavenMetadata.
+    #[cfg(test)]
     fn resolve_version_range(
         range: &str,
         available: &[String],
