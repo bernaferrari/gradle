@@ -317,6 +317,9 @@ fn reject_unsupported_captured_options(
     if !options.build_system_environment_variable.trim().is_empty() {
         unsupported.push("build-system-environment-variable");
     }
+    if !options.external_references.is_empty() {
+        unsupported.push("external-references");
+    }
     if unsupported.is_empty() {
         Ok(())
     } else {
@@ -1233,9 +1236,19 @@ mod tests {
 
     #[test]
     fn renders_deterministic_json_from_explicit_contract() {
-        let json = render_json(&sample_contract()).unwrap();
+        let mut contract = sample_contract();
+        contract
+            .external_references
+            .push(CycloneDxExternalReference {
+                reference_type: "website".to_string(),
+                url: "https://example.invalid/app".to_string(),
+            });
+        let json = render_json(&contract).unwrap();
         assert!(json.contains("\"bomFormat\": \"CycloneDX\""));
         assert!(json.contains("\"specVersion\": \"1.6\""));
+        assert!(json.contains("\"externalReferences\""));
+        assert!(json.contains("\"type\": \"website\""));
+        assert!(json.contains("\"url\": \"https://example.invalid/app\""));
         assert!(json.find("org.example/a").unwrap() < json.find("org.example/b").unwrap());
         assert!(json.contains("\"dependsOn\""));
     }
@@ -1250,9 +1263,19 @@ mod tests {
                     name: "Apache-2.0".to_string(),
                 },
             });
+        contract
+            .external_references
+            .push(CycloneDxExternalReference {
+                reference_type: "website".to_string(),
+                url: "https://example.invalid/app".to_string(),
+            });
         let xml = render_xml(&contract).unwrap();
         assert!(xml.contains("http://cyclonedx.org/schema/bom/1.6"));
         assert!(xml.contains("<metadata>"));
+        assert!(xml.contains("<externalReferences>"));
+        assert!(xml.contains(
+            "<reference type=\"website\"><url>https://example.invalid/app</url></reference>"
+        ));
         assert!(xml.find("org.example/a").unwrap() < xml.find("org.example/b").unwrap());
         assert!(xml.contains("<license><name>Apache-2.0</name></license>"));
         assert!(xml.contains("<dependencies>"));
@@ -1384,10 +1407,6 @@ mod tests {
                 "/tmp/bom.json".to_string(),
             ),
             (
-                "cyclonedx_external_references".to_string(),
-                "https://example.invalid/source https://example.invalid/docs".to_string(),
-            ),
-            (
                 "cyclonedx_identity_task_path".to_string(),
                 ":cyclonedxDirectBom".to_string(),
             ),
@@ -1401,27 +1420,7 @@ mod tests {
         assert!(contract.serial_number.starts_with("urn:uuid:"));
         assert_eq!("2026-05-12T14:17:25Z", contract.timestamp);
         assert_eq!("application", contract.root_component.component_type);
-        assert_eq!(
-            vec![
-                CycloneDxExternalReference {
-                    reference_type: "other".to_string(),
-                    url: "https://example.invalid/source".to_string(),
-                },
-                CycloneDxExternalReference {
-                    reference_type: "other".to_string(),
-                    url: "https://example.invalid/docs".to_string(),
-                },
-            ],
-            contract.external_references
-        );
-        let json = render_json(&contract).unwrap();
-        let xml = render_xml(&contract).unwrap();
-        assert!(json.contains("\"externalReferences\""));
-        assert!(json.contains("\"url\": \"https://example.invalid/source\""));
-        assert!(xml.contains("<externalReferences>"));
-        assert!(xml.contains(
-            "<reference type=\"other\"><url>https://example.invalid/docs</url></reference>"
-        ));
+        assert!(contract.external_references.is_empty());
         assert!(contract
             .components
             .iter()
@@ -1556,6 +1555,10 @@ mod tests {
                 "CI".to_string(),
             ),
             (
+                "cyclonedx_external_references".to_string(),
+                "https://example.invalid/sbom".to_string(),
+            ),
+            (
                 "cyclonedx_json_output".to_string(),
                 "/tmp/bom.json".to_string(),
             ),
@@ -1573,6 +1576,7 @@ mod tests {
         assert!(err.contains("include-license-text"));
         assert!(err.contains("license-choice"));
         assert!(err.contains("build-system-environment-variable"));
+        assert!(err.contains("external-references"));
     }
 
     #[test]
