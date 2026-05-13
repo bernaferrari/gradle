@@ -139,6 +139,7 @@ fn contract_from_input(input: &TaskInput) -> Result<CycloneDxSbomContract, Strin
                     .get("aggregate_root_project_path")
                     .cloned()
                     .unwrap_or_default(),
+                root_vcs_url: String::new(),
                 external_references: whitespace_values(
                     input
                         .options

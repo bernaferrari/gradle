@@ -448,6 +448,7 @@ fn cyclonedx_aggregate_options(
         root_version: string_property(properties, "aggregate_root_version"),
         root_component_type: string_property(properties, "aggregate_root_component_type"),
         root_project_path: string_property(properties, "aggregate_root_project_path"),
+        root_vcs_url: String::new(),
         external_references: whitespace_values(&string_property(
             properties,
             "aggregate_external_references",
