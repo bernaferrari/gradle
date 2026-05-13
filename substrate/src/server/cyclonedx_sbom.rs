@@ -241,6 +241,7 @@ pub struct CycloneDxDraftOptions {
     pub root_project_path: String,
     pub include_metadata_resolution: bool,
     pub external_references: Vec<String>,
+    pub root_vcs_url: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -265,6 +266,7 @@ pub struct CycloneDxCapturedTaskOptions {
     pub build_system_url: String,
     pub raw_external_references_present: bool,
     pub external_references: Vec<CycloneDxExternalReference>,
+    pub root_vcs_url: String,
     pub json_output: String,
     pub xml_output: String,
 }
@@ -280,8 +282,33 @@ pub struct CycloneDxAggregateOptions {
     pub root_component_type: String,
     pub root_project_path: String,
     pub external_references: Vec<String>,
+    pub root_vcs_url: String,
 }
 
+/// Deterministic CycloneDX SBOM serial/timestamp parity policy.
+///
+/// Upstream CycloneDX emits a random `serialNumber` (UUIDv4) and the current
+/// wall-clock `metadata.timestamp` on every invocation, making byte-level or
+/// hash-level parity between runs impossible. This struct encodes the decision
+/// that the Rust substrate uses fully deterministic outputs:
+///
+/// - **serial_number**: SHA-256 hash of build identity fields (build_id,
+///   task_path, root GAV, schema_version), truncated to a UUID namespace.
+///   Identical inputs always produce the same serial. The UUID is stamped as
+///   version 5 (name-based) with the RFC 4122 variant bits set correctly.
+///
+/// - **timestamp**: Derived from an explicit epoch-millisecond value passed by
+///   the Gradle build (`org.gradle.rust.substrate.cyclonedx.timestamp.ms`).
+///   No wall-clock sampling — the timestamp is fully deterministic and
+///   reproducible from the same inputs.
+///
+/// The combination allows the Rust side to emit CycloneDX SBOMs that achieve
+/// byte-level and hash-level parity with the upstream plugin when the
+/// `timestamp_source_policy` is `gradle-substrate-explicit-epoch-ms` and
+/// `serial_source_policy` is `gradle-substrate-deterministic-identity`.
+/// Non-deterministic upstream policies (e.g. `upstream-random`,
+/// `cyclonedx-core-metadata-constructor-now`) are rejected by
+/// `reject_unsupported_captured_options`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CycloneDxIdentityPolicy {
     pub build_id: String,
@@ -384,6 +411,7 @@ pub fn validate_captured_task_options(
             .trim()
             .is_empty(),
         external_references: decode_cyclonedx_external_references(inputs)?,
+        root_vcs_url: value(inputs, "cyclonedx_root_vcs_url").to_string(),
         json_output,
         xml_output,
     })
@@ -505,6 +533,7 @@ pub fn draft_contract_from_captured_inputs(
             root_project_path: value(inputs, "cyclonedx_identity_project_path").to_string(),
             include_metadata_resolution: options.include_metadata_resolution,
             external_references: Vec::new(),
+            root_vcs_url: options.root_vcs_url,
         },
     )?;
     if options.include_build_system && !options.build_system_url.trim().is_empty() {
@@ -589,7 +618,16 @@ pub fn aggregate_contracts(
         properties: BTreeMap::new(),
         licenses: Vec::new(),
         hashes: Vec::new(),
-        external_references: Vec::new(),
+        external_references: if options.root_vcs_url.is_empty() {
+            Vec::new()
+        } else {
+            vec![CycloneDxExternalReference {
+                reference_type: "vcs".to_string(),
+                url: options.root_vcs_url.clone(),
+                comment: String::new(),
+                hashes: Vec::new(),
+            }]
+        },
     };
 
     let mut components_by_ref = BTreeMap::<String, CycloneDxComponent>::new();
@@ -1082,7 +1120,16 @@ pub fn draft_contract_from_resolution_graph(
         properties: BTreeMap::new(),
         licenses: Vec::new(),
         hashes: Vec::new(),
-        external_references: Vec::new(),
+        external_references: if options.root_vcs_url.is_empty() {
+            Vec::new()
+        } else {
+            vec![CycloneDxExternalReference {
+                reference_type: "vcs".to_string(),
+                url: options.root_vcs_url.clone(),
+                comment: String::new(),
+                hashes: Vec::new(),
+            }]
+        },
     };
 
     let mut components_by_id = BTreeMap::new();
@@ -3852,6 +3899,7 @@ mod tests {
                 root_project_path: ":".to_string(),
                 include_metadata_resolution: true,
                 external_references: Vec::new(),
+                root_vcs_url: String::new(),
             },
         )
         .unwrap();
@@ -4002,6 +4050,7 @@ mod tests {
                 root_project_path: ":".to_string(),
                 include_metadata_resolution: true,
                 external_references: Vec::new(),
+                root_vcs_url: String::new(),
             },
         )
         .unwrap();
@@ -4367,6 +4416,7 @@ mod tests {
                 root_project_path: ":".to_string(),
                 include_metadata_resolution: true,
                 external_references: Vec::new(),
+                root_vcs_url: String::new(),
             },
         )
         .unwrap();
@@ -4630,6 +4680,7 @@ mod tests {
                 root_component_type: "application".to_string(),
                 root_project_path: ":".to_string(),
                 include_metadata_resolution: false,
+                root_vcs_url: String::new(),
                 external_references: Vec::new(),
             },
         )
@@ -4669,6 +4720,7 @@ mod tests {
                 root_component_type: "application".to_string(),
                 root_project_path: ":".to_string(),
                 include_metadata_resolution: true,
+                root_vcs_url: String::new(),
                 external_references: Vec::new(),
             },
         )
@@ -4732,6 +4784,7 @@ mod tests {
                 root_project_path: ":".to_string(),
                 include_metadata_resolution: false,
                 external_references: Vec::new(),
+                root_vcs_url: String::new(),
             },
         )
         .unwrap();
@@ -4778,6 +4831,7 @@ mod tests {
                 root_component_type: "application".to_string(),
                 root_project_path: ":".to_string(),
                 external_references: Vec::new(),
+                root_vcs_url: String::new(),
             },
         )
         .unwrap();
@@ -4830,10 +4884,244 @@ mod tests {
                 root_version: "1.0".to_string(),
                 root_component_type: "application".to_string(),
                 root_project_path: ":".to_string(),
+                root_vcs_url: String::new(),
                 external_references: Vec::new(),
             },
         )
         .unwrap_err();
         assert!(err.contains("conflicting component"));
+    }
+
+    #[test]
+    fn deterministic_serial_number_produces_identical_output_for_same_inputs() {
+        let parts = &[
+            "build-123",
+            ":cyclonedxDirectBom",
+            "org.example",
+            "demo",
+            "1.0",
+            "1.6",
+        ];
+        let serial_a = deterministic_serial_number(parts);
+        let serial_b = deterministic_serial_number(parts);
+        assert_eq!(
+            serial_a, serial_b,
+            "same inputs must yield identical serial"
+        );
+        assert!(serial_a.starts_with("urn:uuid:"));
+        assert_eq!(serial_a.len(), "urn:uuid:".len() + 36);
+    }
+
+    #[test]
+    fn deterministic_serial_number_produces_different_output_for_different_inputs() {
+        let a = deterministic_serial_number(&["build-123", ":task", "g", "n", "1.0", "1.6"]);
+        let b = deterministic_serial_number(&["build-456", ":task", "g", "n", "1.0", "1.6"]);
+        let c = deterministic_serial_number(&["build-123", ":other", "g", "n", "1.0", "1.6"]);
+        assert_ne!(a, b, "different build_id must yield different serial");
+        assert_ne!(a, c, "different task_path must yield different serial");
+        assert_ne!(b, c, "two different input sets must not collide by chance");
+    }
+
+    #[test]
+    fn deterministic_serial_number_format_matches_uuid_v5_conventions() {
+        let serial = deterministic_serial_number(&["a", "b", "c", "d", "e", "1.6"]);
+        let uuid = serial.trim_start_matches("urn:uuid:");
+        let bytes: Vec<u8> = uuid
+            .split('-')
+            .flat_map(|seg| {
+                (0..seg.len())
+                    .step_by(2)
+                    .map(|i| u8::from_str_radix(&seg[i..i + 2], 16).unwrap())
+            })
+            .collect();
+        assert_eq!(bytes.len(), 16);
+        assert_eq!(
+            (bytes[6] & 0xf0) >> 4,
+            5,
+            "version nibble must be 5 (name-based SHA-1/v5 style)"
+        );
+        assert_eq!(
+            (bytes[8] & 0xc0) >> 6,
+            2,
+            "variant nibble must match RFC 4122 (10xx)"
+        );
+    }
+
+    #[test]
+    fn identity_policy_produces_same_serial_across_instances() {
+        let p1 = CycloneDxIdentityPolicy {
+            build_id: "build-123".to_string(),
+            task_path: ":cyclonedxDirectBom".to_string(),
+            root_group: "org.example".to_string(),
+            root_name: "demo".to_string(),
+            root_version: "1.0".to_string(),
+            schema_version: "1.6".to_string(),
+            timestamp_ms: 1_778_595_445_123,
+        };
+        let p2 = CycloneDxIdentityPolicy {
+            build_id: "build-123".to_string(),
+            task_path: ":cyclonedxDirectBom".to_string(),
+            root_group: "org.example".to_string(),
+            root_name: "demo".to_string(),
+            root_version: "1.0".to_string(),
+            schema_version: "1.6".to_string(),
+            timestamp_ms: 1_778_595_445_123,
+        };
+        assert_eq!(
+            p1.serial_number(),
+            p2.serial_number(),
+            "two identity-policy instances with identical inputs must yield the same serial"
+        );
+    }
+
+    #[test]
+    fn timestamp_from_epoch_millis_renders_correct_utc_iso8601() {
+        assert_eq!(
+            timestamp_from_epoch_millis(0).unwrap(),
+            "1970-01-01T00:00:00Z"
+        );
+        assert_eq!(
+            timestamp_from_epoch_millis(1_778_595_445_123).unwrap(),
+            "2026-05-12T14:17:25Z"
+        );
+        assert_eq!(
+            timestamp_from_epoch_millis(1_000).unwrap(),
+            "1970-01-01T00:00:01Z"
+        );
+    }
+
+    #[test]
+    fn timestamp_from_epoch_millis_is_stable_for_same_input() {
+        let ms = 1_778_595_445_123_i64;
+        assert_eq!(
+            timestamp_from_epoch_millis(ms).unwrap(),
+            timestamp_from_epoch_millis(ms).unwrap()
+        );
+    }
+
+    #[test]
+    fn identity_policy_timestamp_matches_timestamp_from_epoch_millis() {
+        let policy = CycloneDxIdentityPolicy {
+            build_id: "build-1".to_string(),
+            task_path: ":task".to_string(),
+            root_group: "".to_string(),
+            root_name: "app".to_string(),
+            root_version: "2.0".to_string(),
+            schema_version: "1.6".to_string(),
+            timestamp_ms: 1_778_595_445_123,
+        };
+        assert_eq!(
+            policy.timestamp().unwrap(),
+            timestamp_from_epoch_millis(1_778_595_445_123).unwrap()
+        );
+    }
+
+    #[test]
+    fn reject_unsupported_captured_options_accepts_deterministic_policies() {
+        let options = CycloneDxCapturedTaskOptions {
+            spec_version: "1.6".to_string(),
+            root_group: "org.example".to_string(),
+            root_name: "demo".to_string(),
+            root_version: "1.0".to_string(),
+            root_component_type: "library".to_string(),
+            timestamp_source_policy: "gradle-substrate-explicit-epoch-ms".to_string(),
+            serial_source_policy: "gradle-substrate-deterministic-identity".to_string(),
+            include_bom_serial_number: true,
+            include_metadata_resolution: true,
+            include_build_system: false,
+            include_build_environment: false,
+            include_license_text: false,
+            organizational_entity_present: false,
+            organizational_entity: None,
+            raw_license_choice_present: false,
+            license_choices: Vec::new(),
+            build_system_environment_variable: String::new(),
+            build_system_url: String::new(),
+            raw_external_references_present: false,
+            external_references: Vec::new(),
+            root_vcs_url: String::new(),
+            json_output: "/tmp/bom.json".to_string(),
+            xml_output: String::new(),
+        };
+        reject_unsupported_captured_options(&options).unwrap();
+    }
+
+    #[test]
+    fn reject_unsupported_captured_options_rejects_upstream_random_timestamp_policy() {
+        let mut options = make_all_deterministic_options();
+        options.timestamp_source_policy = "upstream-random".to_string();
+        let err = reject_unsupported_captured_options(&options).unwrap_err();
+        assert!(err.contains("timestamp-source-policy"));
+    }
+
+    #[test]
+    fn reject_unsupported_captured_options_rejects_cyclonedx_gradle_random_serial_policy() {
+        let mut options = make_all_deterministic_options();
+        options.serial_source_policy = "cyclonedx-gradle-random-uuid".to_string();
+        let err = reject_unsupported_captured_options(&options).unwrap_err();
+        assert!(err.contains("serial-source-policy"));
+    }
+
+    #[test]
+    fn reject_unsupported_captured_options_rejects_both_nondeterministic_policies() {
+        let mut options = make_all_deterministic_options();
+        options.timestamp_source_policy = "cyclonedx-core-metadata-constructor-now".to_string();
+        options.serial_source_policy = "upstream-random".to_string();
+        let err = reject_unsupported_captured_options(&options).unwrap_err();
+        assert!(err.contains("timestamp-source-policy"));
+        assert!(err.contains("serial-source-policy"));
+    }
+
+    #[test]
+    fn reject_unsupported_captured_options_rejects_omitted_serial_with_include_bom_serial() {
+        let mut options = make_all_deterministic_options();
+        options.serial_source_policy = "omitted".to_string();
+        let err = reject_unsupported_captured_options(&options).unwrap_err();
+        assert!(err.contains("serial-source-policy"));
+    }
+
+    #[test]
+    fn reject_unsupported_captured_options_accepts_omitted_serial_when_bom_serial_false() {
+        let mut options = make_all_deterministic_options();
+        options.include_bom_serial_number = false;
+        options.serial_source_policy = "omitted".to_string();
+        reject_unsupported_captured_options(&options).unwrap();
+    }
+
+    #[test]
+    fn reject_unsupported_captured_options_rejects_non_omitted_serial_when_bom_serial_false() {
+        let mut options = make_all_deterministic_options();
+        options.include_bom_serial_number = false;
+        options.serial_source_policy = "gradle-substrate-deterministic-identity".to_string();
+        let err = reject_unsupported_captured_options(&options).unwrap_err();
+        assert!(err.contains("serial-source-policy"));
+    }
+
+    fn make_all_deterministic_options() -> CycloneDxCapturedTaskOptions {
+        CycloneDxCapturedTaskOptions {
+            spec_version: "1.6".to_string(),
+            root_group: "org.example".to_string(),
+            root_name: "demo".to_string(),
+            root_version: "1.0".to_string(),
+            root_component_type: "library".to_string(),
+            timestamp_source_policy: "gradle-substrate-explicit-epoch-ms".to_string(),
+            serial_source_policy: "gradle-substrate-deterministic-identity".to_string(),
+            include_bom_serial_number: true,
+            include_metadata_resolution: true,
+            include_build_system: false,
+            include_build_environment: false,
+            include_license_text: false,
+            organizational_entity_present: false,
+            organizational_entity: None,
+            raw_license_choice_present: false,
+            license_choices: Vec::new(),
+            build_system_environment_variable: String::new(),
+            build_system_url: String::new(),
+            raw_external_references_present: false,
+            external_references: Vec::new(),
+            root_vcs_url: String::new(),
+            json_output: "/tmp/bom.json".to_string(),
+            xml_output: String::new(),
+        }
     }
 }
