@@ -646,6 +646,7 @@ impl DependencyResolutionServiceImpl {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn read_cached_text_artifact(
         &self,
         key: &str,
@@ -695,6 +696,7 @@ impl DependencyResolutionServiceImpl {
         Some(text)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn persist_text_artifact(
         &self,
         key: &str,
@@ -744,6 +746,7 @@ impl DependencyResolutionServiceImpl {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn persist_text_artifact_alias(
         &self,
         key: &str,

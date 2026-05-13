@@ -116,7 +116,8 @@ pub fn normalize_path(path: &str) -> String {
     let is_absolute = path.starts_with('/');
     let has_drive = segments
         .first()
-        .map_or(false, |s| s.len() >= 2 && s.chars().nth(1) == Some(':'));
+        .filter(|s| s.len() >= 2 && s.chars().nth(1) == Some(':'))
+        .is_some();
 
     for (i, seg) in segments.iter().enumerate() {
         match *seg {
@@ -143,8 +144,6 @@ pub fn normalize_path(path: &str) -> String {
 
     let mut result = if is_absolute {
         "/".to_string()
-    } else if has_drive {
-        String::new()
     } else {
         String::new()
     };
@@ -198,20 +197,20 @@ impl DeterministicHasher {
     /// Includes domain with null-byte delimiter.
     pub fn update_domain(&mut self, domain: &str) {
         self.state.update(domain.as_bytes());
-        self.state.update(&[0u8]);
+        self.state.update([0u8]);
     }
 
     /// Includes version as little-endian bytes.
     pub fn update_version(&mut self, version: u32) {
-        self.state.update(&version.to_le_bytes());
+        self.state.update(version.to_le_bytes());
     }
 
     /// Includes name\0value\0 for a single key-value input.
     pub fn update_input(&mut self, name: &str, value: &str) {
         self.state.update(name.as_bytes());
-        self.state.update(&[0u8]);
+        self.state.update([0u8]);
         self.state.update(value.as_bytes());
-        self.state.update(&[0u8]);
+        self.state.update([0u8]);
     }
 
     /// Returns the SHA-256 hex digest.
@@ -243,7 +242,7 @@ pub struct CacheKey {
 
 impl CacheKey {
     /// Returns `{domain}:{version}:{hash}`.
-    pub fn to_string(&self) -> String {
+    pub fn to_key_string(&self) -> String {
         format!("{}:{}:{}", self.domain, self.version, self.hash)
     }
 
@@ -260,7 +259,7 @@ impl CacheKey {
 
 impl std::fmt::Display for CacheKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_string())
+        write!(f, "{}:{}", self.domain, self.hash)
     }
 }
 
@@ -896,7 +895,7 @@ mod tests {
             .with_file_content("src/Main.java", "abc123")
             .build();
 
-        let s = key.to_string();
+        let s = key.to_key_string();
         assert!(s.starts_with("compile:1:"));
         assert_eq!(s.split(':').count(), 3);
     }

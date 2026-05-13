@@ -109,8 +109,8 @@ pub struct CycloneDxLicenseText {
     pub encoding: String,
     pub content: String,
 }
-
 impl CycloneDxLicenseChoice {
+    #[cfg(test)]
     fn from_license(license: CycloneDxLicense) -> Self {
         Self {
             expression: String::new(),
@@ -118,6 +118,7 @@ impl CycloneDxLicenseChoice {
         }
     }
 
+    #[cfg(test)]
     fn from_expression(expression: impl Into<String>) -> Self {
         Self {
             expression: expression.into(),
@@ -2388,7 +2389,7 @@ fn interpolate_maven_properties_once(value: &str, properties: &BTreeMap<String, 
 fn normalize_pom_component_metadata(mut metadata: PomComponentMetadata) -> PomComponentMetadata {
     metadata
         .licenses
-        .sort_by(|a, b| license_choice_sort_key(a).cmp(&license_choice_sort_key(b)));
+        .sort_by_key(license_choice_sort_key);
     metadata
         .licenses
         .dedup_by(|a, b| license_choice_sort_key(a) == license_choice_sort_key(b));

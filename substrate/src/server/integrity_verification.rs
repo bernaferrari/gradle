@@ -87,7 +87,7 @@ pub enum ChecksumAlgorithm {
 }
 
 impl ChecksumAlgorithm {
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "sha256" | "sha-256" => Some(ChecksumAlgorithm::Sha256),
             "sha512" | "sha-512" => Some(ChecksumAlgorithm::Sha512),
@@ -165,7 +165,7 @@ impl IntegrityMetadata {
         }
 
         for (algorithm, expected) in &self.checksums {
-            let algo = ChecksumAlgorithm::from_str(algorithm)
+            let algo = ChecksumAlgorithm::parse(algorithm)
                 .ok_or_else(|| IntegrityError::UnsupportedAlgorithm(algorithm.clone()))?;
             let actual = algo.compute(data);
             if actual.to_lowercase() != expected.to_lowercase() {
@@ -189,7 +189,7 @@ impl IntegrityMetadata {
                     url: self.url.clone(),
                 })?;
 
-        let algo = ChecksumAlgorithm::from_str(algorithm)
+        let algo = ChecksumAlgorithm::parse(algorithm)
             .ok_or_else(|| IntegrityError::UnsupportedAlgorithm(algorithm.to_string()))?;
         let actual = algo.compute(data);
         if actual.to_lowercase() != expected.to_lowercase() {
@@ -376,7 +376,7 @@ impl TufMetadata {
 
         // Check all hashes
         for (algorithm, expected) in &target.hashes {
-            let algo = ChecksumAlgorithm::from_str(algorithm)
+            let algo = ChecksumAlgorithm::parse(algorithm)
                 .ok_or_else(|| IntegrityError::UnsupportedAlgorithm(algorithm.clone()))?;
             let actual = algo.compute(data);
             if actual.to_lowercase() != expected.to_lowercase() {
@@ -617,7 +617,7 @@ impl IntegrityVerifier {
 
         let mut verified = Vec::new();
         for (algorithm, expected_hash) in &expected.checksums {
-            let algo = ChecksumAlgorithm::from_str(algorithm)
+            let algo = ChecksumAlgorithm::parse(algorithm)
                 .ok_or_else(|| IntegrityError::UnsupportedAlgorithm(algorithm.clone()))?;
             let actual = algo.compute(data);
             if actual.to_lowercase() == expected_hash.to_lowercase() {
@@ -816,15 +816,15 @@ mod tests {
     #[test]
     fn test_checksum_algorithm_from_str_sha256() {
         assert_eq!(
-            ChecksumAlgorithm::from_str("sha256"),
+            ChecksumAlgorithm::parse("sha256"),
             Some(ChecksumAlgorithm::Sha256)
         );
         assert_eq!(
-            ChecksumAlgorithm::from_str("SHA256"),
+            ChecksumAlgorithm::parse("SHA256"),
             Some(ChecksumAlgorithm::Sha256)
         );
         assert_eq!(
-            ChecksumAlgorithm::from_str("sha-256"),
+            ChecksumAlgorithm::parse("sha-256"),
             Some(ChecksumAlgorithm::Sha256)
         );
     }
@@ -832,11 +832,11 @@ mod tests {
     #[test]
     fn test_checksum_algorithm_from_str_sha512() {
         assert_eq!(
-            ChecksumAlgorithm::from_str("sha512"),
+            ChecksumAlgorithm::parse("sha512"),
             Some(ChecksumAlgorithm::Sha512)
         );
         assert_eq!(
-            ChecksumAlgorithm::from_str("SHA-512"),
+            ChecksumAlgorithm::parse("SHA-512"),
             Some(ChecksumAlgorithm::Sha512)
         );
     }
@@ -844,15 +844,15 @@ mod tests {
     #[test]
     fn test_checksum_algorithm_from_str_sha384() {
         assert_eq!(
-            ChecksumAlgorithm::from_str("sha384"),
+            ChecksumAlgorithm::parse("sha384"),
             Some(ChecksumAlgorithm::Sha384)
         );
     }
 
     #[test]
     fn test_checksum_algorithm_from_str_unsupported() {
-        assert_eq!(ChecksumAlgorithm::from_str("md5"), None);
-        assert_eq!(ChecksumAlgorithm::from_str("crc32"), None);
+        assert_eq!(ChecksumAlgorithm::parse("md5"), None);
+        assert_eq!(ChecksumAlgorithm::parse("crc32"), None);
     }
 
     #[test]

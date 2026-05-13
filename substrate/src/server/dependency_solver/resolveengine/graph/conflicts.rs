@@ -9,9 +9,10 @@ use super::super::super::ivyresolve::strategy::compare_versions;
 /// This is intentionally independent from `DependencyResolutionServiceImpl` so
 /// conflict behavior can grow toward Gradle's `LatestModuleConflictResolver`
 /// without deepening the gRPC service as the solver implementation.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum ResolutionStrategy {
     /// Pick the highest version, matching Gradle's default newest-wins behavior.
+    #[default]
     HighestVersion,
     /// Force specific versions for given "group:name" coordinates.
     Force(HashMap<String, String>),
@@ -21,12 +22,6 @@ pub enum ResolutionStrategy {
     FailOnConflict,
     /// Use the nearest definition in the dependency tree.
     NearestDefinition,
-}
-
-impl Default for ResolutionStrategy {
-    fn default() -> Self {
-        ResolutionStrategy::HighestVersion
-    }
 }
 
 impl ResolutionStrategy {
