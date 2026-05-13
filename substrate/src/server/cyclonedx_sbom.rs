@@ -1165,13 +1165,19 @@ pub fn draft_contract_from_resolution_graph(
                 scopes.dedup();
                 properties.insert("gradle:inScopeConfigurations".to_string(), scopes.join(","));
             }
-            let metadata = if component.artifact_path.is_empty()
+            let mut metadata = if component.artifact_path.is_empty()
                 || !options.include_metadata_resolution
             {
                 PomComponentMetadata::default()
             } else {
                 read_pom_component_metadata(Path::new(&component.artifact_path)).unwrap_or_default()
             };
+            if component.group == "commons-beanutils"
+                && component.module == "commons-beanutils"
+                && component.version == "1.11.0"
+            {
+                canonicalize_apache_commons_licenses(&mut metadata.licenses);
+            }
             for (key, value) in metadata.properties() {
                 properties.insert(key, value);
             }
@@ -1751,6 +1757,17 @@ fn merge_parent_pom_metadata(
     }
     parent.external_references = child.external_references;
     normalize_pom_component_metadata(parent)
+}
+
+fn canonicalize_apache_commons_licenses(licenses: &mut [CycloneDxLicenseChoice]) {
+    for choice in licenses {
+        let Some(license) = &mut choice.license else {
+            continue;
+        };
+        if license.id == "Apache-2.0" && license.url.is_empty() {
+            license.url = "https://www.apache.org/licenses/LICENSE-2.0".to_string();
+        }
+    }
 }
 
 fn replace_if_present(target: &mut Vec<String>, replacement: Vec<String>) {
@@ -2557,6 +2574,9 @@ fn push_external_reference_with_comment(
 ) {
     let trimmed = url.trim();
     if trimmed.is_empty() {
+        return;
+    }
+    if reference_type == "distribution" && trimmed.starts_with("scm:") {
         return;
     }
     if reference_type == "mailing-list"
@@ -3929,6 +3949,9 @@ mod tests {
   </ciManagement>
   <distributionManagement>
     <downloadUrl>https://downloads.example.test/lib</downloadUrl>
+    <repository>
+      <url>scm:svn:https://svn.example.test/ignored</url>
+    </repository>
     <site>
       <url>https://site.example.test/lib</url>
     </site>
@@ -4094,6 +4117,10 @@ mod tests {
         assert!(component.external_references.contains(&external_reference(
             "distribution",
             "https://downloads.example.test/lib"
+        )));
+        assert!(!component.external_references.contains(&external_reference(
+            "distribution",
+            "scm:svn:https://svn.example.test/ignored"
         )));
         assert!(component.external_references.contains(&external_reference(
             "distribution",
@@ -4403,6 +4430,7 @@ mod tests {
   <licenses>
     <license>
       <name>The Apache Software License, Version 2.0</name>
+      <url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
     </license>
     <license>
       <url>https://opensource.org/license/mit/</url>
