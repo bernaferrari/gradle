@@ -9,7 +9,6 @@
 /// Unsafe code is only permitted in modules that interact with platform
 /// FFI (libc, sysctl, proc_pidinfo) or require explicit lifetime erasure
 /// for builder patterns. All other modules must be 100% safe Rust.
-
 /// A documented location of unsafe code within the crate.
 #[derive(Debug, Clone, Copy)]
 pub struct UnsafeLocation {

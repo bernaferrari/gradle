@@ -328,33 +328,30 @@ impl TaskExecutor for SyncTaskExecutor {
                         }
                     }
 
-                    let needs_copy = if !expand_properties.is_empty() {
-                        true
-                    } else if !dest_file.exists() {
-                        true
-                    } else {
-                        // Compare modification times and sizes
-                        let src_meta = tokio::fs::metadata(src_file).await.ok();
-                        let dest_meta = tokio::fs::metadata(&dest_file).await.ok();
+                    let needs_copy = !expand_properties.is_empty() || !dest_file.exists()
+                        || {
+                            // Compare modification times and sizes
+                            let src_meta = tokio::fs::metadata(src_file).await.ok();
+                            let dest_meta = tokio::fs::metadata(&dest_file).await.ok();
 
-                        match (src_meta, dest_meta) {
-                            (Some(sm), Some(dm)) => {
-                                let src_modified = sm
-                                    .modified()
-                                    .ok()
-                                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                                    .map(|d| d.as_millis() as u64);
-                                let dest_modified = dm
-                                    .modified()
-                                    .ok()
-                                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                                    .map(|d| d.as_millis() as u64);
+                            match (src_meta, dest_meta) {
+                                (Some(sm), Some(dm)) => {
+                                    let src_modified = sm
+                                        .modified()
+                                        .ok()
+                                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                        .map(|d| d.as_millis() as u64);
+                                    let dest_modified = dm
+                                        .modified()
+                                        .ok()
+                                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                        .map(|d| d.as_millis() as u64);
 
-                                src_modified != dest_modified || sm.len() != dm.len()
+                                    src_modified != dest_modified || sm.len() != dm.len()
+                                }
+                                _ => true,
                             }
-                            _ => true,
-                        }
-                    };
+                        };
 
                     if needs_copy {
                         if let Err(e) = Self::copy_file(

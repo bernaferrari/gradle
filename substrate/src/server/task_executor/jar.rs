@@ -1312,7 +1312,7 @@ fn looks_like_archive_source_root(root: &Path) -> bool {
     }
     components.windows(2).any(|pair| {
         pair == ["src", "dist"] || pair == ["classes", "java"] || pair == ["resources", "main"]
-    }) || components.iter().any(|component| *component == "src")
+    }) || components.contains(&"src")
 }
 
 #[cfg(test)]

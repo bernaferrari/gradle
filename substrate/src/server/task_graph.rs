@@ -212,13 +212,13 @@ impl TaskGraphServiceImpl {
                 );
             }
             enrich_task_contract_from_graph(task, &task_outputs, &plan_dependencies);
-            maybe_synthesize_cyclonedx_sbom_contract(task, &build_id_str);
+            maybe_synthesize_cyclonedx_sbom_contract(task, build_id_str);
         }
         let cyclonedx_contracts_by_output = cyclonedx_contracts_by_output(&plan_tasks);
         for task in &mut plan_tasks {
             maybe_synthesize_cyclonedx_aggregate_contract(
                 task,
-                &build_id_str,
+                build_id_str,
                 &cyclonedx_contracts_by_output,
             );
         }

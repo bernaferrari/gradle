@@ -304,9 +304,7 @@ fn kernel_task_contract_rejection(
     task_type: &str,
     context_json: Option<&String>,
 ) -> Option<String> {
-    let Some(json) = context_json else {
-        return None;
-    };
+    let json = context_json?;
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
         return Some("execution context is not valid JSON".to_string());
     };
