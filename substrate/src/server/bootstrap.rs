@@ -8,6 +8,7 @@ use tonic::{Request, Response, Status};
 use super::build_event_stream::BuildEventStreamServiceImpl;
 use super::build_plan_ir::from_proto;
 use super::build_plan_shadow::{capture_and_persist_shadow_from_jvm, BuildPlanShadowStore};
+use super::ide_model::{CachedIdeProject, IdeModelServiceImpl};
 use super::scopes::{BuildId, ScopeRegistry, SessionId};
 use super::typed_scopes::ScopeGuard;
 use crate::client::jvm_host_bridge::JvmHostBridge;
@@ -35,7 +36,7 @@ pub struct BootstrapServiceImpl {
     sessions: DashMap<BuildId, BuildSession>,
     /// RAII guards for active builds. When a guard is dropped (removed from this map),
     /// it automatically calls `ScopeRegistry::cleanup_build()` to release all
-    /// scope-tracked state for that build.
+    /// scope-tracked state for this build.
     scope_guards: DashMap<BuildId, ScopeGuard>,
     request_counts: DashMap<String, AtomicI64>,
     start_time: Instant,
@@ -44,6 +45,7 @@ pub struct BootstrapServiceImpl {
     jvm_bridge: Option<Arc<JvmHostBridge>>,
     build_plan_shadow_store: Option<Arc<BuildPlanShadowStore>>,
     event_stream: Option<Arc<BuildEventStreamServiceImpl>>,
+    ide_model: Option<Arc<IdeModelServiceImpl>>,
 }
 
 impl Default for BootstrapServiceImpl {
@@ -64,6 +66,7 @@ impl BootstrapServiceImpl {
             jvm_bridge: None,
             build_plan_shadow_store: None,
             event_stream: None,
+            ide_model: None,
         }
     }
 
@@ -78,6 +81,7 @@ impl BootstrapServiceImpl {
             jvm_bridge: None,
             build_plan_shadow_store: None,
             event_stream: None,
+            ide_model: None,
         }
     }
 
@@ -96,12 +100,19 @@ impl BootstrapServiceImpl {
             jvm_bridge: Some(jvm_bridge),
             build_plan_shadow_store: Some(build_plan_shadow_store),
             event_stream: None,
+            ide_model: None,
         }
     }
 
     /// Set the event stream for build lifecycle event emission.
     pub fn with_event_stream(mut self, event_stream: Arc<BuildEventStreamServiceImpl>) -> Self {
         self.event_stream = Some(event_stream);
+        self
+    }
+
+    /// Set the IDE model service for populating Tooling API caches.
+    pub fn with_ide_model(mut self, ide_model: Arc<IdeModelServiceImpl>) -> Self {
+        self.ide_model = Some(ide_model);
         self
     }
 
@@ -153,16 +164,31 @@ impl BootstrapService for BootstrapServiceImpl {
         self.sessions.insert(
             build_id.clone(),
             BuildSession {
-                project_dir: req.project_dir,
+                project_dir: req.project_dir.clone(),
                 start_time: Instant::now(),
                 start_time_ms: client_start_time_ms,
                 requested_parallelism: parallelism,
-                requested_features: req.requested_features,
-                system_properties: req.system_properties,
+                requested_features: req.requested_features.clone(),
+                system_properties: req.system_properties.clone(),
             },
         );
 
-        // Register build in scope registry. When the caller provides a session_id
+        // Populate IDE model cache with basic project info.
+        if let Some(ide_model) = &self.ide_model {
+            let project_name = std::path::Path::new(&req.project_dir)
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "project".to_string());
+            ide_model.put_project(CachedIdeProject {
+                name: project_name,
+                path: req.project_dir.clone(),
+                description: String::new(),
+                tasks: Vec::new(),
+                source_sets: Vec::new(),
+            });
+        }
+
+        // Register build in scope registry.
         // (e.g., from a Gradle session), use it directly. When session_id is empty
         // (e.g., RustBootstrapClient which does not send one), synthesize a session
         // from the build_id so the build is always registered and downstream services
