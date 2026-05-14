@@ -49,6 +49,7 @@ pub mod groovy_parser;
 pub mod hash;
 pub mod ide_lsp;
 pub mod ide_model;
+pub mod jvm_host_service;
 pub mod incremental_compilation;
 pub mod integrity_verification;
 pub mod ivy_parser;

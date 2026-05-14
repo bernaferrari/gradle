@@ -37,6 +37,7 @@ use gradle_substrate_daemon::{
         garbage_collection_service_server::GarbageCollectionServiceServer,
         hash_service_server::HashServiceServer,
         ide_model_service_server::IdeModelServiceServer,
+        jvm_host_service_server::JvmHostServiceServer,
         incremental_compilation_service_server::IncrementalCompilationServiceServer,
         native_compile_service_server::NativeCompileServiceServer,
         parser_service_server::ParserServiceServer, plugin_service_server::PluginServiceServer,
@@ -66,6 +67,7 @@ use gradle_substrate_daemon::{
         file_fingerprint::FileFingerprintServiceImpl, file_tree::FileTreeServiceImpl,
         file_watch::FileWatchServiceImpl, garbage_collection::GarbageCollectionServiceImpl,
         hash::HashServiceImpl, ide_model::IdeModelServiceImpl,
+        jvm_host_service::JvmHostServiceImpl,
         incremental_compilation::IncrementalCompilationServiceImpl,
         native_compile::NativeCompileServiceImpl,
         parser_service::ParserServiceImpl, plugin::PluginServiceImpl,
@@ -488,6 +490,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             NativeCompileServiceImpl,
         ))
         .add_service(IdeModelServiceServer::new(ide_model.clone()))
+        .add_service(JvmHostServiceServer::new(JvmHostServiceImpl::default()))
         .add_service(BuildMetricsServiceServer::new((*build_metrics).clone()))
         .add_service(GarbageCollectionServiceServer::new(garbage_collection))
         .add_service(VersionCatalogServiceServer::new(
