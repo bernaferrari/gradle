@@ -36,6 +36,7 @@ use gradle_substrate_daemon::{
         file_watch_service_server::FileWatchServiceServer,
         garbage_collection_service_server::GarbageCollectionServiceServer,
         hash_service_server::HashServiceServer,
+        ide_model_service_server::IdeModelServiceServer,
         incremental_compilation_service_server::IncrementalCompilationServiceServer,
         parser_service_server::ParserServiceServer, plugin_service_server::PluginServiceServer,
         problem_reporting_service_server::ProblemReportingServiceServer,
@@ -63,7 +64,8 @@ use gradle_substrate_daemon::{
         execution_history::ExecutionHistoryServiceImpl, execution_plan::ExecutionPlanServiceImpl,
         file_fingerprint::FileFingerprintServiceImpl, file_tree::FileTreeServiceImpl,
         file_watch::FileWatchServiceImpl, garbage_collection::GarbageCollectionServiceImpl,
-        hash::HashServiceImpl, incremental_compilation::IncrementalCompilationServiceImpl,
+        hash::HashServiceImpl, ide_model::IdeModelServiceImpl,
+        incremental_compilation::IncrementalCompilationServiceImpl,
         parser_service::ParserServiceImpl, plugin::PluginServiceImpl,
         problem_reporting::ProblemReportingServiceImpl,
         resource_management::ResourceManagementServiceImpl, scopes::ScopeRegistry,
@@ -299,13 +301,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Scope registry — tracks session→build membership for proper scope isolation
     let scope_registry = Arc::new(ScopeRegistry::new());
 
+    // IDE model service (shared between bootstrap and gRPC server)
+    let ide_model = IdeModelServiceImpl::new();
+
     // Phase 15: Bootstrap (wired to scope registry + event stream for lifecycle events)
     let bootstrap = BootstrapServiceImpl::with_scope_registry_and_shadow(
         scope_registry.clone(),
         Arc::clone(&jvm_bridge),
         Arc::clone(&build_plan_shadow_store),
     )
-    .with_event_stream(Arc::new(build_event_stream.clone()));
+    .with_event_stream(Arc::new(build_event_stream.clone()))
+    .with_ide_model(Arc::new(ide_model.clone()));
 
     // Phase 18: Dependency resolution
     let artifact_store_dir = PathBuf::from(&args.artifact_store_dir);
@@ -476,6 +482,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(IncrementalCompilationServiceServer::new(
             incremental_compilation,
         ))
+        .add_service(IdeModelServiceServer::new(ide_model.clone()))
         .add_service(BuildMetricsServiceServer::new((*build_metrics).clone()))
         .add_service(GarbageCollectionServiceServer::new(garbage_collection))
         .add_service(VersionCatalogServiceServer::new(
