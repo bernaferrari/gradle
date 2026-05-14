@@ -38,6 +38,7 @@ use gradle_substrate_daemon::{
         hash_service_server::HashServiceServer,
         ide_model_service_server::IdeModelServiceServer,
         incremental_compilation_service_server::IncrementalCompilationServiceServer,
+        native_compile_service_server::NativeCompileServiceServer,
         parser_service_server::ParserServiceServer, plugin_service_server::PluginServiceServer,
         problem_reporting_service_server::ProblemReportingServiceServer,
         resource_management_service_server::ResourceManagementServiceServer,
@@ -66,6 +67,7 @@ use gradle_substrate_daemon::{
         file_watch::FileWatchServiceImpl, garbage_collection::GarbageCollectionServiceImpl,
         hash::HashServiceImpl, ide_model::IdeModelServiceImpl,
         incremental_compilation::IncrementalCompilationServiceImpl,
+        native_compile::NativeCompileServiceImpl,
         parser_service::ParserServiceImpl, plugin::PluginServiceImpl,
         problem_reporting::ProblemReportingServiceImpl,
         resource_management::ResourceManagementServiceImpl, scopes::ScopeRegistry,
@@ -394,7 +396,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
          Listening on: {}\n\
          Ready in: {}ms\n\
          Cache dir: {}\n\
-         Services: 40 (control, dag-executor, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console, test-execution, artifact-publishing, build-init, incremental-compilation, ide-model, build-metrics, garbage-collection, version-catalog, parser, classpath, filewatch, jvmhost)",
+         Services: 41 (control, dag-executor, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console, test-execution, artifact-publishing, build-init, incremental-compilation, native-compile, ide-model, build-metrics, garbage-collection, version-catalog, parser, classpath, filewatch, jvmhost)",
         env!("CARGO_PKG_VERSION"),
         listen_endpoint,
         startup_start.elapsed().as_millis(),
@@ -481,6 +483,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(BuildInitServiceServer::new(build_init))
         .add_service(IncrementalCompilationServiceServer::new(
             incremental_compilation,
+        ))
+        .add_service(NativeCompileServiceServer::new(
+            NativeCompileServiceImpl,
         ))
         .add_service(IdeModelServiceServer::new(ide_model.clone()))
         .add_service(BuildMetricsServiceServer::new((*build_metrics).clone()))
