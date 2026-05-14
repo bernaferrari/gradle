@@ -394,7 +394,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
          Listening on: {}\n\
          Ready in: {}ms\n\
          Cache dir: {}\n\
-         Services: 39 (control, dag-executor, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console, test-execution, artifact-publishing, build-init, incremental-compilation, build-metrics, garbage-collection, version-catalog, parser, classpath, filewatch, jvmhost)",
+         Services: 40 (control, dag-executor, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console, test-execution, artifact-publishing, build-init, incremental-compilation, ide-model, build-metrics, garbage-collection, version-catalog, parser, classpath, filewatch, jvmhost)",
         env!("CARGO_PKG_VERSION"),
         listen_endpoint,
         startup_start.elapsed().as_millis(),
