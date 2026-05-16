@@ -491,9 +491,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ))
         .add_service(NativeCompileServiceServer::new(NativeCompileServiceImpl))
         .add_service(IdeModelServiceServer::new(ide_model.clone()))
-        .add_service(JvmHostServiceServer::new(JvmHostServiceImpl::new(
-            Arc::clone(&build_registry),
-        )))
+        .add_service(JvmHostServiceServer::new(
+            JvmHostServiceImpl::new(Arc::clone(&build_registry))
+                .with_build_plan_shadow_store(Arc::clone(&build_plan_shadow_store)),
+        ))
         .add_service(BuildMetricsServiceServer::new((*build_metrics).clone()))
         .add_service(GarbageCollectionServiceServer::new(garbage_collection))
         .add_service(VersionCatalogServiceServer::new(

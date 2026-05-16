@@ -25,6 +25,8 @@ use crate::proto::{
 };
 
 use crate::server::build_init::BuildInitServiceImpl;
+use crate::server::build_plan_ir::to_proto;
+use crate::server::build_plan_shadow::BuildPlanShadowStore;
 use crate::server::platform::{CurrentPlatform, PlatformOps};
 use crate::server::scopes::BuildId;
 
@@ -32,12 +34,25 @@ use crate::server::scopes::BuildId;
 #[derive(Debug, Clone)]
 pub struct JvmHostServiceImpl {
     build_registry: Arc<DashMap<BuildId, String>>,
+    build_plan_shadow_store: Option<Arc<BuildPlanShadowStore>>,
 }
 
 impl JvmHostServiceImpl {
     /// Create a new JvmHostService with access to the shared build registry.
     pub fn new(build_registry: Arc<DashMap<BuildId, String>>) -> Self {
-        Self { build_registry }
+        Self {
+            build_registry,
+            build_plan_shadow_store: None,
+        }
+    }
+
+    /// Set the build-plan shadow store used by GetBuildPlan.
+    pub fn with_build_plan_shadow_store(
+        mut self,
+        build_plan_shadow_store: Arc<BuildPlanShadowStore>,
+    ) -> Self {
+        self.build_plan_shadow_store = Some(build_plan_shadow_store);
+        self
     }
 }
 
@@ -48,6 +63,7 @@ impl Default for JvmHostServiceImpl {
         // tests that don't need registry lookups.
         Self {
             build_registry: Arc::new(DashMap::new()),
+            build_plan_shadow_store: None,
         }
     }
 }
@@ -191,10 +207,43 @@ impl JvmHostService for JvmHostServiceImpl {
 
     async fn get_build_plan(
         &self,
-        _request: Request<GetBuildPlanRequest>,
+        request: Request<GetBuildPlanRequest>,
     ) -> Result<Response<GetBuildPlanResponse>, Status> {
-        // TODO: Port build plan generation to Rust
-        Err(Status::unimplemented("GetBuildPlan not yet ported to Rust"))
+        let req = request.into_inner();
+        if req.build_id.trim().is_empty() {
+            return Err(Status::invalid_argument("build_id must not be empty"));
+        }
+
+        let Some(store) = self.build_plan_shadow_store.as_ref() else {
+            return Ok(Response::new(GetBuildPlanResponse {
+                success: false,
+                error_message: "BuildPlanShadowStore is not configured".to_string(),
+                plan: None,
+                source: "rust-shadow-store-unconfigured".to_string(),
+            }));
+        };
+
+        match store.load_plan(&req.build_id) {
+            Ok(Some(artifact)) => Ok(Response::new(GetBuildPlanResponse {
+                success: true,
+                error_message: String::new(),
+                plan: Some(to_proto(&artifact.plan)),
+                source: artifact.source,
+            })),
+            Ok(None) => Ok(Response::new(GetBuildPlanResponse {
+                success: false,
+                error_message: format!(
+                    "No Rust build-plan shadow found for build '{}'",
+                    req.build_id
+                ),
+                plan: None,
+                source: "rust-shadow-store-miss".to_string(),
+            })),
+            Err(error) => Err(Status::failed_precondition(format!(
+                "Failed to load Rust build-plan shadow for build '{}': {}",
+                req.build_id, error
+            ))),
+        }
     }
 
     async fn execute_task(
@@ -357,10 +406,16 @@ impl JvmHostServiceImpl {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::proto::bootstrap_service_server::BootstrapService;
     use crate::proto::{CompleteBuildRequest, InitBuildRequest};
     use crate::server::bootstrap::BootstrapServiceImpl;
+    use crate::server::build_plan_ir::{
+        CanonicalBuildPlan, CanonicalBuildPlanProject, CanonicalBuildPlanTask,
+        BUILD_PLAN_SCHEMA_VERSION,
+    };
 
     #[tokio::test]
     async fn get_build_model_returns_registered_project_tree() {
@@ -506,6 +561,77 @@ include(":app", ":lib:core")
         assert!(error.message().contains("InitBuild"));
     }
 
+    #[tokio::test]
+    async fn get_build_plan_returns_cached_rust_shadow_plan() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(BuildPlanShadowStore::new(temp.path().to_path_buf()));
+        let plan = sample_canonical_plan("build-plan-1");
+        store.persist_plan(&plan, "test-shadow").unwrap();
+        let service =
+            JvmHostServiceImpl::default().with_build_plan_shadow_store(Arc::clone(&store));
+
+        let response = service
+            .get_build_plan(Request::new(GetBuildPlanRequest {
+                build_id: "build-plan-1".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(response.success);
+        assert!(response.error_message.is_empty());
+        assert_eq!("test-shadow", response.source);
+        let proto_plan = response.plan.expect("plan should be returned");
+        assert_eq!("build-plan-1", proto_plan.build_id);
+        assert_eq!(1, proto_plan.projects.len());
+        assert_eq!(1, proto_plan.tasks.len());
+        assert_eq!(":compileJava", proto_plan.tasks[0].path);
+    }
+
+    #[tokio::test]
+    async fn get_build_plan_reports_missing_shadow_plan_without_fallback() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(BuildPlanShadowStore::new(temp.path().to_path_buf()));
+        let service = JvmHostServiceImpl::default().with_build_plan_shadow_store(store);
+
+        let response = service
+            .get_build_plan(Request::new(GetBuildPlanRequest {
+                build_id: "missing-plan".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!response.success);
+        assert!(response.plan.is_none());
+        assert_eq!("rust-shadow-store-miss", response.source);
+        assert!(response.error_message.contains("missing-plan"));
+    }
+
+    #[tokio::test]
+    async fn get_build_plan_requires_build_id_and_configured_store() {
+        let service = JvmHostServiceImpl::default();
+
+        let error = service
+            .get_build_plan(Request::new(GetBuildPlanRequest {
+                build_id: " ".to_string(),
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(tonic::Code::InvalidArgument, error.code());
+
+        let response = service
+            .get_build_plan(Request::new(GetBuildPlanRequest {
+                build_id: "build-without-store".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!response.success);
+        assert!(response.plan.is_none());
+        assert_eq!("rust-shadow-store-unconfigured", response.source);
+    }
+
     #[test]
     fn direct_child_project_paths_respect_nested_hierarchy() {
         let projects = vec![
@@ -545,5 +671,41 @@ include(":app", ":lib:core")
                 ":lib:util".to_string(),
             ])
         );
+    }
+
+    fn sample_canonical_plan(build_id: &str) -> CanonicalBuildPlan {
+        CanonicalBuildPlan {
+            schema_version: BUILD_PLAN_SCHEMA_VERSION,
+            build_id: build_id.to_string(),
+            projects: vec![CanonicalBuildPlanProject {
+                path: ":".to_string(),
+                name: "root".to_string(),
+                project_dir: "/repo".to_string(),
+            }],
+            tasks: vec![CanonicalBuildPlanTask {
+                path: ":compileJava".to_string(),
+                project_path: ":".to_string(),
+                implementation_id: "JavaCompile".to_string(),
+                depends_on: Vec::new(),
+                inputs: BTreeMap::new(),
+                outputs: vec!["/repo/build/classes/java/main".to_string()],
+                worker_isolation: "none".to_string(),
+                should_run_after: Vec::new(),
+                must_run_after: Vec::new(),
+                finalized_by: Vec::new(),
+                cacheability: "cacheable".to_string(),
+                local_state: Vec::new(),
+                destroyables: Vec::new(),
+                action_kind: "java-compile".to_string(),
+                input_specs: Vec::new(),
+                output_specs: Vec::new(),
+                environment_inputs: Vec::new(),
+                system_property_inputs: Vec::new(),
+                diagnostics: Vec::new(),
+            }],
+            dependencies: Vec::new(),
+            toolchains: Vec::new(),
+            metadata: BTreeMap::new(),
+        }
     }
 }
