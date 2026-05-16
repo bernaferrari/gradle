@@ -46,6 +46,7 @@ pub struct BootstrapServiceImpl {
     build_plan_shadow_store: Option<Arc<BuildPlanShadowStore>>,
     event_stream: Option<Arc<BuildEventStreamServiceImpl>>,
     ide_model: Option<Arc<IdeModelServiceImpl>>,
+    build_registry: Option<Arc<DashMap<BuildId, String>>>,
 }
 
 impl Default for BootstrapServiceImpl {
@@ -67,6 +68,7 @@ impl BootstrapServiceImpl {
             build_plan_shadow_store: None,
             event_stream: None,
             ide_model: None,
+            build_registry: None,
         }
     }
 
@@ -82,6 +84,7 @@ impl BootstrapServiceImpl {
             build_plan_shadow_store: None,
             event_stream: None,
             ide_model: None,
+            build_registry: None,
         }
     }
 
@@ -101,6 +104,7 @@ impl BootstrapServiceImpl {
             build_plan_shadow_store: Some(build_plan_shadow_store),
             event_stream: None,
             ide_model: None,
+            build_registry: None,
         }
     }
 
@@ -113,6 +117,12 @@ impl BootstrapServiceImpl {
     /// Set the IDE model service for populating Tooling API caches.
     pub fn with_ide_model(mut self, ide_model: Arc<IdeModelServiceImpl>) -> Self {
         self.ide_model = Some(ide_model);
+        self
+    }
+
+    /// Set the build registry for mapping BuildId to project directory.
+    pub fn with_build_registry(mut self, build_registry: Arc<DashMap<BuildId, String>>) -> Self {
+        self.build_registry = Some(build_registry);
         self
     }
 
@@ -186,6 +196,13 @@ impl BootstrapService for BootstrapServiceImpl {
                 tasks: Vec::new(),
                 source_sets: Vec::new(),
             });
+        }
+
+        // Register build_id -> project_dir mapping in the shared build registry.
+        // This allows other services (like JvmHostService) to resolve a build's
+        // root directory without needing to pass the path through every RPC.
+        if let Some(ref registry) = self.build_registry {
+            registry.insert(build_id.clone(), req.project_dir.clone());
         }
 
         // Register build in scope registry.
@@ -326,6 +343,10 @@ impl BootstrapService for BootstrapServiceImpl {
                 client_reported_duration_ms = req.duration_ms,
                 "CompleteBuild called for unknown session"
             );
+        }
+
+        if let Some(ref registry) = self.build_registry {
+            registry.remove(&build_id);
         }
 
         // Emit build_finish event to the event stream
