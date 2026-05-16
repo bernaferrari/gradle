@@ -4,8 +4,9 @@
 //! build model, and task execution APIs that originally lived in the JVM
 //! Gradle daemon. This module progressively ports those RPCs to pure Rust.
 //!
-//! Currently implemented: GetBuildEnvironment, GetBuildModel.
-//! Remaining: ResolveConfiguration, GetBuildPlan, ExecuteTask, EvaluateScript.
+//! Currently implemented: GetBuildEnvironment, GetBuildModel, GetBuildPlan,
+//! ResolveConfiguration.
+//! Remaining: ExecuteTask, EvaluateScript.
 
 use std::collections::HashMap;
 use std::env;
@@ -21,11 +22,11 @@ use crate::proto::{
     EvaluateScriptRequest, EvaluateScriptResponse, ExecuteTaskRequest, ExecuteTaskResponse,
     GetBuildEnvironmentRequest, GetBuildEnvironmentResponse, GetBuildModelRequest,
     GetBuildModelResponse, GetBuildPlanRequest, GetBuildPlanResponse, ProjectModel,
-    ResolveConfigRequest, ResolveConfigResponse,
+    RepositoryDescriptor, ResolveConfigRequest, ResolveConfigResponse, ResolvedArtifact,
 };
 
 use crate::server::build_init::BuildInitServiceImpl;
-use crate::server::build_plan_ir::to_proto;
+use crate::server::build_plan_ir::{to_proto, CanonicalBuildPlanRepository};
 use crate::server::build_plan_shadow::BuildPlanShadowStore;
 use crate::server::platform::{CurrentPlatform, PlatformOps};
 use crate::server::scopes::BuildId;
@@ -197,12 +198,132 @@ impl JvmHostService for JvmHostServiceImpl {
 
     async fn resolve_configuration(
         &self,
-        _request: Request<ResolveConfigRequest>,
+        request: Request<ResolveConfigRequest>,
     ) -> Result<Response<ResolveConfigResponse>, Status> {
-        // TODO: Port dependency resolution to Rust (large subsystem)
-        Err(Status::unimplemented(
-            "ResolveConfiguration not yet ported to Rust",
-        ))
+        let req = request.into_inner();
+        if req.build_id.trim().is_empty() {
+            return Err(Status::invalid_argument("build_id must not be empty"));
+        }
+        if req.project_path.trim().is_empty() {
+            return Err(Status::invalid_argument("project_path must not be empty"));
+        }
+        if req.configuration_name.trim().is_empty() {
+            return Err(Status::invalid_argument(
+                "configuration_name must not be empty",
+            ));
+        }
+
+        let Some(store) = self.build_plan_shadow_store.as_ref() else {
+            return Ok(Response::new(ResolveConfigResponse {
+                success: false,
+                artifacts: Vec::new(),
+                error_message: "BuildPlanShadowStore is not configured".to_string(),
+            }));
+        };
+
+        let artifact = match store.load_plan(&req.build_id) {
+            Ok(Some(artifact)) => artifact,
+            Ok(None) => {
+                return Ok(Response::new(ResolveConfigResponse {
+                    success: false,
+                    artifacts: Vec::new(),
+                    error_message: format!(
+                        "No Rust build-plan shadow found for build '{}'",
+                        req.build_id
+                    ),
+                }))
+            }
+            Err(error) => {
+                return Err(Status::failed_precondition(format!(
+                    "Failed to load Rust build-plan shadow for build '{}': {}",
+                    req.build_id, error
+                )))
+            }
+        };
+
+        let matching = artifact
+            .plan
+            .dependencies
+            .into_iter()
+            .filter(|dependency| dependency.project_path == req.project_path)
+            .filter(|dependency| dependency.configuration == req.configuration_name)
+            .collect::<Vec<_>>();
+
+        if matching.is_empty() {
+            return Ok(Response::new(ResolveConfigResponse {
+                success: false,
+                artifacts: Vec::new(),
+                error_message: format!(
+                    "No cached Rust dependency graph for build '{}', project '{}', configuration '{}'",
+                    req.build_id, req.project_path, req.configuration_name
+                ),
+            }));
+        }
+
+        let unsupported = matching
+            .iter()
+            .flat_map(|dependency| dependency.unsupported_features.iter())
+            .filter(|feature| !feature.trim().is_empty())
+            .cloned()
+            .collect::<Vec<_>>();
+        if !unsupported.is_empty() {
+            return Ok(Response::new(ResolveConfigResponse {
+                success: false,
+                artifacts: Vec::new(),
+                error_message: format!(
+                    "Cached Rust dependency graph contains unsupported features for build '{}', project '{}', configuration '{}': {}",
+                    req.build_id,
+                    req.project_path,
+                    req.configuration_name,
+                    unsupported.join(", ")
+                ),
+            }));
+        }
+
+        let mut artifacts = Vec::with_capacity(matching.len());
+        for dependency in matching {
+            let coordinate = match parse_resolved_artifact_notation(&dependency.notation) {
+                Some(coordinate) => coordinate,
+                None => {
+                    return Ok(Response::new(ResolveConfigResponse {
+                        success: false,
+                        artifacts: Vec::new(),
+                        error_message: format!(
+                            "Cached Rust dependency graph contains unsupported notation '{}' for build '{}', project '{}', configuration '{}'",
+                            dependency.notation,
+                            req.build_id,
+                            req.project_path,
+                            req.configuration_name
+                        ),
+                    }))
+                }
+            };
+            artifacts.push(ResolvedArtifact {
+                group: coordinate.group,
+                name: coordinate.name,
+                version: coordinate.version,
+                configuration: dependency.configuration,
+                classifier: coordinate.classifier,
+                extension: coordinate.extension,
+                kind: if dependency.kind.trim().is_empty() {
+                    "dependency".to_string()
+                } else {
+                    dependency.kind
+                },
+                repositories: dependency
+                    .repositories
+                    .into_iter()
+                    .map(repository_to_proto)
+                    .collect(),
+                unsupported_features: Vec::new(),
+            });
+        }
+
+        Ok(Response::new(ResolveConfigResponse {
+            success: true,
+            artifacts,
+            error_message: String::new(),
+        }))
     }
 
     async fn get_build_plan(
@@ -314,6 +435,66 @@ fn is_direct_child_project_path(parent: &str, candidate: &str) -> bool {
     !remainder.is_empty() && !remainder.contains(':')
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedArtifactCoordinate {
+    group: String,
+    name: String,
+    version: String,
+    classifier: String,
+    extension: String,
+}
+
+fn parse_resolved_artifact_notation(value: &str) -> Option<ResolvedArtifactCoordinate> {
+    let (base, extension) = value
+        .split_once('@')
+        .map_or((value, "jar"), |(base, extension)| (base, extension.trim()));
+    if extension.is_empty() {
+        return None;
+    }
+
+    let mut parts = base.split(':');
+    let group = parts.next()?.trim();
+    let name = parts.next()?.trim();
+    let version = parts.next()?.trim();
+    let classifier = parts.next().map(str::trim).unwrap_or_default();
+    if parts.next().is_some()
+        || group.is_empty()
+        || name.is_empty()
+        || version.is_empty()
+        || classifier.contains('@')
+    {
+        return None;
+    }
+
+    Some(ResolvedArtifactCoordinate {
+        group: group.to_string(),
+        name: name.to_string(),
+        version: version.to_string(),
+        classifier: classifier.to_string(),
+        extension: extension.to_string(),
+    })
+}
+
+fn repository_to_proto(repository: CanonicalBuildPlanRepository) -> RepositoryDescriptor {
+    RepositoryDescriptor {
+        id: repository.id,
+        url: repository.url,
+        m2compatible: repository.m2compatible,
+        allow_insecure_protocol: repository.allow_insecure_protocol,
+        credentials: repository.credentials.into_iter().collect(),
+        layout: repository.layout,
+        ivy_pattern: repository.ivy_pattern,
+        include_groups: repository.include_groups,
+        exclude_groups: repository.exclude_groups,
+        include_group_prefixes: repository.include_group_prefixes,
+        exclude_group_prefixes: repository.exclude_group_prefixes,
+        include_modules: repository.include_modules,
+        exclude_modules: repository.exclude_modules,
+        include_module_versions: repository.include_module_versions,
+        exclude_module_versions: repository.exclude_module_versions,
+    }
+}
+
 impl JvmHostServiceImpl {
     /// Detect the Gradle version for this daemon.
     /// Reads from wrapper properties if present, falls back to env var or default.
@@ -413,8 +594,8 @@ mod tests {
     use crate::proto::{CompleteBuildRequest, InitBuildRequest};
     use crate::server::bootstrap::BootstrapServiceImpl;
     use crate::server::build_plan_ir::{
-        CanonicalBuildPlan, CanonicalBuildPlanProject, CanonicalBuildPlanTask,
-        BUILD_PLAN_SCHEMA_VERSION,
+        CanonicalBuildPlan, CanonicalBuildPlanDependency, CanonicalBuildPlanProject,
+        CanonicalBuildPlanRepository, CanonicalBuildPlanTask, BUILD_PLAN_SCHEMA_VERSION,
     };
 
     #[tokio::test]
@@ -632,6 +813,167 @@ include(":app", ":lib:core")
         assert_eq!("rust-shadow-store-unconfigured", response.source);
     }
 
+    #[tokio::test]
+    async fn resolve_configuration_returns_cached_resolved_artifacts() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(BuildPlanShadowStore::new(temp.path().to_path_buf()));
+        let mut plan = sample_canonical_plan("build-deps-1");
+        plan.dependencies = vec![
+            sample_dependency(
+                ":",
+                "compileClasspath",
+                "org.example:demo:1.2.3:sources@jar",
+                "dependency",
+            ),
+            sample_dependency(
+                ":app",
+                "compileClasspath",
+                "org.example:other:1.0",
+                "dependency",
+            ),
+        ];
+        store.persist_plan(&plan, "dependency-shadow").unwrap();
+        let service = JvmHostServiceImpl::default().with_build_plan_shadow_store(store);
+
+        let response = service
+            .resolve_configuration(Request::new(ResolveConfigRequest {
+                build_id: "build-deps-1".to_string(),
+                configuration_name: "compileClasspath".to_string(),
+                project_path: ":".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(response.success);
+        assert!(response.error_message.is_empty());
+        assert_eq!(1, response.artifacts.len());
+        let artifact = &response.artifacts[0];
+        assert_eq!("org.example", artifact.group);
+        assert_eq!("demo", artifact.name);
+        assert_eq!("1.2.3", artifact.version);
+        assert_eq!("sources", artifact.classifier);
+        assert_eq!("jar", artifact.extension);
+        assert_eq!("compileClasspath", artifact.configuration);
+        assert_eq!("dependency", artifact.kind);
+        assert_eq!(1, artifact.repositories.len());
+        assert_eq!("central", artifact.repositories[0].id);
+    }
+
+    #[tokio::test]
+    async fn resolve_configuration_reports_missing_plan_and_invalid_request() {
+        let service = JvmHostServiceImpl::default();
+
+        let invalid = service
+            .resolve_configuration(Request::new(ResolveConfigRequest {
+                build_id: String::new(),
+                configuration_name: "compileClasspath".to_string(),
+                project_path: ":".to_string(),
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(tonic::Code::InvalidArgument, invalid.code());
+
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(BuildPlanShadowStore::new(temp.path().to_path_buf()));
+        let service = JvmHostServiceImpl::default().with_build_plan_shadow_store(store);
+        let missing = service
+            .resolve_configuration(Request::new(ResolveConfigRequest {
+                build_id: "missing-deps".to_string(),
+                configuration_name: "compileClasspath".to_string(),
+                project_path: ":".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!missing.success);
+        assert!(missing.artifacts.is_empty());
+        assert!(missing.error_message.contains("No Rust build-plan shadow"));
+    }
+
+    #[tokio::test]
+    async fn resolve_configuration_fails_closed_for_unsupported_or_malformed_dependencies() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(BuildPlanShadowStore::new(temp.path().to_path_buf()));
+        let mut plan = sample_canonical_plan("build-deps-unsupported");
+        let mut dependency = sample_dependency(
+            ":",
+            "runtimeClasspath",
+            "org.example:demo:1.2.3",
+            "dependency",
+        );
+        dependency.unsupported_features = vec!["component-metadata-rule".to_string()];
+        plan.dependencies = vec![dependency];
+        store.persist_plan(&plan, "dependency-shadow").unwrap();
+        let service =
+            JvmHostServiceImpl::default().with_build_plan_shadow_store(Arc::clone(&store));
+
+        let unsupported = service
+            .resolve_configuration(Request::new(ResolveConfigRequest {
+                build_id: "build-deps-unsupported".to_string(),
+                configuration_name: "runtimeClasspath".to_string(),
+                project_path: ":".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!unsupported.success);
+        assert!(unsupported
+            .error_message
+            .contains("component-metadata-rule"));
+
+        let mut malformed_plan = sample_canonical_plan("build-deps-malformed");
+        malformed_plan.dependencies = vec![sample_dependency(
+            ":",
+            "runtimeClasspath",
+            "not-enough",
+            "dependency",
+        )];
+        store
+            .persist_plan(&malformed_plan, "dependency-shadow")
+            .unwrap();
+
+        let malformed = service
+            .resolve_configuration(Request::new(ResolveConfigRequest {
+                build_id: "build-deps-malformed".to_string(),
+                configuration_name: "runtimeClasspath".to_string(),
+                project_path: ":".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!malformed.success);
+        assert!(malformed.error_message.contains("unsupported notation"));
+    }
+
+    #[test]
+    fn parse_resolved_artifact_notation_preserves_classifier_and_extension() {
+        assert_eq!(
+            Some(ResolvedArtifactCoordinate {
+                group: "org.example".to_string(),
+                name: "demo".to_string(),
+                version: "1.2.3".to_string(),
+                classifier: String::new(),
+                extension: "jar".to_string(),
+            }),
+            parse_resolved_artifact_notation("org.example:demo:1.2.3")
+        );
+        assert_eq!(
+            Some(ResolvedArtifactCoordinate {
+                group: "org.example".to_string(),
+                name: "demo".to_string(),
+                version: "1.2.3".to_string(),
+                classifier: "debug".to_string(),
+                extension: "aar".to_string(),
+            }),
+            parse_resolved_artifact_notation("org.example:demo:1.2.3:debug@aar")
+        );
+        assert!(parse_resolved_artifact_notation("org.example:demo").is_none());
+    }
+
     #[test]
     fn direct_child_project_paths_respect_nested_hierarchy() {
         let projects = vec![
@@ -706,6 +1048,38 @@ include(":app", ":lib:core")
             dependencies: Vec::new(),
             toolchains: Vec::new(),
             metadata: BTreeMap::new(),
+        }
+    }
+
+    fn sample_dependency(
+        project_path: &str,
+        configuration: &str,
+        notation: &str,
+        kind: &str,
+    ) -> CanonicalBuildPlanDependency {
+        CanonicalBuildPlanDependency {
+            project_path: project_path.to_string(),
+            configuration: configuration.to_string(),
+            notation: notation.to_string(),
+            kind: kind.to_string(),
+            repositories: vec![CanonicalBuildPlanRepository {
+                id: "central".to_string(),
+                url: "https://repo.maven.apache.org/maven2".to_string(),
+                m2compatible: true,
+                allow_insecure_protocol: false,
+                credentials: BTreeMap::new(),
+                layout: "maven".to_string(),
+                ivy_pattern: String::new(),
+                include_groups: Vec::new(),
+                exclude_groups: Vec::new(),
+                include_group_prefixes: Vec::new(),
+                exclude_group_prefixes: Vec::new(),
+                include_modules: Vec::new(),
+                exclude_modules: Vec::new(),
+                include_module_versions: Vec::new(),
+                exclude_module_versions: Vec::new(),
+            }],
+            unsupported_features: Vec::new(),
         }
     }
 }

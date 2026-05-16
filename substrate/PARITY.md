@@ -76,6 +76,14 @@
   stores return `success=false` with explicit Rust shadow-store source markers,
   while corrupt/schema-mismatched/fingerprint-mismatched artifacts keep the
   existing quarantine behavior and fail closed.
+- Rust `JvmHostService.ResolveConfiguration` now serves cached resolved
+  dependency artifacts from the same canonical build-plan shadow. It validates
+  build id, project path, configuration name, plan integrity, unsupported
+  dependency markers, and artifact notation before returning
+  `ResolvedArtifact` entries with classifier, extension, kind, and repository
+  descriptors. This is a cache-backed resolved-graph read path, not a claim
+  that arbitrary dependency solving has moved into this RPC; missing plans,
+  unsupported markers, and malformed coordinates fail closed with diagnostics.
 - Rust `RunBuild` dispatch now uses a native ready-task priority queue keyed by
   remaining critical-path duration instead of FIFO order, so independent ready
   tasks on the longest path are claimed first. Filtered task selections also
