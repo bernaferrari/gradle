@@ -60,7 +60,7 @@ impl BuildInitServiceImpl {
 
     /// Parse a Gradle settings file to extract root project name, included builds,
     /// and other build structure information.
-    fn parse_settings_file(root_dir: &str, settings_file: &str) -> ParsedSettings {
+    pub(crate) fn parse_settings_file(root_dir: &str, settings_file: &str) -> ParsedSettings {
         let mut result = ParsedSettings::default();
 
         let settings_path = if settings_file.is_empty() {
@@ -183,19 +183,41 @@ impl BuildInitServiceImpl {
             return;
         };
 
-        // Split by commas
-        for part in rest.split(',') {
-            let part = part.trim();
-            let cleaned = part
-                .strip_prefix("'")
-                .and_then(|v| v.strip_suffix("'"))
-                .or_else(|| part.strip_prefix('"').and_then(|v| v.strip_suffix('"')))
-                .unwrap_or(part);
-            let cleaned = cleaned.trim();
-            if !cleaned.is_empty() && cleaned.starts_with(':') {
-                projects.push(cleaned.to_string());
+        for project in Self::extract_quoted_args(rest) {
+            projects.push(Self::normalize_project_path(&project));
+        }
+    }
+
+    fn normalize_project_path(path: &str) -> String {
+        let trimmed = path.trim().trim_end_matches(':');
+        if trimmed.starts_with(':') {
+            trimmed.to_string()
+        } else {
+            format!(":{trimmed}")
+        }
+    }
+
+    fn extract_quoted_args(input: &str) -> Vec<String> {
+        let mut values = Vec::new();
+        let mut chars = input.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch != '\'' && ch != '"' {
+                continue;
+            }
+            let quote = ch;
+            let mut value = String::new();
+            for next in chars.by_ref() {
+                if next == quote {
+                    break;
+                }
+                value.push(next);
+            }
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                values.push(trimmed.to_string());
             }
         }
+        values
     }
 
     fn extract_included_projects_kotlin(line: &str, projects: &mut Vec<String>) {
@@ -209,15 +231,8 @@ impl BuildInitServiceImpl {
             let end = rest.find(')').unwrap_or(rest.len());
             let content = &rest[..end];
 
-            for part in content.split(',') {
-                let part = part.trim();
-                let cleaned = part.strip_prefix('"').and_then(|v| v.strip_suffix('"'));
-                if let Some(name) = cleaned {
-                    let name = name.trim();
-                    if !name.is_empty() && name.starts_with(':') {
-                        projects.push(name.to_string());
-                    }
-                }
+            for project in Self::extract_quoted_args(content) {
+                projects.push(Self::normalize_project_path(&project));
             }
         }
     }
@@ -282,13 +297,14 @@ impl BuildInitServiceImpl {
 }
 
 /// Parsed settings file information.
-#[derive(Default)]
-struct ParsedSettings {
-    root_project_name: Option<String>,
-    included_projects: Vec<String>,
-    included_builds: Vec<String>,
-    settings_file_exists: bool,
-    is_kotlin_dsl: bool,
+/// Parsed result of a settings file.
+#[derive(Debug, Clone, Default)]
+pub struct ParsedSettings {
+    pub(crate) root_project_name: Option<String>,
+    pub(crate) included_projects: Vec<String>,
+    pub(crate) included_builds: Vec<String>,
+    pub(crate) settings_file_exists: bool,
+    pub(crate) is_kotlin_dsl: bool,
 }
 
 #[tonic::async_trait]
@@ -691,6 +707,7 @@ rootProject.name = 'my-app'
 include ':app', ':lib', ':common'
 includeBuild 'platform'
 includeBuild 'plugins'
+include('parent:child')
 "#,
         )
         .unwrap();
@@ -706,6 +723,9 @@ includeBuild 'plugins'
         assert!(parsed.included_projects.contains(&":app".to_string()));
         assert!(parsed.included_projects.contains(&":lib".to_string()));
         assert!(parsed.included_projects.contains(&":common".to_string()));
+        assert!(parsed
+            .included_projects
+            .contains(&":parent:child".to_string()));
         assert!(parsed.included_builds.contains(&"platform".to_string()));
         assert!(parsed.included_builds.contains(&"plugins".to_string()));
     }
@@ -718,7 +738,7 @@ includeBuild 'plugins'
             &settings_path,
             r#"
 rootProject.name = "kotlin-app"
-include(":app", ":lib")
+include(":app", "lib")
 includeBuild("platform")
 "#,
         )

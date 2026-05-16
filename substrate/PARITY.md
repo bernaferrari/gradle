@@ -54,6 +54,16 @@
   file, and injects the matching `org.gradle.rust.substrate.state.dir`. The JVM
   bridge can then connect to the existing Rust daemon instead of owning sidecar
   startup.
+- Rust `JvmHostService.GetBuildModel` now resolves registered build ids through
+  the Bootstrap-owned build registry and parses simple static
+  `settings.gradle(.kts)` project structure natively. The supported contract is
+  root project name discovery, static `include(...)`/`include '...'` project
+  paths with or without leading `:`, Gradle-compatible ancestor project
+  descriptor synthesis for nested paths like `:lib:core`, and `build.gradle.kts`
+  preference over `build.gradle` when both exist. `CompleteBuild` removes the
+  registry entry, so later model requests for completed or unknown builds fail
+  closed with `NOT_FOUND`. Dynamic settings logic and included-build model
+  expansion remain outside this narrow Rust model RPC contract.
 - Native build-plan shadow artifacts are now treated as durable Rust plan-cache
   entries rather than best-effort JSON files. Writes use atomic temp-file rename,
   and loads validate build id, schema version, and canonical fingerprint before

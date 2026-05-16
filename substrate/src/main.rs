@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use clap::Parser;
+use dashmap::DashMap;
 use tokio::net::UnixListener;
 use tokio::signal;
 use tonic::transport::Server;
@@ -35,10 +36,9 @@ use gradle_substrate_daemon::{
         file_tree_service_server::FileTreeServiceServer,
         file_watch_service_server::FileWatchServiceServer,
         garbage_collection_service_server::GarbageCollectionServiceServer,
-        hash_service_server::HashServiceServer,
-        ide_model_service_server::IdeModelServiceServer,
-        jvm_host_service_server::JvmHostServiceServer,
+        hash_service_server::HashServiceServer, ide_model_service_server::IdeModelServiceServer,
         incremental_compilation_service_server::IncrementalCompilationServiceServer,
+        jvm_host_service_server::JvmHostServiceServer,
         native_compile_service_server::NativeCompileServiceServer,
         parser_service_server::ParserServiceServer, plugin_service_server::PluginServiceServer,
         problem_reporting_service_server::ProblemReportingServiceServer,
@@ -67,9 +67,8 @@ use gradle_substrate_daemon::{
         file_fingerprint::FileFingerprintServiceImpl, file_tree::FileTreeServiceImpl,
         file_watch::FileWatchServiceImpl, garbage_collection::GarbageCollectionServiceImpl,
         hash::HashServiceImpl, ide_model::IdeModelServiceImpl,
-        jvm_host_service::JvmHostServiceImpl,
         incremental_compilation::IncrementalCompilationServiceImpl,
-        native_compile::NativeCompileServiceImpl,
+        jvm_host_service::JvmHostServiceImpl, native_compile::NativeCompileServiceImpl,
         parser_service::ParserServiceImpl, plugin::PluginServiceImpl,
         problem_reporting::ProblemReportingServiceImpl,
         resource_management::ResourceManagementServiceImpl, scopes::ScopeRegistry,
@@ -305,6 +304,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Scope registry — tracks session→build membership for proper scope isolation
     let scope_registry = Arc::new(ScopeRegistry::new());
 
+    // Build registry — maps BuildId to project root directory for JvmHostService lookups.
+    let build_registry = Arc::new(DashMap::new());
+
     // IDE model service (shared between bootstrap and gRPC server)
     let ide_model = IdeModelServiceImpl::new();
 
@@ -315,7 +317,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&build_plan_shadow_store),
     )
     .with_event_stream(Arc::new(build_event_stream.clone()))
-    .with_ide_model(Arc::new(ide_model.clone()));
+    .with_ide_model(Arc::new(ide_model.clone()))
+    .with_build_registry(Arc::clone(&build_registry));
 
     // Phase 18: Dependency resolution
     let artifact_store_dir = PathBuf::from(&args.artifact_store_dir);
@@ -486,11 +489,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(IncrementalCompilationServiceServer::new(
             incremental_compilation,
         ))
-        .add_service(NativeCompileServiceServer::new(
-            NativeCompileServiceImpl,
-        ))
+        .add_service(NativeCompileServiceServer::new(NativeCompileServiceImpl))
         .add_service(IdeModelServiceServer::new(ide_model.clone()))
-        .add_service(JvmHostServiceServer::new(JvmHostServiceImpl::default()))
+        .add_service(JvmHostServiceServer::new(JvmHostServiceImpl::new(
+            Arc::clone(&build_registry),
+        )))
         .add_service(BuildMetricsServiceServer::new((*build_metrics).clone()))
         .add_service(GarbageCollectionServiceServer::new(garbage_collection))
         .add_service(VersionCatalogServiceServer::new(
