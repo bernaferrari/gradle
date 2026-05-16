@@ -91,6 +91,11 @@
   invalid identity fields, and positive `timeout_ms` expirations fail closed
   with explicit Rust execution modes instead of falling through to JVM task
   execution.
+- Rust `JvmHostService.EvaluateScript` is explicit fail-closed rather than a
+  gRPC `UNIMPLEMENTED` placeholder. Groovy/Kotlin DSL evaluation remains a
+  JVM-owned compatibility-host responsibility by design; the Rust endpoint
+  returns `success=false`, no applied plugins, and a deterministic diagnostic
+  pointing callers back to the JVM compatibility host.
 - Rust `RunBuild` dispatch now uses a native ready-task priority queue keyed by
   remaining critical-path duration instead of FIFO order, so independent ready
   tasks on the longest path are claimed first. Filtered task selections also

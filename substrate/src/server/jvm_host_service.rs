@@ -5,8 +5,8 @@
 //! Gradle daemon. This module progressively ports those RPCs to pure Rust.
 //!
 //! Currently implemented: GetBuildEnvironment, GetBuildModel, GetBuildPlan,
-//! ResolveConfiguration, ExecuteTask.
-//! Remaining: EvaluateScript.
+//! ResolveConfiguration, ExecuteTask. EvaluateScript is explicit fail-closed
+//! because Groovy/Kotlin DSL execution remains JVM-owned.
 
 use std::collections::HashMap;
 use std::env;
@@ -458,12 +458,28 @@ impl JvmHostService for JvmHostServiceImpl {
 
     async fn evaluate_script(
         &self,
-        _request: Request<EvaluateScriptRequest>,
+        request: Request<EvaluateScriptRequest>,
     ) -> Result<Response<EvaluateScriptResponse>, Status> {
-        // TODO: Port Groovy/Kotlin script evaluator to Rust
-        Err(Status::unimplemented(
-            "EvaluateScript not yet ported to Rust",
-        ))
+        let req = request.into_inner();
+        let script_type = if req.script_type.trim().is_empty() {
+            "unknown"
+        } else {
+            req.script_type.trim()
+        };
+        let script_path = if req.script_path.trim().is_empty() {
+            "<inline>"
+        } else {
+            req.script_path.trim()
+        };
+
+        Ok(Response::new(EvaluateScriptResponse {
+            success: false,
+            error_message: format!(
+                "Script evaluation for '{}' ({}) is JVM-owned; use the JVM compatibility host",
+                script_path, script_type
+            ),
+            applied_plugins: Vec::new(),
+        }))
     }
 }
 
@@ -1210,6 +1226,49 @@ include(":app", ":lib:core")
             .unwrap_err();
 
         assert_eq!(tonic::Code::InvalidArgument, error.code());
+    }
+
+    #[tokio::test]
+    async fn evaluate_script_fails_closed_as_jvm_owned_surface() {
+        let service = JvmHostServiceImpl::default();
+
+        let response = service
+            .evaluate_script(Request::new(EvaluateScriptRequest {
+                script_path: "build.gradle.kts".to_string(),
+                script_content: "plugins { java }".to_string(),
+                script_type: "kotlin-dsl".to_string(),
+                extra_properties: HashMap::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!response.success);
+        assert!(response.applied_plugins.is_empty());
+        assert!(response.error_message.contains("build.gradle.kts"));
+        assert!(response.error_message.contains("kotlin-dsl"));
+        assert!(response.error_message.contains("JVM-owned"));
+    }
+
+    #[tokio::test]
+    async fn evaluate_script_empty_input_still_fails_closed_without_grpc_error() {
+        let service = JvmHostServiceImpl::default();
+
+        let response = service
+            .evaluate_script(Request::new(EvaluateScriptRequest {
+                script_path: String::new(),
+                script_content: String::new(),
+                script_type: String::new(),
+                extra_properties: HashMap::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!response.success);
+        assert!(response.applied_plugins.is_empty());
+        assert!(response.error_message.contains("<inline>"));
+        assert!(response.error_message.contains("unknown"));
     }
 
     #[test]
