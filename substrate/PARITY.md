@@ -69,6 +69,13 @@
   and loads validate build id, schema version, and canonical fingerprint before
   hydrating the Rust DAG. Corrupted or mismatched plan artifacts are quarantined
   under the shadow store instead of being allowed to schedule work.
+- Rust `JvmHostService.GetBuildPlan` now exposes the same durable
+  `BuildPlanShadowStore` through the JVM-host RPC surface. A valid cached
+  canonical plan is loaded, revalidated, converted back to the protobuf
+  `BuildPlan`, and returned with its recorded source. Missing or unconfigured
+  stores return `success=false` with explicit Rust shadow-store source markers,
+  while corrupt/schema-mismatched/fingerprint-mismatched artifacts keep the
+  existing quarantine behavior and fail closed.
 - Rust `RunBuild` dispatch now uses a native ready-task priority queue keyed by
   remaining critical-path duration instead of FIFO order, so independent ready
   tasks on the longest path are claimed first. Filtered task selections also
