@@ -5,8 +5,8 @@
 //! Gradle daemon. This module progressively ports those RPCs to pure Rust.
 //!
 //! Currently implemented: GetBuildEnvironment, GetBuildModel, GetBuildPlan,
-//! ResolveConfiguration.
-//! Remaining: ExecuteTask, EvaluateScript.
+//! ResolveConfiguration, ExecuteTask.
+//! Remaining: EvaluateScript.
 
 use std::collections::HashMap;
 use std::env;
@@ -30,12 +30,14 @@ use crate::server::build_plan_ir::{to_proto, CanonicalBuildPlanRepository};
 use crate::server::build_plan_shadow::BuildPlanShadowStore;
 use crate::server::platform::{CurrentPlatform, PlatformOps};
 use crate::server::scopes::BuildId;
+use crate::server::task_executor::{TaskExecutorRegistry, TaskInput};
 
 /// JvmHostService implementation.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct JvmHostServiceImpl {
     build_registry: Arc<DashMap<BuildId, String>>,
     build_plan_shadow_store: Option<Arc<BuildPlanShadowStore>>,
+    task_executors: Arc<TaskExecutorRegistry>,
 }
 
 impl JvmHostServiceImpl {
@@ -44,6 +46,7 @@ impl JvmHostServiceImpl {
         Self {
             build_registry,
             build_plan_shadow_store: None,
+            task_executors: Arc::new(TaskExecutorRegistry::new()),
         }
     }
 
@@ -53,6 +56,12 @@ impl JvmHostServiceImpl {
         build_plan_shadow_store: Arc<BuildPlanShadowStore>,
     ) -> Self {
         self.build_plan_shadow_store = Some(build_plan_shadow_store);
+        self
+    }
+
+    /// Set the task executor registry used by ExecuteTask.
+    pub fn with_task_executors(mut self, task_executors: Arc<TaskExecutorRegistry>) -> Self {
+        self.task_executors = task_executors;
         self
     }
 }
@@ -65,6 +74,7 @@ impl Default for JvmHostServiceImpl {
         Self {
             build_registry: Arc::new(DashMap::new()),
             build_plan_shadow_store: None,
+            task_executors: Arc::new(TaskExecutorRegistry::new()),
         }
     }
 }
@@ -369,10 +379,81 @@ impl JvmHostService for JvmHostServiceImpl {
 
     async fn execute_task(
         &self,
-        _request: Request<ExecuteTaskRequest>,
+        request: Request<ExecuteTaskRequest>,
     ) -> Result<Response<ExecuteTaskResponse>, Status> {
-        // TODO: Port task execution to Rust
-        Err(Status::unimplemented("ExecuteTask not yet ported to Rust"))
+        let req = request.into_inner();
+        if req.build_id.trim().is_empty() {
+            return Err(Status::invalid_argument("build_id must not be empty"));
+        }
+        if req.task_path.trim().is_empty() {
+            return Err(Status::invalid_argument("task_path must not be empty"));
+        }
+        if req.task_type.trim().is_empty() {
+            return Err(Status::invalid_argument("task_type must not be empty"));
+        }
+        if !self.task_executors.has_executor(&req.task_type) {
+            return Ok(Response::new(ExecuteTaskResponse {
+                success: false,
+                outcome: "UNSUPPORTED".to_string(),
+                error_message: format!(
+                    "Task type '{}' is not supported by Rust ExecuteTask",
+                    req.task_type
+                ),
+                duration_ms: 0,
+                execution_mode: "rust-native-unsupported".to_string(),
+            }));
+        }
+
+        let input = match task_input_from_parameters_json(&req.task_type, &req.parameters_json) {
+            Ok(input) => input,
+            Err(error_message) => {
+                return Ok(Response::new(ExecuteTaskResponse {
+                    success: false,
+                    outcome: "FAILED".to_string(),
+                    error_message,
+                    duration_ms: 0,
+                    execution_mode: "rust-native-contract-error".to_string(),
+                }))
+            }
+        };
+
+        let execute = self.task_executors.execute(&input);
+        let result = if req.timeout_ms > 0 {
+            match tokio::time::timeout(
+                std::time::Duration::from_millis(req.timeout_ms as u64),
+                execute,
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(_) => {
+                    return Ok(Response::new(ExecuteTaskResponse {
+                        success: false,
+                        outcome: "TIMED_OUT".to_string(),
+                        error_message: format!(
+                            "Rust ExecuteTask timed out after {} ms for task '{}'",
+                            req.timeout_ms, req.task_path
+                        ),
+                        duration_ms: req.timeout_ms,
+                        execution_mode: "rust-native-timeout".to_string(),
+                    }))
+                }
+            }
+        } else {
+            execute.await
+        };
+
+        Ok(Response::new(ExecuteTaskResponse {
+            success: result.success,
+            outcome: if result.success {
+                "EXECUTED".to_string()
+            } else {
+                "FAILED".to_string()
+            },
+            error_message: result.error_message,
+            duration_ms: result.duration_ms as i64,
+            execution_mode: "rust-native".to_string(),
+        }))
     }
 
     async fn evaluate_script(
@@ -495,6 +576,78 @@ fn repository_to_proto(repository: CanonicalBuildPlanRepository) -> RepositoryDe
     }
 }
 
+fn task_input_from_parameters_json(
+    task_type: &str,
+    parameters_json: &str,
+) -> Result<TaskInput, String> {
+    let trimmed = parameters_json.trim();
+    if trimmed.is_empty() {
+        return Ok(TaskInput::new(task_type));
+    }
+
+    let value = serde_json::from_str::<serde_json::Value>(trimmed)
+        .map_err(|error| format!("Invalid parameters_json: {}", error))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| "parameters_json must be a JSON object".to_string())?;
+
+    let mut input = TaskInput::new(task_type);
+    if let Some(source_files) = object.get("source_files") {
+        let source_files = source_files
+            .as_array()
+            .ok_or_else(|| "parameters_json.source_files must be an array".to_string())?;
+        input.source_files = source_files
+            .iter()
+            .map(|value| {
+                value.as_str().map(std::path::PathBuf::from).ok_or_else(|| {
+                    "parameters_json.source_files entries must be strings".to_string()
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+    }
+    if let Some(target_dir) = object.get("target_dir") {
+        let target_dir = target_dir
+            .as_str()
+            .ok_or_else(|| "parameters_json.target_dir must be a string".to_string())?;
+        input.target_dir = std::path::PathBuf::from(target_dir);
+    }
+    if let Some(options) = object.get("options") {
+        let options = options
+            .as_object()
+            .ok_or_else(|| "parameters_json.options must be an object".to_string())?;
+        input.options = options
+            .iter()
+            .map(|(key, value)| {
+                value
+                    .as_str()
+                    .map(|value| (key.clone(), value.to_string()))
+                    .ok_or_else(|| format!("parameters_json.options.{} must be a string", key))
+            })
+            .collect::<Result<HashMap<_, _>, _>>()?;
+    }
+    if let Some(output_files) = object.get("output_files") {
+        let output_files = output_files
+            .as_array()
+            .ok_or_else(|| "parameters_json.output_files must be an array".to_string())?;
+        let values = output_files
+            .iter()
+            .map(|value| {
+                value.as_str().map(str::to_string).ok_or_else(|| {
+                    "parameters_json.output_files entries must be strings".to_string()
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if !values.is_empty() {
+            input.options.insert(
+                "output_files_json".to_string(),
+                serde_json::to_string(&values).unwrap_or_default(),
+            );
+        }
+    }
+
+    Ok(input)
+}
+
 impl JvmHostServiceImpl {
     /// Detect the Gradle version for this daemon.
     /// Reads from wrapper properties if present, falls back to env var or default.
@@ -597,6 +750,7 @@ mod tests {
         CanonicalBuildPlan, CanonicalBuildPlanDependency, CanonicalBuildPlanProject,
         CanonicalBuildPlanRepository, CanonicalBuildPlanTask, BUILD_PLAN_SCHEMA_VERSION,
     };
+    use base64::Engine;
 
     #[tokio::test]
     async fn get_build_model_returns_registered_project_tree() {
@@ -947,6 +1101,115 @@ include(":app", ":lib:core")
 
         assert!(!malformed.success);
         assert!(malformed.error_message.contains("unsupported notation"));
+    }
+
+    #[tokio::test]
+    async fn execute_task_runs_supported_write_file_task_in_rust() {
+        let temp = tempfile::tempdir().unwrap();
+        let output = temp.path().join("reports/output.txt");
+        let encoded = base64::engine::general_purpose::STANDARD.encode("hello from rust\n");
+        let service = JvmHostServiceImpl::default();
+
+        let response = service
+            .execute_task(Request::new(ExecuteTaskRequest {
+                build_id: "build-exec".to_string(),
+                task_path: ":writeReport".to_string(),
+                task_type: "WriteFile".to_string(),
+                parameters_json: serde_json::json!({
+                    "target_dir": output.to_string_lossy(),
+                    "options": {
+                        "static_output_text_b64": encoded,
+                    }
+                })
+                .to_string(),
+                timeout_ms: 30_000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(response.success, "{}", response.error_message);
+        assert_eq!("EXECUTED", response.outcome);
+        assert_eq!("rust-native", response.execution_mode);
+        assert_eq!(
+            "hello from rust\n",
+            std::fs::read_to_string(output).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_task_runs_lifecycle_noop_in_rust() {
+        let service = JvmHostServiceImpl::default();
+
+        let response = service
+            .execute_task(Request::new(ExecuteTaskRequest {
+                build_id: "build-exec".to_string(),
+                task_path: ":classes".to_string(),
+                task_type: "Lifecycle".to_string(),
+                parameters_json: "{}".to_string(),
+                timeout_ms: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(response.success);
+        assert_eq!("EXECUTED", response.outcome);
+        assert_eq!("rust-native", response.execution_mode);
+    }
+
+    #[tokio::test]
+    async fn execute_task_fails_closed_for_unsupported_or_malformed_contracts() {
+        let service = JvmHostServiceImpl::default();
+
+        let unsupported = service
+            .execute_task(Request::new(ExecuteTaskRequest {
+                build_id: "build-exec".to_string(),
+                task_path: ":custom".to_string(),
+                task_type: "CustomJvmTask".to_string(),
+                parameters_json: "{}".to_string(),
+                timeout_ms: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!unsupported.success);
+        assert_eq!("UNSUPPORTED", unsupported.outcome);
+        assert_eq!("rust-native-unsupported", unsupported.execution_mode);
+
+        let malformed = service
+            .execute_task(Request::new(ExecuteTaskRequest {
+                build_id: "build-exec".to_string(),
+                task_path: ":copy".to_string(),
+                task_type: "Copy".to_string(),
+                parameters_json: "{not-json".to_string(),
+                timeout_ms: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!malformed.success);
+        assert_eq!("FAILED", malformed.outcome);
+        assert_eq!("rust-native-contract-error", malformed.execution_mode);
+        assert!(malformed.error_message.contains("Invalid parameters_json"));
+    }
+
+    #[tokio::test]
+    async fn execute_task_validates_required_identity_fields() {
+        let service = JvmHostServiceImpl::default();
+
+        let error = service
+            .execute_task(Request::new(ExecuteTaskRequest {
+                build_id: String::new(),
+                task_path: ":classes".to_string(),
+                task_type: "Lifecycle".to_string(),
+                parameters_json: "{}".to_string(),
+                timeout_ms: 0,
+            }))
+            .await
+            .unwrap_err();
+
+        assert_eq!(tonic::Code::InvalidArgument, error.code());
     }
 
     #[test]

@@ -84,6 +84,13 @@
   descriptors. This is a cache-backed resolved-graph read path, not a claim
   that arbitrary dependency solving has moved into this RPC; missing plans,
   unsupported markers, and malformed coordinates fail closed with diagnostics.
+- Rust `JvmHostService.ExecuteTask` now routes supported native task types
+  through the Rust `TaskExecutorRegistry` using the same JSON task-input
+  contract consumed by the DAG executor (`source_files`, `target_dir`,
+  `options`, and `output_files`). Unsupported task types, malformed contracts,
+  invalid identity fields, and positive `timeout_ms` expirations fail closed
+  with explicit Rust execution modes instead of falling through to JVM task
+  execution.
 - Rust `RunBuild` dispatch now uses a native ready-task priority queue keyed by
   remaining critical-path duration instead of FIFO order, so independent ready
   tasks on the longest path are claimed first. Filtered task selections also
