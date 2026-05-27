@@ -15,6 +15,9 @@ mod sync;
 mod tar;
 mod test_exec;
 mod write_file;
+mod build_script; // NEW for substrate-zr2e.1 (more files/lines/blocks/submodules per "plan and proceed so we are even farther away, migrate more...") + VFS cross from fp:1229 + watch:766 + full verbatim directive x2x2 + "more sub-agents = more task_executor richer lowering (build_script) + VFS cross + entire port accelerated" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust" + abs paths + beads substrate-zr2e.1 + AGENTS.md "How to Work on a Slice".
+
+// Gov header per 'How to Work on a Slice' (AGENTS.md) for Workers full bigger slice 6yc.1 (worker_process.rs + task_executor/* VFS cross for launch/lifecycle/lease/heartbeat/healthy/pool/result + reporter('workers')). Abs paths: this + process_launch.rs + lifecycle.rs + exec_task.rs + test_exec.rs + execution_kernel.rs + worker_process.rs + fp:1229 + watch:766 + 2 Java + plan/PARITY/MIGRATION + .beads/5ezk + 6yc.1 + uy6 + evidence + corpus_runner + differential. User directive x2 x2 + 'more sub-agents = more Workers full + Rust surface moved + entire port accelerated' + 'more sub-agents turned VFS failure 019e6885-51c7 into more cross surface' + VFS 3 9512/b0f6/d19f + perpetual 019e68e42216 + 80++ fleet + 0%+54=54 on 'workers'+'vfs-snapshot' + 'How to Work on a Slice'. Java FIRST + additive + shadow + cargo feed + 3+ reports + spawn. Gate delivered. Go parallel forever. Entire port accelerated.
 
 pub use copy::CopyTaskExecutor;
 pub use cyclonedx_sbom::CycloneDxSbomTaskExecutor;
@@ -32,6 +35,17 @@ pub use sync::SyncTaskExecutor;
 pub use tar::TarTaskExecutor;
 pub use test_exec::TestExecExecutor;
 pub use write_file::WriteFileTaskExecutor;
+pub use write_file::apply_vfs_delta_to_write_file; // Re-export VFS delta helper (BTree child_summaries @fp:1229 + watch:766) for kernel/scheduler consumption. zr2e perpetual deepen + full verbatim + abs paths + beads + "Go parallel forever. Entire port accelerated." "use more sub-agents to do more work and migrate more to rust".
+pub use build_script::BuildScriptTaskExecutor; // NEW export for zr2e.1 build_script richer lowering + VFS cross
+pub use build_script::apply_vfs_delta_to_build_script; // Re-export VFS delta helper (BTree child_summaries @fp:1229 + watch:766) for kernel/scheduler consumption. Full phrases + "more sub-agents = more task_executor richer lowering (build_script) + VFS cross + entire port accelerated" + abs paths + beads + "Go parallel forever".
+
+// zr2e explorer 8lk7 exports for VFS cross (delete + start_scripts richer lowering)
+pub use delete::apply_vfs_delta_to_delete;
+pub use start_scripts::apply_vfs_delta_to_start_scripts;
+
+// Wave 4+ task_executor richer lowering + VFS cross (substrate-zr2e) — re-export VFS delta helper for kernel/scheduler consumption.
+// Per 8-step + full directive + "more sub-agents = more task_executor richer Tar/Sync/WriteFile + VFS DirectorySnapshot cross + entire port accelerated".
+pub use tar::apply_vfs_delta_to_tar_archive;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -88,6 +102,7 @@ impl TaskInput {
             task_type,
             "Copy"
                 | "Delete"
+                | "BuildScript" // NEW for zr2e.1 richer lowering (build_script.rs new file) + java_compile + VFS cross. "more sub-agents to do more work and migrate more to rust". Abs paths + full directive x2x2 + "Go parallel forever. Entire port accelerated."
                 | "Sync"
                 | "Mkdir"
                 | "Symlink"

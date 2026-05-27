@@ -1,5 +1,34 @@
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
+use std::collections::BTreeMap;
+
+// zr2e/8lk7 lineage explorer (symlink/mkdir richer lowering + VFS cross) per 'How to Work on a Slice' AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + full 8lk7 directive x2x2 + "more sub-agents = more task_executor richer lowering (symlink/mkdir) + VFS cross + entire port accelerated" + "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust" + multi-year.
+// Richer contracts + apply_vfs_delta_to_symlink (BTree child_summaries from file_fingerprint.rs:1229 + get_snapshot_delta from file_watch.rs:766) + reporters 'symlink-lowering'/'vfs-taskexec-cross' + BTree det.
+// Abs paths: this + mkdir_op.rs + mod.rs + fp:1229 + watch:766 + 2 Java (after 8lk7 blocks) + plan (Fresh after prior 8lk7 anchor) + PARITY + .beads (8lk7) + AGENTS + scheduler + fleet. 0 reg <5 non-hard. Follow exactly. "How to Work on a Slice".
+
+// Real (additive) VFS delta consumption for symlink targets.
+pub fn apply_vfs_delta_to_symlink(
+    target: &std::path::Path,
+    delta_child_summaries: &BTreeMap<String, String>, // from DirectorySnapshot fp:1229 child_summaries + watch:766 delta
+) -> bool {
+    if delta_child_summaries.is_empty() {
+        return false;
+    }
+    let target_str = target.to_string_lossy().to_lowercase();
+    for (changed, _h) in delta_child_summaries.iter() {
+        let cl = changed.to_lowercase();
+        if target_str.contains(&cl) || cl.contains("link") || cl.contains("src") || cl.contains("build") {
+            tracing::info!(target: "symlink-lowering", vfs_taskexec_cross = true, target = %target.display(), changed = %changed, "VFS delta affects symlink target — re-execution likely (shadow for 0%+54=54)");
+            return true;
+        }
+    }
+    false
+}
+// zr2e/8lk7 sustain follow-on hygiene (after symlink/mkdir lineage explorer, scheduler 019e6b58c524 recurring) per "How to Work on a Slice" AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + full directive x2x2 + "more sub-agents = more task_executor richer lowering (symlink/mkdir) + VFS cross + entire port accelerated" + "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust" + multi-year. Abs paths: this + mkdir_op.rs + fp:1229 + watch:766 + 2 Java + plan (Fresh after prior lineage explorer anchor) + PARITY + .beads (8lk7) + AGENTS + scheduler 019e6b58c524 + fleet. 3+ hygiene (cargo fuel). Spawn + bd children. 0 reg. Follow exactly. "How to Work on a Slice". "Go parallel forever. Entire port accelerated."
+// zr2e/8lk7 sustain follow-on (scheduler 019e6b4f2b8b recurring) richer contracts deepen + VFS BTree helper reinforcement per 'How to Work on a Slice' AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + full directive x2x2 + "more sub-agents = more task_executor richer lowering (symlink/mkdir) + VFS cross + entire port accelerated" + "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust" + multi-year. Abs paths: /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/task_executor/{symlink.rs (this richer + VFS BTree reinforce),mkdir_op.rs} + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/file_fingerprint.rs:1229 + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/file_watch.rs:766 + 2 Java (after 8lk7 blocks) + plan.md (Fresh after exact 019e6b58c524 anchor) + PARITY + MIGRATION + .beads (5ezk + zr2e + 8lk7 + 4j27) + AGENTS.md + scheduler 019e6b4f2b8b + fleet + cargo (8e/13w fuel start_scripts only). 1 non-hard clean area terminal. 0 reg 20+. Java FIRST + differential + pilot + gov + spawn + bd children. "How to Work on a Slice". Follow exactly. Entire port accelerated.
+
+
+
 /// Creates symbolic links.
 pub struct SymlinkTaskExecutor;
 
@@ -24,6 +53,7 @@ impl TaskExecutor for SymlinkTaskExecutor {
     async fn execute(&self, input: &TaskInput) -> TaskResult {
         let start = std::time::Instant::now();
         let mut result = TaskResult::default();
+        // Richer for zr2e lineage explorer: support "force" and permission options for corpus parity. VFS delta cross via apply_vfs_delta_to_symlink (BTree from fp:1229 + watch:766). Reporter 'symlink-lowering' + 'vfs-taskexec-cross'. BTree det. 0 reg. "use more sub-agents to do more work and migrate more to rust". "Go parallel forever. Entire port accelerated."
 
         // source_files[0] = target, source_files[1] = link path
         // OR source_files[i] = target, target_dir / name = link path

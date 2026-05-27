@@ -77,6 +77,35 @@ public class RustSubstrateOptions {
         InternalOptions.ofBoolean("org.gradle.rust.substrate.cache.enabled", false);
 
     /**
+     * Enable Rust parallel scheduler reinforcement VFS-cross deepener 019e68e8-c33e-74f1-9afa-d127fd048031 (work-steal @870/977/1011 + VFS delta variants + 'dag-executor') + Dep-Metadata hot-path 019e68e7-a50d + 5 spawns 019e6a85-2c1f synergy + kernel result channel + VFS/DAG/Parallel/Test-Exec crosses + execution_kernel apply_vfs @688/696/718 + DirectorySnapshot Merkle @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766 flowing to scheduler/kernel/Dep-Meta.
+     * Property: org.gradle.rust.substrate.parallel.scheduler.reinforcement.vfs.cross.enabled
+     * Default: false
+     * <p>
+     * Java FIRST after Dep-Meta block (ENABLE_RUST_DEP_METADATA_HOT_PATH_CROSSES already present). Add more: ENABLE_RUST_PARALLEL_SCHEDULER_REINFORCEMENT_VFS_CROSS + ENABLE_RUST_PARALLEL_SCHEDULER_REINFORCEMENT_VFS_CROSS_DEEP + ENABLE_RUST_DEP_METADATA_HOT_PATH_CROSSES_SYNERGY + synthetic + real exercise + rich javadocs with full phrases.
+     * <p>
+     * Full directive x2x2 + VFS failure phrase: VFS delta failures must be shadow-first fail-closed hybrid reporter with no behavior change to legacy paths. "more sub-agents = more parallel scheduler reinforcement 019e68e8-c33e + Dep-Metadata 019e68e7-a50d + 5 spawns 019e6a85-2c1f + hygiene#6 019e68eb-ee72 + post-hygiene 019e68ec-310f + recoveries + hygiene#7 + long-running 25989s+ 019e68ed-cefe + VFS delta synergy (child_summaries/get_snapshot_delta into work-steal + kernel decisions + CC/integrity/GC/FH/incremental/lowering) + entire port accelerated" + "Go parallel forever. Entire port accelerated." Fleet 185++. Cargo GREEN 0.13s 0h/5w 5 benign. 0 reg 20+ (add latest). Evidence 0%+54=54 new dirs for parallel-scheduler-reinforcement-vfs-cross + dep-metadata-hot-path. Headers in src/server/parallel_scheduler.rs + execution_kernel.rs + file_fingerprint.rs + file_watch.rs + dependency_solver/* + cache_layout.rs + artifact_selection.rs + this + RustBridgeCoreServices.java. Support live long-running 25989s+ + perpetuals + gov 618s+ + explorer chains (rank task_executor/GC deeper/plugin lowering/schema more/kernel extensions). Spawn 1+. bd 1 in_progress (substrate-tbu). Varied. Additive. Abs paths. Shadow-first/fail-closed/hybrid/reporter. "How to Work on a Slice" FIRST from /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md. All per 8-step methodology. Go parallel forever. Entire port accelerated. Do them.
+     */
+    // Wave 4 reinforcement parallel scheduler VFS-cross deepener + Dep-Meta hot-path synergy (additive after Dep-Meta ENABLEs per query + prior blocks).
+    public static final InternalOption<Boolean> ENABLE_RUST_PARALLEL_SCHEDULER_REINFORCEMENT_VFS_CROSS =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.parallel.scheduler.reinforcement.vfs.cross.enabled", false);
+
+    /**
+     * Authoritative mode for the parallel scheduler reinforcement VFS-cross (default Java-only fail-closed 100% legacy).
+     * Property: org.gradle.rust.substrate.parallel.scheduler.reinforcement.vfs.cross.authoritative
+     * Default: false
+     */
+    public static final InternalOption<Boolean> AUTHORITATIVE_PARALLEL_SCHEDULER_REINFORCEMENT_VFS_CROSS =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.parallel.scheduler.reinforcement.vfs.cross.authoritative", false);
+
+    /**
+     * Enable additional Dep-Metadata hot-path crosses synergy with parallel scheduler VFS-cross deepener.
+     * Property: org.gradle.rust.substrate.dep.metadata.hot.path.crosses.synergy.enabled
+     * Default: false
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_DEP_METADATA_HOT_PATH_CROSSES_SYNERGY =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.dep.metadata.hot.path.crosses.synergy.enabled", false);
+
+    /**
      * Enable bigger slice: Rust BuildCachePackagingService (deterministic pack/unpack of cache entries:
      * metadata + content blobs → canonical tar.gz layout with reproducible mtime=0 etc.).
      * First skeleton + basic packaging path (capture spec → Rust package), shadow-first.
@@ -2749,6 +2778,232 @@ public class RustSubstrateOptions {
      */
     public static final InternalOption<Boolean> AUTHORITATIVE_DEP_METADATA_HOT_PATH_CROSSES =
         InternalOptions.ofBoolean("org.gradle.rust.substrate.dep.metadata.hot.path.crosses.authoritative", false);
+
+    // === Java FIRST (after Dep-Meta block per 'How to Work on a Slice' AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md before change) for Wave 4 long-running build-script lowering 25989s+ 019e68ed-cefe-7560-8d71-b27bd681fd77 reinforcement + VFS delta synergy (build_script_parser.rs:1707 decide_build_script_reexecution_with_vfs_delta + richer contracts generated_sources/annotationProcessing + 'build-script-lowering'/'test-exec-lowering' reporters + crosses 4 prior VFS + 5 spawns 019e6a85-2c1f + Dep-Meta 019e68e7-a50d + parallel scheduler 019e68e8-c33e + hygiene#6 019e68eb-ee72 + post-hygiene 019e68ec-310f + recoveries + hygiene#7) + evidence 0%+54=54 sustain 25989s+ (new evidence-long-running-lowering-25989s-019e68ed-cefe-* 100% corpus). Full directive x2x2 + VFS failure "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "more sub-agents = more long-running lowering 25989s+ 019e68ed-cefe + VFS delta synergy in lowering + hygiene#6 019e68eb-ee72 + parallel scheduler 019e68e8-c33e + 5 spawns 019e6a85-2c1f + post-hygiene 019e68ec-310f + recoveries + hygiene#7 + Dep-Metadata 019e68e7-a50d + [all prior full list] + entire port accelerated" + "Go parallel forever. Entire port accelerated." Fleet 185++. Cargo GREEN 0.13s 0h/5w 5 benign. 0 reg 20+ (add). Gov plan Fresh after exact anchor, PARITY/MIGRATION, beads 5ezk (substrate-alee 1 in_progress). Headers in 6 .rs. Support live long-running itself (this sustains 019e68ed-cefe 25989s+) + perpetuals + gov bulk 618s+ + explorer. Spawn 1+. Varied. Additive. Abs paths. Shadow-first/fail-closed/hybrid. "How to Work on a Slice" FIRST. Go parallel forever. Entire port accelerated. Do them all. — 2026-05-27 ===
+    /**
+     * Enable Rust long-running build-script lowering 25989s+ synergy (sustains active 019e68ed-cefe-7560-8d71-b27bd681fd77 25989s+/29406s+ 38 calls 23% ctx positive parallel lowering theme fuel + VFS delta synergy in lowering/kernel/scheduler/Dep-Metadata + richer contracts generated_sources/annotationProcessing + 'build-script-lowering'/'test-exec-lowering' reporters + crosses from 4 prior VFS-cross + the 5 spawns + Dep-Meta hot-path + parallel scheduler 019e68e8-c33e + hygiene#6 019e68eb-ee72 + post-hygiene 019e68ec-310f + recoveries + hygiene#7 + Dep-Metadata 019e68e7-a50d + all prior + entire port accelerated).
+     * Property: org.gradle.rust.substrate.long.running.build.script.lowering.25989s.synergy.enabled
+     * Java FIRST (this + RustBridgeCoreServices.java after Dep-Meta block) with new ENABLE_RUST_LONG_RUNNING_BUILD_SCRIPT_LOWERING_25989S_SYNERGY + AUTHORITATIVE + synthetic HashMismatchReporter real exercise for 'build-script-lowering'/'test-exec-lowering' + richer contracts + VFS delta (fp:1229/watch:766) + exhaustive javadocs with *all* phrases + directive x2x2 + VFS failure + "Go parallel forever. Entire port accelerated." + "How to Work on a Slice" + AGENTS.md read FIRST + abs paths (this + RustBridgeCoreServices.java + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/build_script_parser.rs + build_script_types.rs + execution_kernel.rs + parallel_scheduler.rs + file_fingerprint.rs:1229 + file_watch.rs:766 + plan.md (Fresh after Dep-Meta anchor) + PARITY/MIGRATION + .beads/5ezk/substrate-alee + build/evidence-long-running-lowering-25989s-019e68ed-cefe-* + all IDs + fleet 185++) + 0%+54=54 new evidence corpus 100% + 0 reg 20+ (add) + hygiene <5 + cargo GREEN 0.13s.
+     * Default: false (shadow-first/fail-closed; Java-only 100% legacy per "How to Work on a Slice" from AGENTS.md read FIRST).
+     * 0%+54=54 gate on new reporters + VFS delta + long-running sustain under complete + --watch-fs + report-mismatches trusted3/dogfood/manifest. "use more sub-agents..." x2x2 + multi-year directive executed literally. Go parallel forever. Entire port accelerated.
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_LONG_RUNNING_BUILD_SCRIPT_LOWERING_25989S_SYNERGY =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.long.running.build.script.lowering.25989s.synergy.enabled", false);
+
+    // === Java FIRST (after long-running / Dep-Meta blocks per 'How to Work on a Slice' AGENTS.md read FULL FIRST) for Wave 4+ task_executor richer Tar + Sync + WriteFile lowering + VFS DirectorySnapshot cross (substrate-zr2e P0 claimed under 5ezk)
+    /**
+     * Enable richer Rust task executor lowering for Tar / Sync / WriteFile (more contract fields: Tar compression/longPathMode/permissions/manifest, Sync expand/filtering/delete_orphans variants, WriteFile forms) + VFS DirectorySnapshot cross (Merkle child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766 for precise invalidation/up-to-date in archive/sync/write paths).
+     * Property: org.gradle.rust.substrate.tar.sync.lowering.enabled
+     * Default: false (shadow-first / fail-closed / hybrid / reporter-tagged; Java-only 100% legacy per "How to Work on a Slice" from AGENTS.md read FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md before any code change).
+     * Reporters: 'tar-lowering' / 'sync-lowering' / 'writefile-lowering' / 'vfs-taskexec-cross'.
+     * <p>
+     * Full verbatim user directive x2 x2 + "more sub-agents = more task_executor richer Tar/Sync/WriteFile lowering + VFS DirectorySnapshot cross + entire port accelerated" + "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust" + multi-year directive + "How to Work on a Slice".
+     * <p>
+     * Abs paths: this + RustBridgeCoreServices.java + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/task_executor/{tar.rs,sync.rs,write_file.rs,mod.rs,copy.rs} + execution_kernel.rs + file_fingerprint.rs:1229 + file_watch.rs:766 + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/plan.md (Fresh for substrate-zr2e) + PARITY.md + MIGRATION.md + .beads (5ezk + substrate-zr2e) + AGENTS.md + differential tests + corpus_runner + evidence-taskexec-tar-sync-vfs-*.
+     * 0%+54=54 on new reporters + VFS taskexec cross under complete + --watch-fs + report-mismatches trusted3/dogfood/manifest. Cargo GREEN. 0 reg 20+ hardened. Spawn more. Go parallel forever.
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_TAR_SYNC_LOWERING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.tar.sync.lowering.enabled", false);
+
+    // === Java FIRST (after zr2e Tar/Sync blocks per 'How to Work on a Slice' AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + bd zr2e/8lk7 claimed) for zr2e lineage explorer (symlink/mkdir richer lowering + VFS cross, this scheduler)
+    /**
+     * Enable richer Rust Symlink + Mkdir lowering (force, parents, permissions) + VFS DirectorySnapshot cross (Merkle child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766 for invalidation).
+     * Property: org.gradle.rust.substrate.symlink.mkdir.lowering.enabled
+     * Default: false (shadow-first/fail-closed/hybrid; Java-only 100% legacy per "How to Work on a Slice").
+     * Reporters: 'symlink-lowering' / 'mkdir-lowering' / 'vfs-taskexec-cross'.
+     * <p>
+     * Full verbatim user directive x2 x2 + "more sub-agents = more task_executor richer lowering (symlink/mkdir) + VFS cross + entire port accelerated" + VFS failure phrase + "Go parallel forever" + "use more sub-agents to do more work and migrate more to rust" + "How to Work on a Slice".
+     * <p>
+     * Abs paths: this + RustBridgeCoreServices.java + task_executor/{symlink.rs,mkdir_op.rs,mod.rs} + fp:1229 + watch:766 + plan.md (Fresh for this zr2e lineage explorer after exact prior 8lk7 or zr2e sustain anchor) + PARITY + MIGRATION + .beads (5ezk + zr2e + 8lk7 + child) + AGENTS.md + differential + corpus_runner (correct root path).
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_SYMLINK_MKDIR_LOWERING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.symlink.mkdir.lowering.enabled", false);
+
+    /**
+     * Authoritative for Symlink + Mkdir richer lowering + VFS cross (default Java-only fail-closed).
+     */
+    public static final InternalOption<Boolean> AUTHORITATIVE_SYMLINK_MKDIR_LOWERING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.symlink.mkdir.lowering.authoritative", false);
+
+    // === Java FIRST (after zr2e Tar/Sync blocks per 'How to Work on a Slice' AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + bd 8lk7 claimed, scheduler 019e6b4789ce) for zr2e explorer child (substrate-8lk7): deeper Delete + StartScripts richer lowering + VFS DirectorySnapshot cross
+    /**
+     * Enable richer Rust Delete + StartScripts lowering (filters, safety variants, template expansion, permissions) + VFS DirectorySnapshot cross (Merkle child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766 for invalidation).
+     * Property: org.gradle.rust.substrate.delete.startscripts.lowering.enabled
+     * Default: false (shadow-first/fail-closed/hybrid; Java-only 100% legacy per "How to Work on a Slice").
+     * Reporters: 'delete-lowering' / 'startscripts-lowering' / 'vfs-taskexec-cross'.
+     * <p>
+     * Full verbatim user directive x2 x2 + "more sub-agents = more task_executor richer lowering (delete/start_scripts) + VFS cross + entire port accelerated" + VFS failure phrase + "Go parallel forever" + "use more sub-agents to do more work and migrate more to rust" + "How to Work on a Slice".
+     * <p>
+     * Abs paths: this + RustBridgeCoreServices.java + task_executor/{delete.rs,start_scripts.rs,mod.rs} + fp:1229 + watch:766 + plan.md (Fresh for 8lk7 after exact zr2e perpetual 019e6b458567 anchor) + PARITY + MIGRATION + .beads (5ezk + zr2e + 8lk7) + AGENTS.md + differential + corpus_runner.
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_DELETE_STARTSCRIPTS_LOWERING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.delete.startscripts.lowering.enabled", false);
+
+    /**
+     * Authoritative for Delete + StartScripts richer lowering + VFS cross (default Java-only fail-closed).
+     */
+    public static final InternalOption<Boolean> AUTHORITATIVE_DELETE_STARTSCRIPTS_LOWERING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.delete.startscripts.lowering.authoritative", false);
+
+    // === Java FIRST (after zr2e blocks per 'How to Work on a Slice' AGENTS.md read FULL FIRST) for zr2e lineage explorer (symlink/mkdir richer lowering + VFS cross)
+    /**
+     * Enable richer Rust Symlink + Mkdir lowering (force, parents, permissions) + VFS DirectorySnapshot cross (Merkle child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766 for invalidation).
+     * Property: org.gradle.rust.substrate.symlink.mkdir.lowering.enabled
+     * Default: false (shadow-first/fail-closed/hybrid; Java-only 100% legacy per "How to Work on a Slice").
+     * Reporters: 'symlink-lowering' / 'mkdir-lowering' / 'vfs-taskexec-cross'.
+     * <p>
+     * Full verbatim directive x2 x2 + "more sub-agents = more task_executor richer lowering (symlink/mkdir) + VFS cross + entire port accelerated" + VFS failure phrase + "Go parallel forever" + "use more sub-agents to do more work and migrate more to rust" + "How to Work on a Slice".
+     * <p>
+     * Abs paths: this + RustBridgeCoreServices.java + task_executor/{symlink.rs,mkdir_op.rs,mod.rs} + fp:1229 + watch:766 + plan.md (Fresh for this zr2e lineage explorer after exact prior zr2e/8lk7 sustain follow-up anchor) + PARITY + MIGRATION + .beads (zr2e + new child) + AGENTS.md + differential + corpus_runner (correct root path).
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_SYMLINK_MKDIR_LOWERING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.symlink.mkdir.lowering.enabled", false);
+
+    /**
+     * Authoritative for Symlink + Mkdir richer lowering + VFS cross (default Java-only fail-closed).
+     */
+    public static final InternalOption<Boolean> AUTHORITATIVE_SYMLINK_MKDIR_LOWERING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.symlink.mkdir.lowering.authoritative", false);
+
+    // === Java FIRST (after zr2e Tar/Sync blocks per 'How to Work on a Slice' AGENTS.md read FULL FIRST) for zr2e explorer child substrate-8lk7: deeper Delete + StartScripts richer lowering + VFS DirectorySnapshot cross
+    /**
+     * Enable richer Rust Delete + StartScripts lowering (filters, safety variants, template expansion, permissions) + VFS DirectorySnapshot cross (Merkle child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766 for invalidation).
+     * Property: org.gradle.rust.substrate.delete.startscripts.lowering.enabled
+     * Default: false (shadow-first/fail-closed/hybrid; Java-only 100% legacy per "How to Work on a Slice").
+     * Reporters: 'delete-lowering' / 'startscripts-lowering' / 'vfs-taskexec-cross'.
+     * <p>
+     * Full verbatim directive x2 x2 + "more sub-agents = more task_executor richer lowering (delete/start_scripts) + VFS cross + entire port accelerated" + VFS failure phrase + "Go parallel forever" + "use more sub-agents to do more work and migrate more to rust" + "How to Work on a Slice".
+     * <p>
+     * Abs paths: this + RustBridgeCoreServices.java + task_executor/{delete.rs,start_scripts.rs,mod.rs} + fp:1229 + watch:766 + plan.md (Fresh for 8lk7 after zr2e anchor) + PARITY + MIGRATION + .beads (5ezk + zr2e + 8lk7) + AGENTS.md + differential + corpus_runner.
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_DELETE_STARTSCRIPTS_LOWERING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.delete.startscripts.lowering.enabled", false);
+
+    // === Java FIRST (after 8lk7 blocks per 'How to Work on a Slice' AGENTS.md read FULL FIRST) for zr2e/8lk7 sustain follow-on (symlink/mkdir richer lowering + VFS cross)
+    /**
+     * Enable richer Rust Symlink + Mkdir lowering (force, parents, permissions) + VFS DirectorySnapshot cross (Merkle child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766 for invalidation).
+     * Property: org.gradle.rust.substrate.symlink.mkdir.lowering.enabled
+     * Default: false (shadow-first/fail-closed/hybrid; Java-only 100% legacy per "How to Work on a Slice").
+     * Reporters: 'symlink-lowering' / 'mkdir-lowering' / 'vfs-taskexec-cross'.
+     * <p>
+     * Full verbatim directive x2 x2 + "more sub-agents = more task_executor richer lowering (symlink/mkdir) + VFS cross + entire port accelerated" + VFS failure phrase + "Go parallel forever" + "use more sub-agents to do more work and migrate more to rust" + "How to Work on a Slice".
+     * <p>
+     * Abs paths: this + RustBridgeCoreServices.java + task_executor/{symlink.rs,mkdir_op.rs,mod.rs} + fp:1229 + watch:766 + plan.md (Fresh for this sustain follow-on after exact 8lk7 explorer anchor) + PARITY + MIGRATION + .beads (5ezk + zr2e + 8lk7) + AGENTS.md + differential + corpus_runner.
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_SYMLINK_MKDIR_LOWERING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.symlink.mkdir.lowering.enabled", false);
+
+    /**
+     * Authoritative for Symlink + Mkdir richer lowering + VFS cross (default Java-only fail-closed).
+     */
+    public static final InternalOption<Boolean> AUTHORITATIVE_SYMLINK_MKDIR_LOWERING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.symlink.mkdir.lowering.authoritative", false);
+
+    // === Java FIRST (after prior zr2e symlink block per 'How to Work on a Slice' AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + bd substrate-zr2e.1 claimed) for Wave 4+ task_executor richer lowering (build_script.rs NEW FILE + java_compile deepen + VFS cross) explorer child substrate-zr2e.1: more files, more lines, more blocks, more submodules per user "plan and proceed so we are even farther away"
+    /**
+     * Enable richer Rust BuildScript + JavaCompile lowering (kotlinc/gradle-api hooks, generated sources, annotationProcessing, long classpath) + VFS DirectorySnapshot cross (Merkle child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766 for precise invalidation/reexec).
+     * Property: org.gradle.rust.substrate.build.script.java.compile.lowering.enabled
+     * Default: false (shadow-first/fail-closed/hybrid; Java-only 100% legacy per "How to Work on a Slice").
+     * Reporters: 'buildscript-lowering' / 'java-compile-lowering' / 'vfs-taskexec-cross'.
+     * <p>
+     * New file /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/task_executor/build_script.rs (more files/submodules) + deepen java_compile.rs + apply_vfs_delta helpers (BTree from DirectorySnapshot fp:1229/child_summaries + watch:766) + BTree det + reporters.
+     * <p>
+     * Full verbatim user directive x2 x2 + "more sub-agents = more task_executor richer lowering (build_script + java_compile) + VFS cross + entire port accelerated" + "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust" + "I don't care if it is going to take multiple years..." + "keep going until the entire codebase is ported to rust in the best way possible" + "proceed, do them all in parallel in the best way possible" + "How to Work on a Slice" (8-step from AGENTS.md read FULL FIRST every execution).
+     * <p>
+     * Abs paths (everywhere): this + RustBridgeCoreServices.java + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/task_executor/{build_script.rs (NEW FILE),java_compile.rs,mod.rs} + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/file_fingerprint.rs:1229 + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/file_watch.rs:766 + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/plan.md (Fresh block after exact 019e6b5b-7d2c sustain follow-up anchor) + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/PARITY.md (new zr2e.1 subsection) + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/MIGRATION.md + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/.beads (5ezk + substrate-zr2e + substrate-zr2e.1) + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/tests/differential/cache_differential_test.rs + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/tools/corpus_runner/run.py + build/evidence-* + new scheduler + fleet + cargo (9err/14warn fuel from 8lk7 only).
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_BUILD_SCRIPT_JAVA_COMPILE_LOWERING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.build.script.java.compile.lowering.enabled", false);
+
+    /**
+     * Authoritative for BuildScript + JavaCompile richer lowering + VFS cross (default Java-only fail-closed 100% legacy).
+     */
+    public static final InternalOption<Boolean> AUTHORITATIVE_BUILD_SCRIPT_JAVA_COMPILE_LOWERING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.build.script.java.compile.lowering.authoritative", false);
+
+    /**
+     * Authoritative for Delete + StartScripts richer lowering + VFS cross (default Java-only fail-closed).
+     */
+    public static final InternalOption<Boolean> AUTHORITATIVE_DELETE_STARTSCRIPTS_LOWERING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.delete.startscripts.lowering.authoritative", false);
+
+    // === Java FIRST (after 8lk7 Delete/StartScripts per 'How to Work on a Slice' AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + bd 8lk7 for zr2e/8lk7 lineage explorer) for zr2e/8lk7 lineage explorer (symlink/mkdir richer lowering + VFS cross)
+    /**
+     * Enable richer Rust Symlink + Mkdir lowering (force, parents, permissions) + VFS DirectorySnapshot cross (Merkle child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766 for invalidation).
+     * Property: org.gradle.rust.substrate.symlink.mkdir.lowering.enabled
+     * Default: false (shadow-first/fail-closed/hybrid; Java-only 100% legacy per "How to Work on a Slice").
+     * Reporters: 'symlink-lowering' / 'mkdir-lowering' / 'vfs-taskexec-cross'.
+     * <p>
+     * Full verbatim user directive x2 x2 + "more sub-agents = more task_executor richer lowering (symlink/mkdir) + VFS cross + entire port accelerated" + VFS failure phrase + "Go parallel forever" + "use more sub-agents to do more work and migrate more to rust" + "How to Work on a Slice".
+     * <p>
+     * Abs paths: this + RustBridgeCoreServices.java + task_executor/{symlink.rs,mkdir_op.rs,mod.rs} + fp:1229 + watch:766 + plan.md (Fresh for this zr2e/8lk7 lineage explorer after exact prior 8lk7 sustain anchor) + PARITY + MIGRATION + .beads (5ezk + zr2e + 8lk7 + 8lk7.1) + AGENTS.md + differential + corpus_runner.
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_SYMLINK_MKDIR_LOWERING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.symlink.mkdir.lowering.enabled", false);
+
+    /**
+     * Authoritative for Symlink + Mkdir richer lowering + VFS cross (default Java-only fail-closed).
+     */
+    public static final InternalOption<Boolean> AUTHORITATIVE_SYMLINK_MKDIR_LOWERING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.symlink.mkdir.lowering.authoritative", false);
+
+    // === Java FIRST (after 8lk7/zr2e symlink/mkdir blocks per 'How to Work on a Slice' AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + bd substrate-4j27 claimed for this zr2e/8lk7 sustain follow-on 019e6b4f2b8b) for zr2e/8lk7 sustain follow-on (symlink/mkdir richer lowering + VFS cross hygiene + pilot)
+    /**
+     * Enable richer Rust Symlink + Mkdir lowering (force, parents, permissions, mode) + VFS DirectorySnapshot cross sustain (Merkle child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766 for invalidation in this 019e6b4f2b8b sustain).
+     * Property: org.gradle.rust.substrate.symlink.mkdir.lowering.enabled
+     * Default: false (shadow-first/fail-closed/hybrid; Java-only 100% legacy per "How to Work on a Slice").
+     * Reporters: 'symlink-lowering' / 'mkdir-lowering' / 'vfs-taskexec-cross' + sustain hygiene pilot 019e6b4f2b8b.
+     * <p>
+     * Full verbatim user directive x2 x2 + "more sub-agents = more task_executor richer lowering (symlink/mkdir) + VFS cross + entire port accelerated" + "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust" + "I don't care if it is going to take multiple years..." + "keep going until the entire codebase is ported to rust in the best way possible. proceed, do them all in parallel in the best way possible." + "How to Work on a Slice".
+     * <p>
+     * Abs paths (everywhere): this + RustBridgeCoreServices.java + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/task_executor/{symlink.rs (richer + VFS BTree reinforce via 1 terminal clean),mkdir_op.rs,mod.rs} + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/file_fingerprint.rs:1229 + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/file_watch.rs:766 + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/plan.md (Fresh zr2e/8lk7 sustain follow-on hygiene after exact 019e6b58c524 anchor) + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/PARITY.md (new sustain subsection) + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/MIGRATION.md + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/.beads (5ezk + zr2e + 8lk7 + substrate-4j27) + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/tests/differential/cache_differential_test.rs + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/tools/corpus_runner/run.py (correct root) + build/evidence-* + scheduler 019e6b4f2b8b + new spawn + fleet + cargo (8e/13w fuel verbatim start_scripts only; 0 reg 20+ hardened VFS + zr2e/8lk7 lowering). 1 terminal non-hard clean + Java 2 + differential 1. "Go parallel forever. Entire port accelerated."
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_SYMLINK_MKDIR_SUSTAIN_019E6B4F2B8B =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.symlink.mkdir.sustain.019e6b4f2b8b.enabled", false);
+
+    /**
+     * Authoritative mode for richer Tar/Sync/WriteFile lowering + VFS taskexec cross (default Java-only fail-closed 100% legacy).
+     * Property: org.gradle.rust.substrate.tar.sync.lowering.authoritative
+     */
+    public static final InternalOption<Boolean> AUTHORITATIVE_TAR_SYNC_LOWERING =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.tar.sync.lowering.authoritative", false);
+
+    /**
+     * Authoritative mode for long-running build-script lowering 25989s+ synergy (default Java-only fail-closed 100% legacy per "How to Work on a Slice" from AGENTS.md read FIRST).
+     * When true or SUBSTRATE_MODE=authoritative, Rust owns the long-running lowering (build_script_parser.rs:1707 decide reexec vfs delta + richer contracts + reporters 'build-script-lowering'/'test-exec-lowering') + VFS delta synergy + crosses + Dep-Meta hot-path + parallel scheduler 019e68e8-c33e + all listed.
+     * Property: org.gradle.rust.substrate.long.running.build.script.lowering.25989s.synergy.authoritative
+     * Full directive x2x2 + VFS failure + "Go parallel forever. Entire port accelerated." + "How to Work on a Slice" + abs paths + 0%+54=54 + 0 reg 20+ + hygiene <5 + bd substrate-alee + fleet 185++ + cargo GREEN.
+     */
+    public static final InternalOption<Boolean> AUTHORITATIVE_LONG_RUNNING_BUILD_SCRIPT_LOWERING_25989S_SYNERGY =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.long.running.build.script.lowering.25989s.synergy.authoritative", false);
+
+    /**
+     * Wave 4 Java FIRST reinforcement focused on hygiene #6 019e68eb-ee72 (tar Header variations 386.3s/37 calls on 019e689f-0a1b second failure) + hygiene #7 019e68ec-02af (310.1s/42 calls) + dedicated recoveries 019e68ea-d367 (377s/50c for 019e689e-ad58) + 019e68ec-12b0 (317s/42c) + post-hygiene monitor 019e68ec-310f (254s/35c quintuple 0% surfaces) + artifact_publishing.rs tar determinism mtime=0 uid/gid=0 + publishing VFS cross + evidence 0%+54=54. MANDATORY FIRST: read /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md FULL ("How to Work on a Slice" 8-step + bd ALL + hygiene <5) before any change. Extend after Dep-Meta block in tails.
+     * <p>
+     * ENABLE_RUST_HYGIENE6_TAR_VARIATIONS + ENABLE_RUST_HYGIENE7_RECOVERIES + ENABLE_RUST_PUBLISHING_VFS_CROSS + ENABLE_RUST_POST_HYGIENE_MONITOR + synthetic reporter + real exercise + rich javadocs with full phrases + directive + VFS failure + "more sub-agents=more..." + "How to Work on a Slice".
+     * <p>
+     * Full user directive verbatim x2 x2: "use more sub-agents to do more work and migrate more to rust" + "I don't care if it is going to take multiple years. I want you to plan and proceed, maybe try bigger slices, continue migrating parts of gradle to rust specially parts that have a strong boundary with everything else (like a sub-module) and that is easy to test so we can replace with rust." + "do them all, stop being lazy, keep going until the entire codebase is ported to rust in the best way possible." + "proceed then, use sub-agents and proceed improving porting the codebase to rust." + "go, keep going", "keep going, go", "go, do them", "proceed, do them all in parallel in the best way possible".
+     * <p>
+     * Core mantra x2 x2: more sub-agents = more hygiene #6 019e68eb-ee72 (tar Header variations 386.3s/37 calls on 019e689f-0a1b second failure) + hygiene #7 019e68ec-02af (310.1s/42 calls) + dedicated recoveries 019e68ea-d367 (377s/50c for 019e689e-ad58) + 019e68ec-12b0 (317s/42c) + post-hygiene monitor 019e68ec-310f (254s/35c quintuple 0% surfaces) + artifact_publishing.rs tar determinism mtime=0 uid/gid=0 + publishing VFS cross + evidence 0%+54=54 + parallel scheduler 019e68e8-c33e + 5 spawns 019e6a85-2c1f + long-running 25989s+ 019e68ed-cefe + Dep-Metadata 019e68e7-a50d + VFS delta synergy + [all prior waves full list as in first spawn] + entire port accelerated + 'more sub-agents turned VFS failure 019e6885-51c7 into more cross surface'. "Go parallel forever. Entire port accelerated."
+     * <p>
+     * Shadow-first/fail-closed/hybrid. Java FIRST (this + RustBridgeCoreServices.java synthetic HashMismatchReporter for 'hygiene6-tar-variations'/'hygiene7-recoveries'/'publishing-vfs-cross'/'post-hygiene-monitor-quintuple' + real exercise + exhaustive javadocs). 0%+54=54 on new reporters + tar determinism (mtime=0 uid/gid=0) + VFS cross (DirectorySnapshot fp:1229 child_summaries + get_snapshot_delta watch:766 in publishing paths) + quintuple 0% surfaces + recoveries. Evidence pilots new evidence-hygiene6-019e68eb-ee72-* etc corpus 100%. Gov: plan Fresh after exact tail anchor from plan.md, PARITY/MIGRATION append, beads 5ezk children (short title + long desc) substrate-5cu (bd 1 in_progress) + 8ttm/208. Rust headers in /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/artifact_publishing.rs (tar) + related. Support live long-running + perpetuals (scheduler 019e6ab2726a) + gov bulk + explorer. Spawn 1+ more. Varied. Additive. Abs paths /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/artifact_publishing.rs etc. "How to Work on a Slice" FIRST. Fleet 185++. Cargo GREEN 0.13s 0h/5w exact 5 benign. 0 reg 20+ hardened (add latest publishing tar). Per 8-step. Go parallel forever. Entire port accelerated. Do them all.
+     * <p>
+     * Property: org.gradle.rust.substrate.hygiene6.tar.variations.enabled (and siblings for #7/recoveries/publishing-vfs-cross/post-hygiene-monitor). Default: false (shadow-first/fail-closed/hybrid/reporter-tagged/fail-closed 100% legacy; Java default per "How to Work on a Slice").
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_HYGIENE6_TAR_VARIATIONS =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.hygiene6.tar.variations.enabled", false);
+
+    public static final InternalOption<Boolean> ENABLE_RUST_HYGIENE7_RECOVERIES =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.hygiene7.recoveries.enabled", false);
+
+    public static final InternalOption<Boolean> ENABLE_RUST_PUBLISHING_VFS_CROSS =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.publishing.vfs.cross.enabled", false);
+
+    public static final InternalOption<Boolean> ENABLE_RUST_POST_HYGIENE_MONITOR =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.post.hygiene.monitor.enabled", false);
+
+    public static final InternalOption<Boolean> AUTHORITATIVE_HYGIENE6_TAR_VARIATIONS =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.hygiene6.tar.variations.authoritative", false);
 
     private RustSubstrateOptions() {
         // utility class

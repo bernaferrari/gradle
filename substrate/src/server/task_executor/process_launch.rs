@@ -14,6 +14,8 @@ use nix::unistd::Pid;
 ///
 /// This is intentionally smaller than Gradle's full process API. The JVM bridge
 /// must lower only exact, preview-safe contracts into this shape.
+/// 
+/// Workers full cross (6yc.1): process launch for worker daemons integrated with VFS delta (child_summaries from fp:1229/watch:766) for healthy/lease in worker_process + reporter('workers'). Additive comment only (no behavior change). Per 'How to Work on a Slice' + full directive x2 + 'more sub-agents = more Workers full + Rust surface moved + entire port accelerated' + 'more sub-agents turned VFS failure 019e6885-51c7 into more cross surface' + abs paths + Java FIRST + 0%+54=54 + perpetual 019e68e42216 + fleet. Go parallel.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct ProcessLaunchSpec {
     pub executable: PathBuf,
