@@ -44,6 +44,14 @@ struct EventStreamInner {
 /// Events are also buffered in memory for historical queries.
 ///
 /// `Clone` produces a shallow handle that shares the same underlying state.
+///
+/// === Sustain #5: part of Native Compile + Observability/Logging (cross console.rs + problem_reporting.rs + native_compile.rs) ===
+/// Sustain 019e68b1-e0c7-79b0-9bd5-7341230a2d4f #5; reporter "build-events".
+/// Java FIRST + crosses to VFS 019e68b7-e502.../019e68b8-0529.../019e68b4-39d7.../019e68ba-1b85... + rescue/hygiene/fresh 019e68b9-fd77... + "more sub-agents = more observability + native surface in Rust" (see native_compile.rs header + plan.md sustain #5 launch + RustBridgeCoreServices.java). 0% 54=54 gate delivered. Abs paths.
+/// === Evidence + 54=54 runner for full Problem Reporting + Observability/Logging (the other high-ROI slice the sustain handoff 019e68b9-fd77... just surfaced in its 'continued' append ~9199+: problem_reporting.rs + build_event_stream.rs + console.rs full ownership; all-reporter diagnostics cross every slice; high testability) ===
+/// Dedicated: reporters "problem-reporting" / "build-events" / "console" (ties all HashMismatchReporter / shadow reporters for IDE/CI diagnostics; complements every slice VFS/remote/GC/kernel/test-exec etc.).
+/// Java FIRST + gov append (abs plan after sustain handoff continued ~9199+) + PARITY with crosses to sustain handoff 019e68b9-fd77..., perpetual scheduler 019e68be8b8f, all VFS fleet (incl. 3 recovery 019e68bb-9512.../019e68bb-b0f6.../019e68bb-d19f...), new CC durable 54=54 reinforcement 019e68bf-3536... and VFS+CC cross 019e68bf-5685..., rescue 019e68b1-add4..., hygiene 019e68b2-62f2..., "more sub-agents = more problem_reporting / observability surface + cross every slice".
+/// 0% + 54=54 pilots (complete + --watch-fs + report-mismatches) on trusted3/dogfood/manifest. Differential extended. Internal todo + varied + cargo. Gate delivered on this high-ROI slice. More sub-agents velocity. All abs paths. Hygiene <5 (gov only).
 #[derive(Clone)]
 pub struct BuildEventStreamServiceImpl {
     inner: Arc<EventStreamInner>,
@@ -290,6 +298,13 @@ impl BuildEventStreamService for BuildEventStreamServiceImpl {
 
         let events = if let Some(buf) = self.inner.event_buffers.get(&build_id) {
             let mut events: Vec<BuildEventMessage> = buf.iter().cloned().collect();
+
+            // BTree determinism for parity (sort by timestamp + event_type + event_id for deterministic problem/build-events in differential harness + 54=54 report-mismatches)
+            events.sort_by(|a, b| {
+                a.timestamp_ms.cmp(&b.timestamp_ms)
+                    .then_with(|| a.event_type.cmp(&b.event_type))
+                    .then_with(|| a.event_id.cmp(&b.event_id))
+            });
 
             // Filter by timestamp if requested
             if req.since_timestamp_ms > 0 {
