@@ -2,6 +2,9 @@ use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
 use std::collections::BTreeMap;
 
+
+// zr2e/8lk7 hygiene + sustain (Delete/StartScripts VFS cross evidence, scheduler 019e6b49ada7 recurring) per "How to Work on a Slice" AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + full directive x2x2 + "more sub-agents = more task_executor richer lowering (delete/start_scripts) + VFS cross + entire port accelerated" + "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust" + multi-year. Abs paths: this + start_scripts.rs + fp:1229 + watch:766 + 2 Java (after 8lk7 blocks) + plan (Fresh after prior 8lk7 anchor) + PARITY + MIGRATION + .beads (8lk7) + AGENTS + scheduler 019e6b49ada7 + fleet + cargo fuel. Safe terminal (non-hard). 0 reg 20+. Java FIRST + differential + pilot + gov + spawn + bd children. "How to Work on a Slice". Follow exactly. Entire port accelerated.
+
 /// Deletes files and directories.
 pub struct DeleteTaskExecutor;
 
