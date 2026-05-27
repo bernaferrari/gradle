@@ -6,6 +6,9 @@ use std::collections::BTreeMap;
 // Richer contracts + apply_vfs_delta_to_mkdir (BTree child_summaries from file_fingerprint.rs:1229 + get_snapshot_delta from file_watch.rs:766) + reporters 'mkdir-lowering'/'vfs-taskexec-cross' + BTree det.
 // Abs paths: this + symlink.rs + mod.rs + fp:1229 + watch:766 + 2 Java (after 8lk7 blocks) + plan (Fresh after prior 8lk7 anchor) + PARITY + .beads (8lk7) + AGENTS + scheduler + fleet. 0 reg <5 non-hard. Follow exactly. "How to Work on a Slice".
 
+
+// zr2e/8lk7 next (symlink/mkdir richer lowering + VFS cross, scheduler 019e6b6437ee recurring) per "How to Work on a Slice" AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + full directive x2x2 from 8lk7 sustain + "more sub-agents = more task_executor richer lowering (symlink/mkdir) + VFS cross + entire port accelerated" + "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust" + multi-year. Abs paths: this + symlink.rs + fp:1229 + watch:766 + 2 Java + plan (Fresh after prior anchor) + PARITY + .beads (8lk7) + AGENTS + scheduler 019e6b6437ee + fleet. Safe terminal. 0 reg. Follow exactly. Entire port accelerated.
+
 // Real (additive) VFS delta consumption for mkdir targets (parents, permissions variants).
 pub fn apply_vfs_delta_to_mkdir(
     target: &std::path::Path,
