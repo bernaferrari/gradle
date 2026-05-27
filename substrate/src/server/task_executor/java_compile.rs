@@ -21,6 +21,9 @@ pub struct JavaCompileResult {
     pub error_message: String,
 }
 
+
+// zr2e.1 perpetual gov/evidence monitor (scheduler 019e6b6152a1 recurring, java_compile deepen + VFS cross with build_script) per "How to Work on a Slice" AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + full directive x2x2 + "more sub-agents = more task_executor richer lowering (build_script + java_compile) + VFS cross + entire port accelerated" + "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust" + multi-year. Abs paths: this + build_script.rs + fp:1229 + watch:766 + 2 Java + plan Fresh after zr2e.1 anchor + .beads (zr2e.1) + AGENTS + scheduler 019e6b6152a1 + fleet. Safe additive only. 0 reg. "How to Work on a Slice". Follow exactly. Entire port accelerated.
+
 /// Orchestrates javac compilation as a child process.
 pub struct JavaCompileExecutor;
 

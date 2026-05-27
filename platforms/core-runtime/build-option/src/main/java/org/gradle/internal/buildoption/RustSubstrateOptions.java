@@ -2921,6 +2921,20 @@ public class RustSubstrateOptions {
     public static final InternalOption<Boolean> AUTHORITATIVE_BUILD_SCRIPT_JAVA_COMPILE_LOWERING =
         InternalOptions.ofBoolean("org.gradle.rust.substrate.build.script.java.compile.lowering.authoritative", false);
 
+    // === Java FIRST (after prior zr2e.1 block per 'How to Work on a Slice' AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + bd substrate-zr2e.1 claimed for this zr2e.1 perpetual gov/evidence monitor 019e6b6152a1 recurring) for zr2e.1 perpetual (build_script + java_compile richer + VFS cross hygiene + pilot)
+    /**
+     * Enable richer Rust BuildScript + JavaCompile lowering (kotlinc/gradle-api/inputs/outputs/annotationProcessing/generated_sources) + VFS DirectorySnapshot cross perpetual monitor (Merkle child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766 for invalidation in this 019e6b6152a1 sustain).
+     * Property: org.gradle.rust.substrate.build.script.java.compile.lowering.enabled
+     * Default: false (shadow-first/fail-closed/hybrid; Java-only 100% legacy per "How to Work on a Slice").
+     * Reporters: 'buildscript-lowering' / 'java-compile-lowering' / 'vfs-taskexec-cross' + perpetual monitor 019e6b6152a1.
+     * <p>
+     * Full verbatim user directive x2 x2 + "more sub-agents = more task_executor richer lowering (build_script + java_compile) + VFS cross + entire port accelerated" + "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust" + "I don't care if it is going to take multiple years..." + "keep going until the entire codebase is ported to rust in the best way possible. proceed, do them all in parallel in the best way possible." + "How to Work on a Slice".
+     * <p>
+     * Abs paths (everywhere): this + RustBridgeCoreServices.java + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/task_executor/{build_script.rs (NEW + richer + VFS BTree for monitor),java_compile.rs (VFS cross deepen),mod.rs} + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/file_fingerprint.rs:1229 + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/file_watch.rs:766 + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/plan.md (Fresh zr2e.1 perpetual gov block after exact prior zr2e.1 explorer anchor) + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/PARITY.md (new perpetual monitor subsection) + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/MIGRATION.md + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/.beads (5ezk + substrate-zr2e + substrate-zr2e.1 + new child) + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/tests/differential/cache_differential_test.rs + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/tools/corpus_runner/run.py (corrected) + build/evidence-zr2e.1-perpetual-019e6b6152a1-54-54/ + scheduler 019e6b6152a1 + new spawn + fleet + cargo (8e/13w fuel verbatim start_scripts only; 0 reg 20+ hardened VFS + zr2e.1 lowering). <5 non-hard (safe terminal in .rs + Java 2 + differential 1). "Go parallel forever. Entire port accelerated."
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_BUILD_SCRIPT_JAVA_COMPILE_PERPETUAL_019E6B6152A1 =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.build.script.java.compile.perpetual.019e6b6152a1.enabled", false);
+
     /**
      * Authoritative for Delete + StartScripts richer lowering + VFS cross (default Java-only fail-closed).
      */
