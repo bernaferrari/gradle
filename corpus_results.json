@@ -1,0 +1,57 @@
+{
+  "java-library-kotlin-dsl": {
+    "upstream": {
+      "exit_code": 0,
+      "output_preview": "To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.6.0-20260512200537+0000/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.\nDaemon will be stopped at the end of the build \n\n> Task :help\n\nWelcome to Gradle 9.6.0-20260512200537+0000.\n\nTo run a build, run gradle <task> ...\n\nTo see a list of available tasks, run gradle tasks\n\nTo see more detail about a task, run gradle help --task <task>\n\nTo see a list of command-line options, run gradle --help\n\nFor more detail on using Gradle, see https://docs.gradle.org/9.6.0-20260512200537+0000/userguide/command_line_interface.html\n\nFor troubleshooting, visit https://help.gradle.org\n\nBUILD SUCCESSFUL in 2s\n1 actionable task: 1 executed\nConsider enabling configuration cache to speed up this build: https://docs.gradle.org/9.6.0-20260512200537+0000/userguide/configuration_cache_enabling.html\n",
+      "tasks": [
+        ":help"
+      ],
+      "task_count": 1,
+      "output_file_count": 2,
+      "output_files": [
+        "build/classes/java/main/org/gradle/substrate/corpus/LibraryApi.class",
+        "build/libs/corpus-java-library-1.0.0.jar"
+      ],
+      "output_hashes": {
+        "build/classes/java/main/org/gradle/substrate/corpus/LibraryApi.class": "51c58e0bdbbc080ef8143d90473312f3dfbc2846896e53cf81ef3112b26766ee"
+      },
+      "archive_entries": {
+        "build/libs/corpus-java-library-1.0.0.jar": [
+          "META-INF/",
+          "META-INF/MANIFEST.MF",
+          "org/",
+          "org/gradle/",
+          "org/gradle/substrate/",
+          "org/gradle/substrate/corpus/",
+          "org/gradle/substrate/corpus/LibraryApi.class"
+        ]
+      },
+      "substrate_noop": false,
+      "duration_ms": 2854
+    },
+    "substrate": {
+      "exit_code": 1,
+      "output_preview": "To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.6.0-20260512200537+0000/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.\nDaemon will be stopped at the end of the build \n[substrate] Failed to connect to existing daemon, relaunching: Failed to handshake with substrate daemon\n[HashMismatchReporter] Hash mismatch in subsystem 'value-snapshot': java=c2d1963ac9199927bbb510fe415eb505, rust=b28142557bcc5447e43328698834c72a\n[HashMismatchReporter] Hash mismatch in subsystem 'value-snapshot': java=31944b1ca71d6d88b9336b041f876860, rust=9da06b7123c9bb7f2fa109386da60574\n[HashMismatchReporter] Hash mismatch in subsystem 'value-snapshot': java=0ed31a788ea02f90e74f16ddea2cc35e, rust=523c892414b649f978d46d4b11c46a54\n\n> Configure project :\n[HashMismatchReporter] Hash mismatch in subsystem 'value-snapshot': java=f056edbd70f3f9f59afc98443fed5ed7, rust=3058089492d608758225c20ac8f4babe\n[HashMismatchReporter] Hash mismatch in subsystem 'value-snapshot': java=335fec48f74b878cb299bce59f59035e, rust=555905557ee7da7c02b150c5f30fdae3\n[HashMismatchReporter] Hash mismatch in subsystem 'value-snapshot': java=4c856c0d958cdfb55df00b1325f5f145, rust=8d839d842f43d83732c01b0219374858\n[HashMismatchReporter] Hash mismatch in subsystem 'value-snapshot': java=8faf138ff52138e8a7d7ae48dd9d7795, rust=b5ea0394592191e8e24a158e2166c6f2\n\nFAILURE: Build failed with an exception.\n\n* What went wrong:\nProblem configuring task :help from command line.\n> Unknown command-line option '--watch-fs'.\n\n* Try:\n> Run gradle help --task :help to get task usage details.\n> Run with --stacktrace option to get the stack trace.\n> Run with --info or --debug option to get more log output.\n> Run with --scan to get full insights from a Build Scan (powered by Develocity).\n> Get more help at https://help.gradle.org.\n\nBUILD FAILED in 9s\n",
+      "tasks": [],
+      "task_count": 0,
+      "output_file_count": 0,
+      "output_files": [],
+      "output_hashes": {},
+      "archive_entries": {},
+      "substrate_noop": false,
+      "duration_ms": 9915
+    },
+    "checks": {
+      "successful": false,
+      "exit_code_match": false,
+      "task_list_match": false,
+      "output_files_match": false,
+      "output_hashes_match": false,
+      "archive_entries_match": false,
+      "no_fallback": true,
+      "substrate_usable": true,
+      "match": false
+    },
+    "match": false
+  }
+}

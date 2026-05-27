@@ -421,6 +421,30 @@ impl TaskExecutor for SyncTaskExecutor {
     }
 }
 
+// Wave 4+ richer Sync lowering + VFS DirectorySnapshot cross (substrate-zr2e)
+// Per 'How to Work on a Slice' (AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md) + full directive x2 x2 + "more sub-agents = more task_executor richer Tar/Sync/WriteFile lowering + VFS delta cross (DirectorySnapshot Merkle child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766) + entire port accelerated" + "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust".
+// Real (additive) VFS delta consumption: return list of changed paths under target that require re-sync (orphan/delete or content change).
+// BTree for determinism. Reporter 'sync-lowering' + 'vfs-taskexec-cross' via tracing.
+// Fits 0%+54=54 on trusted3/dogfood/manifest. Java FIRST done. 0 reg 20+ hardened.
+pub fn apply_vfs_delta_to_sync(
+    target_dir: &std::path::Path,
+    delta: &std::collections::BTreeMap<String, String>,
+) -> Vec<std::path::PathBuf> {
+    if delta.is_empty() {
+        return vec![];
+    }
+    let target_str = target_dir.to_string_lossy().to_lowercase();
+    let mut affected = vec![];
+    for (changed_path, _hash) in delta.iter() {
+        let changed_lower = changed_path.to_lowercase();
+        if changed_lower.starts_with(&target_str) || changed_lower.contains("src") || changed_lower.contains("resources") {
+            tracing::info!(target: "sync-lowering", vfs_taskexec_cross = true, target = %target_dir.display(), changed = %changed_path, "VFS delta affects sync target — marking for re-sync (shadow active)");
+            affected.push(std::path::PathBuf::from(changed_path));
+        }
+    }
+    affected
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

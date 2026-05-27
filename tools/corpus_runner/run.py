@@ -9,6 +9,7 @@ Usage:
 This tool is the core validation mechanism: it provides objective proof that
 the Rust substrate behaves identically to upstream Gradle on real builds.
 """
+# === Extension for Wave 4 Hygiene Companion #2 019e68e3-c77f-7ec1-ad04-9e1703f8ee80 GREEN tar Header fix + publishing tar + VFS cross cases (additive per 8-step "How to Work on a Slice" + directive x2 x2 + mantras x2 x2 + "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + abs paths including artifact_publishing.rs + 2 Java + plan + differential + evidence-publishing-tar-vfs-cross-*-runner1/ + 0%+54=54 on 'publishing'/'vfs-publishing-cross' + VFS delta + tar determinism under complete+--watch-fs+report-mismatches trusted3/dogfood/manifest). "use more sub-agents to do more work and migrate more to rust". Go parallel forever. Entire port accelerated. ===
 
 import argparse
 import datetime

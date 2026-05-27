@@ -1,0 +1,21 @@
+{
+  "project_count": 1,
+  "matched_project_count": 0,
+  "failed_project_count": 1,
+  "successful_project_count": 0,
+  "no_fallback_project_count": 1,
+  "fallback_project_count": 0,
+  "exit_code_match_count": 0,
+  "task_list_match_count": 0,
+  "output_file_inventory_match_count": 0,
+  "output_hash_match_count": 0,
+  "archive_entry_inventory_match_count": 0,
+  "upstream_task_total": 1,
+  "substrate_task_total": 0,
+  "upstream_duration_ms": 2854,
+  "substrate_duration_ms": 9915,
+  "failed_projects": [
+    "java-library-kotlin-dsl"
+  ],
+  "fallback_projects": []
+}

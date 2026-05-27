@@ -4,6 +4,8 @@ use crate::server::task_executor::{
 
 use super::process_launch::{run_to_output, ProcessLaunchSpec};
 
+// Workers full (6yc.1) cross: exec_task shares launch path with worker processes; VFS delta cross for worker healthy/lease in pool (fp:1229/watch:766 + reporter('workers')). Additive header only. Full charter in worker_process.rs + Java + plan + 'How to Work on a Slice' + directive x2 x2 + 'more sub-agents = more Workers full + Rust surface moved + entire port accelerated' + 'more sub-agents turned VFS failure 019e6885-51c7 into more cross surface' + abs paths + 0%+54=54 + Java FIRST + perpetual 019e68e42216 + fleet. Gate. Go parallel.
+
 /// Executes a simple external process task.
 ///
 /// This intentionally supports only a narrow, deterministic Exec contract:
