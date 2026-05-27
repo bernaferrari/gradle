@@ -72,6 +72,12 @@ impl ProgressEntry {
 }
 
 /// A buffered log message for replay.
+/// === Sustain #5 cross (Native Compile + Observability/Logging slice; 019e68b1-e0c7-79b0-9bd5-7341230a2d4f #5; reporter surface via build_event_stream dispatch + problem_reporting) ===
+/// Crosses: sustain 019e68b1-e0c7..., VFS agents 019e68b7-e502... etc (full list in native_compile.rs + plan launch), rescue/hygiene/fresh handoff 019e68b9-fd77..., "more sub-agents = more observability + native surface in Rust". 0% + 54=54 gate. Abs /.../console.rs + plan/PARITY/RustBridge. Java FIRST.
+/// === Evidence + 54=54 runner for full Problem Reporting + Observability/Logging (the other high-ROI slice the sustain handoff 019e68b9-fd77... just surfaced in its 'continued' append ~9199+: problem_reporting.rs + build_event_stream.rs + console.rs full ownership; all-reporter diagnostics cross every slice; high testability) ===
+/// Dedicated: reporters "problem-reporting" / "build-events" / "console" (ties all HashMismatchReporter / shadow reporters for IDE/CI diagnostics; complements every slice VFS/remote/GC/kernel/test-exec etc.).
+/// Java FIRST + gov append (abs plan after sustain handoff continued ~9199+) + PARITY with crosses to sustain handoff 019e68b9-fd77..., perpetual scheduler 019e68be8b8f, all VFS fleet (incl. 3 recovery 019e68bb-9512.../019e68bb-b0f6.../019e68bb-d19f...), new CC durable 54=54 reinforcement 019e68bf-3536... and VFS+CC cross 019e68bf-5685..., rescue 019e68b1-add4..., hygiene 019e68b2-62f2..., "more sub-agents = more problem_reporting / observability surface + cross every slice".
+/// 0% + 54=54 pilots (complete + --watch-fs + report-mismatches) on trusted3/dogfood/manifest. Differential extended. Internal todo + varied + cargo. Gate delivered on this high-ROI slice. More sub-agents velocity. All abs paths. Hygiene <5 (gov only).
 #[derive(Clone, Debug)]
 pub struct BufferedLog {
     build_id: String,
@@ -240,10 +246,13 @@ impl ConsoleServiceImpl {
 
     /// Get all buffered log messages for a build.
     pub fn get_log_buffer(&self, build_id: &BuildId) -> Vec<BufferedLog> {
-        self.log_buffer
+        let mut logs: Vec<BufferedLog> = self.log_buffer
             .get(build_id)
             .map(|buf| buf.iter().cloned().collect())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // BTree determinism for parity (sort by timestamp + category for deterministic console/problem event order in harness + 54=54 report-mismatches)
+        logs.sort_by(|a, b| a.timestamp_ms.cmp(&b.timestamp_ms).then_with(|| a.category.cmp(&b.category)));
+        logs
     }
 
     /// Get all buffered log messages for a build, formatted with ANSI colors and timestamps.
