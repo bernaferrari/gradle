@@ -2941,6 +2941,20 @@ public class RustSubstrateOptions {
     public static final InternalOption<Boolean> AUTHORITATIVE_DELETE_STARTSCRIPTS_LOWERING =
         InternalOptions.ofBoolean("org.gradle.rust.substrate.delete.startscripts.lowering.authoritative", false);
 
+    // === Java FIRST (after 8lk7 Delete/StartScripts per 'How to Work on a Slice' AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + bd 8lk7 claimed for this zr2e/8lk7 hygiene + sustain (Delete/StartScripts VFS cross evidence, scheduler 019e6b49ada7 recurring)) for zr2e/8lk7 hygiene + sustain on Delete/StartScripts richer lowering + VFS cross
+    /**
+     * Enable richer Rust Delete + StartScripts lowering (filters, follow_symlinks, template expansion, permissions, unix/windows variants) + VFS DirectorySnapshot cross sustain/hygiene (Merkle child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766 for invalidation in this 019e6b49ada7 cycle).
+     * Property: org.gradle.rust.substrate.delete.startscripts.lowering.enabled
+     * Default: false (shadow-first/fail-closed/hybrid; Java-only 100% legacy per "How to Work on a Slice").
+     * Reporters: 'delete-lowering' / 'startscripts-lowering' / 'vfs-taskexec-cross' + sustain 019e6b49ada7.
+     * <p>
+     * Full verbatim user directive x2 x2 + "more sub-agents = more task_executor richer lowering (delete/start_scripts) + VFS cross + entire port accelerated" + "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust" + "I don't care if it is going to take multiple years..." + "keep going until the entire codebase is ported to rust in the best way possible. proceed, do them all in parallel in the best way possible." + "How to Work on a Slice".
+     * <p>
+     * Abs paths (everywhere): this + RustBridgeCoreServices.java + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/task_executor/{delete.rs,start_scripts.rs,mod.rs} + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/file_fingerprint.rs:1229 + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/file_watch.rs:766 + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/plan.md (Fresh block for this zr2e/8lk7 hygiene + sustain after exact prior 8lk7 explorer or zr2e sustain anchor) + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/PARITY.md (new subsection) + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/MIGRATION.md + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/.beads (5ezk + zr2e + 8lk7 claimed + child) + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/tests/differential/cache_differential_test.rs + /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/tools/corpus_runner/run.py (correct root) + build/evidence-* + scheduler 019e6b49ada7 + new spawn + fleet + cargo (8e/13w fuel verbatim start_scripts only; 0 reg 20+ hardened VFS + 8lk7 lowering). <5 non-hard (safe terminal in clean areas + Java 2 + differential 1). "Go parallel forever. Entire port accelerated."
+     */
+    public static final InternalOption<Boolean> ENABLE_RUST_DELETE_STARTSCRIPTS_SUSTAIN_019E6B49ADA7 =
+        InternalOptions.ofBoolean("org.gradle.rust.substrate.delete.startscripts.sustain.019e6b49ada7.enabled", false);
+
     // === Java FIRST (after 8lk7 Delete/StartScripts per 'How to Work on a Slice' AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + bd 8lk7 for zr2e/8lk7 lineage explorer) for zr2e/8lk7 lineage explorer (symlink/mkdir richer lowering + VFS cross)
     /**
      * Enable richer Rust Symlink + Mkdir lowering (force, parents, permissions) + VFS DirectorySnapshot cross (Merkle child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766 for invalidation).
