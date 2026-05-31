@@ -1,7 +1,5 @@
 import com.github.jengelman.gradle.plugins.shadow.ShadowJavaPlugin.Companion.shadowRuntimeElements
-import gradlebuild.basics.PublicKotlinDslApi
 import org.gradle.kotlin.dsl.implementation
-import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 
 plugins {
     id("gradlebuild.distribution.api-kotlin")
@@ -119,9 +117,6 @@ dependencies {
     testImplementation(projects.buildCacheLocal)
     testImplementation(projects.buildInit)
     testImplementation(projects.jacoco)
-    testImplementation(projects.platformNative) {
-        because("BuildType from platform-native is used in ProjectAccessorsClassPathTest")
-    }
     testImplementation(projects.platformJvm)
     testImplementation(projects.versionControl)
     testImplementation(testFixtures(projects.core))
@@ -143,7 +138,7 @@ dependencies {
     integTestImplementation(testLibs.mockitoKotlin)
 
     testRuntimeOnly(projects.distributionsNative) {
-        because("SimplifiedKotlinScriptEvaluator reads default imports from the distribution (default-imports.txt) and BuildType from platform-native is used in ProjectAccessorsClassPathTest.")
+        because("SimplifiedKotlinScriptEvaluator reads default imports from the distribution (default-imports.txt).")
     }
 
     testFixturesImplementation(projects.baseServices)
@@ -248,23 +243,5 @@ tasks.isolatedProjectsIntegTest {
     enabled = false
 }
 
-// Filter out what goes into the public API
-configure<KotlinJvmProjectExtension> {
-    val filterKotlinDslApi = tasks.register<Copy>("filterKotlinDslApi") {
-        dependsOn(target.compilations.named("main").flatMap { it.compileTaskProvider })
-        into(layout.buildDirectory.dir("generated/kotlin-abi-filtered"))
-        from(layout.buildDirectory.dir("generated/kotlin-abi")) {
-            includeEmptyDirs = false
-            include(PublicKotlinDslApi.includes)
-            // Those leak in the public API - see org.gradle.kotlin.dsl.NamedDomainObjectContainerScope for example
-            include("org/gradle/kotlin/dsl/support/delegates/*")
-            include("META-INF/*.kotlin_module")
-            // We do not exclude inlined functions, they are needed for compilation
-        }
-    }
-
-    configurations.apiStubElements.configure {
-        outgoing.artifacts.clear()
-        outgoing.artifact(filterKotlinDslApi)
-    }
-}
+// Do not publish into the Gradle API ABI JAR
+configurations.remove(configurations.apiStubElements.get())

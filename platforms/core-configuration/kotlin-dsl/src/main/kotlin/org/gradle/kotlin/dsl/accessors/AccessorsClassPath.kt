@@ -80,6 +80,7 @@ import org.jetbrains.org.objectweb.asm.signature.SignatureVisitor
 import java.io.Closeable
 import java.io.File
 import java.util.Optional
+import java.util.concurrent.ConcurrentHashMap
 import java.util.regex.Pattern
 import javax.inject.Inject
 
@@ -95,31 +96,47 @@ class ProjectAccessorsClassPathGenerator @Inject internal constructor(
     internalOptions: InternalOptions,
 ) {
 
+    private
+    val classPathCache = ConcurrentHashMap<ClassLoaderScope, AccessorsClassPath>()
+
     private val cachingDisabled: Boolean =
         internalOptions.getBoolean(KotlinDslInternalOptions.CACHING_DISABLED_PROPERTY)
 
     fun projectAccessorsClassPath(scriptTarget: ExtensionAware, classPath: ClassPath): AccessorsClassPath {
         val classLoaderScope = classLoaderScopeOf(scriptTarget)
-            ?: return AccessorsClassPath.empty
-        val configuredProjectSchemaOf = configuredProjectSchemaOf(scriptTarget, classLoaderScope)
-            ?: return AccessorsClassPath.empty
-
-        val work = GenerateProjectAccessors(
-            scriptTarget,
-            configuredProjectSchemaOf,
-            classPath,
-            fileCollectionFactory,
-            inputFingerprinter,
-            workspaceProvider,
-            asyncIO,
-            isDclEnabledForScriptTarget(scriptTarget),
-            cachingDisabled,
-        )
-        return executionEngine.createRequest(work)
-            .execute()
-            .getOutputAs(AccessorsClassPath::class.java)
-            .get()
+        if (classLoaderScope == null) {
+            return AccessorsClassPath.empty
+        }
+        return classPathCache.computeIfAbsent(classLoaderScope) {
+            buildAccessorsClassPathFor(classLoaderScope, scriptTarget, classPath)
+                ?: AccessorsClassPath.empty
+        }
     }
+
+    private
+    fun buildAccessorsClassPathFor(
+        classLoaderScope: ClassLoaderScope,
+        scriptTarget: Any,
+        classPath: ClassPath
+    ): AccessorsClassPath? =
+        configuredProjectSchemaOf(scriptTarget, classLoaderScope)
+            ?.let { scriptTargetSchema ->
+                val work = GenerateProjectAccessors(
+                    scriptTarget,
+                    scriptTargetSchema,
+                    classPath,
+                    fileCollectionFactory,
+                    inputFingerprinter,
+                    workspaceProvider,
+                    asyncIO,
+                    isDclEnabledForScriptTarget(scriptTarget),
+                    cachingDisabled,
+                )
+                executionEngine.createRequest(work)
+                    .execute()
+                    .getOutputAs(AccessorsClassPath::class.java)
+                    .get()
+            }
 
 
     private
@@ -137,8 +154,17 @@ fun isDclEnabledForScriptTarget(target: Any): Boolean {
         is Settings -> target.serviceOf<GradleProperties>()
         else -> null
     }
-    return gradleProperties?.let { getBooleanKotlinDslOption(it, DCL_ENABLED_PROPERTY_NAME, false) } ?: false
+    return gradleProperties?.isDclEnabled ?: false
 }
+
+internal val GradleProperties.isDclEnabled: Boolean
+    get() = try {
+        getBooleanKotlinDslOption(this, DCL_ENABLED_PROPERTY_NAME, false)
+    } catch (_: IllegalStateException) {
+        // Properties may not be loaded yet, e.g. base/resilient script model before settings evaluation.
+        // Treat DCL as disabled rather than failing.
+        false
+    }
 
 const val DCL_ENABLED_PROPERTY_NAME = "org.gradle.kotlin.dsl.dcl"
 
