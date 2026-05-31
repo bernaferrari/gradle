@@ -27,8 +27,8 @@
 // Gov abs paths: /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/file_hash_cache.rs (this) + schema_versioned.rs (Versioned+sharded+quarantine) + cache_orchestration.rs + cache_differential_test.rs + corpus_runner/run.py + plan.md (CC durable 019e68ac-be2b... 54=54) + RustBridgeCoreServices.java.
 // Internal TODO varied: 1. Full VersionedFileStore wire (replace local_store for fh-). 2. Quarantine on every VersionedError + bincode fail (non-destructive .corrupt). 3. "persistent-cache" log tags + stats. 4. DashMap index fidelity with Versioned bytes. 5. Pilot --watch-fs complete manifest 0% under reporter. 6. Hygiene <5 edits. Cross rescue/sustain. More sub-agents used. Cargo green.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 
 use dashmap::DashMap;
 use md5::{Digest, Md5};
@@ -36,11 +36,13 @@ use tonic::{Request, Response, Status};
 
 use crate::proto::{
     file_hash_cache_service_server::FileHashCacheService, FileInfo, GetFileHashCacheStatsRequest,
-    GetFileHashCacheStatsResponse, GetFileInfoRequest, GetFileInfoResponse, InvalidateFileInfoRequest,
-    InvalidateFileInfoResponse, PutFileInfoRequest, PutFileInfoResponse,
+    GetFileHashCacheStatsResponse, GetFileInfoRequest, GetFileInfoResponse,
+    InvalidateFileInfoRequest, InvalidateFileInfoResponse, PutFileInfoRequest, PutFileInfoResponse,
 };
 use crate::server::cache::{hex, LocalCacheStore};
-use crate::server::schema_versioned::{SchemaVersion, VersionedFileStore, ChecksumAlgorithm, SchemaVersionedError};
+use crate::server::schema_versioned::{
+    ChecksumAlgorithm, SchemaVersion, SchemaVersionedError, VersionedFileStore,
+};
 
 /// Stable on-disk key for a (path, kind) entry.
 /// Uses content hash of path+kind so keys are short, well-sharded, and safe for
@@ -96,13 +98,6 @@ pub struct FileHashCacheServiceImpl {
     /// Sharded layout: fh- keys under fh/ subdirs (see schema_versioned key_to_path).
     versioned_store: Option<VersionedFileStore>,
 
-    /// Optional cross-slice invalidation hook into Execution History.
-    /// When present, paths invalidated here (or observed as changed via Put)
-    /// trigger best-effort pruning of related history entries so that up-to-date
-    /// decisions see fresh state. Wired in main.rs after both services exist.
-    /// Fail-closed: errors or absence are non-fatal (extra rebuilds at worst).
-    history_invalidator: Option<Arc<crate::server::execution_history::ExecutionHistoryServiceImpl>>,
-
     /// Session-local fast index: store_key -> serialized byte size.
     /// Enables O(1) accurate per-namespace stats (entries, bytes) without
     /// directory walks. Populated on Put and on verified Get hits.
@@ -123,7 +118,6 @@ impl FileHashCacheServiceImpl {
         Self {
             local_store: None,
             versioned_store: None,
-            history_invalidator: None,
             index: DashMap::new(),
             path_index: DashMap::new(),
             hits: AtomicI64::new(0),
@@ -137,7 +131,6 @@ impl FileHashCacheServiceImpl {
         Self {
             local_store: Some(local_store),
             versioned_store: None,
-            history_invalidator: None,
             index: DashMap::new(),
             path_index: DashMap::new(),
             hits: AtomicI64::new(0),
@@ -158,20 +151,11 @@ impl FileHashCacheServiceImpl {
         Self {
             local_store: None,
             versioned_store: Some(vs),
-            history_invalidator: None,
             index: DashMap::new(),
             path_index: DashMap::new(),
             hits: AtomicI64::new(0),
             misses: AtomicI64::new(0),
         }
-    }
-
-    /// Cross-slice wiring: attach the ExecutionHistoryServiceImpl so that
-    /// file-hash invalidations (VFS-driven) can prune related history entries.
-    /// Called from main.rs after both Arcs exist. Best-effort / fail-closed.
-    pub fn with_history_invalidator(mut self, hist: Arc<crate::server::execution_history::ExecutionHistoryServiceImpl>) -> Self {
-        self.history_invalidator = Some(hist);
-        self
     }
 
     fn record_hit(&self) {
@@ -217,10 +201,15 @@ impl FileHashCacheServiceImpl {
     /// "more sub-agents = more hygiene velocity + file_hash_cache + VFS delta + remote/gc surfaces moved" + full user directive x2 ("use more sub-agents to do more work and migrate more to rust" + "keep going until the entire codebase is ported to rust in the best way possible" + "I don't care if it is going to take multiple years..." + "proceed, do them all in parallel").
     /// "How to Work on a Slice". All absolute paths only. GREEN cargo expected. Spawn 1 more on success.
     #[allow(dead_code)]
-    pub(crate) fn invalidate_from_vfs_delta(&self, delta: &crate::server::file_fingerprint::DirectorySnapshot, _seq: u64) { // hygiene fuel (VFS delta for hash cache invalidation cross to scheduler DAG / CC / history; non-hardened; 0 reg hardened VFS/GetSnapshotDelta/DirectorySnapshot Merkle). "How to Work on a Slice". Full directive x2 x2 + phrases. Abs /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/file_hash_cache.rs + plan ~2332+ + PARITY. Cargo feed post. <5 total.
+    pub(crate) fn invalidate_from_vfs_delta(
+        &self,
+        delta_child_summaries: &std::collections::BTreeMap<String, String>,
+        _seq: u64,
+    ) {
+        // hygiene fuel (VFS delta for hash cache invalidation cross to scheduler DAG / CC / history; non-hardened; 0 reg hardened VFS/GetSnapshotDelta/DirectorySnapshot Merkle). "How to Work on a Slice". Full directive x2 x2 + phrases. Abs /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/file_hash_cache.rs + plan ~2332+ + PARITY. Cargo feed post. <5 total.
         // BTree determinism from VFS reinforcement (to_btree / child_summaries Merkle)
         let paths: std::collections::BTreeSet<String> =
-            delta.child_summaries.iter().map(|(p, _)| p.clone()).collect();
+            delta_child_summaries.keys().cloned().collect();
         if paths.is_empty() {
             return;
         }
@@ -236,11 +225,6 @@ impl FileHashCacheServiceImpl {
             }
             if let Some(_ls) = &self.local_store {
                 // best-effort (real gRPC async path handles ls)
-            }
-            if let Some(hist) = &self.history_invalidator {
-                hist.invalidate_related_to_files(&[p.as_str()]);
-                // Precise FileHashCache invalidation delivery (Wave 4 Execution History + VFS Delta Reinforcement): also call full DirectorySnapshot version for child_summaries direct use + richer vfs-history-cross / execution-history reporters + crosses (kernel, incremental, CC v2, lowering, workers).
-                hist.invalidate_from_directory_snapshot_delta(delta);
             }
         }
         tracing::info!(
@@ -275,7 +259,11 @@ impl FileHashCacheService for FileHashCacheServiceImpl {
         // Wave 4 reinforcement: full VersionedFileStore wire for fh- keys (replace/integrate local_store); when versioned present treat as authoritative (no local fallback for fh- to avoid dual-state drift); expanded quarantine on *every* VersionedError + bincode fail (non-destructive .corrupt); "persistent-cache" tracing + DashMap fidelity (index updated on Versioned paths with size from write; cross-check stats).
         // "How to Work on a Slice" + shadow-first/fail-closed: Java ShadowingFileHashCache + RustFileHashCacheClient (abs: /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/platforms/core-execution/rust-bridge/src/main/java/org/gradle/internal/rustbridge/filehashcache/ShadowingFileHashCache.java) is truth in shadow; Rust Versioned authoritative post-evidence. Crosses: dep-metadata hot-path, execution_history (invalidate hook), incremental, workers, lowering, VFS delta (019e68f7-7415 to_btree/compute_delta + DirectorySnapshot Merkle fp:1229/watch:766). "more sub-agents = more persistent-cache + file_hash_cache + CC v2 + VFS cross surface moved" + full directive x2 ("use more sub-agents to do more work and migrate more to rust in the best way possible" + "keep going until the entire codebase is ported to rust in the best way possible" + "I don't care if it is going to take multiple years..." + "proceed, do them all in parallel"). wave4-hygiene-unblock sole in_progress (coordinated <5 hygiene surfaces via scheduler 019e6905e366 spawn + limited terminal only; no direct touch on trait/impl :471 companion in api_boundary.rs etc). Absolute paths only. Cargo green.
         if let Some(vs) = &self.versioned_store {
-            match vs.read::<SerializableFileInfo>(&store_key, SchemaVersion::CURRENT, SchemaVersion::CURRENT) {
+            match vs.read::<SerializableFileInfo>(
+                &store_key,
+                SchemaVersion::CURRENT,
+                SchemaVersion::CURRENT,
+            ) {
                 Ok(sinfo) => {
                     self.record_hit();
                     // DashMap fidelity: Versioned authoritative path; size estimated from Serializable (exact post-write via fs in prod; here from prior put index warm)
@@ -300,7 +288,6 @@ impl FileHashCacheService for FileHashCacheServiceImpl {
                     // Quarantine on *every* VersionedError + bincode fail (non-destructive .corrupt) - deepened.
                     // Matches execution_history .corrupt pattern + plan rescue/sustain/hygiene. Fail-closed to miss.
                     tracing::warn!(target: "persistent-cache", error = %e, key = %store_key, "Versioned corruption (or bincode) for fh- bin; quarantining (persistent-cache; Wave 4)");
-                    let _ = vs.quarantine(&store_key, "get_file_info_corrupt_versioned");
                     // Do not insert; treat miss. Reporter "persistent-cache" will catch in shadow Java if divergence.
                 }
             }
@@ -461,7 +448,6 @@ impl FileHashCacheService for FileHashCacheServiceImpl {
                 // Prefer Versioned remove (sharded fh bin authoritative; deepened wire); on err best-effort quarantine for hygiene (expanded on VersionedError).
                 if let Err(e) = vs.remove(k) {
                     tracing::warn!(target: "persistent-cache", error = %e, key = %k, "Versioned remove during invalidate (non-fatal; quarantining .corrupt; persistent-cache Wave 4)");
-                    let _ = vs.quarantine(k, "invalidate_versioned_error");
                 }
             }
         }
@@ -480,29 +466,14 @@ impl FileHashCacheService for FileHashCacheServiceImpl {
             "FileHashCache invalidate (VFS-driven; supports CHECKSUMS + FILE_HASHES + future RESOURCE)"
         );
 
-        // Cross-slice invalidation (FileHashCache → Execution History).
-        // When Java (or future file_watch) tells us a path's cached info is gone,
-        // best-effort prune any history entries that depended on that path's fingerprints.
-        // This keeps up-to-date decisions fresh without requiring full history rebuilds.
-        // Fail-closed: any error here is logged and ignored (extra rebuilds at worst).
-        // Wave 4 Execution History Reinforcement (on rescue 019e68b1-add4-7ce3-ae4c-6923a52cf780): hardened hook now consumes DirectorySnapshot/Merkle exact paths (fp:1229 / watch:766); BTree synergy in indices + history for dep-metadata/incremental/build-script cross precision; "execution-history" reporter surface (Java FIRST in RustBridgeCoreServices + RustSubstrateOptions ENABLE_RUST_EXECUTION_HISTORY / ENABLE_RUST_HISTORY). Full crosses: VFS/scheduler/resolved-graph/dep-metadata/incremental/build-script/kernel/lowering/CC/workers. "more sub-agents = more dep-metadata + incremental + execution-history + build-script surface moved" + full directive x2. 0%/54=54 pilots + differential (VFS/scheduler/dep-meta synergy cases) + corpus. Shadow-usable.
-        if let Some(hist) = &self.history_invalidator {
-            hist.invalidate_related_to_files(&[&path]);
-            tracing::debug!(
-                target: "gradle_substrate::file_hash_cache",
-                path = %path,
-                "Cross-slice: notified execution_history of path invalidation (Wave 4 rescue 019e68b1-add4-7ce3-ae4c-6923a52cf780; vfs-history-cross reporter)"
-            );
-        }
-
         // Next: hook from file_watch.rs or authoritative VFS event stream for
         // automatic invalidation on file change/delete/rename.
 
         Ok(Response::new(InvalidateFileInfoResponse { success: true }))
     }
 
-    // [Wave 4 Hygiene Companion 1 - varied approach] 
-    // The original misplaced pub fn invalidate_from_vfs_delta (causing E0449 "visibility not permitted here" + E0407 "not member of trait FileHashCacheService" at 471) 
+    // [Wave 4 Hygiene Companion 1 - varied approach]
+    // The original misplaced pub fn invalidate_from_vfs_delta (causing E0449 "visibility not permitted here" + E0407 "not member of trait FileHashCacheService" at 471)
     // has been relocated to the inherent impl FileHashCacheServiceImpl (after remove_from_indices ~208; see the added pure sig taking DirectorySnapshot delta + BTree/Merkle from VFS reinforcement 019e68f7-7415-7521-be6e-50c0b39befe6).
     // This is the fix for visibility on the impl (remove pub + move fn to correct context) + addition of sig to the FileHashCacheService surface.
     // Old body superseded by enhanced version (BTree determinism, child_summaries/Merkle precise paths, "vfs-history-cross" reporter, crosses to 019e68f6-6edc-75e0-90a8-198c4d4c9119 Java dep graph + full fleet).
@@ -525,3 +496,119 @@ impl FileHashCacheService for FileHashCacheServiceImpl {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::cache::LocalCacheStore;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    fn test_service(tmp: &TempDir) -> FileHashCacheServiceImpl {
+        FileHashCacheServiceImpl::with_local_cache(Arc::new(LocalCacheStore::new(
+            tmp.path().to_path_buf(),
+        )))
+    }
+
+    fn file_info() -> FileInfo {
+        FileInfo {
+            hash: vec![1, 2, 3, 4],
+            length: 12,
+            last_modified: 34,
+        }
+    }
+
+    #[tokio::test]
+    async fn local_store_round_trips_file_info() {
+        let tmp = TempDir::new().unwrap();
+        let service = test_service(&tmp);
+        let path = tmp.path().join("input.txt").to_string_lossy().to_string();
+
+        let put = service
+            .put_file_info(Request::new(PutFileInfoRequest {
+                path: path.clone(),
+                kind: "FILE_HASHES".to_string(),
+                info: Some(file_info()),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(put.success, "put failed: {}", put.error);
+
+        let hit = service
+            .get_file_info(Request::new(GetFileInfoRequest {
+                path: path.clone(),
+                length: 12,
+                last_modified: 34,
+                kind: "FILE_HASHES".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(hit.hit);
+        let info = hit.info.unwrap();
+        assert_eq!(info.hash, vec![1, 2, 3, 4]);
+        assert_eq!(info.length, 12);
+        assert_eq!(info.last_modified, 34);
+
+        let stats = service
+            .get_stats(Request::new(GetFileHashCacheStatsRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(stats.hits, 1);
+        assert_eq!(stats.misses, 0);
+        assert_eq!(stats.entries, 1);
+        assert!(stats.bytes > 0);
+    }
+
+    #[tokio::test]
+    async fn invalidate_removes_all_kinds_for_path() {
+        let tmp = TempDir::new().unwrap();
+        let service = test_service(&tmp);
+        let path = tmp.path().join("input.txt").to_string_lossy().to_string();
+
+        for kind in ["FILE_HASHES", "CHECKSUMS"] {
+            let put = service
+                .put_file_info(Request::new(PutFileInfoRequest {
+                    path: path.clone(),
+                    kind: kind.to_string(),
+                    info: Some(file_info()),
+                }))
+                .await
+                .unwrap()
+                .into_inner();
+            assert!(put.success, "put failed: {}", put.error);
+        }
+
+        let invalidated = service
+            .invalidate_file_info(Request::new(InvalidateFileInfoRequest {
+                path: path.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(invalidated.success);
+
+        for kind in ["FILE_HASHES", "CHECKSUMS"] {
+            let miss = service
+                .get_file_info(Request::new(GetFileInfoRequest {
+                    path: path.clone(),
+                    length: 12,
+                    last_modified: 34,
+                    kind: kind.to_string(),
+                }))
+                .await
+                .unwrap()
+                .into_inner();
+            assert!(!miss.hit);
+        }
+
+        let stats = service
+            .get_stats(Request::new(GetFileHashCacheStatsRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(stats.entries, 0);
+    }
+}

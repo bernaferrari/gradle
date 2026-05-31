@@ -109,6 +109,8 @@ public class SubstrateClient implements Closeable {
     private final FileTreeServiceGrpc.FileTreeServiceBlockingStub fileTreeStub;
     // Phase 42: Version catalog parsing
     private final VersionCatalogServiceGrpc.VersionCatalogServiceBlockingStub versionCatalogStub;
+    // Phase 43: File hash cache
+    private final FileHashCacheServiceGrpc.FileHashCacheServiceBlockingStub fileHashCacheStub;
     // Phase 6: JVM Compatibility Host
     private final String jvmHostSocketPath;
 
@@ -157,6 +159,7 @@ public class SubstrateClient implements Closeable {
             this.classpathStub = null;
             this.fileTreeStub = null;
             this.versionCatalogStub = null;
+            this.fileHashCacheStub = null;
         } else {
             this.controlStub = configureStub(ControlServiceGrpc.newBlockingStub(channel));
             this.hashStub = configureStub(HashServiceGrpc.newBlockingStub(channel));
@@ -197,6 +200,7 @@ public class SubstrateClient implements Closeable {
             this.classpathStub = configureStub(ClasspathServiceGrpc.newBlockingStub(channel));
             this.fileTreeStub = configureStub(FileTreeServiceGrpc.newBlockingStub(channel));
             this.versionCatalogStub = configureStub(VersionCatalogServiceGrpc.newBlockingStub(channel));
+            this.fileHashCacheStub = configureStub(FileHashCacheServiceGrpc.newBlockingStub(channel));
         }
     }
 
@@ -478,6 +482,11 @@ public class SubstrateClient implements Closeable {
     public VersionCatalogServiceGrpc.VersionCatalogServiceBlockingStub getVersionCatalogStub() {
         throwIfNoop();
         return versionCatalogStub;
+    }
+
+    public FileHashCacheServiceGrpc.FileHashCacheServiceBlockingStub getFileHashCacheStub() {
+        throwIfNoop();
+        return fileHashCacheStub;
     }
 
     private void throwIfNoop() {
