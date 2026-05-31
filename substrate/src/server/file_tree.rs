@@ -185,10 +185,10 @@ impl FileTreeServiceImpl {
             );
         }
 
-        let include_files = if req.include_files {
-            req.include_files
-        } else {
+        let include_files = if !req.include_files && !req.include_dirs {
             true
+        } else {
+            req.include_files
         };
         let include_dirs = req.include_dirs;
         let follow_symlinks = req.follow_symlinks;
@@ -615,6 +615,39 @@ mod tests {
         assert!(err.is_none());
         assert!(!entries.is_empty());
         assert!(entries.iter().any(|e| e.is_directory));
+    }
+
+    #[test]
+    fn test_directory_only_traversal_excludes_files() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("src/main")).unwrap();
+        fs::write(tmp.path().join("src/main/App.java"), "class App {}").unwrap();
+
+        let mut req = make_traverse_request(tmp.path().to_str().unwrap());
+        req.include_files = false;
+        req.include_dirs = true;
+        let (entries, _, err) = FileTreeServiceImpl::traverse_impl(&req);
+
+        assert!(err.is_none());
+        assert!(!entries.is_empty());
+        assert!(entries.iter().all(|entry| entry.is_directory));
+    }
+
+    #[test]
+    fn test_empty_include_flags_default_to_files_only() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("src/main")).unwrap();
+        fs::write(tmp.path().join("src/main/App.java"), "class App {}").unwrap();
+
+        let mut req = make_traverse_request(tmp.path().to_str().unwrap());
+        req.include_files = false;
+        req.include_dirs = false;
+        let (entries, _, err) = FileTreeServiceImpl::traverse_impl(&req);
+
+        assert!(err.is_none());
+        assert_eq!(entries.len(), 1);
+        assert!(!entries[0].is_directory);
+        assert!(entries[0].relative_path.ends_with("App.java"));
     }
 
     #[test]
