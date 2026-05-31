@@ -27,6 +27,7 @@ class RustBuildCacheServiceTest extends Specification {
 
     private static class TestCacheService extends CacheServiceGrpc.CacheServiceImplBase {
         final Map<String, byte[]> entries = new ConcurrentHashMap<>()
+        final Map<String, Integer> dataChunkCounts = new ConcurrentHashMap<>()
         volatile boolean failStores = false
 
         void put(byte[] key, byte[] data) {
@@ -58,6 +59,8 @@ class RustBuildCacheServiceTest extends Specification {
                         CacheStoreInit init = chunk.getInit()
                         key = init.key.toByteArray()
                     } else if (chunk.hasData()) {
+                        def id = keyId(key)
+                        dataChunkCounts.put(id, (dataChunkCounts.get(id) ?: 0) + 1)
                         data.write(chunk.getData().toByteArray())
                     }
                 }
@@ -233,6 +236,36 @@ class RustBuildCacheServiceTest extends Specification {
         then:
         noExceptionThrown()
         harness.service.get(keyBytes) == storeData
+
+        cleanup:
+        harness.close()
+    }
+
+    def "store splits large entries into multiple data chunks"() {
+        given:
+        def harness = new TestCacheHarness()
+        def storeData = new byte[150_000]
+        Arrays.fill(storeData, (byte) 7)
+        def keyBytes = "large-cache-key".getBytes("UTF-8")
+        def key = Mock(BuildCacheKey)
+        key.toByteArray() >> keyBytes
+        def writer = Mock(BuildCacheEntryWriter)
+        writer.writeTo(_ as OutputStream) >> { OutputStream os ->
+            os.write(storeData)
+        }
+
+        def client = Mock(SubstrateClient)
+        client.isNoop() >> false
+        client.getCacheAsyncStub() >> harness.asyncStub()
+        def service = new RustBuildCacheService(client)
+
+        when:
+        service.store(key, writer)
+
+        then:
+        noExceptionThrown()
+        harness.service.get(keyBytes) == storeData
+        harness.service.dataChunkCounts.get(new String(keyBytes, "UTF-8")) > 1
 
         cleanup:
         harness.close()
