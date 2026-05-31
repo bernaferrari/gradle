@@ -40,6 +40,17 @@ dependencies {
     testImplementation(testFixtures(projects.execution))
 }
 
+configurations.matching { configuration ->
+    configuration.name in setOf(
+        "archTestCompileProtoPath",
+        "integTestCompileProtoPath",
+        "testFixturesCompileProtoPath",
+        "testCompileProtoPath"
+    )
+}.configureEach {
+    setExtendsFrom(emptyList())
+}
+
 protobuf {
     protoc {
         artifact = "com.google.protobuf:protoc:3.25.3"
@@ -62,6 +73,25 @@ tasks.named("generateProto").configure { dependsOn("syncProtos") }
 tasks.named("processResources").configure { dependsOn("syncProtos") }
 tasks.named<ProcessResources>("processResources") {
     // Keep service descriptor packaged so the active lightweight services are discoverable.
+}
+
+tasks.matching { task ->
+    task.name in setOf(
+        "extractArchTestProto",
+        "extractIncludeArchTestProto",
+        "generateArchTestProto",
+        "extractIntegTestProto",
+        "extractIncludeIntegTestProto",
+        "generateIntegTestProto",
+        "extractTestFixturesProto",
+        "extractIncludeTestFixturesProto",
+        "generateTestFixturesProto",
+        "extractTestProto",
+        "extractIncludeTestProto",
+        "generateTestProto"
+    )
+}.configureEach {
+    enabled = false
 }
 
 // Two-phase compilation: compile proto-generated sources first, then handwritten sources.
