@@ -33,6 +33,8 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public class RustRemoteBuildCacheService implements BuildCacheService {
 
+    private static final int STORE_CHUNK_SIZE = 64 * 1024;
+
     private final SubstrateClient client;
 
     public RustRemoteBuildCacheService(SubstrateClient client) {
@@ -122,10 +124,16 @@ public class RustRemoteBuildCacheService implements BuildCacheService {
                     .build())
                 .build());
 
-            // Send Data chunk with actual content
-            requestObserver.onNext(CacheStoreChunk.newBuilder()
-                .setData(com.google.protobuf.ByteString.copyFrom(data))
-                .build());
+            // Send data chunks with actual content.
+            for (int offset = 0; offset < data.length; offset += STORE_CHUNK_SIZE) {
+                requestObserver.onNext(CacheStoreChunk.newBuilder()
+                    .setData(com.google.protobuf.ByteString.copyFrom(
+                        data,
+                        offset,
+                        Math.min(STORE_CHUNK_SIZE, data.length - offset)
+                    ))
+                    .build());
+            }
 
             // Signal completion of the stream
             requestObserver.onCompleted();
