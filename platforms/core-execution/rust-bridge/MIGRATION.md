@@ -1,8 +1,9 @@
 # Migration Status: rust-bridge
 
-**Status:** `mixed`  
-**Upstream:** See `UPSTREAM.md`  
+**Status:** `mixed`
+**Upstream:** See `UPSTREAM.md`
 **Parity:** See `PARITY.md`
+**Aggressive Rust engine plan:** See `../../../docs/rust-substrate-turbopack-plan.md`
 
 ## Migration Phases
 
