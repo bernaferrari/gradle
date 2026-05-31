@@ -1068,6 +1068,23 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
+    public void capturesDeleteFollowSymlinksAndTargets() throws IOException {
+        File target = temporaryFolder.newFolder("build", "stale");
+
+        Task delete = deleteTask(target, true);
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(delete, Delete.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals(":clean", task.getPath());
+        assertEquals("delete", task.getActionKind());
+        assertEquals("true", inputs.get("follow_symlinks"));
+        assertTrue(task.getDestroyablesList().contains(target.getAbsolutePath()));
+    }
+
+    @org.junit.Test
     public void capturesProcessResourcesAsNativeFileTransform() throws IOException {
         File resourceFile = temporaryFolder.newFile("application.properties");
         File outputDir = temporaryFolder.newFolder("build/resources/main");
@@ -2231,6 +2248,58 @@ public class ProjectModelProviderAdapterTest {
                     return "256m";
                 case "getOptions":
                     return new JavadocOptionsContract();
+                case "compareTo":
+                    return 0;
+                default:
+                    return defaultValue(method.getReturnType());
+            }
+        });
+    }
+
+    private static Task deleteTask(File target, boolean followSymlinks) {
+        FileCollection targetFiles = fileCollection(target);
+        Project project = proxy(Project.class, (proxy, method, args) -> {
+            if (method.getName().equals("getPath")) {
+                return ":";
+            }
+            return defaultValue(method.getReturnType());
+        });
+        TaskDependency noDependencies = proxy(TaskDependency.class, (proxy, method, args) -> {
+            if (method.getName().equals("getDependencies")) {
+                return Collections.emptySet();
+            }
+            return defaultValue(method.getReturnType());
+        });
+        return proxy(new Class<?>[] {Task.class, DeleteContract.class}, (proxy, method, args) -> {
+            switch (method.getName()) {
+                case "getPath":
+                    return ":clean";
+                case "getProject":
+                    return project;
+                case "getName":
+                    return "clean";
+                case "getEnabled":
+                    return true;
+                case "getGroup":
+                case "getDescription":
+                    return "";
+                case "getTaskDependencies":
+                case "getShouldRunAfter":
+                case "getMustRunAfter":
+                case "getFinalizedBy":
+                    return noDependencies;
+                case "getInputs":
+                case "getOutputs":
+                    return filesOwner(method.getReturnType(), fileCollection());
+                case "getLocalState":
+                case "getDestroyables":
+                    return registeredFilesOwner(method.getReturnType());
+                case "getTargetFiles":
+                    return targetFiles;
+                case "isFollowSymlinks":
+                    return followSymlinks;
+                case "getActions":
+                    return Collections.singletonList(new Object());
                 case "compareTo":
                     return 0;
                 default:
@@ -3645,7 +3714,15 @@ public class ProjectModelProviderAdapterTest {
     public static class JavaExec {
     }
 
+    public static class Delete {
+    }
+
     public static class CreateStartScripts {
+    }
+
+    public interface DeleteContract {
+        FileCollection getTargetFiles();
+        boolean isFollowSymlinks();
     }
 
     public interface CyclonedxDirectTask {

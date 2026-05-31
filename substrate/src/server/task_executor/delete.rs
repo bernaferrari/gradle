@@ -1,10 +1,8 @@
-use crate::server::task_executor::copy::parse_patterns;
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
 use std::collections::BTreeMap;
-
-
-// zr2e/8lk7 hygiene + sustain (Delete/StartScripts VFS cross evidence, scheduler 019e6b49ada7 recurring) per "How to Work on a Slice" AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + full directive x2x2 + "more sub-agents = more task_executor richer lowering (delete/start_scripts) + VFS cross + entire port accelerated" + "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust" + multi-year. Abs paths: this + start_scripts.rs + fp:1229 + watch:766 + 2 Java (after 8lk7 blocks) + plan (Fresh after prior 8lk7 anchor) + PARITY + MIGRATION + .beads (8lk7) + AGENTS + scheduler 019e6b49ada7 + fleet + cargo fuel. Safe terminal (non-hard). 0 reg 20+. Java FIRST + differential + pilot + gov + spawn + bd children. "How to Work on a Slice". Follow exactly. Entire port accelerated.
+use std::path::Path;
+use std::pin::Pin;
 
 /// Deletes files and directories.
 pub struct DeleteTaskExecutor;
@@ -19,6 +17,90 @@ impl DeleteTaskExecutor {
     pub fn new() -> Self {
         Self
     }
+
+    fn delete_recursively<'a>(
+        path: &'a Path,
+        follow_symlinks: bool,
+        result: &'a mut TaskResult,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<bool, String>> + Send + 'a>> {
+        Box::pin(async move {
+            let metadata = match tokio::fs::symlink_metadata(path).await {
+                Ok(metadata) => metadata,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+                Err(e) => {
+                    return Err(format!("Failed to inspect {}: {}", path.display(), e));
+                }
+            };
+
+            if Self::should_descend(path, &metadata, follow_symlinks).await? {
+                let mut children = Self::list_children(path).await?;
+                children.sort_unstable();
+                for child in children {
+                    Self::delete_recursively(&child, follow_symlinks, result).await?;
+                }
+            }
+
+            Self::delete_entry(path, &metadata, result).await?;
+            Ok(true)
+        })
+    }
+
+    async fn should_descend(
+        path: &Path,
+        metadata: &std::fs::Metadata,
+        follow_symlinks: bool,
+    ) -> Result<bool, String> {
+        if metadata.file_type().is_symlink() {
+            return if follow_symlinks {
+                tokio::fs::metadata(path)
+                    .await
+                    .map(|target| target.is_dir())
+                    .map_err(|e| {
+                        format!("Failed to inspect symlink target {}: {}", path.display(), e)
+                    })
+            } else {
+                Ok(false)
+            };
+        }
+        Ok(metadata.is_dir())
+    }
+
+    async fn list_children(path: &Path) -> Result<Vec<std::path::PathBuf>, String> {
+        let mut children = Vec::new();
+        let mut entries = tokio::fs::read_dir(path)
+            .await
+            .map_err(|e| format!("Failed to read directory {}: {}", path.display(), e))?;
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| format!("Failed to read directory {}: {}", path.display(), e))?
+        {
+            children.push(entry.path());
+        }
+        Ok(children)
+    }
+
+    async fn delete_entry(
+        path: &Path,
+        metadata: &std::fs::Metadata,
+        result: &mut TaskResult,
+    ) -> Result<(), String> {
+        let delete_result = if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            tokio::fs::remove_dir(path).await
+        } else {
+            tokio::fs::remove_file(path).await
+        };
+
+        match delete_result {
+            Ok(()) => {
+                result.files_processed += 1;
+                result.removed_files.push(path.to_path_buf());
+                Ok(())
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("Failed to delete {}: {}", path.display(), e)),
+        }
+    }
 }
 
 #[tonic::async_trait]
@@ -31,67 +113,25 @@ impl TaskExecutor for DeleteTaskExecutor {
         let start = std::time::Instant::now();
         let mut result = TaskResult::default();
 
-        // Richer options for 8lk7 explorer: "follow_symlinks" (default: false for safety), "exclude" patterns, "include" filters for precise control.
         let follow_symlinks = input
             .options
             .get("follow_symlinks")
             .map(|v| v == "true")
             .unwrap_or(false);
-        let _exclude_patterns = input.options.get("exclude").map(|s| s.split(',').map(|p| p.trim().to_string()).collect::<Vec<_>>()).unwrap_or_default();
-        let _include_patterns = input.options.get("include").map(|s| s.split(',').map(|p| p.trim().to_string()).collect::<Vec<_>>()).unwrap_or_default();
 
         for target in &input.source_files {
-            if !target.exists() {
-                // Non-existent target is OK (idempotent delete)
-                continue;
+            if let Err(e) = Self::delete_recursively(target, follow_symlinks, &mut result).await {
+                result.success = false;
+                result.error_message = e;
+                return result;
             }
-
-            let is_symlink = target.is_symlink();
-            if target.is_dir() && !is_symlink {
-                // Delete directory recursively
-                match tokio::fs::remove_dir_all(target).await {
-                    Ok(()) => {
-                        result.files_processed += 1;
-                        result.removed_files.push(target.clone());
-                    }
-                    Err(e) => {
-                        result.success = false;
-                        result.error_message =
-                            format!("Failed to delete directory {}: {}", target.display(), e);
-                        return result;
-                    }
-                }
-            } else {
-                // Delete file or symlink
-                match tokio::fs::remove_file(target).await {
-                    Ok(()) => {
-                        result.files_processed += 1;
-                        result.removed_files.push(target.clone());
-                    }
-                    Err(e) => {
-                        result.success = false;
-                        result.error_message =
-                            format!("Failed to delete {}: {}", target.display(), e);
-                        return result;
-                    }
-                }
-            }
-
-            let _ = follow_symlinks; // Available for future use
         }
-
-        // 8lk7 richer contract sustain (additive): support additional "exclude_patterns" / "include_patterns" for Delete (corpus coverage).
-        let _exclude = parse_patterns(input.options.get("exclude_patterns")); // placeholder using existing helper
-        let _include = parse_patterns(input.options.get("include_patterns"));
 
         result.duration_ms = start.elapsed().as_millis() as u64;
         result
     }
 }
 
-// zr2e explorer child (substrate-8lk7) — deeper Delete richer lowering + VFS DirectorySnapshot cross
-// Per 'How to Work on a Slice' AGENTS.md read FULL FIRST + full directive x2 x2 + "more sub-agents = more task_executor richer lowering (delete/start_scripts) + VFS cross (DirectorySnapshot Merkle child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766) + entire port accelerated" + "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust".
-// Richer contracts: additional filter/safety options. Real VFS delta consumption (BTree child_summaries intersection for precise invalidation). Reporter 'delete-lowering' + 'vfs-taskexec-cross' via tracing. BTree det. Java FIRST done (ENABLE after zr2e blocks). 0 reg 20+ hardened. Abs paths: this + start_scripts.rs + mod.rs + fp:1229 + watch:766 + plan Fresh for 8lk7 + PARITY + .beads (5ezk + zr2e + 8lk7) + 2 Java + AGENTS.md.
 pub fn apply_vfs_delta_to_delete(
     _targets: &[std::path::PathBuf],
     delta: &BTreeMap<String, String>, // from DirectorySnapshot child_summaries fp:1229 + watch:766 get_snapshot_delta
@@ -99,11 +139,15 @@ pub fn apply_vfs_delta_to_delete(
     if delta.is_empty() {
         return false;
     }
-    // Deepened real consumption for 8lk7 explorer: BTree intersection against delete targets (simple prefix check for sustain; full Merkle in next turn).
     for (changed, _h) in delta.iter() {
         let changed_l = changed.to_lowercase();
-        if _targets.iter().any(|t| t.to_string_lossy().to_lowercase().contains(&changed_l)) || changed_l.contains("src") || changed_l.contains("build") {
-            tracing::info!(target: "delete-lowering", vfs_taskexec_cross = true, changed = %changed, "VFS delta affects delete targets — re-execution likely (shadow for 0%+54=54)");
+        if _targets
+            .iter()
+            .any(|t| t.to_string_lossy().to_lowercase().contains(&changed_l))
+            || changed_l.contains("src")
+            || changed_l.contains("build")
+        {
+            tracing::info!(target: "delete-lowering", vfs_taskexec_cross = true, changed = %changed, "VFS delta affects delete targets; re-execution likely");
             return true;
         }
     }
@@ -205,5 +249,54 @@ mod tests {
         assert!(!link.exists());
         // Target should still exist
         assert!(target.exists());
+    }
+
+    #[tokio::test]
+    async fn test_delete_directory_symlink_does_not_follow_by_default() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target_dir = tmp.path().join("target");
+        tokio::fs::create_dir_all(&target_dir).await.unwrap();
+        let target_file = target_dir.join("file.txt");
+        tokio::fs::write(&target_file, b"data").await.unwrap();
+
+        let link = tmp.path().join("link");
+        tokio::fs::symlink(&target_dir, &link).await.unwrap();
+
+        let executor = DeleteTaskExecutor::new();
+        let mut input = TaskInput::new("Delete");
+        input.source_files.push(link.clone());
+
+        let result = executor.execute(&input).await;
+        assert!(result.success);
+        assert!(!link.exists());
+        assert!(target_dir.exists());
+        assert!(target_file.exists());
+    }
+
+    #[tokio::test]
+    async fn test_delete_directory_symlink_follows_when_requested() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target_dir = tmp.path().join("target");
+        let nested_dir = target_dir.join("nested");
+        tokio::fs::create_dir_all(&nested_dir).await.unwrap();
+        let target_file = nested_dir.join("file.txt");
+        tokio::fs::write(&target_file, b"data").await.unwrap();
+
+        let link = tmp.path().join("link");
+        tokio::fs::symlink(&target_dir, &link).await.unwrap();
+
+        let executor = DeleteTaskExecutor::new();
+        let mut input = TaskInput::new("Delete");
+        input.source_files.push(link.clone());
+        input
+            .options
+            .insert("follow_symlinks".to_string(), "true".to_string());
+
+        let result = executor.execute(&input).await;
+        assert!(result.success);
+        assert!(!link.exists());
+        assert!(target_dir.exists());
+        assert!(!nested_dir.exists());
+        assert!(!target_file.exists());
     }
 }

@@ -381,6 +381,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if (isArchiveTask(shortTaskTypeName)) {
             captureJarInputs(task, inputs);
         }
+        if ("Delete".equals(shortTaskTypeName)) {
+            captureDeleteInputs(task, taskType, inputs);
+        }
         if (isFileTransformTask(shortTaskTypeName)) {
             captureFileTransformInputs(task, inputs);
         }
@@ -856,6 +859,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
 
     private static boolean isTaskNamed(String simpleName, String taskName) {
         return taskName.equals(simpleName) || simpleName.startsWith(taskName + "_");
+    }
+
+    private static void captureDeleteInputs(Task task, Class<?> taskType, Map<String, String> inputs) {
+        putIfPresent(inputs, "follow_symlinks", booleanString(invokeOptional(task, taskType, "isFollowSymlinks")));
     }
 
     private static void captureFileTransformInputs(Task task, Map<String, String> inputs) {
