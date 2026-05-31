@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package gradle.substrate.v1;
+
+option java_multiple_files = true;
+option java_package = "gradle.substrate.v1";
+
+service FileHashCacheService {
+  rpc GetFileInfo(GetFileInfoRequest) returns (GetFileInfoResponse);
+  rpc PutFileInfo(PutFileInfoRequest) returns (PutFileInfoResponse);
+  rpc InvalidateFileInfo(InvalidateFileInfoRequest) returns (InvalidateFileInfoResponse);
+  rpc GetStats(GetFileHashCacheStatsRequest) returns (GetFileHashCacheStatsResponse);
+}
+
+message FileInfo {
+  bytes hash = 1;
+  int64 length = 2;
+  int64 last_modified = 3;
+}
+
+message GetFileInfoRequest {
+  string path = 1;
+  int64 length = 2;
+  int64 last_modified = 3;
+  string kind = 4;
+}
+
+message GetFileInfoResponse {
+  bool hit = 1;
+  FileInfo info = 2;
+  string error = 3;
+}
+
+message PutFileInfoRequest {
+  string path = 1;
+  string kind = 2;
+  FileInfo info = 3;
+}
+
+message PutFileInfoResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+message InvalidateFileInfoRequest {
+  string path = 1;
+}
+
+message InvalidateFileInfoResponse {
+  bool success = 1;
+}
+
+message GetFileHashCacheStatsRequest {
+}
+
+message GetFileHashCacheStatsResponse {
+  int64 hits = 1;
+  int64 misses = 2;
+  int64 entries = 3;
+  int64 bytes = 4;
+}

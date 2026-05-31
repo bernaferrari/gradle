@@ -33,6 +33,7 @@ use gradle_substrate_daemon::{
         execution_history_service_server::ExecutionHistoryServiceServer,
         execution_plan_service_server::ExecutionPlanServiceServer,
         file_fingerprint_service_server::FileFingerprintServiceServer,
+        file_hash_cache_service_server::FileHashCacheServiceServer,
         file_tree_service_server::FileTreeServiceServer,
         file_watch_service_server::FileWatchServiceServer,
         garbage_collection_service_server::GarbageCollectionServiceServer,
@@ -64,10 +65,10 @@ use gradle_substrate_daemon::{
         dag_executor::DagExecutorServiceImpl,
         dependency_resolution::DependencyResolutionServiceImpl, exec::ExecServiceImpl,
         execution_history::ExecutionHistoryServiceImpl, execution_plan::ExecutionPlanServiceImpl,
-        file_fingerprint::FileFingerprintServiceImpl, file_tree::FileTreeServiceImpl,
-        file_watch::FileWatchServiceImpl, garbage_collection::GarbageCollectionServiceImpl,
-        hash::HashServiceImpl, ide_model::IdeModelServiceImpl,
-        incremental_compilation::IncrementalCompilationServiceImpl,
+        file_fingerprint::FileFingerprintServiceImpl, file_hash_cache::FileHashCacheServiceImpl,
+        file_tree::FileTreeServiceImpl, file_watch::FileWatchServiceImpl,
+        garbage_collection::GarbageCollectionServiceImpl, hash::HashServiceImpl,
+        ide_model::IdeModelServiceImpl, incremental_compilation::IncrementalCompilationServiceImpl,
         jvm_host_service::JvmHostServiceImpl, native_compile::NativeCompileServiceImpl,
         parser_service::ParserServiceImpl, plugin::PluginServiceImpl,
         problem_reporting::ProblemReportingServiceImpl,
@@ -259,6 +260,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Phase 9: File fingerprinting
     let file_fingerprint = FileFingerprintServiceImpl::new();
+    let file_hash_cache = FileHashCacheServiceImpl::with_local_cache(cache.local_store());
 
     // Phase 10: Value snapshotting
     let value_snapshot = ValueSnapshotServiceImpl::new();
@@ -401,7 +403,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
          Listening on: {}\n\
          Ready in: {}ms\n\
          Cache dir: {}\n\
-         Services: 41 (control, dag-executor, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console, test-execution, artifact-publishing, build-init, incremental-compilation, native-compile, ide-model, build-metrics, garbage-collection, version-catalog, parser, classpath, filewatch, jvmhost)",
+         Services: 42 (control, dag-executor, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, file-hash-cache, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console, test-execution, artifact-publishing, build-init, incremental-compilation, native-compile, ide-model, build-metrics, garbage-collection, version-catalog, parser, classpath, filewatch, jvmhost)",
         env!("CARGO_PKG_VERSION"),
         listen_endpoint,
         startup_start.elapsed().as_millis(),
@@ -461,6 +463,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             cache_orchestration,
         ))
         .add_service(FileFingerprintServiceServer::new(file_fingerprint))
+        .add_service(FileHashCacheServiceServer::new(file_hash_cache))
         .add_service(FileTreeServiceServer::new(FileTreeServiceImpl::new()))
         .add_service(ValueSnapshotServiceServer::new(value_snapshot))
         .add_service(task_graph_service)

@@ -36,6 +36,7 @@ fn main() {
         "proto/v1/execution.proto",
         "proto/v1/fingerprint.proto",
         "proto/v1/filetree.proto",
+        "proto/v1/filehashcache.proto",
         "proto/v1/taskgraph.proto",
         "proto/v1/configuration.proto",
         "proto/v1/buildops.proto",
