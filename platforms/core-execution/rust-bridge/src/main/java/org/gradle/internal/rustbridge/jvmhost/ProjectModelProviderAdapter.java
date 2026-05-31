@@ -928,7 +928,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         }
         String taskName = Pattern.quote(task.getName());
         Pattern pattern = Pattern.compile(
-            "tasks\\.register<Copy>\\(\\s*\"" + taskName + "\"\\s*\\)\\s*\\{(?<body>.*?)filter\\s*\\{\\s*line\\s*:\\s*String\\s*->\\s*line\\.replace\\(\\s*\"(?<from>[^\"]*)\"\\s*,\\s*\"(?<to>[^\"]*)\"\\s*\\)\\s*}\\s*",
+            "tasks\\.register<(?:Copy|Sync)>\\(\\s*\"" + taskName + "\"\\s*\\)\\s*\\{(?<body>.*?)filter\\s*\\{\\s*line\\s*:\\s*String\\s*->\\s*line\\.replace\\(\\s*\"(?<from>[^\"]*)\"\\s*,\\s*\"(?<to>[^\"]*)\"\\s*\\)\\s*}\\s*",
             Pattern.DOTALL
         );
         Matcher matcher = pattern.matcher(text);
@@ -998,7 +998,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         }
         String taskName = Pattern.quote(task.getName());
         Pattern pattern = Pattern.compile(
-            "tasks\\.register<Copy>\\(\\s*\"" + taskName + "\"\\s*\\)\\s*\\{(?<body>.*?)eachFile\\s*\\{\\s*relativePath\\s*=\\s*RelativePath\\(\\s*true\\s*,\\s*\"(?<prefix>[^\"]+)\"\\s*,\\s*name\\s*\\)\\s*}\\s*",
+            "tasks\\.register<(?:Copy|Sync)>\\(\\s*\"" + taskName + "\"\\s*\\)\\s*\\{(?<body>.*?)eachFile\\s*\\{\\s*relativePath\\s*=\\s*RelativePath\\(\\s*true\\s*,\\s*\"(?<prefix>[^\"]+)\"\\s*,\\s*name\\s*\\)\\s*}\\s*",
             Pattern.DOTALL
         );
         Matcher matcher = pattern.matcher(text);

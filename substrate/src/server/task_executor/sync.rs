@@ -3,9 +3,10 @@ use std::path::PathBuf;
 use std::pin::Pin;
 
 use crate::server::task_executor::copy::{
-    apply_unix_mode, case_sensitive, dir_permission_mode, duplicate_strategy, expand_bytes,
-    file_permission_mode, include_empty_dirs, inferred_relative_source_path,
-    parse_copy_file_mappings, parse_expand_properties, parse_patterns, path_included,
+    apply_unix_mode, case_sensitive, dir_permission_mode, duplicate_strategy, file_permission_mode,
+    include_empty_dirs, inferred_relative_source_path, parse_copy_file_mappings,
+    parse_expand_properties, parse_line_replace_filter, parse_patterns, path_included,
+    transform_bytes, LineReplaceFilter,
 };
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
@@ -67,6 +68,7 @@ impl SyncTaskExecutor {
         dest_file: &std::path::Path,
         result: &mut TaskResult,
         expand_properties: &[(String, String)],
+        line_replace_filter: Option<&LineReplaceFilter>,
         file_mode: Option<u32>,
         dir_mode: Option<u32>,
     ) -> Result<(), String> {
@@ -77,7 +79,7 @@ impl SyncTaskExecutor {
             apply_unix_mode(parent, dir_mode)?;
         }
 
-        let bytes = if expand_properties.is_empty() {
+        let bytes = if expand_properties.is_empty() && line_replace_filter.is_none() {
             tokio::fs::copy(src_file, dest_file)
                 .await
                 .map_err(|e| format!("Failed to copy {}: {}", src_file.display(), e))?
@@ -85,11 +87,11 @@ impl SyncTaskExecutor {
             let data = tokio::fs::read(src_file)
                 .await
                 .map_err(|e| format!("Failed to read {}: {}", src_file.display(), e))?;
-            let expanded = expand_bytes(data, expand_properties);
-            tokio::fs::write(dest_file, &expanded)
+            let transformed = transform_bytes(data, expand_properties, line_replace_filter);
+            tokio::fs::write(dest_file, &transformed)
                 .await
                 .map_err(|e| format!("Failed to write {}: {}", dest_file.display(), e))?;
-            expanded.len() as u64
+            transformed.len() as u64
         };
         apply_unix_mode(dest_file, file_mode)?;
 
@@ -118,6 +120,16 @@ impl TaskExecutor for SyncTaskExecutor {
             .unwrap_or(true);
 
         let expand_properties = parse_expand_properties(input.options.get("expand_properties"));
+        let line_replace_filter =
+            match parse_line_replace_filter(input.options.get("copy_line_replace_filter")) {
+                Ok(filter) => filter,
+                Err(e) => {
+                    result.success = false;
+                    result.error_message = e;
+                    return result;
+                }
+            };
+        let transforms_content = !expand_properties.is_empty() || line_replace_filter.is_some();
         let duplicate_strategy = duplicate_strategy(input);
         let include_patterns = parse_patterns(input.options.get("include_patterns"));
         let exclude_patterns = parse_patterns(input.options.get("exclude_patterns"));
@@ -201,6 +213,7 @@ impl TaskExecutor for SyncTaskExecutor {
                     &dest,
                     &mut result,
                     &expand_properties,
+                    line_replace_filter.as_ref(),
                     file_mode,
                     dir_mode,
                 )
@@ -258,6 +271,7 @@ impl TaskExecutor for SyncTaskExecutor {
                         &dest_file,
                         &mut result,
                         &expand_properties,
+                        line_replace_filter.as_ref(),
                         file_mode,
                         dir_mode,
                     )
@@ -328,30 +342,29 @@ impl TaskExecutor for SyncTaskExecutor {
                         }
                     }
 
-                    let needs_copy = !expand_properties.is_empty() || !dest_file.exists()
-                        || {
-                            // Compare modification times and sizes
-                            let src_meta = tokio::fs::metadata(src_file).await.ok();
-                            let dest_meta = tokio::fs::metadata(&dest_file).await.ok();
+                    let needs_copy = transforms_content || !dest_file.exists() || {
+                        // Compare modification times and sizes
+                        let src_meta = tokio::fs::metadata(src_file).await.ok();
+                        let dest_meta = tokio::fs::metadata(&dest_file).await.ok();
 
-                            match (src_meta, dest_meta) {
-                                (Some(sm), Some(dm)) => {
-                                    let src_modified = sm
-                                        .modified()
-                                        .ok()
-                                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                                        .map(|d| d.as_millis() as u64);
-                                    let dest_modified = dm
-                                        .modified()
-                                        .ok()
-                                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                                        .map(|d| d.as_millis() as u64);
+                        match (src_meta, dest_meta) {
+                            (Some(sm), Some(dm)) => {
+                                let src_modified = sm
+                                    .modified()
+                                    .ok()
+                                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                    .map(|d| d.as_millis() as u64);
+                                let dest_modified = dm
+                                    .modified()
+                                    .ok()
+                                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                    .map(|d| d.as_millis() as u64);
 
-                                    src_modified != dest_modified || sm.len() != dm.len()
-                                }
-                                _ => true,
+                                src_modified != dest_modified || sm.len() != dm.len()
                             }
-                        };
+                            _ => true,
+                        }
+                    };
 
                     if needs_copy {
                         if let Err(e) = Self::copy_file(
@@ -359,6 +372,7 @@ impl TaskExecutor for SyncTaskExecutor {
                             &dest_file,
                             &mut result,
                             &expand_properties,
+                            line_replace_filter.as_ref(),
                             file_mode,
                             dir_mode,
                         )
@@ -437,7 +451,10 @@ pub fn apply_vfs_delta_to_sync(
     let mut affected = vec![];
     for (changed_path, _hash) in delta.iter() {
         let changed_lower = changed_path.to_lowercase();
-        if changed_lower.starts_with(&target_str) || changed_lower.contains("src") || changed_lower.contains("resources") {
+        if changed_lower.starts_with(&target_str)
+            || changed_lower.contains("src")
+            || changed_lower.contains("resources")
+        {
             tracing::info!(target: "sync-lowering", vfs_taskexec_cross = true, target = %target_dir.display(), changed = %changed_path, "VFS delta affects sync target — marking for re-sync (shadow active)");
             affected.push(std::path::PathBuf::from(changed_path));
         }
@@ -598,6 +615,39 @@ mod tests {
                 .await
                 .unwrap(),
             "name=sync\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sync_applies_static_line_replace_filter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let dest_dir = tmp.path().join("dest");
+
+        tokio::fs::create_dir_all(&src_dir).await.unwrap();
+        tokio::fs::write(src_dir.join("message.txt"), b"hello TOKEN\nTOKEN again")
+            .await
+            .unwrap();
+
+        let replacement = format!(
+            "{}>{}",
+            URL_SAFE_NO_PAD.encode("TOKEN"),
+            URL_SAFE_NO_PAD.encode("native-sync-filter")
+        );
+        let executor = SyncTaskExecutor::new();
+        let mut input = TaskInput::new("Sync");
+        input.source_files.push(src_dir);
+        input.target_dir = dest_dir.clone();
+        input
+            .options
+            .insert("copy_line_replace_filter".to_string(), replacement);
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert_eq!(
+            tokio::fs::read(dest_dir.join("message.txt")).await.unwrap(),
+            b"hello native-sync-filter\nnative-sync-filter again"
         );
     }
 

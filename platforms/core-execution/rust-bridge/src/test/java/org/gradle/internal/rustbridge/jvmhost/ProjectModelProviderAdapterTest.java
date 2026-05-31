@@ -1233,6 +1233,43 @@ public class ProjectModelProviderAdapterTest {
     }
 
     @org.junit.Test
+    public void capturesStaticSyncLineReplaceFilterAsNativeReady() throws IOException {
+        File buildFile = temporaryFolder.newFile("build.gradle.kts");
+        Files.write(buildFile.toPath(), Arrays.asList(
+            "plugins { base }",
+            "tasks.register<Sync>(\"syncFiltered\") {",
+            "    from(\"src/raw\")",
+            "    into(layout.buildDirectory.dir(\"filtered\"))",
+            "    filter { line: String -> line.replace(\"TOKEN\", \"native-sync-filter\") }",
+            "}"
+        ), StandardCharsets.UTF_8);
+        File resourceFile = temporaryFolder.newFile("message.txt");
+        File outputDir = temporaryFolder.newFolder("build/sync-filtered");
+
+        Task sync = basicFileTransformTask(
+            ":syncFiltered",
+            "syncFiltered",
+            fileCollection(resourceFile),
+            fileCollection(outputDir),
+            Collections.emptyMap(),
+            true,
+            false,
+            buildFile
+        );
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(sync, Sync.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("true", inputs.get("copy_has_custom_actions"));
+        assertEquals("false", inputs.get("copy_unsupported_custom_actions"));
+        String[] replacement = inputs.get("copy_line_replace_filter").split(">");
+        assertEquals("TOKEN", decodeMapping(replacement[0]));
+        assertEquals("native-sync-filter", decodeMapping(replacement[1]));
+    }
+
+    @org.junit.Test
     public void marksFileTransformInputsContainingSymlinksAsNotNativeReady() throws IOException {
         File target = temporaryFolder.newFile("target.txt");
         File link = new File(temporaryFolder.getRoot(), "link.txt");
@@ -3770,6 +3807,9 @@ public class ProjectModelProviderAdapterTest {
     }
 
     public static class Copy {
+    }
+
+    public static class Sync {
     }
 
     public static class ProcessResources {

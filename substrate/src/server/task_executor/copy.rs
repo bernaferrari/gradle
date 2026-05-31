@@ -215,7 +215,7 @@ pub(super) fn parse_line_replace_filter(
     }))
 }
 
-fn transform_bytes(
+pub(super) fn transform_bytes(
     data: Vec<u8>,
     expand_properties: &[(String, String)],
     line_replace_filter: Option<&LineReplaceFilter>,
