@@ -43,6 +43,18 @@ pub use build_script::apply_vfs_delta_to_build_script; // Re-export VFS delta he
 pub use delete::apply_vfs_delta_to_delete;
 pub use start_scripts::apply_vfs_delta_to_start_scripts;
 
+// zr2e/8lk7 lineage next (substrate-m4ll): jar richer lowering + VFS cross export.
+// Per "How to Work on a Slice" + full directive x2x2 + "more sub-agents = more task_executor richer lowering (jar) + VFS cross + entire port accelerated" + abs paths + beads substrate-m4ll.
+pub use jar::apply_vfs_delta_to_jar;
+
+// zr2e/8lk7 lineage next after jar (substrate-ya3g): test_exec richer lowering + VFS cross export.
+// Per "How to Work on a Slice" + full directive x2x2 + "more sub-agents = more task_executor richer lowering (test_exec) + VFS cross + entire port accelerated" + abs paths + beads substrate-ya3g + "Go parallel forever".
+pub use test_exec::apply_vfs_delta_to_test_exec;
+
+// zr2e/8lk7 lineage next after test_exec (substrate-i4gt): java_compile richer lowering + VFS cross export.
+// Per "How to Work on a Slice" + full directive x2x2 + "more sub-agents = more task_executor richer lowering (java_compile) + VFS cross + entire port accelerated" + abs paths + beads substrate-i4gt + "Go parallel forever".
+pub use java_compile::apply_vfs_delta_to_java_compile;
+
 // Wave 4+ task_executor richer lowering + VFS cross (substrate-zr2e) — re-export VFS delta helper for kernel/scheduler consumption.
 // Per 8-step + full directive + "more sub-agents = more task_executor richer Tar/Sync/WriteFile + VFS DirectorySnapshot cross + entire port accelerated".
 pub use tar::apply_vfs_delta_to_tar_archive;

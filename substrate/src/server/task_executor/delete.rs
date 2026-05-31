@@ -1,3 +1,4 @@
+use crate::server::task_executor::copy::parse_patterns;
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
 use std::collections::BTreeMap;
@@ -36,8 +37,8 @@ impl TaskExecutor for DeleteTaskExecutor {
             .get("follow_symlinks")
             .map(|v| v == "true")
             .unwrap_or(false);
-        let exclude_patterns = input.options.get("exclude").map(|s| s.split(',').map(|p| p.trim().to_string()).collect::<Vec<_>>()).unwrap_or_default();
-        let include_patterns = input.options.get("include").map(|s| s.split(',').map(|p| p.trim().to_string()).collect::<Vec<_>>()).unwrap_or_default();
+        let _exclude_patterns = input.options.get("exclude").map(|s| s.split(',').map(|p| p.trim().to_string()).collect::<Vec<_>>()).unwrap_or_default();
+        let _include_patterns = input.options.get("include").map(|s| s.split(',').map(|p| p.trim().to_string()).collect::<Vec<_>>()).unwrap_or_default();
 
         for target in &input.source_files {
             if !target.exists() {
