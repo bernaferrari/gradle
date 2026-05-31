@@ -2360,6 +2360,8 @@ fn task_options(
         );
         insert_input_option(task, &mut options, "file_permissions", "file_permissions");
         insert_input_option(task, &mut options, "dir_permissions", "dir_permissions");
+    } else if task_type == "Delete" {
+        insert_input_option(task, &mut options, "follow_symlinks", "follow_symlinks");
     } else if task_type == "TestExec" {
         insert_input_option(task, &mut options, "java_home", "java_home");
         insert_input_option(task, &mut options, "classpath", "classpath");
@@ -5510,7 +5512,7 @@ mod tests {
                 "/repo/generated/stale.txt".to_string(),
             ],
             action_kind: "delete".to_string(),
-            input_specs: Vec::new(),
+            input_specs: vec![value_input("follow_symlinks", "true")],
             output_specs: Vec::new(),
             environment_inputs: Vec::new(),
             system_property_inputs: Vec::new(),
@@ -5525,6 +5527,7 @@ mod tests {
         assert_eq!(context["source_files"][0], "/repo/build");
         assert_eq!(context["source_files"][1], "/repo/generated/stale.txt");
         assert_eq!(context["target_dir"], "");
+        assert_eq!(context["options"]["follow_symlinks"], "true");
     }
 
     #[test]
