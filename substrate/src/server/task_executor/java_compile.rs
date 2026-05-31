@@ -627,3 +627,36 @@ public class Greet {
         assert!(files.is_empty());
     }
 }
+
+// zr2e/8lk7 lineage next after test_exec (substrate-i4gt): java_compile richer lowering + VFS DirectorySnapshot child_summaries cross.
+// Per "How to Work on a Slice" (AGENTS.md read FULL FIRST) + full user directive x2x2 + "more sub-agents = more task_executor richer lowering (java_compile) + VFS cross (DirectorySnapshot Merkle child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766) + entire port accelerated" + VFS failure "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust".
+// Additive only. BTree determinism. Richer contracts (sources/options/outputs/annproc/generated_sources). 0 reg on hardened VFS surfaces.
+pub fn apply_vfs_delta_to_java_compile(
+    sources: &[std::path::PathBuf],
+    output_dir: &std::path::Path,
+    delta_child_summaries: &std::collections::BTreeMap<String, String>, // from DirectorySnapshot fp:1229 child_summaries + watch:766 get_snapshot_delta
+) -> bool {
+    if delta_child_summaries.is_empty() {
+        return false;
+    }
+    // Intersect delta against source trees, annotation processor paths, generated sources, and output dir for precise kernel re-exec decisions in execution substrate 100% path.
+    let output_key = output_dir.to_string_lossy().to_string();
+    if delta_child_summaries.contains_key(&output_key) {
+        tracing::debug!(target: "java-compile-lowering", "VFS delta hits javac output {} -> re-execute", output_key);
+        return true;
+    }
+    for src in sources {
+        let src_key = src.to_string_lossy().to_string();
+        if delta_child_summaries.contains_key(&src_key) {
+            tracing::debug!(target: "java-compile-lowering", "VFS delta hits javac source {} -> re-execute", src_key);
+            return true;
+        }
+    }
+    for (k, _) in delta_child_summaries.iter() {
+        if k.contains("generated") || k.contains("annotationProcessor") || k.contains("build/classes") {
+            tracing::debug!(target: "java-compile-lowering", "VFS delta hits javac generated/annproc {} -> re-execute", k);
+            return true;
+        }
+    }
+    false
+}

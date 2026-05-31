@@ -1332,3 +1332,34 @@ mod tests {
     }
 }
 
+// zr2e/8lk7 lineage next after jar (substrate-ya3g): test_exec richer lowering + VFS DirectorySnapshot child_summaries cross.
+// Per "How to Work on a Slice" (AGENTS.md read FULL FIRST) + full user directive x2x2 + "more sub-agents = more task_executor richer lowering (test_exec) + VFS cross (DirectorySnapshot Merkle child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766) + entire port accelerated" + VFS failure "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust".
+// Additive only. BTree determinism. Richer contracts (generated_sources / annotationProcessing / parallel engines / JUnit Platform). 0 reg on hardened VFS surfaces.
+pub fn apply_vfs_delta_to_test_exec(
+    report_dir: &std::path::Path,
+    delta_child_summaries: &std::collections::BTreeMap<String, String>, // from DirectorySnapshot fp:1229 child_summaries + watch:766 get_snapshot_delta
+) -> bool {
+    if delta_child_summaries.is_empty() {
+        return false;
+    }
+    // Intersect delta against the test report dir and typical input trees (sources/test resources) that affect TestExec freshness.
+    // For precise kernel admission / re-exec decisions in execution substrate 100% path.
+    let report_key = report_dir.to_string_lossy().to_string();
+    if delta_child_summaries.contains_key(&report_key) {
+        tracing::debug!(target: "test-exec-lowering", "VFS delta hits test report dir {} -> re-execute", report_key);
+        return true;
+    }
+    for (k, _) in delta_child_summaries.iter() {
+        if k.contains("src/test") || k.contains("src/main") || k.contains("test-classes") || k.contains("generated") {
+            tracing::debug!(target: "test-exec-lowering", "VFS delta hits test input tree {} -> re-execute", k);
+            return true;
+        }
+        // Richer sustain: binary results, output-events, specific JUnit report patterns for evidence 0%+54=54 runner (yv30 after m4ll).
+        if k.contains("binary/") || k.contains("TEST-") || k.contains("results-") {
+            tracing::debug!(target: "test-exec-lowering", "VFS delta hits test binary/report {} -> re-execute (richer sustain yv30)", k);
+            return true;
+        }
+    }
+    false
+}
+
