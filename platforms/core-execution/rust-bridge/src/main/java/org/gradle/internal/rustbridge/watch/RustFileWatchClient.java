@@ -9,6 +9,8 @@ import gradle.substrate.v1.StartWatchingRequest;
 import gradle.substrate.v1.StartWatchingResponse;
 import gradle.substrate.v1.StopWatchingRequest;
 import gradle.substrate.v1.StopWatchingResponse;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.SubstrateClient;
 import org.gradle.internal.service.scopes.Scope;
@@ -21,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Client for the Rust file watching service.
@@ -30,6 +33,7 @@ import java.util.List;
 public class RustFileWatchClient implements Closeable {
 
     private static final Logger LOGGER = Logging.getLogger(RustFileWatchClient.class);
+    private static final long POLL_DEADLINE_MS = 250;
 
     private final SubstrateClient client;
 
@@ -151,14 +155,15 @@ public class RustFileWatchClient implements Closeable {
             return Collections.emptyList();
         }
 
+        List<FileChange> changes = new ArrayList<>();
         try {
             Iterator<FileChangeEvent> events = client.getFileWatchStub()
+                .withDeadlineAfter(POLL_DEADLINE_MS, TimeUnit.MILLISECONDS)
                 .pollChanges(PollChangesRequest.newBuilder()
                     .setWatchId(watchId)
                     .setSinceTimestampMs(sinceTimestampMs)
                     .build());
 
-            List<FileChange> changes = new ArrayList<>();
             while (events.hasNext()) {
                 FileChangeEvent event = events.next();
                 changes.add(new FileChange(
@@ -176,6 +181,16 @@ public class RustFileWatchClient implements Closeable {
             }
 
             return Collections.unmodifiableList(changes);
+        } catch (StatusRuntimeException e) {
+            if (e.getStatus().getCode() == Status.Code.DEADLINE_EXCEEDED) {
+                if (!changes.isEmpty()) {
+                    LOGGER.debug("[substrate:watch] pollChanges deadline reached after {} events from {}",
+                        changes.size(), watchId);
+                }
+                return Collections.unmodifiableList(changes);
+            }
+            LOGGER.debug("[substrate:watch] pollChanges failed", e);
+            return Collections.emptyList();
         } catch (Exception e) {
             LOGGER.debug("[substrate:watch] pollChanges failed", e);
             return Collections.emptyList();
