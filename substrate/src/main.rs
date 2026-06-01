@@ -10,12 +10,14 @@ use tokio::signal;
 use tonic::transport::Server;
 
 use gradle_substrate_daemon::{
+    PROTOCOL_VERSION,
     client::jvm_host::JvmHostClient,
     client::jvm_host_bridge::JvmHostBridge,
     proto::{
         artifact_publishing_service_server::ArtifactPublishingServiceServer,
         bootstrap_service_server::BootstrapServiceServer,
         build_cache_orchestration_service_server::BuildCacheOrchestrationServiceServer,
+        build_cache_packaging_service_server::BuildCachePackagingServiceServer,
         build_comparison_service_server::BuildComparisonServiceServer,
         build_event_stream_service_server::BuildEventStreamServiceServer,
         build_init_service_server::BuildInitServiceServer,
@@ -59,7 +61,8 @@ use gradle_substrate_daemon::{
         build_layout::BuildLayoutServiceImpl, build_metrics::BuildMetricsServiceImpl,
         build_operations::BuildOperationsServiceImpl, build_plan_shadow::BuildPlanShadowStore,
         build_result::BuildResultServiceImpl, cache::CacheServiceImpl,
-        cache_orchestration::BuildCacheOrchestrationServiceImpl, classpath::ClasspathServiceImpl,
+        cache_orchestration::BuildCacheOrchestrationServiceImpl,
+        cache_packaging::BuildCachePackagingServiceImpl, classpath::ClasspathServiceImpl,
         config_cache::ConfigurationCacheServiceImpl, configuration::ConfigurationServiceImpl,
         console::ConsoleServiceImpl, control::ControlServiceImpl,
         dag_executor::DagExecutorServiceImpl,
@@ -78,7 +81,6 @@ use gradle_substrate_daemon::{
         version_catalog::VersionCatalogServiceImpl, work::WorkServiceImpl,
         worker_process::WorkerProcessServiceImpl,
     },
-    PROTOCOL_VERSION,
 };
 
 const MAX_GRPC_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
@@ -403,7 +405,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
          Listening on: {}\n\
          Ready in: {}ms\n\
          Cache dir: {}\n\
-         Services: 42 (control, dag-executor, hash, cache, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, file-hash-cache, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console, test-execution, artifact-publishing, build-init, incremental-compilation, native-compile, ide-model, build-metrics, garbage-collection, version-catalog, parser, classpath, filewatch, jvmhost)",
+         Services: 43 (control, dag-executor, hash, cache, cache-packaging, exec, work, execution-plan, execution-history, cache-orchestration, file-fingerprint, file-hash-cache, value-snapshot, task-graph, configuration, plugin, build-operations, bootstrap, dependency-resolution, file-watch, config-cache, toolchain, build-event-stream, worker-process, build-layout, build-result, problem-reporting, resource-management, build-comparison, console, test-execution, artifact-publishing, build-init, incremental-compilation, native-compile, ide-model, build-metrics, garbage-collection, version-catalog, parser, classpath, filewatch, jvmhost)",
         env!("CARGO_PKG_VERSION"),
         listen_endpoint,
         startup_start.elapsed().as_millis(),
@@ -452,6 +454,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(dag_executor_service)
         .add_service(HashServiceServer::new(hash))
         .add_service(CacheServiceServer::new(cache))
+        .add_service(BuildCachePackagingServiceServer::new(
+            BuildCachePackagingServiceImpl,
+        ))
         .add_service(ClasspathServiceServer::new(ClasspathServiceImpl::new()))
         .add_service(ExecServiceServer::new(exec))
         .add_service(WorkServiceServer::new(work))

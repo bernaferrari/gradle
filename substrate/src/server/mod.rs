@@ -23,6 +23,7 @@ pub mod build_script_parser;
 pub mod build_script_types;
 pub mod cache;
 pub mod cache_orchestration;
+pub mod cache_packaging;
 pub mod capabilities;
 pub mod classpath;
 pub mod config_cache;

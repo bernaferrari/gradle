@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit;
  * Connects via loopback TCP by default, with Unix domain socket support for environments
  * that package the required Netty native transports.
  *
- * <p>Provides blocking stubs for all 33 substrate services.
+ * <p>Provides blocking stubs for the configured substrate services.
  * When the substrate is disabled (noop mode), all stub getters
  * throw {@link SubstrateException}.</p>
  */
@@ -51,6 +51,7 @@ public class SubstrateClient implements Closeable {
     private final ExecutionHistoryServiceGrpc.ExecutionHistoryServiceBlockingStub executionHistoryStub;
     // Phase 8: Build cache orchestration
     private final BuildCacheOrchestrationServiceGrpc.BuildCacheOrchestrationServiceBlockingStub cacheOrchestrationStub;
+    private final BuildCachePackagingServiceGrpc.BuildCachePackagingServiceBlockingStub cachePackagingStub;
     // Phase 9: File fingerprinting
     private final FileFingerprintServiceGrpc.FileFingerprintServiceBlockingStub fileFingerprintStub;
     // Phase 10: Value snapshotting
@@ -130,6 +131,7 @@ public class SubstrateClient implements Closeable {
             this.dagExecutorStub = null;
             this.executionHistoryStub = null;
             this.cacheOrchestrationStub = null;
+            this.cachePackagingStub = null;
             this.fileFingerprintStub = null;
             this.valueSnapshotStub = null;
             this.taskGraphStub = null;
@@ -171,6 +173,7 @@ public class SubstrateClient implements Closeable {
             this.dagExecutorStub = configureStub(DagExecutorServiceGrpc.newBlockingStub(channel));
             this.executionHistoryStub = configureStub(ExecutionHistoryServiceGrpc.newBlockingStub(channel));
             this.cacheOrchestrationStub = configureStub(BuildCacheOrchestrationServiceGrpc.newBlockingStub(channel));
+            this.cachePackagingStub = configureStub(BuildCachePackagingServiceGrpc.newBlockingStub(channel));
             this.fileFingerprintStub = configureStub(FileFingerprintServiceGrpc.newBlockingStub(channel));
             this.valueSnapshotStub = configureStub(ValueSnapshotServiceGrpc.newBlockingStub(channel));
             this.taskGraphStub = configureStub(TaskGraphServiceGrpc.newBlockingStub(channel));
@@ -337,6 +340,11 @@ public class SubstrateClient implements Closeable {
     public BuildCacheOrchestrationServiceGrpc.BuildCacheOrchestrationServiceBlockingStub getCacheOrchestrationStub() {
         throwIfNoop();
         return cacheOrchestrationStub;
+    }
+
+    public BuildCachePackagingServiceGrpc.BuildCachePackagingServiceBlockingStub getCachePackagingStub() {
+        throwIfNoop();
+        return cachePackagingStub;
     }
 
     public FileFingerprintServiceGrpc.FileFingerprintServiceBlockingStub getFileFingerprintStub() {
