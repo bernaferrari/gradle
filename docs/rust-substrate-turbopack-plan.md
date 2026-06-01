@@ -279,6 +279,12 @@ Progress checkpoint, 2026-06-01:
   32/32 metadata resolver tests. The package-wide integration test target still
   has unrelated pre-existing compile failures under
   `substrate/tests/differential` and `substrate/tests/benchmarks.rs`.
+- External corpus evidence:
+  `build/corpus-preview-external-phase4-20260601/corpus_summary.json` passed
+  9/9 projects with authoritative RunBuild, no fallback substrate runs, exit
+  code/task/output/hash/archive parity, and equal task totals
+  (upstream=105, substrate=105). All 18 declared and resolved dependency graph
+  diffs matched.
 
 ### Phase 5: Move Configuration To A Stable IR
 
