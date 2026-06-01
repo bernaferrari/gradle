@@ -143,6 +143,19 @@ public class SubstrateLifecycleTest {
         assertFalse(RustBridgeCoreServices.shouldEnableBootstrapLifecycle(options));
         assertFalse(RustBridgeCoreServices.shouldEnableBuildResultLifecycle(options));
         assertTrue(RustBridgeCoreServices.shouldCaptureSelectedTaskContracts(options));
+        assertTrue(RustBridgeCoreServices.shouldRunBuildFromSelectedTaskContracts(options));
+    }
+
+    @Test
+    public void authoritativeModeEnablesStrictNoFallbackRunBuildByDefault() {
+        Map<String, String> values = new HashMap<>();
+        values.put(RustSubstrateOptions.SUBSTRATE_MODE.getPropertyName(), "authoritative");
+
+        DefaultInternalOptions options = new DefaultInternalOptions(values);
+        assertEquals(RustSubstrateOptions.ExecutionKernelAdmission.STRICT, RustSubstrateOptions.getExecutionKernelAdmission(options));
+        assertTrue(RustSubstrateOptions.isExecutionKernelEnabled(options));
+        assertTrue(RustBridgeCoreServices.shouldCaptureSelectedTaskContracts(options));
+        assertTrue(RustBridgeCoreServices.shouldRunBuildFromSelectedTaskContracts(options));
     }
 
     @Test
@@ -151,7 +164,9 @@ public class SubstrateLifecycleTest {
         values.put(RustSubstrateOptions.ENABLE_SUBSTRATE.getPropertyName(), "true");
         values.put(RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_RUN_BUILD.getPropertyName(), "true");
 
-        assertTrue(RustSubstrateOptions.isExecutionKernelEnabled(new DefaultInternalOptions(values)));
+        DefaultInternalOptions options = new DefaultInternalOptions(values);
+        assertTrue(RustSubstrateOptions.isExecutionKernelEnabled(options));
+        assertTrue(RustBridgeCoreServices.shouldRunBuildFromSelectedTaskContracts(options));
     }
 
     @Test
@@ -165,6 +180,7 @@ public class SubstrateLifecycleTest {
         assertTrue(RustSubstrateOptions.isExecutionKernelRequested(options));
         assertFalse(RustSubstrateOptions.isExecutionKernelEnabled(options));
         assertTrue(RustBridgeCoreServices.shouldCaptureSelectedTaskContracts(options));
+        assertTrue(RustBridgeCoreServices.shouldRunBuildFromSelectedTaskContracts(options));
     }
 
     @Test
