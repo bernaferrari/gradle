@@ -76,6 +76,7 @@ import org.gradle.internal.nativeintegration.services.NativeServices;
 import org.gradle.internal.os.OperatingSystem;
 import org.gradle.internal.rustbridge.SubstrateClient;
 import org.gradle.internal.rustbridge.SubstrateException;
+import org.gradle.internal.rustbridge.filehashcache.RustFileHashCacheClient;
 import org.gradle.internal.rustbridge.fingerprint.RustFileFingerprintClient;
 import org.gradle.internal.rustbridge.fingerprint.ShadowingFileCollectionSnapshotter;
 import org.gradle.internal.rustbridge.hash.RustGrpcFileHasher;
@@ -498,22 +499,32 @@ public class VirtualFileSystemServices extends AbstractGradleModuleServices {
             @Nullable SubstrateClient substrateClient
         ) {
             FileHasher javaHasher = new DefaultFileHasher(streamHasher);
-            if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_HASHING)) {
+            boolean rustHashingEnabled = RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_HASHING);
+            boolean rustFileHashCacheEnabled = RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_FILE_HASH_CACHE);
+            if (!rustHashingEnabled && !rustFileHashCacheEnabled) {
                 return javaHasher;
             }
-            boolean authoritative = RustSubstrateOptions.isSubsystemAuthoritative(
+            boolean hashingAuthoritative = RustSubstrateOptions.isSubsystemAuthoritative(
                 options,
                 RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_HASHING
             );
+            boolean fileHashCacheAuthoritative = RustSubstrateOptions.isSubsystemAuthoritative(
+                options,
+                RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_FILE_HASH_CACHE
+            );
+            boolean authoritative = hashingAuthoritative || fileHashCacheAuthoritative;
             if (!isUsable(substrateClient)) {
                 if (authoritative) {
-                    throw new SubstrateException("Authoritative Rust hashing is enabled but the Rust substrate client is unavailable");
+                    throw new SubstrateException("Authoritative Rust file hashing/cache is enabled but the Rust substrate client is unavailable");
                 }
                 return javaHasher;
             }
+            RustFileHashCacheClient fileHashCacheClient = rustFileHashCacheEnabled
+                ? new RustFileHashCacheClient(substrateClient)
+                : null;
             return new ShadowingFileHasher(
                 javaHasher,
-                new RustGrpcFileHasher(substrateClient),
+                new RustGrpcFileHasher(substrateClient, fileHashCacheClient, fileHashCacheAuthoritative),
                 createMismatchReporter(options),
                 authoritative
             );

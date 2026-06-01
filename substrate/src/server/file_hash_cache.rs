@@ -27,19 +27,19 @@
 // Gov abs paths: /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/file_hash_cache.rs (this) + schema_versioned.rs (Versioned+sharded+quarantine) + cache_orchestration.rs + cache_differential_test.rs + corpus_runner/run.py + plan.md (CC durable 019e68ac-be2b... 54=54) + RustBridgeCoreServices.java.
 // Internal TODO varied: 1. Full VersionedFileStore wire (replace local_store for fh-). 2. Quarantine on every VersionedError + bincode fail (non-destructive .corrupt). 3. "persistent-cache" log tags + stats. 4. DashMap index fidelity with Versioned bytes. 5. Pilot --watch-fs complete manifest 0% under reporter. 6. Hygiene <5 edits. Cross rescue/sustain. More sub-agents used. Cargo green.
 
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use dashmap::DashMap;
 use md5::{Digest, Md5};
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
-    file_hash_cache_service_server::FileHashCacheService, FileInfo, GetFileHashCacheStatsRequest,
-    GetFileHashCacheStatsResponse, GetFileInfoRequest, GetFileInfoResponse,
-    InvalidateFileInfoRequest, InvalidateFileInfoResponse, PutFileInfoRequest, PutFileInfoResponse,
+    FileInfo, GetFileHashCacheStatsRequest, GetFileHashCacheStatsResponse, GetFileInfoRequest,
+    GetFileInfoResponse, InvalidateFileInfoRequest, InvalidateFileInfoResponse, PutFileInfoRequest,
+    PutFileInfoResponse, file_hash_cache_service_server::FileHashCacheService,
 };
-use crate::server::cache::{hex, LocalCacheStore};
+use crate::server::cache::{LocalCacheStore, hex};
 use crate::server::schema_versioned::{
     ChecksumAlgorithm, SchemaVersion, SchemaVersionedError, VersionedFileStore,
 };
@@ -85,6 +85,10 @@ impl From<SerializableFileInfo> for FileInfo {
             last_modified: s.last_modified,
         }
     }
+}
+
+fn file_info_matches_request(info: &FileInfo, length: i64, last_modified: i64) -> bool {
+    info.length == length && info.last_modified == last_modified
 }
 
 pub struct FileHashCacheServiceImpl {
@@ -190,6 +194,18 @@ impl FileHashCacheServiceImpl {
         }
     }
 
+    fn remove_key_from_indices(&self, path: &str, store_key: &str) {
+        self.index.remove(store_key);
+        let mut remove_path = false;
+        if let Some(mut keys) = self.path_index.get_mut(path) {
+            keys.retain(|k| k != store_key);
+            remove_path = keys.is_empty();
+        }
+        if remove_path {
+            self.path_index.remove(path);
+        }
+    }
+
     /// Precise VFS delta-driven invalidation (Wave 4 Hygiene Companion 1 - varied approach on file_hash_cache + VFS delta integration errors).
     /// Method signature added to FileHashCacheService surface (via inherent impl on FileHashCacheServiceImpl; proper non-trait context resolves E0449 visibility + E0407 "not member of generated tonic trait").
     /// Pure fn taking DirectorySnapshot delta (or paths+seq compatible) for precise invalidation.
@@ -265,21 +281,44 @@ impl FileHashCacheService for FileHashCacheServiceImpl {
                 SchemaVersion::CURRENT,
             ) {
                 Ok(sinfo) => {
-                    self.record_hit();
                     // DashMap fidelity: Versioned authoritative path; size estimated from Serializable (exact post-write via fs in prod; here from prior put index warm)
                     let info: FileInfo = sinfo.into();
-                    tracing::info!(
-                        target: "persistent-cache",
-                        path = %path,
-                        kind = %kind,
-                        hash_len = info.hash.len(),
-                        "FileHashCache HIT (persistent VersionedFileStore sharded fh-bin authoritative; CC v2 durable synergy)"
-                    );
-                    return Ok(Response::new(GetFileInfoResponse {
-                        hit: true,
-                        info: Some(info),
-                        error: String::new(),
-                    }));
+                    if !file_info_matches_request(&info, req.length, req.last_modified) {
+                        self.remove_key_from_indices(&path, &store_key);
+                        if let Err(e) = vs.remove(&store_key) {
+                            tracing::debug!(
+                                target: "persistent-cache",
+                                error = %e,
+                                key = %store_key,
+                                "Failed to remove stale FileHashCache entry"
+                            );
+                        }
+                        tracing::debug!(
+                            target: "persistent-cache",
+                            path = %path,
+                            kind = %kind,
+                            cached_length = info.length,
+                            cached_last_modified = info.last_modified,
+                            requested_length = req.length,
+                            requested_last_modified = req.last_modified,
+                            "FileHashCache stale entry rejected"
+                        );
+                    } else {
+                        self.record_hit();
+                        self.update_indices(&path, &store_key, std::mem::size_of_val(&info));
+                        tracing::info!(
+                            target: "persistent-cache",
+                            path = %path,
+                            kind = %kind,
+                            hash_len = info.hash.len(),
+                            "FileHashCache HIT (persistent VersionedFileStore sharded fh-bin authoritative; CC v2 durable synergy)"
+                        );
+                        return Ok(Response::new(GetFileInfoResponse {
+                            hit: true,
+                            info: Some(info),
+                            error: String::new(),
+                        }));
+                    }
                 }
                 Err(SchemaVersionedError::IoError(_)) => {
                     // Not present (or other io) => miss. Normal.
@@ -298,21 +337,43 @@ impl FileHashCacheService for FileHashCacheServiceImpl {
                 Ok(Some(data)) => {
                     match bincode::deserialize::<SerializableFileInfo>(&data) {
                         Ok(sinfo) => {
-                            self.record_hit();
-                            self.update_indices(&path, &store_key, data.len()); // ensure warm index
                             let info: FileInfo = sinfo.into();
-                            tracing::debug!(
-                                target: "gradle_substrate::file_hash_cache",
-                                path = %path,
-                                kind = %kind,
-                                hash_len = info.hash.len(),
-                                "FileHashCache HIT (persistent local fallback - versioned absent)"
-                            );
-                            return Ok(Response::new(GetFileInfoResponse {
-                                hit: true,
-                                info: Some(info),
-                                error: String::new(),
-                            }));
+                            if !file_info_matches_request(&info, req.length, req.last_modified) {
+                                self.remove_key_from_indices(&path, &store_key);
+                                if let Err(e) = ls.remove(&store_key).await {
+                                    tracing::debug!(
+                                        target: "gradle_substrate::file_hash_cache",
+                                        error = %e,
+                                        key = %store_key,
+                                        "Failed to remove stale FileHashCache entry"
+                                    );
+                                }
+                                tracing::debug!(
+                                    target: "gradle_substrate::file_hash_cache",
+                                    path = %path,
+                                    kind = %kind,
+                                    cached_length = info.length,
+                                    cached_last_modified = info.last_modified,
+                                    requested_length = req.length,
+                                    requested_last_modified = req.last_modified,
+                                    "FileHashCache stale entry rejected"
+                                );
+                            } else {
+                                self.record_hit();
+                                self.update_indices(&path, &store_key, data.len()); // ensure warm index
+                                tracing::debug!(
+                                    target: "gradle_substrate::file_hash_cache",
+                                    path = %path,
+                                    kind = %kind,
+                                    hash_len = info.hash.len(),
+                                    "FileHashCache HIT (persistent local fallback - versioned absent)"
+                                );
+                                return Ok(Response::new(GetFileInfoResponse {
+                                    hit: true,
+                                    info: Some(info),
+                                    error: String::new(),
+                                }));
+                            }
                         }
                         Err(e) => {
                             tracing::warn!(target: "persistent-cache", error = %e, "Bincode deserialize corruption for {}", store_key);
@@ -609,6 +670,57 @@ mod tests {
             .await
             .unwrap()
             .into_inner();
+        assert_eq!(stats.entries, 0);
+    }
+
+    #[tokio::test]
+    async fn stale_length_or_timestamp_is_a_miss_and_removes_entry() {
+        let tmp = TempDir::new().unwrap();
+        let service = test_service(&tmp);
+        let path = tmp.path().join("input.txt").to_string_lossy().to_string();
+
+        let put = service
+            .put_file_info(Request::new(PutFileInfoRequest {
+                path: path.clone(),
+                kind: "FILE_HASHES".to_string(),
+                info: Some(file_info()),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(put.success, "put failed: {}", put.error);
+
+        let miss = service
+            .get_file_info(Request::new(GetFileInfoRequest {
+                path: path.clone(),
+                length: 13,
+                last_modified: 34,
+                kind: "FILE_HASHES".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!miss.hit);
+
+        let miss_after_removal = service
+            .get_file_info(Request::new(GetFileInfoRequest {
+                path,
+                length: 12,
+                last_modified: 34,
+                kind: "FILE_HASHES".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!miss_after_removal.hit);
+
+        let stats = service
+            .get_stats(Request::new(GetFileHashCacheStatsRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(stats.hits, 0);
+        assert_eq!(stats.misses, 2);
         assert_eq!(stats.entries, 0);
     }
 }

@@ -7,19 +7,35 @@ import gradle.substrate.v1.HashResult;
 import org.gradle.internal.hash.FileHasher;
 import org.gradle.internal.hash.HashCode;
 import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.rustbridge.SubstrateException;
+import org.gradle.internal.rustbridge.filehashcache.RustFileHashCacheClient;
+import org.jspecify.annotations.Nullable;
 
 import java.io.File;
-import java.util.Collections;
 
 /**
  * A {@link FileHasher} implementation that delegates to the Rust substrate daemon via gRPC.
  */
 public class RustGrpcFileHasher implements FileHasher {
 
+    private static final String FILE_HASH_KIND = "FILE_HASHES";
+
     private final SubstrateClient client;
+    private final @Nullable RustFileHashCacheClient fileHashCacheClient;
+    private final boolean fileHashCacheAuthoritative;
 
     public RustGrpcFileHasher(SubstrateClient client) {
+        this(client, null, false);
+    }
+
+    public RustGrpcFileHasher(
+        SubstrateClient client,
+        @Nullable RustFileHashCacheClient fileHashCacheClient,
+        boolean fileHashCacheAuthoritative
+    ) {
         this.client = client;
+        this.fileHashCacheClient = fileHashCacheClient;
+        this.fileHashCacheAuthoritative = fileHashCacheAuthoritative;
     }
 
     @Override
@@ -29,9 +45,15 @@ public class RustGrpcFileHasher implements FileHasher {
 
     @Override
     public HashCode hash(File file, long length, long lastModified) {
+        String absolutePath = file.getAbsolutePath();
+        HashCode cached = loadFromFileHashCache(absolutePath, length, lastModified);
+        if (cached != null) {
+            return cached;
+        }
+
         HashBatchRequest request = HashBatchRequest.newBuilder()
             .addFiles(FileToHash.newBuilder()
-                .setAbsolutePath(file.getAbsolutePath())
+                .setAbsolutePath(absolutePath)
                 .setLength(length)
                 .setLastModified(lastModified)
                 .build())
@@ -48,6 +70,39 @@ public class RustGrpcFileHasher implements FileHasher {
             throw new RuntimeException("Rust hash error for " + file + ": " + result.getErrorMessage());
         }
 
-        return HashCode.fromBytes(result.getHashBytes().toByteArray());
+        HashCode hash = HashCode.fromBytes(result.getHashBytes().toByteArray());
+        storeInFileHashCache(absolutePath, hash, length, lastModified);
+        return hash;
+    }
+
+    @Nullable
+    private HashCode loadFromFileHashCache(String absolutePath, long length, long lastModified) {
+        if (fileHashCacheClient == null) {
+            return null;
+        }
+        RustFileHashCacheClient.FileInfoResult result =
+            fileHashCacheClient.getFileInfo(absolutePath, length, lastModified, FILE_HASH_KIND);
+        if (!result.isSuccess()) {
+            if (fileHashCacheAuthoritative) {
+                throw new SubstrateException(
+                    "Authoritative Rust file hash cache get failed for " + absolutePath + ": " + result.getErrorMessage()
+                );
+            }
+            return null;
+        }
+        return result.getInfo()
+            .filter(info -> info.getLength() == length && info.getLastModified() == lastModified)
+            .map(RustFileHashCacheClient.FileInfoData::getHash)
+            .orElse(null);
+    }
+
+    private void storeInFileHashCache(String absolutePath, HashCode hash, long length, long lastModified) {
+        if (fileHashCacheClient == null) {
+            return;
+        }
+        boolean stored = fileHashCacheClient.putFileInfo(absolutePath, hash, length, lastModified, FILE_HASH_KIND);
+        if (!stored && fileHashCacheAuthoritative) {
+            throw new SubstrateException("Authoritative Rust file hash cache put failed for " + absolutePath);
+        }
     }
 }
