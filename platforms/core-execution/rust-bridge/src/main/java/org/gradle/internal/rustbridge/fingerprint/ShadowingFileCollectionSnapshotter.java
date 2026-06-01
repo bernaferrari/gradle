@@ -57,9 +57,10 @@ import java.util.function.Predicate;
  * <p>In shadow mode, this validates the Rust implementation against the known-good Java one
  * by walking the Java snapshot and comparing individual file hashes.</p>
  *
- * <p>In authoritative mode, this supports direct files, missing paths, directory roots,
- * PatternSet-backed file trees, and file-tree-backed archive files. Symlink and special-file
- * paths still fail closed until their Gradle access semantics are modeled explicitly.</p>
+ * <p>In authoritative mode, this supports direct files, file symlinks, broken symlinks,
+ * missing paths, directory roots, PatternSet-backed file trees, and file-tree-backed archive
+ * files. Directory symlinks and special files still fail closed until cycle/remapping semantics
+ * are modeled explicitly.</p>
  */
 public class ShadowingFileCollectionSnapshotter implements FileCollectionSnapshotter {
 
@@ -252,7 +253,7 @@ public class ShadowingFileCollectionSnapshotter implements FileCollectionSnapsho
     private FileSystemLocationSnapshot snapshotRoot(RootSpec root, Map<String, RustFileFingerprintClient.IndividualFingerprint> rustEntriesByPath) {
         File absoluteRoot = root.root;
         if (!absoluteRoot.exists()) {
-            return new MissingFileSnapshot(absoluteRoot.getAbsolutePath(), absoluteRoot.getName(), FileMetadata.AccessType.DIRECT);
+            return new MissingFileSnapshot(absoluteRoot.getAbsolutePath(), absoluteRoot.getName(), accessType(absoluteRoot));
         }
         if (absoluteRoot.isFile()) {
             if (!root.isIncluded(absoluteRoot, false, java.util.Collections.singletonList(absoluteRoot.getName()), stat)) {
@@ -261,6 +262,7 @@ public class ShadowingFileCollectionSnapshotter implements FileCollectionSnapsho
             return regularFileSnapshot(absoluteRoot, rustEntriesByPath);
         }
         if (absoluteRoot.isDirectory()) {
+            ensureSupportedDirectoryPath(absoluteRoot);
             DirectorySnapshotBuilder builder = MerkleDirectorySnapshotBuilder.sortingRequired();
             appendDirectory(builder, root, absoluteRoot, rustEntriesByPath, java.util.Collections.emptyList());
             return builder.getResult();
@@ -275,9 +277,9 @@ public class ShadowingFileCollectionSnapshotter implements FileCollectionSnapsho
         Map<String, RustFileFingerprintClient.IndividualFingerprint> rustEntriesByPath,
         List<String> relativeSegments
     ) {
-        ensureDirectPath(directory);
+        ensureSupportedDirectoryPath(directory);
         builder.enterDirectory(
-            FileMetadata.AccessType.DIRECT,
+            accessType(directory),
             directory.getAbsolutePath(),
             directory.getName(),
             DirectorySnapshotBuilder.EmptyDirectoryHandlingStrategy.INCLUDE_EMPTY_DIRS
@@ -297,6 +299,10 @@ public class ShadowingFileCollectionSnapshotter implements FileCollectionSnapsho
                 if (!DEFAULT_EXCLUDES.excludeFile(child.getName()) && root.isIncluded(child, false, childRelativeSegments, stat)) {
                     builder.visitLeafElement(regularFileSnapshot(child.getAbsoluteFile(), rustEntriesByPath));
                 }
+            } else if (isBrokenSymlink(child)) {
+                if (!DEFAULT_EXCLUDES.excludeFile(child.getName()) && root.isIncluded(child, false, childRelativeSegments, stat)) {
+                    builder.visitLeafElement(new MissingFileSnapshot(child.getAbsolutePath(), child.getName(), FileMetadata.AccessType.VIA_SYMLINK));
+                }
             } else {
                 throw new SubstrateException("Authoritative Rust file fingerprinting does not support special files: " + child.getAbsolutePath());
             }
@@ -305,7 +311,6 @@ public class ShadowingFileCollectionSnapshotter implements FileCollectionSnapsho
     }
 
     private RegularFileSnapshot regularFileSnapshot(File file, Map<String, RustFileFingerprintClient.IndividualFingerprint> rustEntriesByPath) {
-        ensureDirectPath(file);
         RustFileFingerprintClient.IndividualFingerprint entry = rustEntriesByPath.get(file.getAbsolutePath());
         if (entry == null) {
             throw new SubstrateException("Authoritative Rust file fingerprinting returned no entry for " + file.getAbsolutePath());
@@ -316,7 +321,7 @@ public class ShadowingFileCollectionSnapshotter implements FileCollectionSnapsho
         FileMetadata metadata = DefaultFileMetadata.file(
             entry.getLastModified(),
             entry.getSize(),
-            FileMetadata.AccessType.DIRECT
+            accessType(file)
         );
         return new RegularFileSnapshot(
             file.getAbsolutePath(),
@@ -332,7 +337,6 @@ public class ShadowingFileCollectionSnapshotter implements FileCollectionSnapsho
 
     private void collectRegularFiles(RootSpec root, File file, List<File> regularFiles, List<String> relativeSegments) {
         File absoluteRoot = file.getAbsoluteFile();
-        ensureDirectPath(absoluteRoot);
         if (!absoluteRoot.exists()) {
             return;
         }
@@ -343,6 +347,7 @@ public class ShadowingFileCollectionSnapshotter implements FileCollectionSnapsho
             return;
         }
         if (absoluteRoot.isDirectory()) {
+            ensureSupportedDirectoryPath(absoluteRoot);
             File[] children = absoluteRoot.listFiles();
             if (children == null) {
                 throw new SubstrateException("Authoritative Rust file fingerprinting could not list directory: " + absoluteRoot.getAbsolutePath());
@@ -355,9 +360,10 @@ public class ShadowingFileCollectionSnapshotter implements FileCollectionSnapsho
                     }
                 } else if (child.isFile()) {
                     if (!DEFAULT_EXCLUDES.excludeFile(child.getName()) && root.isIncluded(child, false, childRelativeSegments, stat)) {
-                        ensureDirectPath(child);
                         regularFiles.add(child.getAbsoluteFile());
                     }
+                } else if (isBrokenSymlink(child)) {
+                    // Broken symlinks snapshot as missing VIA_SYMLINK entries and do not need Rust content hashes.
                 } else {
                     throw new SubstrateException("Authoritative Rust file fingerprinting does not support special files: " + child.getAbsolutePath());
                 }
@@ -374,9 +380,19 @@ public class ShadowingFileCollectionSnapshotter implements FileCollectionSnapsho
         return result;
     }
 
-    private static void ensureDirectPath(File file) {
-        if (Files.isSymbolicLink(file.toPath())) {
-            throw new SubstrateException("Authoritative Rust file fingerprinting does not yet support symlink paths: " + file.getAbsolutePath());
+    private static FileMetadata.AccessType accessType(File file) {
+        return Files.isSymbolicLink(file.toPath())
+            ? FileMetadata.AccessType.VIA_SYMLINK
+            : FileMetadata.AccessType.DIRECT;
+    }
+
+    private static boolean isBrokenSymlink(File file) {
+        return Files.isSymbolicLink(file.toPath()) && !file.exists();
+    }
+
+    private static void ensureSupportedDirectoryPath(File directory) {
+        if (Files.isSymbolicLink(directory.toPath())) {
+            throw new SubstrateException("Authoritative Rust file fingerprinting does not yet support directory symlink paths: " + directory.getAbsolutePath());
         }
     }
 
