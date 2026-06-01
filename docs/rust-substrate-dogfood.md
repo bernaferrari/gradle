@@ -24,7 +24,7 @@ The runner writes:
 
 ## Current Evidence
 
-Latest checked run: 2026-05-12.
+Latest checked run: 2026-06-01.
 
 | Project | Expectation | Mode | Result | What It Proves |
 | --- | --- | --- | --- | --- |
@@ -36,7 +36,7 @@ Latest checked run: 2026-05-12.
 | `javadoc-process-launch` | supported | strict | pass | Rust DAG execution covers Java compilation, Jar packaging, and native Javadoc process launch with deterministic output. |
 | `unsupported-composite-substitution` | fail-closed | strict | pass | Settings-level `includeBuild(...)` composite substitution rejects before Rust execution instead of approximating included-build semantics. |
 
-Summary from `build/dogfood-current/dogfood-summary.md`:
+Summary from `build/dogfood-phase2-20260601/dogfood-summary.md`:
 
 | Metric | Result |
 | --- | ---: |
@@ -45,25 +45,27 @@ Summary from `build/dogfood-current/dogfood-summary.md`:
 | Fail-closed projects matched | 1/1 |
 | Supported projects with zero JVM forwards | 6/6 |
 | Rust RunBuild markers | 7/7 |
+| Rust RunBuild executions | 7/7 |
 | Task-graph captures | 7/7 |
 | Daemon started signals | 0 |
 | Daemon reused signals | 7 |
-| Upstream observed wall time | 19784 ms |
-| Rust substrate observed wall time | 23112 ms |
-| Rust bootstrap/RunBuild observed time | 3740 ms |
-| Non-Rust/Gradle overhead estimate | 19372 ms |
+| Upstream observed wall time | 48278 ms |
+| Rust substrate observed wall time | 25849 ms |
+| Rust bootstrap/RunBuild observed time | 4713 ms |
+| Non-Rust/Gradle overhead estimate | 21136 ms |
 | Upstream task total | 109 |
 | Rust substrate task total | 105 |
 
 The dogfood runner owns one prewarmed Rust daemon for the manifest execution
 and passes its shared state directory to each substrate invocation. This removes
-per-project Rust daemon startup from the measured substrate path, but it does
-not yet make the full dogfood set faster than upstream.
+per-project Rust daemon startup from the measured substrate path. In the
+2026-06-01 Phase 2 completion run, the substrate path was faster than upstream
+for the full local dogfood set while still preserving strict parity checks.
 
 The current timing split shows the remaining gap is not primarily inside the
 Rust task executor. The measured Rust bootstrap/RunBuild portion is about
-3.7s across the whole local dogfood manifest, while the non-Rust/Gradle
-invocation and configuration overhead is about 19.4s. The next performance
+4.7s across the whole local dogfood manifest, while the non-Rust/Gradle
+invocation and configuration overhead is about 21.1s. The next performance
 work should therefore target skipping or amortizing JVM-side configuration for
 warm supported runs, not micro-optimizing individual Rust task executors first.
 
