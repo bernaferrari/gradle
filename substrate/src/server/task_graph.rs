@@ -1750,7 +1750,10 @@ fn execution_context_json(task: &CanonicalBuildPlanTask, task_type: &str) -> Str
 
 fn cacheability_allows_cache(cacheability: &str) -> bool {
     let value = cacheability.trim().to_ascii_lowercase();
-    value == "cacheable" || value == "enabled" || value == "true"
+    matches!(
+        value.as_str(),
+        "cacheable" | "cacheable-annotation" | "enabled" | "true"
+    )
 }
 
 fn work_input_properties(
@@ -3645,6 +3648,16 @@ mod tests {
                 .len()
                 >= 32
         );
+    }
+
+    #[test]
+    fn test_cacheability_allows_cacheable_task_annotation_marker() {
+        assert!(cacheability_allows_cache("cacheable"));
+        assert!(cacheability_allows_cache("cacheable-annotation"));
+        assert!(cacheability_allows_cache(" enabled "));
+        assert!(!cacheability_allows_cache("declared-outputs"));
+        assert!(!cacheability_allows_cache("unknown"));
+        assert!(!cacheability_allows_cache("not-cacheable"));
     }
 
     #[test]
