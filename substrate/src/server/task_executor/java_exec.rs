@@ -27,14 +27,15 @@ impl JavaExecTaskExecutor {
         }
     }
 
-    fn system_property_args(system_properties: Option<&str>) -> Vec<String> {
-        system_properties
-            .into_iter()
-            .flat_map(|props| props.split(','))
-            .map(str::trim)
-            .filter(|prop| !prop.is_empty() && prop.contains('='))
-            .map(|prop| format!("-D{}", prop))
-            .collect()
+    fn system_property_args(input: &TaskInput) -> Vec<String> {
+        option_string_map(
+            &input.options,
+            "system_properties_json",
+            "system_properties",
+        )
+        .into_iter()
+        .map(|(key, value)| format!("-D{}={}", key, value))
+        .collect()
     }
 
     fn max_heap_arg(max_heap_size: Option<&str>) -> Option<String> {
@@ -103,9 +104,7 @@ impl TaskExecutor for JavaExecTaskExecutor {
             "jvm_args_json",
             "jvm_args",
         ));
-        args.extend(Self::system_property_args(
-            input.options.get("system_properties").map(String::as_str),
-        ));
+        args.extend(Self::system_property_args(input));
         args.push("-cp".to_string());
         args.push(classpath.to_string());
         args.push(main_class.to_string());
@@ -250,15 +249,56 @@ mod tests {
 
     #[test]
     fn test_java_exec_system_property_args() {
+        let mut input = TaskInput::new("JavaExec");
+        input.options.insert(
+            "system_properties".to_string(),
+            "key1=val1,key2=val2".to_string(),
+        );
+        let mut args = JavaExecTaskExecutor::system_property_args(&input);
+        args.sort();
         assert_eq!(
-            JavaExecTaskExecutor::system_property_args(Some("key1=val1,key2=val2")),
+            args,
             vec!["-Dkey1=val1".to_string(), "-Dkey2=val2".to_string()]
         );
-        assert_eq!(
-            JavaExecTaskExecutor::system_property_args(Some("empty,nope,key=value")),
-            vec!["-Dkey=value".to_string()]
+        input.options.insert(
+            "system_properties".to_string(),
+            "empty,nope,key=value".to_string(),
         );
-        assert!(JavaExecTaskExecutor::system_property_args(Some(" ")).is_empty());
+        let mut args = JavaExecTaskExecutor::system_property_args(&input);
+        args.sort();
+        assert_eq!(args, vec!["-Dkey=value".to_string()]);
+        input
+            .options
+            .insert("system_properties".to_string(), " ".to_string());
+        assert!(JavaExecTaskExecutor::system_property_args(&input).is_empty());
+    }
+
+    #[test]
+    fn test_java_exec_system_property_args_prefer_json_contract() {
+        let mut input = TaskInput::new("JavaExec");
+        input.options.insert(
+            "system_properties".to_string(),
+            "BROKEN=legacy,value".to_string(),
+        );
+        input.options.insert(
+            "system_properties_json".to_string(),
+            serde_json::json!({
+                "complex.prop": "value,with=punctuation",
+                "empty.prop": ""
+            })
+            .to_string(),
+        );
+
+        let mut args = JavaExecTaskExecutor::system_property_args(&input);
+        args.sort();
+
+        assert_eq!(
+            args,
+            vec![
+                "-Dcomplex.prop=value,with=punctuation".to_string(),
+                "-Dempty.prop=".to_string()
+            ]
+        );
     }
 
     #[test]

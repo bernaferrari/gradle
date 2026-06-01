@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{Cursor, Read, Write};
 
 use flate2::read::GzDecoder;
@@ -7,12 +7,14 @@ use flate2::{Compression, GzBuilder};
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
-    BuildCachePackFile, PackCacheEntryRequest, PackCacheEntryResponse, UnpackCacheEntryRequest,
-    UnpackCacheEntryResponse, build_cache_packaging_service_server::BuildCachePackagingService,
+    build_cache_packaging_service_server::BuildCachePackagingService, BuildCachePackFile,
+    PackCacheEntryRequest, PackCacheEntryResponse, UnpackCacheEntryRequest,
+    UnpackCacheEntryResponse,
 };
 
 const METADATA_ENTRY: &str = "METADATA";
-const TREE_PREFIX: &str = "tree/";
+const DEFAULT_TREE_NAME: &str = "output";
+const LEGACY_TREE_PREFIX: &str = "tree/";
 
 #[derive(Default)]
 pub struct BuildCachePackagingServiceImpl;
@@ -76,6 +78,64 @@ fn append_file(
     builder.append_data(&mut header, path, Cursor::new(content))
 }
 
+fn append_directory(
+    builder: &mut tar::Builder<&mut Vec<u8>>,
+    path: &str,
+    mode: u32,
+) -> Result<(), std::io::Error> {
+    let mut header = tar::Header::new_gnu();
+    header.set_entry_type(tar::EntryType::Directory);
+    header.set_size(0);
+    header.set_mode(mode);
+    header.set_uid(0);
+    header.set_gid(0);
+    header.set_mtime(0);
+    header.set_cksum();
+    builder.append_data(&mut header, path, Cursor::new(Vec::<u8>::new()))
+}
+
+fn escape_tree_name(name: &str) -> String {
+    let mut encoded = String::new();
+    for byte in name.as_bytes() {
+        match *byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'.' | b'-' | b'*' | b'_' => {
+                encoded.push(*byte as char)
+            }
+            b' ' => encoded.push('+'),
+            _ => {
+                encoded.push('%');
+                encoded.push_str(&format!("{:02X}", byte));
+            }
+        }
+    }
+    encoded
+}
+
+fn tree_root_entry() -> String {
+    format!("tree-{}/", escape_tree_name(DEFAULT_TREE_NAME))
+}
+
+fn tree_child_entry(path: &str) -> String {
+    format!("{}{}", tree_root_entry(), path)
+}
+
+fn parent_directories(path: &str) -> Vec<String> {
+    let mut parents = Vec::new();
+    let mut parts = path.split('/').collect::<Vec<_>>();
+    parts.pop();
+    let mut current = String::new();
+    for part in parts {
+        if current.is_empty() {
+            current.push_str(part);
+        } else {
+            current.push('/');
+            current.push_str(part);
+        }
+        parents.push(current.clone());
+    }
+    parents
+}
+
 fn gzip_bytes(bytes: &[u8]) -> Result<Vec<u8>, std::io::Error> {
     let mut encoder: GzEncoder<Vec<u8>> = GzBuilder::new()
         .mtime(0)
@@ -101,6 +161,7 @@ impl BuildCachePackagingServiceImpl {
         files.sort_unstable_by(|left, right| left.path.cmp(&right.path));
 
         let mut tar_bytes = Vec::new();
+        let mut entry_count = 0_i64;
         {
             let mut builder = tar::Builder::new(&mut tar_bytes);
             append_file(
@@ -110,11 +171,30 @@ impl BuildCachePackagingServiceImpl {
                 0o644,
             )
             .map_err(|e| format!("append metadata: {e}"))?;
+            entry_count += 1;
+
+            let tree_root = tree_root_entry();
+            append_directory(&mut builder, &tree_root, 0o755)
+                .map_err(|e| format!("append {tree_root}: {e}"))?;
+            entry_count += 1;
+
+            let mut parent_dirs = BTreeSet::new();
             for file in &files {
-                let entry_path = format!("{TREE_PREFIX}{}", file.path);
+                parent_dirs.extend(parent_directories(&file.path));
+            }
+            for dir in parent_dirs {
+                let entry_path = tree_child_entry(&format!("{dir}/"));
+                append_directory(&mut builder, &entry_path, 0o755)
+                    .map_err(|e| format!("append {entry_path}: {e}"))?;
+                entry_count += 1;
+            }
+
+            for file in &files {
+                let entry_path = tree_child_entry(&file.path);
                 let mode = if file.executable { 0o755 } else { 0o644 };
                 append_file(&mut builder, &entry_path, &file.content, mode)
                     .map_err(|e| format!("append {}: {e}", file.path))?;
+                entry_count += 1;
             }
             builder.finish().map_err(|e| format!("finish tar: {e}"))?;
         }
@@ -124,7 +204,7 @@ impl BuildCachePackagingServiceImpl {
         } else {
             tar_bytes
         };
-        Ok((packaged, files.len() as i64 + 1))
+        Ok((packaged, entry_count))
     }
 
     fn unpack(
@@ -143,15 +223,15 @@ impl BuildCachePackagingServiceImpl {
         let entries = archive.entries().map_err(|e| format!("read tar: {e}"))?;
         for entry in entries {
             let mut entry = entry.map_err(|e| format!("read tar entry: {e}"))?;
-            if !entry.header().entry_type().is_file() {
-                continue;
-            }
             entry_count += 1;
             let entry_path = entry
                 .path()
                 .map_err(|e| format!("read tar path: {e}"))?
                 .to_string_lossy()
                 .replace('\\', "/");
+            if !entry.header().entry_type().is_file() {
+                continue;
+            }
             let mode = entry.header().mode().unwrap_or(0);
             let mut content = Vec::new();
             entry
@@ -162,12 +242,27 @@ impl BuildCachePackagingServiceImpl {
                 metadata = decode_metadata(&content);
                 continue;
             }
-            if let Some(relative) = entry_path.strip_prefix(TREE_PREFIX) {
+            if let Some(relative) = entry_path.strip_prefix(LEGACY_TREE_PREFIX) {
                 files.push(BuildCachePackFile {
                     path: normalize_relative_path(relative)?,
                     content,
                     executable: mode & 0o111 != 0,
                 });
+                continue;
+            }
+
+            if entry_path.starts_with("missing-tree-") {
+                continue;
+            }
+
+            if let Some((tree_root, relative)) = entry_path.split_once('/') {
+                if tree_root.starts_with("tree-") && !relative.is_empty() {
+                    files.push(BuildCachePackFile {
+                        path: normalize_relative_path(relative)?,
+                        content,
+                        executable: mode & 0o111 != 0,
+                    });
+                }
             }
         }
         files.sort_unstable_by(|left, right| left.path.cmp(&right.path));
@@ -246,6 +341,27 @@ impl BuildCachePackagingService for BuildCachePackagingServiceImpl {
 mod tests {
     use super::*;
 
+    fn tar_entry_names(packaged_bytes: &[u8], gzip: bool) -> Vec<String> {
+        let tar_bytes = if gzip {
+            gunzip_bytes(packaged_bytes).unwrap()
+        } else {
+            packaged_bytes.to_vec()
+        };
+        let mut archive = tar::Archive::new(Cursor::new(tar_bytes));
+        archive
+            .entries()
+            .unwrap()
+            .map(|entry| {
+                entry
+                    .unwrap()
+                    .path()
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect()
+    }
+
     fn pack_request(files: Vec<BuildCachePackFile>, gzip: bool) -> PackCacheEntryRequest {
         PackCacheEntryRequest {
             build_id: "build-1".to_string(),
@@ -290,7 +406,35 @@ mod tests {
 
         assert!(first.success, "pack failed: {}", first.error);
         assert_eq!(first.packaged_bytes, second.packaged_bytes);
-        assert_eq!(first.entry_count, 3);
+        assert_eq!(first.entry_count, 4);
+    }
+
+    #[tokio::test]
+    async fn pack_uses_gradle_tree_entry_layout() {
+        let service = BuildCachePackagingServiceImpl;
+        let packed = service
+            .pack_cache_entry(Request::new(pack_request(
+                vec![BuildCachePackFile {
+                    path: "classes/App.class".to_string(),
+                    content: vec![0xca, 0xfe],
+                    executable: false,
+                }],
+                true,
+            )))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(packed.success, "pack failed: {}", packed.error);
+        assert_eq!(
+            tar_entry_names(&packed.packaged_bytes, true),
+            vec![
+                "METADATA".to_string(),
+                "tree-output/".to_string(),
+                "tree-output/classes/".to_string(),
+                "tree-output/classes/App.class".to_string(),
+            ]
+        );
     }
 
     #[tokio::test]
@@ -328,7 +472,7 @@ mod tests {
             .into_inner();
 
         assert!(unpacked.success, "unpack failed: {}", unpacked.error);
-        assert_eq!(unpacked.entry_count, 3);
+        assert_eq!(unpacked.entry_count, 6);
         assert_eq!(unpacked.origin_metadata["identity"], ":compileJava");
         assert_eq!(unpacked.files.len(), 2);
         assert_eq!(unpacked.files[0].path, "classes/App.class");

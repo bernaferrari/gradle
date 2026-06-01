@@ -1146,6 +1146,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "jvm_args", stringList(invokeOptional(task, taskType, "getJvmArgs")));
         putIfPresent(inputs, "jvm_args_json", stringListJson(invokeOptional(task, taskType, "getJvmArgs")));
         putIfPresent(inputs, "system_properties", stringMap(invokeOptional(task, taskType, "getSystemProperties")));
+        putIfPresent(inputs, "system_properties_json", stringMapJson(invokeOptional(task, taskType, "getSystemProperties")));
         putIfPresent(inputs, "xml_report_dir", testXmlReportDirectory(task));
         captureTestFilterInputs(task, inputs);
         Object options = invokeOptional(task, taskType, "getOptions");
@@ -1255,6 +1256,7 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "jvm_args_json", stringListJson(invokeOptional(task, taskType, "getJvmArgs")));
         putIfPresent(inputs, "max_heap_size", stringOrEmpty(invokeOptional(task, taskType, "getMaxHeapSize")));
         putIfPresent(inputs, "system_properties", stringMap(invokeOptional(task, taskType, "getSystemProperties")));
+        putIfPresent(inputs, "system_properties_json", stringMapJson(invokeOptional(task, taskType, "getSystemProperties")));
         putIfPresent(inputs, "environment", stringMap(invokeOptional(task, taskType, "getEnvironment")));
         putIfPresent(inputs, "environment_json", stringMapJson(invokeOptional(task, taskType, "getEnvironment")));
         putIfPresent(inputs, "working_dir", filePath(invokeOptional(task, taskType, "getWorkingDir")));

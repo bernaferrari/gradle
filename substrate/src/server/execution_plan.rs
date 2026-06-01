@@ -324,6 +324,29 @@ impl ExecutionPlanServiceImpl {
             0.9,
         )
     }
+
+    fn resolve_cache_candidate(
+        authoritative: bool,
+        fingerprint: &str,
+        attempted_reasoning: String,
+    ) -> (i32, String, String) {
+        if authoritative {
+            (
+                crate::proto::PlanAction::Execute as i32,
+                format!(
+                    "{}; Rust authoritative execution cannot mark FROM_CACHE until outputs are restored",
+                    attempted_reasoning
+                ),
+                String::new(),
+            )
+        } else {
+            (
+                crate::proto::PlanAction::LoadFromCache as i32,
+                attempted_reasoning,
+                fingerprint.to_string(),
+            )
+        }
+    }
 }
 
 #[tonic::async_trait]
@@ -409,14 +432,15 @@ impl ExecutionPlanService for ExecutionPlanServiceImpl {
                         entry.consecutive_executions
                     );
                 } else if work.caching_enabled && work.can_load_from_cache {
-                    action = crate::proto::PlanAction::LoadFromCache as i32;
-                    // Use the fingerprint as a cache key hint
-                    cache_key_hint = fingerprint.clone();
                     let est_ms = entry.estimated_duration_ms();
-                    reasoning = format!(
-                        "Inputs changed, attempting cache lookup (key hint: {}, est. duration: {}ms)",
-                        &fingerprint[..8.min(fingerprint.len())],
-                        est_ms
+                    (action, reasoning, cache_key_hint) = Self::resolve_cache_candidate(
+                        req.authoritative,
+                        &fingerprint,
+                        format!(
+                            "Inputs changed, attempting cache lookup (key hint: {}, est. duration: {}ms)",
+                            &fingerprint[..8.min(fingerprint.len())],
+                            est_ms
+                        ),
                     );
                 } else {
                     action = crate::proto::PlanAction::Execute as i32;
@@ -429,9 +453,11 @@ impl ExecutionPlanService for ExecutionPlanServiceImpl {
                 }
             }
         } else if work.caching_enabled && work.can_load_from_cache {
-            action = crate::proto::PlanAction::LoadFromCache as i32;
-            cache_key_hint = fingerprint.clone();
-            reasoning = "No execution history, attempting cache lookup".to_string();
+            (action, reasoning, cache_key_hint) = Self::resolve_cache_candidate(
+                req.authoritative,
+                &fingerprint,
+                "No execution history, attempting cache lookup".to_string(),
+            );
         } else {
             action = crate::proto::PlanAction::Execute as i32;
             cache_key_hint = String::new();
@@ -631,6 +657,43 @@ mod tests {
             .into_inner();
 
         assert_eq!(resp.action, crate::proto::PlanAction::Execute as i32);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_plan_non_authoritative_can_request_cache_load() {
+        let svc = make_service();
+        let work = make_work(":compileJava", vec![("source", "src/main/java")], vec![]);
+
+        let resp = svc
+            .resolve_plan(Request::new(ResolvePlanRequest {
+                work: Some(work),
+                authoritative: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.action, crate::proto::PlanAction::LoadFromCache as i32);
+        assert!(!resp.cache_key_hint.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_plan_authoritative_cache_candidate_executes_without_restore() {
+        let svc = make_service();
+        let work = make_work(":compileJava", vec![("source", "src/main/java")], vec![]);
+
+        let resp = svc
+            .resolve_plan(Request::new(ResolvePlanRequest {
+                work: Some(work),
+                authoritative: true,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.action, crate::proto::PlanAction::Execute as i32);
+        assert!(resp.cache_key_hint.is_empty());
+        assert!(resp.reasoning.contains("cannot mark FROM_CACHE"));
     }
 
     #[tokio::test]

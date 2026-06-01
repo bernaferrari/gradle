@@ -244,7 +244,8 @@ public class ProjectModelProviderAdapterTest {
         assertEquals(workingDir.getAbsolutePath(), inputs.get("working_dir"));
         assertEquals("-ea -Dcustom=true", inputs.get("jvm_args"));
         assertEquals("[\"-ea\",\"-Dcustom=true\"]", inputs.get("jvm_args_json"));
-        assertEquals("env=test", inputs.get("system_properties"));
+        assertEquals("complex.prop=value,with=equals,env=test", inputs.get("system_properties"));
+        assertEquals("{\"complex.prop\":\"value,with=equals\",\"env\":\"test\"}", inputs.get("system_properties_json"));
         assertEquals(reportsDir.getAbsolutePath(), inputs.get("xml_report_dir"));
         assertEquals("example.*Test", inputs.get("test_filter"));
         assertEquals("example.*Test", inputs.get("test_filter_includes"));
@@ -453,7 +454,8 @@ public class ProjectModelProviderAdapterTest {
         assertEquals("-Dnative=true -Xmx128m", inputs.get("jvm_args"));
         assertEquals("[\"-Dnative=true\",\"-Xmx128m\"]", inputs.get("jvm_args_json"));
         assertEquals("256m", inputs.get("max_heap_size"));
-        assertEquals("native.prop=from-task", inputs.get("system_properties"));
+        assertEquals("native.complex=value,with=equals,native.prop=from-task", inputs.get("system_properties"));
+        assertEquals("{\"native.complex\":\"value,with=equals\",\"native.prop\":\"from-task\"}", inputs.get("system_properties_json"));
         assertEquals("NATIVE_JAVA_EXEC_ENV=from-task", inputs.get("environment"));
         assertEquals("{\"NATIVE_JAVA_EXEC_ENV\":\"from-task\"}", inputs.get("environment_json"));
         assertEquals(workingDir.getAbsolutePath(), inputs.get("working_dir"));
@@ -2024,7 +2026,10 @@ public class ProjectModelProviderAdapterTest {
                 case "getJvmArgs":
                     return Arrays.asList("-ea", "-Dcustom=true");
                 case "getSystemProperties":
-                    return Collections.singletonMap("env", "test");
+                    Map<String, String> testProperties = new LinkedHashMap<>();
+                    testProperties.put("env", "test");
+                    testProperties.put("complex.prop", "value,with=equals");
+                    return testProperties;
                 case "getReports":
                     return new TestReports(reportsDir);
                 case "getFilter":
@@ -2147,7 +2152,10 @@ public class ProjectModelProviderAdapterTest {
                 case "getMaxHeapSize":
                     return "256m";
                 case "getSystemProperties":
-                    return Collections.singletonMap("native.prop", "from-task");
+                    Map<String, String> javaExecProperties = new LinkedHashMap<>();
+                    javaExecProperties.put("native.prop", "from-task");
+                    javaExecProperties.put("native.complex", "value,with=equals");
+                    return javaExecProperties;
                 case "getEnvironment":
                     return Collections.singletonMap("NATIVE_JAVA_EXEC_ENV", "from-task");
                 case "getWorkingDir":

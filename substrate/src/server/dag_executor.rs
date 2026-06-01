@@ -1251,13 +1251,37 @@ impl DagExecutorService for DagExecutorServiceImpl {
                         .execution_plan
                         .resolve_plan(Request::new(ResolvePlanRequest {
                             work: Some(meta.clone()),
-                            authoritative: false,
+                            authoritative: true,
                         }))
                         .await?
                         .into_inner();
 
                     let action = crate::proto::PlanAction::try_from(plan_resp.action)
                         .unwrap_or(crate::proto::PlanAction::Unknown);
+                    let predicted_outcome = match action {
+                        crate::proto::PlanAction::Execute => {
+                            PredictedOutcome::PredictedExecute as i32
+                        }
+                        crate::proto::PlanAction::SkipUpToDate => {
+                            PredictedOutcome::PredictedUpToDate as i32
+                        }
+                        crate::proto::PlanAction::LoadFromCache => {
+                            PredictedOutcome::PredictedFromCache as i32
+                        }
+                        crate::proto::PlanAction::ShortCircuit => {
+                            PredictedOutcome::PredictedShortCircuited as i32
+                        }
+                        crate::proto::PlanAction::Unknown => {
+                            PredictedOutcome::PredictedUnknown as i32
+                        }
+                    };
+                    if let Some(mut execution) =
+                        self.builds.get_mut(&BuildId::from(build_id_str.clone()))
+                    {
+                        if let Some(slot) = execution.tasks.get_mut(&task_path) {
+                            slot.predicted_outcome = predicted_outcome;
+                        }
+                    }
                     let up_to_date_enabled = context_allows_up_to_date(context_json.as_ref());
 
                     match action {
@@ -4515,6 +4539,53 @@ mod tests {
         assert_eq!(resp.tasks_up_to_date, 2);
         assert_eq!(resp.tasks_from_cache, 0);
         assert_eq!(resp.tasks_succeeded, 2);
+    }
+
+    #[tokio::test]
+    async fn test_run_build_executes_cache_candidate_until_outputs_are_restored() {
+        let svc = make_svc();
+
+        register_chain(&svc, "build-cache-candidate", &[(":task", "Mkdir", &[])]).await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let output_dir = dir.path().join("created-by-native-exec");
+        let context = serde_json::json!({
+            "work_identity": ":project:cacheCandidate",
+            "display_name": ":project:cacheCandidate",
+            "implementation_class": "org.gradle.api.DefaultTask",
+            "input_properties": {"key": "value"},
+            "input_file_fingerprints": {"input": "hash"},
+            "caching_enabled": true,
+            "can_load_from_cache": true,
+            "up_to_date_enabled": true,
+            "has_previous_execution_state": false,
+            "rebuild_reasons": [],
+            "source_files": [output_dir.to_string_lossy()],
+            "output_files": [output_dir.to_string_lossy()]
+        })
+        .to_string();
+        let mut contexts = HashMap::new();
+        contexts.insert(":task".to_string(), context);
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "build-cache-candidate".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts,
+                allow_jvm_forwarding: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.tasks_from_cache, 0);
+        assert_eq!(resp.tasks_succeeded, 1);
+        assert_eq!(resp.task_details[0].outcome, "EXECUTED");
+        assert!(
+            output_dir.is_dir(),
+            "cache candidates must restore or execute"
+        );
     }
 
     #[tokio::test]

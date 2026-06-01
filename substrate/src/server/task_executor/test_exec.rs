@@ -4,7 +4,9 @@ use std::time::Instant;
 
 use tokio::process::Command;
 
-use crate::server::task_executor::{option_string_list, TaskExecutor, TaskInput, TaskResult};
+use crate::server::task_executor::{
+    option_string_list, option_string_map, TaskExecutor, TaskInput, TaskResult,
+};
 
 use super::process_launch::{run_to_output, ProcessLaunchSpec};
 
@@ -130,13 +132,12 @@ impl TestExecExecutor {
         ));
 
         // System properties
-        if let Some(props) = input.options.get("system_properties") {
-            for prop in props.split(',') {
-                let prop = prop.trim();
-                if !prop.is_empty() && prop.contains('=') {
-                    args.push(format!("-D{}", prop));
-                }
-            }
+        for (key, value) in option_string_map(
+            &input.options,
+            "system_properties_json",
+            "system_properties",
+        ) {
+            args.push(format!("-D{}={}", key, value));
         }
 
         // Classpath
@@ -1014,6 +1015,37 @@ mod tests {
     }
 
     #[test]
+    fn test_build_command_system_properties_prefers_json_contract() {
+        let executor = TestExecExecutor::new();
+        let mut input = make_test_input();
+        input.options.insert(
+            "system_properties".to_string(),
+            "BROKEN=legacy,value".to_string(),
+        );
+        input.options.insert(
+            "system_properties_json".to_string(),
+            serde_json::json!({
+                "complex.prop": "value,with=punctuation",
+                "empty.prop": ""
+            })
+            .to_string(),
+        );
+        let java = PathBuf::from("/usr/lib/jvm/java-17/bin/java");
+        let cmd = executor.build_command(&java, &input);
+
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
+        assert!(args
+            .iter()
+            .any(|a| a == "-Dcomplex.prop=value,with=punctuation"));
+        assert!(args.iter().any(|a| a == "-Dempty.prop="));
+        assert!(!args.iter().any(|a| a == "-DBROKEN=legacy"));
+    }
+
+    #[test]
     fn test_build_command_test_filter() {
         let executor = TestExecExecutor::new();
         let mut input = make_test_input();
@@ -1350,7 +1382,11 @@ pub fn apply_vfs_delta_to_test_exec(
         return true;
     }
     for (k, _) in delta_child_summaries.iter() {
-        if k.contains("src/test") || k.contains("src/main") || k.contains("test-classes") || k.contains("generated") {
+        if k.contains("src/test")
+            || k.contains("src/main")
+            || k.contains("test-classes")
+            || k.contains("generated")
+        {
             tracing::debug!(target: "test-exec-lowering", "VFS delta hits test input tree {} -> re-execute", k);
             return true;
         }
@@ -1362,4 +1398,3 @@ pub fn apply_vfs_delta_to_test_exec(
     }
     false
 }
-

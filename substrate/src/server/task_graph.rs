@@ -2373,6 +2373,12 @@ fn task_options(
         insert_input_option(task, &mut options, "jvm_args", "jvm_args");
         insert_input_option(task, &mut options, "jvm_args_json", "jvm_args_json");
         insert_input_option(task, &mut options, "system_properties", "system_properties");
+        insert_input_option(
+            task,
+            &mut options,
+            "system_properties_json",
+            "system_properties_json",
+        );
         insert_input_option(task, &mut options, "scan_classpath", "scan_classpath");
         insert_input_option(task, &mut options, "test_filter", "test_filter");
         insert_input_option(
@@ -2422,6 +2428,12 @@ fn task_options(
         insert_input_option(task, &mut options, "jvm_args_json", "jvm_args_json");
         insert_input_option(task, &mut options, "max_heap_size", "max_heap_size");
         insert_input_option(task, &mut options, "system_properties", "system_properties");
+        insert_input_option(
+            task,
+            &mut options,
+            "system_properties_json",
+            "system_properties_json",
+        );
         insert_input_option(task, &mut options, "environment", "environment");
         insert_input_option(task, &mut options, "environment_json", "environment_json");
         insert_input_option(task, &mut options, "working_dir", "working_dir");
@@ -4363,6 +4375,13 @@ mod tests {
                     optional: false,
                 },
                 super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "system_properties_json".to_string(),
+                    kind: "value".to_string(),
+                    value: "{\"complex.prop\":\"value,with=equals\"}".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
                     name: "scan_classpath".to_string(),
                     kind: "value".to_string(),
                     value: "true".to_string(),
@@ -4433,6 +4452,10 @@ mod tests {
         assert_eq!(context["target_dir"], "/repo/build/test-results/test");
         assert_eq!(context["options"]["classpath"], classpath);
         assert_eq!(context["options"]["max_heap_mb"], "1024");
+        assert_eq!(
+            context["options"]["system_properties_json"],
+            "{\"complex.prop\":\"value,with=equals\"}"
+        );
         assert_eq!(context["options"]["scan_classpath"], "true");
         assert_eq!(context["options"]["test_filter"], "example.*Test");
         assert_eq!(context["options"]["test_filter_includes"], "example.*Test");
@@ -4698,6 +4721,13 @@ mod tests {
                     optional: false,
                 },
                 super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
+                    name: "system_properties_json".to_string(),
+                    kind: "value".to_string(),
+                    value: "{\"native.complex\":\"value,with=equals\"}".to_string(),
+                    normalization: "scalar".to_string(),
+                    optional: false,
+                },
+                super::super::build_plan_ir::CanonicalBuildPlanTaskInputSpec {
                     name: "environment_json".to_string(),
                     kind: "value".to_string(),
                     value: "{\"NATIVE_JAVA_EXEC_ENV\":\"from-task\"}".to_string(),
@@ -4751,6 +4781,10 @@ mod tests {
         assert_eq!(
             context["options"]["system_properties"],
             "native.prop=from-task"
+        );
+        assert_eq!(
+            context["options"]["system_properties_json"],
+            "{\"native.complex\":\"value,with=equals\"}"
         );
         assert_eq!(
             context["options"]["environment_json"],
