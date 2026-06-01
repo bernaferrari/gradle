@@ -2455,6 +2455,8 @@ fn task_options(
             "static_output_text_b64",
             "static_output_text_b64",
         );
+        insert_input_option(task, &mut options, "file_permissions", "file_permissions");
+        insert_input_option(task, &mut options, "dir_permissions", "dir_permissions");
     } else if task_type == "CycloneDxSbom" {
         insert_input_option(
             task,
@@ -4108,6 +4110,8 @@ mod tests {
             "test",
             "scalar",
         );
+        set_value_input(&mut task, "file_permissions", "493", "test", "scalar");
+        set_value_input(&mut task, "dir_permissions", "448", "test", "scalar");
 
         let task_type = executable_task_type(&task);
         let context =
@@ -4123,6 +4127,8 @@ mod tests {
             context["options"]["static_output_text_b64"],
             "b3NzLXN0eWxlIGFwaSBjb250cmFjdAo="
         );
+        assert_eq!(context["options"]["file_permissions"], "493");
+        assert_eq!(context["options"]["dir_permissions"], "448");
     }
 
     #[tokio::test]
