@@ -47,6 +47,14 @@ struct Args {
     /// Skip conservative build-definition mtime invalidation checks.
     #[arg(long)]
     skip_invalidation: bool,
+
+    /// Trusted file-watch changed path. May be repeated. Relative paths are resolved against --project-dir.
+    #[arg(long = "changed-path")]
+    changed_paths: Vec<PathBuf>,
+
+    /// File containing trusted file-watch changed paths, one path per line.
+    #[arg(long)]
+    changed_paths_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -144,10 +152,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let project_dir_path = Path::new(&project_dir).canonicalize()?;
     let project_dir = project_dir_path.to_string_lossy().to_string();
+    let validation_scope = ValidationScope::from_args(&args, &project_dir_path)?;
     if !args.skip_invalidation {
-        validate_build_definition_mtimes(&project_dir_path, artifact.stored_at_ms)?;
-        validate_task_input_mtimes(&artifact, &project_dir_path, artifact.stored_at_ms)?;
-        validate_input_fingerprints(&artifact, &project_dir_path)?;
+        validate_build_definition_mtimes(
+            &project_dir_path,
+            artifact.stored_at_ms,
+            &validation_scope,
+        )?;
+        validate_task_input_mtimes(
+            &artifact,
+            &project_dir_path,
+            artifact.stored_at_ms,
+            &validation_scope,
+        )?;
+        validate_input_fingerprints(&artifact, &project_dir_path, &validation_scope)?;
     }
     validate_plan_dependencies(&artifact)?;
     let task_filter = resolve_task_filter(&artifact, &args.tasks)?;
@@ -313,11 +331,79 @@ fn path_belongs_to_project(path: &str, project_dir: &Path) -> bool {
     candidate.is_absolute() && candidate.starts_with(project_dir)
 }
 
+#[derive(Debug, Default)]
+struct ValidationScope {
+    changed_paths: Option<Vec<PathBuf>>,
+}
+
+impl ValidationScope {
+    fn from_args(args: &Args, project_dir: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut changed_paths = Vec::new();
+        for path in &args.changed_paths {
+            changed_paths.push(normalize_changed_path(path, project_dir));
+        }
+        if let Some(path) = &args.changed_paths_file {
+            let text = std::fs::read_to_string(path)?;
+            for line in text.lines() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                changed_paths.push(normalize_changed_path(Path::new(line), project_dir));
+            }
+        }
+
+        changed_paths.sort();
+        changed_paths.dedup();
+        Ok(Self {
+            changed_paths: if changed_paths.is_empty() {
+                None
+            } else {
+                Some(changed_paths)
+            },
+        })
+    }
+
+    fn should_validate_project_path(&self, path: &Path, project_dir: &Path) -> bool {
+        let Some(changed_paths) = &self.changed_paths else {
+            return true;
+        };
+
+        if !path.starts_with(project_dir) {
+            // External cache/dependency inputs are outside the project watcher
+            // scope, so keep validating them until a trusted external delta
+            // source exists.
+            return true;
+        }
+
+        changed_paths
+            .iter()
+            .any(|changed| paths_intersect(changed, path))
+    }
+}
+
+fn normalize_changed_path(path: &Path, project_dir: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        project_dir.join(path)
+    };
+    absolute.canonicalize().unwrap_or(absolute)
+}
+
+fn paths_intersect(left: &Path, right: &Path) -> bool {
+    left == right || left.starts_with(right) || right.starts_with(left)
+}
+
 fn validate_build_definition_mtimes(
     project_dir: &Path,
     stored_at_ms: i64,
+    scope: &ValidationScope,
 ) -> Result<(), Box<dyn std::error::Error>> {
     for path in tracked_build_definition_files(project_dir) {
+        if !scope.should_validate_project_path(&path, project_dir) {
+            continue;
+        }
         let modified_ms = file_modified_ms(&path)?;
         if modified_ms > stored_at_ms {
             return Err(format!(
@@ -336,6 +422,7 @@ fn validate_task_input_mtimes(
     artifact: &ShadowArtifact,
     project_dir: &Path,
     stored_at_ms: i64,
+    scope: &ValidationScope,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let produced_paths = captured_produced_paths(artifact);
     for task in &artifact.plan.tasks {
@@ -345,6 +432,9 @@ fn validate_task_input_mtimes(
             }
             let path = Path::new(&input.value);
             if !path.is_absolute() || !path.starts_with(project_dir) || !path.exists() {
+                continue;
+            }
+            if !scope.should_validate_project_path(path, project_dir) {
                 continue;
             }
             if produced_paths
@@ -389,6 +479,7 @@ fn captured_produced_paths(artifact: &ShadowArtifact) -> Vec<PathBuf> {
 fn validate_input_fingerprints(
     artifact: &ShadowArtifact,
     project_dir: &Path,
+    scope: &ValidationScope,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if artifact.input_fingerprints.is_empty() && has_project_path_inputs(artifact, project_dir) {
         return Err(
@@ -404,7 +495,10 @@ fn validate_input_fingerprints(
                 "cached build-plan artifact has unsupported non-absolute input fingerprint: task '{}' input '{}' path '{}'",
                 expected.task_path, expected.input_name, expected.path
             )
-            .into());
+                .into());
+        }
+        if !scope.should_validate_project_path(path, project_dir) {
+            continue;
         }
         let actual = fingerprint_input_path(path)?;
         if actual.kind != expected.kind
@@ -752,7 +846,7 @@ mod tests {
             }],
         );
 
-        validate_input_fingerprints(&artifact, temp.path()).unwrap();
+        validate_input_fingerprints(&artifact, temp.path(), &ValidationScope::default()).unwrap();
     }
 
     #[test]
@@ -777,7 +871,9 @@ mod tests {
         );
 
         std::fs::write(&file, "class Main { String changed; }\n").unwrap();
-        let error = validate_input_fingerprints(&artifact, temp.path()).unwrap_err();
+        let error =
+            validate_input_fingerprints(&artifact, temp.path(), &ValidationScope::default())
+                .unwrap_err();
 
         assert!(error.to_string().contains("fingerprint changed"));
     }
@@ -790,7 +886,9 @@ mod tests {
         std::fs::write(&file, "class Main {}\n").unwrap();
         let artifact = artifact_with_path_input(&file, Vec::new());
 
-        let error = validate_input_fingerprints(&artifact, temp.path()).unwrap_err();
+        let error =
+            validate_input_fingerprints(&artifact, temp.path(), &ValidationScope::default())
+                .unwrap_err();
 
         assert!(error.to_string().contains("missing input_fingerprints"));
     }
@@ -818,7 +916,66 @@ mod tests {
             }],
         );
 
-        validate_input_fingerprints(&artifact, &project_dir).unwrap();
+        validate_input_fingerprints(&artifact, &project_dir, &ValidationScope::default()).unwrap();
+    }
+
+    #[test]
+    fn targeted_validation_rechecks_changed_project_inputs() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("src/Main.java");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "class Main {}\n").unwrap();
+        let current = fingerprint_input_path(&file).unwrap();
+        let artifact = artifact_with_path_input(
+            &file,
+            vec![ShadowInputFingerprint {
+                task_path: ":compileJava".to_string(),
+                input_name: "source".to_string(),
+                path: file.to_string_lossy().into_owned(),
+                kind: current.kind,
+                exists: current.exists,
+                size: current.size,
+                modified_ms: current.modified_ms,
+                sha256: current.sha256,
+            }],
+        );
+        std::fs::write(&file, "class Main { String changed; }\n").unwrap();
+        let scope = ValidationScope {
+            changed_paths: Some(vec![file.clone()]),
+        };
+
+        let error = validate_input_fingerprints(&artifact, temp.path(), &scope).unwrap_err();
+
+        assert!(error.to_string().contains("fingerprint changed"));
+    }
+
+    #[test]
+    fn targeted_validation_skips_unchanged_project_inputs() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("src/Main.java");
+        let unrelated = temp.path().join("README.md");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "class Main {}\n").unwrap();
+        let current = fingerprint_input_path(&file).unwrap();
+        let artifact = artifact_with_path_input(
+            &file,
+            vec![ShadowInputFingerprint {
+                task_path: ":compileJava".to_string(),
+                input_name: "source".to_string(),
+                path: file.to_string_lossy().into_owned(),
+                kind: current.kind,
+                exists: current.exists,
+                size: current.size,
+                modified_ms: current.modified_ms,
+                sha256: current.sha256,
+            }],
+        );
+        std::fs::write(&file, "class Main { String changed; }\n").unwrap();
+        let scope = ValidationScope {
+            changed_paths: Some(vec![unrelated]),
+        };
+
+        validate_input_fingerprints(&artifact, temp.path(), &scope).unwrap();
     }
 
     #[test]

@@ -178,50 +178,58 @@ Rust-owned preview surfaces after admission:
   hidden in-daemon fallback;
 - first-60s metrics and no-fallback execution evidence.
 
-## Warm Cached-Plan Prototype
+## Warm Rust-First Workflow
 
-The preview now has a narrow Rust-only warm execution prototype:
-`gradle-substrate-runbuild`. It connects to an already-running
-`gradle-substrate-daemon`, reads one validated build-plan shadow artifact, calls
-`InitBuild` to register the build scope, then calls `RunBuild` directly without
-starting Gradle or evaluating the DSL again.
+The preview now has a Rust-first warm execution workflow:
+`tools/warm_runner/run.py`. It tries `gradle-substrate-runbuild` against a
+cached build-plan shadow artifact before starting Gradle. On a cache miss, stale
+artifact, unsafe artifact, or task-incomplete artifact, it performs one strict
+Gradle/JVM capture and then retries direct Rust `RunBuild`. Unsupported
+execution failures remain failures; the runner does not fall back to hidden
+task-by-task JVM execution after Rust admission.
 
 Example:
 
 ```bash
-cargo build -p gradle-substrate-daemon --bin gradle-substrate-runbuild
-
-target/debug/gradle-substrate-runbuild \
-  --endpoint tcp://127.0.0.1:58276 \
-  --state-dir build/dogfood-overhead-probe/shared-substrate-state \
+python3 tools/warm_runner/run.py \
   --project-dir "$PWD/testing/corpus/oss-style-java-library-kotlin-dsl" \
-  --max-parallelism 4
+  --task :build \
+  --state-dir build/warm-rust-state \
+  --gradle-command "$PWD/build/gradle-under-test/bin/gradle" \
+  --daemon-binary target/debug/gradle-substrate-daemon \
+  --runbuild-binary target/debug/gradle-substrate-runbuild \
+  --output-json build/warm-rust-state/result.json
 ```
 
-This is not a public replacement CLI yet. It is a proof seam for the next
-architecture step: after Gradle/JVM has produced and validated a supported
-build-plan artifact once, Rust can execute that cached plan directly. Current
-shadow artifacts may have an empty canonical `project_dir`, so the prototype
-uses `--project-dir` plus absolute task paths to find exactly one matching
-artifact under `--state-dir`. It fails closed when no artifact matches or when
-multiple artifacts match without `--build-id` or explicit `--artifact`.
-Promoting this to a user-facing warm path still requires stable build identity
-and selected-task compatibility checks. The prototype already fails closed when
-tracked build-definition files (`build.gradle(.kts)`, `settings.gradle(.kts)`,
-`gradle.properties`, or `gradle/libs.versions.toml`) or captured absolute
-project input paths are newer than the cached artifact. New shadow artifacts
-also carry SHA-256 content fingerprints for captured project input paths, and
-direct RunBuild validates those fingerprints before `InitBuild`. This catches
-content changes even when mtimes are restored. Captured producer outputs, local
-state, and destroyables are excluded so normal producer-consumer paths under
-`build/` do not invalidate an otherwise unchanged plan. Artifacts with path
-inputs but no `input_fingerprints` are rejected as unsafe for direct RunBuild.
-When `--task` is supplied, the prototype accepts only fully-qualified task paths
-that exist in the cached graph, expands them to their captured dependency
-closure, and rejects incomplete graphs before contacting the daemon. Artifact
-lookup also remains fail-closed: zero matches and multiple matches both reject
-unless the caller supplies `--build-id` or an explicit `--artifact`.
-Use `--skip-invalidation` only for debugging stale artifacts.
+The underlying `gradle-substrate-runbuild` tool still connects to an
+already-running `gradle-substrate-daemon`, reads one validated build-plan shadow
+artifact, calls `InitBuild` to register the build scope, then calls `RunBuild`
+directly without starting Gradle or evaluating the DSL again. Current shadow
+artifacts may have an empty canonical `project_dir`, so direct execution uses
+`--project-dir` plus absolute task paths to find exactly one matching artifact
+under `--state-dir`. It fails closed when no artifact matches or when multiple
+artifacts match without `--build-id` or explicit `--artifact`.
+
+Tracked build-definition files (`build.gradle(.kts)`, `settings.gradle(.kts)`,
+`gradle.properties`, and `gradle/libs.versions.toml`) and captured absolute
+project input paths are validated before daemon execution. Shadow artifacts
+carry SHA-256 content fingerprints for captured path inputs, and direct
+RunBuild validates those fingerprints before `InitBuild`. Captured producer
+outputs, local state, and destroyables are excluded so normal producer-consumer
+paths under `build/` do not invalidate an otherwise unchanged plan. Artifacts
+with path inputs but no `input_fingerprints` are rejected as unsafe for direct
+RunBuild. When trusted file-watch changes are available, pass
+`--changed-path` or `--changed-paths-file`; direct RunBuild then validates only
+affected project inputs while still validating external cache/dependency inputs
+fully. Without trusted changed paths, validation remains full-graph and
+conservative.
+
+When `--task` is supplied, direct RunBuild accepts only fully-qualified task
+paths that exist in the cached graph, expands them to their captured dependency
+closure, and rejects incomplete graphs before contacting the daemon. The warm
+runner records structured reasons such as `cache-miss`, `stale`,
+`unsafe-cache`, `task-mismatch`, `incomplete-cache`, `ambiguous-cache`, and
+`unsupported-execution` in its JSON result.
 
 ## Ship Gates
 

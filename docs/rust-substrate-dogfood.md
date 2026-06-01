@@ -101,13 +101,23 @@ Direct warm coverage has also been expanded from one fixture to the supported
 local dogfood set. `tools/dogfood_runner/direct_warm.py` performs one strict
 Gradle/JVM capture per supported dogfood project and then runs the cached plan
 directly through `gradle-substrate-runbuild`. The latest checked run wrote
-`build/direct-warm-dogfood-current/direct-warm-results.json` and
-`build/direct-warm-dogfood-current/direct-warm-summary.md`; all 6 supported
+`build/direct-warm-phase3-20260601/direct-warm-results.json` and
+`build/direct-warm-phase3-20260601/direct-warm-summary.md`; all 6 supported
 local dogfood projects passed direct warm execution with zero JVM forwards:
 OSS-style Java library, Java multiproject, external JUnit library, external
 BOM/conflict, JavaExec process launch, and Javadoc process launch. Total direct
-warm wall time was 4442.7 ms across the six projects, with every project using
+warm wall time was 4575.9 ms across the six projects, with every project using
 `build-plan-shadow` and validated input fingerprints.
+
+Phase 3 also adds the Rust-first warm runner:
+`tools/warm_runner/run.py`. Its checked single-fixture run at
+`build/warm-runner-phase3-20260601/result.json` started with an empty state,
+classified the first direct attempt as `cache-miss`, performed one strict
+Gradle/JVM capture, and then completed direct Rust `RunBuild` with 14 tasks,
+8 up-to-date tasks, 4 skipped tasks, zero JVM forwards, and
+`build-plan-shadow`. Re-running against the same state wrote
+`result-warm-hit.json` and completed as `WARM_HIT` without a capture, with
+29 ms reported Rust `RunBuild` duration.
 
 ## Boundaries
 
