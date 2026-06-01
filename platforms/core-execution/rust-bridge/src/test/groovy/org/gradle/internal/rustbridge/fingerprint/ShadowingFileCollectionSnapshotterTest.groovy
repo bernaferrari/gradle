@@ -11,8 +11,10 @@ import org.gradle.internal.rustbridge.SubstrateException
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter
 import org.gradle.internal.snapshot.DirectorySnapshot
 import org.gradle.internal.snapshot.FileSystemSnapshot
+import org.gradle.internal.snapshot.MissingFileSnapshot
 import org.gradle.internal.snapshot.RegularFileSnapshot
 import org.gradle.internal.snapshot.SnapshotVisitResult
+import org.junit.Assume
 import spock.lang.Specification
 
 class ShadowingFileCollectionSnapshotterTest extends Specification {
@@ -185,6 +187,73 @@ class ShadowingFileCollectionSnapshotterTest extends Specification {
         roots[0].hash == hash
     }
 
+    def "authoritative snapshot marks file symlink snapshots as accessed via symlink"() {
+        given:
+        def javaDelegate = Mock(FileCollectionSnapshotter)
+        def rustClient = Mock(RustFileFingerprintClient)
+        def reporter = Mock(HashMismatchReporter)
+        def rustResult = Mock(RustFileFingerprintClient.FingerprintResult)
+        def rustEntry = Mock(RustFileFingerprintClient.IndividualFingerprint)
+        def hash = HashCode.fromBytes("symlink-md5---".bytes)
+        def dir = File.createTempDir("authoritative-fp-symlink", "")
+        def target = new File(dir, "target.txt")
+        def link = new File(dir, "link.txt")
+        target.text = "linked"
+        createSymlinkOrSkip(link, target)
+        def file = singleFileCollection(link.absolutePath)
+        def snapshotter = new ShadowingFileCollectionSnapshotter(javaDelegate, rustClient, reporter, true)
+
+        rustEntry.isDirectory() >> false
+        rustEntry.getPath() >> link.absolutePath
+        rustEntry.getHash() >> hash
+        rustEntry.getLastModified() >> 789L
+        rustEntry.getSize() >> target.length()
+
+        when:
+        def result = snapshotter.snapshot(file)
+
+        then:
+        0 * javaDelegate._
+        1 * rustClient.fingerprintFiles(_, "ABSOLUTE_PATH", []) >> rustResult
+        1 * rustResult.isSuccess() >> true
+        1 * rustResult.getEntries() >> [rustEntry]
+
+        and:
+        def roots = result.roots().toList()
+        roots.size() == 1
+        roots[0] instanceof RegularFileSnapshot
+        roots[0].absolutePath == link.absolutePath
+        roots[0].accessType == FileMetadata.AccessType.VIA_SYMLINK
+        roots[0].hash == hash
+    }
+
+    def "authoritative snapshot represents broken symlink as missing via symlink without rust hash"() {
+        given:
+        def javaDelegate = Mock(FileCollectionSnapshotter)
+        def rustClient = Mock(RustFileFingerprintClient)
+        def reporter = Mock(HashMismatchReporter)
+        def dir = File.createTempDir("authoritative-fp-broken-symlink", "")
+        def missingTarget = new File(dir, "missing.txt")
+        def link = new File(dir, "broken.txt")
+        createSymlinkOrSkip(link, missingTarget)
+        def file = singleFileCollection(link.absolutePath)
+        def snapshotter = new ShadowingFileCollectionSnapshotter(javaDelegate, rustClient, reporter, true)
+
+        when:
+        def result = snapshotter.snapshot(file)
+
+        then:
+        0 * javaDelegate._
+        0 * rustClient._
+
+        and:
+        def roots = result.roots().toList()
+        roots.size() == 1
+        roots[0] instanceof MissingFileSnapshot
+        roots[0].absolutePath == link.absolutePath
+        roots[0].accessType == FileMetadata.AccessType.VIA_SYMLINK
+    }
+
     def "authoritative snapshot builds directory snapshots from rust file hashes"() {
         given:
         def javaDelegate = Mock(FileCollectionSnapshotter)
@@ -312,5 +381,14 @@ class ShadowingFileCollectionSnapshotterTest extends Specification {
             visitor.visitFileTreeBackedByFile(new File(path), Mock(FileTreeInternal), null)
         }
         file
+    }
+
+    private static void createSymlinkOrSkip(File link, File target) {
+        try {
+            java.nio.file.Files.createSymbolicLink(link.toPath(), target.toPath())
+        } catch (UnsupportedOperationException | IOException | SecurityException e) {
+            Assume.assumeNoException(e)
+        }
+        Assume.assumeTrue(java.nio.file.Files.isSymbolicLink(link.toPath()))
     }
 }
