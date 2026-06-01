@@ -1,7 +1,7 @@
 # Rust Substrate Turbopack-Style Plan
 
 Status: aggressive migration plan
-Last updated: 2026-05-31
+Last updated: 2026-06-01
 
 ## Reference Model
 
@@ -160,6 +160,26 @@ Goal: Rust owns file state and file mutations.
 - Add platform-specific tests for symlinks, permissions, case sensitivity, and
   delete retry semantics.
 - Route Gradle file operations through Rust by default in authoritative mode.
+
+Completion checkpoint, 2026-06-01:
+
+- Rust file watching is authoritative in strict mode: Rust watch startup and
+  polling fail closed, Java watcher events are suppressed as a source of truth,
+  and Rust change events invalidate Gradle's VFS lifecycle.
+- File snapshots, hashing, file-hash cache, file tree traversal, directory
+  symlink traversal, and cycle detection have authoritative bridge coverage for
+  the admitted Rust path.
+- Copy, Sync, Delete, Symlink, Mkdir, WriteFile, Jar, Zip, War, Ear, and Tar
+  have native Rust executors for admitted contracts, including permissions,
+  symlink behavior, delete retry behavior, and archive traversal parity.
+- `mode=authoritative`, strict execution-kernel flags, and the legacy
+  authoritative run-build flag now invoke Rust `RunBuild` with JVM task
+  forwarding disabled for captured/native-ready plans.
+- Boundary: arbitrary JVM plugin action bodies that call `Project.copy`,
+  `FileSystemOperations`, `File.delete`, or other ad hoc Java file APIs remain
+  inside the JVM compatibility island until the configuration/plugin-runtime
+  phases capture those actions as stable Rust contracts. They are not part of
+  the completed Phase 1 authoritative kernel surface.
 
 ### Phase 2: Finish Native Execution Verticals
 
