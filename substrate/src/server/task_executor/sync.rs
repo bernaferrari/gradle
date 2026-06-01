@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
 use crate::server::task_executor::copy::{
@@ -27,40 +27,140 @@ impl SyncTaskExecutor {
 
     /// Recursively list all files in a directory.
     fn list_files(
-        dir: &std::path::Path,
-    ) -> Pin<Box<dyn std::future::Future<Output = Vec<PathBuf>> + Send + '_>> {
+        dir: &Path,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<PathBuf>, String>> + Send + '_>> {
         Box::pin(async move {
             let mut files = Vec::new();
-            if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
-                while let Ok(Some(entry)) = entries.next_entry().await {
+            let mut directory_stack = HashSet::new();
+            Self::list_files_inner(dir, &mut files, &mut directory_stack).await?;
+            files.sort_unstable();
+            Ok(files)
+        })
+    }
+
+    fn list_files_inner<'a>(
+        dir: &'a Path,
+        files: &'a mut Vec<PathBuf>,
+        directory_stack: &'a mut HashSet<PathBuf>,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+        Box::pin(async move {
+            let canonical = Self::canonical_directory(dir).await?;
+            if !directory_stack.insert(canonical.clone()) {
+                return Err(format!(
+                    "Directory symlink cycle detected by the Rust Sync executor: {}",
+                    dir.display()
+                ));
+            }
+
+            let result = async {
+                let mut entries = tokio::fs::read_dir(dir)
+                    .await
+                    .map_err(|e| format!("Failed to read directory {}: {}", dir.display(), e))?;
+                while let Some(entry) = entries
+                    .next_entry()
+                    .await
+                    .map_err(|e| format!("Failed to read directory {}: {}", dir.display(), e))?
+                {
                     let path = entry.path();
-                    if path.is_dir() {
-                        files.extend(Self::list_files(&path).await);
-                    } else {
+                    let file_type = entry
+                        .file_type()
+                        .await
+                        .map_err(|e| format!("Failed to inspect {}: {}", path.display(), e))?;
+                    if file_type.is_symlink() {
+                        if Self::is_symlink_to_dir(&path).await? {
+                            Self::list_files_inner(&path, files, directory_stack).await?;
+                        } else {
+                            files.push(path);
+                        }
+                    } else if file_type.is_dir() {
+                        Self::list_files_inner(&path, files, directory_stack).await?;
+                    } else if file_type.is_file() {
                         files.push(path);
                     }
                 }
+                Ok(())
             }
-            files
+            .await;
+            directory_stack.remove(&canonical);
+            result
         })
     }
 
     fn list_dirs(
-        dir: &std::path::Path,
-    ) -> Pin<Box<dyn std::future::Future<Output = Vec<PathBuf>> + Send + '_>> {
+        dir: &Path,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<PathBuf>, String>> + Send + '_>> {
         Box::pin(async move {
             let mut dirs = Vec::new();
-            if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
-                while let Ok(Some(entry)) = entries.next_entry().await {
+            let mut directory_stack = HashSet::new();
+            Self::list_dirs_inner(dir, &mut dirs, &mut directory_stack).await?;
+            dirs.sort_unstable();
+            Ok(dirs)
+        })
+    }
+
+    fn list_dirs_inner<'a>(
+        dir: &'a Path,
+        dirs: &'a mut Vec<PathBuf>,
+        directory_stack: &'a mut HashSet<PathBuf>,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+        Box::pin(async move {
+            let canonical = Self::canonical_directory(dir).await?;
+            if !directory_stack.insert(canonical.clone()) {
+                return Err(format!(
+                    "Directory symlink cycle detected by the Rust Sync executor: {}",
+                    dir.display()
+                ));
+            }
+
+            let result = async {
+                let mut entries = tokio::fs::read_dir(dir)
+                    .await
+                    .map_err(|e| format!("Failed to read directory {}: {}", dir.display(), e))?;
+                while let Some(entry) = entries
+                    .next_entry()
+                    .await
+                    .map_err(|e| format!("Failed to read directory {}: {}", dir.display(), e))?
+                {
                     let path = entry.path();
-                    if path.is_dir() {
+                    let file_type = entry
+                        .file_type()
+                        .await
+                        .map_err(|e| format!("Failed to inspect {}: {}", path.display(), e))?;
+                    if file_type.is_symlink() {
+                        if Self::is_symlink_to_dir(&path).await? {
+                            dirs.push(path.clone());
+                            Self::list_dirs_inner(&path, dirs, directory_stack).await?;
+                        }
+                    } else if file_type.is_dir() {
                         dirs.push(path.clone());
-                        dirs.extend(Self::list_dirs(&path).await);
+                        Self::list_dirs_inner(&path, dirs, directory_stack).await?;
                     }
                 }
+                Ok(())
             }
-            dirs
+            .await;
+            directory_stack.remove(&canonical);
+            result
         })
+    }
+
+    async fn is_symlink_to_dir(path: &Path) -> Result<bool, String> {
+        let metadata = tokio::fs::symlink_metadata(path)
+            .await
+            .map_err(|e| format!("Failed to inspect {}: {}", path.display(), e))?;
+        if !metadata.file_type().is_symlink() {
+            return Ok(false);
+        }
+        tokio::fs::metadata(path)
+            .await
+            .map(|target| target.is_dir())
+            .map_err(|e| format!("Failed to inspect symlink target {}: {}", path.display(), e))
+    }
+
+    async fn canonical_directory(path: &Path) -> Result<PathBuf, String> {
+        tokio::fs::canonicalize(path)
+            .await
+            .map_err(|e| format!("Failed to canonicalize directory {}: {}", path.display(), e))
     }
 
     async fn copy_file(
@@ -285,7 +385,14 @@ impl TaskExecutor for SyncTaskExecutor {
                 }
 
                 if include_empty_dirs {
-                    let source_dirs = Self::list_dirs(source_dir).await;
+                    let source_dirs = match Self::list_dirs(source_dir).await {
+                        Ok(dirs) => dirs,
+                        Err(e) => {
+                            result.success = false;
+                            result.error_message = e;
+                            return result;
+                        }
+                    };
                     for src_dir in &source_dirs {
                         let relative = src_dir.strip_prefix(source_dir).unwrap_or(src_dir);
                         if !path_included(
@@ -313,7 +420,14 @@ impl TaskExecutor for SyncTaskExecutor {
                 }
 
                 // List all source files
-                let source_files = Self::list_files(source_dir).await;
+                let source_files = match Self::list_files(source_dir).await {
+                    Ok(files) => files,
+                    Err(e) => {
+                        result.success = false;
+                        result.error_message = e;
+                        return result;
+                    }
+                };
 
                 // Copy/update files
                 for src_file in &source_files {
@@ -389,7 +503,14 @@ impl TaskExecutor for SyncTaskExecutor {
 
         // Delete orphan files after all source roots have contributed.
         if delete_orphans && input.target_dir.exists() {
-            let dest_files = Self::list_files(&input.target_dir).await;
+            let dest_files = match Self::list_files(&input.target_dir).await {
+                Ok(files) => files,
+                Err(e) => {
+                    result.success = false;
+                    result.error_message = e;
+                    return result;
+                }
+            };
             for dest_file in &dest_files {
                 let relative = dest_file
                     .strip_prefix(&input.target_dir)
@@ -406,7 +527,14 @@ impl TaskExecutor for SyncTaskExecutor {
                 }
             }
             if include_empty_dirs {
-                let mut dest_dirs = Self::list_dirs(&input.target_dir).await;
+                let mut dest_dirs = match Self::list_dirs(&input.target_dir).await {
+                    Ok(dirs) => dirs,
+                    Err(e) => {
+                        result.success = false;
+                        result.error_message = e;
+                        return result;
+                    }
+                };
                 dest_dirs.sort_by_key(|path| std::cmp::Reverse(path.components().count()));
                 for dest_dir in &dest_dirs {
                     let relative = dest_dir.strip_prefix(&input.target_dir).unwrap_or(dest_dir);
@@ -736,6 +864,60 @@ mod tests {
 
         assert!(result.success, "{}", result.error_message);
         assert!(!dest_dir.join("empty").exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_sync_directory_symlink_follows_target_tree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let target_dir = tmp.path().join("target");
+        let dest_dir = tmp.path().join("dest");
+        tokio::fs::create_dir_all(&src_dir).await.unwrap();
+        tokio::fs::create_dir_all(&target_dir).await.unwrap();
+        tokio::fs::write(target_dir.join("nested.txt"), b"nested")
+            .await
+            .unwrap();
+        tokio::fs::symlink(&target_dir, src_dir.join("linked-dir"))
+            .await
+            .unwrap();
+
+        let executor = SyncTaskExecutor::new();
+        let mut input = TaskInput::new("Sync");
+        input.source_files.push(src_dir);
+        input.target_dir = dest_dir.clone();
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert_eq!(
+            tokio::fs::read(dest_dir.join("linked-dir/nested.txt"))
+                .await
+                .unwrap(),
+            b"nested"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_sync_directory_symlink_cycle_fails_closed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let dest_dir = tmp.path().join("dest");
+        tokio::fs::create_dir_all(&src_dir).await.unwrap();
+        tokio::fs::symlink(&src_dir, src_dir.join("loop"))
+            .await
+            .unwrap();
+
+        let executor = SyncTaskExecutor::new();
+        let mut input = TaskInput::new("Sync");
+        input.source_files.push(src_dir);
+        input.target_dir = dest_dir;
+
+        let result = executor.execute(&input).await;
+
+        assert!(!result.success);
+        assert!(result.error_message.contains("Directory symlink cycle"));
     }
 
     #[cfg(unix)]
