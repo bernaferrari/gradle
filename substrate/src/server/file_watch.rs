@@ -1,10 +1,11 @@
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use tokio::sync::mpsc;
+use tokio::sync::broadcast;
 use tonic::{Request, Response, Status};
 
 use crate::proto::{
@@ -25,12 +26,11 @@ const DEFAULT_DEBOUNCE_MS: u64 = 100;
 const MAX_TREE_DEPTH: u32 = 50;
 /// Maximum number of files to count before giving up.
 const MAX_FILES_TO_COUNT: i64 = 100_000;
+/// Maximum number of file events retained per watch for late pollers.
+const MAX_RETAINED_EVENTS: usize = 4_096;
 
 /// An active file watch session backed by a real OS file watcher.
 struct WatchSession {
-    root_path: String,
-    include_patterns: Vec<String>,
-    exclude_patterns: Vec<String>,
     start_time: Instant,
     files_watched: i64,
     changes_detected: Arc<AtomicI64>,
@@ -39,9 +39,8 @@ struct WatchSession {
     polling_mode: AtomicBool,
     /// Debounce interval in milliseconds.
     debounce_ms: u64,
-    /// Whether to follow symlinks.
-    follow_symlinks: bool,
-    _event_tx: mpsc::Sender<Result<FileChangeEvent, Status>>,
+    events: Arc<Mutex<VecDeque<FileChangeEvent>>>,
+    event_tx: broadcast::Sender<FileChangeEvent>,
     _watcher: Option<RecommendedWatcher>,
 }
 
@@ -252,6 +251,37 @@ impl FileWatchServiceImpl {
             _ => "MODIFIED",
         }
     }
+
+    fn file_event(path: String, change_type: String) -> FileChangeEvent {
+        let metadata = std::fs::metadata(&path).ok();
+        FileChangeEvent {
+            path,
+            change_type,
+            timestamp_ms: Self::now_ms(),
+            file_size: metadata
+                .as_ref()
+                .map(|metadata| metadata.len() as i64)
+                .unwrap_or(0),
+            is_directory: metadata
+                .as_ref()
+                .map(|metadata| metadata.is_dir())
+                .unwrap_or(false),
+        }
+    }
+
+    fn record_event(
+        retained_events: &Arc<Mutex<VecDeque<FileChangeEvent>>>,
+        event_tx: &broadcast::Sender<FileChangeEvent>,
+        event: FileChangeEvent,
+    ) {
+        if let Ok(mut events) = retained_events.lock() {
+            if events.len() >= MAX_RETAINED_EVENTS {
+                events.pop_front();
+            }
+            events.push_back(event.clone());
+        }
+        let _ = event_tx.send(event);
+    }
 }
 
 #[tonic::async_trait]
@@ -278,15 +308,17 @@ impl FileWatchService for FileWatchServiceImpl {
         );
         let files_watched = Self::count_files(&req.root_path);
 
-        // Create channel for forwarding file system events
-        let (event_tx, _event_rx) = mpsc::channel::<Result<FileChangeEvent, Status>>(256);
-
         // Set up the OS-level file watcher
         let _root_path_clone = root_path.clone();
         let include_patterns = req.include_patterns.clone();
         let exclude_patterns = req.exclude_patterns.clone();
         let changes_detected = Arc::new(AtomicI64::new(0));
         let changes_detected_clone = changes_detected.clone();
+        let retained_events = Arc::new(Mutex::new(VecDeque::with_capacity(256)));
+        let retained_events_clone = retained_events.clone();
+        let (event_tx, _) = broadcast::channel::<FileChangeEvent>(256);
+        let event_tx_clone = event_tx.clone();
+        let task_graph_for_watcher = self.task_graph.clone();
         let debounce_ms = if req.debounce_ms > 0 {
             req.debounce_ms as u64
         } else {
@@ -316,6 +348,24 @@ impl FileWatchService for FileWatchServiceImpl {
                             }
 
                             changes_detected_clone.fetch_add(1, Ordering::Relaxed);
+                            let change_type =
+                                Self::event_kind_to_change_type(&event.kind).to_string();
+                            let file_event = Self::file_event(path, change_type);
+                            Self::record_event(
+                                &retained_events_clone,
+                                &event_tx_clone,
+                                file_event.clone(),
+                            );
+
+                            if let Some(tg) = &task_graph_for_watcher {
+                                let count = tg.invalidate_tasks_for_files(&[file_event.path]);
+                                if count > 0 {
+                                    tracing::info!(
+                                        tasks_invalidated = count,
+                                        "File changes invalidated dependent tasks"
+                                    );
+                                }
+                            }
                         }
                     }
                 },
@@ -350,17 +400,14 @@ impl FileWatchService for FileWatchServiceImpl {
         self.watches.insert(
             watch_id.clone(),
             WatchSession {
-                root_path: req.root_path,
-                include_patterns: req.include_patterns,
-                exclude_patterns: req.exclude_patterns,
                 start_time: Instant::now(),
                 files_watched,
                 changes_detected,
                 last_poll_ms: AtomicI64::new(Self::now_ms()),
                 polling_mode: AtomicBool::new(using_polling),
                 debounce_ms,
-                follow_symlinks,
-                _event_tx: event_tx,
+                events: retained_events,
+                event_tx,
                 _watcher: watcher,
             },
         );
@@ -418,83 +465,32 @@ impl FileWatchService for FileWatchServiceImpl {
                 .last_poll_ms
                 .store(Self::now_ms(), Ordering::Relaxed);
 
-            // Set up a new watcher for this poll session that sends events
-            let (tx, rx) = mpsc::channel::<Result<FileChangeEvent, Status>>(256);
-            let root_path = session.root_path.clone();
-            let include = session.include_patterns.clone();
-            let exclude = session.exclude_patterns.clone();
-            let changes_for_session = Arc::clone(&session.changes_detected);
-            let task_graph_for_watcher = self.task_graph.clone();
-            let follow_symlinks = session.follow_symlinks;
-
-            // Create a dedicated watcher for this polling stream
-            let config = notify::Config::default().with_poll_interval(Duration::from_millis(100));
-            let mut stream_watcher = RecommendedWatcher::new(
-                move |res: Result<Event, notify::Error>| {
-                    if let Ok(event) = res {
-                        let paths: Vec<String> = event
-                            .paths
-                            .iter()
-                            .map(|p| resolve_path(&p.to_string_lossy(), follow_symlinks))
-                            .collect();
-
-                        for path in paths {
-                            if !Self::matches_patterns(&path, &include, &exclude) {
-                                continue;
-                            }
-
-                            changes_for_session.fetch_add(1, Ordering::Relaxed);
-                            let _change_type = Self::event_kind_to_change_type(&event.kind);
-
-                            let change_type =
-                                Self::event_kind_to_change_type(&event.kind).to_string();
-                            let file_event = FileChangeEvent {
-                                path,
-                                change_type,
-                                timestamp_ms: Self::now_ms(),
-                                file_size: 0,
-                                is_directory: false,
-                            };
-
-                            // Non-blocking send; drop event if receiver is gone
-                            let _ = tx.blocking_send(Ok(file_event.clone()));
-
-                            // Invalidate tasks that depend on this file
-                            if let Some(tg) = &task_graph_for_watcher {
-                                let changed_path = file_event.path.clone();
-                                let count = tg.invalidate_tasks_for_files(&[changed_path]);
-                                if count > 0 {
-                                    tracing::info!(
-                                        tasks_invalidated = count,
-                                        "File changes invalidated dependent tasks"
-                                    );
-                                }
-                            }
-                        }
-                    }
-                },
-                config,
-            )
-            .map_err(|e| Status::internal(format!("Failed to create poll watcher: {}", e)))?;
-
-            stream_watcher
-                .watch(std::path::Path::new(&root_path), RecursiveMode::Recursive)
-                .map_err(|e| {
-                    Status::internal(format!("Failed to watch path for polling: {}", e))
-                })?;
-
-            // Keep the watcher alive for the duration of the stream. Dropping the
-            // watcher here would close the sender and end the stream immediately.
-            let stream_watcher = stream_watcher;
+            let since_timestamp_ms = req.since_timestamp_ms;
+            let replay = session
+                .events
+                .lock()
+                .map(|events| {
+                    events
+                        .iter()
+                        .filter(|event| event.timestamp_ms >= since_timestamp_ms)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let mut rx = session.event_tx.subscribe();
             let stream = async_stream::stream! {
-                let _watcher = stream_watcher;
-                // Yield events as they arrive
-                // The watcher sends events through the channel
-                // When the caller drops the stream receiver, this future is cancelled
-                // and the watcher is dropped
-                let mut rx = rx;
-                while let Some(event) = rx.recv().await {
-                    yield event;
+                for event in replay {
+                    yield Ok(event);
+                }
+                loop {
+                    match rx.recv().await {
+                        Ok(event) if event.timestamp_ms >= since_timestamp_ms => yield Ok(event),
+                        Ok(_) => {}
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            tracing::warn!(skipped, "File-watch poll receiver lagged behind retained events");
+                        }
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    }
                 }
             };
 
@@ -709,6 +705,87 @@ mod tests {
             .unwrap()
             .into_inner();
         assert!(stopped.stopped);
+    }
+
+    #[tokio::test]
+    async fn poll_changes_replays_events_recorded_before_polling() {
+        use tokio_stream::StreamExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root_path = dir.path().to_string_lossy().into_owned();
+        let svc = FileWatchServiceImpl::new();
+
+        let start = svc
+            .start_watching(Request::new(StartWatchingRequest {
+                root_path,
+                include_patterns: vec!["**/*.txt".to_string()],
+                exclude_patterns: vec![],
+                debounce_ms: 0,
+                follow_symlinks: true,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let changed_file = dir.path().join("late-poller.txt");
+        let changed_path = changed_file.to_string_lossy().into_owned();
+        tokio::fs::write(&changed_file, b"created before poll")
+            .await
+            .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let stats = svc
+                    .get_watch_stats(Request::new(GetWatchStatsRequest {
+                        watch_id: start.watch_id.clone(),
+                    }))
+                    .await
+                    .unwrap()
+                    .into_inner();
+                if stats.changes_detected > 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("file watcher did not record the pre-poll event");
+
+        let mut stream = svc
+            .poll_changes(Request::new(PollChangesRequest {
+                watch_id: start.watch_id.clone(),
+                since_timestamp_ms: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let event = tokio::time::timeout(Duration::from_secs(2), async {
+            while let Some(event) = stream.next().await {
+                let event = event.unwrap();
+                if event.path == changed_path || event.path.ends_with("late-poller.txt") {
+                    return event;
+                }
+            }
+            panic!("file watcher stream ended before replaying the retained event");
+        })
+        .await
+        .expect("file watcher did not replay the retained event");
+
+        assert!(
+            event.change_type == "CREATED" || event.change_type == "MODIFIED",
+            "unexpected change type: {}",
+            event.change_type
+        );
+        assert_eq!(event.file_size, "created before poll".len() as i64);
+
+        drop(stream);
+        svc.stop_watching(Request::new(StopWatchingRequest {
+            watch_id: start.watch_id,
+        }))
+        .await
+        .unwrap();
     }
 
     #[test]
