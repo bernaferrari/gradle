@@ -151,8 +151,25 @@ public class RustFileWatchClient implements Closeable {
      * @return list of change events
      */
     public List<FileChange> pollChanges(String watchId, long sinceTimestampMs) {
-        if (client.isNoop()) {
+        try {
+            return pollChangesStrict(watchId, sinceTimestampMs);
+        } catch (StatusRuntimeException e) {
+            LOGGER.debug("[substrate:watch] pollChanges failed", e);
             return Collections.emptyList();
+        } catch (Exception e) {
+            LOGGER.debug("[substrate:watch] pollChanges failed", e);
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Poll for file changes since a given timestamp.
+     *
+     * @throws RuntimeException when substrate is unavailable or the RPC fails.
+     */
+    public List<FileChange> pollChangesStrict(String watchId, long sinceTimestampMs) {
+        if (client.isNoop()) {
+            throw new IllegalStateException("Substrate not available");
         }
 
         List<FileChange> changes = new ArrayList<>();
@@ -189,11 +206,7 @@ public class RustFileWatchClient implements Closeable {
                 }
                 return Collections.unmodifiableList(changes);
             }
-            LOGGER.debug("[substrate:watch] pollChanges failed", e);
-            return Collections.emptyList();
-        } catch (Exception e) {
-            LOGGER.debug("[substrate:watch] pollChanges failed", e);
-            return Collections.emptyList();
+            throw e;
         }
     }
 
@@ -263,7 +276,7 @@ public class RustFileWatchClient implements Closeable {
         private final long fileSize;
         private final boolean isDirectory;
 
-        private FileChange(String path, String changeType, long timestampMs,
+        public FileChange(String path, String changeType, long timestampMs,
                           long fileSize, boolean isDirectory) {
             this.path = path;
             this.changeType = changeType;

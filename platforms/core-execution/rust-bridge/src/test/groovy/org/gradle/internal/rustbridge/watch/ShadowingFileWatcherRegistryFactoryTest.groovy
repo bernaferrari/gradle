@@ -71,6 +71,30 @@ class ShadowingFileWatcherRegistryFactoryTest extends Specification {
         1 * handler.stopWatchingAfterError()
     }
 
+    def "authoritative wrapped change handler records Java events without forwarding them"() {
+        given:
+        def delegate = Mock(FileWatcherRegistryFactory)
+        def rustClient = Mock(RustFileWatchClient)
+        def reporter = Mock(HashMismatchReporter)
+        def realRegistry = Mock(FileWatcherRegistry)
+        def handler = Mock(FileWatcherRegistry.ChangeHandler)
+        def factory = new ShadowingFileWatcherRegistryFactory(delegate, rustClient, reporter, true)
+        FileWatcherRegistry.ChangeHandler captured
+
+        when:
+        factory.createFileWatcherRegistry(handler)
+        captured.handleChange(FileWatcherRegistry.Type.MODIFIED, java.nio.file.Paths.get("/tmp/f"))
+        captured.stopWatchingAfterError()
+
+        then:
+        1 * delegate.createFileWatcherRegistry(_ as FileWatcherRegistry.ChangeHandler) >> {
+            captured = it[0]
+            realRegistry
+        }
+        0 * handler.handleChange(_, _)
+        1 * handler.stopWatchingAfterError()
+    }
+
     def "createFileWatcherRegistry returns new instance on each call"() {
         given:
         def delegate = Mock(FileWatcherRegistryFactory)
