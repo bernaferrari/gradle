@@ -3,6 +3,10 @@ use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::pin::Pin;
+use std::time::Duration;
+
+const DELETE_ATTEMPTS: usize = 10;
+const DELETE_RETRY_SLEEP_MS: u64 = 10;
 
 /// Deletes files and directories.
 pub struct DeleteTaskExecutor;
@@ -85,21 +89,64 @@ impl DeleteTaskExecutor {
         metadata: &std::fs::Metadata,
         result: &mut TaskResult,
     ) -> Result<(), String> {
-        let delete_result = if metadata.is_dir() && !metadata.file_type().is_symlink() {
-            tokio::fs::remove_dir(path).await
-        } else {
-            tokio::fs::remove_file(path).await
-        };
-
-        match delete_result {
-            Ok(()) => {
+        let is_directory = metadata.is_dir() && !metadata.file_type().is_symlink();
+        match Self::try_hard_to_delete(path, is_directory).await {
+            Ok(true) => {
                 result.files_processed += 1;
                 result.removed_files.push(path.to_path_buf());
                 Ok(())
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Ok(false) => Ok(()),
             Err(e) => Err(format!("Failed to delete {}: {}", path.display(), e)),
         }
+    }
+
+    async fn try_hard_to_delete(path: &Path, is_directory: bool) -> Result<bool, std::io::Error> {
+        let mut last_error = None;
+        for attempt in 0..DELETE_ATTEMPTS {
+            match Self::delete_once(path, is_directory).await {
+                Ok(deleted) => return Ok(deleted),
+                Err(error) => {
+                    last_error = Some(error);
+                    let _ = Self::make_writable(path).await;
+                    if attempt + 1 < DELETE_ATTEMPTS {
+                        tokio::time::sleep(Duration::from_millis(DELETE_RETRY_SLEEP_MS)).await;
+                    }
+                }
+            }
+        }
+        Err(last_error.unwrap_or_else(|| std::io::Error::other("delete failed")))
+    }
+
+    async fn delete_once(path: &Path, is_directory: bool) -> Result<bool, std::io::Error> {
+        let delete_result = if is_directory {
+            tokio::fs::remove_dir(path).await
+        } else {
+            tokio::fs::remove_file(path).await
+        };
+        match delete_result {
+            Ok(()) => Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    #[cfg(unix)]
+    async fn make_writable(path: &Path) -> std::io::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let metadata = tokio::fs::symlink_metadata(path).await?;
+        let mut permissions = metadata.permissions();
+        permissions.set_mode(permissions.mode() | 0o200);
+        tokio::fs::set_permissions(path, permissions).await
+    }
+
+    #[cfg(not(unix))]
+    async fn make_writable(path: &Path) -> std::io::Result<()> {
+        let metadata = tokio::fs::symlink_metadata(path).await?;
+        let mut permissions = metadata.permissions();
+        permissions.set_readonly(false);
+        tokio::fs::set_permissions(path, permissions).await
     }
 }
 
@@ -228,6 +275,27 @@ mod tests {
         for f in &files {
             assert!(!f.exists());
         }
+    }
+
+    #[tokio::test]
+    async fn test_delete_readonly_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("readonly.txt");
+        tokio::fs::write(&file, b"data").await.unwrap();
+        let mut permissions = tokio::fs::metadata(&file).await.unwrap().permissions();
+        permissions.set_readonly(true);
+        tokio::fs::set_permissions(&file, permissions)
+            .await
+            .unwrap();
+
+        let executor = DeleteTaskExecutor::new();
+        let mut input = TaskInput::new("Delete");
+        input.source_files.push(file.clone());
+
+        let result = executor.execute(&input).await;
+        assert!(result.success, "{}", result.error_message);
+        assert_eq!(result.files_processed, 1);
+        assert!(!file.exists());
     }
 
     #[tokio::test]
