@@ -97,6 +97,16 @@ struct VariantDependency {
     version: VersionRequirement,
     #[serde(default)]
     excludes: Vec<DependencyExclude>,
+    #[serde(default)]
+    attributes: BTreeMap<String, serde_json::Value>,
+    #[serde(default, rename = "requestedCapabilities")]
+    requested_capabilities: Vec<Capability>,
+    #[serde(default, rename = "endorseStrictVersions")]
+    endorse_strict_versions: bool,
+    #[serde(default)]
+    reason: String,
+    #[serde(default, flatten)]
+    extra_fields: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -230,6 +240,9 @@ pub fn select_jvm_variant(
 
     let mut dependencies = Vec::with_capacity(variant.dependencies.len());
     for dep in &variant.dependencies {
+        if let Err(selection) = validate_dependency_semantics(dep, "dependency") {
+            return Ok(Some(selection));
+        }
         let dependency_version =
             match static_version_requirement(&dep.version, &dep.group, &dep.module, "dependency") {
                 Ok(version) => version,
@@ -632,11 +645,57 @@ fn non_empty_basename(path: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+fn validate_dependency_semantics(
+    dependency: &VariantDependency,
+    role: &str,
+) -> Result<(), ModuleMetadataSelection> {
+    let _advisory_reason = dependency.reason.trim();
+    if !dependency.attributes.is_empty() {
+        return Err(ModuleMetadataSelection::Unsupported(format!(
+            "unsupported Gradle Module Metadata {role} attributes for {}:{}",
+            dependency.group, dependency.module
+        )));
+    }
+    if !dependency.requested_capabilities.is_empty() {
+        let capabilities = dependency
+            .requested_capabilities
+            .iter()
+            .map(|capability| format!("{}:{}", capability.group, capability.name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(ModuleMetadataSelection::Unsupported(format!(
+            "unsupported Gradle Module Metadata {role} requested capabilities for {}:{}: {}",
+            dependency.group, dependency.module, capabilities
+        )));
+    }
+    if dependency.endorse_strict_versions {
+        return Err(ModuleMetadataSelection::Unsupported(format!(
+            "unsupported Gradle Module Metadata {role} strict-version endorsement for {}:{}",
+            dependency.group, dependency.module
+        )));
+    }
+    let extra_fields = dependency
+        .extra_fields
+        .iter()
+        .filter_map(|(field, value)| (!value.is_null()).then_some(field.as_str()))
+        .collect::<Vec<_>>();
+    if !extra_fields.is_empty() {
+        return Err(ModuleMetadataSelection::Unsupported(format!(
+            "unsupported Gradle Module Metadata {role} fields for {}:{}: {}",
+            dependency.group,
+            dependency.module,
+            extra_fields.join(", ")
+        )));
+    }
+    Ok(())
+}
+
 fn static_dependency_constraints(
     variant: &Variant,
 ) -> Result<BTreeMap<(String, String), StaticVersionRequirement>, ModuleMetadataSelection> {
     let mut constraints: BTreeMap<(String, String), StaticVersionRequirement> = BTreeMap::new();
     for constraint in &variant.dependency_constraints {
+        validate_dependency_semantics(constraint, "dependency constraint")?;
         if !constraint.excludes.is_empty() {
             return Err(ModuleMetadataSelection::Unsupported(format!(
                 "unsupported Gradle Module Metadata dependency constraint exclusions for {}:{}",
@@ -1076,6 +1135,115 @@ mod tests {
         assert!(matches!(
             selected,
             ModuleMetadataSelection::Unsupported(reason) if reason.contains("malformed dependency exclusion")
+        ));
+    }
+
+    #[test]
+    fn allows_advisory_dependency_reason() {
+        let json = r#"{
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "dependencies":[{"group":"org.example","module":"child","version":{"requires":"2.0"},
+               "reason":"documents the published selection"}]}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "org.example", "root", "1.0")
+            .unwrap()
+            .unwrap();
+
+        match selected {
+            ModuleMetadataSelection::Selected(variant) => {
+                assert_eq!(variant.dependencies[0].module, "child");
+                assert_eq!(variant.dependencies[0].version, "2.0");
+            }
+            other => panic!("expected selected variant, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_dependency_attributes() {
+        let json = r#"{
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "dependencies":[{"group":"org.example","module":"child","version":{"requires":"2.0"},
+               "attributes":{"org.gradle.usage":"java-runtime"}}]}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "org.example", "root", "1.0")
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(
+            selected,
+            ModuleMetadataSelection::Unsupported(reason) if reason.contains("dependency attributes")
+        ));
+    }
+
+    #[test]
+    fn rejects_dependency_requested_capabilities() {
+        let json = r#"{
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "dependencies":[{"group":"org.example","module":"child","version":{"requires":"2.0"},
+               "requestedCapabilities":[{"group":"org.example","name":"feature","version":"2.0"}]}]}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "org.example", "root", "1.0")
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(
+            selected,
+            ModuleMetadataSelection::Unsupported(reason) if reason.contains("requested capabilities")
+        ));
+    }
+
+    #[test]
+    fn rejects_dependency_strict_version_endorsement() {
+        let json = r#"{
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "dependencies":[{"group":"org.example","module":"platform","version":{"requires":"1.0"},
+               "endorseStrictVersions":true}]}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "org.example", "root", "1.0")
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(
+            selected,
+            ModuleMetadataSelection::Unsupported(reason) if reason.contains("strict-version endorsement")
+        ));
+    }
+
+    #[test]
+    fn rejects_unknown_dependency_fields() {
+        let json = r#"{
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime"},
+             "dependencies":[{"group":"org.example","module":"child","version":{"requires":"2.0"},
+               "artifactSelector":{"name":"native"}}]}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "org.example", "root", "1.0")
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(
+            selected,
+            ModuleMetadataSelection::Unsupported(reason)
+                if reason.contains("dependency fields") && reason.contains("artifactSelector")
         ));
     }
 

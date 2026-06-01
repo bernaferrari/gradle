@@ -270,10 +270,14 @@ Progress checkpoint, 2026-06-01:
   primary jar after ignoring documentation jars. Multiple primary jars,
   non-JVM files, and malformed artifact entries fail closed with explicit
   diagnostics.
+- Gradle Module Metadata dependency declarations now fail closed for
+  dependency attributes, requested capabilities, strict-version endorsement, and
+  unknown non-null extension fields. Advisory `reason` metadata remains allowed.
 - Evidence: library-only Rust tests passed for the full
   `dependency_solver::gradle_module_metadata` suite and the broader
-  `gradle_module_metadata` resolver filter. The package-wide integration test
-  target still has unrelated pre-existing compile failures under
+  `gradle_module_metadata` resolver filter: 25/25 focused metadata tests and
+  32/32 metadata resolver tests. The package-wide integration test target still
+  has unrelated pre-existing compile failures under
   `substrate/tests/differential` and `substrate/tests/benchmarks.rs`.
 
 ### Phase 5: Move Configuration To A Stable IR
