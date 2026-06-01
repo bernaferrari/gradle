@@ -350,6 +350,113 @@ class ShadowingFileWatcherRegistryTest extends Specification {
         0 * reporter.reportMatch()
     }
 
+    def "authoritative mode drains Rust changes into Gradle VFS updates"() {
+        given:
+        def delegate = Mock(FileWatcherRegistry)
+        def rustClient = Mock(RustFileWatchClient)
+        def reporter = Mock(HashMismatchReporter)
+        def rustHandler = Mock(FileWatcherRegistry.ChangeHandler)
+        def registry = new ShadowingFileWatcherRegistry(delegate, rustClient, reporter, true, rustHandler)
+        def watchableDir = new File("/tmp/test-watch")
+        def root = Mock(org.gradle.internal.snapshot.SnapshotHierarchy)
+        def delegateRoot = Mock(org.gradle.internal.snapshot.SnapshotHierarchy)
+        def invalidatedRoot = Mock(org.gradle.internal.snapshot.SnapshotHierarchy)
+        def watchMode = Mock(org.gradle.internal.watch.registry.WatchMode)
+        def watchResult = Mock(RustFileWatchClient.WatchResult)
+        def removedPath = java.nio.file.Paths.get("/tmp/test-watch/removed.txt")
+
+        when:
+        registry.registerWatchableHierarchy(watchableDir, root)
+        def result = registry.updateVfsOnBuildStarted(root, watchMode, [])
+
+        then:
+        1 * rustClient.startWatching("/tmp/test-watch", [], []) >> watchResult
+        1 * watchResult.isSuccess() >> true
+        1 * watchResult.isWatching() >> true
+        2 * watchResult.getWatchId() >> "watch-42"
+        1 * delegate.registerWatchableHierarchy(watchableDir, root)
+        1 * delegate.updateVfsOnBuildStarted(root, watchMode, []) >> delegateRoot
+        1 * rustClient.pollChangesStrict("watch-42", 0L) >> [
+            new RustFileWatchClient.FileChange("/tmp/test-watch/removed.txt", "DELETED", 10L, 0L, false)
+        ]
+        1 * rustHandler.handleChange(FileWatcherRegistry.Type.REMOVED, removedPath)
+        1 * delegateRoot.invalidate("/tmp/test-watch/removed.txt", _ as org.gradle.internal.snapshot.SnapshotHierarchy.NodeDiffListener) >> invalidatedRoot
+        result == invalidatedRoot
+    }
+
+    def "authoritative mode does not replay the same Rust event twice"() {
+        given:
+        def delegate = Mock(FileWatcherRegistry)
+        def rustClient = Mock(RustFileWatchClient)
+        def reporter = Mock(HashMismatchReporter)
+        def rustHandler = Mock(FileWatcherRegistry.ChangeHandler)
+        def registry = new ShadowingFileWatcherRegistry(delegate, rustClient, reporter, true, rustHandler)
+        def watchableDir = new File("/tmp/test-watch")
+        def root = Mock(org.gradle.internal.snapshot.SnapshotHierarchy)
+        def firstDelegateRoot = Mock(org.gradle.internal.snapshot.SnapshotHierarchy)
+        def firstInvalidatedRoot = Mock(org.gradle.internal.snapshot.SnapshotHierarchy)
+        def secondDelegateRoot = Mock(org.gradle.internal.snapshot.SnapshotHierarchy)
+        def watchMode = Mock(org.gradle.internal.watch.registry.WatchMode)
+        def watchResult = Mock(RustFileWatchClient.WatchResult)
+        def changedPath = java.nio.file.Paths.get("/tmp/test-watch/file.txt")
+        def change = new RustFileWatchClient.FileChange("/tmp/test-watch/file.txt", "MODIFIED", 10L, 1L, false)
+
+        when:
+        registry.registerWatchableHierarchy(watchableDir, root)
+        def first = registry.updateVfsOnBuildStarted(root, watchMode, [])
+
+        then:
+        1 * rustClient.startWatching("/tmp/test-watch", [], []) >> watchResult
+        1 * watchResult.isSuccess() >> true
+        1 * watchResult.isWatching() >> true
+        2 * watchResult.getWatchId() >> "watch-42"
+        1 * delegate.registerWatchableHierarchy(watchableDir, root)
+        1 * delegate.updateVfsOnBuildStarted(root, watchMode, []) >> firstDelegateRoot
+        1 * rustClient.pollChangesStrict("watch-42", 0L) >> [change]
+        1 * rustHandler.handleChange(FileWatcherRegistry.Type.MODIFIED, changedPath)
+        1 * firstDelegateRoot.invalidate("/tmp/test-watch/file.txt", _ as org.gradle.internal.snapshot.SnapshotHierarchy.NodeDiffListener) >> firstInvalidatedRoot
+        first == firstInvalidatedRoot
+
+        when:
+        def second = registry.updateVfsOnBuildStarted(first, watchMode, [])
+
+        then:
+        1 * delegate.updateVfsOnBuildStarted(firstInvalidatedRoot, watchMode, []) >> secondDelegateRoot
+        1 * rustClient.pollChangesStrict("watch-42", 10L) >> [change]
+        0 * rustHandler.handleChange(_, _)
+        second == secondDelegateRoot
+    }
+
+    def "authoritative mode fails closed when Rust polling fails"() {
+        given:
+        def delegate = Mock(FileWatcherRegistry)
+        def rustClient = Mock(RustFileWatchClient)
+        def reporter = Mock(HashMismatchReporter)
+        def rustHandler = Mock(FileWatcherRegistry.ChangeHandler)
+        def registry = new ShadowingFileWatcherRegistry(delegate, rustClient, reporter, true, rustHandler)
+        def watchableDir = new File("/tmp/test-watch")
+        def root = Mock(org.gradle.internal.snapshot.SnapshotHierarchy)
+        def delegateRoot = Mock(org.gradle.internal.snapshot.SnapshotHierarchy)
+        def watchMode = Mock(org.gradle.internal.watch.registry.WatchMode)
+        def watchResult = Mock(RustFileWatchClient.WatchResult)
+
+        when:
+        registry.registerWatchableHierarchy(watchableDir, root)
+        registry.updateVfsOnBuildStarted(root, watchMode, [])
+
+        then:
+        thrown(SubstrateException)
+        1 * rustClient.startWatching("/tmp/test-watch", [], []) >> watchResult
+        1 * watchResult.isSuccess() >> true
+        1 * watchResult.isWatching() >> true
+        2 * watchResult.getWatchId() >> "watch-42"
+        1 * delegate.registerWatchableHierarchy(watchableDir, root)
+        1 * delegate.updateVfsOnBuildStarted(root, watchMode, []) >> delegateRoot
+        1 * rustClient.pollChangesStrict("watch-42", 0L) >> { throw new RuntimeException("poll failed") }
+        1 * reporter.reportRustError("watch-poll:watch-42", _ as RuntimeException)
+        !registry.isRustWatchHealthy()
+    }
+
     def "getAndResetStatistics delegates to Java registry"() {
         given:
         def delegate = Mock(FileWatcherRegistry)

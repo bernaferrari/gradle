@@ -39,6 +39,19 @@ public class ShadowingFileWatcherRegistryFactory implements FileWatcherRegistryF
                 if (registry != null) {
                     registry.recordJavaChange();
                 }
+                if (!authoritative) {
+                    handler.handleChange(type, path);
+                }
+            }
+
+            @Override
+            public void stopWatchingAfterError() {
+                handler.stopWatchingAfterError();
+            }
+        };
+        FileWatcherRegistry.ChangeHandler rustAuthoritativeHandler = new FileWatcherRegistry.ChangeHandler() {
+            @Override
+            public void handleChange(FileWatcherRegistry.Type type, java.nio.file.Path path) {
                 handler.handleChange(type, path);
             }
 
@@ -50,7 +63,13 @@ public class ShadowingFileWatcherRegistryFactory implements FileWatcherRegistryF
 
         FileWatcherRegistry realRegistry = delegate.createFileWatcherRegistry(shadowingHandler);
         ShadowingFileWatcherRegistry registry =
-            new ShadowingFileWatcherRegistry(realRegistry, rustClient, mismatchReporter, authoritative);
+            new ShadowingFileWatcherRegistry(
+                realRegistry,
+                rustClient,
+                mismatchReporter,
+                authoritative,
+                rustAuthoritativeHandler
+            );
         registryRef.set(registry);
         return registry;
     }

@@ -11,10 +11,15 @@ import org.slf4j.Logger;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -35,10 +40,12 @@ public class ShadowingFileWatcherRegistry implements FileWatcherRegistry {
     private final RustFileWatchClient rustClient;
     private final HashMismatchReporter mismatchReporter;
     private final boolean authoritative;
+    private final FileWatcherRegistry.ChangeHandler rustChangeHandler;
 
-    private final List<String> activeWatchIds = new ArrayList<>();
+    private final List<ActiveRustWatch> activeWatches = new ArrayList<>();
     private final Object lock = new Object();
     private final AtomicLong javaChangeCount = new AtomicLong(0);
+    private final AtomicLong rustChangeCount = new AtomicLong(0);
     private final AtomicBoolean rustWatchHealthy = new AtomicBoolean(true);
 
     public ShadowingFileWatcherRegistry(
@@ -46,7 +53,7 @@ public class ShadowingFileWatcherRegistry implements FileWatcherRegistry {
         RustFileWatchClient rustClient,
         HashMismatchReporter mismatchReporter
     ) {
-        this(delegate, rustClient, mismatchReporter, false);
+        this(delegate, rustClient, mismatchReporter, false, null);
     }
 
     public ShadowingFileWatcherRegistry(
@@ -55,14 +62,32 @@ public class ShadowingFileWatcherRegistry implements FileWatcherRegistry {
         HashMismatchReporter mismatchReporter,
         boolean authoritative
     ) {
+        this(delegate, rustClient, mismatchReporter, authoritative, null);
+    }
+
+    public ShadowingFileWatcherRegistry(
+        FileWatcherRegistry delegate,
+        RustFileWatchClient rustClient,
+        HashMismatchReporter mismatchReporter,
+        boolean authoritative,
+        FileWatcherRegistry.ChangeHandler rustChangeHandler
+    ) {
         this.delegate = delegate;
         this.rustClient = rustClient;
         this.mismatchReporter = mismatchReporter;
         this.authoritative = authoritative;
+        this.rustChangeHandler = rustChangeHandler;
     }
 
     @Override
     public boolean isWatchingAnyLocations() {
+        if (authoritative) {
+            synchronized (lock) {
+                if (!activeWatches.isEmpty()) {
+                    return true;
+                }
+            }
+        }
         return delegate.isWatchingAnyLocations();
     }
 
@@ -99,23 +124,27 @@ public class ShadowingFileWatcherRegistry implements FileWatcherRegistry {
     public SnapshotHierarchy updateVfsOnBuildStarted(
         SnapshotHierarchy root, WatchMode watchMode, List<File> unsupportedFileSystems
     ) {
-        return delegate.updateVfsOnBuildStarted(root, watchMode, unsupportedFileSystems);
+        SnapshotHierarchy result = delegate.updateVfsOnBuildStarted(root, watchMode, unsupportedFileSystems);
+        return drainRustChangesInto(result);
     }
 
     @Override
     public SnapshotHierarchy updateVfsBeforeBuildFinished(
         SnapshotHierarchy root, int maximumNumberOfWatchedHierarchies, List<File> unsupportedFileSystems
     ) {
-        return delegate.updateVfsBeforeBuildFinished(root, maximumNumberOfWatchedHierarchies, unsupportedFileSystems);
+        SnapshotHierarchy result =
+            delegate.updateVfsBeforeBuildFinished(root, maximumNumberOfWatchedHierarchies, unsupportedFileSystems);
+        return drainRustChangesInto(result);
     }
 
     @Override
     public SnapshotHierarchy updateVfsAfterBuildFinished(SnapshotHierarchy root) {
         SnapshotHierarchy result = delegate.updateVfsAfterBuildFinished(root);
+        result = drainRustChangesInto(result);
 
         // Shadow: report match for the build's change processing
         long javaCount = javaChangeCount.getAndSet(0);
-        if (javaCount > 0 && rustClient != null) {
+        if (!authoritative && javaCount > 0 && rustClient != null) {
             if (rustWatchHealthy.get()) {
                 mismatchReporter.reportMatch();
                 LOGGER.debug("[substrate:watch] shadow OK: {} changes processed in build", javaCount);
@@ -127,22 +156,48 @@ public class ShadowingFileWatcherRegistry implements FileWatcherRegistry {
 
     @Override
     public FileWatchingStatistics getAndResetStatistics() {
-        return delegate.getAndResetStatistics();
+        FileWatchingStatistics javaStatistics = delegate.getAndResetStatistics();
+        if (!authoritative) {
+            return javaStatistics;
+        }
+        int rustEvents = saturatingInt(rustChangeCount.getAndSet(0));
+        int watchedHierarchies = Math.max(activeWatchCount(), javaStatistics.getNumberOfWatchedHierarchies());
+        return new FileWatchingStatistics() {
+            @Override
+            public Optional<Throwable> getErrorWhileReceivingFileChanges() {
+                return Optional.empty();
+            }
+
+            @Override
+            public boolean isUnknownEventEncountered() {
+                return false;
+            }
+
+            @Override
+            public int getNumberOfReceivedEvents() {
+                return rustEvents;
+            }
+
+            @Override
+            public int getNumberOfWatchedHierarchies() {
+                return watchedHierarchies;
+            }
+        };
     }
 
     @Override
     public void close() throws IOException {
         synchronized (lock) {
-            for (String watchId : activeWatchIds) {
+            for (ActiveRustWatch watch : activeWatches) {
                 if (rustClient != null) {
                     try {
-                        rustClient.stopWatching(watchId);
+                        rustClient.stopWatching(watch.watchId);
                     } catch (Exception e) {
-                        LOGGER.debug("[substrate:watch] shadow watch stop failed for {}", watchId, e);
+                        LOGGER.debug("[substrate:watch] shadow watch stop failed for {}", watch.watchId, e);
                     }
                 }
             }
-            activeWatchIds.clear();
+            activeWatches.clear();
         }
         delegate.close();
     }
@@ -182,7 +237,7 @@ public class ShadowingFileWatcherRegistry implements FileWatcherRegistry {
 
         if (result.isSuccess() && result.isWatching()) {
             synchronized (lock) {
-                activeWatchIds.add(result.getWatchId());
+                activeWatches.add(new ActiveRustWatch(result.getWatchId()));
             }
             rustWatchHealthy.set(true);
             LOGGER.debug("[substrate:watch] shadow watch started for {} (id={})",
@@ -190,6 +245,85 @@ public class ShadowingFileWatcherRegistry implements FileWatcherRegistry {
         } else {
             throw new RuntimeException(result.getErrorMessage());
         }
+    }
+
+    private SnapshotHierarchy drainRustChangesInto(SnapshotHierarchy root) {
+        if (!authoritative) {
+            return root;
+        }
+        if (rustClient == null) {
+            RuntimeException failure = new RuntimeException("Rust file watcher client is unavailable");
+            rustPollFailed("unavailable", failure);
+        }
+
+        SnapshotHierarchy result = root;
+        synchronized (lock) {
+            for (ActiveRustWatch watch : activeWatches) {
+                List<RustFileWatchClient.FileChange> changes;
+                try {
+                    changes = rustClient.pollChangesStrict(watch.watchId, watch.sinceTimestampMs);
+                } catch (Exception e) {
+                    rustPollFailed(watch.watchId, e);
+                    return result;
+                }
+
+                for (RustFileWatchClient.FileChange change : changes) {
+                    if (watch.hasProcessed(change)) {
+                        continue;
+                    }
+                    FileWatcherRegistry.Type type = mapRustChangeType(change.getChangeType());
+                    Path path = Paths.get(change.getPath());
+                    if (rustChangeHandler != null) {
+                        rustChangeHandler.handleChange(type, path);
+                    }
+                    result = result.invalidate(path.toString(), SnapshotHierarchy.NodeDiffListener.NOOP);
+                    rustChangeCount.incrementAndGet();
+                    watch.recordProcessed(change);
+                }
+            }
+        }
+        return result;
+    }
+
+    private void rustPollFailed(String watchId, Exception e) {
+        mismatchReporter.reportRustError("watch-poll:" + watchId, e);
+        rustWatchHealthy.set(false);
+        throw new SubstrateException("Rust file watcher is authoritative but failed to poll " + watchId, e);
+    }
+
+    private int activeWatchCount() {
+        synchronized (lock) {
+            return activeWatches.size();
+        }
+    }
+
+    private static int saturatingInt(long value) {
+        if (value > Integer.MAX_VALUE) {
+            return Integer.MAX_VALUE;
+        }
+        if (value < Integer.MIN_VALUE) {
+            return Integer.MIN_VALUE;
+        }
+        return (int) value;
+    }
+
+    private static FileWatcherRegistry.Type mapRustChangeType(String changeType) {
+        if ("CREATED".equals(changeType)) {
+            return FileWatcherRegistry.Type.CREATED;
+        }
+        if ("MODIFIED".equals(changeType)) {
+            return FileWatcherRegistry.Type.MODIFIED;
+        }
+        if ("DELETED".equals(changeType) || "REMOVED".equals(changeType)) {
+            return FileWatcherRegistry.Type.REMOVED;
+        }
+        if ("INVALIDATED".equals(changeType)) {
+            return FileWatcherRegistry.Type.INVALIDATED;
+        }
+        if ("OVERFLOW".equals(changeType)) {
+            return FileWatcherRegistry.Type.OVERFLOW;
+        }
+        return FileWatcherRegistry.Type.INVALIDATED;
     }
 
     private void onRustWatchFailure(String path, Exception e, boolean failClosed) {
@@ -200,6 +334,39 @@ public class ShadowingFileWatcherRegistry implements FileWatcherRegistry {
             } else {
                 LOGGER.debug("[substrate:watch] shadow watch start failed for {}", path, e);
             }
+        }
+    }
+
+    private static final class ActiveRustWatch {
+        private final String watchId;
+        private long sinceTimestampMs;
+        private long lastTimestampMs = -1;
+        private final Set<String> processedAtLastTimestamp = new HashSet<>();
+
+        private ActiveRustWatch(String watchId) {
+            this.watchId = watchId;
+        }
+
+        private boolean hasProcessed(RustFileWatchClient.FileChange change) {
+            long timestamp = change.getTimestampMs();
+            return timestamp < lastTimestampMs
+                || (timestamp == lastTimestampMs && processedAtLastTimestamp.contains(eventKey(change)));
+        }
+
+        private void recordProcessed(RustFileWatchClient.FileChange change) {
+            long timestamp = change.getTimestampMs();
+            if (timestamp > lastTimestampMs) {
+                lastTimestampMs = timestamp;
+                sinceTimestampMs = timestamp;
+                processedAtLastTimestamp.clear();
+            }
+            if (timestamp == lastTimestampMs) {
+                processedAtLastTimestamp.add(eventKey(change));
+            }
+        }
+
+        private static String eventKey(RustFileWatchClient.FileChange change) {
+            return change.getTimestampMs() + "|" + change.getChangeType() + "|" + change.getPath();
         }
     }
 }
