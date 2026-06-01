@@ -295,6 +295,72 @@ class ShadowingFileCollectionSnapshotterTest extends Specification {
         roots[0].children[0].hash == hash
     }
 
+    def "authoritative snapshot supports directory symlink roots"() {
+        given:
+        def javaDelegate = Mock(FileCollectionSnapshotter)
+        def rustClient = Mock(RustFileFingerprintClient)
+        def reporter = Mock(HashMismatchReporter)
+        def rustResult = Mock(RustFileFingerprintClient.FingerprintResult)
+        def rustEntry = Mock(RustFileFingerprintClient.IndividualFingerprint)
+        def hash = HashCode.fromBytes("dir-symlink-md5".bytes)
+        def dir = File.createTempDir("authoritative-fp-dir-symlink", "")
+        def target = new File(dir, "target")
+        def link = new File(dir, "link")
+        target.mkdirs()
+        new File(target, "child.txt").text = "linked child"
+        createSymlinkOrSkip(link, target)
+        def linkChild = new File(link, "child.txt")
+        def file = singleFileCollection(link.absolutePath)
+        def snapshotter = new ShadowingFileCollectionSnapshotter(javaDelegate, rustClient, reporter, true)
+
+        rustEntry.isDirectory() >> false
+        rustEntry.getPath() >> linkChild.absolutePath
+        rustEntry.getHash() >> hash
+        rustEntry.getLastModified() >> 321L
+        rustEntry.getSize() >> linkChild.length()
+
+        when:
+        def result = snapshotter.snapshot(file)
+
+        then:
+        0 * javaDelegate._
+        1 * rustClient.fingerprintFiles(_, "ABSOLUTE_PATH", []) >> rustResult
+        1 * rustResult.isSuccess() >> true
+        1 * rustResult.getEntries() >> [rustEntry]
+
+        and:
+        def roots = result.roots().toList()
+        roots.size() == 1
+        roots[0] instanceof DirectorySnapshot
+        roots[0].absolutePath == link.absolutePath
+        roots[0].accessType == FileMetadata.AccessType.VIA_SYMLINK
+        roots[0].children.size() == 1
+        roots[0].children[0] instanceof RegularFileSnapshot
+        roots[0].children[0].absolutePath == linkChild.absolutePath
+        roots[0].children[0].hash == hash
+    }
+
+    def "authoritative snapshot fails closed on directory symlink cycle"() {
+        given:
+        def javaDelegate = Mock(FileCollectionSnapshotter)
+        def rustClient = Mock(RustFileFingerprintClient)
+        def reporter = Mock(HashMismatchReporter)
+        def dir = File.createTempDir("authoritative-fp-dir-cycle", "")
+        def loop = new File(dir, "loop")
+        createSymlinkOrSkip(loop, dir)
+        def file = singleFileCollection(dir.absolutePath)
+        def snapshotter = new ShadowingFileCollectionSnapshotter(javaDelegate, rustClient, reporter, true)
+
+        when:
+        snapshotter.snapshot(file)
+
+        then:
+        0 * javaDelegate._
+        0 * rustClient._
+        def e = thrown(SubstrateException)
+        e.message.contains("directory symlink cycle")
+    }
+
     def "authoritative snapshot hashes file-tree-backed backing files with rust"() {
         given:
         def javaDelegate = Mock(FileCollectionSnapshotter)

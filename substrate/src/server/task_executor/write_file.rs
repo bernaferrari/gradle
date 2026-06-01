@@ -1,4 +1,7 @@
-use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
+use crate::server::task_executor::{
+    copy::{apply_unix_mode, dir_permission_mode, file_permission_mode},
+    TaskExecutor, TaskInput, TaskResult,
+};
 
 use std::collections::BTreeMap;
 
@@ -22,7 +25,11 @@ pub fn apply_vfs_delta_to_write_file(
     let target_str = target_path.to_string_lossy().to_lowercase();
     for (changed_path, _hash) in delta_child_summaries.iter() {
         let changed_lower = changed_path.to_lowercase();
-        if target_str.contains(&changed_lower) || changed_lower.contains("build") || changed_lower.contains("output") || changed_lower.contains("reports") {
+        if target_str.contains(&changed_lower)
+            || changed_lower.contains("build")
+            || changed_lower.contains("output")
+            || changed_lower.contains("reports")
+        {
             tracing::info!(target: "writefile-lowering", vfs_taskexec_cross = true, target = %target_path.display(), changed = %changed_path, "VFS delta intersects write-file output — re-execution likely required (shadow reporter active for 0%+54=54 gate)");
             return true;
         }
@@ -81,10 +88,20 @@ impl TaskExecutor for WriteFileTaskExecutor {
                 result.error_message = format!("Failed to create output directory: {}", error);
                 return result;
             }
+            if let Err(error) = apply_unix_mode(parent, dir_permission_mode(input)) {
+                result.success = false;
+                result.error_message = error;
+                return result;
+            }
         }
         if let Err(error) = std::fs::write(&input.target_dir, &bytes) {
             result.success = false;
             result.error_message = format!("Failed to write output file: {}", error);
+            return result;
+        }
+        if let Err(error) = apply_unix_mode(&input.target_dir, file_permission_mode(input)) {
+            result.success = false;
+            result.error_message = error;
             return result;
         }
 
@@ -120,5 +137,45 @@ mod tests {
             "oss-style api contract\n"
         );
         assert_eq!(result.files_processed, 1);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn applies_declared_output_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("reports/api-contract.txt");
+        let mut input = TaskInput::new("WriteFile");
+        input.target_dir = output.clone();
+        input.options.insert(
+            "static_output_text_b64".to_string(),
+            base64::engine::general_purpose::STANDARD.encode("oss-style api contract\n"),
+        );
+        input
+            .options
+            .insert("file_permissions".to_string(), "493".to_string());
+        input
+            .options
+            .insert("dir_permissions".to_string(), "448".to_string());
+
+        let result = WriteFileTaskExecutor::new().execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert_eq!(
+            output.metadata().unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        assert_eq!(
+            output
+                .parent()
+                .unwrap()
+                .metadata()
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
     }
 }
