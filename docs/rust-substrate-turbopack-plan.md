@@ -193,6 +193,25 @@ Goal: common Java builds can run with zero JVM task forwards.
 - Dogfood gates must measure task parity, output hashes, archive entries, and
   zero JVM forwards.
 
+Completion checkpoint, 2026-06-01:
+
+- Completed for the supported Java preview slice, not for arbitrary Gradle
+  builds. JVM configuration, `buildSrc`, arbitrary plugin logic, Kotlin
+  compilation, and unmodeled task implementations remain outside this phase.
+- Rust now owns native execution for the admitted common Java verticals:
+  JavaCompile, ProcessResources/Copy/Sync, Jar/Zip/War/Ear/Tar, Test, Exec,
+  JavaExec, Javadoc, CreateStartScripts, lifecycle, no-source, and static
+  report-style WriteFile contracts.
+- Rust execution planning now performs up-to-date/cache decisions from captured
+  work metadata, admits Gradle `@CacheableTask` markers, avoids synthetic cache
+  hits in authoritative mode, restores declared outputs from the Rust local
+  cache, and stores successful native outputs using the Rust pack/unpack layout.
+- The Phase 2 completion dogfood run used the rebuilt daemon and passed
+  `build/dogfood-phase2-20260601/dogfood-summary.md`: 7/7 projects matched,
+  6/6 supported projects had zero JVM forwards, task graph captures and Rust
+  RunBuild markers were 7/7, and the unsupported composite-substitution fixture
+  failed closed.
+
 ### Phase 3: Make Warm Builds Rust First
 
 Goal: one capture, many direct Rust executions.
@@ -254,7 +273,8 @@ Goal: JVM is optional compatibility, not the engine.
 1. Keep the just-fixed `rust-bridge:testClasses` gate green in CI.
 2. Make Copy/Sync/Delete/Symlink parity authoritative for supported file specs.
 3. Promote the direct warm runbuild path from demo to primary supported workflow.
-4. Finish build-cache packaging proto and Rust pack/unpack parity.
+4. Promote Rust local build-cache entries toward shared/remote Gradle cache
+   compatibility.
 5. Wire execution history and up-to-date checks to VFS deltas, not only mtimes.
 6. Expand dogfood zero-forward support for Java-library and Spring-style builds.
 7. Add Rust dependency-resolution graph parity for file and static Maven repos.
