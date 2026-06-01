@@ -37,42 +37,59 @@ impl CopyTaskExecutor {
         dir: &Path,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<PathBuf>, String>> + Send + '_>> {
         Box::pin(async move {
-            if Self::is_symlink_to_dir(dir).await? {
+            let mut files = Vec::new();
+            let mut directory_stack = HashSet::new();
+            Self::list_files_inner(dir, &mut files, &mut directory_stack).await?;
+            files.sort_unstable();
+            Ok(files)
+        })
+    }
+
+    fn list_files_inner<'a>(
+        dir: &'a Path,
+        files: &'a mut Vec<PathBuf>,
+        directory_stack: &'a mut HashSet<PathBuf>,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+        Box::pin(async move {
+            let canonical = Self::canonical_directory(dir).await?;
+            if !directory_stack.insert(canonical.clone()) {
                 return Err(format!(
-                    "Directory symlink inputs are not supported by the Rust Copy executor: {}",
+                    "Directory symlink cycle detected by the Rust Copy executor: {}",
                     dir.display()
                 ));
             }
-            let mut files = Vec::new();
-            let mut entries = tokio::fs::read_dir(dir)
-                .await
-                .map_err(|e| format!("Failed to read directory {}: {}", dir.display(), e))?;
-            while let Some(entry) = entries
-                .next_entry()
-                .await
-                .map_err(|e| format!("Failed to read directory {}: {}", dir.display(), e))?
-            {
-                let path = entry.path();
-                let file_type = entry
-                    .file_type()
+
+            let result = async {
+                let mut entries = tokio::fs::read_dir(dir)
                     .await
-                    .map_err(|e| format!("Failed to inspect {}: {}", path.display(), e))?;
-                if file_type.is_symlink() {
-                    if Self::is_symlink_to_dir(&path).await? {
-                        return Err(format!(
-                            "Directory symlink inputs are not supported by the Rust Copy executor: {}",
-                            path.display()
-                        ));
+                    .map_err(|e| format!("Failed to read directory {}: {}", dir.display(), e))?;
+                while let Some(entry) = entries
+                    .next_entry()
+                    .await
+                    .map_err(|e| format!("Failed to read directory {}: {}", dir.display(), e))?
+                {
+                    let path = entry.path();
+                    let file_type = entry
+                        .file_type()
+                        .await
+                        .map_err(|e| format!("Failed to inspect {}: {}", path.display(), e))?;
+                    if file_type.is_symlink() {
+                        if Self::is_symlink_to_dir(&path).await? {
+                            Self::list_files_inner(&path, files, directory_stack).await?;
+                        } else {
+                            files.push(path);
+                        }
+                    } else if file_type.is_dir() {
+                        Self::list_files_inner(&path, files, directory_stack).await?;
+                    } else if file_type.is_file() {
+                        files.push(path);
                     }
-                    files.push(path);
-                } else if file_type.is_dir() {
-                    files.extend(Self::list_files(&path).await?);
-                } else if file_type.is_file() {
-                    files.push(path);
                 }
+                Ok(())
             }
-            files.sort_unstable();
-            Ok(files)
+            .await;
+            directory_stack.remove(&canonical);
+            result
         })
     }
 
@@ -80,41 +97,64 @@ impl CopyTaskExecutor {
         dir: &Path,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<PathBuf>, String>> + Send + '_>> {
         Box::pin(async move {
-            if Self::is_symlink_to_dir(dir).await? {
-                return Err(format!(
-                    "Directory symlink inputs are not supported by the Rust Copy executor: {}",
-                    dir.display()
-                ));
-            }
             let mut dirs = Vec::new();
-            let mut entries = tokio::fs::read_dir(dir)
-                .await
-                .map_err(|e| format!("Failed to read directory {}: {}", dir.display(), e))?;
-            while let Some(entry) = entries
-                .next_entry()
-                .await
-                .map_err(|e| format!("Failed to read directory {}: {}", dir.display(), e))?
-            {
-                let path = entry.path();
-                let file_type = entry
-                    .file_type()
-                    .await
-                    .map_err(|e| format!("Failed to inspect {}: {}", path.display(), e))?;
-                if file_type.is_symlink() {
-                    if Self::is_symlink_to_dir(&path).await? {
-                        return Err(format!(
-                            "Directory symlink inputs are not supported by the Rust Copy executor: {}",
-                            path.display()
-                        ));
-                    }
-                } else if file_type.is_dir() {
-                    dirs.push(path.clone());
-                    dirs.extend(Self::list_dirs(&path).await?);
-                }
-            }
+            let mut directory_stack = HashSet::new();
+            Self::list_dirs_inner(dir, &mut dirs, &mut directory_stack).await?;
             dirs.sort_unstable();
             Ok(dirs)
         })
+    }
+
+    fn list_dirs_inner<'a>(
+        dir: &'a Path,
+        dirs: &'a mut Vec<PathBuf>,
+        directory_stack: &'a mut HashSet<PathBuf>,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+        Box::pin(async move {
+            let canonical = Self::canonical_directory(dir).await?;
+            if !directory_stack.insert(canonical.clone()) {
+                return Err(format!(
+                    "Directory symlink cycle detected by the Rust Copy executor: {}",
+                    dir.display()
+                ));
+            }
+
+            let result = async {
+                let mut entries = tokio::fs::read_dir(dir)
+                    .await
+                    .map_err(|e| format!("Failed to read directory {}: {}", dir.display(), e))?;
+                while let Some(entry) = entries
+                    .next_entry()
+                    .await
+                    .map_err(|e| format!("Failed to read directory {}: {}", dir.display(), e))?
+                {
+                    let path = entry.path();
+                    let file_type = entry
+                        .file_type()
+                        .await
+                        .map_err(|e| format!("Failed to inspect {}: {}", path.display(), e))?;
+                    if file_type.is_symlink() {
+                        if Self::is_symlink_to_dir(&path).await? {
+                            dirs.push(path.clone());
+                            Self::list_dirs_inner(&path, dirs, directory_stack).await?;
+                        }
+                    } else if file_type.is_dir() {
+                        dirs.push(path.clone());
+                        Self::list_dirs_inner(&path, dirs, directory_stack).await?;
+                    }
+                }
+                Ok(())
+            }
+            .await;
+            directory_stack.remove(&canonical);
+            result
+        })
+    }
+
+    async fn canonical_directory(path: &Path) -> Result<PathBuf, String> {
+        tokio::fs::canonicalize(path)
+            .await
+            .map_err(|e| format!("Failed to canonicalize directory {}: {}", path.display(), e))
     }
 
     async fn copy_file(
@@ -934,7 +974,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn test_copy_directory_symlink_fails_closed() {
+    async fn test_copy_directory_symlink_follows_target_tree() {
         let tmp = tempfile::tempdir().unwrap();
         let src_dir = tmp.path().join("src");
         let target_dir = tmp.path().join("target");
@@ -951,12 +991,39 @@ mod tests {
         let executor = CopyTaskExecutor::new();
         let mut input = TaskInput::new("Copy");
         input.source_files.push(src_dir);
+        input.target_dir = dest_dir.clone();
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        assert_eq!(
+            tokio::fs::read(dest_dir.join("linked-dir/nested.txt"))
+                .await
+                .unwrap(),
+            b"nested"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_copy_directory_symlink_cycle_fails_closed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let dest_dir = tmp.path().join("dest");
+        tokio::fs::create_dir_all(&src_dir).await.unwrap();
+        tokio::fs::symlink(&src_dir, src_dir.join("loop"))
+            .await
+            .unwrap();
+
+        let executor = CopyTaskExecutor::new();
+        let mut input = TaskInput::new("Copy");
+        input.source_files.push(src_dir);
         input.target_dir = dest_dir;
 
         let result = executor.execute(&input).await;
 
         assert!(!result.success);
-        assert!(result.error_message.contains("Directory symlink inputs"));
+        assert!(result.error_message.contains("Directory symlink cycle"));
     }
 
     #[tokio::test]
