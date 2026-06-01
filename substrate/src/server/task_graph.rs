@@ -2362,6 +2362,9 @@ fn task_options(
         insert_input_option(task, &mut options, "dir_permissions", "dir_permissions");
     } else if task_type == "Delete" {
         insert_input_option(task, &mut options, "follow_symlinks", "follow_symlinks");
+    } else if task_type == "Mkdir" {
+        insert_input_option(task, &mut options, "parents", "parents");
+        insert_input_option(task, &mut options, "dir_permissions", "dir_permissions");
     } else if task_type == "TestExec" {
         insert_input_option(task, &mut options, "java_home", "java_home");
         insert_input_option(task, &mut options, "classpath", "classpath");
@@ -5195,6 +5198,29 @@ mod tests {
 
         assert_eq!(task_type, "Copy");
         assert_eq!(context["options"]["file_permissions"], "493");
+        assert_eq!(context["options"]["dir_permissions"], "448");
+    }
+
+    #[test]
+    fn test_mkdir_contract_lowers_permissions_to_native_options() {
+        let mut task = canonical_task(
+            ":createOutput",
+            "Mkdir",
+            Vec::new(),
+            vec!["/repo/build/generated".to_string()],
+        );
+        task.input_specs = vec![
+            value_input("parents", "true"),
+            value_input("dir_permissions", "448"),
+        ];
+
+        let task_type = executable_task_type(&task);
+        let context: serde_json::Value =
+            serde_json::from_str(&execution_context_json(&task, &task_type)).unwrap();
+
+        assert_eq!(task_type, "Mkdir");
+        assert_eq!(context["source_files"][0], "/repo/build/generated");
+        assert_eq!(context["options"]["parents"], "true");
         assert_eq!(context["options"]["dir_permissions"], "448");
     }
 

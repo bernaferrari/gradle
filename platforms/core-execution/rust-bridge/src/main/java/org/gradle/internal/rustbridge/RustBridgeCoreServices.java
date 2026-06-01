@@ -82,6 +82,11 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
             || RustSubstrateOptions.isExecutionKernelRequested(options);
     }
 
+    static boolean shouldRunBuildFromSelectedTaskContracts(InternalOptions options) {
+        return RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_RUN_BUILD)
+            || RustSubstrateOptions.isExecutionKernelRequested(options);
+    }
+
     @Override
     public void registerGlobalServices(ServiceRegistration registration) {
     }
@@ -499,17 +504,14 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
                 options,
                 RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_TASK_GRAPH
             );
-            boolean runBuildEnabled = RustSubstrateOptions.isSubsystemEnabled(
-                options,
-                RustSubstrateOptions.ENABLE_RUST_RUN_BUILD
-            );
+            boolean runBuildEnabled = RustBridgeCoreServices.shouldRunBuildFromSelectedTaskContracts(options);
             boolean runBuildAuthoritative = RustSubstrateOptions.isExecutionKernelEnabled(options);
             TaskGraphShadowReporter reporter = new TaskGraphShadowReporter(
                 activeClient,
-                runBuildEnabled && !runBuildAuthoritative ? rustBuildExecutionClient : null,
+                runBuildEnabled ? rustBuildExecutionClient : null,
                 mismatchReporter,
                 authoritative,
-                runBuildEnabled && !runBuildAuthoritative,
+                runBuildEnabled,
                 runBuildAuthoritative
             );
             TaskGraphShadowListener listener = new TaskGraphShadowListener(

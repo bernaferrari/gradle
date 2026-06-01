@@ -241,6 +241,13 @@ public final class RustSubstrateOptions {
     }
 
     public static ExecutionKernelAdmission getExecutionKernelAdmission(InternalOptions options) {
+        SubstrateMode mode = getMode(options);
+        if (mode == SubstrateMode.AUTHORITATIVE) {
+            return ExecutionKernelAdmission.STRICT;
+        }
+        if (mode == SubstrateMode.OFF) {
+            return ExecutionKernelAdmission.OFF;
+        }
         if (!isSubstrateEnabled(options)) {
             return ExecutionKernelAdmission.OFF;
         }
