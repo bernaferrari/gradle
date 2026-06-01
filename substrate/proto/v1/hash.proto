@@ -23,6 +23,7 @@ message HashResult {
 message HashBatchRequest {
   repeated FileToHash files = 1;
   string algorithm = 2;
+  bool gradle_signature = 3;
 }
 message HashBatchResponse {
   repeated HashResult results = 1;

@@ -6,13 +6,13 @@ use blake3::Hasher as Blake3Hasher;
 use md5::{Digest, Md5};
 use rayon::prelude::*;
 use sha1::Sha1;
-use sha2::Sha256;
+use sha2::{Sha256, Sha512};
 use sha3::{Sha3_256, Sha3_512};
 use tonic::{Request, Response, Status};
 
 use crate::error::SubstrateError;
 use crate::proto::{
-    hash_service_server::HashService, HashBatchRequest, HashBatchResponse, HashResult,
+    HashBatchRequest, HashBatchResponse, HashResult, hash_service_server::HashService,
 };
 
 #[derive(Default)]
@@ -27,6 +27,7 @@ pub enum HashAlgorithm {
     Md5,
     Sha1,
     Sha256,
+    Sha512,
     Sha3_256,
     Sha3_512,
     Blake3,
@@ -39,6 +40,7 @@ impl HashAlgorithm {
             b"" | b"MD5" | b"md5" => Some(HashAlgorithm::Md5),
             b"SHA-1" | b"sha-1" | b"SHA1" | b"sha1" => Some(HashAlgorithm::Sha1),
             b"SHA-256" | b"sha-256" | b"SHA256" | b"sha256" => Some(HashAlgorithm::Sha256),
+            b"SHA-512" | b"sha-512" | b"SHA512" | b"sha512" => Some(HashAlgorithm::Sha512),
             b"SHA3-256" | b"sha3-256" | b"SHA3_256" | b"sha3_256" => Some(HashAlgorithm::Sha3_256),
             b"SHA3-512" | b"sha3-512" | b"SHA3_512" | b"sha3_512" => Some(HashAlgorithm::Sha3_512),
             b"BLAKE3" | b"blake3" => Some(HashAlgorithm::Blake3),
@@ -54,6 +56,10 @@ impl HashAlgorithm {
                     || Self::eq_ignore_case(other, b"SHA256")
                 {
                     Some(HashAlgorithm::Sha256)
+                } else if Self::eq_ignore_case(other, b"SHA-512")
+                    || Self::eq_ignore_case(other, b"SHA512")
+                {
+                    Some(HashAlgorithm::Sha512)
                 } else if Self::eq_ignore_case(other, b"SHA3-256")
                     || Self::eq_ignore_case(other, b"SHA3_256")
                 {
@@ -83,6 +89,7 @@ impl HashAlgorithm {
             HashAlgorithm::Md5 => 16,
             HashAlgorithm::Sha1 => 20,
             HashAlgorithm::Sha256 => 32,
+            HashAlgorithm::Sha512 => 64,
             HashAlgorithm::Sha3_256 => 32,
             HashAlgorithm::Sha3_512 => 64,
             HashAlgorithm::Blake3 => 32,
@@ -125,6 +132,11 @@ fn hash_file_with_algorithm(
         }
         HashAlgorithm::Sha256 => {
             let mut hasher = Sha256::new();
+            stream_hash(&mut reader, &mut hasher, path, file_len)?;
+            Ok(hasher.finalize().to_vec())
+        }
+        HashAlgorithm::Sha512 => {
+            let mut hasher = Sha512::new();
             stream_hash(&mut reader, &mut hasher, path, file_len)?;
             Ok(hasher.finalize().to_vec())
         }
@@ -233,13 +245,14 @@ impl HashService for HashServiceImpl {
             Some(algo) => algo,
             None => {
                 return Err(Status::invalid_argument(format!(
-                    "Unsupported hash algorithm: '{}'. Supported: MD5, SHA-1, SHA-256, SHA3-256, SHA3-512, BLAKE3",
+                    "Unsupported hash algorithm: '{}'. Supported: MD5, SHA-1, SHA-256, SHA-512, SHA3-256, SHA3-512, BLAKE3",
                     req.algorithm
                 )));
             }
         };
 
         let files = req.files;
+        let gradle_signature = req.gradle_signature;
         let use_parallel = files.len() >= PARALLEL_THRESHOLD;
 
         let results: Vec<HashResult> = if use_parallel {
@@ -247,7 +260,8 @@ impl HashService for HashServiceImpl {
                 .into_par_iter()
                 .map(|file| {
                     let path = Path::new(&file.absolute_path);
-                    let with_signature = matches!(algorithm, HashAlgorithm::Md5);
+                    let with_signature =
+                        gradle_signature && matches!(algorithm, HashAlgorithm::Md5);
                     match hash_file_with_algorithm(path, algorithm, with_signature) {
                         Ok(hash_bytes) => HashResult {
                             absolute_path: file.absolute_path,
@@ -269,7 +283,8 @@ impl HashService for HashServiceImpl {
                 .into_iter()
                 .map(|file| {
                     let path = Path::new(&file.absolute_path);
-                    let with_signature = matches!(algorithm, HashAlgorithm::Md5);
+                    let with_signature =
+                        gradle_signature && matches!(algorithm, HashAlgorithm::Md5);
                     match hash_file_with_algorithm(path, algorithm, with_signature) {
                         Ok(hash_bytes) => HashResult {
                             absolute_path: file.absolute_path,
@@ -310,6 +325,11 @@ pub fn hash_file_md5(path: &Path) -> Result<Vec<u8>, SubstrateError> {
 /// Hash a file using SHA-256 (no signature prefix).
 pub fn hash_file_sha256(path: &Path) -> Result<Vec<u8>, SubstrateError> {
     hash_file_with_algorithm(path, HashAlgorithm::Sha256, false)
+}
+
+/// Hash a file using SHA-512 (no signature prefix).
+pub fn hash_file_sha512(path: &Path) -> Result<Vec<u8>, SubstrateError> {
+    hash_file_with_algorithm(path, HashAlgorithm::Sha512, false)
 }
 
 /// Hash a file using SHA-1 (no signature prefix).
@@ -407,6 +427,14 @@ mod tests {
         write!(tmp, "sha1 test content").unwrap();
         let hash = hash_file_sha1(tmp.path()).unwrap();
         assert_eq!(hash.len(), 20);
+    }
+
+    #[test]
+    fn test_sha512_hash() {
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "sha512 test content").unwrap();
+        let hash = hash_file_sha512(tmp.path()).unwrap();
+        assert_eq!(hash.len(), 64);
     }
 
     #[test]
@@ -586,6 +614,9 @@ mod tests {
         assert!(HashAlgorithm::from_name("SHA-256").is_some());
         assert!(HashAlgorithm::from_name("SHA256").is_some());
         assert!(HashAlgorithm::from_name("sha-256").is_some());
+        assert!(HashAlgorithm::from_name("SHA-512").is_some());
+        assert!(HashAlgorithm::from_name("SHA512").is_some());
+        assert!(HashAlgorithm::from_name("sha-512").is_some());
         assert!(HashAlgorithm::from_name("SHA3-256").is_some());
         assert!(HashAlgorithm::from_name("SHA3_256").is_some());
         assert!(HashAlgorithm::from_name("sha3-256").is_some());
@@ -602,6 +633,7 @@ mod tests {
         assert_eq!(HashAlgorithm::Md5.output_len(), 16);
         assert_eq!(HashAlgorithm::Sha1.output_len(), 20);
         assert_eq!(HashAlgorithm::Sha256.output_len(), 32);
+        assert_eq!(HashAlgorithm::Sha512.output_len(), 64);
         assert_eq!(HashAlgorithm::Sha3_256.output_len(), 32);
         assert_eq!(HashAlgorithm::Sha3_512.output_len(), 64);
         assert_eq!(HashAlgorithm::Blake3.output_len(), 32);
@@ -647,6 +679,7 @@ mod tests {
         assert_eq!(hash_file_md5(tmp.path()).unwrap().len(), 16);
         assert_eq!(hash_file_sha1(tmp.path()).unwrap().len(), 20);
         assert_eq!(hash_file_sha256(tmp.path()).unwrap().len(), 32);
+        assert_eq!(hash_file_sha512(tmp.path()).unwrap().len(), 64);
         assert_eq!(hash_file_sha3_256(tmp.path()).unwrap().len(), 32);
         assert_eq!(hash_file_sha3_512(tmp.path()).unwrap().len(), 64);
         assert_eq!(hash_file_blake3(tmp.path()).unwrap().len(), 32);
@@ -720,6 +753,7 @@ mod tests {
             HashAlgorithm::Md5,
             HashAlgorithm::Sha1,
             HashAlgorithm::Sha256,
+            HashAlgorithm::Sha512,
             HashAlgorithm::Sha3_256,
             HashAlgorithm::Sha3_512,
             HashAlgorithm::Blake3,
@@ -757,6 +791,7 @@ mod tests {
                     last_modified: 0,
                 }],
                 algorithm: "SHA-256".to_string(),
+                gradle_signature: false,
             }))
             .await
             .unwrap()
@@ -782,6 +817,7 @@ mod tests {
                     last_modified: 0,
                 }],
                 algorithm: "SHA-1".to_string(),
+                gradle_signature: false,
             }))
             .await
             .unwrap()
@@ -807,6 +843,7 @@ mod tests {
                     last_modified: 0,
                 }],
                 algorithm: "SHA3-256".to_string(),
+                gradle_signature: false,
             }))
             .await
             .unwrap()
@@ -814,6 +851,32 @@ mod tests {
 
         assert_eq!(resp.results.len(), 1);
         assert_eq!(resp.results[0].hash_bytes.len(), 32);
+        assert!(!resp.results[0].error);
+    }
+
+    #[tokio::test]
+    async fn test_gRPC_sha512_algorithm() {
+        let svc = HashServiceImpl;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "test sha512 via grpc").unwrap();
+
+        let resp = svc
+            .hash_batch(Request::new(HashBatchRequest {
+                files: vec![crate::proto::FileToHash {
+                    absolute_path: tmp.path().to_string_lossy().to_string(),
+                    length: 0,
+                    last_modified: 0,
+                }],
+                algorithm: "SHA-512".to_string(),
+                gradle_signature: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.results.len(), 1);
+        assert_eq!(resp.results[0].hash_bytes.len(), 64);
         assert!(!resp.results[0].error);
     }
 
@@ -832,6 +895,7 @@ mod tests {
                     last_modified: 0,
                 }],
                 algorithm: "SHA3-512".to_string(),
+                gradle_signature: false,
             }))
             .await
             .unwrap()
@@ -857,6 +921,7 @@ mod tests {
                     last_modified: 0,
                 }],
                 algorithm: "BLAKE3".to_string(),
+                gradle_signature: false,
             }))
             .await
             .unwrap()
@@ -875,6 +940,7 @@ mod tests {
             .hash_batch(Request::new(HashBatchRequest {
                 files: vec![],
                 algorithm: "CRC32".to_string(),
+                gradle_signature: false,
             }))
             .await;
 
@@ -893,6 +959,7 @@ mod tests {
                     last_modified: 0,
                 }],
                 algorithm: "MD5".to_string(),
+                gradle_signature: true,
             }))
             .await
             .unwrap()
@@ -935,6 +1002,7 @@ mod tests {
                     },
                 ],
                 algorithm: "MD5".to_string(),
+                gradle_signature: false,
             }))
             .await
             .unwrap()
@@ -970,6 +1038,7 @@ mod tests {
                     last_modified: 0,
                 }],
                 algorithm: "MD5".to_string(),
+                gradle_signature: true,
             }))
             .await
             .unwrap()
@@ -989,6 +1058,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_gRPC_md5_without_gradle_signature_is_raw_checksum() {
+        let svc = HashServiceImpl;
+
+        let tmp = NamedTempFile::new().unwrap();
+
+        let resp = svc
+            .hash_batch(Request::new(HashBatchRequest {
+                files: vec![crate::proto::FileToHash {
+                    absolute_path: tmp.path().to_string_lossy().to_string(),
+                    length: 0,
+                    last_modified: 0,
+                }],
+                algorithm: "MD5".to_string(),
+                gradle_signature: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let expected = Md5::new().finalize().to_vec();
+        assert_eq!(resp.results[0].hash_bytes, expected);
+    }
+
+    #[tokio::test]
     async fn test_gRPC_hash_same_file_twice_is_deterministic() {
         let svc = HashServiceImpl;
 
@@ -1004,6 +1097,7 @@ mod tests {
                 last_modified: 0,
             }],
             algorithm: "SHA-256".to_string(),
+            gradle_signature: false,
         };
 
         let resp1 = svc
@@ -1045,6 +1139,7 @@ mod tests {
                     last_modified: 0,
                 }],
                 algorithm: "MD5".to_string(),
+                gradle_signature: false,
             }))
             .await
             .unwrap()
@@ -1096,6 +1191,7 @@ mod tests {
                     },
                 ],
                 algorithm: "SHA-256".to_string(),
+                gradle_signature: false,
             }))
             .await
             .unwrap()
@@ -1149,6 +1245,7 @@ mod tests {
                     },
                 ],
                 algorithm: "SHA-256".to_string(),
+                gradle_signature: false,
             }))
             .await
             .unwrap()
@@ -1191,6 +1288,7 @@ mod tests {
             .hash_batch(Request::new(HashBatchRequest {
                 files: vec![file_entry.clone()],
                 algorithm: "MD5".to_string(),
+                gradle_signature: false,
             }))
             .await
             .unwrap()
@@ -1201,6 +1299,7 @@ mod tests {
             .hash_batch(Request::new(HashBatchRequest {
                 files: vec![file_entry],
                 algorithm: "SHA-256".to_string(),
+                gradle_signature: false,
             }))
             .await
             .unwrap()
@@ -1226,6 +1325,7 @@ mod tests {
                     last_modified: 0,
                 }],
                 algorithm: "SHA-1".to_string(),
+                gradle_signature: false,
             }))
             .await
             .unwrap()
@@ -1266,6 +1366,7 @@ mod tests {
             .hash_batch(Request::new(HashBatchRequest {
                 files: files_to_hash,
                 algorithm: "MD5".to_string(),
+                gradle_signature: false,
             }))
             .await
             .unwrap()
@@ -1320,6 +1421,7 @@ mod tests {
             .hash_batch(Request::new(HashBatchRequest {
                 files: files_to_hash,
                 algorithm: "SHA-256".to_string(),
+                gradle_signature: false,
             }))
             .await
             .unwrap()
@@ -1353,6 +1455,7 @@ mod tests {
             .hash_batch(Request::new(HashBatchRequest {
                 files: files_to_hash,
                 algorithm: "BLAKE3".to_string(),
+                gradle_signature: false,
             }))
             .await
             .unwrap()
@@ -1387,6 +1490,7 @@ mod tests {
             .hash_batch(Request::new(HashBatchRequest {
                 files: files_to_hash,
                 algorithm: "SHA3-256".to_string(),
+                gradle_signature: false,
             }))
             .await
             .unwrap()

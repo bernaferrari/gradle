@@ -43,6 +43,8 @@ import org.gradle.initialization.GradleUserHomeDirProvider;
 import org.gradle.initialization.layout.BuildLayout;
 import org.gradle.initialization.layout.BuildLayoutFactory;
 import org.gradle.initialization.layout.ProjectCacheDir;
+import org.gradle.internal.buildoption.InternalOptions;
+import org.gradle.internal.buildoption.RustSubstrateOptions;
 import org.gradle.internal.build.BuildLayoutValidator;
 import org.gradle.internal.buildevents.BuildStartedTime;
 import org.gradle.internal.event.ListenerManager;
@@ -57,6 +59,13 @@ import org.gradle.internal.model.InMemoryCacheFactory;
 import org.gradle.internal.model.StateTransitionControllerFactory;
 import org.gradle.internal.nativeintegration.filesystem.FileSystem;
 import org.gradle.internal.operations.BuildOperationRunner;
+import org.gradle.internal.rustbridge.SubstrateClient;
+import org.gradle.internal.rustbridge.SubstrateException;
+import org.gradle.internal.rustbridge.filehashcache.RustFileHashCacheClient;
+import org.gradle.internal.rustbridge.hash.RustChecksumService;
+import org.gradle.internal.rustbridge.hash.ShadowingChecksumService;
+import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
+
 import org.gradle.internal.scopeids.PersistentScopeIdLoader;
 import org.gradle.internal.scopeids.ScopeIdsServices;
 import org.gradle.internal.scopeids.id.UserScopeId;
@@ -68,6 +77,7 @@ import org.gradle.internal.service.ServiceRegistrationProvider;
 import org.gradle.internal.time.Clock;
 import org.gradle.internal.work.AsyncWorkTracker;
 import org.gradle.internal.work.DefaultAsyncWorkTracker;
+import org.jspecify.annotations.Nullable;
 
 
 import java.io.File;
@@ -174,8 +184,44 @@ public class CoreBuildSessionServices implements ServiceRegistrationProvider {
         FileSystem fileSystem,
         CrossBuildFileHashCache crossBuildCache,
         BuildSessionScopeFileTimeStampInspector inspector,
-        FileHasherStatistics.Collector statisticsCollector
+        FileHasherStatistics.Collector statisticsCollector,
+        InternalOptions options,
+        @Nullable SubstrateClient substrateClient
     ) {
-        return new DefaultChecksumService(stringInterner, crossBuildCache, fileSystem, inspector, statisticsCollector);
+        ChecksumService javaChecksumService = new DefaultChecksumService(stringInterner, crossBuildCache, fileSystem, inspector, statisticsCollector);
+        if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_HASHING)) {
+            return javaChecksumService;
+        }
+
+        boolean hashingAuthoritative = RustSubstrateOptions.isSubsystemAuthoritative(
+            options,
+            RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_HASHING
+        );
+        boolean fileHashCacheEnabled = RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_FILE_HASH_CACHE);
+        boolean fileHashCacheAuthoritative = RustSubstrateOptions.isSubsystemAuthoritative(
+            options,
+            RustSubstrateOptions.ENABLE_RUST_AUTHORITATIVE_FILE_HASH_CACHE
+        );
+        boolean authoritative = hashingAuthoritative || fileHashCacheAuthoritative;
+        if (!isUsable(substrateClient)) {
+            if (authoritative) {
+                throw new SubstrateException("Authoritative Rust checksum hashing/cache is enabled but the Rust substrate client is unavailable");
+            }
+            return javaChecksumService;
+        }
+
+        RustFileHashCacheClient fileHashCacheClient = fileHashCacheEnabled
+            ? new RustFileHashCacheClient(substrateClient)
+            : null;
+        return new ShadowingChecksumService(
+            javaChecksumService,
+            new RustChecksumService(substrateClient, fileHashCacheClient, fileHashCacheAuthoritative),
+            new HashMismatchReporter(options.getBoolean(RustSubstrateOptions.REPORT_MISMATCHES)),
+            authoritative
+        );
+    }
+
+    private static boolean isUsable(@Nullable SubstrateClient substrateClient) {
+        return substrateClient != null && !substrateClient.isNoop();
     }
 }

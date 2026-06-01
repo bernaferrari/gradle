@@ -50,10 +50,12 @@ class RustGrpcFileHasherTest extends Specification {
 
     private static class TestHashService extends HashServiceGrpc.HashServiceImplBase {
         byte[] responseHash = hashBytes(7)
+        HashBatchRequest lastRequest
         int calls
 
         @Override
         void hashBatch(HashBatchRequest request, StreamObserver<HashBatchResponse> responseObserver) {
+            lastRequest = request
             calls++
             responseObserver.onNext(HashBatchResponse.newBuilder()
                 .addResults(HashResult.newBuilder()
@@ -138,6 +140,8 @@ class RustGrpcFileHasherTest extends Specification {
         then:
         result == HashCode.fromBytes(harness.service.responseHash)
         harness.service.calls == 1
+        harness.service.lastRequest.algorithm == "MD5"
+        harness.service.lastRequest.gradleSignature
         cache.puts.size() == 1
         cache.puts[0].path == file.absolutePath
         cache.puts[0].hash == result
