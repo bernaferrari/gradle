@@ -10,6 +10,8 @@ import org.gradle.internal.event.ListenerManager;
 import org.gradle.internal.rustbridge.bootstrap.BootstrapLifecycleListener;
 import org.gradle.internal.rustbridge.bootstrap.RustBootstrapClient;
 import org.gradle.internal.rustbridge.cache.BuildCacheOrchestrationClient;
+import org.gradle.internal.rustbridge.cache.RustBuildCachePackagingClient;
+import org.gradle.internal.rustbridge.cache.ShadowingBuildCachePacker;
 import org.gradle.internal.rustbridge.buildresult.BuildResultShadowListener;
 import org.gradle.internal.rustbridge.buildresult.RustBuildResultClient;
 import org.gradle.internal.rustbridge.configcache.ConfigurationCacheShadowListener;
@@ -273,6 +275,24 @@ public class RustBridgeCoreServices extends AbstractGradleModuleServices {
         @Provides
         BuildCacheOrchestrationClient createBuildCacheOrchestrationClient(SubstrateClient client) {
             return new BuildCacheOrchestrationClient(client);
+        }
+
+        @Provides
+        RustBuildCachePackagingClient createRustBuildCachePackagingClient(SubstrateClient client) {
+            return new RustBuildCachePackagingClient(client);
+        }
+
+        @Provides
+        @Nullable
+        ShadowingBuildCachePacker createShadowingBuildCachePacker(
+            RustBuildCachePackagingClient rustBuildCachePackagingClient,
+            HashMismatchReporter mismatchReporter,
+            InternalOptions options
+        ) {
+            if (!RustSubstrateOptions.isSubsystemEnabled(options, RustSubstrateOptions.ENABLE_RUST_CACHE_PACKAGING)) {
+                return null;
+            }
+            return new ShadowingBuildCachePacker(rustBuildCachePackagingClient, mismatchReporter);
         }
 
         @Provides

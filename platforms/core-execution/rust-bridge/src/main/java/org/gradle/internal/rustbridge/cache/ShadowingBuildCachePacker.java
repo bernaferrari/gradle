@@ -4,6 +4,8 @@ import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
 import org.slf4j.Logger;
 
+import java.util.Arrays;
+
 /**
  * Shadowing wrapper for the build-cache packaging slice.
  */
@@ -36,7 +38,7 @@ public class ShadowingBuildCachePacker {
             return;
         }
         byte[] rustBytes = rustResult.getPackagedBytes();
-        boolean match = javaPackaged != null && javaPackaged.length == rustBytes.length;
+        boolean match = Arrays.equals(javaPackaged, rustBytes);
         if (match) {
             mismatchReporter.reportMatch();
         } else {
