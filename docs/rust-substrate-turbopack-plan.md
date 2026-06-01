@@ -225,6 +225,31 @@ Goal: one capture, many direct Rust executions.
 This is the strongest Turbopack-style wedge: skip JVM configuration when the
 stable Rust graph is still valid.
 
+Completion checkpoint, 2026-06-01:
+
+- Completed for the supported Java preview slice. The warm path is still a
+  supported-slice workflow, not a universal Gradle CLI replacement.
+- `tools/warm_runner/run.py` now makes Rust-first warm execution the default
+  workflow: it tries direct `gradle-substrate-runbuild` first, captures through
+  Gradle/JVM only on `cache-miss`, `stale`, `unsafe-cache`, `task-mismatch`, or
+  `incomplete-cache`, and keeps unsupported execution as a fail-closed result.
+- `gradle-substrate-runbuild` now accepts trusted file-watch deltas via
+  `--changed-path` and `--changed-paths-file`, so direct warm validation can
+  rehash affected project inputs while still validating external
+  cache/dependency inputs fully. Without trusted deltas it keeps full
+  conservative validation.
+- The warm runner writes structured reasons and evidence JSON for direct hits,
+  recaptures, capture failures, and unsupported direct execution.
+- Evidence: `build/warm-runner-phase3-20260601/result.json` proved
+  `cache-miss -> capture -> direct Rust RunBuild`; `result-warm-hit.json`
+  proved the next invocation was `WARM_HIT` with no capture, 14 tasks,
+  8 up-to-date tasks, 4 skipped tasks, zero JVM forwards, and
+  `build-plan-shadow`.
+- Dogfood evidence:
+  `build/direct-warm-phase3-20260601/direct-warm-summary.md` passed 6/6
+  supported projects with zero JVM forwards and 4575.9 ms total direct warm
+  wall time across the supported local dogfood set.
+
 ### Phase 4: Move Dependency Resolution Into Rust
 
 Goal: Rust owns dependency graph solving for common repositories.
@@ -272,7 +297,8 @@ Goal: JVM is optional compatibility, not the engine.
 
 1. Keep the just-fixed `rust-bridge:testClasses` gate green in CI.
 2. Make Copy/Sync/Delete/Symlink parity authoritative for supported file specs.
-3. Promote the direct warm runbuild path from demo to primary supported workflow.
+3. Add stable build identity so direct warm artifact lookup no longer needs
+   `--project-dir` heuristics.
 4. Promote Rust local build-cache entries toward shared/remote Gradle cache
    compatibility.
 5. Wire execution history and up-to-date checks to VFS deltas, not only mtimes.

@@ -7,11 +7,12 @@ RUN_SAMPLE_BUILDS=1
 RUN_GRPC_E2E=1
 RUN_NATIVE_SHADOW=1
 RUN_FIRST60=1
+RUN_DIRECT_WARM=1
 OUTPUT_DIR=""
 
 usage() {
   cat <<'USAGE'
-Usage: tools/demo/rust_substrate_demo.sh [--quick|--full] [--skip-first60] [--skip-sample-builds] [--skip-grpc-e2e] [--skip-native-shadow] [--output-dir DIR]
+Usage: tools/demo/rust_substrate_demo.sh [--quick|--full] [--skip-first60] [--skip-direct-warm] [--skip-sample-builds] [--skip-grpc-e2e] [--skip-native-shadow] [--output-dir DIR]
 
 Runs an honest Rust substrate demo:
   - first-60-second visible wins: daemon ready time, authoritative Rust RunBuild with zero JVM forwards, real-build remote requests avoided, file-watch latency
@@ -51,6 +52,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-first60)
       RUN_FIRST60=0
+      ;;
+    --skip-direct-warm)
+      RUN_DIRECT_WARM=0
       ;;
     --output-dir)
       shift
@@ -97,6 +101,29 @@ if [[ "$RUN_FIRST60" -eq 1 ]]; then
     python3 ./tools/demo/first_60_seconds.py \
       --mode fast \
       --output "$OUTPUT_DIR/first60.json"
+fi
+
+if [[ "$RUN_DIRECT_WARM" -eq 1 ]]; then
+  if [[ -z "$GRADLE_UNDER_TEST_BIN" ]]; then
+    GRADLE_UNDER_TEST_BIN="$ROOT_DIR/build/gradle-under-test/bin/gradle"
+  fi
+  if [[ ! -x "$GRADLE_UNDER_TEST_BIN" ]]; then
+    echo "== Rust-first warm supported workflow"
+    echo "Skipping: build/gradle-under-test/bin/gradle was not found. Build :distributions-full:install or set GRADLE_UNDER_TEST_BIN."
+    echo
+  else
+    run_step "Build Rust direct warm binaries" \
+      cargo build -q -p gradle-substrate-daemon --bins
+    run_step "Rust-first warm supported workflow" \
+      python3 ./tools/warm_runner/run.py \
+        --project-dir "$ROOT_DIR/testing/corpus/oss-style-java-library-kotlin-dsl" \
+        --task :build \
+        --state-dir "$OUTPUT_DIR/warm-rust-state" \
+        --gradle-command "$GRADLE_UNDER_TEST_BIN" \
+        --daemon-binary target/debug/gradle-substrate-daemon \
+        --runbuild-binary target/debug/gradle-substrate-runbuild \
+        --output-json "$OUTPUT_DIR/warm-run.json"
+  fi
 fi
 
 if [[ "$MODE" == "full" ]]; then
