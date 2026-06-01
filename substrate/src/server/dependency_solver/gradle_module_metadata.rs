@@ -256,14 +256,10 @@ pub fn select_jvm_variant(
         });
     }
 
-    let artifacts = variant
-        .files
-        .iter()
-        .map(|file| ModuleArtifact {
-            name: file.name.clone(),
-            url: file.url.clone(),
-        })
-        .collect();
+    let artifacts = match selected_jvm_artifacts(variant) {
+        Ok(artifacts) => artifacts,
+        Err(selection) => return Ok(Some(selection)),
+    };
 
     Ok(Some(ModuleMetadataSelection::Selected(SelectedVariant {
         name: variant.name.clone(),
@@ -545,6 +541,95 @@ fn preferred_jvm_candidates<'a>(candidates: &[&'a Variant]) -> Vec<&'a Variant> 
     } else {
         standard_jvm_candidates
     }
+}
+
+fn selected_jvm_artifacts(
+    variant: &Variant,
+) -> Result<Vec<ModuleArtifact>, ModuleMetadataSelection> {
+    if variant.files.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut main_jars = Vec::new();
+    let mut unsupported_artifacts = Vec::new();
+    for file in &variant.files {
+        if file.name.trim().is_empty() || file.url.trim().is_empty() {
+            return Err(ModuleMetadataSelection::Unsupported(format!(
+                "unsupported Gradle Module Metadata malformed artifact file on variant {}",
+                variant.name
+            )));
+        }
+        if is_primary_jvm_jar(file) {
+            main_jars.push(file);
+        } else if !is_documentation_jar(file) {
+            unsupported_artifacts.push(file.name.clone());
+        }
+    }
+
+    if !unsupported_artifacts.is_empty() {
+        return Err(ModuleMetadataSelection::Unsupported(format!(
+            "unsupported Gradle Module Metadata non-JVM artifact files on variant {}: {}",
+            variant.name,
+            unsupported_artifacts.join(", ")
+        )));
+    }
+    if main_jars.is_empty() {
+        return Err(ModuleMetadataSelection::Unsupported(format!(
+            "unsupported Gradle Module Metadata JVM variant {} has no primary jar artifact",
+            variant.name
+        )));
+    }
+    if main_jars.len() > 1 {
+        let names = main_jars
+            .iter()
+            .map(|file| file.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(ModuleMetadataSelection::Unsupported(format!(
+            "unsupported Gradle Module Metadata multiple primary jar artifacts on variant {}: {}",
+            variant.name, names
+        )));
+    }
+
+    let artifact = main_jars[0];
+    Ok(vec![ModuleArtifact {
+        name: artifact.name.clone(),
+        url: artifact.url.clone(),
+    }])
+}
+
+fn is_primary_jvm_jar(file: &VariantFile) -> bool {
+    artifact_basename(file)
+        .as_deref()
+        .is_some_and(|name| name.ends_with(".jar") && !is_documentation_jar_name(name))
+}
+
+fn is_documentation_jar(file: &VariantFile) -> bool {
+    artifact_basename(file)
+        .as_deref()
+        .is_some_and(is_documentation_jar_name)
+}
+
+fn is_documentation_jar_name(name: &str) -> bool {
+    matches!(
+        name.strip_suffix(".jar"),
+        Some(stem) if stem.ends_with("-sources") || stem.ends_with("-javadoc")
+    )
+}
+
+fn artifact_basename(file: &VariantFile) -> Option<String> {
+    if let Some(name) = non_empty_basename(&file.url) {
+        return Some(name);
+    }
+    non_empty_basename(&file.name)
+}
+
+fn non_empty_basename(path: &str) -> Option<String> {
+    path.rsplit('/')
+        .next()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
 }
 
 fn static_dependency_constraints(
@@ -1037,5 +1122,98 @@ mod tests {
             }
             other => panic!("expected selected variant, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn selects_primary_jar_artifact_when_documentation_artifacts_are_listed_first() {
+        let json = r#"{
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime","org.gradle.libraryelements":"jar"},
+             "files":[
+               {"name":"root-1.0-sources.jar","url":"root-1.0-sources.jar"},
+               {"name":"root-1.0-javadoc.jar","url":"root-1.0-javadoc.jar"},
+               {"name":"root-1.0.jar","url":"root-1.0.jar"}
+             ]}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "org.example", "root", "1.0")
+            .unwrap()
+            .unwrap();
+
+        match selected {
+            ModuleMetadataSelection::Selected(variant) => {
+                assert_eq!(variant.artifacts.len(), 1);
+                assert_eq!(variant.artifacts[0].url, "root-1.0.jar");
+            }
+            other => panic!("expected selected variant, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_multiple_primary_jar_artifacts() {
+        let json = r#"{
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime","org.gradle.libraryelements":"jar"},
+             "files":[
+               {"name":"root-1.0.jar","url":"root-1.0.jar"},
+               {"name":"root-1.0-extra.jar","url":"root-1.0-extra.jar"}
+             ]}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "org.example", "root", "1.0")
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(
+            selected,
+            ModuleMetadataSelection::Unsupported(reason) if reason.contains("multiple primary jar artifacts")
+        ));
+    }
+
+    #[test]
+    fn rejects_non_jvm_artifact_files_on_jvm_variant() {
+        let json = r#"{
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime","org.gradle.libraryelements":"jar"},
+             "files":[
+               {"name":"root-1.0.jar","url":"root-1.0.jar"},
+               {"name":"root-1.0-linux.so","url":"root-1.0-linux.so"}
+             ]}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "org.example", "root", "1.0")
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(
+            selected,
+            ModuleMetadataSelection::Unsupported(reason) if reason.contains("non-JVM artifact files")
+        ));
+    }
+
+    #[test]
+    fn rejects_malformed_artifact_file_entries() {
+        let json = r#"{
+          "component": {"group":"org.example","module":"root","version":"1.0"},
+          "variants": [
+            {"name":"runtimeElements","attributes":{"org.gradle.usage":"java-runtime","org.gradle.libraryelements":"jar"},
+             "files":[{"name":"root-1.0.jar","url":""}]}
+          ]
+        }"#;
+
+        let selected = select_jvm_variant(json, "runtime", "org.example", "root", "1.0")
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(
+            selected,
+            ModuleMetadataSelection::Unsupported(reason) if reason.contains("malformed artifact file")
+        ));
     }
 }

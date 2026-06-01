@@ -262,6 +262,20 @@ Goal: Rust owns dependency graph solving for common repositories.
 - Fail closed for component metadata rules, custom artifact transforms, and
   plugin-specific resolution hooks until modeled.
 
+Progress checkpoint, 2026-06-01:
+
+- Gradle Module Metadata JVM artifact selection now rejects ambiguous artifact
+  shapes instead of taking the first published file. Supported JVM variants may
+  publish no files and fall back to Maven-layout artifact URLs, or publish one
+  primary jar after ignoring documentation jars. Multiple primary jars,
+  non-JVM files, and malformed artifact entries fail closed with explicit
+  diagnostics.
+- Evidence: library-only Rust tests passed for the full
+  `dependency_solver::gradle_module_metadata` suite and the broader
+  `gradle_module_metadata` resolver filter. The package-wide integration test
+  target still has unrelated pre-existing compile failures under
+  `substrate/tests/differential` and `substrate/tests/benchmarks.rs`.
+
 ### Phase 5: Move Configuration To A Stable IR
 
 Goal: JVM configuration is a capture source, not the warm engine.
