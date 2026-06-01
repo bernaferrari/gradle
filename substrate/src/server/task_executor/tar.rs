@@ -78,7 +78,11 @@ impl TaskExecutor for TarTaskExecutor {
 
         // Wave 4+ richer Tar contract (substrate-zr2e) — longPathMode, manifest support (additive, used by newer Gradle Tar tasks in corpus).
         // Per full directive + "more sub-agents = more task_executor richer Tar/Sync/WriteFile lowering + VFS cross + entire port accelerated".
-        let long_path_mode = input.options.get("longPathMode").map(|s| s.as_str()).unwrap_or("gnu");
+        let long_path_mode = input
+            .options
+            .get("longPathMode")
+            .map(|s| s.as_str())
+            .unwrap_or("gnu");
         if long_path_mode != "gnu" && long_path_mode != "posix" {
             // For now log; real version would adjust pax headers etc.
             tracing::debug!(target: "tar-lowering", long_path_mode = %long_path_mode, "non-default longPathMode requested (shadow will validate)");
@@ -118,7 +122,11 @@ pub fn apply_vfs_delta_to_tar_archive(
     let archive_str = archive_path.to_string_lossy().to_lowercase();
     for (changed_path, _hash) in delta_child_summaries.iter() {
         let changed_lower = changed_path.to_lowercase();
-        if archive_str.contains(&changed_lower) || changed_lower.contains("src") || changed_lower.contains("build") || changed_lower.contains("resources") {
+        if archive_str.contains(&changed_lower)
+            || changed_lower.contains("src")
+            || changed_lower.contains("build")
+            || changed_lower.contains("resources")
+        {
             tracing::info!(target: "tar-lowering", vfs_taskexec_cross = true, archive = %archive_path.display(), changed = %changed_path, "VFS delta intersects tar inputs — re-execution likely required (shadow reporter active for 0%+54=54 gate)");
             return true;
         }
@@ -227,6 +235,7 @@ fn collect_entries(
                     return Err(format!("Source file not found: {}", source.display()));
                 }
                 if source.is_dir() {
+                    let mut directory_stack = HashSet::new();
                     collect_dir(
                         source,
                         source,
@@ -234,6 +243,7 @@ fn collect_entries(
                         include_empty_dirs,
                         file_mode,
                         dir_mode,
+                        &mut directory_stack,
                     )?;
                 } else {
                     let relative = inferred_relative_source_path(source);
@@ -460,6 +470,37 @@ fn collect_dir(
     include_empty_dirs: bool,
     file_mode: u32,
     dir_mode: u32,
+    directory_stack: &mut HashSet<PathBuf>,
+) -> Result<(), String> {
+    let canonical = std::fs::canonicalize(dir)
+        .map_err(|e| format!("Cannot canonicalize directory {}: {}", dir.display(), e))?;
+    if !directory_stack.insert(canonical.clone()) {
+        return Err(format!(
+            "Directory symlink cycle detected by the Rust Tar executor: {}",
+            dir.display()
+        ));
+    }
+    let result = collect_dir_entries(
+        root,
+        dir,
+        entries,
+        include_empty_dirs,
+        file_mode,
+        dir_mode,
+        directory_stack,
+    );
+    directory_stack.remove(&canonical);
+    result
+}
+
+fn collect_dir_entries(
+    root: &Path,
+    dir: &Path,
+    entries: &mut Vec<TarEntry>,
+    include_empty_dirs: bool,
+    file_mode: u32,
+    dir_mode: u32,
+    directory_stack: &mut HashSet<PathBuf>,
 ) -> Result<(), String> {
     let mut children = std::fs::read_dir(dir)
         .map_err(|e| format!("Cannot read directory {}: {}", dir.display(), e))?
@@ -489,6 +530,7 @@ fn collect_dir(
                 include_empty_dirs,
                 file_mode,
                 dir_mode,
+                directory_stack,
             )?;
         } else if path.is_file() {
             entries.push(TarEntry {
@@ -669,6 +711,71 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(!names.contains(&"empty".to_string()));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_tar_directory_symlink_follows_target_tree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let target_dir = tmp.path().join("target");
+        let out_dir = tmp.path().join("out");
+
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&target_dir).unwrap();
+        fs::write(target_dir.join("nested.txt"), b"nested").unwrap();
+        std::os::unix::fs::symlink(&target_dir, src_dir.join("linked-dir")).unwrap();
+
+        let executor = TarTaskExecutor::new();
+        let mut input = TaskInput::new("Tar");
+        input.source_files.push(src_dir);
+        input.target_dir = out_dir.clone();
+        input
+            .options
+            .insert("tarName".to_string(), "symlink-dir.tar".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(result.success, "{}", result.error_message);
+        let file = fs::File::open(out_dir.join("symlink-dir.tar")).unwrap();
+        let mut archive = ::tar::Archive::new(file);
+        let names = archive
+            .entries()
+            .unwrap()
+            .map(|entry| {
+                entry
+                    .unwrap()
+                    .path()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"linked-dir/nested.txt".to_string()));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_tar_directory_symlink_cycle_fails_closed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_dir = tmp.path().join("src");
+        let out_dir = tmp.path().join("out");
+
+        fs::create_dir_all(&src_dir).unwrap();
+        std::os::unix::fs::symlink(&src_dir, src_dir.join("loop")).unwrap();
+
+        let executor = TarTaskExecutor::new();
+        let mut input = TaskInput::new("Tar");
+        input.source_files.push(src_dir);
+        input.target_dir = out_dir;
+        input
+            .options
+            .insert("tarName".to_string(), "symlink-cycle.tar".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(!result.success);
+        assert!(result.error_message.contains("Directory symlink cycle"));
     }
 
     #[tokio::test]

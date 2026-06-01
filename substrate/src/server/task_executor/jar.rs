@@ -56,14 +56,9 @@ fn is_directory_symlink(path: &Path) -> Result<bool, String> {
         .map_err(|e| format!("Cannot inspect symlink target {}: {}", path.display(), e))
 }
 
-fn fail_directory_symlink(path: &Path) -> Result<(), String> {
-    if is_directory_symlink(path)? {
-        return Err(format!(
-            "Directory symlink inputs are not supported by the Rust archive executor: {}",
-            path.display()
-        ));
-    }
-    Ok(())
+fn canonical_directory(path: &Path) -> Result<PathBuf, String> {
+    std::fs::canonicalize(path)
+        .map_err(|e| format!("Cannot canonicalize directory {}: {}", path.display(), e))
 }
 
 impl Default for JarTaskExecutor {
@@ -238,8 +233,40 @@ impl JarTaskExecutor {
         include_empty_dirs: bool,
         file_mode: u32,
         dir_mode: u32,
+        directory_stack: &mut HashSet<PathBuf>,
     ) -> Result<(), String> {
-        fail_directory_symlink(current)?;
+        let canonical = canonical_directory(current)?;
+        if !directory_stack.insert(canonical.clone()) {
+            return Err(format!(
+                "Directory symlink cycle detected by the Rust archive executor: {}",
+                current.display()
+            ));
+        }
+
+        let result = Self::collect_files_in_directory(
+            base,
+            current,
+            entries,
+            emitted_dirs,
+            include_empty_dirs,
+            file_mode,
+            dir_mode,
+            directory_stack,
+        );
+        directory_stack.remove(&canonical);
+        result
+    }
+
+    fn collect_files_in_directory(
+        base: &Path,
+        current: &Path,
+        entries: &mut Vec<ZipEntry>,
+        emitted_dirs: &mut HashSet<String>,
+        include_empty_dirs: bool,
+        file_mode: u32,
+        dir_mode: u32,
+        directory_stack: &mut HashSet<PathBuf>,
+    ) -> Result<(), String> {
         let dir_entries = std::fs::read_dir(current)
             .map_err(|e| format!("Cannot read directory {}: {}", current.display(), e))?;
 
@@ -255,11 +282,26 @@ impl JarTaskExecutor {
                 .map_err(|e| format!("Cannot inspect {}: {}", path.display(), e))?;
 
             if file_type.is_symlink() {
-                fail_directory_symlink(&path)?;
-                push_zip_parent_dirs(entries, emitted_dirs, &name, dir_mode);
-                let data = std::fs::read(&path)
-                    .map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
-                entries.push(ZipEntry::file(name, data, file_mode));
+                if is_directory_symlink(&path)? {
+                    if include_empty_dirs {
+                        push_zip_dir_entry(entries, emitted_dirs, &name, dir_mode);
+                    }
+                    Self::collect_files(
+                        base,
+                        &path,
+                        entries,
+                        emitted_dirs,
+                        include_empty_dirs,
+                        file_mode,
+                        dir_mode,
+                        directory_stack,
+                    )?;
+                } else {
+                    push_zip_parent_dirs(entries, emitted_dirs, &name, dir_mode);
+                    let data = std::fs::read(&path)
+                        .map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
+                    entries.push(ZipEntry::file(name, data, file_mode));
+                }
             } else if file_type.is_dir() {
                 if include_empty_dirs {
                     push_zip_dir_entry(entries, emitted_dirs, &name, dir_mode);
@@ -272,6 +314,7 @@ impl JarTaskExecutor {
                     include_empty_dirs,
                     file_mode,
                     dir_mode,
+                    directory_stack,
                 )?;
             } else if file_type.is_file() {
                 push_zip_parent_dirs(entries, emitted_dirs, &name, dir_mode);
@@ -301,7 +344,6 @@ impl JarTaskExecutor {
 
         let mut emitted_dirs = HashSet::new();
         for source in source_files {
-            fail_directory_symlink(source)?;
             if !source.exists() {
                 return Err(format!("Source file not found: {}", source.display()));
             }
@@ -358,7 +400,6 @@ impl JarTaskExecutor {
                     mapping.source.display()
                 ));
             }
-            fail_directory_symlink(&mapping.source)?;
             if mapping.is_dir {
                 if include_empty_dirs {
                     push_zip_dir_entry(entries, &mut emitted_dirs, &name, dir_mode);
@@ -595,10 +636,39 @@ fn collect_existing_files(
     destination_dir: &str,
     files: &mut Vec<(PathBuf, String)>,
 ) -> Result<(), String> {
+    let mut directory_stack = HashSet::new();
+    collect_existing_files_inner(source_dir, destination_dir, files, &mut directory_stack)
+}
+
+fn collect_existing_files_inner(
+    source_dir: &Path,
+    destination_dir: &str,
+    files: &mut Vec<(PathBuf, String)>,
+    directory_stack: &mut HashSet<PathBuf>,
+) -> Result<(), String> {
     if !source_dir.exists() {
         return Ok(());
     }
-    fail_directory_symlink(source_dir)?;
+    let canonical = canonical_directory(source_dir)?;
+    if !directory_stack.insert(canonical.clone()) {
+        return Err(format!(
+            "Directory symlink cycle detected by the Rust archive executor: {}",
+            source_dir.display()
+        ));
+    }
+
+    let result =
+        collect_existing_files_in_directory(source_dir, destination_dir, files, directory_stack);
+    directory_stack.remove(&canonical);
+    result
+}
+
+fn collect_existing_files_in_directory(
+    source_dir: &Path,
+    destination_dir: &str,
+    files: &mut Vec<(PathBuf, String)>,
+    directory_stack: &mut HashSet<PathBuf>,
+) -> Result<(), String> {
     for entry in std::fs::read_dir(source_dir)
         .map_err(|e| format!("Cannot read directory {}: {}", source_dir.display(), e))?
     {
@@ -608,7 +678,15 @@ fn collect_existing_files(
             .file_type()
             .map_err(|e| format!("Cannot inspect {}: {}", path.display(), e))?;
         if file_type.is_symlink() {
-            fail_directory_symlink(&path)?;
+            if is_directory_symlink(&path)? {
+                collect_existing_files_inner(
+                    &path,
+                    &join_archive_path(destination_dir, &entry.file_name().to_string_lossy()),
+                    files,
+                    directory_stack,
+                )?;
+                continue;
+            }
             files.push((
                 path,
                 join_archive_path(destination_dir, &entry.file_name().to_string_lossy()),
@@ -616,10 +694,11 @@ fn collect_existing_files(
             continue;
         }
         if file_type.is_dir() {
-            collect_existing_files(
+            collect_existing_files_inner(
                 &path,
                 &join_archive_path(destination_dir, &entry.file_name().to_string_lossy()),
                 files,
+                directory_stack,
             )?;
             continue;
         }
@@ -1151,6 +1230,7 @@ impl JarTaskExecutor {
                     include_empty_dirs,
                     file_mode,
                     dir_mode,
+                    &mut HashSet::new(),
                 )?;
             }
         }
@@ -1251,6 +1331,7 @@ impl JarTaskExecutor {
                         include_empty_dirs,
                         file_mode,
                         dir_mode,
+                        &mut HashSet::new(),
                     )?;
                     for new_entry in new_entries {
                         entries.retain(|entry| entry.name != new_entry.name);
@@ -1992,7 +2073,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn test_zip_directory_symlink_fails_closed() {
+    async fn test_zip_directory_symlink_follows_target_tree() {
         let tmp = TempDir::new().unwrap();
         let src_dir = tmp.path().join("src");
         let target_dir = tmp.path().join("target");
@@ -2014,8 +2095,43 @@ mod tests {
 
         let result = executor.execute(&input).await;
 
+        assert!(result.success, "{}", result.error_message);
+        let file = fs::File::open(result.output_files.first().unwrap()).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        assert_eq!(
+            archive
+                .by_name("linked-dir/nested.txt")
+                .unwrap()
+                .bytes()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap(),
+            b"nested"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_zip_directory_symlink_cycle_fails_closed() {
+        let tmp = TempDir::new().unwrap();
+        let src_dir = tmp.path().join("src");
+        let out_dir = tmp.path().join("out");
+
+        fs::create_dir_all(&src_dir).unwrap();
+        std::os::unix::fs::symlink(&src_dir, src_dir.join("loop")).unwrap();
+
+        let executor = JarTaskExecutor::new();
+        let mut input = TaskInput::new("Zip");
+        input.source_files.push(src_dir);
+        input.target_dir = out_dir;
+        input.options.insert(
+            "archive_file_name".to_string(),
+            "symlink-cycle.zip".to_string(),
+        );
+
+        let result = executor.execute(&input).await;
+
         assert!(!result.success);
-        assert!(result.error_message.contains("Directory symlink inputs"));
+        assert!(result.error_message.contains("Directory symlink cycle"));
     }
 
     #[tokio::test]
