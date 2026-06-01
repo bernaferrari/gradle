@@ -1,4 +1,5 @@
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
@@ -19,13 +20,17 @@ use crate::proto::{
     dag_executor_service_server::DagExecutorService,
     execution_plan_service_server::ExecutionPlanService,
     task_graph_service_server::TaskGraphService, AwaitBuildCompletionRequest,
-    AwaitBuildCompletionResponse, BuildEventMessage, CancelBuildRequest, CancelBuildResponse,
-    GetBuildStatusRequest, GetBuildStatusResponse, GetNextTaskRequest, GetNextTaskResponse,
-    NotifyTaskFinishedRequest, NotifyTaskFinishedResponse, NotifyTaskStartedRequest,
-    NotifyTaskStartedResponse, PredictedOutcome, RecordOutcomeRequest, ResolveExecutionPlanRequest,
-    ResolvePlanRequest, RunBuildRequest, RunBuildResponse, StartBuildRequest, StartBuildResponse,
-    TaskExecutionDetail, TaskFinishedRequest, TaskStartedRequest, TaskStatusEntry, WorkMetadata,
+    AwaitBuildCompletionResponse, BuildCachePackFile, BuildEventMessage, CancelBuildRequest,
+    CancelBuildResponse, GetBuildStatusRequest, GetBuildStatusResponse, GetNextTaskRequest,
+    GetNextTaskResponse, NotifyTaskFinishedRequest, NotifyTaskFinishedResponse,
+    NotifyTaskStartedRequest, NotifyTaskStartedResponse, PackCacheEntryRequest, PredictedOutcome,
+    RecordOutcomeRequest, ResolveExecutionPlanRequest, ResolvePlanRequest, RunBuildRequest,
+    RunBuildResponse, StartBuildRequest, StartBuildResponse, TaskExecutionDetail,
+    TaskFinishedRequest, TaskStartedRequest, TaskStatusEntry, UnpackCacheEntryRequest,
+    WorkMetadata,
 };
+use crate::server::cache::LocalCacheStore;
+use crate::server::cache_packaging::BuildCachePackagingServiceImpl;
 use crate::server::task_executor::{TaskExecutorRegistry, TaskInput};
 
 /// Sentinel value returned by GetNextTask when the build is complete.
@@ -262,6 +267,142 @@ fn context_is_no_source(context_json: Option<&String>) -> bool {
         .unwrap_or(false)
 }
 
+fn context_output_paths(context_json: Option<&String>) -> Vec<PathBuf> {
+    let Some(json) = context_json else {
+        return Vec::new();
+    };
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("output_files")
+                .and_then(|outputs| outputs.as_array())
+                .map(|outputs| {
+                    outputs
+                        .iter()
+                        .filter_map(|output| output.as_str())
+                        .filter(|output| !output.is_empty())
+                        .map(PathBuf::from)
+                        .collect::<Vec<_>>()
+                })
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(unix)]
+fn is_executable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .map(|metadata| metadata.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable(_path: &Path) -> bool {
+    false
+}
+
+#[cfg(unix)]
+async fn apply_cached_executable_bit(path: &Path, executable: bool) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let metadata = tokio::fs::metadata(path)
+        .await
+        .map_err(|error| format!("metadata {}: {error}", path.display()))?;
+    let mut permissions = metadata.permissions();
+    let current = permissions.mode();
+    let next = if executable {
+        current | 0o111
+    } else {
+        current & !0o111
+    };
+    permissions.set_mode(next);
+    tokio::fs::set_permissions(path, permissions)
+        .await
+        .map_err(|error| format!("chmod {}: {error}", path.display()))
+}
+
+#[cfg(not(unix))]
+async fn apply_cached_executable_bit(_path: &Path, _executable: bool) -> Result<(), String> {
+    Ok(())
+}
+
+fn collect_output_cache_files(
+    root: &Path,
+    relative_prefix: &str,
+    files: &mut Vec<BuildCachePackFile>,
+) -> Result<String, String> {
+    let metadata = std::fs::metadata(root)
+        .map_err(|error| format!("metadata output {}: {error}", root.display()))?;
+    if metadata.is_file() {
+        files.push(BuildCachePackFile {
+            path: relative_prefix.to_string(),
+            content: std::fs::read(root)
+                .map_err(|error| format!("read output {}: {error}", root.display()))?,
+            executable: is_executable(root),
+        });
+        return Ok("file".to_string());
+    }
+    if metadata.is_dir() {
+        collect_output_directory_files(root, root, relative_prefix, files)?;
+        return Ok("dir".to_string());
+    }
+    Err(format!(
+        "output {} is neither a regular file nor a directory",
+        root.display()
+    ))
+}
+
+fn collect_output_directory_files(
+    base: &Path,
+    dir: &Path,
+    relative_prefix: &str,
+    files: &mut Vec<BuildCachePackFile>,
+) -> Result<(), String> {
+    let mut entries = std::fs::read_dir(dir)
+        .map_err(|error| format!("read output dir {}: {error}", dir.display()))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("read output dir entry {}: {error}", dir.display()))?;
+    entries.sort_by_key(|entry| entry.path());
+
+    for entry in entries {
+        let path = entry.path();
+        let metadata = entry
+            .metadata()
+            .map_err(|error| format!("metadata output {}: {error}", path.display()))?;
+        if metadata.is_dir() {
+            collect_output_directory_files(base, &path, relative_prefix, files)?;
+        } else if metadata.is_file() {
+            let relative = path
+                .strip_prefix(base)
+                .map_err(|error| format!("relativize output {}: {error}", path.display()))?
+                .to_string_lossy()
+                .replace('\\', "/");
+            files.push(BuildCachePackFile {
+                path: format!("{relative_prefix}/{relative}"),
+                content: std::fs::read(&path)
+                    .map_err(|error| format!("read output {}: {error}", path.display()))?,
+                executable: is_executable(&path),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn output_kinds_from_metadata(
+    metadata: &HashMap<String, String>,
+    output_count: usize,
+) -> Vec<Option<String>> {
+    metadata
+        .get("output_kinds_json")
+        .and_then(|json| serde_json::from_str::<Vec<String>>(json).ok())
+        .map(|kinds| {
+            (0..output_count)
+                .map(|index| kinds.get(index).cloned())
+                .collect()
+        })
+        .unwrap_or_else(|| vec![None; output_count])
+}
+
 fn refreshed_work_metadata(meta: &WorkMetadata, context_json: &str) -> WorkMetadata {
     let mut refreshed = meta.clone();
     let Ok(value) = serde_json::from_str::<serde_json::Value>(context_json) else {
@@ -327,6 +468,8 @@ pub struct DagExecutorServiceImpl {
     jvm_host_bridge: Option<SharedJvmHostBridge>,
     /// Scope registry for build-session membership validation.
     scope_registry: Option<Arc<ScopeRegistry>>,
+    /// Local Rust build cache store used for authoritative output restore/store.
+    local_cache: Option<Arc<LocalCacheStore>>,
     request_counter: AtomicI64,
     builds_started: AtomicI64,
 }
@@ -342,6 +485,7 @@ impl Clone for DagExecutorServiceImpl {
             executor_registry: Arc::clone(&self.executor_registry),
             jvm_host_bridge: self.jvm_host_bridge.clone(),
             scope_registry: self.scope_registry.clone(),
+            local_cache: self.local_cache.clone(),
             request_counter: AtomicI64::new(self.request_counter.load(Ordering::Relaxed)),
             builds_started: AtomicI64::new(self.builds_started.load(Ordering::Relaxed)),
         }
@@ -375,6 +519,7 @@ impl DagExecutorServiceImpl {
             executor_registry: Arc::new(TaskExecutorRegistry::new()),
             jvm_host_bridge: None,
             scope_registry: None,
+            local_cache: None,
             request_counter: AtomicI64::new(0),
             builds_started: AtomicI64::new(0),
         }
@@ -387,6 +532,11 @@ impl DagExecutorServiceImpl {
 
     pub fn with_scope_registry(mut self, registry: Arc<ScopeRegistry>) -> Self {
         self.scope_registry = Some(registry);
+        self
+    }
+
+    pub fn with_local_cache(mut self, local_cache: Arc<LocalCacheStore>) -> Self {
+        self.local_cache = Some(local_cache);
         self
     }
 
@@ -586,6 +736,161 @@ impl DagExecutorServiceImpl {
                     .map(|slot| slot.execution_context_json.clone())
             })
             .filter(|context| !context.is_empty())
+    }
+
+    async fn restore_outputs_from_cache(
+        &self,
+        cache_key: &str,
+        context_json: Option<&String>,
+    ) -> Result<bool, String> {
+        let Some(cache) = &self.local_cache else {
+            return Ok(false);
+        };
+        if cache_key.is_empty() {
+            return Ok(false);
+        }
+        let output_paths = context_output_paths(context_json);
+        if output_paths.is_empty() {
+            return Ok(false);
+        }
+
+        let Some(packaged_bytes) = cache
+            .load(cache_key)
+            .await
+            .map_err(|error| format!("load cache entry {cache_key}: {error}"))?
+        else {
+            return Ok(false);
+        };
+
+        let (files, metadata, _entry_count) =
+            BuildCachePackagingServiceImpl::unpack(UnpackCacheEntryRequest {
+                build_id: String::new(),
+                packaged_bytes,
+                gzip: true,
+            })?;
+        let output_kinds = output_kinds_from_metadata(&metadata, output_paths.len());
+
+        for output in &output_paths {
+            match tokio::fs::metadata(output).await {
+                Ok(metadata) if metadata.is_dir() => {
+                    tokio::fs::remove_dir_all(output).await.map_err(|error| {
+                        format!("remove cached output dir {}: {error}", output.display())
+                    })?
+                }
+                Ok(_) => tokio::fs::remove_file(output).await.map_err(|error| {
+                    format!("remove cached output file {}: {error}", output.display())
+                })?,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(format!(
+                        "inspect cached output {}: {error}",
+                        output.display()
+                    ));
+                }
+            }
+        }
+
+        for (index, output) in output_paths.iter().enumerate() {
+            if output_kinds.get(index).and_then(|kind| kind.as_deref()) == Some("dir") {
+                tokio::fs::create_dir_all(output).await.map_err(|error| {
+                    format!("create cached output dir {}: {error}", output.display())
+                })?;
+            } else if let Some(parent) = output.parent() {
+                tokio::fs::create_dir_all(parent).await.map_err(|error| {
+                    format!("create cached output parent {}: {error}", parent.display())
+                })?;
+            }
+        }
+
+        for file in files {
+            let normalized = file.path.replace('\\', "/");
+            let Some((prefix, relative)) = normalized.split_once('/') else {
+                let Some(index) = normalized
+                    .strip_prefix("out")
+                    .and_then(|value| value.parse::<usize>().ok())
+                else {
+                    continue;
+                };
+                let Some(target) = output_paths.get(index) else {
+                    continue;
+                };
+                if let Some(parent) = target.parent() {
+                    tokio::fs::create_dir_all(parent).await.map_err(|error| {
+                        format!("create cached file parent {}: {error}", parent.display())
+                    })?;
+                }
+                tokio::fs::write(target, &file.content)
+                    .await
+                    .map_err(|error| {
+                        format!("write cached output {}: {error}", target.display())
+                    })?;
+                apply_cached_executable_bit(target, file.executable).await?;
+                continue;
+            };
+            let Some(index) = prefix
+                .strip_prefix("out")
+                .and_then(|value| value.parse::<usize>().ok())
+            else {
+                continue;
+            };
+            let Some(root) = output_paths.get(index) else {
+                continue;
+            };
+            let target = root.join(relative);
+            if let Some(parent) = target.parent() {
+                tokio::fs::create_dir_all(parent).await.map_err(|error| {
+                    format!("create cached file parent {}: {error}", parent.display())
+                })?;
+            }
+            tokio::fs::write(&target, &file.content)
+                .await
+                .map_err(|error| format!("write cached output {}: {error}", target.display()))?;
+            apply_cached_executable_bit(&target, file.executable).await?;
+        }
+
+        Ok(true)
+    }
+
+    async fn store_outputs_in_cache(
+        &self,
+        cache_key: &str,
+        context_json: Option<&String>,
+    ) -> Result<bool, String> {
+        let Some(cache) = &self.local_cache else {
+            return Ok(false);
+        };
+        if cache_key.is_empty() {
+            return Ok(false);
+        }
+        let output_paths = context_output_paths(context_json);
+        if output_paths.is_empty() {
+            return Ok(false);
+        }
+
+        let mut files = Vec::new();
+        let mut output_kinds = Vec::with_capacity(output_paths.len());
+        for (index, output) in output_paths.iter().enumerate() {
+            let kind = collect_output_cache_files(output, &format!("out{index}"), &mut files)?;
+            output_kinds.push(kind);
+        }
+
+        let mut origin_metadata = HashMap::new();
+        origin_metadata.insert(
+            "output_kinds_json".to_string(),
+            serde_json::to_string(&output_kinds).unwrap_or_default(),
+        );
+        let (packaged_bytes, _entry_count) =
+            BuildCachePackagingServiceImpl::pack(PackCacheEntryRequest {
+                build_id: String::new(),
+                files,
+                origin_metadata,
+                gzip: true,
+            })?;
+        cache
+            .store(cache_key, &packaged_bytes)
+            .await
+            .map_err(|error| format!("store cache entry {cache_key}: {error}"))?;
+        Ok(true)
     }
 
     fn build_kernel_plan(
@@ -1251,7 +1556,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                         .execution_plan
                         .resolve_plan(Request::new(ResolvePlanRequest {
                             work: Some(meta.clone()),
-                            authoritative: true,
+                            authoritative: self.local_cache.is_none(),
                         }))
                         .await?
                         .into_inner();
@@ -1329,43 +1634,68 @@ impl DagExecutorService for DagExecutorServiceImpl {
                             continue;
                         }
                         crate::proto::PlanAction::LoadFromCache => {
-                            self.notify_task_finished(Request::new(NotifyTaskFinishedRequest {
-                                build_id: build_id_str.clone(),
-                                task_path: task_path.clone(),
-                                success: true,
-                                outcome: "FROM_CACHE".to_string(),
-                                duration_ms: 0,
-                                failure_message: String::new(),
-                            }))
-                            .await?;
+                            match self
+                                .restore_outputs_from_cache(
+                                    &plan_resp.cache_key_hint,
+                                    context_json.as_ref(),
+                                )
+                                .await
+                            {
+                                Ok(true) => {
+                                    self.notify_task_finished(Request::new(
+                                        NotifyTaskFinishedRequest {
+                                            build_id: build_id_str.clone(),
+                                            task_path: task_path.clone(),
+                                            success: true,
+                                            outcome: "FROM_CACHE".to_string(),
+                                            duration_ms: 0,
+                                            failure_message: String::new(),
+                                        },
+                                    ))
+                                    .await?;
 
-                            let fp =
-                                super::execution_plan::ExecutionPlanServiceImpl::compute_fingerprint(
-                                    meta,
-                                );
-                            let _ = self
-                                .execution_plan
-                                .record_outcome(Request::new(RecordOutcomeRequest {
-                                    work_identity: meta.work_identity.clone(),
-                                    predicted_outcome: PredictedOutcome::PredictedFromCache as i32,
-                                    actual_outcome: "FROM_CACHE".to_string(),
-                                    prediction_correct: true,
-                                    duration_ms: 0,
-                                    input_fingerprint: fp,
-                                }))
-                                .await;
+                                    let fp = super::execution_plan::ExecutionPlanServiceImpl::compute_fingerprint(meta);
+                                    let _ = self
+                                        .execution_plan
+                                        .record_outcome(Request::new(RecordOutcomeRequest {
+                                            work_identity: meta.work_identity.clone(),
+                                            predicted_outcome: PredictedOutcome::PredictedFromCache
+                                                as i32,
+                                            actual_outcome: "FROM_CACHE".to_string(),
+                                            prediction_correct: true,
+                                            duration_ms: 0,
+                                            input_fingerprint: fp,
+                                        }))
+                                        .await;
 
-                            from_cache_count += 1;
-                            tasks_completed += 1;
-                            task_details.push(TaskExecutionDetail {
-                                task_path,
-                                task_type,
-                                outcome: "FROM_CACHE".to_string(),
-                                duration_ms: 0,
-                                execution_mode: "cached".to_string(),
-                                error_message: plan_resp.reasoning,
-                            });
-                            continue;
+                                    from_cache_count += 1;
+                                    tasks_completed += 1;
+                                    task_details.push(TaskExecutionDetail {
+                                        task_path,
+                                        task_type,
+                                        outcome: "FROM_CACHE".to_string(),
+                                        duration_ms: 0,
+                                        execution_mode: "cached".to_string(),
+                                        error_message: plan_resp.reasoning,
+                                    });
+                                    continue;
+                                }
+                                Ok(false) => {
+                                    tracing::debug!(
+                                        task = %task_path,
+                                        cache_key = %plan_resp.cache_key_hint,
+                                        "Cache candidate missed; executing task"
+                                    );
+                                }
+                                Err(error) => {
+                                    tracing::warn!(
+                                        task = %task_path,
+                                        cache_key = %plan_resp.cache_key_hint,
+                                        error = %error,
+                                        "Cache restore failed; executing task"
+                                    );
+                                }
+                            }
                         }
                         _ => {
                             // EXECUTE or UNKNOWN — proceed with execution.
@@ -1520,6 +1850,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 .await?;
 
                 // Record outcome to execution plan for executed tasks.
+                let mut cache_store: Option<(String, String)> = None;
                 {
                     let build_id_for_meta = build_id_str.clone();
                     let task_path_for_meta = result.task_path.clone();
@@ -1529,6 +1860,11 @@ impl DagExecutorService for DagExecutorServiceImpl {
                     if let Some(execution) = self.builds.get(&BuildId::from(build_id_for_meta)) {
                         if let Some(slot) = execution.tasks.get(&task_path_for_meta) {
                             if let Some(ref meta) = slot.work_metadata {
+                                let cache_context_json = task_contexts
+                                    .get(&task_path_for_meta)
+                                    .cloned()
+                                    .filter(|context| !context.is_empty())
+                                    .unwrap_or_else(|| slot.execution_context_json.clone());
                                 let refreshed_meta =
                                     refreshed_work_metadata(meta, &slot.execution_context_json);
                                 let predicted = slot.predicted_outcome;
@@ -1546,14 +1882,37 @@ impl DagExecutorService for DagExecutorServiceImpl {
                                     .record_outcome(Request::new(RecordOutcomeRequest {
                                         work_identity: refreshed_meta.work_identity.clone(),
                                         predicted_outcome: predicted,
-                                        actual_outcome,
+                                        actual_outcome: actual_outcome.clone(),
                                         prediction_correct,
                                         duration_ms: duration_for_record,
                                         input_fingerprint: refreshed_fingerprint,
                                     }))
                                     .await;
+
+                                if result.success
+                                    && actual_outcome == "EXECUTED"
+                                    && !is_jvm_execution_mode(&result.execution_mode)
+                                    && refreshed_meta.caching_enabled
+                                {
+                                    let cache_key =
+                                        super::execution_plan::ExecutionPlanServiceImpl::compute_fingerprint(meta);
+                                    cache_store = Some((cache_key, cache_context_json));
+                                }
                             }
                         }
+                    }
+                }
+                if let Some((cache_key, context_json)) = cache_store {
+                    if let Err(error) = self
+                        .store_outputs_in_cache(&cache_key, Some(&context_json))
+                        .await
+                    {
+                        tracing::debug!(
+                            task = %result.task_path,
+                            cache_key = %cache_key,
+                            error = %error,
+                            "Skipping Rust cache store for executed task"
+                        );
                     }
                 }
 
@@ -4586,6 +4945,146 @@ mod tests {
             output_dir.is_dir(),
             "cache candidates must restore or execute"
         );
+    }
+
+    #[tokio::test]
+    async fn test_run_build_restores_outputs_from_rust_local_cache() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let local_cache = Arc::new(LocalCacheStore::new(cache_dir.path().to_path_buf()));
+        let svc = make_svc().with_local_cache(Arc::clone(&local_cache));
+
+        register_chain(&svc, "build-cache-hit", &[(":task", "Mkdir", &[])]).await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let output_dir = dir.path().join("restored-output");
+        let work_meta = WorkMetadata {
+            work_identity: ":project:cacheHit".to_string(),
+            display_name: ":project:cacheHit".to_string(),
+            implementation_class: "org.gradle.api.DefaultTask".to_string(),
+            input_properties: [("key".to_string(), "value".to_string())].into(),
+            input_file_fingerprints: [("input".to_string(), "hash".to_string())].into(),
+            caching_enabled: true,
+            can_load_from_cache: true,
+            has_previous_execution_state: false,
+            rebuild_reasons: Vec::new(),
+        };
+        let cache_key =
+            super::super::execution_plan::ExecutionPlanServiceImpl::compute_fingerprint(&work_meta);
+        let (packaged_bytes, _) = BuildCachePackagingServiceImpl::pack(PackCacheEntryRequest {
+            build_id: "build-cache-hit".to_string(),
+            files: vec![BuildCachePackFile {
+                path: "out0/restored.txt".to_string(),
+                content: b"from rust cache".to_vec(),
+                executable: false,
+            }],
+            origin_metadata: [(
+                "output_kinds_json".to_string(),
+                serde_json::json!(["dir"]).to_string(),
+            )]
+            .into(),
+            gzip: true,
+        })
+        .unwrap();
+        local_cache
+            .store(&cache_key, &packaged_bytes)
+            .await
+            .unwrap();
+
+        let context = serde_json::json!({
+            "work_identity": work_meta.work_identity,
+            "display_name": work_meta.display_name,
+            "implementation_class": work_meta.implementation_class,
+            "input_properties": {"key": "value"},
+            "input_file_fingerprints": {"input": "hash"},
+            "caching_enabled": true,
+            "can_load_from_cache": true,
+            "up_to_date_enabled": true,
+            "has_previous_execution_state": false,
+            "rebuild_reasons": [],
+            "source_files": [output_dir.to_string_lossy()],
+            "output_files": [output_dir.to_string_lossy()]
+        })
+        .to_string();
+        let mut contexts = HashMap::new();
+        contexts.insert(":task".to_string(), context);
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "build-cache-hit".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts,
+                allow_jvm_forwarding: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.tasks_from_cache, 1);
+        assert_eq!(resp.tasks_succeeded, 1);
+        assert_eq!(resp.task_details[0].outcome, "FROM_CACHE");
+        assert_eq!(
+            std::fs::read_to_string(output_dir.join("restored.txt")).unwrap(),
+            "from rust cache"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_run_build_stores_native_outputs_in_rust_local_cache() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let local_cache = Arc::new(LocalCacheStore::new(cache_dir.path().to_path_buf()));
+        let svc = make_svc().with_local_cache(Arc::clone(&local_cache));
+
+        register_chain(&svc, "build-cache-store", &[(":task", "Mkdir", &[])]).await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let output_dir = dir.path().join("stored-output");
+        let work_meta = WorkMetadata {
+            work_identity: ":project:cacheStore".to_string(),
+            display_name: ":project:cacheStore".to_string(),
+            implementation_class: "org.gradle.api.DefaultTask".to_string(),
+            input_properties: [("key".to_string(), "value".to_string())].into(),
+            input_file_fingerprints: [("input".to_string(), "hash".to_string())].into(),
+            caching_enabled: true,
+            can_load_from_cache: true,
+            has_previous_execution_state: false,
+            rebuild_reasons: Vec::new(),
+        };
+        let cache_key =
+            super::super::execution_plan::ExecutionPlanServiceImpl::compute_fingerprint(&work_meta);
+        let context = serde_json::json!({
+            "work_identity": work_meta.work_identity,
+            "display_name": work_meta.display_name,
+            "implementation_class": work_meta.implementation_class,
+            "input_properties": {"key": "value"},
+            "input_file_fingerprints": {"input": "hash"},
+            "caching_enabled": true,
+            "can_load_from_cache": true,
+            "up_to_date_enabled": true,
+            "has_previous_execution_state": false,
+            "rebuild_reasons": [],
+            "source_files": [output_dir.to_string_lossy()],
+            "output_files": [output_dir.to_string_lossy()]
+        })
+        .to_string();
+        let mut contexts = HashMap::new();
+        contexts.insert(":task".to_string(), context);
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "build-cache-store".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts,
+                allow_jvm_forwarding: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.tasks_from_cache, 0);
+        assert_eq!(resp.task_details[0].outcome, "EXECUTED");
+        assert!(local_cache.contains(&cache_key).await.unwrap());
     }
 
     #[tokio::test]

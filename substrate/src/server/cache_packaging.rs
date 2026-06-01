@@ -152,7 +152,7 @@ fn gunzip_bytes(bytes: &[u8]) -> Result<Vec<u8>, std::io::Error> {
 }
 
 impl BuildCachePackagingServiceImpl {
-    fn pack(req: PackCacheEntryRequest) -> Result<(Vec<u8>, i64), String> {
+    pub(crate) fn pack(req: PackCacheEntryRequest) -> Result<(Vec<u8>, i64), String> {
         let mut files = Vec::with_capacity(req.files.len());
         for file in req.files {
             let path = normalize_relative_path(&file.path)?;
@@ -207,7 +207,7 @@ impl BuildCachePackagingServiceImpl {
         Ok((packaged, entry_count))
     }
 
-    fn unpack(
+    pub(crate) fn unpack(
         req: UnpackCacheEntryRequest,
     ) -> Result<(Vec<BuildCachePackFile>, HashMap<String, String>, i64), String> {
         let tar_bytes = if req.gzip {

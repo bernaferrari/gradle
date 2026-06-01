@@ -10,7 +10,6 @@ use tokio::signal;
 use tonic::transport::Server;
 
 use gradle_substrate_daemon::{
-    PROTOCOL_VERSION,
     client::jvm_host::JvmHostClient,
     client::jvm_host_bridge::JvmHostBridge,
     proto::{
@@ -81,6 +80,7 @@ use gradle_substrate_daemon::{
         version_catalog::VersionCatalogServiceImpl, work::WorkServiceImpl,
         worker_process::WorkerProcessServiceImpl,
     },
+    PROTOCOL_VERSION,
 };
 
 const MAX_GRPC_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
@@ -346,6 +346,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         event_dispatchers,
     )
     .with_jvm_host_bridge(Arc::clone(&jvm_bridge))
+    .with_local_cache(cache.local_store())
     .with_scope_registry(Arc::clone(&scope_registry));
 
     // Phase 25: Worker process management
