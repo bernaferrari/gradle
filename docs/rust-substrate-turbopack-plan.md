@@ -409,7 +409,11 @@ Progress checkpoint, 2026-06-02:
   the Gradle JVM distribution, and delegates to the compatibility frontend when
   the direct warm plan is absent, stale, unsafe, or requested with unsupported
   Gradle CLI options.
-- Evidence: `cargo test -p gradle-wrapper -- --test-threads=1` passed 28/28,
+- `gradle-substrate-runbuild` now separates exit codes for wrapper fallback:
+  `0` means direct Rust execution completed, `1` means the direct Rust build ran
+  and failed, and `2` means direct execution was unavailable so the wrapper may
+  delegate to Gradle.
+- Evidence: `cargo test -p gradle-wrapper -- --test-threads=1` passed 29/29,
   and `./gradlew :rust-bridge:test --tests
   org.gradle.internal.rustbridge.SubstrateLifecycleTest --no-daemon
   --console=plain` passed, including endpoint metadata admission checks.

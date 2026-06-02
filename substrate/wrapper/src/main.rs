@@ -414,6 +414,8 @@ struct SubstrateContext {
     endpoint: String,
 }
 
+const DIRECT_RUNBUILD_UNAVAILABLE_EXIT: i32 = 2;
+
 fn env_truthy(name: &str) -> bool {
     std::env::var(name)
         .map(|value| {
@@ -853,10 +855,14 @@ target/debug/gradle-substrate-runbuild."
             e
         )
     })?;
-    if status.success() {
-        Ok(Some(status.code().unwrap_or(0)))
+    Ok(direct_runbuild_exit_decision(status.code().unwrap_or(1)))
+}
+
+fn direct_runbuild_exit_decision(code: i32) -> Option<i32> {
+    if code == DIRECT_RUNBUILD_UNAVAILABLE_EXIT {
+        None
     } else {
-        Ok(None)
+        Some(code)
     }
 }
 
@@ -1300,6 +1306,14 @@ distributionSha256Sum=abc123
             "-p".to_string(),
             "other".to_string(),
         ]));
+    }
+
+    #[test]
+    fn test_direct_runbuild_exit_decision_only_delegates_unavailable_code() {
+        assert_eq!(direct_runbuild_exit_decision(0), Some(0));
+        assert_eq!(direct_runbuild_exit_decision(1), Some(1));
+        assert_eq!(direct_runbuild_exit_decision(2), None);
+        assert_eq!(direct_runbuild_exit_decision(127), Some(127));
     }
 
     #[test]

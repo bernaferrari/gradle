@@ -124,8 +124,22 @@ struct ShadowInputFingerprint {
     sha256: String,
 }
 
+const EXIT_SUCCESS: i32 = 0;
+const EXIT_EXECUTION_FAILURE: i32 = 1;
+const EXIT_DIRECT_UNAVAILABLE: i32 = 2;
+
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() {
+    match run_direct_build().await {
+        Ok(code) => std::process::exit(code),
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(EXIT_DIRECT_UNAVAILABLE);
+        }
+    }
+}
+
+async fn run_direct_build() -> Result<i32, Box<dyn std::error::Error>> {
     let args = Args::parse();
     let artifact_path = resolve_artifact_path(&args)?;
     let artifact = read_artifact(&artifact_path)?;
@@ -232,9 +246,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if outcome == "COMPLETED" {
-        Ok(())
+        Ok(EXIT_SUCCESS)
     } else {
-        std::process::exit(1);
+        Ok(EXIT_EXECUTION_FAILURE)
     }
 }
 
