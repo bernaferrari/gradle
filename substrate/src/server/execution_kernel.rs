@@ -378,6 +378,7 @@ fn kernel_task_contract_rejection(
         "copy_unsupported_custom_actions",
         "test_unsupported_filters",
         "unsupported_dependency_semantics",
+        "unsupported_configuration_semantics",
         "unsupported_archive_semantics",
         "requires_jvm_task_execution",
     ];
@@ -629,6 +630,9 @@ fn unsupported_contract_marker_reason(
         "unsupported_repository_features",
         "input.unsupported_repository_features",
         "input_value.unsupported_repository_features",
+        "unsupported_configuration_features",
+        "input.unsupported_configuration_features",
+        "input_value.unsupported_configuration_features",
     ]
     .iter()
     .filter_map(|feature_key| input_properties.get(*feature_key))
@@ -1202,6 +1206,36 @@ mod tests {
         assert!(rejection
             .message()
             .contains("copy_unsupported_custom_actions"));
+    }
+
+    #[test]
+    fn rejects_unsupported_configuration_marker_before_execution() {
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![task(
+                ":classes",
+                "Lifecycle",
+                Some(
+                    serde_json::json!({
+                        "input_properties": {
+                            "input.unsupported_configuration_semantics": "true",
+                            "input.unsupported_configuration_features": "applied plugin 'com.example.custom' on project ':' is not supported by Rust configuration replay"
+                        }
+                    })
+                    .to_string(),
+                ),
+            )],
+        };
+
+        let KernelAdmission::Rejected(rejection) =
+            admit_build_plan(&plan, &native_types(&["Lifecycle"]))
+        else {
+            panic!("expected rejection");
+        };
+        let message = rejection.message();
+        assert!(message.contains("unsupported_configuration_semantics"));
+        assert!(message.contains("com.example.custom"));
     }
 
     #[test]
