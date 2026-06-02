@@ -351,6 +351,19 @@ Goal: new plugin work does not require JVM.
 - Provide compatibility shims for common Gradle plugin patterns.
 - Keep JVM plugins as a guest runtime with explicit capability boundaries.
 
+Progress checkpoint, 2026-06-02:
+
+- Added a versioned `NativePluginContract` ABI with model contributions, task
+  registrations, dependency requests, diagnostics, and execution handler
+  declarations. Built-in Rust contracts now exist for `base`, `java`,
+  `java-library`, and `application`.
+- Phase 6 now resolves native plugin contracts from the Phase 5 configuration
+  graph. Supported built-in plugins produce contracts; custom/external applied
+  plugins and captured plugin classpath dependencies produce explicit
+  rejections until native ABI support or a JVM guest runtime is available.
+- Evidence: `cargo test -p gradle-substrate-daemon --lib
+  plugin_abi::tests` passed 3/3.
+
 ### Phase 7: Shrink The JVM Shell
 
 Goal: JVM is optional compatibility, not the engine.
