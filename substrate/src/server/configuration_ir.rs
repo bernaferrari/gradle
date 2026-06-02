@@ -22,10 +22,14 @@ pub struct CanonicalConfigurationGraph {
     pub build_id: String,
     #[serde(default)]
     pub settings: Option<CanonicalSettingsModel>,
+    #[serde(default)]
+    pub environment: Option<CanonicalConfigurationEnvironment>,
     pub projects: Vec<CanonicalProjectConfiguration>,
     pub source_sets: Vec<CanonicalSourceSet>,
     pub tasks: Vec<CanonicalTaskConfiguration>,
     pub plugins: Vec<CanonicalPluginModel>,
+    #[serde(default)]
+    pub plugin_classpath: Vec<CanonicalPluginClasspathDependency>,
     pub dependency_configurations: Vec<CanonicalDependencyConfiguration>,
     pub toolchains: Vec<CanonicalBuildPlanToolchainRequest>,
     pub invalidation_inputs: Vec<CanonicalConfigurationInput>,
@@ -81,6 +85,30 @@ pub struct CanonicalPluginModel {
     pub version: String,
     pub apply: bool,
     pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CanonicalPluginClasspathDependency {
+    pub project_path: String,
+    pub notation: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CanonicalConfigurationEnvironment {
+    #[serde(default)]
+    pub java_version: String,
+    #[serde(default)]
+    pub java_home: String,
+    #[serde(default)]
+    pub gradle_version: String,
+    #[serde(default)]
+    pub os_name: String,
+    #[serde(default)]
+    pub os_arch: String,
+    pub available_processors: i32,
+    pub max_memory_bytes: i64,
+    pub system_properties: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -196,6 +224,19 @@ impl CanonicalConfigurationGraph {
             settings.warnings.sort_unstable();
             settings.warnings.dedup();
         }
+        if let Some(environment) = &mut self.environment {
+            environment.system_properties.retain(|key, _| {
+                matches!(
+                    key.as_str(),
+                    "file.encoding"
+                        | "java.vendor"
+                        | "java.vm.name"
+                        | "user.country"
+                        | "user.language"
+                        | "user.timezone"
+                )
+            });
+        }
 
         for project in &mut self.projects {
             project.plugins.sort_unstable_by(|a, b| {
@@ -246,6 +287,15 @@ impl CanonicalConfigurationGraph {
             ))
         });
         self.plugins.dedup();
+
+        self.plugin_classpath.sort_unstable_by(|a, b| {
+            (&a.project_path, &a.notation, &a.source).cmp(&(
+                &b.project_path,
+                &b.notation,
+                &b.source,
+            ))
+        });
+        self.plugin_classpath.dedup();
 
         for configuration in &mut self.dependency_configurations {
             configuration.dependencies.sort_unstable();
@@ -326,6 +376,7 @@ pub fn from_build_plan(plan: &CanonicalBuildPlan) -> CanonicalConfigurationGraph
         schema_version: CONFIGURATION_GRAPH_SCHEMA_VERSION,
         build_id: plan.build_id.clone(),
         settings: None,
+        environment: None,
         projects: plan
             .projects
             .iter()
@@ -347,6 +398,7 @@ pub fn from_build_plan(plan: &CanonicalBuildPlan) -> CanonicalConfigurationGraph
         source_sets: Vec::new(),
         tasks: task_configurations_from_plan(plan),
         plugins: Vec::new(),
+        plugin_classpath: Vec::new(),
         dependency_configurations: dependency_configurations_from_plan(&plan.dependencies),
         toolchains: plan.toolchains.clone(),
         invalidation_inputs: Vec::new(),
@@ -391,6 +443,7 @@ pub fn from_jvm_capture(
 
     let projects = project_configurations_from_model(model, &project_scripts);
     let plugins = plugin_models(&projects);
+    let plugin_classpath = plugin_classpath_from_scripts(&project_scripts);
     let source_sets = source_sets_from_projects(&projects);
     let mut invalidation_inputs = scripts
         .iter()
@@ -407,6 +460,7 @@ pub fn from_jvm_capture(
         settings_script.map(|s| s.path),
     ));
     invalidation_inputs.extend(init_script_inputs());
+    invalidation_inputs.extend(environment_inputs());
 
     let mut metadata = BTreeMap::from([
         (
@@ -416,6 +470,10 @@ pub fn from_jvm_capture(
         ("projectCount".to_string(), projects.len().to_string()),
         ("taskCount".to_string(), plan.tasks.len().to_string()),
         ("pluginCount".to_string(), plugins.len().to_string()),
+        (
+            "pluginClasspathCount".to_string(),
+            plugin_classpath.len().to_string(),
+        ),
         ("sourceSetCount".to_string(), source_sets.len().to_string()),
         (
             "invalidationInputCount".to_string(),
@@ -435,10 +493,12 @@ pub fn from_jvm_capture(
         schema_version: CONFIGURATION_GRAPH_SCHEMA_VERSION,
         build_id: build_id.to_string(),
         settings: settings_script.map(settings_model),
+        environment: env.map(environment_model),
         projects,
         source_sets,
         tasks: task_configurations_from_plan(plan),
         plugins,
+        plugin_classpath,
         dependency_configurations: dependency_configurations_from_plan(&plan.dependencies),
         toolchains: plan.toolchains.clone(),
         invalidation_inputs,
@@ -495,6 +555,12 @@ fn native_replay_rejection_reasons(graph: &CanonicalConfigurationGraph) -> Vec<S
                 plugin.id, plugin.project_path
             ));
         }
+    }
+    for dependency in &graph.plugin_classpath {
+        reasons.push(format!(
+            "plugin classpath dependency '{}' on project '{}' requires native plugin ABI support",
+            dependency.notation, dependency.project_path
+        ));
     }
     if graph
         .projects
@@ -680,6 +746,47 @@ fn plugin_models(projects: &[CanonicalProjectConfiguration]) -> Vec<CanonicalPlu
             })
         })
         .collect()
+}
+
+fn plugin_classpath_from_scripts(
+    scripts: &[&ConfigurationScript<'_>],
+) -> Vec<CanonicalPluginClasspathDependency> {
+    scripts
+        .iter()
+        .flat_map(|script| {
+            let buildscript_classpath = script.parsed.buildscript_deps.iter().map(|dependency| {
+                CanonicalPluginClasspathDependency {
+                    project_path: script.project_path.to_string(),
+                    notation: dependency.notation.clone(),
+                    source: "buildscript-classpath".to_string(),
+                }
+            });
+            let plugins_block = script.parsed.plugins.iter().filter_map(|plugin| {
+                plugin
+                    .version
+                    .as_ref()
+                    .map(|version| CanonicalPluginClasspathDependency {
+                        project_path: script.project_path.to_string(),
+                        notation: format!("plugin:{}:{version}", plugin.id),
+                        source: "plugins-block".to_string(),
+                    })
+            });
+            buildscript_classpath.chain(plugins_block)
+        })
+        .collect()
+}
+
+fn environment_model(env: &GetBuildEnvironmentResponse) -> CanonicalConfigurationEnvironment {
+    CanonicalConfigurationEnvironment {
+        java_version: env.java_version.clone(),
+        java_home: env.java_home.clone(),
+        gradle_version: env.gradle_version.clone(),
+        os_name: env.os_name.clone(),
+        os_arch: env.os_arch.clone(),
+        available_processors: env.available_processors,
+        max_memory_bytes: env.max_memory_bytes,
+        system_properties: env.system_properties.clone().into_iter().collect(),
+    }
 }
 
 fn source_sets_from_projects(
@@ -874,6 +981,65 @@ fn gradle_user_home() -> Option<PathBuf> {
                 .filter(|value| !value.is_empty())
                 .map(|home| PathBuf::from(home).join(".gradle"))
         })
+}
+
+fn environment_inputs() -> Vec<CanonicalConfigurationInput> {
+    [
+        current_configuration_value_input("runtime-environment", "runtime:os"),
+        current_configuration_value_input("runtime-environment", "runtime:arch"),
+        current_configuration_value_input("environment-variable", "env:GRADLE_USER_HOME"),
+        current_configuration_value_input("environment-variable", "env:JAVA_HOME"),
+        current_configuration_value_input("environment-variable", "env:TZ"),
+        current_configuration_value_input("environment-variable", "env:LANG"),
+        current_configuration_value_input("environment-variable", "env:LC_ALL"),
+        current_configuration_value_input("environment-variable", "env:LC_CTYPE"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+pub fn current_configuration_value_input(
+    kind: &str,
+    key: &str,
+) -> Option<CanonicalConfigurationInput> {
+    match (kind, key) {
+        ("runtime-environment", "runtime:os") => Some(configuration_value_input(
+            key,
+            kind,
+            Some(std::env::consts::OS.to_string()),
+        )),
+        ("runtime-environment", "runtime:arch") => Some(configuration_value_input(
+            key,
+            kind,
+            Some(std::env::consts::ARCH.to_string()),
+        )),
+        ("environment-variable", key) => key.strip_prefix("env:").map(|name| {
+            configuration_value_input(
+                key,
+                kind,
+                std::env::var_os(name).map(|value| value.to_string_lossy().into_owned()),
+            )
+        }),
+        _ => None,
+    }
+}
+
+fn configuration_value_input(
+    key: &str,
+    kind: &str,
+    value: Option<String>,
+) -> CanonicalConfigurationInput {
+    let exists = value.is_some();
+    let sha256 = value
+        .map(|value| format!("{:x}", Sha256::digest(value.as_bytes())))
+        .unwrap_or_default();
+    CanonicalConfigurationInput {
+        path: key.to_string(),
+        kind: kind.to_string(),
+        exists,
+        sha256,
+    }
 }
 
 pub fn fingerprint_configuration_input_path(
@@ -1096,6 +1262,7 @@ mod tests {
             graph.settings.as_ref().unwrap().included_projects,
             vec![":app"]
         );
+        assert_eq!(graph.environment.as_ref().unwrap().gradle_version, "9.6");
         assert_eq!(graph.projects[0].group, "org.example");
         assert!(graph.plugins.iter().any(|plugin| plugin.id == "java"));
         assert!(graph
@@ -1118,6 +1285,13 @@ mod tests {
             .invalidation_inputs
             .iter()
             .any(|input| input.kind == "version-catalog"
+                && input.exists
+                && !input.sha256.is_empty()));
+        assert!(graph
+            .invalidation_inputs
+            .iter()
+            .any(|input| input.kind == "runtime-environment"
+                && input.path == "runtime:os"
                 && input.exists
                 && !input.sha256.is_empty()));
         assert_eq!(
@@ -1148,6 +1322,61 @@ mod tests {
         assert!(rejection
             .message()
             .contains("applied plugin 'com.example.custom'"));
+    }
+
+    #[test]
+    fn native_replay_admission_rejects_plugin_classpath_dependencies() {
+        let temp = tempfile::tempdir().unwrap();
+        let build = temp.path().join("build.gradle.kts");
+        std::fs::write(
+            &build,
+            r#"
+                buildscript {
+                    dependencies {
+                        classpath("com.example:plugin:1.0")
+                    }
+                }
+                plugins { id("com.example.binary") version "2.0" }
+            "#,
+        )
+        .unwrap();
+        let model = GetBuildModelResponse {
+            projects: vec![crate::proto::ProjectModel {
+                path: ":".to_string(),
+                name: "root".to_string(),
+                build_file: build.to_string_lossy().into_owned(),
+                subprojects: Vec::new(),
+            }],
+        };
+        let parsed = parse_build_script_file(&build).unwrap();
+        let build_path = build.to_string_lossy();
+        let scripts = vec![ConfigurationScript {
+            kind: ConfigurationScriptKind::Project,
+            project_path: ":",
+            path: &build_path,
+            parsed: &parsed,
+        }];
+
+        let graph = from_jvm_capture(
+            "build-config",
+            &model,
+            None,
+            &sample_plan(temp.path()),
+            &scripts,
+        );
+
+        assert!(graph.plugin_classpath.iter().any(|dependency| {
+            dependency.notation == "com.example:plugin:1.0"
+                && dependency.source == "buildscript-classpath"
+        }));
+        assert!(graph.plugin_classpath.iter().any(|dependency| {
+            dependency.notation == "plugin:com.example.binary:2.0"
+                && dependency.source == "plugins-block"
+        }));
+        let ConfigurationReplayAdmission::Rejected(rejection) = admit_native_replay(&graph) else {
+            panic!("expected plugin classpath to reject native configuration replay");
+        };
+        assert!(rejection.message().contains("plugin classpath dependency"));
     }
 
     #[test]

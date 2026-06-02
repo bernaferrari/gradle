@@ -373,9 +373,11 @@ fn parse_plugins_block(content: &str, result: &mut BuildScriptParseResult) {
                         .unwrap_or(block.len());
                     let statement = &block[i..statement_end];
                     let apply = !statement.contains("apply false");
+                    let version = plugin_statement_version(statement);
                     result.plugins.push(ParsedPlugin {
                         id,
                         apply,
+                        version,
                         ..Default::default()
                     });
                 }
@@ -427,6 +429,13 @@ fn parse_plugins_block(content: &str, result: &mut BuildScriptParseResult) {
             }
         }
     }
+}
+
+fn plugin_statement_version(statement: &str) -> Option<String> {
+    let version_pos = statement.find("version")?;
+    extract_string_literals(&statement[version_pos + "version".len()..])
+        .into_iter()
+        .next()
 }
 
 /// Parse dependencies block in Kotlin DSL.
@@ -892,9 +901,11 @@ fn parse_groovy_plugins(content: &str, result: &mut BuildScriptParseResult) {
                 // Check if "apply false" appears on the SAME line as this id
                 let rest_of_line = &block[i..args_start + line_end];
                 let apply = !rest_of_line.contains("apply false");
+                let version = plugin_statement_version(rest_of_line);
                 result.plugins.push(ParsedPlugin {
                     id,
                     apply,
+                    version,
                     ..Default::default()
                 });
             }
@@ -1699,8 +1710,10 @@ plugins {
         assert_eq!(result.plugins[0].id, "java");
         assert!(result.plugins[0].apply);
         assert_eq!(result.plugins[1].id, "org.springframework.boot");
+        assert_eq!(result.plugins[1].version.as_deref(), Some("3.2.0"));
         assert!(result.plugins[1].apply);
         assert_eq!(result.plugins[2].id, "io.spring.dependency-management");
+        assert_eq!(result.plugins[2].version.as_deref(), Some("1.1.4"));
         assert!(!result.plugins[2].apply);
     }
 
@@ -1751,6 +1764,7 @@ apply plugin: "java"
         assert_eq!(result.script_type, ScriptType::Groovy);
         assert_eq!(result.plugins.len(), 3);
         assert_eq!(result.plugins[0].id, "java");
+        assert_eq!(result.plugins[1].version.as_deref(), Some("3.2.0"));
         assert!(result.plugins[2].apply);
     }
 
@@ -2381,4 +2395,3 @@ include(":lib")
         assert_eq!(result.subprojects[1].path, ":lib");
     }
 }
-

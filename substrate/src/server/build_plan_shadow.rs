@@ -1137,6 +1137,17 @@ fn fingerprint_plan_inputs(
 
 fn validate_configuration_inputs(graph: &CanonicalConfigurationGraph) -> Result<(), String> {
     for input in &graph.invalidation_inputs {
+        if let Some(current) =
+            configuration_ir::current_configuration_value_input(&input.kind, &input.path)
+        {
+            if current.exists != input.exists || current.sha256 != input.sha256 {
+                return Err(format!(
+                    "build plan shadow configuration input changed: {} '{}' value changed",
+                    input.kind, input.path
+                ));
+            }
+            continue;
+        }
         let path = Path::new(&input.path);
         let exists = path.exists();
         if exists != input.exists {
@@ -2045,6 +2056,34 @@ mod tests {
         assert!(
             !path.exists(),
             "configuration directory-invalidated artifact should be quarantined"
+        );
+    }
+
+    #[test]
+    fn configuration_input_validation_detects_runtime_environment_value_change() {
+        let plan = CanonicalBuildPlan {
+            schema_version: BUILD_PLAN_SCHEMA_VERSION,
+            build_id: "build:runtime-env".to_string(),
+            projects: Vec::new(),
+            tasks: Vec::new(),
+            dependencies: Vec::new(),
+            toolchains: Vec::new(),
+            metadata: std::collections::BTreeMap::new(),
+        };
+        let mut graph = configuration_ir::from_build_plan(&plan);
+        let mut input = configuration_ir::current_configuration_value_input(
+            "runtime-environment",
+            "runtime:os",
+        )
+        .unwrap();
+        input.sha256 = "stale".to_string();
+        graph.invalidation_inputs.push(input);
+
+        let error = validate_configuration_inputs(&graph).unwrap_err();
+
+        assert!(
+            error.contains("runtime-environment 'runtime:os' value changed"),
+            "unexpected error: {error}"
         );
     }
 

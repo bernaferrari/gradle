@@ -318,6 +318,11 @@ Progress checkpoint, 2026-06-02:
   sentinels: `init.gradle`, `init.gradle.kts`, and the `init.d` directory.
   Directory inputs use deterministic content fingerprints, so adding an init
   script after capture invalidates warm replay.
+- Configuration graphs now carry JVM environment identity and plugin classpath
+  declarations captured from `buildscript { classpath(...) }` and versioned
+  `plugins {}` entries. Warm replay validates runtime/environment-variable
+  inputs without starting the JVM. Captured plugin classpath entries fail closed
+  into Phase 6 until the native plugin ABI can execute those plugins.
 - Added a native configuration replay admission gate over the graph. Supported
   Java/base/application plugin configuration can replay from Rust; applied
   external/custom plugins, unsupported repository shapes, parser warnings, and
@@ -325,14 +330,16 @@ Progress checkpoint, 2026-06-02:
   `unsupported_configuration_semantics`, which the Rust execution kernel rejects
   before dispatch.
 - Evidence: `cargo test -p gradle-substrate-daemon --lib
-  configuration_ir::tests` passed 6/6, `cargo test -p
-  gradle-substrate-daemon --lib build_plan_shadow::tests` passed 13/13, and
+  configuration_ir::tests` passed 7/7, `cargo test -p
+  gradle-substrate-daemon --lib build_plan_shadow::tests` passed 14/14, and
   `cargo test -p gradle-substrate-daemon --test build_plan_shadow_test` passed
   7/7 with an integration assertion that the persisted shadow artifact contains
   the Phase 5 configuration graph. Additional replay-admission checks passed:
   `cargo test -p gradle-substrate-daemon --lib execution_kernel::tests` 26/26,
-  plus focused task-graph shadow hydration tests for unsupported configuration
-  markers and build-plan-only compatibility.
+  `cargo test -p gradle-substrate-daemon --lib
+  build_script_parser::tests::test_parse` 18/18, plus focused task-graph shadow
+  hydration tests for unsupported configuration markers and build-plan-only
+  compatibility.
 
 ### Phase 6: Native Plugin ABI
 
