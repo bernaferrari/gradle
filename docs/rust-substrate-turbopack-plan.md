@@ -314,12 +314,21 @@ Progress checkpoint, 2026-06-02:
   recorded in the graph changes, appears, disappears, or loses its stored
   content fingerprint, Rust quarantines the artifact instead of running a stale
   configuration graph.
+- Added a native configuration replay admission gate over the graph. Supported
+  Java/base/application plugin configuration can replay from Rust; applied
+  external/custom plugins, unsupported repository shapes, parser warnings, and
+  missing catalog/input fingerprints mark the hydrated shadow plan with
+  `unsupported_configuration_semantics`, which the Rust execution kernel rejects
+  before dispatch.
 - Evidence: `cargo test -p gradle-substrate-daemon --lib
-  configuration_ir::tests` passed 3/3, `cargo test -p
+  configuration_ir::tests` passed 4/4, `cargo test -p
   gradle-substrate-daemon --lib build_plan_shadow::tests` passed 12/12, and
   `cargo test -p gradle-substrate-daemon --test build_plan_shadow_test` passed
   7/7 with an integration assertion that the persisted shadow artifact contains
-  the Phase 5 configuration graph.
+  the Phase 5 configuration graph. Additional replay-admission checks passed:
+  `cargo test -p gradle-substrate-daemon --lib execution_kernel::tests` 26/26,
+  plus focused task-graph shadow hydration tests for unsupported configuration
+  markers and build-plan-only compatibility.
 
 ### Phase 6: Native Plugin ABI
 

@@ -150,6 +150,31 @@ pub struct ConfigurationScript<'a> {
     pub parsed: &'a BuildScriptParseResult,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigurationReplayAdmission {
+    Accepted {
+        project_count: usize,
+        plugin_count: usize,
+    },
+    Rejected(ConfigurationReplayRejection),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigurationReplayRejection {
+    pub build_id: String,
+    pub reasons: Vec<String>,
+}
+
+impl ConfigurationReplayRejection {
+    pub fn message(&self) -> String {
+        format!(
+            "Rust configuration replay rejected build '{}' before execution: {}",
+            self.build_id,
+            self.reasons.join("; ")
+        )
+    }
+}
+
 impl CanonicalConfigurationGraph {
     pub fn normalized(mut self) -> Self {
         self.normalize_mut();
@@ -281,6 +306,21 @@ pub fn fingerprint_sha256_hex(
     fingerprint_normalized(&normalized)
 }
 
+pub fn admit_native_replay(graph: &CanonicalConfigurationGraph) -> ConfigurationReplayAdmission {
+    let reasons = native_replay_rejection_reasons(graph);
+    if reasons.is_empty() {
+        ConfigurationReplayAdmission::Accepted {
+            project_count: graph.projects.len(),
+            plugin_count: graph.plugins.len(),
+        }
+    } else {
+        ConfigurationReplayAdmission::Rejected(ConfigurationReplayRejection {
+            build_id: graph.build_id.clone(),
+            reasons,
+        })
+    }
+}
+
 pub fn from_build_plan(plan: &CanonicalBuildPlan) -> CanonicalConfigurationGraph {
     let mut graph = CanonicalConfigurationGraph {
         schema_version: CONFIGURATION_GRAPH_SCHEMA_VERSION,
@@ -405,6 +445,103 @@ pub fn from_jvm_capture(
     };
     graph.normalize_mut();
     graph
+}
+
+fn native_replay_rejection_reasons(graph: &CanonicalConfigurationGraph) -> Vec<String> {
+    let mut reasons = Vec::new();
+    if let Err(error) = validate_schema_version(graph) {
+        reasons.push(error);
+    }
+    if let Some(settings) = &graph.settings {
+        for warning in &settings.warnings {
+            reasons.push(format!(
+                "settings script warning requires JVM replay: {warning}"
+            ));
+        }
+        for repository in settings
+            .plugin_repositories
+            .iter()
+            .chain(settings.dependency_repositories.iter())
+        {
+            if !native_replay_repository_type_supported(&repository.repo_type) {
+                reasons.push(format!(
+                    "settings repository '{}' uses unsupported repository type '{}'",
+                    repository.name, repository.repo_type
+                ));
+            }
+        }
+    }
+    for project in &graph.projects {
+        for warning in &project.warnings {
+            reasons.push(format!(
+                "project '{}' script warning requires JVM replay: {}",
+                project.path, warning
+            ));
+        }
+        for repository in &project.repositories {
+            if !native_replay_repository_type_supported(&repository.repo_type) {
+                reasons.push(format!(
+                    "project '{}' repository '{}' uses unsupported repository type '{}'",
+                    project.path, repository.name, repository.repo_type
+                ));
+            }
+        }
+    }
+    for plugin in &graph.plugins {
+        if plugin.apply && !native_replay_plugin_supported(&plugin.id) {
+            reasons.push(format!(
+                "applied plugin '{}' on project '{}' is not supported by Rust configuration replay",
+                plugin.id, plugin.project_path
+            ));
+        }
+    }
+    if graph
+        .projects
+        .iter()
+        .any(|project| !project.version_catalog_refs.is_empty())
+        && !graph
+            .invalidation_inputs
+            .iter()
+            .any(|input| input.kind == "version-catalog")
+    {
+        reasons.push(
+            "version catalog references require a captured version-catalog invalidation input"
+                .to_string(),
+        );
+    }
+    for input in &graph.invalidation_inputs {
+        if input.exists && input.sha256.is_empty() {
+            reasons.push(format!(
+                "configuration input '{}' for {} is missing a content fingerprint",
+                input.path, input.kind
+            ));
+        }
+    }
+
+    reasons.sort_unstable();
+    reasons.dedup();
+    reasons
+}
+
+fn native_replay_plugin_supported(plugin_id: &str) -> bool {
+    matches!(
+        plugin_id,
+        "base"
+            | "org.gradle.base"
+            | "java"
+            | "org.gradle.java"
+            | "java-library"
+            | "org.gradle.java-library"
+            | "application"
+            | "org.gradle.application"
+    )
+}
+
+fn native_replay_repository_type_supported(repo_type: &str) -> bool {
+    matches!(
+        repo_type,
+        "" | "maven" | "mavenCentral" | "mavenLocal" | "google" | "gradlePluginPortal" | "ivy"
+    )
 }
 
 fn settings_model(script: &ConfigurationScript<'_>) -> CanonicalSettingsModel {
@@ -903,6 +1040,34 @@ mod tests {
             .any(|input| input.kind == "version-catalog"
                 && input.exists
                 && !input.sha256.is_empty()));
+        assert_eq!(
+            admit_native_replay(&graph),
+            ConfigurationReplayAdmission::Accepted {
+                project_count: 1,
+                plugin_count: 1
+            }
+        );
+    }
+
+    #[test]
+    fn native_replay_admission_rejects_applied_external_plugin() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut graph = from_build_plan(&sample_plan(temp.path()));
+        graph.plugins.push(CanonicalPluginModel {
+            project_path: ":".to_string(),
+            id: "com.example.custom".to_string(),
+            version: "1.0".to_string(),
+            apply: true,
+            source: "project-script".to_string(),
+        });
+
+        let ConfigurationReplayAdmission::Rejected(rejection) = admit_native_replay(&graph) else {
+            panic!("expected external plugin to reject native configuration replay");
+        };
+
+        assert!(rejection
+            .message()
+            .contains("applied plugin 'com.example.custom'"));
     }
 
     #[test]

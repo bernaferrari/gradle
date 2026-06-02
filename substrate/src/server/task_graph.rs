@@ -24,6 +24,7 @@ use super::build_plan_ir::{
     CanonicalBuildPlanDependency, CanonicalBuildPlanProject, CanonicalBuildPlanTask,
 };
 use super::build_plan_shadow::BuildPlanShadowStore;
+use super::configuration_ir::{self, ConfigurationReplayAdmission};
 use super::cyclonedx_sbom::{
     draft_contract_from_captured_inputs, CycloneDxIdentityPolicy, CycloneDxSbomContract,
 };
@@ -182,6 +183,21 @@ impl TaskGraphServiceImpl {
             }
         };
 
+        let configuration_rejection_reasons =
+            artifact.configuration_graph.as_ref().and_then(|graph| {
+                match configuration_ir::admit_native_replay(graph) {
+                    ConfigurationReplayAdmission::Accepted { .. } => None,
+                    ConfigurationReplayAdmission::Rejected(rejection) => Some(rejection.reasons),
+                }
+            });
+        if let Some(reasons) = &configuration_rejection_reasons {
+            tracing::warn!(
+                build_id = %build_id_str,
+                reasons = %reasons.join("; "),
+                "Build-plan shadow artifact requires JVM configuration replay"
+            );
+        }
+
         if replace_existing {
             self.cleanup_build(build_id);
         }
@@ -201,6 +217,20 @@ impl TaskGraphServiceImpl {
             .collect();
 
         for task in &mut plan_tasks {
+            if let Some(reasons) = &configuration_rejection_reasons {
+                task.inputs.insert(
+                    "unsupported_configuration_semantics".to_string(),
+                    "true".to_string(),
+                );
+                task.inputs.insert(
+                    "unsupported_configuration_features".to_string(),
+                    reasons
+                        .iter()
+                        .map(|reason| reason.replace(',', ";"))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                );
+            }
             if included_build_project_paths.contains(&task.project_path) {
                 task.inputs.insert(
                     "unsupported_dependency_semantics".to_string(),
@@ -539,6 +569,9 @@ fn task_context_has_unsupported_marker(context_json: &str) -> bool {
     if context_json.contains("\"unsupported_dependency_semantics\":\"true\"")
         || context_json.contains("\"input.unsupported_dependency_semantics\":\"true\"")
         || context_json.contains("\"input_value.unsupported_dependency_semantics\":\"true\"")
+        || context_json.contains("\"unsupported_configuration_semantics\":\"true\"")
+        || context_json.contains("\"input.unsupported_configuration_semantics\":\"true\"")
+        || context_json.contains("\"input_value.unsupported_configuration_semantics\":\"true\"")
         || context_json.contains("\"requires_jvm_task_execution\":true")
         || context_json.contains("\"copy_unsupported_custom_actions\":true")
         || context_json.contains("\"test_unsupported_filters\":true")
@@ -561,6 +594,18 @@ fn task_context_has_unsupported_marker(context_json: &str) -> bool {
                     == Some("true")
                 || properties
                     .get("input_value.unsupported_dependency_semantics")
+                    .and_then(|value| value.as_str())
+                    == Some("true")
+                || properties
+                    .get("unsupported_configuration_semantics")
+                    .and_then(|value| value.as_str())
+                    == Some("true")
+                || properties
+                    .get("input.unsupported_configuration_semantics")
+                    .and_then(|value| value.as_str())
+                    == Some("true")
+                || properties
+                    .get("input_value.unsupported_configuration_semantics")
                     .and_then(|value| value.as_str())
                     == Some("true")
         })
@@ -5907,6 +5952,59 @@ mod tests {
         assert_eq!(resp.total_tasks, 1);
         assert_eq!(resp.execution_order[0].task_path, ":fromShadow");
         assert_eq!(resp.plan_source, "build-plan-shadow");
+    }
+
+    #[tokio::test]
+    async fn test_build_plan_shadow_marks_unsupported_configuration_replay() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(BuildPlanShadowStore::new(temp.path().to_path_buf()));
+        let history = Arc::new(ExecutionHistoryServiceImpl::new(
+            temp.path().join("history"),
+        ));
+        let svc = TaskGraphServiceImpl::with_history_and_shadow(history, Arc::clone(&store));
+        let build_id = "unsupported-config-shadow-build";
+        let plan = super::super::build_plan_ir::CanonicalBuildPlan {
+            schema_version: super::super::build_plan_ir::BUILD_PLAN_SCHEMA_VERSION,
+            build_id: build_id.to_string(),
+            projects: Vec::new(),
+            tasks: vec![canonical_task(
+                ":classes",
+                "org.gradle.api.DefaultTask",
+                Vec::new(),
+                Vec::new(),
+            )],
+            dependencies: Vec::new(),
+            toolchains: Vec::new(),
+            metadata: Default::default(),
+        };
+        let mut graph = configuration_ir::from_build_plan(&plan);
+        graph.plugins.push(configuration_ir::CanonicalPluginModel {
+            project_path: ":".to_string(),
+            id: "com.example.custom".to_string(),
+            version: "1.0".to_string(),
+            apply: true,
+            source: "project-script".to_string(),
+        });
+
+        store
+            .persist_plan_with_configuration_graph(&plan, Some(&graph), "test-shadow")
+            .unwrap();
+
+        let resp = svc
+            .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
+                build_id: build_id.to_string(),
+                prefer_build_plan_shadow: true,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.total_tasks, 1);
+        assert_eq!(resp.plan_source, "build-plan-shadow");
+        let context = &resp.execution_order[0].execution_context_json;
+        assert!(context.contains("input.unsupported_configuration_semantics"));
+        assert!(context.contains("com.example.custom"));
+        assert!(task_context_has_unsupported_marker(context));
     }
 
     #[tokio::test]
