@@ -406,6 +406,12 @@ enum SubstrateCliMode {
 struct WrapperCli {
     gradle_args: Vec<String>,
     substrate_mode: SubstrateCliMode,
+    direct_runbuild: bool,
+}
+
+struct SubstrateContext {
+    state_dir: PathBuf,
+    endpoint: String,
 }
 
 fn env_truthy(name: &str) -> bool {
@@ -419,11 +425,12 @@ fn env_truthy(name: &str) -> bool {
 
 fn parse_wrapper_cli(args: impl IntoIterator<Item = String>) -> WrapperCli {
     let mut gradle_args = Vec::new();
+    let mut direct_runbuild = env_truthy("GRADLEW_RUST_DIRECT_RUNBUILD");
     let mut substrate_mode = if env_truthy("GRADLEW_RUST_SUBSTRATE_KERNEL")
         || env_truthy("GRADLEW_RUST_SUBSTRATE_AUTHORITATIVE")
     {
         SubstrateCliMode::Authoritative
-    } else if env_truthy("GRADLEW_RUST_SUBSTRATE") {
+    } else if env_truthy("GRADLEW_RUST_SUBSTRATE") || direct_runbuild {
         SubstrateCliMode::NativeReadyDefault
     } else {
         SubstrateCliMode::Off
@@ -432,9 +439,16 @@ fn parse_wrapper_cli(args: impl IntoIterator<Item = String>) -> WrapperCli {
     for arg in args {
         match arg.as_str() {
             "--rust-substrate" => substrate_mode = SubstrateCliMode::NativeReadyDefault,
+            "--rust-substrate-direct" => {
+                substrate_mode = SubstrateCliMode::NativeReadyDefault;
+                direct_runbuild = true;
+            }
             "--rust-substrate-kernel" => substrate_mode = SubstrateCliMode::Authoritative,
             "--rust-substrate-authoritative" => substrate_mode = SubstrateCliMode::Authoritative,
-            "--no-rust-substrate" => substrate_mode = SubstrateCliMode::Off,
+            "--no-rust-substrate" => {
+                substrate_mode = SubstrateCliMode::Off;
+                direct_runbuild = false;
+            }
             _ => gradle_args.push(arg),
         }
     }
@@ -442,6 +456,7 @@ fn parse_wrapper_cli(args: impl IntoIterator<Item = String>) -> WrapperCli {
     WrapperCli {
         gradle_args,
         substrate_mode,
+        direct_runbuild,
     }
 }
 
@@ -453,22 +468,26 @@ fn executable_name(base: &str) -> String {
     }
 }
 
-fn candidate_substrate_daemon_paths(project_dir: &Path) -> Vec<PathBuf> {
-    let daemon_name = executable_name("gradle-substrate-daemon");
+fn candidate_substrate_binary_paths(project_dir: &Path, binary_name: &str) -> Vec<PathBuf> {
+    let binary_name = executable_name(binary_name);
     let mut candidates = Vec::new();
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(parent) = current_exe.parent() {
-            candidates.push(parent.join(&daemon_name));
+            candidates.push(parent.join(&binary_name));
         }
     }
-    candidates.push(project_dir.join("target").join("debug").join(&daemon_name));
+    candidates.push(project_dir.join("target").join("debug").join(&binary_name));
     candidates.push(
         project_dir
             .join("target")
             .join("release")
-            .join(&daemon_name),
+            .join(&binary_name),
     );
     candidates
+}
+
+fn candidate_substrate_daemon_paths(project_dir: &Path) -> Vec<PathBuf> {
+    candidate_substrate_binary_paths(project_dir, "gradle-substrate-daemon")
 }
 
 fn locate_substrate_daemon(project_dir: &Path) -> Option<PathBuf> {
@@ -479,6 +498,18 @@ fn locate_substrate_daemon(project_dir: &Path) -> Option<PathBuf> {
         }
     }
     candidate_substrate_daemon_paths(project_dir)
+        .into_iter()
+        .find(|path| path.exists())
+}
+
+fn locate_substrate_runbuild(project_dir: &Path) -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("GRADLE_SUBSTRATE_RUNBUILD") {
+        let path = PathBuf::from(path);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+    candidate_substrate_binary_paths(project_dir, "gradle-substrate-runbuild")
         .into_iter()
         .find(|path| path.exists())
 }
@@ -731,9 +762,9 @@ fn inject_substrate_flags(
     mode: SubstrateCliMode,
     project_dir: &Path,
     gradle_args: &mut Vec<String>,
-) -> Result<(), String> {
+) -> Result<Option<SubstrateContext>, String> {
     if mode == SubstrateCliMode::Off {
-        return Ok(());
+        return Ok(None);
     }
     let daemon_path = locate_substrate_daemon(project_dir).ok_or_else(|| {
         "Rust substrate requested, but gradle-substrate-daemon was not found. \
@@ -742,10 +773,91 @@ Set GRADLE_SUBSTRATE_DAEMON or build target/debug/gradle-substrate-daemon."
     })?;
     let state_dir = default_substrate_state_dir();
     prewarm_substrate_daemon(&daemon_path, &state_dir)?;
+    let endpoint_file = state_dir.join("substrate.tcp-endpoint");
+    let endpoint = read_endpoint_file(&endpoint_file, &daemon_path).ok_or_else(|| {
+        format!(
+            "Rust substrate daemon endpoint was not written or did not match {}",
+            daemon_path.display()
+        )
+    })?;
     let mut flags = substrate_gradle_flags(mode, &daemon_path, &state_dir);
     flags.append(gradle_args);
     *gradle_args = flags;
-    Ok(())
+    Ok(Some(SubstrateContext {
+        state_dir,
+        endpoint,
+    }))
+}
+
+fn direct_runbuild_can_handle_args(args: &[String]) -> bool {
+    args.iter().all(|arg| {
+        if !arg.starts_with('-') {
+            return true;
+        }
+        matches!(
+            arg.as_str(),
+            "--info"
+                | "-i"
+                | "--debug"
+                | "-d"
+                | "--stacktrace"
+                | "-s"
+                | "--full-stacktrace"
+                | "-S"
+                | "--scan"
+                | "--no-scan"
+                | "--no-daemon"
+                | "--offline"
+        ) || arg.starts_with("--console=")
+            || arg.starts_with("--warning-mode=")
+    })
+}
+
+fn direct_runbuild_task_filters(args: &[String]) -> Vec<String> {
+    args.iter()
+        .filter(|arg| arg.starts_with(':') && !arg.contains('='))
+        .cloned()
+        .collect()
+}
+
+fn try_direct_runbuild(
+    context: &SubstrateContext,
+    project_dir: &Path,
+    gradle_args: &[String],
+) -> Result<Option<i32>, String> {
+    if !direct_runbuild_can_handle_args(gradle_args) {
+        return Ok(None);
+    }
+    let runbuild = locate_substrate_runbuild(project_dir).ok_or_else(|| {
+        "gradle-substrate-runbuild was not found. Set GRADLE_SUBSTRATE_RUNBUILD or build \
+target/debug/gradle-substrate-runbuild."
+            .to_string()
+    })?;
+    let mut cmd = Command::new(&runbuild);
+    cmd.arg("--endpoint")
+        .arg(&context.endpoint)
+        .arg("--state-dir")
+        .arg(&context.state_dir)
+        .arg("--project-dir")
+        .arg(project_dir)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    for task in direct_runbuild_task_filters(gradle_args) {
+        cmd.arg("--task").arg(task);
+    }
+    let status = cmd.status().map_err(|e| {
+        format!(
+            "Failed to launch direct Rust RunBuild {}: {}",
+            runbuild.display(),
+            e
+        )
+    })?;
+    if status.success() {
+        Ok(Some(status.code().unwrap_or(0)))
+    } else {
+        Ok(None)
+    }
 }
 
 fn find_java() -> Result<PathBuf, String> {
@@ -815,6 +927,7 @@ fn print_usage() {
     eprintln!(
         "  --rust-substrate                 Try Rust RunBuild first, delegate if unsupported"
     );
+    eprintln!("  --rust-substrate-direct          Try cached direct Rust RunBuild before launching Gradle");
     eprintln!("  --rust-substrate-kernel          Require Rust execution-kernel admission with no JVM task fallback");
     eprintln!("  --rust-substrate-authoritative   Compatibility alias for --rust-substrate-kernel");
     eprintln!("  --no-rust-substrate              Disable GRADLEW_RUST_SUBSTRATE env opt-in");
@@ -829,6 +942,32 @@ fn main() {
 
     // Find project root (directory containing gradle/wrapper/gradle-wrapper.properties)
     let project_dir = find_project_root().unwrap_or_else(|| PathBuf::from("."));
+
+    let cli = parse_wrapper_cli(raw_args.into_iter().skip(1));
+    let direct_gradle_args = cli.gradle_args.clone();
+    let mut gradle_args = cli.gradle_args;
+    let substrate_context =
+        match inject_substrate_flags(cli.substrate_mode, &project_dir, &mut gradle_args) {
+            Ok(context) => context,
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        };
+    if cli.direct_runbuild {
+        if let Some(context) = &substrate_context {
+            match try_direct_runbuild(context, &project_dir, &direct_gradle_args) {
+                Ok(Some(code)) => std::process::exit(code),
+                Ok(None) => {}
+                Err(e) => {
+                    eprintln!(
+                        "Direct Rust RunBuild unavailable: {}; continuing through Gradle.",
+                        e
+                    );
+                }
+            }
+        }
+    }
 
     let dist_dir = if let Ok(override_dir) = std::env::var("GRADLEW_DISTRIBUTION_DIR") {
         PathBuf::from(override_dir)
@@ -849,13 +988,6 @@ fn main() {
         }
         paths.dist_dir
     };
-
-    let cli = parse_wrapper_cli(raw_args.into_iter().skip(1));
-    let mut gradle_args = cli.gradle_args;
-    if let Err(e) = inject_substrate_flags(cli.substrate_mode, &project_dir, &mut gradle_args) {
-        eprintln!("Error: {}", e);
-        std::process::exit(1);
-    }
 
     match launch_gradle(&dist_dir, &gradle_args) {
         Ok(code) => std::process::exit(code),
@@ -1080,7 +1212,21 @@ distributionSha256Sum=abc123
         ]);
 
         assert_eq!(cli.substrate_mode, SubstrateCliMode::NativeReadyDefault);
+        assert!(!cli.direct_runbuild);
         assert_eq!(cli.gradle_args, vec!["build", "--info"]);
+    }
+
+    #[test]
+    fn test_parse_wrapper_cli_strips_direct_flag() {
+        let cli = parse_wrapper_cli(vec![
+            "--rust-substrate-direct".to_string(),
+            "clean".to_string(),
+            ":app:build".to_string(),
+        ]);
+
+        assert_eq!(cli.substrate_mode, SubstrateCliMode::NativeReadyDefault);
+        assert!(cli.direct_runbuild);
+        assert_eq!(cli.gradle_args, vec!["clean", ":app:build"]);
     }
 
     #[test]
@@ -1092,6 +1238,7 @@ distributionSha256Sum=abc123
         ]);
 
         assert_eq!(cli.substrate_mode, SubstrateCliMode::Authoritative);
+        assert!(!cli.direct_runbuild);
         assert_eq!(cli.gradle_args, vec!["clean", "build"]);
     }
 
@@ -1104,6 +1251,7 @@ distributionSha256Sum=abc123
         ]);
 
         assert_eq!(cli.substrate_mode, SubstrateCliMode::Authoritative);
+        assert!(!cli.direct_runbuild);
         assert_eq!(cli.gradle_args, vec!["clean", "build"]);
     }
 
@@ -1116,7 +1264,42 @@ distributionSha256Sum=abc123
         ]);
 
         assert_eq!(cli.substrate_mode, SubstrateCliMode::Off);
+        assert!(!cli.direct_runbuild);
         assert_eq!(cli.gradle_args, vec!["tasks"]);
+    }
+
+    #[test]
+    fn test_direct_runbuild_filters_only_fully_qualified_tasks() {
+        let args = vec![
+            "clean".to_string(),
+            ":app:build".to_string(),
+            "--info".to_string(),
+            ":lib:test".to_string(),
+        ];
+
+        assert_eq!(
+            direct_runbuild_task_filters(&args),
+            vec![":app:build".to_string(), ":lib:test".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_direct_runbuild_rejects_unsupported_gradle_options() {
+        assert!(direct_runbuild_can_handle_args(&[
+            "clean".to_string(),
+            "build".to_string(),
+            "--info".to_string(),
+            "--console=plain".to_string(),
+        ]));
+        assert!(!direct_runbuild_can_handle_args(&[
+            "build".to_string(),
+            "--dry-run".to_string(),
+        ]));
+        assert!(!direct_runbuild_can_handle_args(&[
+            "build".to_string(),
+            "-p".to_string(),
+            "other".to_string(),
+        ]));
     }
 
     #[test]

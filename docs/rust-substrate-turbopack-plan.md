@@ -403,10 +403,18 @@ Progress checkpoint, 2026-06-02:
 - The JVM bridge now parses that launch metadata before reusing persisted TCP
   endpoints. Legacy endpoint files remain accepted for compatibility, but
   inconsistent metadata is rejected and forces a fresh Rust daemon launch.
-- Evidence: `cargo test -p gradle-wrapper -- --test-threads=1` passed 25/25,
+- The Rust wrapper now has an opt-in `--rust-substrate-direct` path, also
+  available through `GRADLEW_RUST_DIRECT_RUNBUILD=true`, that prewarms the Rust
+  daemon, tries cached `gradle-substrate-runbuild` before resolving or launching
+  the Gradle JVM distribution, and delegates to the compatibility frontend when
+  the direct warm plan is absent, stale, unsafe, or requested with unsupported
+  Gradle CLI options.
+- Evidence: `cargo test -p gradle-wrapper -- --test-threads=1` passed 28/28,
   and `./gradlew :rust-bridge:test --tests
   org.gradle.internal.rustbridge.SubstrateLifecycleTest --no-daemon
   --console=plain` passed, including endpoint metadata admission checks.
+  `cargo build -p gradle-wrapper -p gradle-substrate-daemon --bin
+  gradle-substrate-runbuild` also passed.
 
 ## Aggressive Near-Term Backlog
 
