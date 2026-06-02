@@ -314,6 +314,10 @@ Progress checkpoint, 2026-06-02:
   recorded in the graph changes, appears, disappears, or loses its stored
   content fingerprint, Rust quarantines the artifact instead of running a stale
   configuration graph.
+- Configuration invalidation now also records Gradle user-home init script
+  sentinels: `init.gradle`, `init.gradle.kts`, and the `init.d` directory.
+  Directory inputs use deterministic content fingerprints, so adding an init
+  script after capture invalidates warm replay.
 - Added a native configuration replay admission gate over the graph. Supported
   Java/base/application plugin configuration can replay from Rust; applied
   external/custom plugins, unsupported repository shapes, parser warnings, and
@@ -321,8 +325,8 @@ Progress checkpoint, 2026-06-02:
   `unsupported_configuration_semantics`, which the Rust execution kernel rejects
   before dispatch.
 - Evidence: `cargo test -p gradle-substrate-daemon --lib
-  configuration_ir::tests` passed 4/4, `cargo test -p
-  gradle-substrate-daemon --lib build_plan_shadow::tests` passed 12/12, and
+  configuration_ir::tests` passed 6/6, `cargo test -p
+  gradle-substrate-daemon --lib build_plan_shadow::tests` passed 13/13, and
   `cargo test -p gradle-substrate-daemon --test build_plan_shadow_test` passed
   7/7 with an integration assertion that the persisted shadow artifact contains
   the Phase 5 configuration graph. Additional replay-admission checks passed:

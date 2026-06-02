@@ -406,6 +406,7 @@ pub fn from_jvm_capture(
         model,
         settings_script.map(|s| s.path),
     ));
+    invalidation_inputs.extend(init_script_inputs());
 
     let mut metadata = BTreeMap::from([
         (
@@ -831,10 +832,8 @@ fn version_catalog_inputs(
 fn configuration_input(path: &str, kind: &str) -> CanonicalConfigurationInput {
     let path_ref = Path::new(path);
     let exists = path_ref.exists();
-    let sha256 = if exists && path_ref.is_file() {
-        std::fs::read(path_ref)
-            .map(|bytes| format!("{:x}", Sha256::digest(bytes)))
-            .unwrap_or_default()
+    let sha256 = if exists {
+        fingerprint_configuration_input_path(path_ref).unwrap_or_default()
     } else {
         String::new()
     };
@@ -844,6 +843,87 @@ fn configuration_input(path: &str, kind: &str) -> CanonicalConfigurationInput {
         exists,
         sha256,
     }
+}
+
+fn init_script_inputs() -> Vec<CanonicalConfigurationInput> {
+    let Some(gradle_user_home) = gradle_user_home() else {
+        return Vec::new();
+    };
+    init_script_inputs_from_gradle_user_home(&gradle_user_home)
+}
+
+fn init_script_inputs_from_gradle_user_home(
+    gradle_user_home: &Path,
+) -> Vec<CanonicalConfigurationInput> {
+    [
+        (gradle_user_home.join("init.gradle"), "init-script"),
+        (gradle_user_home.join("init.gradle.kts"), "init-script"),
+        (gradle_user_home.join("init.d"), "init-script-directory"),
+    ]
+    .into_iter()
+    .map(|(path, kind)| configuration_input(&path.to_string_lossy(), kind))
+    .collect()
+}
+
+fn gradle_user_home() -> Option<PathBuf> {
+    std::env::var_os("GRADLE_USER_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .filter(|value| !value.is_empty())
+                .map(|home| PathBuf::from(home).join(".gradle"))
+        })
+}
+
+pub fn fingerprint_configuration_input_path(
+    path: &Path,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    if path.is_file() {
+        let bytes = std::fs::read(path)?;
+        return Ok(format!("{:x}", Sha256::digest(bytes)));
+    }
+    if path.is_dir() {
+        return fingerprint_configuration_input_directory(path);
+    }
+    Ok(String::new())
+}
+
+fn fingerprint_configuration_input_directory(
+    path: &Path,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let mut files = Vec::new();
+    collect_configuration_input_directory_files(path, path, &mut files)?;
+    let mut hasher = Sha256::new();
+    for (relative_path, file_path) in files {
+        hasher.update(relative_path.as_bytes());
+        hasher.update([0]);
+        hasher.update(fingerprint_configuration_input_path(&file_path)?.as_bytes());
+        hasher.update([0]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn collect_configuration_input_directory_files(
+    root: &Path,
+    path: &Path,
+    files: &mut Vec<(String, PathBuf)>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    for entry in std::fs::read_dir(path)? {
+        let child = entry?.path();
+        let metadata = std::fs::metadata(&child)?;
+        if metadata.is_dir() {
+            collect_configuration_input_directory_files(root, &child, files)?;
+        } else if metadata.is_file() {
+            let relative_path = child
+                .strip_prefix(root)?
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            files.push((relative_path, child));
+        }
+    }
+    files.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    Ok(())
 }
 
 fn repository_from_parsed(repository: &ParsedRepository) -> CanonicalParsedRepository {
@@ -1068,6 +1148,40 @@ mod tests {
         assert!(rejection
             .message()
             .contains("applied plugin 'com.example.custom'"));
+    }
+
+    #[test]
+    fn init_script_inputs_track_missing_files_and_init_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let init_dir = temp.path().join("init.d");
+        std::fs::create_dir_all(&init_dir).unwrap();
+        std::fs::write(init_dir.join("tooling.gradle.kts"), "println(\"init\")\n").unwrap();
+
+        let inputs = init_script_inputs_from_gradle_user_home(temp.path());
+
+        assert!(inputs.iter().any(|input| input.kind == "init-script"
+            && input.path.ends_with("init.gradle")
+            && !input.exists));
+        let init_directory = inputs
+            .iter()
+            .find(|input| input.kind == "init-script-directory")
+            .expect("expected init.d sentinel");
+        assert!(init_directory.exists);
+        assert!(!init_directory.sha256.is_empty());
+    }
+
+    #[test]
+    fn configuration_directory_fingerprint_changes_when_child_file_appears() {
+        let temp = tempfile::tempdir().unwrap();
+        let init_dir = temp.path().join("init.d");
+        std::fs::create_dir_all(&init_dir).unwrap();
+        std::fs::write(init_dir.join("a.gradle"), "println(\"a\")\n").unwrap();
+        let before = fingerprint_configuration_input_path(&init_dir).unwrap();
+
+        std::fs::write(init_dir.join("b.gradle"), "println(\"b\")\n").unwrap();
+        let after = fingerprint_configuration_input_path(&init_dir).unwrap();
+
+        assert_ne!(before, after);
     }
 
     #[test]
