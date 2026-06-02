@@ -297,6 +297,25 @@ Goal: JVM configuration is a capture source, not the warm engine.
 - Execute supported configuration directly from Rust for common builds.
 - Keep JVM configuration as fallback and differential oracle.
 
+Progress checkpoint, 2026-06-02:
+
+- Added a Rust-owned `CanonicalConfigurationGraph` schema for Phase 5. The
+  graph captures settings, projects, default JVM source sets, task
+  configuration summaries, plugin applications, dependency configurations,
+  toolchains, version-catalog inputs, and script invalidation inputs with a
+  deterministic fingerprint.
+- JVM shadow capture now parses the inferred root settings script in addition
+  to project build scripts and persists the configuration graph beside each
+  build-plan shadow artifact. New artifacts validate and quarantine corrupt
+  configuration-graph schema/build-id/fingerprint mismatches; old artifacts
+  without a graph remain loadable.
+- Evidence: `cargo test -p gradle-substrate-daemon --lib
+  configuration_ir::tests` passed 3/3, `cargo test -p
+  gradle-substrate-daemon --lib build_plan_shadow::tests` passed 11/11, and
+  `cargo test -p gradle-substrate-daemon --test build_plan_shadow_test` passed
+  7/7 with an integration assertion that the persisted shadow artifact contains
+  the Phase 5 configuration graph.
+
 ### Phase 6: Native Plugin ABI
 
 Goal: new plugin work does not require JVM.

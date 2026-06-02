@@ -29,6 +29,7 @@ pub mod classpath;
 pub mod config_cache;
 pub mod config_cache_ir;
 pub mod configuration;
+pub mod configuration_ir;
 pub mod console;
 pub mod control;
 pub mod corruption_detection;

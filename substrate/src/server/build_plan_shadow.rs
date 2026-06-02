@@ -17,6 +17,9 @@ use super::build_plan_ir::{
 };
 use super::build_script_parser::parse_build_script_file;
 use super::build_script_types::BuildScriptParseResult;
+use super::configuration_ir::{
+    self, CanonicalConfigurationGraph, ConfigurationScript, ConfigurationScriptKind,
+};
 
 const SHADOWED_CONFIGURATIONS: &[&str] = &[
     "classpath",
@@ -33,6 +36,10 @@ const SHADOWED_CONFIGURATIONS: &[&str] = &[
 pub struct BuildPlanShadowArtifact {
     pub plan: CanonicalBuildPlan,
     pub fingerprint_sha256: String,
+    #[serde(default)]
+    pub configuration_graph: Option<CanonicalConfigurationGraph>,
+    #[serde(default)]
+    pub configuration_graph_fingerprint_sha256: String,
     #[serde(default)]
     pub input_fingerprints: Vec<BuildPlanShadowInputFingerprint>,
     pub stored_at_ms: i64,
@@ -65,6 +72,13 @@ pub struct BuildPlanShadowDiffReport {
 #[derive(Debug, Clone)]
 struct ParsedProjectBuildScript {
     project_path: String,
+    build_file: String,
+    parsed: BuildScriptParseResult,
+}
+
+#[derive(Debug, Clone)]
+struct ParsedSettingsScript {
+    path: String,
     parsed: BuildScriptParseResult,
 }
 
@@ -90,6 +104,16 @@ impl BuildPlanShadowStore {
         plan: &CanonicalBuildPlan,
         source: &str,
     ) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
+        let configuration_graph = configuration_ir::from_build_plan(plan);
+        self.persist_plan_with_configuration_graph(plan, Some(&configuration_graph), source)
+    }
+
+    pub fn persist_plan_with_configuration_graph(
+        &self,
+        plan: &CanonicalBuildPlan,
+        configuration_graph: Option<&CanonicalConfigurationGraph>,
+        source: &str,
+    ) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
         let path = self.artifact_path(&plan.build_id);
         if !is_inline_shadow_source(source) && path.exists() {
             let bytes = std::fs::read(&path)?;
@@ -113,10 +137,32 @@ impl BuildPlanShadowStore {
         normalized.normalize_mut();
         let fingerprint = fingerprint_normalized(&normalized)?;
         let input_fingerprints = fingerprint_plan_inputs(&normalized)?;
+        let (configuration_graph, configuration_graph_fingerprint_sha256) =
+            match configuration_graph {
+                Some(graph) => {
+                    configuration_ir::validate_schema_version(graph).map_err(|e| {
+                        format!("configuration graph schema validation failed: {e}")
+                    })?;
+                    if graph.build_id != normalized.build_id {
+                        return Err(format!(
+                            "configuration graph build id mismatch: plan '{}' graph '{}'",
+                            normalized.build_id, graph.build_id
+                        )
+                        .into());
+                    }
+                    let mut normalized_graph = graph.clone();
+                    normalized_graph.normalize_mut();
+                    let fingerprint = configuration_ir::fingerprint_normalized(&normalized_graph)?;
+                    (Some(normalized_graph), fingerprint)
+                }
+                None => (None, String::new()),
+            };
 
         let artifact = BuildPlanShadowArtifact {
             plan: normalized,
             fingerprint_sha256: fingerprint,
+            configuration_graph,
+            configuration_graph_fingerprint_sha256,
             input_fingerprints,
             stored_at_ms: now_ms(),
             source: source.to_string(),
@@ -184,6 +230,45 @@ impl BuildPlanShadowStore {
             self.quarantine_artifact(path, &reason)?;
             return Err(reason.into());
         }
+        if let Some(configuration_graph) = &artifact.configuration_graph {
+            if let Err(error) = configuration_ir::validate_schema_version(configuration_graph) {
+                let reason = format!(
+                    "build plan shadow configuration graph schema validation failed: {}",
+                    error
+                );
+                self.quarantine_artifact(path, &reason)?;
+                return Err(reason.into());
+            }
+            if configuration_graph.build_id != artifact.plan.build_id {
+                let reason = format!(
+                    "build plan shadow configuration graph build id mismatch: plan '{}' but graph contains '{}'",
+                    artifact.plan.build_id, configuration_graph.build_id
+                );
+                self.quarantine_artifact(path, &reason)?;
+                return Err(reason.into());
+            }
+            if artifact.configuration_graph_fingerprint_sha256.is_empty() {
+                let reason = "build plan shadow configuration graph fingerprint is missing";
+                self.quarantine_artifact(path, reason)?;
+                return Err(reason.to_string().into());
+            }
+            let mut normalized_graph = configuration_graph.clone();
+            normalized_graph.normalize_mut();
+            let actual_graph_fingerprint =
+                configuration_ir::fingerprint_normalized(&normalized_graph)?;
+            if actual_graph_fingerprint != artifact.configuration_graph_fingerprint_sha256 {
+                let reason = format!(
+                    "build plan shadow configuration graph fingerprint mismatch: computed '{}' but artifact stores '{}'",
+                    actual_graph_fingerprint, artifact.configuration_graph_fingerprint_sha256
+                );
+                self.quarantine_artifact(path, &reason)?;
+                return Err(reason.into());
+            }
+        } else if !artifact.configuration_graph_fingerprint_sha256.is_empty() {
+            let reason = "build plan shadow configuration graph fingerprint exists without graph";
+            self.quarantine_artifact(path, reason)?;
+            return Err(reason.to_string().into());
+        }
         Ok(())
     }
 
@@ -232,8 +317,14 @@ pub async fn capture_and_persist_shadow_from_jvm(
     let env = bridge.get_build_environment().await?;
     let host_plan = get_successful_host_plan(bridge, build_id).await?;
 
-    let plan =
-        canonical_plan_from_jvm_bridge(bridge, build_id, &model, env.as_ref(), host_plan).await?;
+    let (plan, configuration_graph) = canonical_plan_and_configuration_graph_from_jvm_bridge(
+        bridge,
+        build_id,
+        &model,
+        env.as_ref(),
+        host_plan,
+    )
+    .await?;
     if let Some(existing) = store.load_plan(build_id)? {
         if is_inline_shadow_source(&existing.source)
             || existing
@@ -245,7 +336,11 @@ pub async fn capture_and_persist_shadow_from_jvm(
             return Ok(Some(store.artifact_path_for_build_id(build_id)));
         }
     }
-    let path = store.persist_plan(&plan, "jvm-host-shadow")?;
+    let path = store.persist_plan_with_configuration_graph(
+        &plan,
+        Some(&configuration_graph),
+        "jvm-host-shadow",
+    )?;
     if let Some(artifact) = store.load_plan(build_id)? {
         let diff = diff_expected_vs_artifact(&plan, &artifact);
         if !diff.is_match() {
@@ -298,16 +393,39 @@ pub async fn canonical_plan_from_jvm_bridge(
     env: Option<&GetBuildEnvironmentResponse>,
     host_plan: Option<CanonicalBuildPlan>,
 ) -> Result<CanonicalBuildPlan, Box<dyn std::error::Error + Send + Sync>> {
+    Ok(canonical_plan_and_configuration_graph_from_jvm_bridge(
+        bridge, build_id, model, env, host_plan,
+    )
+    .await?
+    .0)
+}
+
+pub async fn canonical_plan_and_configuration_graph_from_jvm_bridge(
+    bridge: &JvmHostBridge,
+    build_id: &str,
+    model: &GetBuildModelResponse,
+    env: Option<&GetBuildEnvironmentResponse>,
+    host_plan: Option<CanonicalBuildPlan>,
+) -> Result<
+    (CanonicalBuildPlan, CanonicalConfigurationGraph),
+    Box<dyn std::error::Error + Send + Sync>,
+> {
     let dependencies = collect_shadow_dependencies(bridge, build_id, model).await?;
     let parsed_scripts = collect_parsed_build_scripts(model);
-    Ok(canonical_plan_from_jvm(
+    let parsed_settings_script = collect_parsed_settings_script(model);
+    let plan = canonical_plan_from_jvm(
         build_id,
         model,
         env,
         dependencies,
         &parsed_scripts,
         host_plan,
-    ))
+    );
+    let configuration_scripts =
+        configuration_scripts(&parsed_scripts, parsed_settings_script.as_ref());
+    let configuration_graph =
+        configuration_ir::from_jvm_capture(build_id, model, env, &plan, &configuration_scripts);
+    Ok((plan, configuration_graph))
 }
 
 async fn get_successful_host_plan(
@@ -779,10 +897,67 @@ fn collect_parsed_build_scripts(model: &GetBuildModelResponse) -> Vec<ParsedProj
             let parsed = parse_build_script_file(path).ok()?;
             Some(ParsedProjectBuildScript {
                 project_path: project.path.clone(),
+                build_file: project.build_file.clone(),
                 parsed,
             })
         })
         .collect()
+}
+
+fn collect_parsed_settings_script(model: &GetBuildModelResponse) -> Option<ParsedSettingsScript> {
+    let root_dir = root_project_dir(model)?;
+    for file_name in ["settings.gradle.kts", "settings.gradle"] {
+        let path = root_dir.join(file_name);
+        if !path.exists() {
+            continue;
+        }
+        let parsed = parse_build_script_file(&path).ok()?;
+        return Some(ParsedSettingsScript {
+            path: path.to_string_lossy().into_owned(),
+            parsed,
+        });
+    }
+    None
+}
+
+fn root_project_dir(model: &GetBuildModelResponse) -> Option<PathBuf> {
+    model
+        .projects
+        .iter()
+        .find(|project| project.path == ":")
+        .or_else(|| model.projects.first())
+        .and_then(|project| {
+            if project.build_file.is_empty() {
+                None
+            } else {
+                Path::new(&project.build_file)
+                    .parent()
+                    .map(Path::to_path_buf)
+            }
+        })
+}
+
+fn configuration_scripts<'a>(
+    project_scripts: &'a [ParsedProjectBuildScript],
+    settings_script: Option<&'a ParsedSettingsScript>,
+) -> Vec<ConfigurationScript<'a>> {
+    let mut scripts =
+        Vec::with_capacity(project_scripts.len() + if settings_script.is_some() { 1 } else { 0 });
+    if let Some(settings_script) = settings_script {
+        scripts.push(ConfigurationScript {
+            kind: ConfigurationScriptKind::Settings,
+            project_path: ":",
+            path: &settings_script.path,
+            parsed: &settings_script.parsed,
+        });
+    }
+    scripts.extend(project_scripts.iter().map(|script| ConfigurationScript {
+        kind: ConfigurationScriptKind::Project,
+        project_path: &script.project_path,
+        path: &script.build_file,
+        parsed: &script.parsed,
+    }));
+    scripts
 }
 
 fn collect_script_declared_tasks(
@@ -1724,6 +1899,8 @@ mod tests {
         assert_eq!(loaded.plan.build_id, "build:1");
         assert_eq!(loaded.source, "test");
         assert!(!loaded.fingerprint_sha256.is_empty());
+        assert!(loaded.configuration_graph.is_some());
+        assert!(!loaded.configuration_graph_fingerprint_sha256.is_empty());
     }
 
     #[test]
@@ -1983,6 +2160,11 @@ mod tests {
         let mut artifact = BuildPlanShadowArtifact {
             plan: expected.clone(),
             fingerprint_sha256: fingerprint_sha256_hex(&expected).unwrap(),
+            configuration_graph: Some(configuration_ir::from_build_plan(&expected)),
+            configuration_graph_fingerprint_sha256: configuration_ir::fingerprint_sha256_hex(
+                &configuration_ir::from_build_plan(&expected),
+            )
+            .unwrap(),
             input_fingerprints: Vec::new(),
             stored_at_ms: 0,
             source: "test".to_string(),

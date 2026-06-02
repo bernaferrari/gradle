@@ -601,6 +601,27 @@ fn create_mock_repo(root: &std::path::Path) {
     )
     .unwrap();
     std::fs::write(
+        root.join("settings.gradle.kts"),
+        r#"
+            pluginManagement {
+                repositories {
+                    gradlePluginPortal()
+                    mavenCentral()
+                }
+            }
+
+            dependencyResolutionManagement {
+                repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+                repositories {
+                    mavenCentral()
+                }
+            }
+
+            include(":app")
+        "#,
+    )
+    .unwrap();
+    std::fs::write(
         root.join("build.gradle.kts"),
         r#"
             plugins {
@@ -871,6 +892,34 @@ async fn capture_and_persist_shadow_build_plan_artifact() {
             .map(String::as_str),
         Some("3")
     );
+    let configuration_graph = loaded
+        .configuration_graph
+        .as_ref()
+        .expect("expected persisted Phase 5 configuration graph");
+    assert!(!loaded.configuration_graph_fingerprint_sha256.is_empty());
+    assert_eq!(configuration_graph.build_id, "build-it");
+    assert_eq!(
+        configuration_graph
+            .settings
+            .as_ref()
+            .expect("expected settings model")
+            .included_projects,
+        vec![":app".to_string()]
+    );
+    assert!(configuration_graph
+        .plugins
+        .iter()
+        .any(|plugin| plugin.project_path == ":" && plugin.id == "java"));
+    assert!(configuration_graph
+        .source_sets
+        .iter()
+        .any(|source_set| source_set.project_path == ":"
+            && source_set.name == "main"
+            && source_set.java_source_dirs[0].ends_with("src/main/java")));
+    assert!(configuration_graph
+        .invalidation_inputs
+        .iter()
+        .any(|input| input.kind == "settings-script" && input.exists));
 
     let lint_task = loaded
         .plan
