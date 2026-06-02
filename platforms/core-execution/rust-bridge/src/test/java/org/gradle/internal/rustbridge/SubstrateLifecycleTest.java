@@ -6,13 +6,17 @@ import org.junit.Test;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Properties;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -97,6 +101,33 @@ public class SubstrateLifecycleTest {
         DaemonLauncher launcher = DaemonLauncher.of(tempDir.resolve("daemon").toFile(), tempDir.toFile());
 
         assertEquals(tempDir.resolve("substrate.tcp-endpoint").toString(), launcher.getTcpEndpointPath());
+    }
+
+    @Test
+    public void daemonLauncherReadsRustPrimaryEndpointLaunchMetadata() throws Exception {
+        Path tempDir = Files.createTempDirectory("substrate-lifecycle-");
+        Path daemon = tempDir.resolve("daemon");
+        Files.write(daemon, new byte[]{1});
+        Path endpointFile = tempDir.resolve("substrate.tcp-endpoint");
+        writeEndpointFile(endpointFile, daemon, "rust-daemon-primary", "attached-on-demand");
+
+        DaemonLauncher.PersistedTcpEndpoint endpoint = DaemonLauncher.readTcpEndpoint(endpointFile, daemon);
+
+        assertNotNull(endpoint);
+        assertEquals("tcp://127.0.0.1:12345", endpoint.endpoint);
+        assertEquals("rust-daemon-primary", endpoint.launchMode);
+        assertEquals("attached-on-demand", endpoint.jvmHostMode);
+    }
+
+    @Test
+    public void daemonLauncherRejectsInconsistentWrapperPrewarmEndpointMetadata() throws Exception {
+        Path tempDir = Files.createTempDirectory("substrate-lifecycle-");
+        Path daemon = tempDir.resolve("daemon");
+        Files.write(daemon, new byte[]{1});
+        Path endpointFile = tempDir.resolve("substrate.tcp-endpoint");
+        writeEndpointFile(endpointFile, daemon, "rust-wrapper-prewarm", "attached-on-demand");
+
+        assertNull(DaemonLauncher.readTcpEndpoint(endpointFile, daemon));
     }
 
     @Test
@@ -207,6 +238,27 @@ public class SubstrateLifecycleTest {
             System.clearProperty(key);
         } else {
             System.setProperty(key, previousValue);
+        }
+    }
+
+    private static void writeEndpointFile(
+        Path endpointFile,
+        Path daemon,
+        String launchMode,
+        String jvmHostMode
+    ) throws Exception {
+        Properties properties = new Properties();
+        properties.setProperty("endpoint", "tcp://127.0.0.1:12345");
+        properties.setProperty("launchMode", launchMode);
+        properties.setProperty("jvmHostMode", jvmHostMode);
+        properties.setProperty("daemonBinary", daemon.toAbsolutePath().normalize().toString());
+        properties.setProperty(
+            "daemonBinaryLastModifiedMillis",
+            Long.toString(Files.getLastModifiedTime(daemon).toMillis())
+        );
+        properties.setProperty("daemonBinarySize", Long.toString(Files.size(daemon)));
+        try (Writer writer = Files.newBufferedWriter(endpointFile)) {
+            properties.store(writer, "test endpoint");
         }
     }
 }

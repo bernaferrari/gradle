@@ -32,6 +32,9 @@ public class DaemonLauncher {
     private static final String TCP_ENDPOINT_NAME = "substrate.tcp-endpoint";
     private static final String BINARY_NAME = "gradle-substrate-daemon";
     private static final String LAUNCH_MODE_RUST_PRIMARY = "rust-daemon-primary";
+    private static final String LAUNCH_MODE_RUST_WRAPPER_PREWARM = "rust-wrapper-prewarm";
+    private static final String JVM_HOST_MODE_ATTACHED_ON_DEMAND = "attached-on-demand";
+    private static final String JVM_HOST_MODE_STANDALONE = "standalone";
 
     private final File daemonBinary;
     private final File socketDirectory;
@@ -178,12 +181,17 @@ public class DaemonLauncher {
         Files.createDirectories(socketDirectory.toPath());
 
         if (!useUnixDomainSocket) {
-            String existingEndpoint = readTcpEndpoint(tcpEndpointFile, daemonBinary.toPath());
+            PersistedTcpEndpoint existingEndpoint = readTcpEndpoint(tcpEndpointFile, daemonBinary.toPath());
             if (existingEndpoint != null) {
-                LOGGER.info("[substrate] Connecting to existing daemon at {}", existingEndpoint);
+                LOGGER.info(
+                    "[substrate] Connecting to existing daemon at {} (launchMode={}, jvmHostMode={})",
+                    existingEndpoint.endpoint,
+                    existingEndpoint.launchMode,
+                    existingEndpoint.jvmHostMode
+                );
                 jvmHostSocketPath = startJvmHostIfEnabled();
                 try {
-                    return SubstrateClient.connect(existingEndpoint, jvmHostSocketPath);
+                    return SubstrateClient.connect(existingEndpoint.endpoint, jvmHostSocketPath);
                 } catch (IOException connectFailure) {
                     LOGGER.warn("[substrate] Failed to connect to existing daemon, relaunching: {}", connectFailure.getMessage());
                     Files.deleteIfExists(tcpEndpointFile);
@@ -254,7 +262,12 @@ public class DaemonLauncher {
         while (attempts < 50) {
             try {
                 SubstrateClient client = SubstrateClient.connect(daemonEndpoint, jvmHostSocketPath);
-                writeTcpEndpoint(tcpEndpointFile, daemonEndpoint, daemonBinary.toPath(), enableJvmHost);
+                writeTcpEndpoint(
+                    tcpEndpointFile,
+                    daemonEndpoint,
+                    daemonBinary.toPath(),
+                    enableJvmHost
+                );
                 LOGGER.info("[substrate] Daemon started successfully");
                 return client;
             } catch (IOException e) {
@@ -273,7 +286,7 @@ public class DaemonLauncher {
     }
 
     @Nullable
-    private static String readTcpEndpoint(Path endpointFile, Path daemonBinaryPath) {
+    static PersistedTcpEndpoint readTcpEndpoint(Path endpointFile, Path daemonBinaryPath) {
         if (!Files.exists(endpointFile)) {
             return null;
         }
@@ -290,14 +303,29 @@ public class DaemonLauncher {
                 LOGGER.info("[substrate] Ignoring persisted daemon endpoint because daemon binary identity changed");
                 return null;
             }
-            return endpoint;
+            String launchMode = properties.getProperty("launchMode", "legacy").trim();
+            String jvmHostMode = properties.getProperty("jvmHostMode", "unknown").trim();
+            if (!launchMetadataSupported(launchMode, jvmHostMode)) {
+                LOGGER.info(
+                    "[substrate] Ignoring persisted daemon endpoint because launch metadata is inconsistent: launchMode={}, jvmHostMode={}",
+                    launchMode,
+                    jvmHostMode
+                );
+                return null;
+            }
+            return new PersistedTcpEndpoint(endpoint, launchMode, jvmHostMode);
         } catch (IOException e) {
             LOGGER.debug("[substrate] Failed to read persisted TCP endpoint {}", endpointFile, e);
             return null;
         }
     }
 
-    private static void writeTcpEndpoint(Path endpointFile, String endpoint, Path daemonBinaryPath, boolean jvmHostEnabled) throws IOException {
+    private static void writeTcpEndpoint(
+        Path endpointFile,
+        String endpoint,
+        Path daemonBinaryPath,
+        boolean jvmHostEnabled
+    ) throws IOException {
         Path parent = endpointFile.getParent();
         if (parent != null) {
             Files.createDirectories(parent);
@@ -305,9 +333,15 @@ public class DaemonLauncher {
         Properties properties = new Properties();
         properties.setProperty("endpoint", endpoint);
         properties.setProperty("launchMode", LAUNCH_MODE_RUST_PRIMARY);
-        properties.setProperty("jvmHostMode", jvmHostEnabled ? "attached-on-demand" : "standalone");
+        properties.setProperty(
+            "jvmHostMode",
+            jvmHostEnabled ? JVM_HOST_MODE_ATTACHED_ON_DEMAND : JVM_HOST_MODE_STANDALONE
+        );
         properties.setProperty("daemonBinary", daemonBinaryPath.toAbsolutePath().normalize().toString());
-        properties.setProperty("daemonBinaryLastModifiedMillis", Long.toString(Files.getLastModifiedTime(daemonBinaryPath).toMillis()));
+        properties.setProperty(
+            "daemonBinaryLastModifiedMillis",
+            Long.toString(Files.getLastModifiedTime(daemonBinaryPath).toMillis())
+        );
         properties.setProperty("daemonBinarySize", Long.toString(Files.size(daemonBinaryPath)));
 
         Path tempFile = Files.createTempFile(parent, TCP_ENDPOINT_NAME, ".tmp");
@@ -325,6 +359,20 @@ public class DaemonLauncher {
         }
     }
 
+    private static boolean launchMetadataSupported(String launchMode, String jvmHostMode) {
+        if ("legacy".equals(launchMode) && "unknown".equals(jvmHostMode)) {
+            return true;
+        }
+        if (LAUNCH_MODE_RUST_PRIMARY.equals(launchMode)) {
+            return JVM_HOST_MODE_STANDALONE.equals(jvmHostMode)
+                || JVM_HOST_MODE_ATTACHED_ON_DEMAND.equals(jvmHostMode);
+        }
+        if (LAUNCH_MODE_RUST_WRAPPER_PREWARM.equals(launchMode)) {
+            return JVM_HOST_MODE_STANDALONE.equals(jvmHostMode);
+        }
+        return false;
+    }
+
     private static boolean daemonBinaryMatches(Properties properties, Path daemonBinaryPath) throws IOException {
         String expectedPath = daemonBinaryPath.toAbsolutePath().normalize().toString();
         String actualPath = properties.getProperty("daemonBinary", "");
@@ -333,9 +381,24 @@ public class DaemonLauncher {
         }
         long expectedLastModified = Files.getLastModifiedTime(daemonBinaryPath).toMillis();
         long expectedSize = Files.size(daemonBinaryPath);
-        long actualLastModified = parseLongOrDefault(properties.getProperty("daemonBinaryLastModifiedMillis"), -1);
+        long actualLastModified = parseLongOrDefault(
+            properties.getProperty("daemonBinaryLastModifiedMillis"),
+            -1
+        );
         long actualSize = parseLongOrDefault(properties.getProperty("daemonBinarySize"), -1);
         return expectedLastModified == actualLastModified && expectedSize == actualSize;
+    }
+
+    static final class PersistedTcpEndpoint {
+        final String endpoint;
+        final String launchMode;
+        final String jvmHostMode;
+
+        PersistedTcpEndpoint(String endpoint, String launchMode, String jvmHostMode) {
+            this.endpoint = endpoint;
+            this.launchMode = launchMode;
+            this.jvmHostMode = jvmHostMode;
+        }
     }
 
     private static long parseLongOrDefault(@Nullable String value, long defaultValue) {
