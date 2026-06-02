@@ -1154,18 +1154,13 @@ fn validate_configuration_inputs(graph: &CanonicalConfigurationGraph) -> Result<
                 input.path, input.kind
             ));
         }
-        if !path.is_file() {
-            return Err(format!(
-                "build plan shadow configuration input changed: {} '{}' is no longer a regular file",
-                input.kind, input.path
-            ));
-        }
-        let actual_sha256 = sha256_file(path).map_err(|error| {
-            format!(
-                "build plan shadow configuration input fingerprint failed for {} '{}': {}",
-                input.kind, input.path, error
-            )
-        })?;
+        let actual_sha256 =
+            configuration_ir::fingerprint_configuration_input_path(path).map_err(|error| {
+                format!(
+                    "build plan shadow configuration input fingerprint failed for {} '{}': {}",
+                    input.kind, input.path, error
+                )
+            })?;
         if actual_sha256 != input.sha256 {
             return Err(format!(
                 "build plan shadow configuration input changed: {} '{}' sha256 mismatch: computed '{}' but artifact stores '{}'",
@@ -2001,6 +1996,55 @@ mod tests {
         assert!(
             !path.exists(),
             "configuration-invalidated artifact should be quarantined"
+        );
+    }
+
+    #[test]
+    fn load_plan_quarantines_changed_configuration_directory_input() {
+        let temp = tempfile::tempdir().unwrap();
+        let init_dir = temp.path().join("init.d");
+        std::fs::create_dir_all(&init_dir).unwrap();
+        std::fs::write(init_dir.join("a.gradle"), "println(\"a\")\n").unwrap();
+        let store = BuildPlanShadowStore::new(temp.path().join("cache"));
+        let plan = CanonicalBuildPlan {
+            schema_version: BUILD_PLAN_SCHEMA_VERSION,
+            build_id: "build:config-dir-input".to_string(),
+            projects: vec![CanonicalBuildPlanProject {
+                path: ":".to_string(),
+                name: "root".to_string(),
+                project_dir: temp.path().to_string_lossy().into_owned(),
+            }],
+            tasks: Vec::new(),
+            dependencies: Vec::new(),
+            toolchains: Vec::new(),
+            metadata: std::collections::BTreeMap::new(),
+        };
+        let mut graph = configuration_ir::from_build_plan(&plan);
+        graph
+            .invalidation_inputs
+            .push(configuration_ir::CanonicalConfigurationInput {
+                path: init_dir.to_string_lossy().into_owned(),
+                kind: "init-script-directory".to_string(),
+                exists: true,
+                sha256: configuration_ir::fingerprint_configuration_input_path(&init_dir).unwrap(),
+            });
+        graph.normalize_mut();
+
+        let path = store
+            .persist_plan_with_configuration_graph(&plan, Some(&graph), "test")
+            .unwrap();
+        std::fs::write(init_dir.join("b.gradle"), "println(\"b\")\n").unwrap();
+
+        let error = store.load_plan("build:config-dir-input").unwrap_err();
+
+        assert!(
+            error.to_string().contains("sha256 mismatch"),
+            "unexpected error: {}",
+            error
+        );
+        assert!(
+            !path.exists(),
+            "configuration directory-invalidated artifact should be quarantined"
         );
     }
 
