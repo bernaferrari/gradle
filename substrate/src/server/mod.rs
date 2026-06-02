@@ -61,6 +61,7 @@ pub mod parallel_scheduler;
 pub mod parser_service;
 pub mod platform;
 pub mod plugin;
+pub mod plugin_abi;
 pub mod problem_reporting;
 pub mod remote_cache;
 pub mod resource_management;
