@@ -152,6 +152,9 @@ impl BuildPlanShadowStore {
                     }
                     let mut normalized_graph = graph.clone();
                     normalized_graph.normalize_mut();
+                    validate_configuration_inputs(&normalized_graph).map_err(|error| {
+                        format!("configuration graph input validation failed: {error}")
+                    })?;
                     let fingerprint = configuration_ir::fingerprint_normalized(&normalized_graph)?;
                     (Some(normalized_graph), fingerprint)
                 }
@@ -261,6 +264,10 @@ impl BuildPlanShadowStore {
                     "build plan shadow configuration graph fingerprint mismatch: computed '{}' but artifact stores '{}'",
                     actual_graph_fingerprint, artifact.configuration_graph_fingerprint_sha256
                 );
+                self.quarantine_artifact(path, &reason)?;
+                return Err(reason.into());
+            }
+            if let Err(reason) = validate_configuration_inputs(configuration_graph) {
                 self.quarantine_artifact(path, &reason)?;
                 return Err(reason.into());
             }
@@ -1128,6 +1135,47 @@ fn fingerprint_plan_inputs(
     Ok(fingerprints)
 }
 
+fn validate_configuration_inputs(graph: &CanonicalConfigurationGraph) -> Result<(), String> {
+    for input in &graph.invalidation_inputs {
+        let path = Path::new(&input.path);
+        let exists = path.exists();
+        if exists != input.exists {
+            return Err(format!(
+                "build plan shadow configuration input changed: {} '{}' existence changed from {} to {}",
+                input.kind, input.path, input.exists, exists
+            ));
+        }
+        if !exists {
+            continue;
+        }
+        if input.sha256.is_empty() {
+            return Err(format!(
+                "build plan shadow configuration input '{}' for {} is missing stored sha256",
+                input.path, input.kind
+            ));
+        }
+        if !path.is_file() {
+            return Err(format!(
+                "build plan shadow configuration input changed: {} '{}' is no longer a regular file",
+                input.kind, input.path
+            ));
+        }
+        let actual_sha256 = sha256_file(path).map_err(|error| {
+            format!(
+                "build plan shadow configuration input fingerprint failed for {} '{}': {}",
+                input.kind, input.path, error
+            )
+        })?;
+        if actual_sha256 != input.sha256 {
+            return Err(format!(
+                "build plan shadow configuration input changed: {} '{}' sha256 mismatch: computed '{}' but artifact stores '{}'",
+                input.kind, input.path, actual_sha256, input.sha256
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn captured_produced_paths(plan: &CanonicalBuildPlan) -> Vec<PathBuf> {
     plan.tasks
         .iter()
@@ -1901,6 +1949,59 @@ mod tests {
         assert!(!loaded.fingerprint_sha256.is_empty());
         assert!(loaded.configuration_graph.is_some());
         assert!(!loaded.configuration_graph_fingerprint_sha256.is_empty());
+    }
+
+    #[test]
+    fn load_plan_quarantines_changed_configuration_input() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings_file = temp.path().join("settings.gradle.kts");
+        std::fs::write(&settings_file, "include(\":app\")\n").unwrap();
+        let store = BuildPlanShadowStore::new(temp.path().join("cache"));
+        let plan = CanonicalBuildPlan {
+            schema_version: BUILD_PLAN_SCHEMA_VERSION,
+            build_id: "build:config-input".to_string(),
+            projects: vec![CanonicalBuildPlanProject {
+                path: ":".to_string(),
+                name: "root".to_string(),
+                project_dir: temp.path().to_string_lossy().into_owned(),
+            }],
+            tasks: Vec::new(),
+            dependencies: Vec::new(),
+            toolchains: Vec::new(),
+            metadata: std::collections::BTreeMap::new(),
+        };
+        let mut graph = configuration_ir::from_build_plan(&plan);
+        graph
+            .invalidation_inputs
+            .push(configuration_ir::CanonicalConfigurationInput {
+                path: settings_file.to_string_lossy().into_owned(),
+                kind: "settings-script".to_string(),
+                exists: true,
+                sha256: sha256_file(&settings_file).unwrap(),
+            });
+        graph.normalize_mut();
+
+        let path = store
+            .persist_plan_with_configuration_graph(&plan, Some(&graph), "test")
+            .unwrap();
+        std::fs::write(&settings_file, "include(\":lib\")\n").unwrap();
+
+        let error = store.load_plan("build:config-input").unwrap_err();
+
+        assert!(
+            error.to_string().contains("configuration input changed"),
+            "unexpected error: {}",
+            error
+        );
+        assert!(
+            error.to_string().contains("sha256 mismatch"),
+            "unexpected error: {}",
+            error
+        );
+        assert!(
+            !path.exists(),
+            "configuration-invalidated artifact should be quarantined"
+        );
     }
 
     #[test]
