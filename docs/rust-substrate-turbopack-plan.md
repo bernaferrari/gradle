@@ -400,10 +400,13 @@ Progress checkpoint, 2026-06-02:
   `jvmHostMode` of `attached-on-demand` or `standalone`, while Rust-wrapper
   prewarmed daemons write `launchMode=rust-wrapper-prewarm` and
   `jvmHostMode=standalone`.
+- The JVM bridge now parses that launch metadata before reusing persisted TCP
+  endpoints. Legacy endpoint files remain accepted for compatibility, but
+  inconsistent metadata is rejected and forces a fresh Rust daemon launch.
 - Evidence: `cargo test -p gradle-wrapper -- --test-threads=1` passed 25/25,
   and `./gradlew :rust-bridge:test --tests
   org.gradle.internal.rustbridge.SubstrateLifecycleTest --no-daemon
-  --console=plain` passed.
+  --console=plain` passed, including endpoint metadata admission checks.
 
 ## Aggressive Near-Term Backlog
 
