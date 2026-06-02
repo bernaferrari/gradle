@@ -635,7 +635,7 @@ fn write_endpoint_file(path: &Path, endpoint: &str, daemon_path: &Path) -> Resul
     let (binary, modified, size) = daemon_binary_identity(daemon_path)?;
     let temp_path = path.with_extension("tmp");
     let content = format!(
-        "# Gradle Rust substrate daemon endpoint\nendpoint={endpoint}\ndaemonBinary={binary}\ndaemonBinaryLastModifiedMillis={modified}\ndaemonBinarySize={size}\n"
+        "# Gradle Rust substrate daemon endpoint\nendpoint={endpoint}\nlaunchMode=rust-wrapper-prewarm\njvmHostMode=standalone\ndaemonBinary={binary}\ndaemonBinaryLastModifiedMillis={modified}\ndaemonBinarySize={size}\n"
     );
     std::fs::write(&temp_path, content)
         .map_err(|e| format!("Failed to write {}: {}", temp_path.display(), e))?;
@@ -1171,6 +1171,9 @@ distributionSha256Sum=abc123
 
         write_endpoint_file(&endpoint_file, "tcp://127.0.0.1:12345", &daemon).unwrap();
 
+        let endpoint_content = std::fs::read_to_string(&endpoint_file).unwrap();
+        assert!(endpoint_content.contains("launchMode=rust-wrapper-prewarm"));
+        assert!(endpoint_content.contains("jvmHostMode=standalone"));
         assert_eq!(
             read_endpoint_file(&endpoint_file, &daemon).as_deref(),
             Some("tcp://127.0.0.1:12345")

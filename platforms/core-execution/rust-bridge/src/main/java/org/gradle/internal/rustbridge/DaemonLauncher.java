@@ -31,6 +31,7 @@ public class DaemonLauncher {
     private static final String JVM_HOST_SOCKET_NAME = "jvm-host.sock";
     private static final String TCP_ENDPOINT_NAME = "substrate.tcp-endpoint";
     private static final String BINARY_NAME = "gradle-substrate-daemon";
+    private static final String LAUNCH_MODE_RUST_PRIMARY = "rust-daemon-primary";
 
     private final File daemonBinary;
     private final File socketDirectory;
@@ -201,9 +202,6 @@ public class DaemonLauncher {
             return SubstrateClient.noop(reason);
         }
 
-        // Phase 6: Start JVM Compatibility Host before launching the Rust daemon.
-        jvmHostSocketPath = startJvmHostIfEnabled();
-
         LOGGER.info("[substrate] Launching daemon from {}", daemonBinary);
         int daemonTcpPort = reserveLoopbackPort();
         String daemonTcpAddress = "127.0.0.1:" + daemonTcpPort;
@@ -241,13 +239,22 @@ public class DaemonLauncher {
         // Consume stdout/stderr to prevent buffer deadlock
         consumeStream(daemonProcess);
 
+        // Phase 7: the Rust daemon is primary. Attach the JVM compatibility host only
+        // after the Rust process is launched, and only when this build session needs it.
+        try {
+            jvmHostSocketPath = startJvmHostIfEnabled();
+        } catch (IOException e) {
+            shutdownDaemon();
+            throw e;
+        }
+
         // Wait briefly for the daemon to accept connections.
         int attempts = 0;
         IOException lastConnectFailure = null;
         while (attempts < 50) {
             try {
                 SubstrateClient client = SubstrateClient.connect(daemonEndpoint, jvmHostSocketPath);
-                writeTcpEndpoint(tcpEndpointFile, daemonEndpoint, daemonBinary.toPath());
+                writeTcpEndpoint(tcpEndpointFile, daemonEndpoint, daemonBinary.toPath(), enableJvmHost);
                 LOGGER.info("[substrate] Daemon started successfully");
                 return client;
             } catch (IOException e) {
@@ -290,13 +297,15 @@ public class DaemonLauncher {
         }
     }
 
-    private static void writeTcpEndpoint(Path endpointFile, String endpoint, Path daemonBinaryPath) throws IOException {
+    private static void writeTcpEndpoint(Path endpointFile, String endpoint, Path daemonBinaryPath, boolean jvmHostEnabled) throws IOException {
         Path parent = endpointFile.getParent();
         if (parent != null) {
             Files.createDirectories(parent);
         }
         Properties properties = new Properties();
         properties.setProperty("endpoint", endpoint);
+        properties.setProperty("launchMode", LAUNCH_MODE_RUST_PRIMARY);
+        properties.setProperty("jvmHostMode", jvmHostEnabled ? "attached-on-demand" : "standalone");
         properties.setProperty("daemonBinary", daemonBinaryPath.toAbsolutePath().normalize().toString());
         properties.setProperty("daemonBinaryLastModifiedMillis", Long.toString(Files.getLastModifiedTime(daemonBinaryPath).toMillis()));
         properties.setProperty("daemonBinarySize", Long.toString(Files.size(daemonBinaryPath)));
