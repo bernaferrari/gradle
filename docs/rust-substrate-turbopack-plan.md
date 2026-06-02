@@ -309,9 +309,14 @@ Progress checkpoint, 2026-06-02:
   build-plan shadow artifact. New artifacts validate and quarantine corrupt
   configuration-graph schema/build-id/fingerprint mismatches; old artifacts
   without a graph remain loadable.
+- Warm shadow-plan reuse now validates captured configuration inputs before
+  replay. If a settings script, project build script, or version catalog
+  recorded in the graph changes, appears, disappears, or loses its stored
+  content fingerprint, Rust quarantines the artifact instead of running a stale
+  configuration graph.
 - Evidence: `cargo test -p gradle-substrate-daemon --lib
   configuration_ir::tests` passed 3/3, `cargo test -p
-  gradle-substrate-daemon --lib build_plan_shadow::tests` passed 11/11, and
+  gradle-substrate-daemon --lib build_plan_shadow::tests` passed 12/12, and
   `cargo test -p gradle-substrate-daemon --test build_plan_shadow_test` passed
   7/7 with an integration assertion that the persisted shadow artifact contains
   the Phase 5 configuration graph.
