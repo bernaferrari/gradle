@@ -361,8 +361,22 @@ Progress checkpoint, 2026-06-02:
   graph. Supported built-in plugins produce contracts; custom/external applied
   plugins and captured plugin classpath dependencies produce explicit
   rejections until native ABI support or a JVM guest runtime is available.
+- Native plugin contracts now materialize directly into the Rust task graph
+  when a persisted build-plan shadow has configuration data but no captured JVM
+  task plan. Supported built-in plugin tasks are hydrated from ABI task
+  registrations; unsupported ABI/plugin-classpath semantics still mark the task
+  context with `unsupported_configuration_semantics` so the execution kernel
+  fails closed before dispatch.
 - Evidence: `cargo test -p gradle-substrate-daemon --lib
-  plugin_abi::tests` passed 3/3.
+  plugin_abi::tests` passed 4/4. Focused task-graph checks passed for native
+  ABI task materialization, unsupported configuration replay markers, and
+  build-plan shadow replacement:
+  `cargo test -p gradle-substrate-daemon --lib
+  task_graph::tests::test_build_plan_shadow_materializes_tasks_from_native_plugin_abi_when_plan_is_empty`,
+  `cargo test -p gradle-substrate-daemon --lib
+  task_graph::tests::test_build_plan_shadow_marks_unsupported_configuration_replay`,
+  and `cargo test -p gradle-substrate-daemon --lib
+  task_graph::tests::test_prefer_build_plan_shadow_replaces_registered_tasks`.
 
 ### Phase 7: Shrink The JVM Shell
 
