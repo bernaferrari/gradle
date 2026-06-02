@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::io::Read;
 use std::path::Path;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -29,6 +29,7 @@ use super::cyclonedx_sbom::{
     draft_contract_from_captured_inputs, CycloneDxIdentityPolicy, CycloneDxSbomContract,
 };
 use super::execution_history::ExecutionHistoryServiceImpl;
+use super::plugin_abi;
 use super::scopes::BuildId;
 
 /// Task graph node stored internally.
@@ -183,20 +184,11 @@ impl TaskGraphServiceImpl {
             }
         };
 
-        let configuration_rejection_reasons =
-            artifact.configuration_graph.as_ref().and_then(|graph| {
-                match configuration_ir::admit_native_replay(graph) {
-                    ConfigurationReplayAdmission::Accepted { .. } => None,
-                    ConfigurationReplayAdmission::Rejected(rejection) => Some(rejection.reasons),
-                }
-            });
-        if let Some(reasons) = &configuration_rejection_reasons {
-            tracing::warn!(
-                build_id = %build_id_str,
-                reasons = %reasons.join("; "),
-                "Build-plan shadow artifact requires JVM configuration replay"
-            );
-        }
+        let configuration_graph = artifact.configuration_graph.clone();
+        let mut configuration_rejection_reasons = configuration_graph
+            .as_ref()
+            .map(configuration_shadow_rejection_reasons)
+            .unwrap_or_default();
 
         if replace_existing {
             self.cleanup_build(build_id);
@@ -205,6 +197,29 @@ impl TaskGraphServiceImpl {
         let plan_dependencies = artifact.plan.dependencies.clone();
         let included_build_project_paths = included_build_project_paths(&artifact.plan.projects);
         let mut plan_tasks = artifact.plan.tasks;
+        if plan_tasks.is_empty() {
+            if let Some(graph) = configuration_graph.as_ref() {
+                let materialized = plugin_abi::materialize_native_plugin_tasks(graph);
+                configuration_rejection_reasons.extend(
+                    materialized
+                        .rejections
+                        .into_iter()
+                        .map(|rejection| rejection.message()),
+                );
+                plan_tasks = materialized.tasks;
+            }
+        }
+        let configuration_rejection_reasons =
+            dedupe_rejection_reasons(configuration_rejection_reasons);
+        if !configuration_rejection_reasons.is_empty() {
+            tracing::warn!(
+                build_id = %build_id_str,
+                reasons = %configuration_rejection_reasons.join("; "),
+                "Build-plan shadow artifact requires JVM configuration replay"
+            );
+        }
+        let configuration_rejection_reasons = (!configuration_rejection_reasons.is_empty())
+            .then_some(configuration_rejection_reasons);
         let task_outputs: HashMap<String, Vec<String>> = plan_tasks
             .iter()
             .map(|task| (task.path.clone(), task.outputs.clone()))
@@ -610,6 +625,31 @@ fn task_context_has_unsupported_marker(context_json: &str) -> bool {
                     == Some("true")
         })
         .unwrap_or(false)
+}
+
+fn configuration_shadow_rejection_reasons(
+    graph: &configuration_ir::CanonicalConfigurationGraph,
+) -> Vec<String> {
+    let mut reasons = match configuration_ir::admit_native_replay(graph) {
+        ConfigurationReplayAdmission::Accepted { .. } => Vec::new(),
+        ConfigurationReplayAdmission::Rejected(rejection) => rejection.reasons,
+    };
+    reasons.extend(
+        plugin_abi::resolve_native_plugin_contracts(graph)
+            .rejections
+            .into_iter()
+            .map(|rejection| rejection.message()),
+    );
+    dedupe_rejection_reasons(reasons)
+}
+
+fn dedupe_rejection_reasons(reasons: Vec<String>) -> Vec<String> {
+    reasons
+        .into_iter()
+        .filter(|reason| !reason.trim().is_empty())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
@@ -5952,6 +5992,74 @@ mod tests {
         assert_eq!(resp.total_tasks, 1);
         assert_eq!(resp.execution_order[0].task_path, ":fromShadow");
         assert_eq!(resp.plan_source, "build-plan-shadow");
+    }
+
+    #[tokio::test]
+    async fn test_build_plan_shadow_materializes_tasks_from_native_plugin_abi_when_plan_is_empty() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(BuildPlanShadowStore::new(temp.path().to_path_buf()));
+        let history = Arc::new(ExecutionHistoryServiceImpl::new(
+            temp.path().join("history"),
+        ));
+        let svc = TaskGraphServiceImpl::with_history_and_shadow(history, Arc::clone(&store));
+        let build_id = "native-plugin-abi-shadow-build";
+        let plan = super::super::build_plan_ir::CanonicalBuildPlan {
+            schema_version: super::super::build_plan_ir::BUILD_PLAN_SCHEMA_VERSION,
+            build_id: build_id.to_string(),
+            projects: vec![CanonicalBuildPlanProject {
+                path: ":app".to_string(),
+                name: "app".to_string(),
+                project_dir: temp.path().join("app").to_string_lossy().into_owned(),
+            }],
+            tasks: Vec::new(),
+            dependencies: Vec::new(),
+            toolchains: Vec::new(),
+            metadata: Default::default(),
+        };
+        let mut graph = configuration_ir::from_build_plan(&plan);
+        graph.plugins.push(configuration_ir::CanonicalPluginModel {
+            project_path: ":app".to_string(),
+            id: "java".to_string(),
+            version: String::new(),
+            apply: true,
+            source: "project-script".to_string(),
+        });
+
+        store
+            .persist_plan_with_configuration_graph(&plan, Some(&graph), "test-shadow")
+            .unwrap();
+
+        let resp = svc
+            .resolve_execution_plan(Request::new(ResolveExecutionPlanRequest {
+                build_id: build_id.to_string(),
+                prefer_build_plan_shadow: true,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.plan_source, "build-plan-shadow");
+        assert!(resp.total_tasks > 0);
+        assert!(resp
+            .execution_order
+            .iter()
+            .any(|node| node.task_path == ":app:compileJava"));
+        assert!(resp
+            .execution_order
+            .iter()
+            .any(|node| node.task_path == ":app:build"));
+        let compile_java = resp
+            .execution_order
+            .iter()
+            .find(|node| node.task_path == ":app:compileJava")
+            .expect("expected compileJava task");
+        assert!(compile_java
+            .execution_context_json
+            .contains("input.native_plugin_id"));
+        assert!(compile_java.execution_context_json.contains("java"));
+        assert!(!task_context_has_unsupported_marker(
+            &compile_java.execution_context_json
+        ));
     }
 
     #[tokio::test]

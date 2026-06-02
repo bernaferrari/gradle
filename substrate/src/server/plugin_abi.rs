@@ -2,6 +2,9 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
+use super::build_plan_ir::{
+    CanonicalBuildPlanTask, CanonicalBuildPlanTaskDiagnostic, CanonicalBuildPlanTaskInputSpec,
+};
 use super::configuration_ir::{CanonicalConfigurationGraph, CanonicalPluginModel};
 
 pub const NATIVE_PLUGIN_ABI_VERSION: u32 = 1;
@@ -65,6 +68,12 @@ pub struct NativePluginRejection {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativePluginResolution {
     pub contracts: Vec<NativePluginContract>,
+    pub rejections: Vec<NativePluginRejection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativePluginTaskMaterialization {
+    pub tasks: Vec<CanonicalBuildPlanTask>,
     pub rejections: Vec<NativePluginRejection>,
 }
 
@@ -182,8 +191,151 @@ pub fn resolve_native_plugin_contracts(
     }
 }
 
+pub fn materialize_native_plugin_tasks(
+    graph: &CanonicalConfigurationGraph,
+) -> NativePluginTaskMaterialization {
+    let mut tasks = Vec::new();
+    let mut rejections = Vec::new();
+    let mut seen_task_paths = BTreeSet::new();
+
+    for plugin in graph.plugins.iter().filter(|plugin| plugin.apply) {
+        let Some(contract) = contract_for_plugin(plugin) else {
+            rejections.push(NativePluginRejection {
+                plugin_id: plugin.id.clone(),
+                reasons: vec![format!(
+                    "applied plugin '{}' on project '{}' has no Rust native plugin contract",
+                    plugin.id, plugin.project_path
+                )],
+            });
+            continue;
+        };
+        match admit_native_plugin_contract(&contract) {
+            NativePluginAdmission::Accepted { .. } => {
+                for registration in &contract.task_registrations {
+                    let task_path =
+                        qualify_task_path(&plugin.project_path, &registration.task_name);
+                    if !seen_task_paths.insert(task_path.clone()) {
+                        continue;
+                    }
+                    tasks.push(canonical_task_from_registration(
+                        plugin,
+                        &contract,
+                        registration,
+                        task_path,
+                    ));
+                }
+            }
+            NativePluginAdmission::Rejected(rejection) => rejections.push(rejection),
+        }
+    }
+
+    for dependency in &graph.plugin_classpath {
+        rejections.push(NativePluginRejection {
+            plugin_id: dependency.notation.clone(),
+            reasons: vec![format!(
+                "plugin classpath dependency '{}' on project '{}' requires a native plugin ABI or JVM guest runtime",
+                dependency.notation, dependency.project_path
+            )],
+        });
+    }
+
+    tasks.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+    rejections.sort_unstable_by(|a, b| a.plugin_id.cmp(&b.plugin_id));
+    NativePluginTaskMaterialization { tasks, rejections }
+}
+
 fn contract_for_plugin(plugin: &CanonicalPluginModel) -> Option<NativePluginContract> {
     builtin_native_plugin_contract(&plugin.id)
+}
+
+fn canonical_task_from_registration(
+    plugin: &CanonicalPluginModel,
+    contract: &NativePluginContract,
+    registration: &NativePluginTaskRegistration,
+    task_path: String,
+) -> CanonicalBuildPlanTask {
+    CanonicalBuildPlanTask {
+        path: task_path,
+        project_path: plugin.project_path.clone(),
+        implementation_id: registration.task_type.clone(),
+        depends_on: registration
+            .depends_on
+            .iter()
+            .map(|dependency| qualify_task_path(&plugin.project_path, dependency))
+            .collect(),
+        inputs: [
+            ("native_plugin_id".to_string(), plugin.id.clone()),
+            (
+                "native_plugin_abi_version".to_string(),
+                contract.abi_version.to_string(),
+            ),
+            (
+                "native_plugin_implementation_kind".to_string(),
+                contract.implementation_kind.clone(),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+        outputs: Vec::new(),
+        worker_isolation: worker_isolation_for_task_type(&registration.task_type).to_string(),
+        should_run_after: Vec::new(),
+        must_run_after: Vec::new(),
+        finalized_by: Vec::new(),
+        cacheability: "unknown".to_string(),
+        local_state: Vec::new(),
+        destroyables: Vec::new(),
+        action_kind: action_kind_for_task_type(&registration.task_type).to_string(),
+        input_specs: vec![CanonicalBuildPlanTaskInputSpec {
+            name: "nativePlugin".to_string(),
+            kind: "value".to_string(),
+            value: plugin.id.clone(),
+            normalization: "scalar".to_string(),
+            optional: false,
+        }],
+        output_specs: Vec::new(),
+        environment_inputs: Vec::new(),
+        system_property_inputs: Vec::new(),
+        diagnostics: vec![CanonicalBuildPlanTaskDiagnostic {
+            severity: "info".to_string(),
+            code: "native-plugin-abi".to_string(),
+            message: format!(
+                "Task '{}' materialized from Rust native plugin ABI contract '{}'",
+                registration.task_name, contract.plugin_id
+            ),
+            source: "native-plugin-abi".to_string(),
+        }],
+    }
+}
+
+fn qualify_task_path(project_path: &str, task_name: &str) -> String {
+    if task_name.starts_with(':') {
+        return task_name.to_string();
+    }
+    if project_path == ":" || project_path.is_empty() {
+        format!(":{task_name}")
+    } else {
+        format!("{project_path}:{task_name}")
+    }
+}
+
+fn worker_isolation_for_task_type(task_type: &str) -> &'static str {
+    match task_type {
+        "JavaCompile" | "Test" | "JavaExec" => "process",
+        _ => "in-process",
+    }
+}
+
+fn action_kind_for_task_type(task_type: &str) -> &'static str {
+    match task_type {
+        "JavaCompile" => "compile",
+        "Copy" => "file-transform",
+        "Jar" | "Zip" | "Tar" => "archive",
+        "Test" => "test",
+        "JavaExec" => "external-process",
+        "CreateStartScripts" => "start-scripts",
+        "Lifecycle" => "lifecycle",
+        _ => "jvm-task",
+    }
 }
 
 fn base_plugin_contract(plugin_id: &str) -> NativePluginContract {
@@ -472,5 +624,53 @@ mod tests {
             .rejections
             .iter()
             .any(|rejection| rejection.plugin_id == "com.example:plugin:1.0"));
+    }
+
+    #[test]
+    fn materializes_tasks_from_supported_native_plugin_contracts() {
+        let graph = CanonicalConfigurationGraph {
+            schema_version: CONFIGURATION_GRAPH_SCHEMA_VERSION,
+            build_id: "build".to_string(),
+            settings: None,
+            environment: None,
+            projects: Vec::new(),
+            source_sets: Vec::new(),
+            tasks: Vec::new(),
+            plugins: vec![CanonicalPluginModel {
+                project_path: ":app".to_string(),
+                id: "java".to_string(),
+                version: String::new(),
+                apply: true,
+                source: "project-script".to_string(),
+            }],
+            plugin_classpath: Vec::new(),
+            dependency_configurations: Vec::new(),
+            toolchains: Vec::new(),
+            invalidation_inputs: Vec::new(),
+            metadata: Default::default(),
+        };
+
+        let materialized = materialize_native_plugin_tasks(&graph);
+
+        assert!(materialized.rejections.is_empty());
+        let compile_java = materialized
+            .tasks
+            .iter()
+            .find(|task| task.path == ":app:compileJava")
+            .expect("expected compileJava task");
+        assert_eq!(compile_java.project_path, ":app");
+        assert_eq!(compile_java.implementation_id, "JavaCompile");
+        assert_eq!(
+            compile_java
+                .inputs
+                .get("native_plugin_id")
+                .map(String::as_str),
+            Some("java")
+        );
+        assert!(materialized
+            .tasks
+            .iter()
+            .any(|task| task.path == ":app:build"
+                && task.depends_on == vec![":app:assemble", ":app:check"]));
     }
 }
