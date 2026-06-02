@@ -388,6 +388,23 @@ Goal: JVM is optional compatibility, not the engine.
   the compatibility runtime.
 - Native plugin builds never need the JVM shell.
 
+Progress checkpoint, 2026-06-02:
+
+- Fresh JVM bridge launches now start the Rust daemon process first and attach
+  the JVM compatibility host only after the Rust process has launched, and only
+  when the build-session options request that backchannel. If the optional JVM
+  host fails to start, the just-launched Rust daemon is shut down instead of
+  leaving an orphaned sidecar.
+- Persisted daemon endpoint files now declare launch-mode metadata:
+  JVM-bridge-launched daemons write `launchMode=rust-daemon-primary` with a
+  `jvmHostMode` of `attached-on-demand` or `standalone`, while Rust-wrapper
+  prewarmed daemons write `launchMode=rust-wrapper-prewarm` and
+  `jvmHostMode=standalone`.
+- Evidence: `cargo test -p gradle-wrapper -- --test-threads=1` passed 25/25,
+  and `./gradlew :rust-bridge:test --tests
+  org.gradle.internal.rustbridge.SubstrateLifecycleTest --no-daemon
+  --console=plain` passed.
+
 ## Aggressive Near-Term Backlog
 
 1. Keep the just-fixed `rust-bridge:testClasses` gate green in CI.
