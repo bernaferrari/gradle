@@ -13,6 +13,7 @@
       "tasks": ["clean", "build"],
       "mode": "strict",
       "expectation": "supported",
+      "coverage_tags": ["java-library", "zero-forward"],
       "timeout_seconds": 300,
       "reason": "Represents the simplest externally showable Java library shape: compile, resources, jar, sources, javadoc, tests/report-like outputs.",
       "checks": {
@@ -33,8 +34,30 @@
       "tasks": ["clean", "build"],
       "mode": "strict",
       "expectation": "supported",
+      "coverage_tags": ["java-application", "java-library", "zero-forward"],
       "timeout_seconds": 300,
       "reason": "Exercises project dependency wiring and selected DAG materialization across multiple projects.",
+      "checks": {
+        "task_parity": true,
+        "output_inventory": true,
+        "output_hashes": true,
+        "archive_entries": true,
+        "no_jvm_forwards": true
+      }
+    },
+    {
+      "name": "java-application",
+      "path": "java-application-groovy-dsl",
+      "source": {
+        "kind": "checked-in-local",
+        "description": "Checked-in Java application fixture with start scripts and Zip/Tar distributions."
+      },
+      "tasks": ["clean", "build"],
+      "mode": "strict",
+      "expectation": "supported",
+      "coverage_tags": ["java-application", "start-scripts", "zero-forward"],
+      "timeout_seconds": 300,
+      "reason": "Exercises the application plugin vertical: Java compilation, Jar, CreateStartScripts, Zip/Tar distributions, lifecycle scheduling, and zero JVM forwards.",
       "checks": {
         "task_parity": true,
         "output_inventory": true,
@@ -53,6 +76,7 @@
       "tasks": ["clean", "build"],
       "mode": "strict",
       "expectation": "supported",
+      "coverage_tags": ["external-dependencies", "java-library", "test-execution", "zero-forward"],
       "timeout_seconds": 300,
       "reason": "Visible dependency resolution plus real JUnit Platform test execution is a first-minute credibility gate.",
       "checks": {
@@ -74,6 +98,7 @@
       "tasks": ["clean", "build"],
       "mode": "strict",
       "expectation": "supported",
+      "coverage_tags": ["dependency-resolution", "external-dependencies", "java-library", "zero-forward"],
       "timeout_seconds": 300,
       "reason": "Proves a bounded but important Rust-owned dependency solver slice beyond direct static coordinates.",
       "checks": {
@@ -96,6 +121,7 @@
       "tasks": ["clean", "build"],
       "mode": "strict",
       "expectation": "supported",
+      "coverage_tags": ["java-application", "javaexec", "zero-forward"],
       "timeout_seconds": 300,
       "reason": "Exercises Rust DAG control across Java compilation, classes lifecycle, and native JavaExec process launch with declared output parity.",
       "checks": {
@@ -116,6 +142,7 @@
       "tasks": ["clean", "build"],
       "mode": "strict",
       "expectation": "supported",
+      "coverage_tags": ["javadoc", "java-library", "zero-forward"],
       "timeout_seconds": 300,
       "reason": "Exercises Rust DAG control across Java compilation, Jar packaging, and native Javadoc process launch with deterministic no-timestamp output.",
       "checks": {
@@ -136,6 +163,7 @@
       "tasks": ["clean", "build"],
       "mode": "strict",
       "expectation": "fail-closed",
+      "coverage_tags": ["fail-closed", "unsupported-composite-build"],
       "timeout_seconds": 300,
       "reason": "Demonstrates that the preview rejects unsupported composite substitution at admission instead of approximating included-build semantics.",
       "checks": {

@@ -16,7 +16,7 @@ import socket
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +49,7 @@ class DogfoodProject:
     reason: str
     checks: dict[str, Any]
     source: dict[str, Any]
+    coverage_tags: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -61,6 +62,7 @@ class DogfoodProject:
             "reason": self.reason,
             "checks": self.checks,
             "source": self.source,
+            "coverage_tags": self.coverage_tags,
         }
 
 
@@ -87,6 +89,7 @@ def load_manifest(manifest_path: Path) -> tuple[dict[str, Any], list[DogfoodProj
                 reason=entry.get("reason", ""),
                 checks=dict(entry.get("checks", {})),
                 source=dict(entry.get("source", {})),
+                coverage_tags=sorted(str(tag) for tag in entry.get("coverage_tags", [])),
             )
         )
     return data, projects
@@ -134,6 +137,8 @@ def validate_manifest(manifest_path: Path) -> list[str]:
             errors.append(prefix + "reason must be non-empty")
         if not project.source.get("kind") or not project.source.get("description"):
             errors.append(prefix + "source.kind and source.description are required")
+        if any(not tag for tag in project.coverage_tags):
+            errors.append(prefix + "coverage_tags must be non-empty strings")
         if project.expectation in {"supported", "supported-or-fail-closed"}:
             supported_count += 1
             if not project.checks.get("task_parity"):
@@ -250,6 +255,7 @@ def materialized_project(project: DogfoodProject, source_cache_dir: Path) -> Dog
         reason=project.reason,
         checks=project.checks,
         source=project.source,
+        coverage_tags=project.coverage_tags,
     )
 
 
@@ -449,6 +455,7 @@ def run_project(
         "expectation": project.expectation,
         "tasks": project.tasks,
         "reason": project.reason,
+        "coverage_tags": project.coverage_tags,
         "upstream": upstream.to_dict(),
         "substrate": substrate.to_dict(),
         "substrate_signals": substrate_signals,
@@ -618,6 +625,13 @@ def summarize_execution(results: list[dict[str, Any]]) -> dict[str, Any]:
         if result["expectation"] == "fail-closed"
         or result.get("checks", {}).get("resolved_expectation") == "fail-closed"
     ]
+    supported_coverage_counts: dict[str, int] = {}
+    zero_forward_coverage_counts: dict[str, int] = {}
+    for result in supported:
+        for tag in result.get("coverage_tags", []):
+            supported_coverage_counts[tag] = supported_coverage_counts.get(tag, 0) + 1
+            if result.get("match") and result.get("checks", {}).get("jvm_forward_count") == 0:
+                zero_forward_coverage_counts[tag] = zero_forward_coverage_counts.get(tag, 0) + 1
     return {
         "schema": "gradle-substrate.dogfood-summary.v1",
         "project_count": len(results),
@@ -631,6 +645,8 @@ def summarize_execution(results: list[dict[str, Any]]) -> dict[str, Any]:
             for result in supported
             if result.get("checks", {}).get("jvm_forward_count") == 0
         ),
+        "supported_coverage_counts": dict(sorted(supported_coverage_counts.items())),
+        "zero_jvm_forward_coverage_counts": dict(sorted(zero_forward_coverage_counts.items())),
         "upstream_duration_ms": sum(result["upstream"].get("duration_ms", 0) for result in results),
         "substrate_duration_ms": sum(result["substrate"].get("duration_ms", 0) for result in results),
         "upstream_task_total": sum(result["upstream"].get("task_count", 0) for result in results),
@@ -673,6 +689,14 @@ def write_markdown_report(output_dir: Path, summary: dict[str, Any], results: li
         f"Supported projects matched: {summary['supported_matched_count']}/{summary['supported_project_count']}",
         f"Fail-closed projects matched: {summary['fail_closed_matched_count']}/{summary['fail_closed_project_count']}",
         f"Supported projects with zero JVM forwards: {summary['zero_jvm_forward_supported_count']}/{summary['supported_project_count']}",
+    ]
+    if summary.get("zero_jvm_forward_coverage_counts"):
+        coverage = ", ".join(
+            f"{tag}={count}/{summary.get('supported_coverage_counts', {}).get(tag, count)}"
+            for tag, count in summary["zero_jvm_forward_coverage_counts"].items()
+        )
+        lines.append(f"Zero-forward supported coverage: {coverage}")
+    lines.extend([
         f"Observed wall time: upstream={summary['upstream_duration_ms']}ms, substrate={summary['substrate_duration_ms']}ms",
         f"Task totals: upstream={summary['upstream_task_total']}, substrate={summary['substrate_task_total']}",
         f"Rust RunBuild markers: {summary['runbuild_marker_count']}/{summary['project_count']}",
@@ -681,7 +705,7 @@ def write_markdown_report(output_dir: Path, summary: dict[str, Any], results: li
         f"Daemon signals: started={summary['daemon_started_count']}, reused={summary['daemon_reused_count']}",
         f"Rust bootstrap duration total: {summary['rust_bootstrap_duration_ms']}ms",
         f"Non-Rust/Gradle overhead estimate: {summary['non_rust_overhead_ms']}ms",
-    ]
+    ])
     shared_daemon = summary.get("shared_daemon", {})
     if shared_daemon:
         lines.append(

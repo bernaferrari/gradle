@@ -235,6 +235,7 @@ class DogfoodRunnerTest(unittest.TestCase):
                 "name": "supported",
                 "expectation": "supported",
                 "match": True,
+                "coverage_tags": ["java-library", "zero-forward"],
                 "upstream": {"duration_ms": 100, "task_count": 2},
                 "substrate": {"duration_ms": 50, "task_count": 2},
                 "checks": {"jvm_forward_count": 0},
@@ -265,6 +266,7 @@ class DogfoodRunnerTest(unittest.TestCase):
                 "name": "drift",
                 "expectation": "supported",
                 "match": False,
+                "coverage_tags": ["java-library"],
                 "upstream": {"duration_ms": 100, "task_count": 1},
                 "substrate": {"duration_ms": 90, "task_count": 2},
                 "checks": {"jvm_forward_count": 1},
@@ -287,6 +289,8 @@ class DogfoodRunnerTest(unittest.TestCase):
         self.assertEqual(1, summary["rust_runbuild_executed_count"])
         self.assertEqual(1, summary["daemon_started_count"])
         self.assertEqual(1, summary["daemon_reused_count"])
+        self.assertEqual({"java-library": 2, "zero-forward": 1}, summary["supported_coverage_counts"])
+        self.assertEqual({"java-library": 1, "zero-forward": 1}, summary["zero_jvm_forward_coverage_counts"])
         self.assertEqual(["drift"], summary["failed_projects"])
 
     def test_writes_markdown_report(self):
@@ -297,6 +301,7 @@ class DogfoodRunnerTest(unittest.TestCase):
                     "expectation": "supported",
                     "mode": "strict",
                     "match": True,
+                    "coverage_tags": ["java-library"],
                     "upstream": {"duration_ms": 100, "task_count": 2},
                     "substrate": {"duration_ms": 50, "task_count": 2},
                     "checks": {"jvm_forward_count": 0},
@@ -309,6 +314,7 @@ class DogfoodRunnerTest(unittest.TestCase):
             text = report.read_text(encoding="utf-8")
 
         self.assertIn("Projects matched: 1/1", text)
+        self.assertIn("Zero-forward supported coverage: java-library=1/1", text)
         self.assertIn("not a 100% Gradle compatibility claim", text)
 
     def test_summary_names_task_and_output_drift_failures(self):
