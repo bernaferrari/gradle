@@ -525,11 +525,20 @@ up-to-date correctness without falling back to broad mtime-only validation.
   `build/dogfood-phase-backlog-20260604` correctly failed all entries with
   `substrate-inactive: run-build marker missing` because the selected Gradle
   command did not include active rust-bridge services.
+- Review-noise cleanup removed tracked Rust `.bak` source duplicates under
+  `substrate/src/server` and `substrate/src/server/task_executor`. These files
+  were not referenced and duplicated live modules, so deleting them reduces
+  false ownership surface without changing compiled code.
+  Cleanup evidence: `rg` found no references to the tracked `.bak` files, and
+  this is source-tree cleanup only.
+- Bridge gate evidence: `./gradlew -q :rust-bridge:testClasses` passed on
+  2026-06-04.
 
 ## Aggressive Near-Term Backlog
 
-1. Keep the just-fixed `rust-bridge:testClasses` gate green in CI.
-2. Delete or quarantine noisy generated Rust/docs that obscure real ownership.
+No discrete items remain from the 2026-06-04 aggressive backlog checkpoint.
+The next useful work is a new phase checkpoint, not carrying these completed
+items forward as stale todos.
 
 ## Metrics
 
