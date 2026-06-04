@@ -867,39 +867,103 @@ fn direct_task_contexts(
     task_filter: &[String],
     validation_scope: &ValidationScope,
 ) -> HashMap<String, String> {
-    let Some(changed_paths) = &validation_scope.changed_paths else {
-        return HashMap::new();
-    };
-    if changed_paths.is_empty() {
+    let changed_paths = validation_scope.changed_paths.as_ref().map(|paths| {
+        paths
+            .iter()
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .collect::<Vec<_>>()
+    });
+    let graph_tasks = artifact
+        .build_graph
+        .as_ref()
+        .map(|graph| {
+            graph
+                .tasks
+                .iter()
+                .map(|task| (task.path.as_str(), task))
+                .collect::<HashMap<_, _>>()
+        })
+        .unwrap_or_default();
+    let graph_dependencies = artifact
+        .build_graph
+        .as_ref()
+        .map(|graph| {
+            let mut dependencies: HashMap<&str, Vec<String>> = HashMap::new();
+            for edge in &graph.edges {
+                if edge.kind == "depends_on" {
+                    dependencies
+                        .entry(edge.from.as_str())
+                        .or_default()
+                        .push(edge.to.clone());
+                }
+            }
+            for deps in dependencies.values_mut() {
+                deps.sort();
+                deps.dedup();
+            }
+            dependencies
+        })
+        .unwrap_or_default();
+    if changed_paths.as_ref().is_none_or(Vec::is_empty) && graph_tasks.is_empty() {
         return HashMap::new();
     }
-    let changed_paths = changed_paths
+    let selected = selected_direct_context_tasks(artifact, task_filter);
+    selected
         .iter()
-        .map(|path| path.to_string_lossy().replace('\\', "/"))
-        .collect::<Vec<_>>();
+        .filter_map(|task| {
+            let mut context = serde_json::Map::new();
+            if let Some(changed_paths) = changed_paths.as_ref().filter(|paths| !paths.is_empty()) {
+                context.insert(
+                    "trusted_vfs_delta".to_string(),
+                    serde_json::Value::Bool(true),
+                );
+                context.insert(
+                    "trusted_changed_paths".to_string(),
+                    serde_json::json!(changed_paths),
+                );
+            }
+            if let Some(graph_task) = graph_tasks.get(task.as_str()) {
+                context.insert(
+                    "build_graph_task".to_string(),
+                    serde_json::json!({
+                        "path": graph_task.path,
+                        "project_path": graph_task.project_path,
+                        "implementation_id": graph_task.implementation_id,
+                        "action_kind": graph_task.action_kind,
+                        "cacheability": graph_task.cacheability,
+                        "worker_isolation": graph_task.worker_isolation,
+                    }),
+                );
+                context.insert(
+                    "build_graph_dependencies".to_string(),
+                    serde_json::json!(graph_dependencies
+                        .get(task.as_str())
+                        .cloned()
+                        .unwrap_or_default()),
+                );
+            }
+            (!context.is_empty())
+                .then(|| (task.clone(), serde_json::Value::Object(context).to_string()))
+        })
+        .collect()
+}
+
+fn selected_direct_context_tasks(artifact: &ShadowArtifact, task_filter: &[String]) -> Vec<String> {
     let selected = if task_filter.is_empty() {
-        artifact
-            .plan
-            .tasks
-            .iter()
-            .map(|task| task.path.clone())
-            .collect::<Vec<_>>()
+        if let Some(graph) = &artifact.build_graph {
+            graph.tasks.iter().map(|task| task.path.clone()).collect()
+        } else {
+            artifact
+                .plan
+                .tasks
+                .iter()
+                .map(|task| task.path.clone())
+                .collect()
+        }
     } else {
         task_filter.to_vec()
     };
     selected
-        .into_iter()
-        .map(|task| {
-            (
-                task,
-                serde_json::json!({
-                    "trusted_vfs_delta": true,
-                    "trusted_changed_paths": changed_paths,
-                })
-                .to_string(),
-            )
-        })
-        .collect()
 }
 
 fn has_project_path_inputs(artifact: &ShadowArtifact, project_dir: &Path) -> bool {
@@ -1507,6 +1571,64 @@ mod tests {
         assert_eq!(contexts.len(), 1);
         assert_eq!(context["trusted_vfs_delta"], true);
         assert_eq!(context["trusted_changed_paths"][0], "/repo/src/Main.java");
+    }
+
+    #[test]
+    fn direct_task_contexts_include_build_graph_task_metadata_without_vfs_delta() {
+        let graph = ShadowBuildGraph {
+            schema_version: 1,
+            build_id: "build:test".to_string(),
+            projects: Vec::new(),
+            tasks: vec![
+                ShadowBuildGraphTask {
+                    path: ":compileJava".to_string(),
+                    project_path: ":".to_string(),
+                    implementation_id: "org.gradle.api.tasks.compile.JavaCompile".to_string(),
+                    action_kind: "java_compile".to_string(),
+                    cacheability: "cacheable".to_string(),
+                    worker_isolation: "process".to_string(),
+                },
+                ShadowBuildGraphTask {
+                    path: ":classes".to_string(),
+                    project_path: ":".to_string(),
+                    implementation_id: "Classes".to_string(),
+                    action_kind: "lifecycle".to_string(),
+                    cacheability: String::new(),
+                    worker_isolation: "none".to_string(),
+                },
+            ],
+            edges: vec![ShadowBuildGraphEdge {
+                from: ":classes".to_string(),
+                to: ":compileJava".to_string(),
+                kind: "depends_on".to_string(),
+            }],
+            dependency_requests: Vec::new(),
+            metadata: BTreeMap::new(),
+        };
+        let artifact = ShadowArtifact {
+            plan: ShadowPlan {
+                build_id: "build:test".to_string(),
+                projects: Vec::new(),
+                tasks: Vec::new(),
+            },
+            build_graph_fingerprint_sha256: fingerprint_build_graph(&graph).unwrap(),
+            build_graph: Some(graph),
+            stored_at_ms: 0,
+            input_fingerprints: Vec::new(),
+        };
+        let scope = ValidationScope {
+            changed_paths: None,
+        };
+
+        let contexts = direct_task_contexts(&artifact, &[":classes".to_string()], &scope);
+        let context: serde_json::Value =
+            serde_json::from_str(contexts.get(":classes").unwrap()).unwrap();
+
+        assert_eq!(contexts.len(), 1);
+        assert!(context.get("trusted_vfs_delta").is_none());
+        assert_eq!(context["build_graph_task"]["action_kind"], "lifecycle");
+        assert_eq!(context["build_graph_task"]["worker_isolation"], "none");
+        assert_eq!(context["build_graph_dependencies"][0], ":compileJava");
     }
 
     #[test]
