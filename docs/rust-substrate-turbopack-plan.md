@@ -1,7 +1,7 @@
 # Rust Substrate Turbopack-Style Plan
 
 Status: aggressive migration plan
-Last updated: 2026-06-01
+Last updated: 2026-06-04
 
 ## Reference Model
 
