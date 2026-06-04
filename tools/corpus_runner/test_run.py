@@ -335,6 +335,36 @@ tasks.register("resolveTransformedArtifact") {
             )
         )
 
+    def test_static_maven_repositories_are_scanned(self):
+        repos = corpus_run.scan_static_maven_repositories(
+            """
+repositories {
+    mavenCentral()
+    mavenLocal()
+    maven { url = uri("repo") }
+    maven { url = "https://repo.example.test/maven2" }
+}
+"""
+        )
+
+        self.assertIn(
+            ("mavenCentral", "https://repo.maven.apache.org/maven2/", "maven"),
+            repos,
+        )
+        self.assertIn(("mavenLocal", "file:${user.home}/.m2/repository", "file-maven"), repos)
+        self.assertIn(("repo", "repo", "file-maven"), repos)
+        self.assertIn(
+            ("https-repo-example-test-maven2", "https://repo.example.test/maven2", "maven"),
+            repos,
+        )
+
+    def test_static_file_maven_repository_is_scanned(self):
+        repos = corpus_run.scan_static_maven_repositories(
+            'repositories { maven { url = uri("../fixtures/m2") } }'
+        )
+
+        self.assertEqual({("fixtures-m2", "../fixtures/m2", "file-maven")}, repos)
+
     def test_exact_module_dependency_substitution_is_supported(self):
         self.assertFalse(
             corpus_run.has_unsupported_dependency_substitution(
@@ -593,6 +623,23 @@ dependencies {
 
         self.assertFalse(diff["match"])
         self.assertEqual("dependency-constraints", diff["mismatches"][0]["category"])
+
+    def test_declared_dependency_graph_diff_rejects_repository_drift(self):
+        upstream = {
+            "repositories": [{"id": "local", "url": "file:/repo", "kind": "file-maven"}],
+            "configurations": [{"name": "declared", "dependencies": []}],
+            "unsupported_features": [],
+        }
+        substrate = {
+            "repositories": [],
+            "configurations": [{"name": "declared", "dependencies": []}],
+            "unsupported_features": [],
+        }
+
+        diff = corpus_run.diff_declared_dependency_graphs(upstream, substrate)
+
+        self.assertFalse(diff["match"])
+        self.assertEqual("repositories", diff["mismatches"][0]["category"])
 
     def test_declared_dependency_graph_diff_rejects_unsupported_feature_drift(self):
         upstream = {
