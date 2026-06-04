@@ -471,25 +471,28 @@ up-to-date correctness without falling back to broad mtime-only validation.
   `DagExecutor` admission when the caller has not supplied an explicit trusted
   delta. This makes live daemon watch state participate in the same fail-closed
   up-to-date decision path as direct `runbuild` changed paths.
+- `ExecutionPlan` records a per-work VFS delta watermark in the persistent
+  execution record. Replayed daemon events are ignored after the task has
+  admitted them once, including across daemon restart via execution-history
+  reload.
 - Evidence: `cargo test -p gradle-substrate-daemon --bin
   gradle-substrate-runbuild` passed 15/15, and `cargo test -p
-  gradle-substrate-daemon --lib vfs_delta` passed 7 focused tests, including a
-  `RunBuild` assertion that input-intersecting VFS deltas force execution.
+  gradle-substrate-daemon --lib vfs_delta` passed 10 focused tests, including
+  `RunBuild` assertions that input-intersecting VFS deltas force execution and
+  persisted watermarks prevent already-admitted daemon deltas from replaying.
 
 ## Aggressive Near-Term Backlog
 
 1. Keep the just-fixed `rust-bridge:testClasses` gate green in CI.
 2. Make Copy/Sync/Delete/Symlink parity authoritative for supported file specs.
-3. Persist VFS-delta watermarks into execution history so daemon restart and
-   multi-build-session admission can avoid replaying stale retained watch events.
-4. Promote Rust local build-cache entries toward shared/remote Gradle cache
+3. Promote Rust local build-cache entries toward shared/remote Gradle cache
    compatibility.
-5. Make direct execution consume richer `BuildGraph` node metadata directly,
+4. Make direct execution consume richer `BuildGraph` node metadata directly,
    not only its task closure.
-6. Expand dogfood zero-forward support for Java-library and Spring-style builds.
-7. Add Rust dependency-resolution graph parity for file and static Maven repos.
-8. Add a strict unsupported-feature registry with counts in every dogfood run.
-9. Delete or quarantine noisy generated Rust/docs that obscure real ownership.
+5. Expand dogfood zero-forward support for Java-library and Spring-style builds.
+6. Add Rust dependency-resolution graph parity for file and static Maven repos.
+7. Add a strict unsupported-feature registry with counts in every dogfood run.
+8. Delete or quarantine noisy generated Rust/docs that obscure real ownership.
 
 ## Metrics
 

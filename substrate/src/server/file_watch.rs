@@ -172,20 +172,38 @@ impl VfsDeltaStore {
     }
 
     pub fn changed_paths_since(&self, since_timestamp_ms: i64) -> Vec<String> {
-        let mut paths = self
+        self.changed_paths_since_with_watermark(since_timestamp_ms)
+            .map(|(paths, _)| paths)
+            .unwrap_or_default()
+    }
+
+    pub fn changed_paths_since_with_watermark(
+        &self,
+        since_timestamp_ms: i64,
+    ) -> Option<(Vec<String>, i64)> {
+        let paths = self
             .events
             .lock()
             .map(|events| {
                 events
                     .iter()
                     .filter(|event| event.timestamp_ms >= since_timestamp_ms)
-                    .map(|event| event.path.clone())
-                    .collect::<Vec<_>>()
+                    .fold((Vec::new(), None), |(mut paths, max_ts), event| {
+                        paths.push(event.path.clone());
+                        (
+                            paths,
+                            Some(max_ts.unwrap_or(event.timestamp_ms).max(event.timestamp_ms)),
+                        )
+                    })
             })
             .unwrap_or_default();
+        let Some(watermark_ms) = paths.1 else {
+            return None;
+        };
+        let mut paths = paths.0;
         paths.sort();
         paths.dedup();
-        paths
+        Some((paths, watermark_ms))
     }
 }
 
