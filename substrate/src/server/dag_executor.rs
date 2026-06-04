@@ -267,6 +267,94 @@ fn context_is_no_source(context_json: Option<&String>) -> bool {
         .unwrap_or(false)
 }
 
+fn merged_task_context(
+    override_json: Option<&String>,
+    base_json: Option<String>,
+) -> Option<String> {
+    match (override_json, base_json) {
+        (Some(override_json), Some(base_json)) => {
+            let Ok(mut base) = serde_json::from_str::<serde_json::Value>(&base_json) else {
+                return Some(override_json.clone());
+            };
+            let Ok(override_value) = serde_json::from_str::<serde_json::Value>(override_json)
+            else {
+                return Some(base_json);
+            };
+            let (Some(base_obj), Some(override_obj)) =
+                (base.as_object_mut(), override_value.as_object())
+            else {
+                return Some(override_json.clone());
+            };
+            for (key, value) in override_obj {
+                base_obj.insert(key.clone(), value.clone());
+            }
+            Some(base.to_string())
+        }
+        (Some(override_json), None) => Some(override_json.clone()),
+        (None, Some(base_json)) => Some(base_json),
+        (None, None) => None,
+    }
+}
+
+fn context_vfs_changed_paths(context_json: Option<&String>) -> Vec<String> {
+    let Some(json) = context_json else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Vec::new();
+    };
+    if !value
+        .get("trusted_vfs_delta")
+        .and_then(|flag| flag.as_bool())
+        .unwrap_or(false)
+    {
+        return Vec::new();
+    }
+    value
+        .get("trusted_changed_paths")
+        .and_then(|paths| paths.as_array())
+        .map(|paths| {
+            paths
+                .iter()
+                .filter_map(|path| path.as_str())
+                .filter(|path| !path.is_empty())
+                .map(normalize_context_path)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn apply_vfs_delta_to_work_metadata(meta: &mut WorkMetadata, context_json: Option<&String>) {
+    let changed_paths = context_vfs_changed_paths(context_json);
+    if changed_paths.is_empty() {
+        return;
+    }
+    let intersects_input = meta.input_file_fingerprints.keys().any(|input| {
+        let input = normalize_context_path(input);
+        changed_paths
+            .iter()
+            .any(|changed| paths_intersect_normalized(changed, &input))
+    });
+    if intersects_input {
+        meta.rebuild_reasons
+            .push("trusted VFS delta intersects task inputs".to_string());
+    }
+}
+
+fn normalize_context_path(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+fn paths_intersect_normalized(left: &str, right: &str) -> bool {
+    left == right
+        || left
+            .strip_prefix(right)
+            .is_some_and(|rest| rest.starts_with('/'))
+        || right
+            .strip_prefix(left)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
 fn context_output_paths(context_json: Option<&String>) -> Vec<PathBuf> {
     let Some(json) = context_json else {
         return Vec::new();
@@ -1448,10 +1536,10 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 let task_type = next.task_type.clone();
 
                 // Phase 2a: Check execution plan for UP-TO-DATE / FROM_CACHE.
-                let context_json = task_contexts
-                    .get(&task_path)
-                    .cloned()
-                    .or_else(|| self.task_execution_context(&build_id_str, &task_path));
+                let context_json = merged_task_context(
+                    task_contexts.get(&task_path),
+                    self.task_execution_context(&build_id_str, &task_path),
+                );
                 if context_is_no_source(context_json.as_ref()) {
                     self.notify_task_finished(Request::new(NotifyTaskFinishedRequest {
                         build_id: build_id_str.clone(),
@@ -1479,7 +1567,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                     serde_json::from_str::<serde_json::Value>(json)
                         .ok()
                         .and_then(|v| {
-                            Some(WorkMetadata {
+                            let mut meta = WorkMetadata {
                                 work_identity: v.get("work_identity")?.as_str()?.to_string(),
                                 display_name: v
                                     .get("display_name")
@@ -1534,7 +1622,9 @@ impl DagExecutorService for DagExecutorServiceImpl {
                                             .collect()
                                     })
                                     .unwrap_or_default(),
-                            })
+                            };
+                            apply_vfs_delta_to_work_metadata(&mut meta, context_json.as_ref());
+                            Some(meta)
                         })
                 });
 
@@ -1704,10 +1794,10 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 }
 
                 let registry = Arc::clone(&self.executor_registry);
-                let context_for_task = task_contexts
-                    .get(&task_path)
-                    .cloned()
-                    .or_else(|| self.task_execution_context(&build_id_str, &task_path));
+                let context_for_task = merged_task_context(
+                    task_contexts.get(&task_path),
+                    self.task_execution_context(&build_id_str, &task_path),
+                );
                 let tx = result_tx.clone();
                 let allow_jvm_forwarding_for_task = allow_jvm_forwarding;
                 let jvm_host_bridge = self.jvm_host_bridge.clone();
@@ -4796,6 +4886,79 @@ mod tests {
         assert_eq!(resp2.tasks_succeeded, 1);
     }
 
+    #[tokio::test]
+    async fn test_run_build_vfs_delta_intersecting_input_prevents_up_to_date_skip() {
+        let svc = make_svc();
+
+        register_chain(
+            &svc,
+            "build-vfs-delta",
+            &[(":compileJava", "JavaCompile", &[])],
+        )
+        .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let base_ctx = serde_json::json!({
+            "work_identity": ":project:compileJava",
+            "display_name": ":project:compileJava",
+            "implementation_class": "org.gradle.api.tasks.compile.JavaCompile",
+            "input_properties": {"classpath": "libs/a.jar"},
+            "input_file_fingerprints": {"src/Main.java": "abc123"},
+            "caching_enabled": false,
+            "can_load_from_cache": false,
+            "up_to_date_enabled": true,
+            "has_previous_execution_state": true,
+            "rebuild_reasons": [],
+            "source_files": [dir.path().join("src").to_string_lossy()],
+            "target_dir": dir.path().join("classes").to_string_lossy()
+        });
+
+        let mut contexts1 = HashMap::new();
+        contexts1.insert(":compileJava".to_string(), base_ctx.to_string());
+
+        let _ = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "build-vfs-delta".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts1,
+                allow_jvm_forwarding: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        register_chain(
+            &svc,
+            "build-vfs-delta-2",
+            &[(":compileJava", "JavaCompile", &[])],
+        )
+        .await;
+
+        let mut changed_ctx = base_ctx;
+        changed_ctx["trusted_vfs_delta"] = serde_json::Value::Bool(true);
+        changed_ctx["trusted_changed_paths"] = serde_json::json!(["src/Main.java"]);
+        let mut contexts2 = HashMap::new();
+        contexts2.insert(":compileJava".to_string(), changed_ctx.to_string());
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "build-vfs-delta-2".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts2,
+                allow_jvm_forwarding: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(
+            resp.tasks_up_to_date, 0,
+            "trusted VFS delta intersecting an input should force execution"
+        );
+    }
+
     /// Test that UP-TO-DATE count is reflected in RunBuildResponse.
     #[tokio::test]
     async fn test_run_build_up_to_date_counted_in_response() {
@@ -5302,6 +5465,82 @@ mod tests {
             .into_inner();
 
         assert_eq!(resp2.tasks_up_to_date, 1, "second run should be UP-TO-DATE");
+    }
+
+    #[test]
+    fn test_vfs_delta_context_merges_with_shadow_work_metadata() {
+        let base = serde_json::json!({
+            "work_identity": ":project:compileJava",
+            "input_file_fingerprints": {"src/Main.java": "hash"},
+            "up_to_date_enabled": true
+        })
+        .to_string();
+        let delta = serde_json::json!({
+            "trusted_vfs_delta": true,
+            "trusted_changed_paths": ["/repo/README.md"]
+        })
+        .to_string();
+
+        let merged = merged_task_context(Some(&delta), Some(base)).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&merged).unwrap();
+
+        assert_eq!(value["work_identity"], ":project:compileJava");
+        assert_eq!(value["trusted_vfs_delta"], true);
+        assert_eq!(value["trusted_changed_paths"][0], "/repo/README.md");
+    }
+
+    #[test]
+    fn test_vfs_delta_intersecting_input_forces_rebuild_reason() {
+        let context = serde_json::json!({
+            "trusted_vfs_delta": true,
+            "trusted_changed_paths": ["/repo/src/Main.java"]
+        })
+        .to_string();
+        let mut meta = WorkMetadata {
+            work_identity: ":compileJava".to_string(),
+            display_name: ":compileJava".to_string(),
+            implementation_class: "JavaCompile".to_string(),
+            input_properties: Default::default(),
+            input_file_fingerprints: [("/repo/src/Main.java".to_string(), "hash".to_string())]
+                .into(),
+            caching_enabled: false,
+            can_load_from_cache: false,
+            has_previous_execution_state: true,
+            rebuild_reasons: Vec::new(),
+        };
+
+        apply_vfs_delta_to_work_metadata(&mut meta, Some(&context));
+
+        assert!(meta
+            .rebuild_reasons
+            .iter()
+            .any(|reason| reason.contains("VFS delta")));
+    }
+
+    #[test]
+    fn test_vfs_delta_unrelated_input_preserves_work_fingerprint_inputs() {
+        let context = serde_json::json!({
+            "trusted_vfs_delta": true,
+            "trusted_changed_paths": ["/repo/README.md"]
+        })
+        .to_string();
+        let mut meta = WorkMetadata {
+            work_identity: ":compileJava".to_string(),
+            display_name: ":compileJava".to_string(),
+            implementation_class: "JavaCompile".to_string(),
+            input_properties: Default::default(),
+            input_file_fingerprints: [("/repo/src/Main.java".to_string(), "hash".to_string())]
+                .into(),
+            caching_enabled: false,
+            can_load_from_cache: false,
+            has_previous_execution_state: true,
+            rebuild_reasons: Vec::new(),
+        };
+
+        apply_vfs_delta_to_work_metadata(&mut meta, Some(&context));
+
+        assert!(meta.rebuild_reasons.is_empty());
+        assert!(meta.input_properties.is_empty());
     }
 
     #[test]

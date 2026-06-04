@@ -251,6 +251,7 @@ async fn run_direct_build() -> Result<i32, Box<dyn std::error::Error>> {
     }
     validate_execution_graph(&artifact)?;
     let task_filter = resolve_task_filter(&artifact, &args.tasks)?;
+    let task_contexts = direct_task_contexts(&artifact, &task_filter, &validation_scope);
 
     let channel = connect_tcp(&args.endpoint).await?;
     let mut bootstrap = BootstrapServiceClient::new(channel.clone());
@@ -275,7 +276,7 @@ async fn run_direct_build() -> Result<i32, Box<dyn std::error::Error>> {
             build_id: build_id.clone(),
             max_parallelism: args.max_parallelism,
             task_filter,
-            task_contexts: HashMap::new(),
+            task_contexts,
             allow_jvm_forwarding: false,
         })
         .await?
@@ -861,6 +862,46 @@ fn fingerprint_build_graph(graph: &ShadowBuildGraph) -> Result<String, Box<dyn s
     Ok(hex)
 }
 
+fn direct_task_contexts(
+    artifact: &ShadowArtifact,
+    task_filter: &[String],
+    validation_scope: &ValidationScope,
+) -> HashMap<String, String> {
+    let Some(changed_paths) = &validation_scope.changed_paths else {
+        return HashMap::new();
+    };
+    if changed_paths.is_empty() {
+        return HashMap::new();
+    }
+    let changed_paths = changed_paths
+        .iter()
+        .map(|path| path.to_string_lossy().replace('\\', "/"))
+        .collect::<Vec<_>>();
+    let selected = if task_filter.is_empty() {
+        artifact
+            .plan
+            .tasks
+            .iter()
+            .map(|task| task.path.clone())
+            .collect::<Vec<_>>()
+    } else {
+        task_filter.to_vec()
+    };
+    selected
+        .into_iter()
+        .map(|task| {
+            (
+                task,
+                serde_json::json!({
+                    "trusted_vfs_delta": true,
+                    "trusted_changed_paths": changed_paths,
+                })
+                .to_string(),
+            )
+        })
+        .collect()
+}
+
 fn has_project_path_inputs(artifact: &ShadowArtifact, project_dir: &Path) -> bool {
     let produced_paths = captured_produced_paths(artifact);
     artifact.plan.tasks.iter().any(|task| {
@@ -1423,6 +1464,49 @@ mod tests {
         assert!(error
             .to_string()
             .contains("build graph fingerprint mismatch"));
+    }
+
+    #[test]
+    fn direct_task_contexts_include_trusted_vfs_delta_for_selected_tasks() {
+        let artifact = ShadowArtifact {
+            plan: ShadowPlan {
+                build_id: "build:test".to_string(),
+                projects: Vec::new(),
+                tasks: vec![
+                    ShadowTask {
+                        path: ":compileJava".to_string(),
+                        depends_on: Vec::new(),
+                        input_specs: Vec::new(),
+                        outputs: Vec::new(),
+                        local_state: Vec::new(),
+                        destroyables: Vec::new(),
+                    },
+                    ShadowTask {
+                        path: ":classes".to_string(),
+                        depends_on: Vec::new(),
+                        input_specs: Vec::new(),
+                        outputs: Vec::new(),
+                        local_state: Vec::new(),
+                        destroyables: Vec::new(),
+                    },
+                ],
+            },
+            build_graph: None,
+            build_graph_fingerprint_sha256: String::new(),
+            stored_at_ms: 0,
+            input_fingerprints: Vec::new(),
+        };
+        let scope = ValidationScope {
+            changed_paths: Some(vec![PathBuf::from("/repo/src/Main.java")]),
+        };
+
+        let contexts = direct_task_contexts(&artifact, &[":classes".to_string()], &scope);
+        let context: serde_json::Value =
+            serde_json::from_str(contexts.get(":classes").unwrap()).unwrap();
+
+        assert_eq!(contexts.len(), 1);
+        assert_eq!(context["trusted_vfs_delta"], true);
+        assert_eq!(context["trusted_changed_paths"][0], "/repo/src/Main.java");
     }
 
     #[test]
