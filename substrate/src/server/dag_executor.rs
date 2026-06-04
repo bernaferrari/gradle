@@ -353,6 +353,40 @@ fn context_vfs_delta_since_ms(context_json: Option<&String>) -> i64 {
         .unwrap_or(0)
 }
 
+fn context_work_identity(context_json: Option<&String>) -> Option<String> {
+    let json = context_json?;
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("work_identity")
+                .and_then(|identity| identity.as_str())
+                .filter(|identity| !identity.is_empty())
+                .map(str::to_string)
+        })
+}
+
+fn context_daemon_vfs_watermark_ms(context_json: Option<&String>) -> Option<(String, i64)> {
+    let json = context_json?;
+    let value = serde_json::from_str::<serde_json::Value>(json).ok()?;
+    if !value
+        .get("daemon_vfs_delta")
+        .and_then(|flag| flag.as_bool())
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    let work_identity = value
+        .get("work_identity")
+        .and_then(|identity| identity.as_str())
+        .filter(|identity| !identity.is_empty())?;
+    let watermark_ms = value
+        .get("daemon_vfs_delta_watermark_ms")
+        .and_then(|watermark| watermark.as_i64())
+        .unwrap_or(0);
+    (watermark_ms > 0).then(|| (work_identity.to_string(), watermark_ms))
+}
+
 fn apply_vfs_delta_to_work_metadata(meta: &mut WorkMetadata, context_json: Option<&String>) {
     let changed_paths = context_vfs_changed_paths(context_json);
     if changed_paths.is_empty() {
@@ -674,18 +708,32 @@ impl DagExecutorServiceImpl {
             return context_json;
         };
 
-        let since_ms = context_vfs_delta_since_ms(context_json.as_ref());
-        let changed_paths = store.changed_paths_since(since_ms);
-        if changed_paths.is_empty() {
+        let explicit_since_ms = context_vfs_delta_since_ms(context_json.as_ref());
+        let persisted_since_ms = context_work_identity(context_json.as_ref())
+            .map(|work_identity| self.execution_plan.vfs_delta_watermark_ms(&work_identity) + 1)
+            .unwrap_or(0);
+        let since_ms = explicit_since_ms.max(persisted_since_ms);
+        let Some((changed_paths, watermark_ms)) =
+            store.changed_paths_since_with_watermark(since_ms)
+        else {
             return context_json;
-        }
+        };
 
         let delta_context = serde_json::json!({
+            "daemon_vfs_delta": true,
+            "daemon_vfs_delta_watermark_ms": watermark_ms,
             "trusted_vfs_delta": true,
             "trusted_changed_paths": changed_paths,
         })
         .to_string();
         merged_task_context(Some(&delta_context), context_json)
+    }
+
+    fn record_daemon_vfs_watermark_from_context(&self, context_json: Option<&String>) {
+        if let Some((work_identity, watermark_ms)) = context_daemon_vfs_watermark_ms(context_json) {
+            self.execution_plan
+                .record_vfs_delta_watermark(&work_identity, watermark_ms);
+        }
     }
 
     /// Dispatch an event to all registered dispatchers.
@@ -1699,6 +1747,9 @@ impl DagExecutorService for DagExecutorServiceImpl {
                                 super::execution_plan::ExecutionPlanServiceImpl::compute_fingerprint(
                                     meta,
                                 );
+                            if let Some(context_json) = &context_json {
+                                slot.execution_context_json = context_json.clone();
+                            }
                         }
                     }
 
@@ -1770,6 +1821,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                                     input_fingerprint: fp,
                                 }))
                                 .await;
+                            self.record_daemon_vfs_watermark_from_context(context_json.as_ref());
 
                             up_to_date_count += 1;
                             tasks_completed += 1;
@@ -1817,6 +1869,9 @@ impl DagExecutorService for DagExecutorServiceImpl {
                                             input_fingerprint: fp,
                                         }))
                                         .await;
+                                    self.record_daemon_vfs_watermark_from_context(
+                                        context_json.as_ref(),
+                                    );
 
                                     from_cache_count += 1;
                                     tasks_completed += 1;
@@ -1854,10 +1909,7 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 }
 
                 let registry = Arc::clone(&self.executor_registry);
-                let context_for_task = self.merge_daemon_vfs_delta_context(merged_task_context(
-                    task_contexts.get(&task_path),
-                    self.task_execution_context(&build_id_str, &task_path),
-                ));
+                let context_for_task = context_json.clone();
                 let tx = result_tx.clone();
                 let allow_jvm_forwarding_for_task = allow_jvm_forwarding;
                 let jvm_host_bridge = self.jvm_host_bridge.clone();
@@ -2038,6 +2090,9 @@ impl DagExecutorService for DagExecutorServiceImpl {
                                         input_fingerprint: refreshed_fingerprint,
                                     }))
                                     .await;
+                                self.record_daemon_vfs_watermark_from_context(Some(
+                                    &slot.execution_context_json,
+                                ));
 
                                 if result.success
                                     && actual_outcome == "EXECUTED"
@@ -5027,28 +5082,27 @@ mod tests {
         register_chain(
             &svc,
             "build-daemon-vfs-delta",
-            &[(":compileJava", "JavaCompile", &[])],
+            &[(":prepare", "Mkdir", &[])],
         )
         .await;
 
         let dir = tempfile::tempdir().unwrap();
         let base_ctx = serde_json::json!({
-            "work_identity": ":project:compileJava",
-            "display_name": ":project:compileJava",
-            "implementation_class": "org.gradle.api.tasks.compile.JavaCompile",
-            "input_properties": {"classpath": "libs/a.jar"},
+            "work_identity": ":project:prepare",
+            "display_name": ":project:prepare",
+            "implementation_class": "Mkdir",
+            "input_properties": {"path": dir.path().join("classes").to_string_lossy()},
             "input_file_fingerprints": {"src/Main.java": "abc123"},
             "caching_enabled": false,
             "can_load_from_cache": false,
             "up_to_date_enabled": true,
             "has_previous_execution_state": true,
             "rebuild_reasons": [],
-            "source_files": [dir.path().join("src").to_string_lossy()],
             "target_dir": dir.path().join("classes").to_string_lossy()
         });
 
         let mut contexts1 = HashMap::new();
-        contexts1.insert(":compileJava".to_string(), base_ctx.to_string());
+        contexts1.insert(":prepare".to_string(), base_ctx.to_string());
 
         let _ = svc
             .run_build(Request::new(RunBuildRequest {
@@ -5073,12 +5127,12 @@ mod tests {
         register_chain(
             &svc,
             "build-daemon-vfs-delta-2",
-            &[(":compileJava", "JavaCompile", &[])],
+            &[(":prepare", "Mkdir", &[])],
         )
         .await;
 
         let mut contexts2 = HashMap::new();
-        contexts2.insert(":compileJava".to_string(), base_ctx.to_string());
+        contexts2.insert(":prepare".to_string(), base_ctx.to_string());
 
         let resp = svc
             .run_build(Request::new(RunBuildRequest {
@@ -5095,6 +5149,33 @@ mod tests {
         assert_eq!(
             resp.tasks_up_to_date, 0,
             "daemon-retained VFS delta intersecting an input should force execution"
+        );
+
+        register_chain(
+            &svc,
+            "build-daemon-vfs-delta-3",
+            &[(":prepare", "Mkdir", &[])],
+        )
+        .await;
+
+        let mut contexts3 = HashMap::new();
+        contexts3.insert(":prepare".to_string(), base_ctx.to_string());
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "build-daemon-vfs-delta-3".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts3,
+                allow_jvm_forwarding: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(
+            resp.tasks_up_to_date, 1,
+            "persisted VFS watermark should keep already-admitted daemon deltas from replaying"
         );
     }
 

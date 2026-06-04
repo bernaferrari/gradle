@@ -54,6 +54,9 @@ pub(crate) struct ExecutionRecord {
     consecutive_executions: i64,
     /// Total execution time across consecutive runs (for average estimation).
     total_consecutive_ms: i64,
+    /// Highest daemon VFS event timestamp admitted for this work identity.
+    #[serde(default)]
+    vfs_delta_watermark_ms: i64,
 }
 
 impl ExecutionRecord {
@@ -156,6 +159,41 @@ impl ExecutionPlanServiceImpl {
         }
     }
 
+    pub(crate) fn vfs_delta_watermark_ms(&self, work_identity: &str) -> i64 {
+        self.history
+            .entries
+            .get(work_identity)
+            .map(|entry| entry.vfs_delta_watermark_ms)
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn record_vfs_delta_watermark(&self, work_identity: &str, watermark_ms: i64) {
+        if watermark_ms <= 0 {
+            return;
+        }
+        let mut record = self
+            .history
+            .entries
+            .get(work_identity)
+            .map(|entry| entry.clone())
+            .unwrap_or_else(|| ExecutionRecord {
+                input_fingerprint: String::new(),
+                outcome: String::new(),
+                duration_ms: 0,
+                consecutive_executions: 0,
+                total_consecutive_ms: 0,
+                vfs_delta_watermark_ms: 0,
+            });
+        if watermark_ms <= record.vfs_delta_watermark_ms {
+            return;
+        }
+        record.vfs_delta_watermark_ms = watermark_ms;
+        self.history
+            .entries
+            .insert(work_identity.to_string(), record.clone());
+        self.persist_record(work_identity, &record);
+    }
+
     /// Record an outcome and update execution history for rebuild loop tracking.
     /// This is the synchronous core used by both the gRPC handler and tests.
     fn record_outcome_internal(
@@ -207,6 +245,7 @@ impl ExecutionPlanServiceImpl {
                 duration_ms,
                 consecutive_executions: if is_execute { 1 } else { 0 },
                 total_consecutive_ms: if is_execute { duration_ms } else { 0 },
+                vfs_delta_watermark_ms: 0,
             })
         };
 
@@ -561,6 +600,7 @@ mod tests {
                 duration_ms: 1200,
                 consecutive_executions: 1,
                 total_consecutive_ms: 1200,
+                vfs_delta_watermark_ms: 0,
             },
         );
 
@@ -586,6 +626,7 @@ mod tests {
                 duration_ms: 500,
                 consecutive_executions: 1,
                 total_consecutive_ms: 500,
+                vfs_delta_watermark_ms: 0,
             },
         );
 
@@ -709,6 +750,7 @@ mod tests {
                 duration_ms: 100,
                 consecutive_executions: 1,
                 total_consecutive_ms: 100,
+                vfs_delta_watermark_ms: 0,
             },
         );
 
@@ -739,6 +781,7 @@ mod tests {
                 duration_ms: 200,
                 consecutive_executions: 5,
                 total_consecutive_ms: 1000,
+                vfs_delta_watermark_ms: 0,
             },
         );
 
@@ -764,6 +807,7 @@ mod tests {
                 duration_ms: 150,
                 consecutive_executions: 5,
                 total_consecutive_ms: 750,
+                vfs_delta_watermark_ms: 0,
             },
         );
 
@@ -795,6 +839,7 @@ mod tests {
                 duration_ms: 100,
                 consecutive_executions: 4,
                 total_consecutive_ms: 400,
+                vfs_delta_watermark_ms: 0,
             },
         );
 
@@ -831,6 +876,7 @@ mod tests {
                 duration_ms: 100,
                 consecutive_executions: 1,
                 total_consecutive_ms: 100,
+                vfs_delta_watermark_ms: 0,
             },
         );
 
@@ -889,6 +935,7 @@ mod tests {
                 duration_ms: 250, // most recent
                 consecutive_executions: 3,
                 total_consecutive_ms: 600,
+                vfs_delta_watermark_ms: 0,
             },
         );
 
@@ -1023,5 +1070,39 @@ mod tests {
             .map(|entry| (entry.input_fingerprint.clone(), entry.duration_ms));
         assert_eq!(restored, Some(("fingerprint-a".to_string(), 500)));
         assert_ne!(fingerprint, "");
+    }
+
+    #[tokio::test]
+    async fn test_vfs_delta_watermark_persists_with_execution_record() {
+        let temp = tempfile::tempdir().unwrap();
+        let history_dir = temp.path().join("history");
+        let history = Arc::new(ExecutionHistoryServiceImpl::new(history_dir.clone()));
+        let svc = ExecutionPlanServiceImpl::with_persistent_history(
+            Arc::new(WorkerScheduler::new(1)),
+            Arc::clone(&history),
+        );
+
+        svc.record_outcome_internal(
+            ":compileJava",
+            PredictedOutcome::PredictedExecute as i32,
+            "EXECUTED",
+            true,
+            12,
+            "fp",
+        );
+        svc.record_vfs_delta_watermark(":compileJava", 1_700_000_000_123);
+
+        let reloaded_history = Arc::new(ExecutionHistoryServiceImpl::new(history_dir));
+        assert_eq!(reloaded_history.load_from_disk().await.unwrap(), 1);
+        let reloaded = ExecutionPlanServiceImpl::with_persistent_history(
+            Arc::new(WorkerScheduler::new(1)),
+            Arc::clone(&reloaded_history),
+        );
+        reloaded.load_persistent_history();
+
+        assert_eq!(
+            reloaded.vfs_delta_watermark_ms(":compileJava"),
+            1_700_000_000_123
+        );
     }
 }
