@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -23,7 +24,43 @@ sys.modules[DIRECT_WARM_SPEC.name] = direct_warm
 DIRECT_WARM_SPEC.loader.exec_module(direct_warm)
 
 
+def restore_env(name: str, value: str | None) -> None:
+    if value is None:
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = value
+
+
 class DogfoodRunnerTest(unittest.TestCase):
+    def test_default_gradle_command_prefers_explicit_bin(self):
+        original_bin = os.environ.get("GRADLE_UNDER_TEST_BIN")
+        original_home = os.environ.get("GRADLE_UNDER_TEST")
+        try:
+            os.environ["GRADLE_UNDER_TEST_BIN"] = "/tmp/gradle-under-test/bin/gradle"
+            os.environ["GRADLE_UNDER_TEST"] = "/tmp/ignored"
+
+            self.assertEqual(
+                "/tmp/gradle-under-test/bin/gradle",
+                dogfood_run.default_gradle_command(),
+            )
+        finally:
+            restore_env("GRADLE_UNDER_TEST_BIN", original_bin)
+            restore_env("GRADLE_UNDER_TEST", original_home)
+
+    def test_arg_parser_defaults_gradle_command_from_under_test_env(self):
+        original_bin = os.environ.get("GRADLE_UNDER_TEST_BIN")
+        original_home = os.environ.get("GRADLE_UNDER_TEST")
+        try:
+            os.environ.pop("GRADLE_UNDER_TEST_BIN", None)
+            os.environ["GRADLE_UNDER_TEST"] = "/tmp/gradle-home"
+
+            args = dogfood_run.create_arg_parser().parse_args([])
+
+            self.assertEqual("/tmp/gradle-home/bin/gradle", args.gradle_command)
+        finally:
+            restore_env("GRADLE_UNDER_TEST_BIN", original_bin)
+            restore_env("GRADLE_UNDER_TEST", original_home)
+
     def test_checked_in_manifest_validates(self):
         errors = dogfood_run.validate_manifest(dogfood_run.DEFAULT_MANIFEST)
 

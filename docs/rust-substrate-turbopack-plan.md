@@ -520,11 +520,15 @@ up-to-date correctness without falling back to broad mtime-only validation.
   Java application/start-scripts/distribution fixture, and the pinned OSS
   manifest tags Spring-style supported and fail-closed slices.
   Dogfood coverage evidence: `python3 -m unittest
-  tools.dogfood_runner.test_run` passed 18/18, both local and OSS dogfood
-  manifests validate, and a local execution attempt under
-  `build/dogfood-phase-backlog-20260604` correctly failed all entries with
-  `substrate-inactive: run-build marker missing` because the selected Gradle
-  command did not include active rust-bridge services.
+  tools.dogfood_runner.test_run` passed 20/20, both local and OSS dogfood
+  manifests validate, and the local dogfood execution at
+  `build/dogfood-default-gradle-under-test-20260604` passed 8/8 projects with
+  7/7 supported projects at zero JVM forwards after using the Gradle-under-test
+  binary that contains active rust-bridge services.
+- Dogfood execution now defaults to the active Gradle-under-test binary when it
+  is discoverable from `GRADLE_UNDER_TEST_BIN`, `GRADLE_UNDER_TEST`, or
+  `build/gradle-under-test/bin/gradle`. This prevents accidental inactive
+  wrapper runs that report `substrate-inactive: run-build marker missing`.
 - Review-noise cleanup removed tracked Rust `.bak` source duplicates under
   `substrate/src/server` and `substrate/src/server/task_executor`. These files
   were not referenced and duplicated live modules, so deleting them reduces

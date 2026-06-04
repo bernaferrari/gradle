@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
 import shutil
 import socket
@@ -36,6 +37,20 @@ def load_corpus_runner():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def default_gradle_command() -> str | None:
+    """Return the Gradle-under-test binary that contains rust-bridge services."""
+    gradle_bin = os.environ.get("GRADLE_UNDER_TEST_BIN")
+    if gradle_bin:
+        return gradle_bin
+    gradle_home = os.environ.get("GRADLE_UNDER_TEST")
+    if gradle_home:
+        return str(Path(gradle_home) / "bin" / "gradle")
+    repo_gradle_under_test = REPO_ROOT / "build" / "gradle-under-test" / "bin" / "gradle"
+    if repo_gradle_under_test.exists():
+        return str(repo_gradle_under_test)
+    return None
 
 
 @dataclass(frozen=True)
@@ -815,7 +830,11 @@ def create_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fetch-only", action="store_true", help="Fetch pinned external sources without executing Gradle")
     parser.add_argument("--output-dir", default="build/dogfood", help="Directory for execution results")
     parser.add_argument("--source-cache-dir", default=None, help="Directory for fetched external sources")
-    parser.add_argument("--gradle-command", default=None, help="Gradle-under-test executable")
+    parser.add_argument(
+        "--gradle-command",
+        default=default_gradle_command(),
+        help="Gradle-under-test executable; defaults to GRADLE_UNDER_TEST_BIN, GRADLE_UNDER_TEST/bin/gradle, or build/gradle-under-test/bin/gradle when present",
+    )
     parser.add_argument("--daemon-binary", default="target/debug/gradle-substrate-daemon", help="Rust daemon binary")
     parser.add_argument("--verbose", action="store_true", help="Print per-project execution status")
     return parser
