@@ -529,6 +529,11 @@ up-to-date correctness without falling back to broad mtime-only validation.
   is discoverable from `GRADLE_UNDER_TEST_BIN`, `GRADLE_UNDER_TEST`, or
   `build/gradle-under-test/bin/gradle`. This prevents accidental inactive
   wrapper runs that report `substrate-inactive: run-build marker missing`.
+- Direct-warm dogfood execution uses the same Gradle-under-test discovery path.
+  The newly added local Java application/start-scripts fixture passed direct
+  warm execution at `build/direct-warm-java-application-20260604`: 15 tasks,
+  `build-plan-shadow`, zero JVM forwards, and 436 ms reported Rust RunBuild
+  duration after one capture.
 - Review-noise cleanup removed tracked Rust `.bak` source duplicates under
   `substrate/src/server` and `substrate/src/server/task_executor`. These files
   were not referenced and duplicated live modules, so deleting them reduces

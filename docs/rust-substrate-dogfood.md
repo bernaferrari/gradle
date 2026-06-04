@@ -114,6 +114,14 @@ BOM/conflict, JavaExec process launch, and Javadoc process launch. Total direct
 warm wall time was 4575.9 ms across the six projects, with every project using
 `build-plan-shadow` and validated input fingerprints.
 
+The expanded Java application/start-scripts fixture has separate direct-warm
+evidence at `build/direct-warm-java-application-20260604`: 1/1 supported
+project passed, 15 tasks executed from `build-plan-shadow`, zero JVM forwards,
+and 436 ms reported Rust `RunBuild` duration after one capture. The direct-warm
+runner now uses the same Gradle-under-test discovery as the main dogfood
+runner, so `--gradle-command` is optional when `build/gradle-under-test` or the
+`GRADLE_UNDER_TEST*` environment is available.
+
 Phase 3 also adds the Rust-first warm runner:
 `tools/warm_runner/run.py`. Its checked single-fixture run at
 `build/warm-runner-phase3-20260601/result.json` started with an empty state,

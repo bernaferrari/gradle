@@ -304,13 +304,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST))
     parser.add_argument("--output-dir", default="build/direct-warm-dogfood")
-    parser.add_argument("--gradle-command", required=True)
+    dogfood = load_dogfood_runner()
+    parser.add_argument(
+        "--gradle-command",
+        default=dogfood.default_gradle_command(),
+        help="Gradle-under-test executable; defaults to the dogfood runner's Gradle-under-test discovery",
+    )
     parser.add_argument("--daemon-binary", default="target/debug/gradle-substrate-daemon")
     parser.add_argument("--runbuild-binary", default="target/debug/gradle-substrate-runbuild")
     parser.add_argument("--project", action="append", help="Run only named project(s)")
     args = parser.parse_args(argv)
 
-    dogfood = load_dogfood_runner()
     errors = dogfood.validate_manifest(Path(args.manifest))
     if errors:
         for error in errors:
@@ -324,6 +328,13 @@ def main(argv: list[str] | None = None) -> int:
 
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    if not args.gradle_command:
+        print(
+            "missing Gradle-under-test command; set GRADLE_UNDER_TEST_BIN, "
+            "GRADLE_UNDER_TEST, build build/gradle-under-test, or pass --gradle-command",
+            file=sys.stderr,
+        )
+        return 2
     gradle_command = Path(args.gradle_command).resolve()
     daemon_binary = (REPO_ROOT / args.daemon_binary).resolve() if not Path(args.daemon_binary).is_absolute() else Path(args.daemon_binary)
     runbuild_binary = (REPO_ROOT / args.runbuild_binary).resolve() if not Path(args.runbuild_binary).is_absolute() else Path(args.runbuild_binary)
