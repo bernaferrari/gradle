@@ -54,30 +54,51 @@ use gradle_substrate_daemon::{
         worker_process_service_server::WorkerProcessServiceServer,
     },
     server::{
-        artifact_publishing::ArtifactPublishingServiceImpl, authoritative::AuthoritativeConfig,
-        bootstrap::BootstrapServiceImpl, build_comparison::BuildComparisonServiceImpl,
-        build_event_stream::BuildEventStreamServiceImpl, build_init::BuildInitServiceImpl,
-        build_layout::BuildLayoutServiceImpl, build_metrics::BuildMetricsServiceImpl,
-        build_operations::BuildOperationsServiceImpl, build_plan_shadow::BuildPlanShadowStore,
-        build_result::BuildResultServiceImpl, cache::CacheServiceImpl,
+        artifact_publishing::ArtifactPublishingServiceImpl,
+        authoritative::AuthoritativeConfig,
+        bootstrap::BootstrapServiceImpl,
+        build_comparison::BuildComparisonServiceImpl,
+        build_event_stream::BuildEventStreamServiceImpl,
+        build_init::BuildInitServiceImpl,
+        build_layout::BuildLayoutServiceImpl,
+        build_metrics::BuildMetricsServiceImpl,
+        build_operations::BuildOperationsServiceImpl,
+        build_plan_shadow::BuildPlanShadowStore,
+        build_result::BuildResultServiceImpl,
+        cache::CacheServiceImpl,
         cache_orchestration::BuildCacheOrchestrationServiceImpl,
-        cache_packaging::BuildCachePackagingServiceImpl, classpath::ClasspathServiceImpl,
-        config_cache::ConfigurationCacheServiceImpl, configuration::ConfigurationServiceImpl,
-        console::ConsoleServiceImpl, control::ControlServiceImpl,
+        cache_packaging::BuildCachePackagingServiceImpl,
+        classpath::ClasspathServiceImpl,
+        config_cache::ConfigurationCacheServiceImpl,
+        configuration::ConfigurationServiceImpl,
+        console::ConsoleServiceImpl,
+        control::ControlServiceImpl,
         dag_executor::DagExecutorServiceImpl,
-        dependency_resolution::DependencyResolutionServiceImpl, exec::ExecServiceImpl,
-        execution_history::ExecutionHistoryServiceImpl, execution_plan::ExecutionPlanServiceImpl,
-        file_fingerprint::FileFingerprintServiceImpl, file_hash_cache::FileHashCacheServiceImpl,
-        file_tree::FileTreeServiceImpl, file_watch::FileWatchServiceImpl,
-        garbage_collection::GarbageCollectionServiceImpl, hash::HashServiceImpl,
-        ide_model::IdeModelServiceImpl, incremental_compilation::IncrementalCompilationServiceImpl,
-        jvm_host_service::JvmHostServiceImpl, native_compile::NativeCompileServiceImpl,
-        parser_service::ParserServiceImpl, plugin::PluginServiceImpl,
+        dependency_resolution::DependencyResolutionServiceImpl,
+        exec::ExecServiceImpl,
+        execution_history::ExecutionHistoryServiceImpl,
+        execution_plan::ExecutionPlanServiceImpl,
+        file_fingerprint::FileFingerprintServiceImpl,
+        file_hash_cache::FileHashCacheServiceImpl,
+        file_tree::FileTreeServiceImpl,
+        file_watch::{FileWatchServiceImpl, VfsDeltaStore},
+        garbage_collection::GarbageCollectionServiceImpl,
+        hash::HashServiceImpl,
+        ide_model::IdeModelServiceImpl,
+        incremental_compilation::IncrementalCompilationServiceImpl,
+        jvm_host_service::JvmHostServiceImpl,
+        native_compile::NativeCompileServiceImpl,
+        parser_service::ParserServiceImpl,
+        plugin::PluginServiceImpl,
         problem_reporting::ProblemReportingServiceImpl,
-        resource_management::ResourceManagementServiceImpl, scopes::ScopeRegistry,
-        task_graph::TaskGraphServiceImpl, test_execution::TestExecutionServiceImpl,
-        toolchain::ToolchainServiceImpl, value_snapshot::ValueSnapshotServiceImpl,
-        version_catalog::VersionCatalogServiceImpl, work::WorkServiceImpl,
+        resource_management::ResourceManagementServiceImpl,
+        scopes::ScopeRegistry,
+        task_graph::TaskGraphServiceImpl,
+        test_execution::TestExecutionServiceImpl,
+        toolchain::ToolchainServiceImpl,
+        value_snapshot::ValueSnapshotServiceImpl,
+        version_catalog::VersionCatalogServiceImpl,
+        work::WorkServiceImpl,
         worker_process::WorkerProcessServiceImpl,
     },
     PROTOCOL_VERSION,
@@ -328,8 +349,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let artifact_store_dir = PathBuf::from(&args.artifact_store_dir);
     let dependency_resolution = DependencyResolutionServiceImpl::new(artifact_store_dir);
 
-    // Phase 19: File watching (wired to task graph for file-change -> task invalidation)
-    let file_watch = FileWatchServiceImpl::with_task_graph(Arc::clone(&task_graph));
+    // Phase 19: File watching (wired to task graph + DAG executor VFS admission)
+    let vfs_delta_store = Arc::new(VfsDeltaStore::default());
+    let file_watch = FileWatchServiceImpl::with_task_graph_and_delta_store(
+        Arc::clone(&task_graph),
+        Arc::clone(&vfs_delta_store),
+    );
 
     // Phase 20: Configuration cache
     let config_cache = ConfigurationCacheServiceImpl::new(config_cache_dir);
@@ -347,7 +372,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .with_jvm_host_bridge(Arc::clone(&jvm_bridge))
     .with_local_cache(cache.local_store())
-    .with_scope_registry(Arc::clone(&scope_registry));
+    .with_scope_registry(Arc::clone(&scope_registry))
+    .with_vfs_delta_store(vfs_delta_store);
 
     // Phase 25: Worker process management
     let worker_process = WorkerProcessServiceImpl::new();

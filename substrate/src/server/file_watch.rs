@@ -139,6 +139,54 @@ pub struct FileWatchServiceImpl {
     next_watch_id: AtomicI64,
     /// Optional reference to the task graph for file-change -> task invalidation.
     task_graph: Option<Arc<TaskGraphServiceImpl>>,
+    vfs_delta_store: Arc<VfsDeltaStore>,
+}
+
+#[derive(Debug, Clone)]
+pub struct VfsDeltaStore {
+    events: Arc<Mutex<VecDeque<FileChangeEvent>>>,
+    max_events: usize,
+}
+
+impl Default for VfsDeltaStore {
+    fn default() -> Self {
+        Self::new(MAX_RETAINED_EVENTS)
+    }
+}
+
+impl VfsDeltaStore {
+    pub fn new(max_events: usize) -> Self {
+        Self {
+            events: Arc::new(Mutex::new(VecDeque::with_capacity(max_events.min(256)))),
+            max_events,
+        }
+    }
+
+    pub fn record(&self, event: FileChangeEvent) {
+        if let Ok(mut events) = self.events.lock() {
+            if events.len() >= self.max_events {
+                events.pop_front();
+            }
+            events.push_back(event);
+        }
+    }
+
+    pub fn changed_paths_since(&self, since_timestamp_ms: i64) -> Vec<String> {
+        let mut paths = self
+            .events
+            .lock()
+            .map(|events| {
+                events
+                    .iter()
+                    .filter(|event| event.timestamp_ms >= since_timestamp_ms)
+                    .map(|event| event.path.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        paths.sort();
+        paths.dedup();
+        paths
+    }
 }
 
 impl Default for FileWatchServiceImpl {
@@ -153,6 +201,7 @@ impl FileWatchServiceImpl {
             watches: DashMap::new(),
             next_watch_id: AtomicI64::new(1),
             task_graph: None,
+            vfs_delta_store: Arc::new(VfsDeltaStore::default()),
         }
     }
 
@@ -161,7 +210,24 @@ impl FileWatchServiceImpl {
             watches: DashMap::new(),
             next_watch_id: AtomicI64::new(1),
             task_graph: Some(task_graph),
+            vfs_delta_store: Arc::new(VfsDeltaStore::default()),
         }
+    }
+
+    pub fn with_task_graph_and_delta_store(
+        task_graph: Arc<TaskGraphServiceImpl>,
+        vfs_delta_store: Arc<VfsDeltaStore>,
+    ) -> Self {
+        Self {
+            watches: DashMap::new(),
+            next_watch_id: AtomicI64::new(1),
+            task_graph: Some(task_graph),
+            vfs_delta_store,
+        }
+    }
+
+    pub fn vfs_delta_store(&self) -> Arc<VfsDeltaStore> {
+        Arc::clone(&self.vfs_delta_store)
     }
 
     fn now_ms() -> i64 {
@@ -282,6 +348,16 @@ impl FileWatchServiceImpl {
         }
         let _ = event_tx.send(event);
     }
+
+    fn record_event_with_store(
+        vfs_delta_store: &Arc<VfsDeltaStore>,
+        retained_events: &Arc<Mutex<VecDeque<FileChangeEvent>>>,
+        event_tx: &broadcast::Sender<FileChangeEvent>,
+        event: FileChangeEvent,
+    ) {
+        vfs_delta_store.record(event.clone());
+        Self::record_event(retained_events, event_tx, event);
+    }
 }
 
 #[tonic::async_trait]
@@ -319,6 +395,7 @@ impl FileWatchService for FileWatchServiceImpl {
         let (event_tx, _) = broadcast::channel::<FileChangeEvent>(256);
         let event_tx_clone = event_tx.clone();
         let task_graph_for_watcher = self.task_graph.clone();
+        let vfs_delta_store_for_watcher = Arc::clone(&self.vfs_delta_store);
         let debounce_ms = if req.debounce_ms > 0 {
             req.debounce_ms as u64
         } else {
@@ -351,7 +428,8 @@ impl FileWatchService for FileWatchServiceImpl {
                             let change_type =
                                 Self::event_kind_to_change_type(&event.kind).to_string();
                             let file_event = Self::file_event(path, change_type);
-                            Self::record_event(
+                            Self::record_event_with_store(
+                                &vfs_delta_store_for_watcher,
                                 &retained_events_clone,
                                 &event_tx_clone,
                                 file_event.clone(),
@@ -618,6 +696,35 @@ mod tests {
     }
 
     #[test]
+    fn vfs_delta_store_retains_recent_unique_paths() {
+        let store = VfsDeltaStore::new(3);
+        for (path, timestamp_ms) in [
+            ("/repo/old.txt", 10),
+            ("/repo/src/Main.java", 20),
+            ("/repo/src/Main.java", 30),
+            ("/repo/settings.gradle", 40),
+        ] {
+            store.record(FileChangeEvent {
+                path: path.to_string(),
+                change_type: "MODIFIED".to_string(),
+                timestamp_ms,
+                file_size: 0,
+                is_directory: false,
+            });
+        }
+
+        let paths = store.changed_paths_since(20);
+
+        assert_eq!(
+            paths,
+            vec![
+                "/repo/settings.gradle".to_string(),
+                "/repo/src/Main.java".to_string()
+            ]
+        );
+    }
+
+    #[test]
     fn test_matches_patterns_include() {
         assert!(FileWatchServiceImpl::matches_patterns(
             "/tmp/Test.java",
@@ -843,7 +950,7 @@ mod tests {
         let stats = svc
             .get_watch_stats(Request::new(GetWatchStatsRequest {
                 watch_id: resp.watch_id.clone(), // Wave 4 super-combined sustain + VFS delta cross accelerator (reporters super-combined-vfs-delta/vfs-triple-cross). Focus DirectorySnapshot Merkle child_summaries @fp:1229 + get_snapshot_delta @watch:766 consumption here + scheduler work-steal/kernel apply_vfs/incremental/execution_history/remote/gc/integrity/build_script. 0%+54=54 evidence-super-combined-vfs-delta-54-54-*. 0 reg 20+ hardened. Hygiene <5. "How to Work on a Slice" (AGENTS.md read FIRST). Full directive x2x2 + VFS failure "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "more sub-agents = more super-combined 019e68e7-c390 (290.2s/39 calls) + mega-quad 019e69e7-9a52 (265.8s/33 calls) + ... + entire port accelerated" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust" + multi-year. bd 5ezk + substrate-d22 + scheduler 019e69fb0fe0. Java FIRST 2. Entire port accelerated.
-                // Wave 4 long-running build-script lowering 25989s+ 019e68ed-cefe-7560-8d71-b27bd681fd77 reinforcement + VFS delta synergy (build_script_parser.rs:1707 decide_build_script_reexecution_with_vfs_delta + richer contracts generated_sources/annotationProcessing + 'build-script-lowering'/'test-exec-lowering' reporters + crosses 4 prior VFS + 5 spawns 019e6a85-2c1f + Dep-Meta 019e68e7-a50d + parallel scheduler 019e68e8-c33e + hygiene#6 019e68eb-ee72 + post 019e68ec-310f + recoveries + hygiene#7). Evidence new evidence-long-running-lowering-25989s-019e68ed-cefe-* 100% corpus 0%+54=54. Java FIRST after Dep-Meta ENABLE_RUST_LONG_RUNNING..._25989S_SYNERGY + synthetic. Cargo GREEN 0.13s 0h/5w 5 benign. 0 reg 20+ add. Gov Fresh after Dep-Meta anchor + PARITY/MIGRATION + beads 5ezk substrate-alee (1 in_progress) + headers in 6 files + abs paths + "How to Work on a Slice" + full directive x2x2 + VFS failure + "more sub-agents = more long-running lowering 25989s+ 019e68ed-cefe + VFS delta synergy in lowering + ... + entire port accelerated" + "Go parallel forever. Entire port accelerated." + spawn 1+ scheduler + support live 019e68ed-cefe 25989s+ + perpetuals + gov bulk 618s+ + explorer. Shadow-first/fail-closed/hybrid. Varied additive. Do them all. — 2026-05-27
+                                                 // Wave 4 long-running build-script lowering 25989s+ 019e68ed-cefe-7560-8d71-b27bd681fd77 reinforcement + VFS delta synergy (build_script_parser.rs:1707 decide_build_script_reexecution_with_vfs_delta + richer contracts generated_sources/annotationProcessing + 'build-script-lowering'/'test-exec-lowering' reporters + crosses 4 prior VFS + 5 spawns 019e6a85-2c1f + Dep-Meta 019e68e7-a50d + parallel scheduler 019e68e8-c33e + hygiene#6 019e68eb-ee72 + post 019e68ec-310f + recoveries + hygiene#7). Evidence new evidence-long-running-lowering-25989s-019e68ed-cefe-* 100% corpus 0%+54=54. Java FIRST after Dep-Meta ENABLE_RUST_LONG_RUNNING..._25989S_SYNERGY + synthetic. Cargo GREEN 0.13s 0h/5w 5 benign. 0 reg 20+ add. Gov Fresh after Dep-Meta anchor + PARITY/MIGRATION + beads 5ezk substrate-alee (1 in_progress) + headers in 6 files + abs paths + "How to Work on a Slice" + full directive x2x2 + VFS failure + "more sub-agents = more long-running lowering 25989s+ 019e68ed-cefe + VFS delta synergy in lowering + ... + entire port accelerated" + "Go parallel forever. Entire port accelerated." + spawn 1+ scheduler + support live 019e68ed-cefe 25989s+ + perpetuals + gov bulk 618s+ + explorer. Shadow-first/fail-closed/hybrid. Varied additive. Do them all. — 2026-05-27
             }))
             .await
             .unwrap()
