@@ -478,6 +478,10 @@ up-to-date correctness without falling back to broad mtime-only validation.
 - Native `RunBuild` cache restore/store now participates in the configured
   remote build cache: local misses can restore from remote and promote locally,
   and successful native output packs are pushed to remote after local storage.
+- Direct `gradle-substrate-runbuild` now forwards persisted `BuildGraph` task
+  metadata into selected task contexts even without VFS changes. `DagExecutor`
+  admits that metadata fail-closed by rejecting mismatched graph task paths
+  before dispatch.
 - Evidence: `cargo test -p gradle-substrate-daemon --bin
   gradle-substrate-runbuild` passed 15/15, and `cargo test -p
   gradle-substrate-daemon --lib vfs_delta` passed 10 focused tests, including
@@ -486,17 +490,18 @@ up-to-date correctness without falling back to broad mtime-only validation.
   Remote cache evidence: `cargo test -p gradle-substrate-daemon --lib
   remote_cache` passed 20/20 including native `RunBuild` remote restore,
   local-promotion, and remote-store coverage.
+  BuildGraph context evidence: `cargo test -p gradle-substrate-daemon --bin
+  gradle-substrate-runbuild` passed 16/16, and focused `DagExecutor`
+  admission coverage rejects mismatched BuildGraph task metadata.
 
 ## Aggressive Near-Term Backlog
 
 1. Keep the just-fixed `rust-bridge:testClasses` gate green in CI.
 2. Make Copy/Sync/Delete/Symlink parity authoritative for supported file specs.
-3. Make direct execution consume richer `BuildGraph` node metadata directly,
-   not only its task closure.
-4. Expand dogfood zero-forward support for Java-library and Spring-style builds.
-5. Add Rust dependency-resolution graph parity for file and static Maven repos.
-6. Add a strict unsupported-feature registry with counts in every dogfood run.
-7. Delete or quarantine noisy generated Rust/docs that obscure real ownership.
+3. Expand dogfood zero-forward support for Java-library and Spring-style builds.
+4. Add Rust dependency-resolution graph parity for file and static Maven repos.
+5. Add a strict unsupported-feature registry with counts in every dogfood run.
+6. Delete or quarantine noisy generated Rust/docs that obscure real ownership.
 
 ## Metrics
 

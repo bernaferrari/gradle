@@ -367,6 +367,20 @@ fn context_work_identity(context_json: Option<&String>) -> Option<String> {
         })
 }
 
+fn context_build_graph_task_path(context_json: Option<&String>) -> Option<String> {
+    let json = context_json?;
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("build_graph_task")
+                .and_then(|task| task.get("path"))
+                .and_then(|path| path.as_str())
+                .filter(|path| !path.is_empty())
+                .map(str::to_string)
+        })
+}
+
 fn context_daemon_vfs_watermark_ms(context_json: Option<&String>) -> Option<(String, i64)> {
     let json = context_json?;
     let value = serde_json::from_str::<serde_json::Value>(json).ok()?;
@@ -1693,6 +1707,29 @@ impl DagExecutorService for DagExecutorServiceImpl {
                     task_contexts.get(&task_path),
                     self.task_execution_context(&build_id_str, &task_path),
                 ));
+                if let Some(graph_task_path) = context_build_graph_task_path(context_json.as_ref())
+                {
+                    if graph_task_path != task_path {
+                        return Ok(Response::new(RunBuildResponse {
+                            build_id: build_id_str.clone(),
+                            final_status: "FAILED".to_string(),
+                            total_tasks,
+                            tasks_succeeded: tasks_completed as i32,
+                            tasks_failed: total_tasks - tasks_completed as i32,
+                            tasks_skipped: 0,
+                            tasks_forwarded_to_jvm: jvm_forward_count,
+                            total_duration_ms: now_ms() - start_time,
+                            failure_message: format!(
+                                "BuildGraph task metadata mismatch for '{}': context carries '{}'",
+                                task_path, graph_task_path
+                            ),
+                            task_details,
+                            tasks_up_to_date: up_to_date_count,
+                            tasks_from_cache: from_cache_count,
+                            plan_source,
+                        }));
+                    }
+                }
                 if context_is_no_source(context_json.as_ref()) {
                     self.notify_task_finished(Request::new(NotifyTaskFinishedRequest {
                         build_id: build_id_str.clone(),
@@ -5306,6 +5343,55 @@ mod tests {
             resp.tasks_up_to_date, 1,
             "persisted VFS watermark should keep already-admitted daemon deltas from replaying"
         );
+    }
+
+    #[tokio::test]
+    async fn test_run_build_rejects_mismatched_build_graph_task_context() {
+        let svc = make_svc();
+        register_chain(&svc, "build-graph-context", &[(":task", "Mkdir", &[])]).await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let context = serde_json::json!({
+            "build_graph_task": {
+                "path": ":other",
+                "project_path": ":",
+                "implementation_id": "Mkdir",
+                "action_kind": "mkdir",
+                "cacheability": "not_cacheable",
+                "worker_isolation": "none"
+            },
+            "work_identity": ":project:task",
+            "display_name": ":project:task",
+            "implementation_class": "Mkdir",
+            "input_properties": {"path": dir.path().join("out").to_string_lossy()},
+            "input_file_fingerprints": {},
+            "caching_enabled": false,
+            "can_load_from_cache": false,
+            "up_to_date_enabled": true,
+            "has_previous_execution_state": false,
+            "rebuild_reasons": [],
+            "target_dir": dir.path().join("out").to_string_lossy()
+        })
+        .to_string();
+        let mut contexts = HashMap::new();
+        contexts.insert(":task".to_string(), context);
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "build-graph-context".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts,
+                allow_jvm_forwarding: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.final_status, "FAILED");
+        assert!(resp
+            .failure_message
+            .contains("BuildGraph task metadata mismatch"));
     }
 
     /// Test that UP-TO-DATE count is reflected in RunBuildResponse.
