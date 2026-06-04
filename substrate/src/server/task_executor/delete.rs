@@ -1,7 +1,7 @@
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::collections::{BTreeMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::time::Duration;
 
@@ -25,6 +25,7 @@ impl DeleteTaskExecutor {
     fn delete_recursively<'a>(
         path: &'a Path,
         follow_symlinks: bool,
+        directory_stack: &'a mut HashSet<PathBuf>,
         result: &'a mut TaskResult,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<bool, String>> + Send + 'a>> {
         Box::pin(async move {
@@ -37,11 +38,25 @@ impl DeleteTaskExecutor {
             };
 
             if Self::should_descend(path, &metadata, follow_symlinks).await? {
-                let mut children = Self::list_children(path).await?;
-                children.sort_unstable();
-                for child in children {
-                    Self::delete_recursively(&child, follow_symlinks, result).await?;
+                let canonical = Self::canonical_directory(path).await?;
+                if !directory_stack.insert(canonical.clone()) {
+                    return Err(format!(
+                        "Directory symlink cycle detected by the Rust Delete executor: {}",
+                        path.display()
+                    ));
                 }
+                let child_result: Result<(), String> = async {
+                    let mut children = Self::list_children(path).await?;
+                    children.sort_unstable();
+                    for child in children {
+                        Self::delete_recursively(&child, follow_symlinks, directory_stack, result)
+                            .await?;
+                    }
+                    Ok(())
+                }
+                .await;
+                directory_stack.remove(&canonical);
+                child_result?;
             }
 
             Self::delete_entry(path, &metadata, result).await?;
@@ -82,6 +97,12 @@ impl DeleteTaskExecutor {
             children.push(entry.path());
         }
         Ok(children)
+    }
+
+    async fn canonical_directory(path: &Path) -> Result<PathBuf, String> {
+        tokio::fs::canonicalize(path)
+            .await
+            .map_err(|e| format!("Failed to canonicalize directory {}: {}", path.display(), e))
     }
 
     async fn delete_entry(
@@ -166,8 +187,12 @@ impl TaskExecutor for DeleteTaskExecutor {
             .map(|v| v == "true")
             .unwrap_or(false);
 
+        let mut directory_stack = HashSet::new();
         for target in &input.source_files {
-            if let Err(e) = Self::delete_recursively(target, follow_symlinks, &mut result).await {
+            if let Err(e) =
+                Self::delete_recursively(target, follow_symlinks, &mut directory_stack, &mut result)
+                    .await
+            {
                 result.success = false;
                 result.error_message = e;
                 return result;
@@ -366,5 +391,27 @@ mod tests {
         assert!(target_dir.exists());
         assert!(!nested_dir.exists());
         assert!(!target_file.exists());
+    }
+
+    #[tokio::test]
+    async fn test_delete_followed_directory_symlink_cycle_fails_closed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("root");
+        let child = root.join("child");
+        tokio::fs::create_dir_all(&child).await.unwrap();
+        tokio::fs::symlink(&root, child.join("loop")).await.unwrap();
+
+        let executor = DeleteTaskExecutor::new();
+        let mut input = TaskInput::new("Delete");
+        input.source_files.push(root.clone());
+        input
+            .options
+            .insert("follow_symlinks".to_string(), "true".to_string());
+
+        let result = executor.execute(&input).await;
+
+        assert!(!result.success);
+        assert!(result.error_message.contains("symlink cycle"));
+        assert!(root.exists());
     }
 }
