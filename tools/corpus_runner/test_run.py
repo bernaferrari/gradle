@@ -780,6 +780,7 @@ dependencies {
             "ok": {
                 "upstream": {"task_count": 2, "duration_ms": 100},
                 "substrate": {"task_count": 2, "duration_ms": 80},
+                "unsupported_features": ["artifact-transform", "repository-content-filter"],
                 "checks": {
                     "successful": True,
                     "exit_code_match": True,
@@ -793,6 +794,7 @@ dependencies {
             "fallback": {
                 "upstream": {"task_count": 1, "duration_ms": 50},
                 "substrate": {"task_count": 1, "duration_ms": 40},
+                "unsupported_features": ["artifact-transform"],
                 "checks": {
                     "successful": False,
                     "exit_code_match": True,
@@ -814,6 +816,11 @@ dependencies {
         self.assertEqual(3, summary["upstream_task_total"])
         self.assertEqual(["fallback"], summary["failed_projects"])
         self.assertEqual(["fallback"], summary["fallback_projects"])
+        self.assertEqual(2, summary["unsupported_project_count"])
+        self.assertEqual(
+            {"artifact-transform": 2, "repository-content-filter": 1},
+            summary["unsupported_feature_counts"],
+        )
 
 
 if __name__ == "__main__":
