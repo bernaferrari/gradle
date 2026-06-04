@@ -500,14 +500,21 @@ up-to-date correctness without falling back to broad mtime-only validation.
   Unsupported-registry evidence: `python3 -m unittest
   tools.corpus_runner.test_run` passed 45/45 with aggregate feature-count
   coverage.
+- Declared dependency graph parity now includes statically declared repositories
+  that the Rust dependency engine can model: `mavenCentral()`, `mavenLocal()`,
+  absolute/relative/file Maven repos, and static HTTP Maven repos. Repository
+  drift is a hard declared-graph mismatch, so file/static Maven repository
+  parity can be measured before full Gradle solver ownership.
+  Repository-graph evidence: `python3 -m unittest
+  tools.corpus_runner.test_run` passed 48/48 with static Maven repository and
+  repository-drift coverage.
 
 ## Aggressive Near-Term Backlog
 
 1. Keep the just-fixed `rust-bridge:testClasses` gate green in CI.
 2. Make Copy/Sync/Delete/Symlink parity authoritative for supported file specs.
 3. Expand dogfood zero-forward support for Java-library and Spring-style builds.
-4. Add Rust dependency-resolution graph parity for file and static Maven repos.
-5. Delete or quarantine noisy generated Rust/docs that obscure real ownership.
+4. Delete or quarantine noisy generated Rust/docs that obscure real ownership.
 
 ## Metrics
 

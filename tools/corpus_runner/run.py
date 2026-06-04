@@ -308,6 +308,7 @@ def scan_project_contract(project_dir: str) -> dict:
     dependencies: set[str] = set()
     dependency_constraints: set[str] = set()
     project_dependencies: set[str] = set()
+    repositories: set[tuple[str, str, str]] = set()
     toolchains: set[str] = set()
     unsupported_features: set[str] = set()
 
@@ -338,6 +339,7 @@ def scan_project_contract(project_dir: str) -> dict:
             tasks.add("test")
         outputs.update(re.findall(r"outputs\.(?:dir|file)\([\"']([^\"']+)[\"']\)", text))
         dependency_constraints.update(scan_dependency_constraints(text))
+        repositories.update(scan_static_maven_repositories(text))
         dependencies_text = strip_balanced_blocks(text, "constraints")
         dependencies.update(re.findall(r"[\"']([A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+(?::[^\"']+)?)[\"']", dependencies_text))
         project_dependencies.update(re.findall(r"project\([\"']:([^\"']+)[\"']\)", text))
@@ -386,9 +388,52 @@ def scan_project_contract(project_dir: str) -> dict:
         "dependencies": sorted(dependencies),
         "dependency_constraints": sorted(dependency_constraints),
         "project_dependencies": sorted(project_dependencies),
+        "repositories": [
+            {"id": repo_id, "url": url, "kind": kind}
+            for repo_id, url, kind in sorted(repositories)
+        ],
         "toolchains": sorted(toolchains),
         "unsupported_features": sorted(unsupported_features),
     }
+
+
+def scan_static_maven_repositories(build_text: str) -> set[tuple[str, str, str]]:
+    """Return statically declared Maven repositories that Rust can model."""
+    repositories: set[tuple[str, str, str]] = set()
+    if re.search(r"\bmavenCentral\s*\(", build_text):
+        repositories.add(("mavenCentral", "https://repo.maven.apache.org/maven2/", "maven"))
+    if re.search(r"\bmavenLocal\s*\(", build_text):
+        repositories.add(("mavenLocal", "file:${user.home}/.m2/repository", "file-maven"))
+    for raw_url in re.findall(
+        r"\bmaven\s*\{[^{}]*?\burl\s*=\s*(?:uri|file)?\(\s*[\"']([^\"']+)[\"']\s*\)",
+        build_text,
+        re.DOTALL,
+    ):
+        url = gradle_string_literal_value(raw_url)
+        kind = "file-maven" if is_static_file_repository_url(url) else "maven"
+        repositories.add((repository_id_from_url(url), url, kind))
+    for raw_url in re.findall(
+        r"\bmaven\s*\{[^{}]*?\burl\s*=\s*[\"']([^\"']+)[\"']",
+        build_text,
+        re.DOTALL,
+    ):
+        url = gradle_string_literal_value(raw_url)
+        kind = "file-maven" if is_static_file_repository_url(url) else "maven"
+        repositories.add((repository_id_from_url(url), url, kind))
+    return repositories
+
+
+def is_static_file_repository_url(url: str) -> bool:
+    if url.startswith(("http://", "https://")):
+        return False
+    if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", url):
+        return url.startswith("file:")
+    return True
+
+
+def repository_id_from_url(url: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9]+", "-", url.strip()).strip("-").lower()
+    return normalized or "maven"
 
 
 def scan_dependency_constraints(build_text: str) -> set[str]:
@@ -921,6 +966,7 @@ def declared_dependency_graph(project_name: str, project_dir: str) -> dict:
     return {
         "schema": "gradle-substrate.declared-dependency-graph.v1",
         "project": project_name,
+        "repositories": contract["repositories"],
         "configurations": [
             {
                 "name": "declared",
@@ -959,6 +1005,12 @@ def diff_declared_dependency_graphs(upstream: dict, substrate: dict) -> dict:
     substrate_deps = substrate.get("configurations", [{}])[0].get("dependencies", [])
     upstream_constraints = upstream.get("configurations", [{}])[0].get("dependency_constraints", [])
     substrate_constraints = substrate.get("configurations", [{}])[0].get("dependency_constraints", [])
+    if upstream.get("repositories", []) != substrate.get("repositories", []):
+        mismatches.append({
+            "category": "repositories",
+            "upstream": upstream.get("repositories", []),
+            "substrate": substrate.get("repositories", []),
+        })
     if upstream_deps != substrate_deps:
         mismatches.append({
             "category": "declared-dependencies",
