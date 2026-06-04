@@ -514,12 +514,22 @@ up-to-date correctness without falling back to broad mtime-only validation.
   the existing Copy cycle boundary for supported file specs.
   File-operation evidence: `cargo test -p gradle-substrate-daemon --lib
   task_executor::delete` passed 9/9 focused tests.
+- Dogfood zero-forward coverage is now explicit by build shape. Dogfood
+  manifests carry `coverage_tags`, summaries report supported and zero-forward
+  counts by tag, the checked-in local manifest now includes a strict supported
+  Java application/start-scripts/distribution fixture, and the pinned OSS
+  manifest tags Spring-style supported and fail-closed slices.
+  Dogfood coverage evidence: `python3 -m unittest
+  tools.dogfood_runner.test_run` passed 18/18, both local and OSS dogfood
+  manifests validate, and a local execution attempt under
+  `build/dogfood-phase-backlog-20260604` correctly failed all entries with
+  `substrate-inactive: run-build marker missing` because the selected Gradle
+  command did not include active rust-bridge services.
 
 ## Aggressive Near-Term Backlog
 
 1. Keep the just-fixed `rust-bridge:testClasses` gate green in CI.
-2. Expand dogfood zero-forward support for Java-library and Spring-style builds.
-3. Delete or quarantine noisy generated Rust/docs that obscure real ownership.
+2. Delete or quarantine noisy generated Rust/docs that obscure real ownership.
 
 ## Metrics
 
