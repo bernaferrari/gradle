@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -6,7 +6,7 @@ use clap::Parser;
 use gradle_substrate_daemon::proto::bootstrap_service_client::BootstrapServiceClient;
 use gradle_substrate_daemon::proto::dag_executor_service_client::DagExecutorServiceClient;
 use gradle_substrate_daemon::proto::{CompleteBuildRequest, InitBuildRequest, RunBuildRequest};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tonic::transport::Endpoint;
 
@@ -60,6 +60,10 @@ struct Args {
 #[derive(Debug, Deserialize)]
 struct ShadowArtifact {
     plan: ShadowPlan,
+    #[serde(default)]
+    build_graph: Option<ShadowBuildGraph>,
+    #[serde(default)]
+    build_graph_fingerprint_sha256: String,
     stored_at_ms: i64,
     #[serde(default)]
     input_fingerprints: Vec<ShadowInputFingerprint>,
@@ -94,6 +98,70 @@ struct ShadowTask {
     local_state: Vec<String>,
     #[serde(default)]
     destroyables: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct ShadowBuildGraph {
+    schema_version: u32,
+    build_id: String,
+    #[serde(default)]
+    projects: Vec<ShadowBuildGraphProject>,
+    #[serde(default)]
+    tasks: Vec<ShadowBuildGraphTask>,
+    #[serde(default)]
+    edges: Vec<ShadowBuildGraphEdge>,
+    #[serde(default)]
+    dependency_requests: Vec<ShadowBuildGraphDependencyRequest>,
+    #[serde(default)]
+    metadata: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct ShadowBuildGraphProject {
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    project_dir: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct ShadowBuildGraphTask {
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    project_path: String,
+    #[serde(default)]
+    implementation_id: String,
+    #[serde(default)]
+    action_kind: String,
+    #[serde(default)]
+    cacheability: String,
+    #[serde(default)]
+    worker_isolation: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct ShadowBuildGraphEdge {
+    #[serde(default)]
+    from: String,
+    #[serde(default)]
+    to: String,
+    #[serde(default)]
+    kind: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct ShadowBuildGraphDependencyRequest {
+    #[serde(default)]
+    project_path: String,
+    #[serde(default)]
+    configuration: String,
+    #[serde(default)]
+    notation: String,
+    #[serde(default)]
+    kind: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -181,7 +249,7 @@ async fn run_direct_build() -> Result<i32, Box<dyn std::error::Error>> {
         )?;
         validate_input_fingerprints(&artifact, &project_dir_path, &validation_scope)?;
     }
-    validate_plan_dependencies(&artifact)?;
+    validate_execution_graph(&artifact)?;
     let task_filter = resolve_task_filter(&artifact, &args.tasks)?;
 
     let channel = connect_tcp(&args.endpoint).await?;
@@ -590,23 +658,9 @@ fn validate_input_fingerprints(
     Ok(())
 }
 
-fn validate_plan_dependencies(artifact: &ShadowArtifact) -> Result<(), Box<dyn std::error::Error>> {
-    let task_paths = task_path_set(artifact);
-    for task in &artifact.plan.tasks {
-        if task.path.trim().is_empty() {
-            return Err("cached build-plan artifact contains a task without a path".into());
-        }
-        for dependency in &task.depends_on {
-            if !task_paths.contains(dependency) {
-                return Err(format!(
-                    "cached build-plan artifact is incomplete: task '{}' depends on missing task '{}'",
-                    task.path, dependency
-                )
-                .into());
-            }
-        }
-    }
-    Ok(())
+fn validate_execution_graph(artifact: &ShadowArtifact) -> Result<(), Box<dyn std::error::Error>> {
+    let graph = ExecutionGraphView::from_artifact(artifact)?;
+    graph.validate()
 }
 
 fn resolve_task_filter(
@@ -616,7 +670,8 @@ fn resolve_task_filter(
     if requested_tasks.is_empty() {
         return Ok(Vec::new());
     }
-    let task_paths = task_path_set(artifact);
+    let graph = ExecutionGraphView::from_artifact(artifact)?;
+    graph.validate()?;
     let mut selected = HashSet::new();
     for task in requested_tasks {
         if !task.starts_with(':') {
@@ -626,55 +681,184 @@ fn resolve_task_filter(
             )
             .into());
         }
-        if !task_paths.contains(task) {
+        if !graph.task_paths.contains(task) {
             return Err(format!(
                 "cached build-plan artifact does not contain requested task '{}'",
                 task
             )
             .into());
         }
-        include_task_and_dependencies(artifact, task, &task_paths, &mut selected)?;
+        graph.include_task_and_dependencies(task, &mut selected)?;
     }
     let mut result = selected.into_iter().collect::<Vec<_>>();
     result.sort();
     Ok(result)
 }
 
-fn include_task_and_dependencies(
-    artifact: &ShadowArtifact,
-    task_path: &str,
-    task_paths: &HashSet<String>,
-    selected: &mut HashSet<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if !selected.insert(task_path.to_string()) {
-        return Ok(());
-    }
-    let task = artifact
-        .plan
-        .tasks
-        .iter()
-        .find(|candidate| candidate.path == task_path)
-        .ok_or_else(|| format!("cached build-plan artifact does not contain task '{task_path}'"))?;
-    for dependency in &task.depends_on {
-        if !task_paths.contains(dependency) {
-            return Err(format!(
-                "cached build-plan artifact is incomplete: task '{}' depends on missing task '{}'",
-                task.path, dependency
-            )
-            .into());
-        }
-        include_task_and_dependencies(artifact, dependency, task_paths, selected)?;
-    }
-    Ok(())
+struct ExecutionGraphView {
+    source: &'static str,
+    task_paths: HashSet<String>,
+    depends_on: HashMap<String, Vec<String>>,
 }
 
-fn task_path_set(artifact: &ShadowArtifact) -> HashSet<String> {
-    artifact
-        .plan
-        .tasks
-        .iter()
-        .map(|task| task.path.clone())
-        .collect()
+impl ExecutionGraphView {
+    fn from_artifact(artifact: &ShadowArtifact) -> Result<Self, Box<dyn std::error::Error>> {
+        if let Some(graph) = &artifact.build_graph {
+            if graph.build_id != artifact.plan.build_id {
+                return Err(format!(
+                    "cached build graph build id '{}' does not match plan build id '{}'",
+                    graph.build_id, artifact.plan.build_id
+                )
+                .into());
+            }
+            if !artifact.build_graph_fingerprint_sha256.is_empty() {
+                let actual = fingerprint_build_graph(graph)?;
+                if actual != artifact.build_graph_fingerprint_sha256 {
+                    return Err(format!(
+                        "cached build graph fingerprint mismatch: computed '{}' but artifact stores '{}'",
+                        actual, artifact.build_graph_fingerprint_sha256
+                    )
+                    .into());
+                }
+            }
+            let task_paths = graph
+                .tasks
+                .iter()
+                .map(|task| task.path.clone())
+                .collect::<HashSet<_>>();
+            let mut depends_on: HashMap<String, Vec<String>> = HashMap::new();
+            for edge in &graph.edges {
+                if edge.kind == "depends_on" {
+                    depends_on
+                        .entry(edge.from.clone())
+                        .or_default()
+                        .push(edge.to.clone());
+                }
+            }
+            for dependencies in depends_on.values_mut() {
+                dependencies.sort();
+                dependencies.dedup();
+            }
+            return Ok(Self {
+                source: "build_graph",
+                task_paths,
+                depends_on,
+            });
+        }
+
+        let task_paths = artifact
+            .plan
+            .tasks
+            .iter()
+            .map(|task| task.path.clone())
+            .collect::<HashSet<_>>();
+        let depends_on = artifact
+            .plan
+            .tasks
+            .iter()
+            .map(|task| {
+                let mut dependencies = task.depends_on.clone();
+                dependencies.sort();
+                dependencies.dedup();
+                (task.path.clone(), dependencies)
+            })
+            .collect::<HashMap<_, _>>();
+        Ok(Self {
+            source: "build_plan_fallback",
+            task_paths,
+            depends_on,
+        })
+    }
+
+    fn validate(&self) -> Result<(), Box<dyn std::error::Error>> {
+        for task_path in &self.task_paths {
+            if task_path.trim().is_empty() {
+                return Err(
+                    format!("cached {} contains a task without a path", self.source).into(),
+                );
+            }
+        }
+        for (task, dependencies) in &self.depends_on {
+            if !self.task_paths.contains(task) {
+                return Err(format!(
+                    "cached {} is incomplete: dependency edge source '{}' is missing",
+                    self.source, task
+                )
+                .into());
+            }
+            for dependency in dependencies {
+                if !self.task_paths.contains(dependency) {
+                    return Err(format!(
+                        "cached {} is incomplete: task '{}' depends on missing task '{}'",
+                        self.source, task, dependency
+                    )
+                    .into());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn include_task_and_dependencies(
+        &self,
+        task_path: &str,
+        selected: &mut HashSet<String>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if !selected.insert(task_path.to_string()) {
+            return Ok(());
+        }
+        let dependencies = self
+            .depends_on
+            .get(task_path)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        for dependency in dependencies {
+            if !self.task_paths.contains(dependency) {
+                return Err(format!(
+                    "cached {} is incomplete: task '{}' depends on missing task '{}'",
+                    self.source, task_path, dependency
+                )
+                .into());
+            }
+            self.include_task_and_dependencies(dependency, selected)?;
+        }
+        Ok(())
+    }
+}
+
+fn fingerprint_build_graph(graph: &ShadowBuildGraph) -> Result<String, Box<dyn std::error::Error>> {
+    let mut graph = graph.clone();
+    graph.projects.sort_unstable_by(|a, b| {
+        (&a.path, &a.name, &a.project_dir).cmp(&(&b.path, &b.name, &b.project_dir))
+    });
+    graph.tasks.sort_unstable_by(|a, b| {
+        (&a.path, &a.project_path, &a.implementation_id).cmp(&(
+            &b.path,
+            &b.project_path,
+            &b.implementation_id,
+        ))
+    });
+    graph
+        .edges
+        .sort_unstable_by(|a, b| (&a.from, &a.to, &a.kind).cmp(&(&b.from, &b.to, &b.kind)));
+    graph.dependency_requests.sort_unstable_by(|a, b| {
+        (&a.project_path, &a.configuration, &a.kind, &a.notation).cmp(&(
+            &b.project_path,
+            &b.configuration,
+            &b.kind,
+            &b.notation,
+        ))
+    });
+    let canonical = serde_json::to_string(&graph)?;
+    let mut hasher = Sha256::new();
+    hasher.update(canonical.as_bytes());
+    let digest = hasher.finalize();
+    let mut hex = String::new();
+    for byte in &digest[..] {
+        use std::fmt::Write;
+        write!(&mut hex, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    Ok(hex)
 }
 
 fn has_project_path_inputs(artifact: &ShadowArtifact, project_dir: &Path) -> bool {
@@ -929,6 +1113,8 @@ mod tests {
                     destroyables: Vec::new(),
                 }],
             },
+            build_graph: None,
+            build_graph_fingerprint_sha256: String::new(),
             stored_at_ms: 0,
             input_fingerprints: fingerprints,
         }
@@ -1120,6 +1306,8 @@ mod tests {
                     },
                 ],
             },
+            build_graph: None,
+            build_graph_fingerprint_sha256: String::new(),
             stored_at_ms: 0,
             input_fingerprints: Vec::new(),
         };
@@ -1127,6 +1315,114 @@ mod tests {
         let selected = resolve_task_filter(&artifact, &[":build".to_string()]).unwrap();
 
         assert_eq!(selected, vec![":build", ":classes", ":compileJava"]);
+    }
+
+    #[test]
+    fn expands_requested_task_filter_from_build_graph_when_present() {
+        let graph = ShadowBuildGraph {
+            schema_version: 1,
+            build_id: "build:test".to_string(),
+            projects: Vec::new(),
+            tasks: vec![
+                ShadowBuildGraphTask {
+                    path: ":compileJava".to_string(),
+                    project_path: ":".to_string(),
+                    implementation_id: "JavaCompile".to_string(),
+                    action_kind: "java_compile".to_string(),
+                    cacheability: "cacheable".to_string(),
+                    worker_isolation: "process".to_string(),
+                },
+                ShadowBuildGraphTask {
+                    path: ":classes".to_string(),
+                    project_path: ":".to_string(),
+                    implementation_id: "Classes".to_string(),
+                    action_kind: "lifecycle".to_string(),
+                    cacheability: String::new(),
+                    worker_isolation: "none".to_string(),
+                },
+                ShadowBuildGraphTask {
+                    path: ":build".to_string(),
+                    project_path: ":".to_string(),
+                    implementation_id: "Build".to_string(),
+                    action_kind: "lifecycle".to_string(),
+                    cacheability: String::new(),
+                    worker_isolation: "none".to_string(),
+                },
+            ],
+            edges: vec![
+                ShadowBuildGraphEdge {
+                    from: ":classes".to_string(),
+                    to: ":compileJava".to_string(),
+                    kind: "depends_on".to_string(),
+                },
+                ShadowBuildGraphEdge {
+                    from: ":build".to_string(),
+                    to: ":classes".to_string(),
+                    kind: "depends_on".to_string(),
+                },
+            ],
+            dependency_requests: Vec::new(),
+            metadata: BTreeMap::new(),
+        };
+        let artifact = ShadowArtifact {
+            plan: ShadowPlan {
+                build_id: "build:test".to_string(),
+                projects: Vec::new(),
+                tasks: vec![ShadowTask {
+                    path: ":build".to_string(),
+                    depends_on: Vec::new(),
+                    input_specs: Vec::new(),
+                    outputs: Vec::new(),
+                    local_state: Vec::new(),
+                    destroyables: Vec::new(),
+                }],
+            },
+            build_graph_fingerprint_sha256: fingerprint_build_graph(&graph).unwrap(),
+            build_graph: Some(graph),
+            stored_at_ms: 0,
+            input_fingerprints: Vec::new(),
+        };
+
+        let selected = resolve_task_filter(&artifact, &[":build".to_string()]).unwrap();
+
+        assert_eq!(selected, vec![":build", ":classes", ":compileJava"]);
+    }
+
+    #[test]
+    fn rejects_changed_build_graph_fingerprint() {
+        let graph = ShadowBuildGraph {
+            schema_version: 1,
+            build_id: "build:test".to_string(),
+            projects: Vec::new(),
+            tasks: vec![ShadowBuildGraphTask {
+                path: ":build".to_string(),
+                project_path: ":".to_string(),
+                implementation_id: "Build".to_string(),
+                action_kind: "lifecycle".to_string(),
+                cacheability: String::new(),
+                worker_isolation: "none".to_string(),
+            }],
+            edges: Vec::new(),
+            dependency_requests: Vec::new(),
+            metadata: BTreeMap::new(),
+        };
+        let artifact = ShadowArtifact {
+            plan: ShadowPlan {
+                build_id: "build:test".to_string(),
+                projects: Vec::new(),
+                tasks: Vec::new(),
+            },
+            build_graph: Some(graph),
+            build_graph_fingerprint_sha256: "stale".to_string(),
+            stored_at_ms: 0,
+            input_fingerprints: Vec::new(),
+        };
+
+        let error = validate_execution_graph(&artifact).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("build graph fingerprint mismatch"));
     }
 
     #[test]
@@ -1144,6 +1440,8 @@ mod tests {
                     destroyables: Vec::new(),
                 }],
             },
+            build_graph: None,
+            build_graph_fingerprint_sha256: String::new(),
             stored_at_ms: 0,
             input_fingerprints: Vec::new(),
         };
@@ -1171,11 +1469,13 @@ mod tests {
                     destroyables: Vec::new(),
                 }],
             },
+            build_graph: None,
+            build_graph_fingerprint_sha256: String::new(),
             stored_at_ms: 0,
             input_fingerprints: Vec::new(),
         };
 
-        let error = validate_plan_dependencies(&artifact).unwrap_err();
+        let error = validate_execution_graph(&artifact).unwrap_err();
 
         assert!(error.to_string().contains("depends on missing task"));
     }
