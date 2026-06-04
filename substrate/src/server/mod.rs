@@ -11,6 +11,7 @@ pub mod authoritative;
 pub mod bootstrap;
 pub mod build_comparison;
 pub mod build_event_stream;
+pub mod build_graph_ir;
 pub mod build_init;
 pub mod build_layout;
 pub mod build_metrics;

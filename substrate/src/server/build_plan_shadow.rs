@@ -8,6 +8,7 @@ use crate::client::jvm_host_bridge::JvmHostBridge;
 use crate::proto::{GetBuildEnvironmentResponse, GetBuildModelResponse};
 
 use super::atomic_write::AtomicWriter;
+use super::build_graph_ir::{self, CanonicalBuildGraph};
 use super::build_plan_ir::{
     fingerprint_normalized, from_proto, validate_schema_version, CanonicalBuildPlan,
     CanonicalBuildPlanDependency, CanonicalBuildPlanProject, CanonicalBuildPlanRepository,
@@ -36,6 +37,10 @@ const SHADOWED_CONFIGURATIONS: &[&str] = &[
 pub struct BuildPlanShadowArtifact {
     pub plan: CanonicalBuildPlan,
     pub fingerprint_sha256: String,
+    #[serde(default)]
+    pub build_graph: Option<CanonicalBuildGraph>,
+    #[serde(default)]
+    pub build_graph_fingerprint_sha256: String,
     #[serde(default)]
     pub configuration_graph: Option<CanonicalConfigurationGraph>,
     #[serde(default)]
@@ -137,6 +142,11 @@ impl BuildPlanShadowStore {
         normalized.normalize_mut();
         let fingerprint = fingerprint_normalized(&normalized)?;
         let input_fingerprints = fingerprint_plan_inputs(&normalized)?;
+        let mut build_graph = build_graph_ir::from_build_plan(&normalized);
+        build_graph_ir::validate_graph(&build_graph)
+            .map_err(|e| format!("build graph validation failed: {e}"))?;
+        build_graph.normalize_mut();
+        let build_graph_fingerprint_sha256 = build_graph_ir::fingerprint_normalized(&build_graph)?;
         let (configuration_graph, configuration_graph_fingerprint_sha256) =
             match configuration_graph {
                 Some(graph) => {
@@ -164,6 +174,8 @@ impl BuildPlanShadowStore {
         let artifact = BuildPlanShadowArtifact {
             plan: normalized,
             fingerprint_sha256: fingerprint,
+            build_graph: Some(build_graph),
+            build_graph_fingerprint_sha256,
             configuration_graph,
             configuration_graph_fingerprint_sha256,
             input_fingerprints,
@@ -232,6 +244,42 @@ impl BuildPlanShadowStore {
             );
             self.quarantine_artifact(path, &reason)?;
             return Err(reason.into());
+        }
+        if let Some(build_graph) = &artifact.build_graph {
+            if let Err(error) = build_graph_ir::validate_graph(build_graph) {
+                let reason = format!("build plan shadow build graph validation failed: {}", error);
+                self.quarantine_artifact(path, &reason)?;
+                return Err(reason.into());
+            }
+            if build_graph.build_id != artifact.plan.build_id {
+                let reason = format!(
+                    "build plan shadow build graph build id mismatch: plan '{}' but graph contains '{}'",
+                    artifact.plan.build_id, build_graph.build_id
+                );
+                self.quarantine_artifact(path, &reason)?;
+                return Err(reason.into());
+            }
+            if artifact.build_graph_fingerprint_sha256.is_empty() {
+                let reason = "build plan shadow build graph fingerprint is missing";
+                self.quarantine_artifact(path, reason)?;
+                return Err(reason.to_string().into());
+            }
+            let mut normalized_graph = build_graph.clone();
+            normalized_graph.normalize_mut();
+            let actual_graph_fingerprint =
+                build_graph_ir::fingerprint_normalized(&normalized_graph)?;
+            if actual_graph_fingerprint != artifact.build_graph_fingerprint_sha256 {
+                let reason = format!(
+                    "build plan shadow build graph fingerprint mismatch: computed '{}' but artifact stores '{}'",
+                    actual_graph_fingerprint, artifact.build_graph_fingerprint_sha256
+                );
+                self.quarantine_artifact(path, &reason)?;
+                return Err(reason.into());
+            }
+        } else if !artifact.build_graph_fingerprint_sha256.is_empty() {
+            let reason = "build plan shadow build graph fingerprint exists without graph";
+            self.quarantine_artifact(path, reason)?;
+            return Err(reason.to_string().into());
         }
         if let Some(configuration_graph) = &artifact.configuration_graph {
             if let Err(error) = configuration_ir::validate_schema_version(configuration_graph) {
@@ -2344,6 +2392,11 @@ mod tests {
         let mut artifact = BuildPlanShadowArtifact {
             plan: expected.clone(),
             fingerprint_sha256: fingerprint_sha256_hex(&expected).unwrap(),
+            build_graph: Some(build_graph_ir::from_build_plan(&expected)),
+            build_graph_fingerprint_sha256: build_graph_ir::fingerprint_sha256_hex(
+                &build_graph_ir::from_build_plan(&expected),
+            )
+            .unwrap(),
             configuration_graph: Some(configuration_ir::from_build_plan(&expected)),
             configuration_graph_fingerprint_sha256: configuration_ir::fingerprint_sha256_hex(
                 &configuration_ir::from_build_plan(&expected),
