@@ -374,6 +374,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .with_local_cache(cache.local_store())
     .with_scope_registry(Arc::clone(&scope_registry))
     .with_vfs_delta_store(vfs_delta_store);
+    let dag_executor = if let Some(remote_cache) = cache.remote_store() {
+        dag_executor.with_remote_cache(remote_cache)
+    } else {
+        dag_executor
+    };
 
     // Phase 25: Worker process management
     let worker_process = WorkerProcessServiceImpl::new();

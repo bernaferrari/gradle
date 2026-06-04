@@ -286,6 +286,11 @@ impl CacheServiceImpl {
     pub fn local_store(&self) -> Arc<LocalCacheStore> {
         Arc::clone(&self.store)
     }
+
+    /// Get a reference to the configured remote cache store for cross-service integration.
+    pub fn remote_store(&self) -> Option<Arc<crate::server::remote_cache::RemoteCacheStore>> {
+        self.remote.clone()
+    }
 }
 
 #[tonic::async_trait]
