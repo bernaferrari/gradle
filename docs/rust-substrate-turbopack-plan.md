@@ -482,6 +482,10 @@ up-to-date correctness without falling back to broad mtime-only validation.
   metadata into selected task contexts even without VFS changes. `DagExecutor`
   admits that metadata fail-closed by rejecting mismatched graph task paths
   before dispatch.
+- Corpus and dogfood summaries now include a strict unsupported-feature
+  registry: each project records detected unsupported features and
+  `corpus_summary.json` aggregates per-feature counts and affected project
+  counts.
 - Evidence: `cargo test -p gradle-substrate-daemon --bin
   gradle-substrate-runbuild` passed 15/15, and `cargo test -p
   gradle-substrate-daemon --lib vfs_delta` passed 10 focused tests, including
@@ -493,6 +497,9 @@ up-to-date correctness without falling back to broad mtime-only validation.
   BuildGraph context evidence: `cargo test -p gradle-substrate-daemon --bin
   gradle-substrate-runbuild` passed 16/16, and focused `DagExecutor`
   admission coverage rejects mismatched BuildGraph task metadata.
+  Unsupported-registry evidence: `python3 -m unittest
+  tools.corpus_runner.test_run` passed 45/45 with aggregate feature-count
+  coverage.
 
 ## Aggressive Near-Term Backlog
 
@@ -500,8 +507,7 @@ up-to-date correctness without falling back to broad mtime-only validation.
 2. Make Copy/Sync/Delete/Symlink parity authoritative for supported file specs.
 3. Expand dogfood zero-forward support for Java-library and Spring-style builds.
 4. Add Rust dependency-resolution graph parity for file and static Maven repos.
-5. Add a strict unsupported-feature registry with counts in every dogfood run.
-6. Delete or quarantine noisy generated Rust/docs that obscure real ownership.
+5. Delete or quarantine noisy generated Rust/docs that obscure real ownership.
 
 ## Metrics
 

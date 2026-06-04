@@ -1123,6 +1123,18 @@ def summarize_results(results: dict) -> dict:
         for name, result in project_results.items()
         if not result.get("checks", {}).get("no_fallback")
     )
+    unsupported_feature_counts: dict[str, int] = {}
+    unsupported_project_count = 0
+    for result in project_results.values():
+        features = result.get("unsupported_features")
+        if features is None:
+            graph = result.get("dependency_graph_diff") or {}
+            features = graph.get("upstream", {}).get("unsupported_features", [])
+        features = sorted(set(features or []))
+        if features:
+            unsupported_project_count += 1
+        for feature in features:
+            unsupported_feature_counts[feature] = unsupported_feature_counts.get(feature, 0) + 1
 
     return {
         "project_count": total,
@@ -1142,6 +1154,8 @@ def summarize_results(results: dict) -> dict:
         "substrate_duration_ms": substrate_duration_ms,
         "failed_projects": failed_projects,
         "fallback_projects": fallback_projects,
+        "unsupported_project_count": unsupported_project_count,
+        "unsupported_feature_counts": dict(sorted(unsupported_feature_counts.items())),
     }
 
 
@@ -1169,6 +1183,15 @@ def print_summary(summary: dict) -> None:
         print(f"Failed projects: {', '.join(summary['failed_projects'])}")
     if summary["fallback_projects"]:
         print(f"Fallback projects: {', '.join(summary['fallback_projects'])}")
+    if summary.get("unsupported_feature_counts"):
+        counts = ", ".join(
+            f"{feature}={count}"
+            for feature, count in summary["unsupported_feature_counts"].items()
+        )
+        print(
+            f"Unsupported features: {summary.get('unsupported_project_count', 0)} "
+            f"project(s); {counts}"
+        )
 
 
 def run_build(
@@ -1328,6 +1351,7 @@ def main():
             print(f"  Project not found: {project}")
             results[project_name] = {"error": "Project not found"}
             continue
+        project_contract = scan_project_contract(project)
         
         # Run upstream
         print("  Running upstream Gradle...")
@@ -1444,6 +1468,7 @@ def main():
             "substrate": substrate.to_dict(),
             "checks": checks,
             "match": checks["match"],
+            "unsupported_features": project_contract["unsupported_features"],
         }
         if args.dependency_graph_parity:
             results[project_name]["dependency_graph_paths"] = graph_paths
