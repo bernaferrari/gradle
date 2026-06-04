@@ -475,24 +475,28 @@ up-to-date correctness without falling back to broad mtime-only validation.
   execution record. Replayed daemon events are ignored after the task has
   admitted them once, including across daemon restart via execution-history
   reload.
+- Native `RunBuild` cache restore/store now participates in the configured
+  remote build cache: local misses can restore from remote and promote locally,
+  and successful native output packs are pushed to remote after local storage.
 - Evidence: `cargo test -p gradle-substrate-daemon --bin
   gradle-substrate-runbuild` passed 15/15, and `cargo test -p
   gradle-substrate-daemon --lib vfs_delta` passed 10 focused tests, including
   `RunBuild` assertions that input-intersecting VFS deltas force execution and
   persisted watermarks prevent already-admitted daemon deltas from replaying.
+  Remote cache evidence: `cargo test -p gradle-substrate-daemon --lib
+  remote_cache` passed 20/20 including native `RunBuild` remote restore,
+  local-promotion, and remote-store coverage.
 
 ## Aggressive Near-Term Backlog
 
 1. Keep the just-fixed `rust-bridge:testClasses` gate green in CI.
 2. Make Copy/Sync/Delete/Symlink parity authoritative for supported file specs.
-3. Promote Rust local build-cache entries toward shared/remote Gradle cache
-   compatibility.
-4. Make direct execution consume richer `BuildGraph` node metadata directly,
+3. Make direct execution consume richer `BuildGraph` node metadata directly,
    not only its task closure.
-5. Expand dogfood zero-forward support for Java-library and Spring-style builds.
-6. Add Rust dependency-resolution graph parity for file and static Maven repos.
-7. Add a strict unsupported-feature registry with counts in every dogfood run.
-8. Delete or quarantine noisy generated Rust/docs that obscure real ownership.
+4. Expand dogfood zero-forward support for Java-library and Spring-style builds.
+5. Add Rust dependency-resolution graph parity for file and static Maven repos.
+6. Add a strict unsupported-feature registry with counts in every dogfood run.
+7. Delete or quarantine noisy generated Rust/docs that obscure real ownership.
 
 ## Metrics
 

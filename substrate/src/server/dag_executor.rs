@@ -32,6 +32,7 @@ use crate::proto::{
 };
 use crate::server::cache::LocalCacheStore;
 use crate::server::cache_packaging::BuildCachePackagingServiceImpl;
+use crate::server::remote_cache::RemoteCacheStore;
 use crate::server::task_executor::{TaskExecutorRegistry, TaskInput};
 
 /// Sentinel value returned by GetNextTask when the build is complete.
@@ -621,6 +622,8 @@ pub struct DagExecutorServiceImpl {
     scope_registry: Option<Arc<ScopeRegistry>>,
     /// Local Rust build cache store used for authoritative output restore/store.
     local_cache: Option<Arc<LocalCacheStore>>,
+    /// Optional remote build cache store used by native RunBuild cache restore/store.
+    remote_cache: Option<Arc<RemoteCacheStore>>,
     /// Retained daemon file-watch/VFS deltas for fail-closed up-to-date admission.
     vfs_delta_store: Option<Arc<VfsDeltaStore>>,
     request_counter: AtomicI64,
@@ -639,6 +642,7 @@ impl Clone for DagExecutorServiceImpl {
             jvm_host_bridge: self.jvm_host_bridge.clone(),
             scope_registry: self.scope_registry.clone(),
             local_cache: self.local_cache.clone(),
+            remote_cache: self.remote_cache.clone(),
             vfs_delta_store: self.vfs_delta_store.clone(),
             request_counter: AtomicI64::new(self.request_counter.load(Ordering::Relaxed)),
             builds_started: AtomicI64::new(self.builds_started.load(Ordering::Relaxed)),
@@ -674,6 +678,7 @@ impl DagExecutorServiceImpl {
             jvm_host_bridge: None,
             scope_registry: None,
             local_cache: None,
+            remote_cache: None,
             vfs_delta_store: None,
             request_counter: AtomicI64::new(0),
             builds_started: AtomicI64::new(0),
@@ -692,6 +697,11 @@ impl DagExecutorServiceImpl {
 
     pub fn with_local_cache(mut self, local_cache: Arc<LocalCacheStore>) -> Self {
         self.local_cache = Some(local_cache);
+        self
+    }
+
+    pub fn with_remote_cache(mut self, remote_cache: Arc<RemoteCacheStore>) -> Self {
+        self.remote_cache = Some(remote_cache);
         self
     }
 
@@ -950,12 +960,38 @@ impl DagExecutorServiceImpl {
             return Ok(false);
         }
 
-        let Some(packaged_bytes) = cache
+        let packaged_bytes = cache
             .load(cache_key)
             .await
-            .map_err(|error| format!("load cache entry {cache_key}: {error}"))?
-        else {
-            return Ok(false);
+            .map_err(|error| format!("load cache entry {cache_key}: {error}"))?;
+        let packaged_bytes = match packaged_bytes {
+            Some(bytes) => bytes,
+            None => {
+                let Some(remote_cache) = &self.remote_cache else {
+                    return Ok(false);
+                };
+                match remote_cache.load(cache_key).await {
+                    Ok(Some(bytes)) => {
+                        if let Err(error) = cache.store(cache_key, &bytes).await {
+                            tracing::warn!(
+                                cache_key,
+                                error = %error,
+                                "Failed to promote remote build-cache hit into local cache"
+                            );
+                        }
+                        bytes
+                    }
+                    Ok(None) => return Ok(false),
+                    Err(error) => {
+                        tracing::warn!(
+                            cache_key,
+                            error,
+                            "Remote build-cache load failed; executing task"
+                        );
+                        return Ok(false);
+                    }
+                }
+            }
         };
 
         let (files, metadata, _entry_count) =
@@ -1086,6 +1122,15 @@ impl DagExecutorServiceImpl {
             .store(cache_key, &packaged_bytes)
             .await
             .map_err(|error| format!("store cache entry {cache_key}: {error}"))?;
+        if let Some(remote_cache) = &self.remote_cache {
+            if let Err(error) = remote_cache.store(cache_key, &packaged_bytes).await {
+                tracing::warn!(
+                    cache_key,
+                    error,
+                    "Remote build-cache store failed after local store"
+                );
+            }
+        }
         Ok(true)
     }
 
@@ -2669,6 +2714,7 @@ mod tests {
     use crate::proto::{FileChangeEvent, RegisterTaskRequest};
     use crate::server::task_graph;
     use tokio::net::UnixListener;
+    use tokio::sync::RwLock;
     use tonic::transport::Server;
 
     struct MockJvmTaskHost;
@@ -3019,6 +3065,89 @@ mod tests {
     async fn make_svc_with_mock_jvm_host() -> (DagExecutorServiceImpl, tempfile::TempDir) {
         let (bridge, dir) = make_mock_jvm_bridge().await;
         (make_svc().with_jvm_host_bridge(bridge), dir)
+    }
+
+    async fn spawn_remote_cache_server(backing: Arc<RwLock<HashMap<String, Vec<u8>>>>) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    continue;
+                };
+                let backing = Arc::clone(&backing);
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+                    let mut buf = Vec::new();
+                    let mut tmp = [0u8; 4096];
+                    loop {
+                        let n = match stream.read(&mut tmp).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => n,
+                        };
+                        buf.extend_from_slice(&tmp[..n]);
+                        if buf.windows(4).any(|window| window == b"\r\n\r\n") {
+                            break;
+                        }
+                    }
+
+                    let header_end = buf
+                        .windows(4)
+                        .position(|window| window == b"\r\n\r\n")
+                        .unwrap()
+                        + 4;
+                    let header = String::from_utf8_lossy(&buf[..header_end]);
+                    let mut request_parts = header.lines().next().unwrap_or("").split_whitespace();
+                    let method = request_parts.next().unwrap_or("").to_string();
+                    let path = request_parts.next().unwrap_or("/").to_string();
+                    let content_length = header
+                        .lines()
+                        .find_map(|line| {
+                            line.strip_prefix("Content-Length:")
+                                .or_else(|| line.strip_prefix("content-length:"))
+                                .and_then(|value| value.trim().parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                    let body_so_far = buf.len().saturating_sub(header_end);
+                    if content_length > body_so_far {
+                        let mut remaining = vec![0u8; content_length - body_so_far];
+                        let mut read = 0;
+                        while read < remaining.len() {
+                            match stream.read(&mut remaining[read..]).await {
+                                Ok(0) | Err(_) => break,
+                                Ok(n) => read += n,
+                            }
+                        }
+                        buf.extend_from_slice(&remaining[..read]);
+                    }
+                    let body = &buf[header_end..];
+
+                    let (status, response_body) = match method.as_str() {
+                        "GET" => backing
+                            .read()
+                            .await
+                            .get(&path)
+                            .cloned()
+                            .map(|body| ("200 OK", body))
+                            .unwrap_or_else(|| ("404 Not Found", Vec::new())),
+                        "PUT" => {
+                            backing.write().await.insert(path, body.to_vec());
+                            ("200 OK", Vec::new())
+                        }
+                        _ => ("405 Method Not Allowed", Vec::new()),
+                    };
+
+                    let response = format!(
+                        "HTTP/1.1 {status}\r\nContent-Length: {}\r\n\r\n",
+                        response_body.len()
+                    );
+                    let _ = stream.write_all(response.as_bytes()).await;
+                    let _ = stream.write_all(&response_body).await;
+                });
+            }
+        });
+        format!("http://127.0.0.1:{}", addr.port())
     }
 
     /// Helper to register tasks in the task graph before starting a build.
@@ -5413,6 +5542,95 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_run_build_restores_outputs_from_remote_cache_and_promotes_local() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let local_cache = Arc::new(LocalCacheStore::new(cache_dir.path().to_path_buf()));
+        let remote_backing = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let remote_url = spawn_remote_cache_server(Arc::clone(&remote_backing)).await;
+        let remote_cache = Arc::new(RemoteCacheStore::new(remote_url, None, None));
+        let svc = make_svc()
+            .with_local_cache(Arc::clone(&local_cache))
+            .with_remote_cache(Arc::clone(&remote_cache));
+
+        register_chain(&svc, "build-remote-cache-hit", &[(":task", "Mkdir", &[])]).await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let output_dir = dir.path().join("remote-restored-output");
+        let work_meta = WorkMetadata {
+            work_identity: ":project:remoteCacheHit".to_string(),
+            display_name: ":project:remoteCacheHit".to_string(),
+            implementation_class: "org.gradle.api.DefaultTask".to_string(),
+            input_properties: [("key".to_string(), "remote-value".to_string())].into(),
+            input_file_fingerprints: [("input".to_string(), "remote-hash".to_string())].into(),
+            caching_enabled: true,
+            can_load_from_cache: true,
+            has_previous_execution_state: false,
+            rebuild_reasons: Vec::new(),
+        };
+        let cache_key =
+            super::super::execution_plan::ExecutionPlanServiceImpl::compute_fingerprint(&work_meta);
+        let (packaged_bytes, _) = BuildCachePackagingServiceImpl::pack(PackCacheEntryRequest {
+            build_id: "build-remote-cache-hit".to_string(),
+            files: vec![BuildCachePackFile {
+                path: "out0/remote.txt".to_string(),
+                content: b"from remote cache".to_vec(),
+                executable: false,
+            }],
+            origin_metadata: [(
+                "output_kinds_json".to_string(),
+                serde_json::json!(["dir"]).to_string(),
+            )]
+            .into(),
+            gzip: true,
+        })
+        .unwrap();
+        remote_backing
+            .write()
+            .await
+            .insert(format!("/{cache_key}"), packaged_bytes);
+
+        let context = serde_json::json!({
+            "work_identity": work_meta.work_identity,
+            "display_name": work_meta.display_name,
+            "implementation_class": work_meta.implementation_class,
+            "input_properties": {"key": "remote-value"},
+            "input_file_fingerprints": {"input": "remote-hash"},
+            "caching_enabled": true,
+            "can_load_from_cache": true,
+            "up_to_date_enabled": true,
+            "has_previous_execution_state": false,
+            "rebuild_reasons": [],
+            "source_files": [output_dir.to_string_lossy()],
+            "output_files": [output_dir.to_string_lossy()]
+        })
+        .to_string();
+        let mut contexts = HashMap::new();
+        contexts.insert(":task".to_string(), context);
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "build-remote-cache-hit".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts,
+                allow_jvm_forwarding: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.tasks_from_cache, 1);
+        assert_eq!(
+            std::fs::read_to_string(output_dir.join("remote.txt")).unwrap(),
+            "from remote cache"
+        );
+        assert!(
+            local_cache.contains(&cache_key).await.unwrap(),
+            "remote cache hits should be promoted into the local cache"
+        );
+    }
+
+    #[tokio::test]
     async fn test_run_build_stores_native_outputs_in_rust_local_cache() {
         let cache_dir = tempfile::tempdir().unwrap();
         let local_cache = Arc::new(LocalCacheStore::new(cache_dir.path().to_path_buf()));
@@ -5468,6 +5686,76 @@ mod tests {
         assert_eq!(resp.tasks_from_cache, 0);
         assert_eq!(resp.task_details[0].outcome, "EXECUTED");
         assert!(local_cache.contains(&cache_key).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_run_build_stores_native_outputs_in_remote_cache() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let local_cache = Arc::new(LocalCacheStore::new(cache_dir.path().to_path_buf()));
+        let remote_backing = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let remote_url = spawn_remote_cache_server(Arc::clone(&remote_backing)).await;
+        let remote_cache = Arc::new(RemoteCacheStore::new(remote_url, None, None));
+        let svc = make_svc()
+            .with_local_cache(Arc::clone(&local_cache))
+            .with_remote_cache(Arc::clone(&remote_cache));
+
+        register_chain(&svc, "build-remote-cache-store", &[(":task", "Mkdir", &[])]).await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let output_dir = dir.path().join("remote-stored-output");
+        let work_meta = WorkMetadata {
+            work_identity: ":project:remoteCacheStore".to_string(),
+            display_name: ":project:remoteCacheStore".to_string(),
+            implementation_class: "org.gradle.api.DefaultTask".to_string(),
+            input_properties: [("key".to_string(), "remote-store".to_string())].into(),
+            input_file_fingerprints: [("input".to_string(), "remote-store-hash".to_string())]
+                .into(),
+            caching_enabled: true,
+            can_load_from_cache: true,
+            has_previous_execution_state: false,
+            rebuild_reasons: Vec::new(),
+        };
+        let cache_key =
+            super::super::execution_plan::ExecutionPlanServiceImpl::compute_fingerprint(&work_meta);
+        let context = serde_json::json!({
+            "work_identity": work_meta.work_identity,
+            "display_name": work_meta.display_name,
+            "implementation_class": work_meta.implementation_class,
+            "input_properties": {"key": "remote-store"},
+            "input_file_fingerprints": {"input": "remote-store-hash"},
+            "caching_enabled": true,
+            "can_load_from_cache": true,
+            "up_to_date_enabled": true,
+            "has_previous_execution_state": false,
+            "rebuild_reasons": [],
+            "source_files": [output_dir.to_string_lossy()],
+            "output_files": [output_dir.to_string_lossy()]
+        })
+        .to_string();
+        let mut contexts = HashMap::new();
+        contexts.insert(":task".to_string(), context);
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "build-remote-cache-store".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts,
+                allow_jvm_forwarding: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.tasks_succeeded, 1);
+        assert!(local_cache.contains(&cache_key).await.unwrap());
+        assert!(
+            remote_backing
+                .read()
+                .await
+                .contains_key(&format!("/{cache_key}")),
+            "native RunBuild should push successful output packs to remote cache"
+        );
     }
 
     #[tokio::test]
