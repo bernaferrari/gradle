@@ -10,11 +10,14 @@ not whether it is a full Gradle replacement.
 python3 tools/dogfood_runner/run.py \
   --manifest testing/dogfood/manifest.json \
   --execute \
-  --gradle-command "$PWD/build/gradle-under-test/bin/gradle" \
   --daemon-binary target/debug/gradle-substrate-daemon \
   --output-dir build/dogfood-current \
   --verbose
 ```
+
+The runner uses `GRADLE_UNDER_TEST_BIN`, `GRADLE_UNDER_TEST/bin/gradle`, or
+`build/gradle-under-test/bin/gradle` automatically when available. Pass
+`--gradle-command` only when you need to override that discovery.
 
 The runner writes:
 
@@ -24,48 +27,50 @@ The runner writes:
 
 ## Current Evidence
 
-Latest checked run: 2026-06-01.
+Latest checked run: 2026-06-04.
 
 | Project | Expectation | Mode | Result | What It Proves |
 | --- | --- | --- | --- | --- |
 | `oss-style-java-library` | supported | strict | pass | Standard Java library lifecycle with sources/Javadoc/report-like outputs can run through the Rust kernel. |
 | `java-multiproject` | supported | strict | pass | Rust DAG admission and execution handle a small multi-project Java build. |
+| `java-application` | supported | strict | pass | Rust DAG execution covers the application plugin, start scripts, and Zip/Tar distributions. |
 | `external-junit-library` | supported | strict | pass | Pinned external dependencies plus JUnit Platform execution remain no-fallback in the supported slice. |
 | `external-bom-and-conflict` | supported | strict | pass | Bounded Maven BOM/platform dependency semantics remain admitted in the dogfood path. |
 | `javaexec-process-launch` | supported | strict | pass | Rust DAG execution covers Java compilation plus native `JavaExec` process launch with declared output parity. |
 | `javadoc-process-launch` | supported | strict | pass | Rust DAG execution covers Java compilation, Jar packaging, and native Javadoc process launch with deterministic output. |
 | `unsupported-composite-substitution` | fail-closed | strict | pass | Settings-level `includeBuild(...)` composite substitution rejects before Rust execution instead of approximating included-build semantics. |
 
-Summary from `build/dogfood-phase2-20260601/dogfood-summary.md`:
+Summary from `build/dogfood-default-gradle-under-test-20260604/dogfood-summary.md`:
 
 | Metric | Result |
 | --- | ---: |
-| Projects matched | 7/7 |
-| Supported projects matched | 6/6 |
+| Projects matched | 8/8 |
+| Supported projects matched | 7/7 |
 | Fail-closed projects matched | 1/1 |
-| Supported projects with zero JVM forwards | 6/6 |
-| Rust RunBuild markers | 7/7 |
-| Rust RunBuild executions | 7/7 |
-| Task-graph captures | 7/7 |
+| Supported projects with zero JVM forwards | 7/7 |
+| Rust RunBuild markers | 8/8 |
+| Rust RunBuild executions | 8/8 |
+| Task-graph captures | 8/8 |
 | Daemon started signals | 0 |
-| Daemon reused signals | 7 |
-| Upstream observed wall time | 48278 ms |
-| Rust substrate observed wall time | 25849 ms |
-| Rust bootstrap/RunBuild observed time | 4713 ms |
-| Non-Rust/Gradle overhead estimate | 21136 ms |
-| Upstream task total | 109 |
-| Rust substrate task total | 105 |
+| Daemon reused signals | 8 |
+| Upstream observed wall time | 36548 ms |
+| Rust substrate observed wall time | 36917 ms |
+| Rust bootstrap/RunBuild observed time | 6600 ms |
+| Non-Rust/Gradle overhead estimate | 30317 ms |
+| Upstream task total | 124 |
+| Rust substrate task total | 120 |
+| Zero-forward coverage | dependency-resolution=1/1, external-dependencies=2/2, java-application=3/3, java-library=5/5, javadoc=1/1, javaexec=1/1, start-scripts=1/1, test-execution=1/1 |
 
 The dogfood runner owns one prewarmed Rust daemon for the manifest execution
 and passes its shared state directory to each substrate invocation. This removes
 per-project Rust daemon startup from the measured substrate path. In the
-2026-06-01 Phase 2 completion run, the substrate path was faster than upstream
-for the full local dogfood set while still preserving strict parity checks.
+2026-06-04 run, every supported project used the Rust RunBuild path with zero
+JVM forwards while preserving strict parity checks.
 
 The current timing split shows the remaining gap is not primarily inside the
 Rust task executor. The measured Rust bootstrap/RunBuild portion is about
-4.7s across the whole local dogfood manifest, while the non-Rust/Gradle
-invocation and configuration overhead is about 21.1s. The next performance
+6.6s across the whole local dogfood manifest, while the non-Rust/Gradle
+invocation and configuration overhead is about 30.3s. The next performance
 work should therefore target skipping or amortizing JVM-side configuration for
 warm supported runs, not micro-optimizing individual Rust task executors first.
 
@@ -148,7 +153,6 @@ Latest checked run: 2026-05-12.
 python3 tools/dogfood_runner/run.py \
   --manifest testing/dogfood/oss-manifest.json \
   --execute \
-  --gradle-command "$PWD/build/gradle-under-test/bin/gradle" \
   --daemon-binary target/debug/gradle-substrate-daemon \
   --output-dir build/dogfood-oss \
   --verbose
