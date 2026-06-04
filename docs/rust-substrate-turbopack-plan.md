@@ -441,17 +441,28 @@ instead of a per-session Gradle build UUID or project-directory scan.
   Build-plan shadow artifacts persist the graph plus a graph fingerprint, and
   load-time validation quarantines schema, build-id, and fingerprint
   mismatches while preserving compatibility with older graphless artifacts.
+- Direct `gradle-substrate-runbuild` now consumes the persisted `BuildGraph`
+  for task existence, dependency-closure expansion, and graph fingerprint
+  validation, with an explicit `BuildPlan` fallback only for older graphless
+  artifacts.
+- JVM-host model capture now also writes a stable root-keyed artifact with
+  `stableBuildIdentity` and `sessionBuildId`, so stable direct-warm lookup is
+  available beyond the selected task-graph listener path.
+- Evidence: `cargo test -p gradle-substrate-daemon --bin
+  gradle-substrate-runbuild` passed 14/14, and `cargo test -p
+  gradle-substrate-daemon --test build_plan_shadow_test
+  capture_and_persist_shadow_build_plan_artifact` passed with assertions for
+  both session-keyed and stable root-keyed artifacts.
 
 ## Aggressive Near-Term Backlog
 
 1. Keep the just-fixed `rust-bridge:testClasses` gate green in CI.
 2. Make Copy/Sync/Delete/Symlink parity authoritative for supported file specs.
-3. Extend Phase 8 stable identity to every JVM capture path and make direct
-   execution consume `BuildGraph` directly instead of deriving from
-   `BuildPlan`.
+3. Wire execution history and up-to-date checks to VFS deltas, not only mtimes.
 4. Promote Rust local build-cache entries toward shared/remote Gradle cache
    compatibility.
-5. Wire execution history and up-to-date checks to VFS deltas, not only mtimes.
+5. Make direct execution consume richer `BuildGraph` node metadata directly,
+   not only its task closure.
 6. Expand dogfood zero-forward support for Java-library and Spring-style builds.
 7. Add Rust dependency-resolution graph parity for file and static Maven repos.
 8. Create a canonical Rust `BuildGraph` IR and make JVM capture write it.

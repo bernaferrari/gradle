@@ -28,6 +28,7 @@ use gradle_substrate_daemon::server::execution_plan::ExecutionPlanServiceImpl;
 use gradle_substrate_daemon::server::scopes::ScopeRegistry;
 use gradle_substrate_daemon::server::task_graph::TaskGraphServiceImpl;
 use gradle_substrate_daemon::server::work::WorkerScheduler;
+use sha2::{Digest, Sha256};
 use tokio::net::UnixListener;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
@@ -725,7 +726,7 @@ async fn spawn_mock_server_with_native_ready(
 
 #[tokio::test]
 async fn capture_and_persist_shadow_build_plan_artifact() {
-    let (socket_path, _tmp_server_dir, _repo_root) = spawn_mock_server().await;
+    let (socket_path, _tmp_server_dir, repo_root) = spawn_mock_server().await;
     let client = JvmHostClient::connect(&socket_path).await.unwrap();
 
     let bridge = JvmHostBridge::new();
@@ -938,6 +939,28 @@ async fn capture_and_persist_shadow_build_plan_artifact() {
         .invalidation_inputs
         .iter()
         .any(|input| input.kind == "settings-script" && input.exists));
+    let stable_build_id = stable_build_identity(&repo_root);
+    let stable = store
+        .load_plan(&stable_build_id)
+        .unwrap()
+        .expect("expected stable root-keyed shadow artifact");
+    assert_eq!(stable.plan.build_id, stable_build_id);
+    assert_eq!(
+        stable
+            .plan
+            .metadata
+            .get("sessionBuildId")
+            .map(String::as_str),
+        Some("build-it")
+    );
+    assert_eq!(
+        stable
+            .plan
+            .metadata
+            .get("stableBuildIdentity")
+            .map(String::as_str),
+        Some(stable_build_id.as_str())
+    );
 
     let lint_task = loaded
         .plan
@@ -1051,6 +1074,18 @@ async fn capture_and_persist_shadow_build_plan_artifact() {
         "expected no mismatches, got: {:?}",
         report.mismatches
     );
+}
+
+fn stable_build_identity(root: &std::path::Path) -> String {
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let mut hasher = Sha256::new();
+    hasher.update(root.to_string_lossy().as_bytes());
+    let digest = hasher.finalize();
+    let suffix = digest[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("stable-root-{suffix}")
 }
 
 #[tokio::test]

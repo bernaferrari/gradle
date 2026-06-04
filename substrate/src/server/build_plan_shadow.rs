@@ -396,6 +396,31 @@ pub async fn capture_and_persist_shadow_from_jvm(
         Some(&configuration_graph),
         "jvm-host-shadow",
     )?;
+    if let Some(stable_build_id) = stable_build_identity_from_plan(&plan) {
+        if stable_build_id != plan.build_id {
+            let mut stable_plan = plan.clone();
+            stable_plan
+                .metadata
+                .insert("sessionBuildId".to_string(), plan.build_id.clone());
+            stable_plan
+                .metadata
+                .insert("stableBuildIdentity".to_string(), stable_build_id.clone());
+            stable_plan.build_id = stable_build_id.clone();
+            let mut stable_configuration_graph = configuration_graph.clone();
+            stable_configuration_graph
+                .metadata
+                .insert("sessionBuildId".to_string(), plan.build_id.clone());
+            stable_configuration_graph
+                .metadata
+                .insert("stableBuildIdentity".to_string(), stable_build_id);
+            stable_configuration_graph.build_id = stable_plan.build_id.clone();
+            store.persist_plan_with_configuration_graph(
+                &stable_plan,
+                Some(&stable_configuration_graph),
+                "jvm-host-shadow",
+            )?;
+        }
+    }
     if let Some(artifact) = store.load_plan(build_id)? {
         let diff = diff_expected_vs_artifact(&plan, &artifact);
         if !diff.is_match() {
@@ -439,6 +464,30 @@ fn is_inline_shadow_source(source: &str) -> bool {
         source,
         "task-graph-listener-inline" | "finalized-execution-plan-inline" | "inline-build-plan"
     )
+}
+
+fn stable_build_identity_from_plan(plan: &CanonicalBuildPlan) -> Option<String> {
+    let root_dir = plan
+        .projects
+        .iter()
+        .find(|project| project.path == ":" && !project.project_dir.trim().is_empty())
+        .or_else(|| {
+            plan.projects
+                .iter()
+                .find(|project| !project.project_dir.trim().is_empty())
+        })?
+        .project_dir
+        .trim();
+    let root = Path::new(root_dir)
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(root_dir));
+    let mut hasher = Sha256::new();
+    hasher.update(root.to_string_lossy().as_bytes());
+    let digest = hasher.finalize();
+    Some(format!(
+        "stable-root-{}",
+        super::cache::hex::encode(&digest[..8])
+    ))
 }
 
 pub async fn canonical_plan_from_jvm_bridge(
