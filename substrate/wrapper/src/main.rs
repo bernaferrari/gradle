@@ -836,10 +836,13 @@ target/debug/gradle-substrate-runbuild."
             .to_string()
     })?;
     let mut cmd = Command::new(&runbuild);
+    let stable_build_id = stable_build_identity(project_dir);
     cmd.arg("--endpoint")
         .arg(&context.endpoint)
         .arg("--state-dir")
         .arg(&context.state_dir)
+        .arg("--build-id")
+        .arg(stable_build_id)
         .arg("--project-dir")
         .arg(project_dir)
         .stdin(Stdio::inherit())
@@ -856,6 +859,20 @@ target/debug/gradle-substrate-runbuild."
         )
     })?;
     Ok(direct_runbuild_exit_decision(status.code().unwrap_or(1)))
+}
+
+fn stable_build_identity(project_dir: &Path) -> String {
+    let root = project_dir
+        .canonicalize()
+        .unwrap_or_else(|_| project_dir.to_path_buf());
+    let mut hasher = Sha256::new();
+    hasher.update(root.to_string_lossy().as_bytes());
+    let digest = hasher.finalize();
+    let mut suffix = String::new();
+    for byte in &digest[..8] {
+        write!(&mut suffix, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    format!("stable-root-{suffix}")
 }
 
 fn direct_runbuild_exit_decision(code: i32) -> Option<i32> {
@@ -1314,6 +1331,18 @@ distributionSha256Sum=abc123
         assert_eq!(direct_runbuild_exit_decision(1), Some(1));
         assert_eq!(direct_runbuild_exit_decision(2), None);
         assert_eq!(direct_runbuild_exit_decision(127), Some(127));
+    }
+
+    #[test]
+    fn test_stable_build_identity_is_root_derived_and_sanitized() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = stable_build_identity(dir.path());
+        let b = stable_build_identity(dir.path());
+
+        assert_eq!(a, b);
+        assert!(a.starts_with("stable-root-"));
+        assert_eq!(a.len(), "stable-root-".len() + 16);
+        assert!(a.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
     }
 
     #[test]

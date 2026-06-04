@@ -420,12 +420,29 @@ Progress checkpoint, 2026-06-02:
   `cargo build -p gradle-wrapper -p gradle-substrate-daemon --bin
   gradle-substrate-runbuild` also passed.
 
+### Phase 8: Stable BuildGraph Identity
+
+Goal: make durable Rust graph snapshots addressable by a stable build identity
+instead of a per-session Gradle build UUID or project-directory scan.
+
+- The live build session id remains unchanged so active services can keep using
+  their existing per-build state keys.
+- JVM task-graph capture now writes both the existing session-keyed inline
+  build-plan shadow and a stable root-keyed shadow artifact with
+  `stableBuildIdentity`/`sessionBuildId` metadata.
+- The Rust wrapper computes the same canonical-root identity and passes it to
+  `gradle-substrate-runbuild` as `--build-id`.
+- `gradle-substrate-runbuild` resolves `--state-dir + --build-id` through the
+  shadow store's keyed artifact filename and validates the embedded artifact
+  identity before executing, avoiding direct warm project-dir scanning for this
+  path.
+
 ## Aggressive Near-Term Backlog
 
 1. Keep the just-fixed `rust-bridge:testClasses` gate green in CI.
 2. Make Copy/Sync/Delete/Symlink parity authoritative for supported file specs.
-3. Add stable build identity so direct warm artifact lookup no longer needs
-   `--project-dir` heuristics.
+3. Extend Phase 8 stable identity from selected-task shadows to the canonical
+   `BuildGraph` IR and all JVM capture paths.
 4. Promote Rust local build-cache entries toward shared/remote Gradle cache
    compatibility.
 5. Wire execution history and up-to-date checks to VFS deltas, not only mtimes.

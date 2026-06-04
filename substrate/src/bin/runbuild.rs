@@ -265,12 +265,33 @@ fn resolve_artifact_path(args: &Args) -> Result<PathBuf, Box<dyn std::error::Err
         .state_dir
         .as_ref()
         .ok_or("--state-dir is required when --artifact is not supplied")?;
+    let root = build_plan_shadow_root(state_dir);
+    if let Some(build_id) = &args.build_id {
+        let path = root.join(keyed_artifact_filename(build_id));
+        let artifact = read_artifact(&path).map_err(|error| {
+            format!(
+                "cached build-plan artifact for build id '{}' was not found under '{}': {}",
+                build_id,
+                root.display(),
+                error
+            )
+        })?;
+        if artifact.plan.build_id != *build_id {
+            return Err(format!(
+                "cached build-plan artifact '{}' contains build id '{}' but '{}' was requested",
+                path.display(),
+                artifact.plan.build_id,
+                build_id
+            )
+            .into());
+        }
+        return Ok(path);
+    }
     let project_dir = args
         .project_dir
         .as_ref()
         .ok_or("--project-dir is required when locating a cached artifact")?
         .canonicalize()?;
-    let root = build_plan_shadow_root(state_dir);
     let mut candidates = Vec::new();
     for entry in std::fs::read_dir(&root)? {
         let entry = entry?;
@@ -282,11 +303,6 @@ fn resolve_artifact_path(args: &Args) -> Result<PathBuf, Box<dyn std::error::Err
             Ok(artifact) => artifact,
             Err(_) => continue,
         };
-        if let Some(build_id) = &args.build_id {
-            if artifact.plan.build_id != *build_id {
-                continue;
-            }
-        }
         if artifact_matches_project(&artifact, &project_dir) {
             candidates.push((path, artifact.plan.build_id));
         }
@@ -321,6 +337,38 @@ fn build_plan_shadow_root(state_dir: &Path) -> PathBuf {
         .join("state")
         .join("config-cache")
         .join("build-plan-shadow")
+}
+
+fn keyed_artifact_filename(build_id: &str) -> String {
+    format!(
+        "{}-{}.json",
+        sanitize_key(build_id),
+        stable_short_hash(build_id)
+    )
+}
+
+fn sanitize_key(raw: &str) -> String {
+    raw.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn stable_short_hash(raw: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(raw.as_bytes());
+    let digest = hasher.finalize();
+    let mut hex = String::new();
+    for byte in &digest[..8] {
+        use std::fmt::Write;
+        write!(&mut hex, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    hex
 }
 
 fn artifact_matches_project(artifact: &ShadowArtifact, project_dir: &Path) -> bool {
@@ -814,6 +862,53 @@ fn now_ms() -> i64 {
 mod tests {
     use super::*;
 
+    fn test_args() -> Args {
+        Args {
+            endpoint: "tcp://127.0.0.1:1".to_string(),
+            artifact: None,
+            state_dir: None,
+            build_id: None,
+            project_dir: None,
+            max_parallelism: 12,
+            tasks: Vec::new(),
+            skip_invalidation: false,
+            changed_paths: Vec::new(),
+            changed_paths_file: None,
+        }
+    }
+
+    fn write_shadow_artifact(root: &Path, build_id: &str, project_dir: Option<&Path>) -> PathBuf {
+        std::fs::create_dir_all(root).unwrap();
+        let projects = project_dir
+            .map(|path| {
+                serde_json::json!([{
+                    "path": ":",
+                    "name": "root",
+                    "project_dir": path.to_string_lossy()
+                }])
+            })
+            .unwrap_or_else(|| serde_json::json!([]));
+        let path = root.join(keyed_artifact_filename(build_id));
+        let payload = serde_json::json!({
+            "plan": {
+                "schema_version": 4,
+                "build_id": build_id,
+                "projects": projects,
+                "tasks": [],
+                "dependencies": [],
+                "repositories": [],
+                "toolchain_requests": [],
+                "metadata": {}
+            },
+            "fingerprint_sha256": "unused-by-runbuild",
+            "input_fingerprints": [],
+            "stored_at_ms": 0,
+            "source": "test"
+        });
+        std::fs::write(&path, serde_json::to_vec_pretty(&payload).unwrap()).unwrap();
+        path
+    }
+
     fn artifact_with_path_input(
         path: &Path,
         fingerprints: Vec<ShadowInputFingerprint>,
@@ -1083,5 +1178,63 @@ mod tests {
         let error = validate_plan_dependencies(&artifact).unwrap_err();
 
         assert!(error.to_string().contains("depends on missing task"));
+    }
+
+    #[test]
+    fn resolves_cached_artifact_by_build_id_without_project_dir() {
+        let temp = tempfile::tempdir().unwrap();
+        let state_dir = temp.path().join("state-dir");
+        let root = state_dir.join("config-cache").join("build-plan-shadow");
+        let expected = write_shadow_artifact(&root, "stable-root:test", None);
+        let mut args = test_args();
+        args.state_dir = Some(state_dir);
+        args.build_id = Some("stable-root:test".to_string());
+
+        let path = resolve_artifact_path(&args).unwrap();
+
+        assert_eq!(path, expected);
+    }
+
+    #[test]
+    fn rejects_build_id_lookup_when_artifact_payload_identity_differs() {
+        let temp = tempfile::tempdir().unwrap();
+        let state_dir = temp.path().join("state-dir");
+        let root = state_dir.join("config-cache").join("build-plan-shadow");
+        let path = root.join(keyed_artifact_filename("stable-root:test"));
+        std::fs::create_dir_all(&root).unwrap();
+        let payload = serde_json::json!({
+            "plan": {
+                "build_id": "different",
+                "projects": [],
+                "tasks": []
+            },
+            "stored_at_ms": 0,
+            "input_fingerprints": []
+        });
+        std::fs::write(&path, serde_json::to_vec_pretty(&payload).unwrap()).unwrap();
+        let mut args = test_args();
+        args.state_dir = Some(state_dir);
+        args.build_id = Some("stable-root:test".to_string());
+
+        let error = resolve_artifact_path(&args).unwrap_err();
+
+        assert!(error.to_string().contains("contains build id 'different'"));
+    }
+
+    #[test]
+    fn preserves_project_dir_scan_when_build_id_is_absent() {
+        let temp = tempfile::tempdir().unwrap();
+        let state_dir = temp.path().join("state-dir");
+        let root = state_dir.join("config-cache").join("build-plan-shadow");
+        let project_dir = temp.path().join("project");
+        std::fs::create_dir_all(&project_dir).unwrap();
+        let expected = write_shadow_artifact(&root, "session-build", Some(&project_dir));
+        let mut args = test_args();
+        args.state_dir = Some(state_dir);
+        args.project_dir = Some(project_dir);
+
+        let path = resolve_artifact_path(&args).unwrap();
+
+        assert_eq!(path, expected);
     }
 }

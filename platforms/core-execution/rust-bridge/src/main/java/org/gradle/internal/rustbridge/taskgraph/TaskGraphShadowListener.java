@@ -18,6 +18,11 @@ import org.gradle.internal.service.scopes.ServiceScope;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -96,6 +101,21 @@ public class TaskGraphShadowListener implements TaskExecutionGraphListener {
                 inlinePlan.getTasksCount(),
                 refreshed
             );
+            String stableBuildId = stableBuildIdentity(tasks);
+            if (!stableBuildId.equals(buildId)) {
+                BuildPlan stablePlan = inlineBuildPlan(stableBuildId, tasks, taskContracts)
+                    .toBuilder()
+                    .putMetadata("sessionBuildId", buildId)
+                    .putMetadata("stableBuildIdentity", stableBuildId)
+                    .build();
+                boolean stableRefreshed = bootstrapClient.refreshBuildPlanShadow(stableBuildId, stablePlan);
+                LOGGER.info(
+                    "[substrate:taskgraph] stable inline build-plan refresh for {} sent {} task contracts (refreshed={})",
+                    stableBuildId,
+                    stablePlan.getTasksCount(),
+                    stableRefreshed
+                );
+            }
         }
 
         reporter.compareExecutionGraph(taskPaths, taskDependencies, buildId);
@@ -127,5 +147,38 @@ public class TaskGraphShadowListener implements TaskExecutionGraphListener {
         }
 
         return plan.build();
+    }
+
+    private static String stableBuildIdentity(List<Task> tasks) {
+        if (tasks.isEmpty()) {
+            return "stable-root-empty";
+        }
+        return stableBuildIdentityForRoot(tasks.get(0).getProject().getRootProject().getProjectDir());
+    }
+
+    static String stableBuildIdentityForRoot(File rootDir) {
+        byte[] digest = sha256(canonicalRootPath(rootDir));
+        StringBuilder suffix = new StringBuilder(16);
+        for (int i = 0; i < 8; i++) {
+            suffix.append(String.format("%02x", digest[i] & 0xff));
+        }
+        return "stable-root-" + suffix;
+    }
+
+    private static String canonicalRootPath(File rootDir) {
+        try {
+            return rootDir.getCanonicalPath();
+        } catch (IOException e) {
+            return rootDir.getAbsoluteFile().toPath().normalize().toString();
+        }
+    }
+
+    private static byte[] sha256(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return digest.digest(value.getBytes(StandardCharsets.UTF_8));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 digest is unavailable", e);
+        }
     }
 }
