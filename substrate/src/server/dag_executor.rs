@@ -12,6 +12,7 @@ use super::execution_kernel::{
     admit_build_plan, KernelAdmission, KernelBuildPlan, KernelDependencyConfiguration,
     KernelDependencyGraph, KernelDependencyRequest, KernelRepository, KernelTaskPlan,
 };
+use super::file_watch::VfsDeltaStore;
 use super::scopes::{BuildId, ScopeRegistry};
 use super::work::WorkerScheduler;
 
@@ -324,6 +325,34 @@ fn context_vfs_changed_paths(context_json: Option<&String>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn context_has_trusted_vfs_delta(context_json: Option<&String>) -> bool {
+    let Some(json) = context_json else {
+        return false;
+    };
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("trusted_vfs_delta")
+                .and_then(|flag| flag.as_bool())
+        })
+        .unwrap_or(false)
+}
+
+fn context_vfs_delta_since_ms(context_json: Option<&String>) -> i64 {
+    let Some(json) = context_json else {
+        return 0;
+    };
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("vfs_delta_since_ms")
+                .and_then(|timestamp| timestamp.as_i64())
+        })
+        .unwrap_or(0)
+}
+
 fn apply_vfs_delta_to_work_metadata(meta: &mut WorkMetadata, context_json: Option<&String>) {
     let changed_paths = context_vfs_changed_paths(context_json);
     if changed_paths.is_empty() {
@@ -558,6 +587,8 @@ pub struct DagExecutorServiceImpl {
     scope_registry: Option<Arc<ScopeRegistry>>,
     /// Local Rust build cache store used for authoritative output restore/store.
     local_cache: Option<Arc<LocalCacheStore>>,
+    /// Retained daemon file-watch/VFS deltas for fail-closed up-to-date admission.
+    vfs_delta_store: Option<Arc<VfsDeltaStore>>,
     request_counter: AtomicI64,
     builds_started: AtomicI64,
 }
@@ -574,6 +605,7 @@ impl Clone for DagExecutorServiceImpl {
             jvm_host_bridge: self.jvm_host_bridge.clone(),
             scope_registry: self.scope_registry.clone(),
             local_cache: self.local_cache.clone(),
+            vfs_delta_store: self.vfs_delta_store.clone(),
             request_counter: AtomicI64::new(self.request_counter.load(Ordering::Relaxed)),
             builds_started: AtomicI64::new(self.builds_started.load(Ordering::Relaxed)),
         }
@@ -608,6 +640,7 @@ impl DagExecutorServiceImpl {
             jvm_host_bridge: None,
             scope_registry: None,
             local_cache: None,
+            vfs_delta_store: None,
             request_counter: AtomicI64::new(0),
             builds_started: AtomicI64::new(0),
         }
@@ -626,6 +659,33 @@ impl DagExecutorServiceImpl {
     pub fn with_local_cache(mut self, local_cache: Arc<LocalCacheStore>) -> Self {
         self.local_cache = Some(local_cache);
         self
+    }
+
+    pub fn with_vfs_delta_store(mut self, vfs_delta_store: Arc<VfsDeltaStore>) -> Self {
+        self.vfs_delta_store = Some(vfs_delta_store);
+        self
+    }
+
+    fn merge_daemon_vfs_delta_context(&self, context_json: Option<String>) -> Option<String> {
+        if context_has_trusted_vfs_delta(context_json.as_ref()) {
+            return context_json;
+        }
+        let Some(store) = &self.vfs_delta_store else {
+            return context_json;
+        };
+
+        let since_ms = context_vfs_delta_since_ms(context_json.as_ref());
+        let changed_paths = store.changed_paths_since(since_ms);
+        if changed_paths.is_empty() {
+            return context_json;
+        }
+
+        let delta_context = serde_json::json!({
+            "trusted_vfs_delta": true,
+            "trusted_changed_paths": changed_paths,
+        })
+        .to_string();
+        merged_task_context(Some(&delta_context), context_json)
     }
 
     /// Dispatch an event to all registered dispatchers.
@@ -1536,10 +1596,10 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 let task_type = next.task_type.clone();
 
                 // Phase 2a: Check execution plan for UP-TO-DATE / FROM_CACHE.
-                let context_json = merged_task_context(
+                let context_json = self.merge_daemon_vfs_delta_context(merged_task_context(
                     task_contexts.get(&task_path),
                     self.task_execution_context(&build_id_str, &task_path),
-                );
+                ));
                 if context_is_no_source(context_json.as_ref()) {
                     self.notify_task_finished(Request::new(NotifyTaskFinishedRequest {
                         build_id: build_id_str.clone(),
@@ -1794,10 +1854,10 @@ impl DagExecutorService for DagExecutorServiceImpl {
                 }
 
                 let registry = Arc::clone(&self.executor_registry);
-                let context_for_task = merged_task_context(
+                let context_for_task = self.merge_daemon_vfs_delta_context(merged_task_context(
                     task_contexts.get(&task_path),
                     self.task_execution_context(&build_id_str, &task_path),
-                );
+                ));
                 let tx = result_tx.clone();
                 let allow_jvm_forwarding_for_task = allow_jvm_forwarding;
                 let jvm_host_bridge = self.jvm_host_bridge.clone();
@@ -2551,7 +2611,7 @@ mod tests {
     use crate::client::jvm_host::JvmHostClient;
     use crate::client::jvm_host_bridge::JvmHostBridge;
     use crate::proto::jvm_host_service_server::{JvmHostService, JvmHostServiceServer};
-    use crate::proto::RegisterTaskRequest;
+    use crate::proto::{FileChangeEvent, RegisterTaskRequest};
     use crate::server::task_graph;
     use tokio::net::UnixListener;
     use tonic::transport::Server;
@@ -4956,6 +5016,85 @@ mod tests {
         assert_eq!(
             resp.tasks_up_to_date, 0,
             "trusted VFS delta intersecting an input should force execution"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_run_build_daemon_vfs_delta_prevents_up_to_date_skip() {
+        let store = Arc::new(VfsDeltaStore::default());
+        let svc = make_svc().with_vfs_delta_store(Arc::clone(&store));
+
+        register_chain(
+            &svc,
+            "build-daemon-vfs-delta",
+            &[(":compileJava", "JavaCompile", &[])],
+        )
+        .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let base_ctx = serde_json::json!({
+            "work_identity": ":project:compileJava",
+            "display_name": ":project:compileJava",
+            "implementation_class": "org.gradle.api.tasks.compile.JavaCompile",
+            "input_properties": {"classpath": "libs/a.jar"},
+            "input_file_fingerprints": {"src/Main.java": "abc123"},
+            "caching_enabled": false,
+            "can_load_from_cache": false,
+            "up_to_date_enabled": true,
+            "has_previous_execution_state": true,
+            "rebuild_reasons": [],
+            "source_files": [dir.path().join("src").to_string_lossy()],
+            "target_dir": dir.path().join("classes").to_string_lossy()
+        });
+
+        let mut contexts1 = HashMap::new();
+        contexts1.insert(":compileJava".to_string(), base_ctx.to_string());
+
+        let _ = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "build-daemon-vfs-delta".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts1,
+                allow_jvm_forwarding: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        store.record(FileChangeEvent {
+            path: "src/Main.java".to_string(),
+            change_type: "MODIFIED".to_string(),
+            timestamp_ms: 1,
+            file_size: 0,
+            is_directory: false,
+        });
+
+        register_chain(
+            &svc,
+            "build-daemon-vfs-delta-2",
+            &[(":compileJava", "JavaCompile", &[])],
+        )
+        .await;
+
+        let mut contexts2 = HashMap::new();
+        contexts2.insert(":compileJava".to_string(), base_ctx.to_string());
+
+        let resp = svc
+            .run_build(Request::new(RunBuildRequest {
+                build_id: "build-daemon-vfs-delta-2".to_string(),
+                max_parallelism: 1,
+                task_filter: vec![],
+                task_contexts: contexts2,
+                allow_jvm_forwarding: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(
+            resp.tasks_up_to_date, 0,
+            "daemon-retained VFS delta intersecting an input should force execution"
         );
     }
 

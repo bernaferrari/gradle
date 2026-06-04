@@ -467,6 +467,10 @@ up-to-date correctness without falling back to broad mtime-only validation.
 - Trusted deltas that intersect a task input fingerprint add a rebuild reason
   and prevent an otherwise up-to-date skip; unrelated deltas leave the work
   fingerprint untouched so history can still produce `UP_TO_DATE`.
+- Daemon-managed file-watch events now retain a shared VFS delta store and feed
+  `DagExecutor` admission when the caller has not supplied an explicit trusted
+  delta. This makes live daemon watch state participate in the same fail-closed
+  up-to-date decision path as direct `runbuild` changed paths.
 - Evidence: `cargo test -p gradle-substrate-daemon --bin
   gradle-substrate-runbuild` passed 15/15, and `cargo test -p
   gradle-substrate-daemon --lib vfs_delta` passed 7 focused tests, including a
@@ -476,8 +480,8 @@ up-to-date correctness without falling back to broad mtime-only validation.
 
 1. Keep the just-fixed `rust-bridge:testClasses` gate green in CI.
 2. Make Copy/Sync/Delete/Symlink parity authoritative for supported file specs.
-3. Expand VFS-delta history from direct-run changed paths to daemon-managed
-   file-watch sessions.
+3. Persist VFS-delta watermarks into execution history so daemon restart and
+   multi-build-session admission can avoid replaying stale retained watch events.
 4. Promote Rust local build-cache entries toward shared/remote Gradle cache
    compatibility.
 5. Make direct execution consume richer `BuildGraph` node metadata directly,
