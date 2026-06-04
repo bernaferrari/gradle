@@ -454,20 +454,38 @@ instead of a per-session Gradle build UUID or project-directory scan.
   capture_and_persist_shadow_build_plan_artifact` passed with assertions for
   both session-keyed and stable root-keyed artifacts.
 
+### Phase 9: VFS-Backed Execution History
+
+Goal: let direct Rust execution use trusted file-watch/VFS deltas to preserve
+up-to-date correctness without falling back to broad mtime-only validation.
+
+- `gradle-substrate-runbuild` now forwards trusted changed paths from
+  `--changed-path` / `--changed-paths-file` as per-task
+  `trusted_vfs_delta` context.
+- `DagExecutor` merges those direct-run contexts into the hydrated shadow task
+  context instead of replacing work metadata.
+- Trusted deltas that intersect a task input fingerprint add a rebuild reason
+  and prevent an otherwise up-to-date skip; unrelated deltas leave the work
+  fingerprint untouched so history can still produce `UP_TO_DATE`.
+- Evidence: `cargo test -p gradle-substrate-daemon --bin
+  gradle-substrate-runbuild` passed 15/15, and `cargo test -p
+  gradle-substrate-daemon --lib vfs_delta` passed 7 focused tests, including a
+  `RunBuild` assertion that input-intersecting VFS deltas force execution.
+
 ## Aggressive Near-Term Backlog
 
 1. Keep the just-fixed `rust-bridge:testClasses` gate green in CI.
 2. Make Copy/Sync/Delete/Symlink parity authoritative for supported file specs.
-3. Wire execution history and up-to-date checks to VFS deltas, not only mtimes.
+3. Expand VFS-delta history from direct-run changed paths to daemon-managed
+   file-watch sessions.
 4. Promote Rust local build-cache entries toward shared/remote Gradle cache
    compatibility.
 5. Make direct execution consume richer `BuildGraph` node metadata directly,
    not only its task closure.
 6. Expand dogfood zero-forward support for Java-library and Spring-style builds.
 7. Add Rust dependency-resolution graph parity for file and static Maven repos.
-8. Create a canonical Rust `BuildGraph` IR and make JVM capture write it.
-9. Add a strict unsupported-feature registry with counts in every dogfood run.
-10. Delete or quarantine noisy generated Rust/docs that obscure real ownership.
+8. Add a strict unsupported-feature registry with counts in every dogfood run.
+9. Delete or quarantine noisy generated Rust/docs that obscure real ownership.
 
 ## Metrics
 
