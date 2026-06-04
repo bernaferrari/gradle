@@ -436,13 +436,19 @@ instead of a per-session Gradle build UUID or project-directory scan.
   shadow store's keyed artifact filename and validates the embedded artifact
   identity before executing, avoiding direct warm project-dir scanning for this
   path.
+- A canonical Rust `BuildGraph` IR now derives project nodes, task nodes,
+  ordering edges, and dependency requests from the canonical build-plan IR.
+  Build-plan shadow artifacts persist the graph plus a graph fingerprint, and
+  load-time validation quarantines schema, build-id, and fingerprint
+  mismatches while preserving compatibility with older graphless artifacts.
 
 ## Aggressive Near-Term Backlog
 
 1. Keep the just-fixed `rust-bridge:testClasses` gate green in CI.
 2. Make Copy/Sync/Delete/Symlink parity authoritative for supported file specs.
-3. Extend Phase 8 stable identity from selected-task shadows to the canonical
-   `BuildGraph` IR and all JVM capture paths.
+3. Extend Phase 8 stable identity to every JVM capture path and make direct
+   execution consume `BuildGraph` directly instead of deriving from
+   `BuildPlan`.
 4. Promote Rust local build-cache entries toward shared/remote Gradle cache
    compatibility.
 5. Wire execution history and up-to-date checks to VFS deltas, not only mtimes.

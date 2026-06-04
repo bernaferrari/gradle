@@ -744,6 +744,24 @@ async fn capture_and_persist_shadow_build_plan_artifact() {
     assert_eq!(loaded.plan.build_id, "build-it");
     assert_eq!(loaded.source, "jvm-host-shadow");
     assert!(!loaded.fingerprint_sha256.is_empty());
+    let build_graph = loaded
+        .build_graph
+        .as_ref()
+        .expect("expected persisted Phase 8 build graph");
+    assert!(!loaded.build_graph_fingerprint_sha256.is_empty());
+    assert_eq!(build_graph.build_id, "build-it");
+    assert!(build_graph
+        .tasks
+        .iter()
+        .any(|task| task.path == ":app:compileJava"));
+    assert!(build_graph
+        .edges
+        .iter()
+        .any(|edge| edge.from == ":app:compileJava" && edge.to == ":app:check"));
+    assert!(build_graph
+        .dependency_requests
+        .iter()
+        .any(|dependency| dependency.configuration == "compileClasspath"));
     assert_eq!(loaded.plan.toolchains.len(), 1);
     assert_eq!(loaded.plan.toolchains[0].version, "17");
     assert!(
