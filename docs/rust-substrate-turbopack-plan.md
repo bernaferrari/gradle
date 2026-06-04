@@ -508,13 +508,18 @@ up-to-date correctness without falling back to broad mtime-only validation.
   Repository-graph evidence: `python3 -m unittest
   tools.corpus_runner.test_run` passed 48/48 with static Maven repository and
   repository-drift coverage.
+- File-operation authority was hardened for followed directory symlink cycles:
+  the Rust `Delete` executor now tracks canonical directories while descending
+  and fails closed instead of recursing through a cycle. This aligns Delete with
+  the existing Copy cycle boundary for supported file specs.
+  File-operation evidence: `cargo test -p gradle-substrate-daemon --lib
+  task_executor::delete` passed 9/9 focused tests.
 
 ## Aggressive Near-Term Backlog
 
 1. Keep the just-fixed `rust-bridge:testClasses` gate green in CI.
-2. Make Copy/Sync/Delete/Symlink parity authoritative for supported file specs.
-3. Expand dogfood zero-forward support for Java-library and Spring-style builds.
-4. Delete or quarantine noisy generated Rust/docs that obscure real ownership.
+2. Expand dogfood zero-forward support for Java-library and Spring-style builds.
+3. Delete or quarantine noisy generated Rust/docs that obscure real ownership.
 
 ## Metrics
 
