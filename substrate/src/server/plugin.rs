@@ -233,7 +233,7 @@ impl PluginServiceImpl {
 
         let mut queue: std::collections::VecDeque<String> = in_degree
             .iter()
-            .filter(|(_, &deg)| deg == 0)
+            .filter(|&(_, &deg)| deg == 0)
             .map(|(id, _)| id.clone())
             .collect();
 

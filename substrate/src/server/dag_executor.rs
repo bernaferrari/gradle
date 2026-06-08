@@ -1,7 +1,7 @@
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use dashmap::DashMap;
 use tonic::{Request, Response, Status};
@@ -9,8 +9,8 @@ use tonic::{Request, Response, Status};
 use super::dependency_solver::graph_builder;
 use super::event_dispatcher::EventDispatcher;
 use super::execution_kernel::{
-    admit_build_plan, KernelAdmission, KernelBuildPlan, KernelDependencyConfiguration,
-    KernelDependencyGraph, KernelDependencyRequest, KernelRepository, KernelTaskPlan,
+    KernelAdmission, KernelBuildPlan, KernelDependencyConfiguration, KernelDependencyGraph,
+    KernelDependencyRequest, KernelRepository, KernelTaskPlan, admit_build_plan,
 };
 use super::file_watch::VfsDeltaStore;
 use super::scopes::{BuildId, ScopeRegistry};
@@ -18,17 +18,16 @@ use super::work::WorkerScheduler;
 
 use crate::client::jvm_host_bridge::SharedJvmHostBridge;
 use crate::proto::{
-    dag_executor_service_server::DagExecutorService,
+    AwaitBuildCompletionRequest, AwaitBuildCompletionResponse, BuildCachePackFile,
+    BuildEventMessage, CancelBuildRequest, CancelBuildResponse, GetBuildStatusRequest,
+    GetBuildStatusResponse, GetNextTaskRequest, GetNextTaskResponse, NotifyTaskFinishedRequest,
+    NotifyTaskFinishedResponse, NotifyTaskStartedRequest, NotifyTaskStartedResponse,
+    PackCacheEntryRequest, PredictedOutcome, RecordOutcomeRequest, ResolveExecutionPlanRequest,
+    ResolvePlanRequest, RunBuildRequest, RunBuildResponse, StartBuildRequest, StartBuildResponse,
+    TaskExecutionDetail, TaskFinishedRequest, TaskStartedRequest, TaskStatusEntry,
+    UnpackCacheEntryRequest, WorkMetadata, dag_executor_service_server::DagExecutorService,
     execution_plan_service_server::ExecutionPlanService,
-    task_graph_service_server::TaskGraphService, AwaitBuildCompletionRequest,
-    AwaitBuildCompletionResponse, BuildCachePackFile, BuildEventMessage, CancelBuildRequest,
-    CancelBuildResponse, GetBuildStatusRequest, GetBuildStatusResponse, GetNextTaskRequest,
-    GetNextTaskResponse, NotifyTaskFinishedRequest, NotifyTaskFinishedResponse,
-    NotifyTaskStartedRequest, NotifyTaskStartedResponse, PackCacheEntryRequest, PredictedOutcome,
-    RecordOutcomeRequest, ResolveExecutionPlanRequest, ResolvePlanRequest, RunBuildRequest,
-    RunBuildResponse, StartBuildRequest, StartBuildResponse, TaskExecutionDetail,
-    TaskFinishedRequest, TaskStartedRequest, TaskStatusEntry, UnpackCacheEntryRequest,
-    WorkMetadata,
+    task_graph_service_server::TaskGraphService,
 };
 use crate::server::cache::LocalCacheStore;
 use crate::server::cache_packaging::BuildCachePackagingServiceImpl;
@@ -296,6 +295,18 @@ fn merged_task_context(
         (None, Some(base_json)) => Some(base_json),
         (None, None) => None,
     }
+}
+
+fn merged_slot_task_context(
+    override_json: Option<&String>,
+    slot_context_json: &str,
+) -> Option<String> {
+    let base_json = if slot_context_json.is_empty() {
+        None
+    } else {
+        Some(slot_context_json.to_string())
+    };
+    merged_task_context(override_json, base_json)
 }
 
 fn context_vfs_changed_paths(context_json: Option<&String>) -> Vec<String> {
@@ -1164,14 +1175,10 @@ impl DagExecutorServiceImpl {
             .tasks
             .values()
             .map(|slot| {
-                let execution_context_json =
-                    task_contexts.get(&slot.task_path).cloned().or_else(|| {
-                        if slot.execution_context_json.is_empty() {
-                            None
-                        } else {
-                            Some(slot.execution_context_json.clone())
-                        }
-                    });
+                let execution_context_json = merged_slot_task_context(
+                    task_contexts.get(&slot.task_path),
+                    &slot.execution_context_json,
+                );
                 KernelTaskPlan {
                     task_path: slot.task_path.clone(),
                     task_type: slot.task_type.clone(),
@@ -2144,11 +2151,11 @@ impl DagExecutorService for DagExecutorServiceImpl {
                     if let Some(execution) = self.builds.get(&BuildId::from(build_id_for_meta)) {
                         if let Some(slot) = execution.tasks.get(&task_path_for_meta) {
                             if let Some(ref meta) = slot.work_metadata {
-                                let cache_context_json = task_contexts
-                                    .get(&task_path_for_meta)
-                                    .cloned()
-                                    .filter(|context| !context.is_empty())
-                                    .unwrap_or_else(|| slot.execution_context_json.clone());
+                                let cache_context_json = merged_slot_task_context(
+                                    task_contexts.get(&task_path_for_meta),
+                                    &slot.execution_context_json,
+                                )
+                                .unwrap_or_else(|| slot.execution_context_json.clone());
                                 let refreshed_meta =
                                     refreshed_work_metadata(meta, &slot.execution_context_json);
                                 let predicted = slot.predicted_outcome;
@@ -2891,8 +2898,10 @@ mod tests {
         .expect("dependency graph");
 
         assert!(graph.configurations[0].dependencies.is_empty());
-        assert!(graph.configurations[0].unsupported_features[0]
-            .contains("unsupported dependency notation"));
+        assert!(
+            graph.configurations[0].unsupported_features[0]
+                .contains("unsupported dependency notation")
+        );
     }
 
     #[test]
@@ -2939,8 +2948,10 @@ mod tests {
 
         assert!(graph.configurations[0].dependencies.is_empty());
         assert!(graph.configurations[0].constraints.is_empty());
-        assert!(graph.configurations[0].unsupported_features[0]
-            .contains("unsupported dependency kind 'platform'"));
+        assert!(
+            graph.configurations[0].unsupported_features[0]
+                .contains("unsupported dependency kind 'platform'")
+        );
     }
 
     #[test]
@@ -4966,12 +4977,13 @@ mod tests {
         assert_eq!(resp.tasks_failed, 1);
         assert_eq!(resp.tasks_skipped, 1);
         assert_eq!(resp.task_details.len(), 2);
-        assert!(resp
-            .task_details
-            .iter()
-            .any(|detail| detail.task_path == ":downstream"
-                && detail.outcome == "SKIPPED"
-                && detail.execution_mode == "skipped"));
+        assert!(
+            resp.task_details
+                .iter()
+                .any(|detail| detail.task_path == ":downstream"
+                    && detail.outcome == "SKIPPED"
+                    && detail.execution_mode == "skipped")
+        );
         assert!(!resp.failure_message.is_empty());
     }
 
@@ -5389,9 +5401,10 @@ mod tests {
             .into_inner();
 
         assert_eq!(resp.final_status, "FAILED");
-        assert!(resp
-            .failure_message
-            .contains("BuildGraph task metadata mismatch"));
+        assert!(
+            resp.failure_message
+                .contains("BuildGraph task metadata mismatch")
+        );
     }
 
     /// Test that UP-TO-DATE count is reflected in RunBuildResponse.
@@ -6084,6 +6097,37 @@ mod tests {
     }
 
     #[test]
+    fn test_direct_context_does_not_replace_shadow_task_options_for_kernel_admission() {
+        let shadow_context = serde_json::json!({
+            "work_identity": ":runTool",
+            "options": {
+                "classpath": "/repo/build/classes/java/main",
+                "main_class": "example.Tool"
+            }
+        })
+        .to_string();
+        let direct_context = serde_json::json!({
+            "build_graph_task": {
+                "path": ":runTool",
+                "implementation_id": "org.gradle.api.tasks.JavaExec"
+            },
+            "build_graph_dependencies": [":classes"]
+        })
+        .to_string();
+
+        let merged = merged_slot_task_context(Some(&direct_context), &shadow_context).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&merged).unwrap();
+
+        assert_eq!(value["options"]["main_class"], "example.Tool");
+        assert_eq!(
+            value["options"]["classpath"],
+            "/repo/build/classes/java/main"
+        );
+        assert_eq!(value["build_graph_task"]["path"], ":runTool");
+        assert_eq!(value["build_graph_dependencies"][0], ":classes");
+    }
+
+    #[test]
     fn test_vfs_delta_intersecting_input_forces_rebuild_reason() {
         let context = serde_json::json!({
             "trusted_vfs_delta": true,
@@ -6105,10 +6149,11 @@ mod tests {
 
         apply_vfs_delta_to_work_metadata(&mut meta, Some(&context));
 
-        assert!(meta
-            .rebuild_reasons
-            .iter()
-            .any(|reason| reason.contains("VFS delta")));
+        assert!(
+            meta.rebuild_reasons
+                .iter()
+                .any(|reason| reason.contains("VFS delta"))
+        );
     }
 
     #[test]

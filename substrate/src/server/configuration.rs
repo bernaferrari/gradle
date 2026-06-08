@@ -112,6 +112,10 @@ pub struct ConfigurationServiceImpl {
     /// per-project in Gradle; they apply to the whole build.
     command_line_props: DashMap<String, String>,
 
+    /// Global system properties (`-D` flags). These are modeled in-process
+    /// instead of mutating the OS environment under Rust 2024.
+    system_props: DashMap<String, String>,
+
     /// Configuration cache keyed by project path.
     config_cache: DashMap<String, ConfigCacheEntry>,
 
@@ -361,6 +365,7 @@ impl ConfigurationServiceImpl {
         Self {
             projects: DashMap::new(),
             command_line_props: DashMap::new(),
+            system_props: DashMap::new(),
             config_cache: DashMap::new(),
             property_resolutions: AtomicI64::new(0),
             property_hits: AtomicI64::new(0),
@@ -426,6 +431,12 @@ impl ConfigurationServiceImpl {
         let mut sys_prop = String::with_capacity(12 + property_name.len());
         sys_prop.push_str("org.gradle.");
         sys_prop.push_str(property_name);
+        if let Some(value) = self.system_props.get(property_name) {
+            return Some((value.clone(), PropertySource::SystemProperty.as_str().to_string()));
+        }
+        if let Some(value) = self.system_props.get(&sys_prop) {
+            return Some((value.clone(), PropertySource::SystemProperty.as_str().to_string()));
+        }
         if let Ok(value) = std::env::var(&sys_prop) {
             return Some((value, PropertySource::SystemProperty.as_str().to_string()));
         }
@@ -662,10 +673,12 @@ impl ConfigurationService for ConfigurationServiceImpl {
         // System properties – set via env var.
         if target == PropertySource::SystemProperty {
             let env_key = format!("org.gradle.{}", req.property_name);
-            let prev = std::env::var(&env_key).ok();
+            let prev = self
+                .system_props
+                .insert(req.property_name.clone(), req.value.clone())
+                .or_else(|| std::env::var(&env_key).ok());
             let had_previous = prev.is_some();
             let previous_value = prev.unwrap_or_default();
-            std::env::set_var(&env_key, &req.value);
             return Ok(Response::new(SetPropertyResponse {
                 success: true,
                 previous_value,
@@ -918,6 +931,21 @@ mod tests {
 
     // -- helpers ------------------------------------------------------------
 
+    fn set_test_env(key: &str, value: &str) {
+        // SAFETY: these unit tests mutate process environment only within the
+        // current test process to exercise Gradle-compatible env lookup.
+        unsafe {
+            std::env::set_var(key, value);
+        }
+    }
+
+    fn remove_test_env(key: &str) {
+        // SAFETY: paired cleanup for test-only process environment mutation.
+        unsafe {
+            std::env::remove_var(key);
+        }
+    }
+
     async fn register_test_project(
         svc: &ConfigurationServiceImpl,
         path: &str,
@@ -1128,16 +1156,16 @@ mod tests {
         let svc = ConfigurationServiceImpl::new();
         register_test_project(&svc, ":app", HashMap::new()).await;
 
-        std::env::set_var("ORG_GRADLE_PROJECT_MY_PROP", "env_val");
-        std::env::set_var("org.gradle.my.prop", "sys_val");
+        set_test_env("ORG_GRADLE_PROJECT_MY_PROP", "env_val");
+        set_test_env("org.gradle.my.prop", "sys_val");
 
         let resp = resolve_via_get(&svc, ":app", "my.prop").await;
         assert!(resp.found);
         assert_eq!(resp.value, "sys_val");
         assert_eq!(resp.source, "system_property");
 
-        std::env::remove_var("ORG_GRADLE_PROJECT_MY_PROP");
-        std::env::remove_var("org.gradle.my.prop");
+        remove_test_env("ORG_GRADLE_PROJECT_MY_PROP");
+        remove_test_env("org.gradle.my.prop");
     }
 
     #[tokio::test]
@@ -1145,10 +1173,10 @@ mod tests {
         let svc = ConfigurationServiceImpl::new();
         register_test_project(&svc, ":app", HashMap::new()).await;
 
-        std::env::set_var("ORG_GRADLE_PROJECT_CUSTOM_PROP", "env_value");
+        set_test_env("ORG_GRADLE_PROJECT_CUSTOM_PROP", "env_value");
         let resp = resolve_via_get(&svc, ":app", "custom.prop").await;
 
-        std::env::remove_var("ORG_GRADLE_PROJECT_CUSTOM_PROP");
+        remove_test_env("ORG_GRADLE_PROJECT_CUSTOM_PROP");
 
         assert!(resp.found);
         assert_eq!(resp.value, "env_value");
@@ -1160,10 +1188,10 @@ mod tests {
         let svc = ConfigurationServiceImpl::new();
         register_test_project(&svc, ":app", HashMap::new()).await;
 
-        std::env::set_var("GRADLE_PROPERTY_CUSTOM_PROP", "env_value");
+        set_test_env("GRADLE_PROPERTY_CUSTOM_PROP", "env_value");
         let resp = resolve_via_get(&svc, ":app", "custom.prop").await;
 
-        std::env::remove_var("GRADLE_PROPERTY_CUSTOM_PROP");
+        remove_test_env("GRADLE_PROPERTY_CUSTOM_PROP");
 
         assert!(resp.found);
         assert_eq!(resp.value, "env_value");
@@ -1615,18 +1643,18 @@ mod tests {
         assert_eq!(resp.source, "gradle_properties");
 
         // Now add env var.
-        std::env::set_var("ORG_GRADLE_PROJECT_PROP", "env_variable");
+        set_test_env("ORG_GRADLE_PROJECT_PROP", "env_variable");
         let resp = resolve_via_get(&svc, ":app", "prop").await;
         assert_eq!(resp.value, "env_variable");
         assert_eq!(resp.source, "env_variable");
-        std::env::remove_var("ORG_GRADLE_PROJECT_PROP");
+        remove_test_env("ORG_GRADLE_PROJECT_PROP");
 
         // Add system property.
-        std::env::set_var("org.gradle.prop", "system_property");
+        set_test_env("org.gradle.prop", "system_property");
         let resp = resolve_via_get(&svc, ":app", "prop").await;
         assert_eq!(resp.value, "system_property");
         assert_eq!(resp.source, "system_property");
-        std::env::remove_var("org.gradle.prop");
+        remove_test_env("org.gradle.prop");
 
         // Add command-line (highest).
         svc.set_command_line_properties(

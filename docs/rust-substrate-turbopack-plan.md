@@ -1,7 +1,7 @@
 # Rust Substrate Turbopack-Style Plan
 
 Status: aggressive migration plan
-Last updated: 2026-06-04
+Last updated: 2026-06-08
 
 ## Reference Model
 
@@ -60,6 +60,8 @@ Good:
 - Several core file-operation and execution-path slices already execute in Rust.
 - Direct warm build-plan execution exists as the highest-value proof: one JVM
   capture can feed repeated zero-forward Rust executions for supported builds.
+- The Rust workspace now builds with Rust 1.96.0, edition 2024, and a refreshed
+  latest-compatible Cargo lockfile.
 - Fail-closed boundaries are present for unsupported semantics, which is better
   than silent approximation.
 
@@ -530,10 +532,14 @@ up-to-date correctness without falling back to broad mtime-only validation.
   `build/gradle-under-test/bin/gradle`. This prevents accidental inactive
   wrapper runs that report `substrate-inactive: run-build marker missing`.
 - Direct-warm dogfood execution uses the same Gradle-under-test discovery path.
-  The newly added local Java application/start-scripts fixture passed direct
-  warm execution at `build/direct-warm-java-application-20260604`: 15 tasks,
-  `build-plan-shadow`, zero JVM forwards, and 436 ms reported Rust RunBuild
-  duration after one capture.
+  The Rust 2024 run at `build/direct-warm-dogfood-20260608-rust2024` passed
+  7/7 supported local dogfood projects with zero JVM forwards: Java library,
+  Java multiproject, Java application/start-scripts/distributions, external
+  JUnit, external BOM/conflict, JavaExec process launch, and Javadoc process
+  launch. Every direct replay used `build-plan-shadow`; total direct warm wall
+  time was 4886.8 ms. This run also proves the JavaExec direct replay gap is
+  closed by merging direct build-graph metadata into the hydrated shadow task
+  context before kernel admission.
 - Review-noise cleanup removed tracked Rust `.bak` source duplicates under
   `substrate/src/server` and `substrate/src/server/task_executor`. These files
   were not referenced and duplicated live modules, so deleting them reduces
