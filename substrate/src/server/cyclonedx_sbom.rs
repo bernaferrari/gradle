@@ -1835,7 +1835,7 @@ struct PomComponentMetadataDocument {
 
 fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
     let mut reader = quick_xml::Reader::from_str(pom);
-    reader.trim_text(true);
+    reader.config_mut().trim_text(true);
 
     let mut metadata = PomComponentMetadata::default();
     let mut parent_relative_path = None;
@@ -1866,7 +1866,7 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
                 }
             }
             Ok(Event::Text(event)) => {
-                let text = normalize_pom_text(&event.unescape().unwrap_or_default());
+                let text = normalize_pom_text(&decode_quick_xml_text(&event));
                 if text.is_empty() {
                     buf.clear();
                     continue;
@@ -1986,6 +1986,15 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
         parent_group,
         parent_artifact,
         parent_version,
+    }
+}
+
+fn decode_quick_xml_text(event: &quick_xml::events::BytesText<'_>) -> String {
+    match event.decode() {
+        Ok(decoded) => quick_xml::escape::unescape(decoded.as_ref())
+            .map(|text| text.into_owned())
+            .unwrap_or_else(|_| decoded.into_owned()),
+        Err(_) => String::new(),
     }
 }
 

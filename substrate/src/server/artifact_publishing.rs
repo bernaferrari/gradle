@@ -150,15 +150,15 @@ impl ArtifactPublishingServiceImpl {
         let checksum_uploads = [
             (
                 format!("{}.md5", base_url),
-                format!("{:x}", md5::Md5::digest(&data)),
+                hex::encode(md5::Md5::digest(&data)),
             ),
             (
                 format!("{}.sha1", base_url),
-                format!("{:x}", sha1::Sha1::digest(&data)),
+                hex::encode(sha1::Sha1::digest(&data)),
             ),
             (
                 format!("{}.sha256", base_url),
-                format!("{:x}", sha2::Sha256::digest(&data)),
+                hex::encode(sha2::Sha256::digest(&data)),
             ),
         ];
 
@@ -419,9 +419,9 @@ impl ArtifactPublishingService for ArtifactPublishingServiceImpl {
             let (md5, sha1, sha256) =
                 if !file_path.is_empty() && std::path::Path::new(file_path).exists() {
                     let content = std::fs::read(file_path).unwrap_or_default();
-                    let md5_hash = format!("{:x}", md5::Md5::digest(&content));
-                    let sha1_hash = format!("{:x}", sha1::Sha1::digest(&content));
-                    let sha256_hash = format!("{:x}", sha2::Sha256::digest(&content));
+                    let md5_hash = hex::encode(md5::Md5::digest(&content));
+                    let sha1_hash = hex::encode(sha1::Sha1::digest(&content));
+                    let sha256_hash = hex::encode(sha2::Sha256::digest(&content));
                     (md5_hash, sha1_hash, sha256_hash)
                 } else {
                     (String::new(), String::new(), String::new())
@@ -936,21 +936,15 @@ mod tests {
         // Verify the MD5 matches expected value for the known content
         assert_eq!(
             checksums.md5,
-            format!("{:x}", md5::Md5::digest(b"artifact content for publishing"))
+            hex::encode(md5::Md5::digest(b"artifact content for publishing"))
         );
         assert_eq!(
             checksums.sha1,
-            format!(
-                "{:x}",
-                sha1::Sha1::digest(b"artifact content for publishing")
-            )
+            hex::encode(sha1::Sha1::digest(b"artifact content for publishing"))
         );
         assert_eq!(
             checksums.sha256,
-            format!(
-                "{:x}",
-                sha2::Sha256::digest(b"artifact content for publishing")
-            )
+            hex::encode(sha2::Sha256::digest(b"artifact content for publishing"))
         );
 
         // Also confirm the status reflects the completed upload

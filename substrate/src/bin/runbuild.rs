@@ -1053,7 +1053,7 @@ fn fingerprint_directory(path: &Path) -> Result<(u64, i64, String), Box<dyn std:
     Ok((
         total_size,
         newest_modified_ms,
-        format!("{:x}", hasher.finalize()),
+        hex::encode(hasher.finalize()),
     ))
 }
 
@@ -1081,7 +1081,7 @@ fn collect_directory_files(
 
 fn sha256_file(path: &Path) -> Result<String, Box<dyn std::error::Error>> {
     let bytes = std::fs::read(path)?;
-    Ok(format!("{:x}", Sha256::digest(bytes)))
+    Ok(hex::encode(Sha256::digest(bytes)))
 }
 
 fn metadata_modified_ms(metadata: &std::fs::Metadata) -> Result<i64, Box<dyn std::error::Error>> {

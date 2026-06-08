@@ -361,7 +361,7 @@ fn bench_hashing(c: &mut Criterion) {
             use sha2::{Digest, Sha256};
             let mut hasher = Sha256::new();
             hasher.update(black_box(&small_data));
-            black_box(format!("{:x}", hasher.finalize()));
+            black_box(hex::encode(hasher.finalize()));
         });
     });
 
@@ -370,7 +370,7 @@ fn bench_hashing(c: &mut Criterion) {
             use sha2::{Digest, Sha256};
             let mut hasher = Sha256::new();
             hasher.update(black_box(&large_data));
-            black_box(format!("{:x}", hasher.finalize()));
+            black_box(hex::encode(hasher.finalize()));
         });
     });
 
@@ -391,7 +391,7 @@ fn bench_hashing(c: &mut Criterion) {
             use md5::Digest;
             let mut hasher = md5::Md5::new();
             hasher.update(black_box(&small_data));
-            black_box(format!("{:x}", hasher.finalize()));
+            black_box(hex::encode(hasher.finalize()));
         });
     });
 
@@ -400,7 +400,7 @@ fn bench_hashing(c: &mut Criterion) {
             use md5::Digest;
             let mut hasher = md5::Md5::new();
             hasher.update(black_box(&large_data));
-            black_box(format!("{:x}", hasher.finalize()));
+            black_box(hex::encode(hasher.finalize()));
         });
     });
 }

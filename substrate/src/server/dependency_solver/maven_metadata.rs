@@ -1,6 +1,6 @@
 //! Maven metadata parsing for Gradle-compatible dependency resolution.
 
-use quick_xml::events::Event;
+use quick_xml::events::{BytesText, Event};
 
 /// Parsed `maven-metadata.xml`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,7 +30,7 @@ pub(crate) struct MavenSnapshot {
 
 pub(crate) fn parse_maven_metadata(xml: &str) -> Result<MavenMetadata, String> {
     let mut reader = quick_xml::Reader::from_str(xml);
-    reader.trim_text(true);
+    reader.config_mut().trim_text(true);
 
     let mut metadata = MavenMetadata {
         group_id: String::new(),
@@ -82,7 +82,7 @@ pub(crate) fn parse_maven_metadata(xml: &str) -> Result<MavenMetadata, String> {
                     .to_string();
             }
             Ok(Event::Text(ref e)) => {
-                let text = e.unescape().unwrap_or_default().to_string();
+                let text = decode_text(e);
                 if in_versions && current_tag == "version" {
                     metadata.versioning.versions.push(text);
                 } else if in_snapshot {
@@ -122,6 +122,15 @@ pub(crate) fn parse_maven_metadata(xml: &str) -> Result<MavenMetadata, String> {
     }
 
     Ok(metadata)
+}
+
+fn decode_text(event: &BytesText<'_>) -> String {
+    match event.decode() {
+        Ok(decoded) => quick_xml::escape::unescape(decoded.as_ref())
+            .map(|text| text.into_owned())
+            .unwrap_or_else(|_| decoded.into_owned()),
+        Err(_) => String::new(),
+    }
 }
 
 /// Resolve a Maven `-SNAPSHOT` selector from parsed metadata.

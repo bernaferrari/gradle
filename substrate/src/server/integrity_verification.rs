@@ -116,17 +116,17 @@ impl ChecksumAlgorithm {
             ChecksumAlgorithm::Sha256 => {
                 let mut hasher = Sha256::new();
                 hasher.update(data);
-                format!("{:x}", hasher.finalize())
+                hex::encode(hasher.finalize())
             }
             ChecksumAlgorithm::Sha512 => {
                 let mut hasher = Sha512::new();
                 hasher.update(data);
-                format!("{:x}", hasher.finalize())
+                hex::encode(hasher.finalize())
             }
             ChecksumAlgorithm::Sha384 => {
                 let mut hasher = Sha384::new();
                 hasher.update(data);
-                format!("{:x}", hasher.finalize())
+                hex::encode(hasher.finalize())
             }
             ChecksumAlgorithm::Sri { algorithm, hash } => {
                 let _ = algorithm;
@@ -660,7 +660,7 @@ impl WrapperIntegrity {
     pub fn verify_distribution(&self, data: &[u8]) -> Result<(), IntegrityError> {
         let mut hasher = Sha256::new();
         hasher.update(data);
-        let actual = format!("{:x}", hasher.finalize());
+        let actual = hex::encode(hasher.finalize());
 
         if actual.to_lowercase() != self.distribution_sha256.to_lowercase() {
             return Err(IntegrityError::ChecksumMismatch {
@@ -684,7 +684,7 @@ impl WrapperIntegrity {
 
         let mut hasher = Sha256::new();
         hasher.update(data);
-        let actual = format!("{:x}", hasher.finalize());
+        let actual = hex::encode(hasher.finalize());
 
         if actual.to_lowercase() != expected.to_lowercase() {
             return Err(IntegrityError::ChecksumMismatch {
@@ -1175,7 +1175,7 @@ mod tests {
         let data = b"fake gradle distribution";
         let mut hasher = Sha256::new();
         hasher.update(data);
-        let sha256 = format!("{:x}", hasher.finalize());
+        let sha256 = hex::encode(hasher.finalize());
 
         let wrapper = WrapperIntegrity {
             distribution_url: "https://example.com/gradle.zip".to_string(),
@@ -1207,7 +1207,7 @@ mod tests {
         let data = b"wrapper jar content";
         let mut hasher = Sha256::new();
         hasher.update(data);
-        let sha256 = format!("{:x}", hasher.finalize());
+        let sha256 = hex::encode(hasher.finalize());
 
         let wrapper = WrapperIntegrity {
             distribution_url: "https://example.com/gradle.zip".to_string(),
@@ -1471,4 +1471,3 @@ mod tests {
         }
     }
 }
-

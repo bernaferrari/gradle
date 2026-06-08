@@ -60,7 +60,7 @@ fn main() {
         "proto/v1/native_compile.proto",
     ];
 
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .compile_protos(&proto_files, &["proto"])
         .unwrap();
 }

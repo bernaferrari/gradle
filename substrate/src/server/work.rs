@@ -182,7 +182,7 @@ mod tests {
             hasher.update(v.as_bytes());
             hasher.update([0x1e]);
         }
-        format!("{:x}", hasher.finalize())
+        hex::encode(hasher.finalize())
     }
 
     #[tokio::test]

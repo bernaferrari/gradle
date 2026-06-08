@@ -1374,7 +1374,7 @@ fn fingerprint_directory(
     Ok((
         total_size,
         newest_modified_ms,
-        format!("{:x}", hasher.finalize()),
+        hex::encode(hasher.finalize()),
     ))
 }
 
@@ -1402,7 +1402,7 @@ fn collect_directory_files(
 
 fn sha256_file(path: &Path) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let bytes = std::fs::read(path)?;
-    Ok(format!("{:x}", Sha256::digest(bytes)))
+    Ok(hex::encode(Sha256::digest(bytes)))
 }
 
 fn metadata_modified_ms(
@@ -2251,7 +2251,7 @@ mod tests {
         assert_eq!(fingerprint.size, "class PublicApi {}\n".len() as u64);
         assert_eq!(
             fingerprint.sha256,
-            format!("{:x}", Sha256::digest("class PublicApi {}\n"))
+            hex::encode(Sha256::digest("class PublicApi {}\n"))
         );
     }
 

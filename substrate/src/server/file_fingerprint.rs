@@ -1048,7 +1048,7 @@ impl FileFingerprintService for FileFingerprintServiceImpl {
                                     .unwrap_or(&file.absolute_path)
                                     .to_string(),
                                 NormalizationStrategy::HashOnly => {
-                                    format!("hash-{:x}", Md5::digest(&hash))
+                            format!("hash-{}", hex::encode(Md5::digest(&hash)))
                                 }
                                 _ => file.absolute_path.clone(),
                             };
