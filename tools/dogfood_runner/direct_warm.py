@@ -90,6 +90,22 @@ def count_input_fingerprints(state_dir: Path) -> int:
     return total
 
 
+def classify_engine_mode(result: dict[str, Any]) -> str:
+    direct = result.get("direct", {})
+    if (
+        result.get("match")
+        and direct.get("status") == "COMPLETED"
+        and direct.get("jvm_forwarded") == 0
+        and direct.get("plan_source") == "build-plan-shadow"
+    ):
+        return "rust-hot-path-direct-warm"
+    if result.get("capture_exit_code") == 0 and direct.get("marker"):
+        return "rust-hot-path-rejected"
+    if result.get("capture_exit_code") == 0:
+        return "jvm-compatibility-capture-only"
+    return "jvm-compatibility-capture-failed"
+
+
 def start_daemon(daemon_binary: Path, state_dir: Path) -> tuple[subprocess.Popen[str], str]:
     state_root = state_dir / "state"
     port = reserve_loopback_port()
@@ -232,7 +248,7 @@ def run_project(
     if not ok and not rejection_reason:
         rejection_reason = direct_output.strip().splitlines()[-1] if direct_output.strip() else "direct-runbuild-failed"
 
-    return {
+    result = {
         "name": project.name,
         "path": str(project_dir),
         "tasks": project.tasks,
@@ -246,11 +262,17 @@ def run_project(
         "match": ok,
         "rejection_reason": "" if ok else rejection_reason,
     }
+    result["engine_mode"] = classify_engine_mode(result)
+    return result
 
 
 def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     supported = [result for result in results if result["expectation"] == "supported"]
     direct_ok = [result for result in supported if result["match"]]
+    engine_mode_counts: dict[str, int] = {}
+    for result in results:
+        mode = str(result.get("engine_mode") or classify_engine_mode(result))
+        engine_mode_counts[mode] = engine_mode_counts.get(mode, 0) + 1
     return {
         "schema": "gradle-substrate.direct-warm-dogfood-summary.v1",
         "project_count": len(results),
@@ -261,6 +283,7 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "failed_projects": [result["name"] for result in supported if not result["match"]],
         "total_direct_ms": round(sum(float(result.get("direct_ms") or 0) for result in direct_ok), 1),
+        "engine_mode_counts": dict(sorted(engine_mode_counts.items())),
     }
 
 
@@ -272,16 +295,19 @@ def write_markdown(output_dir: Path, summary: dict[str, Any], results: list[dict
         f"Supported direct warm projects: {summary['direct_warm_supported_count']}/{summary['supported_project_count']}",
         f"Zero-JVM-forward direct warm projects: {summary['zero_jvm_forward_count']}/{summary['supported_project_count']}",
         f"Total direct warm wall time: {summary['total_direct_ms']} ms",
+        "Engine modes: "
+        + ", ".join(f"{mode}={count}" for mode, count in summary.get("engine_mode_counts", {}).items()),
         "",
-        "| Project | Result | Capture ms | Direct ms | RunBuild ms | Tasks | Fingerprints | Plan | JVM forwards | Reason |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- |",
+        "| Project | Result | Engine Mode | Capture ms | Direct ms | RunBuild ms | Tasks | Fingerprints | Plan | JVM forwards | Reason |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- |",
     ]
     for result in results:
         direct = result.get("direct", {})
         lines.append(
-            "| {name} | {status} | {capture_ms} | {direct_ms} | {runbuild_ms} | {tasks} | {fingerprints} | {plan} | {jvm} | {reason} |".format(
+            "| {name} | {status} | {engine_mode} | {capture_ms} | {direct_ms} | {runbuild_ms} | {tasks} | {fingerprints} | {plan} | {jvm} | {reason} |".format(
                 name=result["name"],
                 status="PASS" if result["match"] else ("SKIP" if result["expectation"] != "supported" else "FAIL"),
+                engine_mode=result.get("engine_mode", ""),
                 capture_ms=result["capture_ms"],
                 direct_ms=result["direct_ms"],
                 runbuild_ms=direct.get("duration_ms", ""),

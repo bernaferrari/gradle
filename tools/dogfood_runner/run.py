@@ -341,6 +341,24 @@ def parse_substrate_signals(output: str) -> dict[str, Any]:
     }
 
 
+def classify_engine_mode(result: dict[str, Any]) -> str:
+    checks = result.get("checks", {})
+    signals = result.get("substrate_signals", {})
+    resolved_expectation = checks.get("resolved_expectation", result.get("expectation"))
+    jvm_forward_count = checks.get("jvm_forward_count", -1)
+    rust_tasks = int(signals.get("rust_executed_tasks", 0) or 0)
+
+    if resolved_expectation == "fail-closed":
+        return "jvm-compatibility-frontend-fail-closed"
+    if result.get("match") and rust_tasks > 0 and jvm_forward_count == 0:
+        return "rust-hot-path-via-compat-frontend"
+    if isinstance(jvm_forward_count, int) and jvm_forward_count > 0:
+        return "jvm-compatibility-runtime"
+    if signals.get("runbuild_marker"):
+        return "rust-admission-or-execution-failed"
+    return "jvm-compatibility-frontend-only"
+
+
 def run_project(
     project: DogfoodProject,
     output_dir: Path,
@@ -477,6 +495,7 @@ def run_project(
         "checks": checks,
         "match": checks["match"],
     }
+    result["engine_mode"] = classify_engine_mode(result)
     (project_output_dir / "result.json").write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -647,6 +666,10 @@ def summarize_execution(results: list[dict[str, Any]]) -> dict[str, Any]:
             supported_coverage_counts[tag] = supported_coverage_counts.get(tag, 0) + 1
             if result.get("match") and result.get("checks", {}).get("jvm_forward_count") == 0:
                 zero_forward_coverage_counts[tag] = zero_forward_coverage_counts.get(tag, 0) + 1
+    engine_mode_counts: dict[str, int] = {}
+    for result in results:
+        mode = str(result.get("engine_mode") or classify_engine_mode(result))
+        engine_mode_counts[mode] = engine_mode_counts.get(mode, 0) + 1
     return {
         "schema": "gradle-substrate.dogfood-summary.v1",
         "project_count": len(results),
@@ -691,6 +714,7 @@ def summarize_execution(results: list[dict[str, Any]]) -> dict[str, Any]:
             result.get("substrate_signals", {}).get("non_rust_overhead_ms", 0)
             for result in results
         ),
+        "engine_mode_counts": dict(sorted(engine_mode_counts.items())),
         "failed_projects": [result["name"] for result in results if not result["match"]],
     }
 
@@ -720,6 +744,8 @@ def write_markdown_report(output_dir: Path, summary: dict[str, Any], results: li
         f"Daemon signals: started={summary['daemon_started_count']}, reused={summary['daemon_reused_count']}",
         f"Rust bootstrap duration total: {summary['rust_bootstrap_duration_ms']}ms",
         f"Non-Rust/Gradle overhead estimate: {summary['non_rust_overhead_ms']}ms",
+        "Engine modes: "
+        + ", ".join(f"{mode}={count}" for mode, count in summary.get("engine_mode_counts", {}).items()),
     ])
     shared_daemon = summary.get("shared_daemon", {})
     if shared_daemon:
@@ -733,18 +759,19 @@ def write_markdown_report(output_dir: Path, summary: dict[str, Any], results: li
         )
     lines.extend([
         "",
-        "| Project | Expectation | Mode | Result | Plan Source | Upstream ms | Substrate ms | Rust ms | Non-Rust ms | JVM forwards |",
-        "| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
+        "| Project | Expectation | Mode | Engine Mode | Result | Plan Source | Upstream ms | Substrate ms | Rust ms | Non-Rust ms | JVM forwards |",
+        "| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
     ])
     for result in results:
         checks = result.get("checks", {})
         signals = result.get("substrate_signals", {})
         jvm_forwards = checks.get("jvm_forward_count", "")
         lines.append(
-            "| {name} | {expectation} | {mode} | {status} | {plan_source} | {upstream_ms} | {substrate_ms} | {rust_ms} | {non_rust_ms} | {jvm_forwards} |".format(
+            "| {name} | {expectation} | {mode} | {engine_mode} | {status} | {plan_source} | {upstream_ms} | {substrate_ms} | {rust_ms} | {non_rust_ms} | {jvm_forwards} |".format(
                 name=result["name"],
                 expectation=result["expectation"],
                 mode=result["mode"],
+                engine_mode=result.get("engine_mode") or classify_engine_mode(result),
                 status="PASS" if result["match"] else "FAIL",
                 plan_source=signals.get("plan_source", ""),
                 upstream_ms=result["upstream"].get("duration_ms", 0),

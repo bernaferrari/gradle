@@ -240,15 +240,21 @@ class DogfoodRunnerTest(unittest.TestCase):
                     "name": "a",
                     "expectation": "supported",
                     "match": True,
+                    "capture_exit_code": 0,
                     "direct_ms": 50,
-                    "direct": {"jvm_forwarded": 0},
+                    "direct": {
+                        "status": "COMPLETED",
+                        "jvm_forwarded": 0,
+                        "plan_source": "build-plan-shadow",
+                    },
                 },
                 {
                     "name": "b",
                     "expectation": "supported",
                     "match": False,
+                    "capture_exit_code": 0,
                     "direct_ms": 0,
-                    "direct": {"jvm_forwarded": None},
+                    "direct": {"marker": True, "status": "FAILED", "jvm_forwarded": None},
                 },
                 {
                     "name": "unsupported",
@@ -264,6 +270,14 @@ class DogfoodRunnerTest(unittest.TestCase):
         self.assertEqual(2, summary["supported_project_count"])
         self.assertEqual(1, summary["direct_warm_supported_count"])
         self.assertEqual(1, summary["zero_jvm_forward_count"])
+        self.assertEqual(
+            {
+                "jvm-compatibility-capture-failed": 1,
+                "rust-hot-path-direct-warm": 1,
+                "rust-hot-path-rejected": 1,
+            },
+            summary["engine_mode_counts"],
+        )
         self.assertEqual(["b"], summary["failed_projects"])
 
     def test_summarizes_pass_and_fail_closed_results(self):
@@ -326,6 +340,14 @@ class DogfoodRunnerTest(unittest.TestCase):
         self.assertEqual(1, summary["rust_runbuild_executed_count"])
         self.assertEqual(1, summary["daemon_started_count"])
         self.assertEqual(1, summary["daemon_reused_count"])
+        self.assertEqual(
+            {
+                "jvm-compatibility-frontend-fail-closed": 1,
+                "jvm-compatibility-runtime": 1,
+                "rust-hot-path-via-compat-frontend": 1,
+            },
+            summary["engine_mode_counts"],
+        )
         self.assertEqual({"java-library": 2, "zero-forward": 1}, summary["supported_coverage_counts"])
         self.assertEqual({"java-library": 1, "zero-forward": 1}, summary["zero_jvm_forward_coverage_counts"])
         self.assertEqual(["drift"], summary["failed_projects"])
@@ -342,7 +364,10 @@ class DogfoodRunnerTest(unittest.TestCase):
                     "upstream": {"duration_ms": 100, "task_count": 2},
                     "substrate": {"duration_ms": 50, "task_count": 2},
                     "checks": {"jvm_forward_count": 0},
-                    "substrate_signals": {"plan_source": "build-plan-cache"},
+                    "substrate_signals": {
+                        "plan_source": "build-plan-cache",
+                        "rust_executed_tasks": 2,
+                    },
                 }
             ]
             summary = dogfood_run.summarize_execution(results)
@@ -352,6 +377,8 @@ class DogfoodRunnerTest(unittest.TestCase):
 
         self.assertIn("Projects matched: 1/1", text)
         self.assertIn("Zero-forward supported coverage: java-library=1/1", text)
+        self.assertIn("Engine modes: rust-hot-path-via-compat-frontend=1", text)
+        self.assertIn("| supported | supported | strict | rust-hot-path-via-compat-frontend | PASS |", text)
         self.assertIn("not a 100% Gradle compatibility claim", text)
 
     def test_summary_names_task_and_output_drift_failures(self):
