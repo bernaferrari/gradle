@@ -9,6 +9,8 @@
 #[allow(missing_docs)]
 pub mod client;
 #[allow(missing_docs)]
+pub mod binary_codec;
+#[allow(missing_docs)]
 pub mod error;
 #[allow(missing_docs)]
 pub mod server;

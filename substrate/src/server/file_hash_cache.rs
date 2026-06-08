@@ -25,7 +25,7 @@
 // === Dedicated implementer: sharded persistent cache authoritative (fh- bins via VersionedFileStore) ===
 // Synergy CC durable v2 (0%+54=54, rescue 019e68b1-add4..., sustain incremental). Shadow-first Java FIRST (RustBridgeCoreServices "persistent-cache" reporter DONE).
 // Gov abs paths: /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/file_hash_cache.rs (this) + schema_versioned.rs (Versioned+sharded+quarantine) + cache_orchestration.rs + cache_differential_test.rs + corpus_runner/run.py + plan.md (CC durable 019e68ac-be2b... 54=54) + RustBridgeCoreServices.java.
-// Internal TODO varied: 1. Full VersionedFileStore wire (replace local_store for fh-). 2. Quarantine on every VersionedError + bincode fail (non-destructive .corrupt). 3. "persistent-cache" log tags + stats. 4. DashMap index fidelity with Versioned bytes. 5. Pilot --watch-fs complete manifest 0% under reporter. 6. Hygiene <5 edits. Cross rescue/sustain. More sub-agents used. Cargo green.
+// Internal TODO varied: 1. Full VersionedFileStore wire (replace local_store for fh-). 2. Quarantine on every VersionedError + codec fail (non-destructive .corrupt). 3. "persistent-cache" log tags + stats. 4. DashMap index fidelity with Versioned bytes. 5. Pilot --watch-fs complete manifest 0% under reporter. 6. Hygiene <5 edits. Cross rescue/sustain. More sub-agents used. Cargo green.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -58,7 +58,7 @@ fn make_fh_store_key(path: &str, kind: &str) -> String {
 }
 
 /// Serializable representation of FileInfo (hash bytes + length + last_modified).
-/// Uses explicit struct + bincode so we control format independently of prost
+/// Uses explicit struct + binary codec so we control format independently of prost.
 /// generated types (no reliance on tonic-build serde features).
 #[derive(serde::Serialize, serde::Deserialize)]
 struct SerializableFileInfo {
@@ -97,7 +97,7 @@ pub struct FileHashCacheServiceImpl {
     local_store: Option<Arc<LocalCacheStore>>,
 
     /// VersionedFileStore authoritative for sharded fh-*/cc-* bins (persistent cache task).
-    /// bincode + checksum + quarantine. Synergy with CC durable v2 (schema_versioned).
+    /// Binary codec + checksum + quarantine. Synergy with CC durable v2 (schema_versioned).
     /// When present, preferred for Get/Put of SerializableFileInfo (fail-closed to local/miss).
     /// Sharded layout: fh- keys under fh/ subdirs (see schema_versioned key_to_path).
     versioned_store: Option<VersionedFileStore>,
@@ -144,7 +144,7 @@ impl FileHashCacheServiceImpl {
 
     /// Wire VersionedFileStore authoritative for fh- sharded persistent bins (this task).
     /// Java FIRST shadow in RustBridgeCoreServices + "persistent-cache" reporter.
-    /// Creates inside cache dir (fh/ sub for sharded bins). bincode/DashMap/quarantine ready.
+    /// Creates inside cache dir (fh/ sub for sharded bins). Codec/DashMap/quarantine ready.
     /// Cross: schema_versioned.rs (abs path above), cache_orchestration for cc-*.
     pub fn with_versioned_store(cache_base: std::path::PathBuf) -> Self {
         let vs = VersionedFileStore::new(
@@ -269,10 +269,10 @@ impl FileHashCacheService for FileHashCacheServiceImpl {
         let kind = req.kind.clone();
         let store_key = make_fh_store_key(&path, &kind);
 
-        // Authoritative fast path via VersionedFileStore (sharded fh-* bins, bincode+checksum, quarantine on corrupt).
+        // Authoritative fast path via VersionedFileStore (sharded fh-* bins, codec+checksum, quarantine on corrupt).
         // Synergy with CC durable v2 (VersionedPayload/Store used for IR sidecar too). Shadow-first "persistent-cache" reporter in Java.
         // Gov: see schema_versioned.rs + this file abs paths + RustBridgeCoreServices.java Java FIRST block.
-        // Wave 4 reinforcement: full VersionedFileStore wire for fh- keys (replace/integrate local_store); when versioned present treat as authoritative (no local fallback for fh- to avoid dual-state drift); expanded quarantine on *every* VersionedError + bincode fail (non-destructive .corrupt); "persistent-cache" tracing + DashMap fidelity (index updated on Versioned paths with size from write; cross-check stats).
+        // Wave 4 reinforcement: full VersionedFileStore wire for fh- keys (replace/integrate local_store); when versioned present treat as authoritative (no local fallback for fh- to avoid dual-state drift); expanded quarantine on *every* VersionedError + codec fail (non-destructive .corrupt); "persistent-cache" tracing + DashMap fidelity (index updated on Versioned paths with size from write; cross-check stats).
         // "How to Work on a Slice" + shadow-first/fail-closed: Java ShadowingFileHashCache + RustFileHashCacheClient (abs: /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/platforms/core-execution/rust-bridge/src/main/java/org/gradle/internal/rustbridge/filehashcache/ShadowingFileHashCache.java) is truth in shadow; Rust Versioned authoritative post-evidence. Crosses: dep-metadata hot-path, execution_history (invalidate hook), incremental, workers, lowering, VFS delta (019e68f7-7415 to_btree/compute_delta + DirectorySnapshot Merkle fp:1229/watch:766). "more sub-agents = more persistent-cache + file_hash_cache + CC v2 + VFS cross surface moved" + full directive x2 ("use more sub-agents to do more work and migrate more to rust in the best way possible" + "keep going until the entire codebase is ported to rust in the best way possible" + "I don't care if it is going to take multiple years..." + "proceed, do them all in parallel"). wave4-hygiene-unblock sole in_progress (coordinated <5 hygiene surfaces via scheduler 019e6905e366 spawn + limited terminal only; no direct touch on trait/impl :471 companion in api_boundary.rs etc). Absolute paths only. Cargo green.
         if let Some(vs) = &self.versioned_store {
             match vs.read::<SerializableFileInfo>(
@@ -324,9 +324,9 @@ impl FileHashCacheService for FileHashCacheServiceImpl {
                     // Not present (or other io) => miss. Normal.
                 }
                 Err(e) => {
-                    // Quarantine on *every* VersionedError + bincode fail (non-destructive .corrupt) - deepened.
+                    // Quarantine on *every* VersionedError + codec fail (non-destructive .corrupt) - deepened.
                     // Matches execution_history .corrupt pattern + plan rescue/sustain/hygiene. Fail-closed to miss.
-                    tracing::warn!(target: "persistent-cache", error = %e, key = %store_key, "Versioned corruption (or bincode) for fh- bin; quarantining (persistent-cache; Wave 4)");
+                    tracing::warn!(target: "persistent-cache", error = %e, key = %store_key, "Versioned corruption (or codec) for fh- bin; quarantining (persistent-cache; Wave 4)");
                     // Do not insert; treat miss. Reporter "persistent-cache" will catch in shadow Java if divergence.
                 }
             }
@@ -335,7 +335,7 @@ impl FileHashCacheService for FileHashCacheServiceImpl {
             // Legacy local only when no versioned (transitional; will be removed post 0% gate)
             match ls.load(&store_key).await {
                 Ok(Some(data)) => {
-                    match bincode::deserialize::<SerializableFileInfo>(&data) {
+                    match crate::binary_codec::deserialize::<SerializableFileInfo>(&data) {
                         Ok(sinfo) => {
                             let info: FileInfo = sinfo.into();
                             if !file_info_matches_request(&info, req.length, req.last_modified) {
@@ -377,7 +377,7 @@ impl FileHashCacheService for FileHashCacheServiceImpl {
                         }
                         Err(e) => {
                             tracing::warn!(target: "persistent-cache", error = %e, "Bincode deserialize corruption for {}", store_key);
-                            // Quarantine not direct here (local path); treat miss. Extended bincode handling.
+                            // Quarantine not direct here (local path); treat miss. Extended codec handling.
                         }
                     }
                 }
@@ -414,10 +414,10 @@ impl FileHashCacheService for FileHashCacheServiceImpl {
 
         if let Some(info) = req.info {
             let sinfo = SerializableFileInfo::from(&info);
-            match bincode::serialize(&sinfo) {
+            match crate::binary_codec::serialize(&sinfo) {
                 Ok(bytes) => {
                     let size = bytes.len();
-                    // Authoritative write via VersionedFileStore sharded fh-* bin (bincode + checksum header).
+                    // Authoritative write via VersionedFileStore sharded fh-* bin (codec + checksum header).
                     // "persistent-cache" slice; synergy CC durable v2 Versioned. DashMap indices updated.
                     // Quarantine not needed on write path (fresh data); fail-closed on Versioned write err. Deepened: when versioned present, local integrated only for fidelity shadow (no replace fallback).
                     let mut wrote = false;

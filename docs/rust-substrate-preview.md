@@ -66,10 +66,10 @@ to build them from the local checkout.
 The Rust workspace is validated on Rust 1.96.0 with edition 2024. The direct
 Rust dependency graph is on latest stable major versions for `tonic/prost`,
 `reqwest`, `notify`, `quick-xml`, `nix`, `tower`, `criterion`, `zip`, `bzip2`,
-`thiserror`, `tikv-jemallocator`, and digest/hash crates; `bincode` remains on
-v1 to avoid changing the existing serde-backed cache/storage format. Direct
-warm dogfood uses the Gradle-under-test binary automatically when it is
-discoverable from `GRADLE_UNDER_TEST_BIN`, `GRADLE_UNDER_TEST`, or
+`thiserror`, `tikv-jemallocator`, digest/hash crates, and `postcard` for
+maintained serde cache/state serialization. Direct warm dogfood uses the
+Gradle-under-test binary automatically when it is discoverable from
+`GRADLE_UNDER_TEST_BIN`, `GRADLE_UNDER_TEST`, or
 `build/gradle-under-test/bin/gradle`.
 
 ## Supported Build Shapes

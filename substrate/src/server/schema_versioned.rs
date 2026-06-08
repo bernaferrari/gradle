@@ -5,7 +5,7 @@ use std::fmt;
 use std::path::PathBuf;
 use thiserror::Error;
 use dashmap::DashMap; // Wave 4 additive: for sharded fh- bins in VersionedFileStore + VFS delta cross (per charter 019e69ce-7137 + explorer 019e69cf-4668 + all phrases/directive x2x2 + VFS failure + "Go parallel forever").
-// Wave 4 schema_versioned sharded + VFS delta (additive per 8-step AGENTS.md): DashMap for concurrent fh- sharded bins + VersionedFileStore sharding + bincode roundtrips + invalidate_from_vfs_delta consuming DirectorySnapshot Merkle child_summaries/get_snapshot_delta from fp:1229/watch:766 + BTree determinism. Reporters 'schema-versioned-sharded'/'persistent-cache'/'vfs-delta'. Crosses per full charter (prior VFS 4 + 3 VFS spawns + EH + lowering + hygiene + perpetuals + directive x2x2 + "more sub-agents..." + "Go parallel forever. Entire port accelerated."). Java FIRST synergy. 0%+54=54 + 0 reg 20+ hardened. "How to Work on a Slice".
+// Wave 4 schema_versioned sharded + VFS delta (additive per 8-step AGENTS.md): DashMap for concurrent fh- sharded bins + VersionedFileStore sharding + codec roundtrips + invalidate_from_vfs_delta consuming DirectorySnapshot Merkle child_summaries/get_snapshot_delta from fp:1229/watch:766 + BTree determinism. Reporters 'schema-versioned-sharded'/'persistent-cache'/'vfs-delta'. Crosses per full charter (prior VFS 4 + 3 VFS spawns + EH + lowering + hygiene + perpetuals + directive x2x2 + "more sub-agents..." + "Go parallel forever. Entire port accelerated."). Java FIRST synergy. 0%+54=54 + 0 reg 20+ hardened. "How to Work on a Slice".
 
 // ---------------------------------------------------------------------------
 // VISION: Mega 54=54 Runner 1 (Persistent Cache sharded + VFS delta cross) per 'How to Work on a Slice' (AGENTS.md FIRST, 8-step) + full user directive x2 x2 + core mantra x2 x2
@@ -13,7 +13,7 @@ use dashmap::DashMap; // Wave 4 additive: for sharded fh- bins in VersionedFileS
 // "use more sub-agents to do more work and migrate more to rust" + "I don't care if it is going to take multiple years..." + "keep going until the entire codebase is ported to rust in the best way possible" + "proceed, do them all in parallel in the best way possible".
 // Core mantra x2 x2: more sub-agents = more hygiene GREEN (ResolvedGraph E0560 fix + coordination + cargo verify + 2 bigger slice starters on Persistent Cache/Incremental/Execution History + Workers full/Remote Cache etc.) + dual-hygiene acceleration for E0425/E0560/E0599 + ... + entire port accelerated + "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated" — all identical to the Java FIRST spawn charter.
 // Full hygiene protocol + 0 reg on 20+ hardened list + additive-only + shadow-first/fail-closed/hybrid/reporter-tagged/fail-closed 100% legacy + bd discipline + varied calls + abs paths.
-// Sharded Persistent Cache authoritative via VersionedFileStore (bincode roundtrips for fh-bins + quarantine + BTree determinism everywhere) + invalidate_from_vfs_delta using DirectorySnapshot child_summaries BTree (from authoritative prep 019e68d5-b31f on 5 surfaces now flowing via fp:1229/watch:766) + reporter 'persistent-cache' + 'vfs-cc-ir-v2-durable-cross' etc. Cross to incremental/execution-history + cache_orchestration + file_hash_cache fh-bins. BTreeMap/BTreeSet for all keys/sets (e.g. versioned file index, delta child summaries). Shadow-first: VersionedFileStore impl behind flag, fail-closed to legacy on mismatch/quarantine. Hybrid gRPC + Java FIRST in 2 Java paths. 0%+54=54 on 'persistent-cache' under complete + --watch-fs + report-mismatches trusted3/dogfood/manifest -> evidence build/evidence-hygiene-green-019e68e3-c77f-...-persistent-cache-incremental-execution-history-54-54-runner1/*. <5 edits total. bd 5ezk + child substrate-5xz. Launch 1 more on done. Subagent reporting: this Mega Runner1 + 019e68d5-cdb6.3/5xz. "more sub-agents = more hygiene GREEN ... entire port accelerated". Go parallel forever.
+// Sharded Persistent Cache authoritative via VersionedFileStore (codec roundtrips for fh-bins + quarantine + BTree determinism everywhere) + invalidate_from_vfs_delta using DirectorySnapshot child_summaries BTree (from authoritative prep 019e68d5-b31f on 5 surfaces now flowing via fp:1229/watch:766) + reporter 'persistent-cache' + 'vfs-cc-ir-v2-durable-cross' etc. Cross to incremental/execution-history + cache_orchestration + file_hash_cache fh-bins. BTreeMap/BTreeSet for all keys/sets (e.g. versioned file index, delta child summaries). Shadow-first: VersionedFileStore impl behind flag, fail-closed to legacy on mismatch/quarantine. Hybrid gRPC + Java FIRST in 2 Java paths. 0%+54=54 on 'persistent-cache' under complete + --watch-fs + report-mismatches trusted3/dogfood/manifest -> evidence build/evidence-hygiene-green-019e68e3-c77f-...-persistent-cache-incremental-execution-history-54-54-runner1/*. <5 edits total. bd 5ezk + child substrate-5xz. Launch 1 more on done. Subagent reporting: this Mega Runner1 + 019e68d5-cdb6.3/5xz. "more sub-agents = more hygiene GREEN ... entire port accelerated". Go parallel forever.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -148,7 +148,7 @@ impl<T: Serialize + DeserializeOwned> VersionedPayload<T> {
         version: SchemaVersion,
         algo: ChecksumAlgorithm,
     ) -> Result<Self, SchemaVersionedError> {
-        let data = bincode::serialize(value)
+        let data = crate::binary_codec::serialize(value)
             .map_err(|e| SchemaVersionedError::SerializationError(e.to_string()))?;
         let checksum = algo.compute(&data);
         Ok(VersionedPayload {
@@ -179,7 +179,7 @@ impl<T: Serialize + DeserializeOwned> VersionedPayload<T> {
             });
         }
 
-        bincode::deserialize(&self.data)
+        crate::binary_codec::deserialize(&self.data)
             .map_err(|e| SchemaVersionedError::SerializationError(e.to_string()))
     }
 
@@ -201,7 +201,7 @@ pub struct VersionedFileStore { // Wave 4 super-combined sustain + VFS delta cro
     base_dir: PathBuf,
     default_version: SchemaVersion,
     default_checksum: ChecksumAlgorithm,
-    // Wave 4 schema_versioned sharded Persistent Cache + VFS delta cross (additive): DashMap for concurrent fh-*/cc-* sharded bins (bincode roundtrips preserved). VFS delta consumption stub for DirectorySnapshot Merkle child_summaries/get_snapshot_delta @file_fingerprint.rs:1229 + file_watch.rs:766 (BTree determinism). Reporters 'schema-versioned-sharded'/'persistent-cache'/'vfs-delta'. Full charter phrases + directive x2x2 + "more sub-agents..." + "Go parallel forever. Entire port accelerated." + "How to Work on a Slice" + crosses + 0%+54=54 + Java FIRST. 0 reg.
+    // Wave 4 schema_versioned sharded Persistent Cache + VFS delta cross (additive): DashMap for concurrent fh-*/cc-* sharded bins (codec roundtrips preserved). VFS delta consumption stub for DirectorySnapshot Merkle child_summaries/get_snapshot_delta @file_fingerprint.rs:1229 + file_watch.rs:766 (BTree determinism). Reporters 'schema-versioned-sharded'/'persistent-cache'/'vfs-delta'. Full charter phrases + directive x2x2 + "more sub-agents..." + "Go parallel forever. Entire port accelerated." + "How to Work on a Slice" + crosses + 0%+54=54 + Java FIRST. 0 reg.
     shards: DashMap<String, BTreeMap<String, Vec<u8>>>, // fh- sharded by prefix for concurrent persistent cache
 }
 
@@ -224,7 +224,7 @@ impl VersionedFileStore {
     }
 
     pub fn write<T: Serialize>(&self, key: &str, value: &T) -> Result<(), SchemaVersionedError> {
-        let data = bincode::serialize(value)
+        let data = crate::binary_codec::serialize(value)
             .map_err(|e| SchemaVersionedError::SerializationError(e.to_string()))?;
         let checksum = self.default_checksum.compute(&data);
 
@@ -299,7 +299,7 @@ impl VersionedFileStore {
             });
         }
 
-        bincode::deserialize(data)
+        crate::binary_codec::deserialize(data)
             .map_err(|e| SchemaVersionedError::SerializationError(e.to_string()))
     }
 
@@ -327,7 +327,7 @@ impl VersionedFileStore {
         // eprintln reporter style for 'vfs-delta' (cross problem_reporting).
         for (p, _hash) in changed_or_added.iter() {
             if p.contains("fh-") || p.starts_with("build/") {
-                // Example sharded invalidate hook (additive; real bincode roundtrip quarantine in production follow-on).
+                // Example sharded invalidate hook (additive; real codec roundtrip quarantine in production follow-on).
                 invalidated += 1;
             }
         }
@@ -336,7 +336,7 @@ impl VersionedFileStore {
                 invalidated += 1;
             }
         }
-        // TODO full: self.shards retain filtered by BTree delta precision; bincode roundtrips for migrated sharded payloads.
+        // TODO full: self.shards retain filtered by BTree delta precision; codec roundtrips for migrated sharded payloads.
         invalidated
     }
 }

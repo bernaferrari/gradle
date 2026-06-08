@@ -78,7 +78,9 @@ impl ExecutionHistoryServiceImpl {
                 if name.ends_with(".bin") {
                     match fs::read(entry.path()).await {
                         Ok(data) => {
-                            if let Ok(mut hentry) = bincode::deserialize::<HistoryEntry>(&data) {
+                            if let Ok(mut hentry) =
+                                crate::binary_codec::deserialize::<HistoryEntry>(&data)
+                            {
                                 let key = std::mem::take(&mut hentry.key);
                                 self.entries.insert(key, hentry);
                                 count += 1;
@@ -104,7 +106,7 @@ impl ExecutionHistoryServiceImpl {
 
     async fn persist_to_disk(&self, key: &str, entry: &HistoryEntry) {
         let path = self.state_file_path(key);
-        if let Ok(data) = bincode::serialize(entry) {
+        if let Ok(data) = crate::binary_codec::serialize(entry) {
             if let Err(e) = fs::write(&path, &data).await {
                 tracing::warn!("Failed to persist history for {}: {}", key, e);
             }
@@ -196,7 +198,7 @@ impl ExecutionHistoryServiceImpl {
             return;
         }
         let path = self.state_file_path(&key);
-        match bincode::serialize(&entry) {
+        match crate::binary_codec::serialize(&entry) {
             Ok(data) => {
                 if let Err(error) = std::fs::write(&path, data) {
                     tracing::warn!("Failed to persist history for {}: {}", key, error);
@@ -853,4 +855,3 @@ mod tests {
         assert_eq!(stats2.removes, 2); // incremented even for no-op remove
     }
 }
-

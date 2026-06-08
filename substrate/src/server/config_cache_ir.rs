@@ -281,8 +281,8 @@ mod tests {
             creation_time_ms: 1234567890,
             ..Default::default()
         };
-        let bytes = bincode::serialize(&env).unwrap();
-        let restored: PhaseGraphEnvelope = bincode::deserialize(&bytes).unwrap();
+        let bytes = crate::binary_codec::serialize(&env).unwrap();
+        let restored: PhaseGraphEnvelope = crate::binary_codec::deserialize(&bytes).unwrap();
         assert_eq!(restored.build_id, "build-123");
         assert_eq!(restored.project_count, 5);
         assert_eq!(restored.task_count, 42);

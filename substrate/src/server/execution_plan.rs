@@ -128,7 +128,9 @@ impl ExecutionPlanServiceImpl {
         for entry in ph.entries.iter() {
             let key = entry.key();
             if key.starts_with("__exec_record__:") {
-                if let Ok(record) = bincode::deserialize::<ExecutionRecord>(&entry.value().state) {
+                if let Ok(record) =
+                    crate::binary_codec::deserialize::<ExecutionRecord>(&entry.value().state)
+                {
                     let work_identity = key
                         .strip_prefix("__exec_record__:")
                         .unwrap_or(key)
@@ -149,7 +151,7 @@ impl ExecutionPlanServiceImpl {
             let mut key = String::with_capacity(16 + work_identity.len());
             key.push_str("__exec_record__:");
             key.push_str(work_identity);
-            if let Ok(state) = bincode::serialize(record) {
+            if let Ok(state) = crate::binary_codec::serialize(record) {
                 let ts = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_millis() as i64)
