@@ -106,16 +106,16 @@ Direct warm coverage has also been expanded from one fixture to the supported
 local dogfood set. `tools/dogfood_runner/direct_warm.py` performs one strict
 Gradle/JVM capture per supported dogfood project and then runs the cached plan
 directly through `gradle-substrate-runbuild`. The latest checked run wrote
-`build/direct-warm-dogfood-20260608-deps-latest/direct-warm-results.json` and
-`build/direct-warm-dogfood-20260608-deps-latest/direct-warm-summary.md`; all
+`build/direct-warm-dogfood-20260608-postcard/direct-warm-results.json` and
+`build/direct-warm-dogfood-20260608-postcard/direct-warm-summary.md`; all
 7 supported local dogfood projects passed direct warm execution with zero JVM
-forwards under Rust 1.96.0, Rust 2024, and latest stable direct crate versions
-for the Rust substrate except `bincode` v1, which remains pinned to preserve the
-existing serde-backed cache/storage format: OSS-style Java library, Java
-multiproject, Java application/start scripts/distributions, external JUnit
-library, external BOM/conflict, JavaExec process launch, and Javadoc process
-launch. Total direct warm wall time was 4401.5 ms across the seven projects,
-with every project using `build-plan-shadow` and validated input fingerprints.
+forwards under Rust 1.96.0, Rust 2024, latest stable direct crate versions, and
+the maintained `postcard` serde codec for Rust cache/state serialization:
+OSS-style Java library, Java multiproject, Java application/start
+scripts/distributions, external JUnit library, external BOM/conflict, JavaExec
+process launch, and Javadoc process launch. Total direct warm wall time was
+4414.1 ms across the seven projects, with every project using
+`build-plan-shadow` and validated input fingerprints.
 The JavaExec fixture is now covered by standalone direct replay: Rust merges
 direct build-graph metadata with the hydrated shadow task context before kernel
 admission, preserving the captured `main_class`, classpath, Java home, args,

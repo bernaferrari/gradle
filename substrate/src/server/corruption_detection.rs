@@ -300,7 +300,7 @@ pub struct ChecksummedCacheEntry<T> {
 impl<T: Serialize + DeserializeOwned> ChecksummedCacheEntry<T> {
     pub fn wrap(data: T) -> Result<Self, CorruptionError> {
         let serialized =
-            bincode::serialize(&data).map_err(|e| CorruptionError::DeserializationError {
+            crate::binary_codec::serialize(&data).map_err(|e| CorruptionError::DeserializationError {
                 key: String::new(),
                 reason: format!("Failed to serialize: {}", e),
             })?;
@@ -326,7 +326,7 @@ impl<T: Serialize + DeserializeOwned> ChecksummedCacheEntry<T> {
 
     pub fn unwrap(self) -> Result<T, CorruptionError> {
         let serialized =
-            bincode::serialize(&self.data).map_err(|e| CorruptionError::DeserializationError {
+            crate::binary_codec::serialize(&self.data).map_err(|e| CorruptionError::DeserializationError {
                 key: String::new(),
                 reason: format!("Failed to serialize for validation: {}", e),
             })?;
@@ -347,7 +347,7 @@ impl<T: Serialize + DeserializeOwned> ChecksummedCacheEntry<T> {
     }
 
     pub fn validate(&self) -> bool {
-        let serialized = match bincode::serialize(&self.data) {
+        let serialized = match crate::binary_codec::serialize(&self.data) {
             Ok(s) => s,
             Err(_) => return false,
         };
@@ -414,7 +414,7 @@ pub fn load_with_integrity<T: DeserializeOwned>(
     }
 
     let value: T =
-        bincode::deserialize(&data).map_err(|e| CorruptionError::DeserializationError {
+        crate::binary_codec::deserialize(&data).map_err(|e| CorruptionError::DeserializationError {
             key: path.to_string_lossy().to_string(),
             reason: e.to_string(),
         })?;
@@ -597,7 +597,7 @@ mod tests {
             value: 100,
             label: "test".to_string(),
         };
-        let serialized = bincode::serialize(&data).unwrap();
+        let serialized = crate::binary_codec::serialize(&data).unwrap();
         let file_path = cache_dir.join("myfile");
         fs::write(&file_path, &serialized).unwrap();
 

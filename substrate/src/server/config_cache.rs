@@ -36,10 +36,10 @@ struct ConfigCacheEntry {
 const MAX_CACHE_ENTRIES: usize = 1000;
 
 /// Rust-native configuration cache service.
-/// Stores and retrieves serialized build configuration using bincode.
+/// Stores and retrieves serialized build configuration using a compact binary codec.
 ///
 /// This replaces Gradle's Java-based configuration cache with a faster
-/// Rust implementation using bincode serialization (10-50x faster than
+/// Rust implementation using compact binary serialization (10-50x faster than
 /// Java serialization for complex object graphs).
 pub struct ConfigurationCacheServiceImpl {
     cache: DashMap<String, ConfigCacheEntry>,
@@ -96,7 +96,7 @@ impl ConfigurationCacheServiceImpl {
 
     fn persist_to_disk(&self, cache_key: &str, entry: &ConfigCacheEntry) {
         let path = self.disk_path(cache_key);
-        if let Ok(data) = bincode::serialize(entry) {
+        if let Ok(data) = crate::binary_codec::serialize(entry) {
             std::fs::write(&path, data).ok();
         }
     }
@@ -104,7 +104,7 @@ impl ConfigurationCacheServiceImpl {
     fn load_from_disk(&self, cache_key: &str) -> Option<ConfigCacheEntry> {
         let path = self.disk_path(cache_key);
         let data = std::fs::read(&path).ok()?;
-        bincode::deserialize(&data).ok()
+        crate::binary_codec::deserialize(&data).ok()
     }
 
     fn remove_from_disk(&self, cache_key: &str) {

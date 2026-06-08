@@ -303,14 +303,14 @@ pub struct EncryptedCacheField {
 impl EncryptedCacheField {
     /// Encrypt a serializable value with the given key.
     ///
-    /// The value is serialized with bincode, then XOR'd with the key
+    /// The value is serialized with the compact binary codec, then XOR'd with the key.
     /// (repeating the key as needed). A nonce is generated from the
     /// ciphertext length for demonstration purposes.
     pub fn encrypt<T: Serialize>(value: &T, key: &[u8]) -> Result<Self, SecretHygieneError> {
         if key.is_empty() {
             return Err(SecretHygieneError::EmptyKey);
         }
-        let plaintext = bincode::serialize(value)
+        let plaintext = crate::binary_codec::serialize(value)
             .map_err(|e| SecretHygieneError::Serialization(e.to_string()))?;
         let ciphertext: Vec<u8> = plaintext
             .iter()
@@ -335,7 +335,7 @@ impl EncryptedCacheField {
             .enumerate()
             .map(|(i, b)| b ^ key[i % key.len()])
             .collect();
-        bincode::deserialize(&plaintext)
+        crate::binary_codec::deserialize(&plaintext)
             .map_err(|e| SecretHygieneError::Deserialization(e.to_string()))
     }
 
@@ -720,7 +720,7 @@ mod tests {
         };
         let key = b"some-key";
         let encrypted = EncryptedCacheField::encrypt(&data, key).unwrap();
-        let plaintext = bincode::serialize(&data).unwrap();
+        let plaintext = crate::binary_codec::serialize(&data).unwrap();
         // XOR with non-zero key should produce different bytes
         assert_ne!(encrypted.ciphertext(), plaintext.as_slice());
     }
