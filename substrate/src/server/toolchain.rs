@@ -705,12 +705,22 @@ impl ToolchainServiceImpl {
 
     /// Compute SHA-256 hex digest of a file.
     fn sha256_file(path: &Path) -> Result<String, String> {
+        use std::io::Read;
+
         let mut file = std::fs::File::open(path)
             .map_err(|e| format!("Failed to open file for hashing: {}", e))?;
         let mut hasher = Sha256::new();
-        std::io::copy(&mut file, &mut hasher)
-            .map_err(|e| format!("Failed to read file for hashing: {}", e))?;
-        Ok(format!("{:x}", hasher.finalize()))
+        let mut buffer = [0_u8; 8192];
+        loop {
+            let read = file
+                .read(&mut buffer)
+                .map_err(|e| format!("Failed to read file for hashing: {}", e))?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+        }
+        Ok(hex::encode(hasher.finalize()))
     }
 }
 

@@ -205,7 +205,7 @@ impl DependencyResolutionServiceImpl {
             }
             hasher.update(&buf[..read]);
         }
-        Ok(format!("{:x}", hasher.finalize()))
+        Ok(hex::encode(hasher.finalize()))
     }
 
     async fn cached_or_compute_file_sha256(path: &Path) -> Result<String, String> {
@@ -275,7 +275,7 @@ impl DependencyResolutionServiceImpl {
                 .await
                 .map_err(|e| format!("Failed to commit artifact cache file: {}", e))?;
 
-            Ok((written, format!("{:x}", hasher.finalize())))
+            Ok((written, hex::encode(hasher.finalize())))
         }
         .await;
 
@@ -289,7 +289,7 @@ impl DependencyResolutionServiceImpl {
     fn compute_sha256(data: &[u8]) -> String {
         let mut hasher = Sha256::new();
         hasher.update(data);
-        format!("{:x}", hasher.finalize())
+        hex::encode(hasher.finalize())
     }
 
     /// Compute SHA-1 hex digest of data.
@@ -297,7 +297,7 @@ impl DependencyResolutionServiceImpl {
     fn compute_sha1(data: &[u8]) -> String {
         let mut hasher = sha1::Sha1::new();
         sha1::Digest::update(&mut hasher, data);
-        format!("{:x}", hasher.finalize())
+        hex::encode(hasher.finalize())
     }
 
     /// Compute MD5 hex digest of data.
@@ -306,7 +306,7 @@ impl DependencyResolutionServiceImpl {
         use md5::Digest;
         let mut hasher = md5::Md5::new();
         hasher.update(data);
-        format!("{:x}", hasher.finalize())
+        hex::encode(hasher.finalize())
     }
 
     /// Parse a checksum file content (e.g., "abc123  filename.jar").
@@ -2251,7 +2251,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                             }
                         }
 
-                        let sha256 = format!("{:x}", hasher.finalize());
+                        let sha256 = hex::encode(hasher.finalize());
                         artifact_cache.insert(cache_key.clone(), CachedArtifact {
                             group: cache_group.clone(),
                             name: cache_name.clone(),
@@ -2395,7 +2395,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                         }
                     }
                 }
-                let sha256 = format!("{:x}", hasher.finalize());
+                let sha256 = hex::encode(hasher.finalize());
                 if let Some(mut file) = cache_file {
                     if let Err(e) = file.flush().await {
                         let _ = tokio::fs::remove_file(&tmp_path).await;
@@ -2537,7 +2537,7 @@ impl DependencyResolutionService for DependencyResolutionServiceImpl {
                                     }
                                 }
 
-                                let sha256 = format!("{:x}", hasher.finalize());
+                                let sha256 = hex::encode(hasher.finalize());
                                 if let Some(mut cache_file) = file {
                                     if let Err(e) = cache_file.flush().await {
                                         let _ = tokio::fs::remove_file(&tmp_path).await;

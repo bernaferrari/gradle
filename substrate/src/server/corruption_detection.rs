@@ -218,7 +218,7 @@ impl CorruptionScanner {
 
         let mut hasher = Sha256::new();
         hasher.update(&data);
-        let actual_checksum = format!("{:x}", hasher.finalize());
+        let actual_checksum = hex::encode(hasher.finalize());
 
         if let Some(expected) = self.checksum_index.get(key) {
             if *expected != actual_checksum {
@@ -309,7 +309,7 @@ impl<T: Serialize + DeserializeOwned> ChecksummedCacheEntry<T> {
 
         let mut hasher = Sha256::new();
         hasher.update(&serialized);
-        let checksum = format!("{:x}", hasher.finalize());
+        let checksum = hex::encode(hasher.finalize());
 
         let created_at_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -333,7 +333,7 @@ impl<T: Serialize + DeserializeOwned> ChecksummedCacheEntry<T> {
 
         let mut hasher = Sha256::new();
         hasher.update(&serialized);
-        let actual_checksum = format!("{:x}", hasher.finalize());
+        let actual_checksum = hex::encode(hasher.finalize());
 
         if actual_checksum != self.checksum {
             return Err(CorruptionError::ChecksumMismatch {
@@ -354,7 +354,7 @@ impl<T: Serialize + DeserializeOwned> ChecksummedCacheEntry<T> {
 
         let mut hasher = Sha256::new();
         hasher.update(&serialized);
-        let actual_checksum = format!("{:x}", hasher.finalize());
+        let actual_checksum = hex::encode(hasher.finalize());
 
         actual_checksum == self.checksum
     }
@@ -376,7 +376,7 @@ pub fn load_with_integrity<T: DeserializeOwned>(
 
     let mut hasher = Sha256::new();
     hasher.update(&data);
-    let actual_checksum = format!("{:x}", hasher.finalize());
+    let actual_checksum = hex::encode(hasher.finalize());
 
     if let Some(expected) = expected_checksum {
         if actual_checksum != expected {
@@ -484,7 +484,7 @@ mod tests {
         let good_data = b"good data";
         let mut hasher = Sha256::new();
         hasher.update(good_data);
-        let good_checksum = format!("{:x}", hasher.finalize());
+        let good_checksum = hex::encode(hasher.finalize());
 
         fs::write(shard.join("1234567890"), good_data).unwrap();
 
@@ -558,14 +558,14 @@ mod tests {
         hasher1.update(data1);
         scanner.register_expected_checksum(
             "ef1111111111".to_string(),
-            format!("{:x}", hasher1.finalize()),
+            hex::encode(hasher1.finalize()),
         );
 
         let mut hasher2 = Sha256::new();
         hasher2.update(data2);
         scanner.register_expected_checksum(
             "ef2222222222".to_string(),
-            format!("{:x}", hasher2.finalize()),
+            hex::encode(hasher2.finalize()),
         );
 
         let report = scanner.scan().unwrap();

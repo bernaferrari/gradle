@@ -8,9 +8,10 @@ name = "gradlew"
 path = "src/main.rs"
 
 [dependencies]
-sha2 = "0.10"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
-zip = "2"
+sha2 = "0.11"
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }
+zip = "8"
+hex = "0.4"
 
 [dev-dependencies]
 tempfile = "3"

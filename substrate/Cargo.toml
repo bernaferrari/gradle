@@ -13,6 +13,7 @@ path = "src/bin/runbuild.rs"
 
 [dependencies]
 tonic.workspace = true
+tonic-prost.workspace = true
 prost.workspace = true
 tokio.workspace = true
 tracing.workspace = true
@@ -22,17 +23,17 @@ thiserror.workspace = true
 dashmap.workspace = true
 uuid.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
-tower = "0.4"
+tower = "0.5"
 tokio-stream = "0.1"
 num_cpus = "1"
 bincode = "1"
 serde = { version = "1", features = ["derive"] }
-toml = "0.8"
+toml = "1.1"
 async-stream = "0.3"
 futures-util = "0.3"
-sha1 = "0.10"
-sha2 = "0.10"
-sha3 = "0.10"
+sha1 = "0.11"
+sha2 = "0.11"
+sha3 = "0.12"
 blake3 = "1"
 memchr = "2"
 rayon = "1"
@@ -41,15 +42,16 @@ reqwest.workspace = true
 quick-xml.workspace = true
 nix.workspace = true
 libc.workspace = true
-zip = "2"
+zip = "8"
 tar = "0.4"
 flate2 = "1"
-bzip2 = "0.4"
+bzip2 = "0.6"
 base64 = "0.22"
 crc32fast = "1"
 hyper-util = "0.1"
 serde_json = "1.0.149"
 chrono = "0.4"
+hex.workspace = true
 
 [features]
 default = ["remote-cache", "xml-parsing", "toolchain-download"]
@@ -58,7 +60,7 @@ xml-parsing = []
 toolchain-download = []
 
 [build-dependencies]
-tonic-build = "0.12"
+tonic-prost-build = "0.14"
 
 [dev-dependencies]
 tempfile.workspace = true
@@ -69,7 +71,7 @@ http-body-util = "0.1"
 tokio-stream = "0.1"
 # jemalloc returns freed pages to the OS, preventing 150GB RSS when
 # running 832+ tests in a single process (system malloc does not).
-tikv-jemallocator = "0.6"
+tikv-jemallocator = "0.7"
 
 [[bench]]
 name = "hash_bench"

@@ -1032,7 +1032,7 @@ fn configuration_value_input(
 ) -> CanonicalConfigurationInput {
     let exists = value.is_some();
     let sha256 = value
-        .map(|value| format!("{:x}", Sha256::digest(value.as_bytes())))
+        .map(|value| hex::encode(Sha256::digest(value.as_bytes())))
         .unwrap_or_default();
     CanonicalConfigurationInput {
         path: key.to_string(),
@@ -1047,7 +1047,7 @@ pub fn fingerprint_configuration_input_path(
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     if path.is_file() {
         let bytes = std::fs::read(path)?;
-        return Ok(format!("{:x}", Sha256::digest(bytes)));
+        return Ok(hex::encode(Sha256::digest(bytes)));
     }
     if path.is_dir() {
         return fingerprint_configuration_input_directory(path);
@@ -1067,7 +1067,7 @@ fn fingerprint_configuration_input_directory(
         hasher.update(fingerprint_configuration_input_path(&file_path)?.as_bytes());
         hasher.update([0]);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hex::encode(hasher.finalize()))
 }
 
 fn collect_configuration_input_directory_files(

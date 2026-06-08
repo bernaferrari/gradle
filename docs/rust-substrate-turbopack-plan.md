@@ -60,8 +60,12 @@ Good:
 - Several core file-operation and execution-path slices already execute in Rust.
 - Direct warm build-plan execution exists as the highest-value proof: one JVM
   capture can feed repeated zero-forward Rust executions for supported builds.
-- The Rust workspace now builds with Rust 1.96.0, edition 2024, and a refreshed
-  latest-compatible Cargo lockfile.
+- The Rust workspace now builds with Rust 1.96.0, edition 2024, and latest
+  stable direct crate majors for the substrate runtime/tooling stack:
+  `tonic/prost`, `reqwest`, `notify`, `quick-xml`, `nix`, `tower`,
+  `criterion`, `zip`, `bzip2`, `thiserror`, `tikv-jemallocator`, and the
+  digest/hash crates. `bincode` remains intentionally pinned at v1 until the
+  persisted serde cache/storage format is migrated deliberately.
 - Fail-closed boundaries are present for unsupported semantics, which is better
   than silent approximation.
 
@@ -532,12 +536,13 @@ up-to-date correctness without falling back to broad mtime-only validation.
   `build/gradle-under-test/bin/gradle`. This prevents accidental inactive
   wrapper runs that report `substrate-inactive: run-build marker missing`.
 - Direct-warm dogfood execution uses the same Gradle-under-test discovery path.
-  The Rust 2024 run at `build/direct-warm-dogfood-20260608-rust2024` passed
+  The Rust 2024/latest-stable-dependency run at
+  `build/direct-warm-dogfood-20260608-deps-latest` passed
   7/7 supported local dogfood projects with zero JVM forwards: Java library,
   Java multiproject, Java application/start-scripts/distributions, external
   JUnit, external BOM/conflict, JavaExec process launch, and Javadoc process
   launch. Every direct replay used `build-plan-shadow`; total direct warm wall
-  time was 4886.8 ms. This run also proves the JavaExec direct replay gap is
+  time was 4401.5 ms. This run also proves the JavaExec direct replay gap is
   closed by merging direct build-graph metadata into the hydrated shadow task
   context before kernel admission.
 - Review-noise cleanup removed tracked Rust `.bak` source duplicates under
