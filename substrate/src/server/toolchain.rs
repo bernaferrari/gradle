@@ -1786,6 +1786,21 @@ impl ToolchainService for ToolchainServiceImpl {
 mod tests {
     use super::*;
 
+    fn set_test_env(key: &str, value: &str) {
+        // SAFETY: this test module mutates JAVA_HOME only inside scoped
+        // unit tests and restores it before returning.
+        unsafe {
+            std::env::set_var(key, value);
+        }
+    }
+
+    fn remove_test_env(key: &str) {
+        // SAFETY: paired cleanup for test-only process environment mutation.
+        unsafe {
+            std::env::remove_var(key);
+        }
+    }
+
     fn make_svc() -> ToolchainServiceImpl {
         let dir = tempfile::tempdir().unwrap();
         ToolchainServiceImpl::new(dir.path().to_path_buf())
@@ -1909,7 +1924,7 @@ OpenJDK Runtime Environment (build 21.0.4+7)"#;
 
         // Temporarily clear JAVA_HOME so we get a pure "not found" path
         let original_java_home = std::env::var("JAVA_HOME").ok();
-        std::env::remove_var("JAVA_HOME");
+        remove_test_env("JAVA_HOME");
 
         let resp = svc
             .get_java_home(Request::new(GetJavaHomeRequest {
@@ -1929,7 +1944,7 @@ OpenJDK Runtime Environment (build 21.0.4+7)"#;
 
         // Restore JAVA_HOME if it was set
         if let Some(val) = original_java_home {
-            std::env::set_var("JAVA_HOME", val);
+            set_test_env("JAVA_HOME", &val);
         }
     }
 

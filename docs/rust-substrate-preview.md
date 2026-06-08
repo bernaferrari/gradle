@@ -34,7 +34,6 @@ The direct warm dogfood command is:
 ```bash
 python3 tools/dogfood_runner/direct_warm.py \
   --manifest testing/dogfood/manifest.json \
-  --gradle-command "$PWD/build/gradle-under-test/bin/gradle" \
   --daemon-binary target/debug/gradle-substrate-daemon \
   --runbuild-binary target/debug/gradle-substrate-runbuild \
   --output-dir build/direct-warm-dogfood-current
@@ -63,6 +62,11 @@ python3 tools/demo/first_60_seconds.py \
 These commands assume this fork has already produced `build/gradle-under-test`
 and `target/debug/gradle-substrate-daemon`, or that the demo command is allowed
 to build them from the local checkout.
+
+The Rust workspace is validated on Rust 1.96.0 with edition 2024. Direct warm
+dogfood uses the Gradle-under-test binary automatically when it is discoverable
+from `GRADLE_UNDER_TEST_BIN`, `GRADLE_UNDER_TEST`, or
+`build/gradle-under-test/bin/gradle`.
 
 ## Supported Build Shapes
 

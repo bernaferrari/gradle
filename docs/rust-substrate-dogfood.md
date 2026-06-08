@@ -106,21 +106,22 @@ Direct warm coverage has also been expanded from one fixture to the supported
 local dogfood set. `tools/dogfood_runner/direct_warm.py` performs one strict
 Gradle/JVM capture per supported dogfood project and then runs the cached plan
 directly through `gradle-substrate-runbuild`. The latest checked run wrote
-`build/direct-warm-phase3-20260601/direct-warm-results.json` and
-`build/direct-warm-phase3-20260601/direct-warm-summary.md`; all 6 supported
-local dogfood projects passed direct warm execution with zero JVM forwards:
-OSS-style Java library, Java multiproject, external JUnit library, external
-BOM/conflict, JavaExec process launch, and Javadoc process launch. Total direct
-warm wall time was 4575.9 ms across the six projects, with every project using
-`build-plan-shadow` and validated input fingerprints.
+`build/direct-warm-dogfood-20260608-rust2024/direct-warm-results.json` and
+`build/direct-warm-dogfood-20260608-rust2024/direct-warm-summary.md`; all
+7 supported local dogfood projects passed direct warm execution with zero JVM
+forwards under Rust 1.96.0, Rust 2024, and the refreshed compatible crate
+lockfile: OSS-style Java library, Java multiproject, Java application/start
+scripts/distributions, external JUnit library, external BOM/conflict, JavaExec
+process launch, and Javadoc process launch. Total direct warm wall time was
+4886.8 ms across the seven projects, with every project using
+`build-plan-shadow` and validated input fingerprints. The JavaExec fixture is
+now covered by standalone direct replay: Rust merges direct build-graph metadata
+with the hydrated shadow task context before kernel admission, preserving the
+captured `main_class`, classpath, Java home, args, and working directory.
 
-The expanded Java application/start-scripts fixture has separate direct-warm
-evidence at `build/direct-warm-java-application-20260604`: 1/1 supported
-project passed, 15 tasks executed from `build-plan-shadow`, zero JVM forwards,
-and 436 ms reported Rust `RunBuild` duration after one capture. The direct-warm
-runner now uses the same Gradle-under-test discovery as the main dogfood
-runner, so `--gradle-command` is optional when `build/gradle-under-test` or the
-`GRADLE_UNDER_TEST*` environment is available.
+The direct-warm runner uses the same Gradle-under-test discovery as the main
+dogfood runner, so `--gradle-command` is optional when
+`build/gradle-under-test` or the `GRADLE_UNDER_TEST*` environment is available.
 
 Phase 3 also adds the Rust-first warm runner:
 `tools/warm_runner/run.py`. Its checked single-fixture run at

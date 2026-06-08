@@ -994,6 +994,21 @@ fn extract_host(url: &str) -> String {
 mod tests {
     use super::*;
 
+    fn set_test_env(key: &str, value: &str) {
+        // SAFETY: these tests mutate process environment only to validate
+        // environment capability filtering.
+        unsafe {
+            std::env::set_var(key, value);
+        }
+    }
+
+    fn remove_test_env(key: &str) {
+        // SAFETY: paired cleanup for test-only process environment mutation.
+        unsafe {
+            std::env::remove_var(key);
+        }
+    }
+
     // =========================================================================
     // Token issuance and validation
     // =========================================================================
@@ -1214,13 +1229,13 @@ mod tests {
         let env = EnvironmentCapability::from_token(token_id, registry.clone()).unwrap();
 
         // Set a test env var
-        std::env::set_var("GRADLE_TEST_CAP", "test-value");
+        set_test_env("GRADLE_TEST_CAP", "test-value");
         let result = env.get_var("GRADLE_TEST_CAP");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Some("test-value".to_string()));
 
         // Cleanup
-        std::env::remove_var("GRADLE_TEST_CAP");
+        remove_test_env("GRADLE_TEST_CAP");
     }
 
     #[test]
@@ -1232,12 +1247,12 @@ mod tests {
 
         let env = EnvironmentCapability::from_token(token_id, registry.clone()).unwrap();
 
-        std::env::set_var("SECRET_KEY", "should-not-read");
+        set_test_env("SECRET_KEY", "should-not-read");
         let result = env.get_var("SECRET_KEY");
         assert!(result.is_err());
 
         // Cleanup
-        std::env::remove_var("SECRET_KEY");
+        remove_test_env("SECRET_KEY");
     }
 
     #[test]
@@ -1249,9 +1264,9 @@ mod tests {
 
         let env = EnvironmentCapability::from_token(token_id, registry.clone()).unwrap();
 
-        std::env::set_var("CAP_TEST_A", "1");
-        std::env::set_var("CAP_TEST_B", "2");
-        std::env::set_var("CAP_OTHER", "3");
+        set_test_env("CAP_TEST_A", "1");
+        set_test_env("CAP_TEST_B", "2");
+        set_test_env("CAP_OTHER", "3");
 
         let vars = env.get_vars().unwrap();
 
@@ -1260,9 +1275,9 @@ mod tests {
         assert!(!vars.contains_key("CAP_OTHER"));
 
         // Cleanup
-        std::env::remove_var("CAP_TEST_A");
-        std::env::remove_var("CAP_TEST_B");
-        std::env::remove_var("CAP_OTHER");
+        remove_test_env("CAP_TEST_A");
+        remove_test_env("CAP_TEST_B");
+        remove_test_env("CAP_OTHER");
     }
 
     // =========================================================================
