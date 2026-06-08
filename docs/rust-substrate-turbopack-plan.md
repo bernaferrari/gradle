@@ -1,6 +1,6 @@
 # Rust Substrate Turbopack-Style Plan
 
-Status: aggressive migration plan
+Status: Rust-first Gradle engine plan with JVM plugin compatibility
 Last updated: 2026-06-08
 
 ## Reference Model
@@ -8,10 +8,18 @@ Last updated: 2026-06-08
 The useful Turbopack lesson is not "rewrite every class in Rust." The useful
 lesson is to build a new Rust engine around a persistent graph, make work lazy
 and incremental, and keep compatibility layers only where the ecosystem needs
-them.
+them. The equivalent target for Gradle is closer to `uv`, Vite, and Turbopack:
+make the common path feel dramatically faster while preserving compatibility
+for the existing ecosystem.
 
 For Gradle, that means moving from "Gradle with Rust helper services" to "a Rust
 build engine with a Gradle compatibility frontend."
+
+The product goal is not a visible second build tool. It is a Gradle-compatible
+front door where users keep invoking Gradle, but supported warm builds execute
+through a Rust hot path. The JVM stays available for DSL evaluation, existing
+plugins, Tooling API behavior, and unsupported semantics. That compatibility
+runtime should be measured and isolated, not treated as a failure of the design.
 
 Relevant Turbopack ideas:
 
@@ -26,9 +34,9 @@ Official references:
 - https://nextjs.org/docs/architecture/turbopack
 - https://vercel.com/blog/turbopack
 
-## What 100% Rust Can Realistically Mean
+## What Rust-First Really Means
 
-The realistic target is 100% Rust for Gradle's build engine:
+The realistic target is Rust-first ownership of Gradle's build engine:
 
 - file system model, VFS, watching, snapshots, hashing, and file operations
 - dependency metadata transport, cache, graph solving, and artifact stores
@@ -40,9 +48,9 @@ The realistic target is 100% Rust for Gradle's build engine:
 
 It cannot honestly mean that arbitrary existing JVM plugins become Rust without
 a migration boundary. The Gradle plugin ecosystem is part of Gradle's product
-surface. A realistic "100% Rust" architecture keeps a JVM compatibility island
-for existing plugins and DSL execution until those plugins can move to a Rust or
-Wasm plugin ABI.
+surface. A realistic architecture keeps a JVM compatibility island for existing
+plugins and DSL execution until those plugins can move to a Rust or Wasm plugin
+ABI.
 
 The end state should be:
 
@@ -50,6 +58,16 @@ The end state should be:
 - JVM code is a guest compatibility runtime.
 - Native Rust plugins are first class.
 - Unsupported JVM-only behavior is isolated, measured, and eventually optional.
+
+The core metric is engine mode per build:
+
+- `rust-hot-path-direct-warm`: valid cached graph, no JVM configuration, no JVM
+  task forwards.
+- `rust-hot-path-via-compat-frontend`: JVM frontend captured the graph, then
+  Rust executed the admitted task graph with no JVM task forwards.
+- `jvm-compatibility-frontend-fail-closed`: JVM frontend found unsupported
+  semantics and Rust rejected rather than approximating behavior.
+- `jvm-compatibility-runtime`: legacy JVM execution was needed after admission.
 
 ## Current State
 
@@ -545,6 +563,11 @@ up-to-date correctness without falling back to broad mtime-only validation.
   time was 4414.1 ms. This run also proves the JavaExec direct replay gap is
   closed by merging direct build-graph metadata into the hydrated shadow task
   context before kernel admission.
+- Engine-mode dogfood evidence now tracks the compatibility boundary directly.
+  The run at `build/direct-warm-dogfood-20260608-engine-modes` passed 7/7
+  supported local dogfood projects with zero JVM forwards and reported
+  `rust-hot-path-direct-warm=7`, so every supported warm sample executed through
+  the Rust hot path rather than a JVM compatibility runtime.
 - Review-noise cleanup removed tracked Rust `.bak` source duplicates under
   `substrate/src/server` and `substrate/src/server/task_executor`. These files
   were not referenced and duplicated live modules, so deleting them reduces
