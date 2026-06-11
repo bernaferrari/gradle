@@ -403,10 +403,17 @@ enum SubstrateCliMode {
     Authoritative,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DirectRunbuildMode {
+    Off,
+    Auto,
+    Force,
+}
+
 struct WrapperCli {
     gradle_args: Vec<String>,
     substrate_mode: SubstrateCliMode,
-    direct_runbuild: bool,
+    direct_runbuild: DirectRunbuildMode,
 }
 
 struct SubstrateContext {
@@ -425,14 +432,31 @@ fn env_truthy(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn env_disabled(name: &str) -> bool {
+    std::env::var(name)
+        .map(|value| {
+            let value = value.trim();
+            value == "0" || value.eq_ignore_ascii_case("false") || value.eq_ignore_ascii_case("no")
+        })
+        .unwrap_or(false)
+}
+
 fn parse_wrapper_cli(args: impl IntoIterator<Item = String>) -> WrapperCli {
     let mut gradle_args = Vec::new();
-    let mut direct_runbuild = env_truthy("GRADLEW_RUST_DIRECT_RUNBUILD");
+    let mut direct_runbuild = if env_truthy("GRADLEW_RUST_DIRECT_RUNBUILD") {
+        DirectRunbuildMode::Force
+    } else if env_disabled("GRADLEW_RUST_DIRECT_RUNBUILD")
+        || env_disabled("GRADLEW_RUST_AUTO_DIRECT_RUNBUILD")
+    {
+        DirectRunbuildMode::Off
+    } else {
+        DirectRunbuildMode::Auto
+    };
     let mut substrate_mode = if env_truthy("GRADLEW_RUST_SUBSTRATE_KERNEL")
         || env_truthy("GRADLEW_RUST_SUBSTRATE_AUTHORITATIVE")
     {
         SubstrateCliMode::Authoritative
-    } else if env_truthy("GRADLEW_RUST_SUBSTRATE") || direct_runbuild {
+    } else if env_truthy("GRADLEW_RUST_SUBSTRATE") || direct_runbuild == DirectRunbuildMode::Force {
         SubstrateCliMode::NativeReadyDefault
     } else {
         SubstrateCliMode::Off
@@ -443,13 +467,13 @@ fn parse_wrapper_cli(args: impl IntoIterator<Item = String>) -> WrapperCli {
             "--rust-substrate" => substrate_mode = SubstrateCliMode::NativeReadyDefault,
             "--rust-substrate-direct" => {
                 substrate_mode = SubstrateCliMode::NativeReadyDefault;
-                direct_runbuild = true;
+                direct_runbuild = DirectRunbuildMode::Force;
             }
             "--rust-substrate-kernel" => substrate_mode = SubstrateCliMode::Authoritative,
             "--rust-substrate-authoritative" => substrate_mode = SubstrateCliMode::Authoritative,
             "--no-rust-substrate" => {
                 substrate_mode = SubstrateCliMode::Off;
-                direct_runbuild = false;
+                direct_runbuild = DirectRunbuildMode::Off;
             }
             _ => gradle_args.push(arg),
         }
@@ -791,6 +815,12 @@ Set GRADLE_SUBSTRATE_DAEMON or build target/debug/gradle-substrate-daemon."
     }))
 }
 
+fn auto_direct_runbuild_can_prepare(project_dir: &Path, gradle_args: &[String]) -> bool {
+    direct_runbuild_can_handle_args(gradle_args)
+        && locate_substrate_daemon(project_dir).is_some()
+        && locate_substrate_runbuild(project_dir).is_some()
+}
+
 fn direct_runbuild_can_handle_args(args: &[String]) -> bool {
     args.iter().all(|arg| {
         if !arg.starts_with('-') {
@@ -950,10 +980,16 @@ fn print_usage() {
     eprintln!(
         "  --rust-substrate                 Try Rust RunBuild first, delegate if unsupported"
     );
-    eprintln!("  --rust-substrate-direct          Try cached direct Rust RunBuild before launching Gradle");
-    eprintln!("  --rust-substrate-kernel          Require Rust execution-kernel admission with no JVM task fallback");
+    eprintln!(
+        "  --rust-substrate-direct          Try cached direct Rust RunBuild before launching Gradle"
+    );
+    eprintln!(
+        "  --rust-substrate-kernel          Require Rust execution-kernel admission with no JVM task fallback"
+    );
     eprintln!("  --rust-substrate-authoritative   Compatibility alias for --rust-substrate-kernel");
-    eprintln!("  --no-rust-substrate              Disable GRADLEW_RUST_SUBSTRATE env opt-in");
+    eprintln!(
+        "  --no-rust-substrate              Disable Rust substrate env opt-ins and automatic direct RunBuild"
+    );
 }
 
 fn main() {
@@ -969,15 +1005,30 @@ fn main() {
     let cli = parse_wrapper_cli(raw_args.into_iter().skip(1));
     let direct_gradle_args = cli.gradle_args.clone();
     let mut gradle_args = cli.gradle_args;
+    let auto_direct_prepare = cli.direct_runbuild == DirectRunbuildMode::Auto
+        && cli.substrate_mode == SubstrateCliMode::Off
+        && auto_direct_runbuild_can_prepare(&project_dir, &direct_gradle_args);
+    let substrate_mode = if auto_direct_prepare {
+        SubstrateCliMode::NativeReadyDefault
+    } else {
+        cli.substrate_mode
+    };
     let substrate_context =
-        match inject_substrate_flags(cli.substrate_mode, &project_dir, &mut gradle_args) {
+        match inject_substrate_flags(substrate_mode, &project_dir, &mut gradle_args) {
             Ok(context) => context,
+            Err(e) if auto_direct_prepare => {
+                eprintln!(
+                    "Automatic Rust direct RunBuild unavailable: {}; continuing through Gradle.",
+                    e
+                );
+                None
+            }
             Err(e) => {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
         };
-    if cli.direct_runbuild {
+    if cli.direct_runbuild != DirectRunbuildMode::Off {
         if let Some(context) = &substrate_context {
             match try_direct_runbuild(context, &project_dir, &direct_gradle_args) {
                 Ok(Some(code)) => std::process::exit(code),
@@ -1198,11 +1249,13 @@ distributionSha256Sum=abc123
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.bin");
         std::fs::write(&file_path, b"hello").unwrap();
-        assert!(verify_sha256(
-            &file_path,
-            "0000000000000000000000000000000000000000000000000000000000000000"
-        )
-        .is_err());
+        assert!(
+            verify_sha256(
+                &file_path,
+                "0000000000000000000000000000000000000000000000000000000000000000"
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -1235,7 +1288,7 @@ distributionSha256Sum=abc123
         ]);
 
         assert_eq!(cli.substrate_mode, SubstrateCliMode::NativeReadyDefault);
-        assert!(!cli.direct_runbuild);
+        assert_eq!(cli.direct_runbuild, DirectRunbuildMode::Auto);
         assert_eq!(cli.gradle_args, vec!["build", "--info"]);
     }
 
@@ -1248,7 +1301,7 @@ distributionSha256Sum=abc123
         ]);
 
         assert_eq!(cli.substrate_mode, SubstrateCliMode::NativeReadyDefault);
-        assert!(cli.direct_runbuild);
+        assert_eq!(cli.direct_runbuild, DirectRunbuildMode::Force);
         assert_eq!(cli.gradle_args, vec!["clean", ":app:build"]);
     }
 
@@ -1261,7 +1314,7 @@ distributionSha256Sum=abc123
         ]);
 
         assert_eq!(cli.substrate_mode, SubstrateCliMode::Authoritative);
-        assert!(!cli.direct_runbuild);
+        assert_eq!(cli.direct_runbuild, DirectRunbuildMode::Auto);
         assert_eq!(cli.gradle_args, vec!["clean", "build"]);
     }
 
@@ -1274,7 +1327,7 @@ distributionSha256Sum=abc123
         ]);
 
         assert_eq!(cli.substrate_mode, SubstrateCliMode::Authoritative);
-        assert!(!cli.direct_runbuild);
+        assert_eq!(cli.direct_runbuild, DirectRunbuildMode::Auto);
         assert_eq!(cli.gradle_args, vec!["clean", "build"]);
     }
 
@@ -1287,8 +1340,17 @@ distributionSha256Sum=abc123
         ]);
 
         assert_eq!(cli.substrate_mode, SubstrateCliMode::Off);
-        assert!(!cli.direct_runbuild);
+        assert_eq!(cli.direct_runbuild, DirectRunbuildMode::Off);
         assert_eq!(cli.gradle_args, vec!["tasks"]);
+    }
+
+    #[test]
+    fn test_parse_wrapper_cli_defaults_to_auto_direct_mode() {
+        let cli = parse_wrapper_cli(vec!["build".to_string()]);
+
+        assert_eq!(cli.substrate_mode, SubstrateCliMode::Off);
+        assert_eq!(cli.direct_runbuild, DirectRunbuildMode::Auto);
+        assert_eq!(cli.gradle_args, vec!["build"]);
     }
 
     #[test]
@@ -1326,6 +1388,20 @@ distributionSha256Sum=abc123
     }
 
     #[test]
+    fn test_auto_direct_prepare_requires_safe_args_and_binaries() {
+        let dir = tempfile::tempdir().unwrap();
+
+        assert!(!auto_direct_runbuild_can_prepare(
+            dir.path(),
+            &["build".to_string()]
+        ));
+        assert!(!auto_direct_runbuild_can_prepare(
+            dir.path(),
+            &["build".to_string(), "--dry-run".to_string()]
+        ));
+    }
+
+    #[test]
     fn test_direct_runbuild_exit_decision_only_delegates_unavailable_code() {
         assert_eq!(direct_runbuild_exit_decision(0), Some(0));
         assert_eq!(direct_runbuild_exit_decision(1), Some(1));
@@ -1359,8 +1435,11 @@ distributionSha256Sum=abc123
             &"-Dorg.gradle.rust.substrate.state.dir=/tmp/gradle-substrate-state".to_string()
         ));
         assert!(flags.contains(&"-Dorg.gradle.rust.substrate.dependency.enabled=true".to_string()));
-        assert!(flags
-            .contains(&"-Dorg.gradle.rust.substrate.dependency.download.enabled=true".to_string()));
+        assert!(
+            flags.contains(
+                &"-Dorg.gradle.rust.substrate.dependency.download.enabled=true".to_string()
+            )
+        );
         assert!(flags.contains(
             &"-Dorg.gradle.rust.substrate.dependency.readthrough.metadata=true".to_string()
         ));
