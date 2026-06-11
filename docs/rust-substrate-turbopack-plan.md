@@ -577,6 +577,48 @@ up-to-date correctness without falling back to broad mtime-only validation.
 - Bridge gate evidence: `./gradlew -q :rust-bridge:testClasses` passed on
   2026-06-04.
 
+### Phase 10: Make The Rust Hot Path Transparent
+
+Goal: normal Gradle wrapper invocation silently tries the Rust hot path when it
+is safe, and falls back to the JVM compatibility frontend when no direct cached
+graph is available.
+
+- The Rust wrapper now defaults to automatic direct `RunBuild` mode. It only
+  prepares the Rust daemon and direct replay path when the wrapper can see both
+  `gradle-substrate-daemon` and `gradle-substrate-runbuild`, and when the
+  requested Gradle arguments are in the replay-safe subset.
+- Automatic direct mode promotes the fallback invocation to
+  `NativeReadyDefault`, so a first cache miss delegates through Gradle/JVM with
+  substrate capture enabled and a later warm invocation can skip JVM
+  configuration.
+- Direct replay keeps the Phase 7 exit-code contract: exit `0` is completed
+  direct Rust execution, exit `1` is an executed build failure, and exit `2`
+  delegates to the JVM compatibility frontend. Missing Rust binaries do not
+  break ordinary wrapper execution in automatic mode.
+- Explicit modes are still strict: `--rust-substrate-direct` and
+  `GRADLEW_RUST_DIRECT_RUNBUILD=true` force direct mode, while
+  `--no-rust-substrate`, `GRADLEW_RUST_DIRECT_RUNBUILD=false`, or
+  `GRADLEW_RUST_AUTO_DIRECT_RUNBUILD=false` disable automatic direct replay.
+- `gradle-substrate-runbuild` now falls back from missing stable-root keyed
+  artifacts to project-directory matching and selects the newest matching
+  session-keyed capture. This lets transparent wrapper replay work with the
+  artifacts the JVM compatibility frontend already writes.
+- Evidence: `cargo test -p gradle-wrapper -- --test-threads=1` passed 32/32,
+  including default automatic direct mode, explicit forced direct mode,
+  replay-safe argument admission, and missing-binary auto-skip coverage.
+  `cargo test -p gradle-substrate-daemon --bin gradle-substrate-runbuild`
+  passed 18/18, including stable-key fallback and newest session-capture
+  project matching.
+- Live wrapper smoke evidence: an unflagged `target/debug/gradlew clean build
+  --console=plain --no-daemon` on a temporary `oss-style-java-library` copy
+  used the automatic path after one capture and completed direct Rust replay
+  with `direct-runbuild status=COMPLETED`, 15 tasks, 5 up-to-date tasks, zero
+  JVM forwards, 712 ms reported `RunBuild` duration, and `build-plan-shadow`.
+- Dogfood evidence:
+  `build/direct-warm-dogfood-20260611-transparent-wrapper/direct-warm-summary.md`
+  passed 7/7 supported local dogfood projects with zero JVM forwards and
+  `rust-hot-path-direct-warm=7`; total direct warm wall time was 4160.0 ms.
+
 ## Aggressive Near-Term Backlog
 
 No discrete items remain from the 2026-06-04 aggressive backlog checkpoint.

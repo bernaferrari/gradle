@@ -337,30 +337,43 @@ fn resolve_artifact_path(args: &Args) -> Result<PathBuf, Box<dyn std::error::Err
     let root = build_plan_shadow_root(state_dir);
     if let Some(build_id) = &args.build_id {
         let path = root.join(keyed_artifact_filename(build_id));
-        let artifact = read_artifact(&path).map_err(|error| {
-            format!(
-                "cached build-plan artifact for build id '{}' was not found under '{}': {}",
-                build_id,
-                root.display(),
-                error
-            )
-        })?;
-        if artifact.plan.build_id != *build_id {
-            return Err(format!(
-                "cached build-plan artifact '{}' contains build id '{}' but '{}' was requested",
-                path.display(),
-                artifact.plan.build_id,
-                build_id
-            )
-            .into());
+        match read_artifact(&path) {
+            Ok(artifact) => {
+                if artifact.plan.build_id != *build_id {
+                    return Err(format!(
+                        "cached build-plan artifact '{}' contains build id '{}' but '{}' was requested",
+                        path.display(),
+                        artifact.plan.build_id,
+                        build_id
+                    )
+                    .into());
+                }
+                return Ok(path);
+            }
+            Err(error) if args.project_dir.is_none() => {
+                return Err(format!(
+                    "cached build-plan artifact for build id '{}' was not found under '{}': {}",
+                    build_id,
+                    root.display(),
+                    error
+                )
+                .into());
+            }
+            Err(_) => {}
         }
-        return Ok(path);
     }
     let project_dir = args
         .project_dir
         .as_ref()
         .ok_or("--project-dir is required when locating a cached artifact")?
         .canonicalize()?;
+    resolve_artifact_path_by_project(&root, &project_dir)
+}
+
+fn resolve_artifact_path_by_project(
+    root: &Path,
+    project_dir: &Path,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let mut candidates = Vec::new();
     for entry in std::fs::read_dir(&root)? {
         let entry = entry?;
@@ -373,7 +386,7 @@ fn resolve_artifact_path(args: &Args) -> Result<PathBuf, Box<dyn std::error::Err
             Err(_) => continue,
         };
         if artifact_matches_project(&artifact, &project_dir) {
-            candidates.push((path, artifact.plan.build_id));
+            candidates.push((path, artifact.plan.build_id, artifact.stored_at_ms));
         }
     }
     match candidates.len() {
@@ -384,16 +397,16 @@ fn resolve_artifact_path(args: &Args) -> Result<PathBuf, Box<dyn std::error::Err
         )
         .into()),
         1 => Ok(candidates.remove(0).0),
-        _ => Err(format!(
-            "multiple cached build-plan artifacts match project '{}': {}; pass --build-id or --artifact",
-            project_dir.display(),
-            candidates
-                .iter()
-                .map(|(_, build_id)| build_id.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-        .into()),
+        _ => {
+            candidates.sort_by(|left, right| {
+                right
+                    .2
+                    .cmp(&left.2)
+                    .then_with(|| right.0.cmp(&left.0))
+                    .then_with(|| right.1.cmp(&left.1))
+            });
+            Ok(candidates.remove(0).0)
+        }
     }
 }
 
@@ -936,10 +949,12 @@ fn direct_task_contexts(
                 );
                 context.insert(
                     "build_graph_dependencies".to_string(),
-                    serde_json::json!(graph_dependencies
-                        .get(task.as_str())
-                        .cloned()
-                        .unwrap_or_default()),
+                    serde_json::json!(
+                        graph_dependencies
+                            .get(task.as_str())
+                            .cloned()
+                            .unwrap_or_default()
+                    ),
                 );
             }
             (!context.is_empty())
@@ -1167,6 +1182,15 @@ mod tests {
     }
 
     fn write_shadow_artifact(root: &Path, build_id: &str, project_dir: Option<&Path>) -> PathBuf {
+        write_shadow_artifact_at(root, build_id, project_dir, 0)
+    }
+
+    fn write_shadow_artifact_at(
+        root: &Path,
+        build_id: &str,
+        project_dir: Option<&Path>,
+        stored_at_ms: i64,
+    ) -> PathBuf {
         std::fs::create_dir_all(root).unwrap();
         let projects = project_dir
             .map(|path| {
@@ -1191,7 +1215,7 @@ mod tests {
             },
             "fingerprint_sha256": "unused-by-runbuild",
             "input_fingerprints": [],
-            "stored_at_ms": 0,
+            "stored_at_ms": stored_at_ms,
             "source": "test"
         });
         std::fs::write(&path, serde_json::to_vec_pretty(&payload).unwrap()).unwrap();
@@ -1525,9 +1549,11 @@ mod tests {
 
         let error = validate_execution_graph(&artifact).unwrap_err();
 
-        assert!(error
-            .to_string()
-            .contains("build graph fingerprint mismatch"));
+        assert!(
+            error
+                .to_string()
+                .contains("build graph fingerprint mismatch")
+        );
     }
 
     #[test]
@@ -1655,9 +1681,11 @@ mod tests {
         let unqualified = resolve_task_filter(&artifact, &["build".to_string()]).unwrap_err();
         assert!(unqualified.to_string().contains("fully-qualified"));
         let unknown = resolve_task_filter(&artifact, &[":test".to_string()]).unwrap_err();
-        assert!(unknown
-            .to_string()
-            .contains("does not contain requested task"));
+        assert!(
+            unknown
+                .to_string()
+                .contains("does not contain requested task")
+        );
     }
 
     #[test]
@@ -1735,6 +1763,42 @@ mod tests {
         let project_dir = temp.path().join("project");
         std::fs::create_dir_all(&project_dir).unwrap();
         let expected = write_shadow_artifact(&root, "session-build", Some(&project_dir));
+        let mut args = test_args();
+        args.state_dir = Some(state_dir);
+        args.project_dir = Some(project_dir);
+
+        let path = resolve_artifact_path(&args).unwrap();
+
+        assert_eq!(path, expected);
+    }
+
+    #[test]
+    fn falls_back_to_project_scan_when_stable_build_id_artifact_is_missing() {
+        let temp = tempfile::tempdir().unwrap();
+        let state_dir = temp.path().join("state-dir");
+        let root = state_dir.join("config-cache").join("build-plan-shadow");
+        let project_dir = temp.path().join("project");
+        std::fs::create_dir_all(&project_dir).unwrap();
+        let expected = write_shadow_artifact(&root, "session-build", Some(&project_dir));
+        let mut args = test_args();
+        args.state_dir = Some(state_dir);
+        args.project_dir = Some(project_dir);
+        args.build_id = Some("stable-root:test".to_string());
+
+        let path = resolve_artifact_path(&args).unwrap();
+
+        assert_eq!(path, expected);
+    }
+
+    #[test]
+    fn project_scan_uses_newest_matching_artifact_when_multiple_sessions_exist() {
+        let temp = tempfile::tempdir().unwrap();
+        let state_dir = temp.path().join("state-dir");
+        let root = state_dir.join("config-cache").join("build-plan-shadow");
+        let project_dir = temp.path().join("project");
+        std::fs::create_dir_all(&project_dir).unwrap();
+        write_shadow_artifact_at(&root, "older-session", Some(&project_dir), 10);
+        let expected = write_shadow_artifact_at(&root, "newer-session", Some(&project_dir), 20);
         let mut args = test_args();
         args.state_dir = Some(state_dir);
         args.project_dir = Some(project_dir);
