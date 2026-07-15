@@ -11,7 +11,7 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Hooks into {@link TaskExecutionGraph#whenReady()} to shadow-compare
+ * Hooks into {@code TaskExecutionGraph.whenReady()} to shadow-compare
  * the Java task execution ordering with the Rust task graph service.
  *
  * <p>Registers all tasks with the Rust service, resolves its execution plan,

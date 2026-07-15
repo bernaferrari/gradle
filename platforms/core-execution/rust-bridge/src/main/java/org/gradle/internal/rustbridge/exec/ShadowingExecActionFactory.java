@@ -5,6 +5,7 @@ import org.gradle.internal.rustbridge.SubstrateClient;
 import org.gradle.internal.rustbridge.SubstrateException;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
 import org.gradle.process.internal.ExecAction;
+import org.gradle.process.internal.ExecHandle;
 import org.gradle.process.internal.ExecActionFactory;
 import org.gradle.process.internal.JavaExecAction;
 import org.gradle.process.internal.ExecHandleListener;
@@ -43,7 +44,7 @@ public class ShadowingExecActionFactory implements ExecActionFactory {
         HashMismatchReporter mismatchReporter,
         boolean authoritative
     ) {
-        this(javaDelegate, client, mismatchReporter, authoritative, RustExecAction::new);
+        this(javaDelegate, client, mismatchReporter, authoritative, (c, host) -> new RustExecAction(c, host));
     }
 
     ShadowingExecActionFactory(
@@ -70,7 +71,8 @@ public class ShadowingExecActionFactory implements ExecActionFactory {
         }
 
         ExecAction javaAction = javaDelegate.newExecAction();
-        return new ShadowingExecAction(javaAction, rustActionFactory.create(client), mismatchReporter, authoritative);
+        ExecAction rustAction = rustActionFactory.create(client, javaAction);
+        return new ShadowingExecAction(javaAction, rustAction, mismatchReporter, authoritative);
     }
 
     @Override
@@ -79,7 +81,7 @@ public class ShadowingExecActionFactory implements ExecActionFactory {
     }
 
     interface RustActionFactory {
-        ExecAction create(SubstrateClient client);
+        ExecAction create(SubstrateClient client, ExecAction optionsHost);
     }
 
     /**
@@ -110,6 +112,21 @@ public class ShadowingExecActionFactory implements ExecActionFactory {
                 return executeAuthoritative();
             }
             return executeShadow();
+        }
+
+        @Override
+        public ExecHandle buildHandle() {
+            if (authoritative) {
+                try {
+                    syncToRust();
+                } catch (RuntimeException e) {
+                    throw e;
+                } catch (Exception e) {
+                    throw new ProcessExecutionException("Failed to sync authoritative Rust exec handle", e);
+                }
+                return rustDelegate.buildHandle();
+            }
+            return javaDelegate.buildHandle();
         }
 
         private ExecResult executeShadow() {
@@ -232,6 +249,7 @@ public class ShadowingExecActionFactory implements ExecActionFactory {
         @Override public List<CommandLineArgumentProvider> getArgumentProviders() { return javaDelegate.getArgumentProviders(); }
         @Override public String getExecutable() { return javaDelegate.getExecutable(); }
         @Override public File getWorkingDir() { return javaDelegate.getWorkingDir(); }
+        @Override public org.gradle.api.file.DirectoryProperty getWorkingDirectory() { return javaDelegate.getWorkingDirectory(); }
         @Override public Map<String, Object> getEnvironment() { return javaDelegate.getEnvironment(); }
         @Override public boolean isIgnoreExitValue() { return javaDelegate.isIgnoreExitValue(); }
         @Override public InputStream getStandardInput() { return javaDelegate.getStandardInput(); }

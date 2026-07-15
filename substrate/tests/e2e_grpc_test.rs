@@ -188,6 +188,7 @@ async fn test_hash_batch_md5() {
 
     let resp = client
         .hash_batch(HashBatchRequest {
+            gradle_signature: true,
             algorithm: "MD5".to_string(),
             files: vec![FileToHash {
                 absolute_path: file.to_string_lossy().to_string(),
@@ -227,6 +228,7 @@ async fn test_hash_batch_sha256() {
 
     let resp = client
         .hash_batch(HashBatchRequest {
+            gradle_signature: false,
             algorithm: "SHA256".to_string(),
             files: vec![FileToHash {
                 absolute_path: file.to_string_lossy().to_string(),
@@ -261,6 +263,7 @@ async fn test_hash_batch_multiple_files_distinct_hashes() {
 
     let resp = client
         .hash_batch(HashBatchRequest {
+            gradle_signature: false,
             algorithm: "SHA256".to_string(),
             files: vec![
                 FileToHash {
@@ -310,6 +313,7 @@ async fn test_hash_batch_empty() {
 
     let resp = client
         .hash_batch(HashBatchRequest {
+            gradle_signature: false,
             algorithm: "SHA256".to_string(),
             files: vec![],
         })
@@ -328,6 +332,7 @@ async fn test_hash_batch_nonexistent_file_returns_error() {
 
     let resp = client
         .hash_batch(HashBatchRequest {
+            gradle_signature: false,
             algorithm: "MD5".to_string(),
             files: vec![FileToHash {
                 absolute_path: "/tmp/substrate_e2e_nonexistent_99999.txt".to_string(),

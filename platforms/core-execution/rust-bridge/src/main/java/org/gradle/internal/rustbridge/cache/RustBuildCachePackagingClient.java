@@ -1,5 +1,8 @@
 package org.gradle.internal.rustbridge.cache;
 
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
+
 import com.google.protobuf.ByteString;
 import gradle.substrate.v1.BuildCachePackFile;
 import gradle.substrate.v1.PackCacheEntryRequest;
@@ -19,6 +22,7 @@ import java.util.Map;
 /**
  * Thin client for the Rust build-cache packaging service.
  */
+@ServiceScope(Scope.Build.class)
 public class RustBuildCachePackagingClient {
 
     private static final Logger LOGGER = Logging.getLogger(RustBuildCachePackagingClient.class);

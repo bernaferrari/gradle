@@ -1,5 +1,8 @@
 package org.gradle.internal.rustbridge.cache;
 
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
+
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.rustbridge.shadow.HashMismatchReporter;
 import org.slf4j.Logger;
@@ -9,6 +12,7 @@ import java.util.Arrays;
 /**
  * Shadowing wrapper for the build-cache packaging slice.
  */
+@ServiceScope(Scope.Build.class)
 public class ShadowingBuildCachePacker {
 
     private static final Logger LOGGER = Logging.getLogger(ShadowingBuildCachePacker.class);

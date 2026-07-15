@@ -190,6 +190,7 @@ fn bench_grpc_hash_batch(
     // Warm up
     for _ in 0..5 {
         let req = Request::new(HashBatchRequest {
+            gradle_signature: false,
             algorithm: algorithm.clone(),
             files: file_entries.clone(),
         });
@@ -200,6 +201,7 @@ fn bench_grpc_hash_batch(
     let mut success_count = 0usize;
     for _ in 0..iterations {
         let req = Request::new(HashBatchRequest {
+            gradle_signature: false,
             algorithm: algorithm.clone(),
             files: file_entries.clone(),
         });

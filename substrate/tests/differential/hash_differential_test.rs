@@ -387,6 +387,7 @@ async fn test_hash_100_files_against_reference_md5() {
         .hash_batch(Request::new(HashBatchRequest {
             files: files_to_hash,
             algorithm: "MD5".to_string(),
+            gradle_signature: true,
         }))
         .await
         .unwrap()
@@ -454,6 +455,7 @@ async fn test_hash_100_files_against_reference_sha256() {
         .hash_batch(Request::new(HashBatchRequest {
             files: files_to_hash,
             algorithm: "SHA-256".to_string(),
+            gradle_signature: false,
         }))
         .await
         .unwrap()
@@ -528,6 +530,7 @@ async fn test_hash_100_files_against_reference_sha1() {
         .hash_batch(Request::new(HashBatchRequest {
             files: files_to_hash,
             algorithm: "SHA-1".to_string(),
+            gradle_signature: false,
         }))
         .await
         .unwrap()
@@ -605,6 +608,7 @@ async fn test_hash_empty_files_against_reference() {
             .hash_batch(Request::new(HashBatchRequest {
                 files,
                 algorithm: algorithm.to_string(),
+                gradle_signature: true,
             }))
             .await
             .unwrap()
@@ -690,6 +694,7 @@ async fn test_hash_binary_files_against_reference() {
                         last_modified: 0,
                     }],
                     algorithm: algorithm.to_string(),
+                    gradle_signature: true,
                 }))
                 .await
                 .unwrap()
@@ -774,6 +779,7 @@ async fn test_hash_unicode_filenames_against_reference() {
                     last_modified: 0,
                 }],
                 algorithm: "SHA-256".to_string(),
+                gradle_signature: false,
             }))
             .await
             .unwrap()
@@ -840,6 +846,7 @@ async fn test_hash_large_files_against_reference() {
                         last_modified: 0,
                     }],
                     algorithm: algorithm.to_string(),
+                    gradle_signature: true,
                 }))
                 .await
                 .unwrap()
@@ -924,6 +931,7 @@ async fn test_hash_symlinks_against_reference() {
                     last_modified: 0,
                 }],
                 algorithm: "SHA-256".to_string(),
+                gradle_signature: false,
             }))
             .await
             .unwrap()
@@ -983,6 +991,7 @@ async fn test_different_algorithms_produce_different_hashes() {
                     last_modified: 0,
                 }],
                 algorithm: algorithm.to_string(),
+                gradle_signature: false,
             }))
             .await
             .unwrap()
@@ -1047,6 +1056,7 @@ async fn test_nonexistent_files_report_errors_cleanly() {
         .hash_batch(Request::new(HashBatchRequest {
             files,
             algorithm: "SHA-256".to_string(),
+            gradle_signature: false,
         }))
         .await
         .unwrap()
@@ -1107,6 +1117,7 @@ async fn test_mixed_valid_invalid_batch() {
                 },
             ],
             algorithm: "SHA-256".to_string(),
+            gradle_signature: false,
         }))
         .await
         .unwrap()
@@ -1163,6 +1174,7 @@ async fn test_hash_determinism_across_10_calls() {
             .hash_batch(Request::new(HashBatchRequest {
                 files: vec![file_entry.clone()],
                 algorithm: "SHA-256".to_string(),
+                gradle_signature: false,
             }))
             .await
             .unwrap()

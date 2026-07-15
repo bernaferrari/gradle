@@ -1523,6 +1523,7 @@ fn merge_classpaths(existing: &str, additional: &[String]) -> Option<String> {
         .map(|paths| paths.to_string_lossy().into_owned())
 }
 
+
 fn external_classpath_candidates(
     task: &CanonicalBuildPlanTask,
     plan_dependencies: &[CanonicalBuildPlanDependency],

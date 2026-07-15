@@ -3,12 +3,14 @@ package org.gradle.internal.rustbridge.exec;
 import gradle.substrate.v1.ExecSpawnRequest;
 import gradle.substrate.v1.ExecSpawnResponse;
 import org.gradle.api.logging.Logging;
+import org.gradle.api.file.DirectoryProperty;
 import org.gradle.process.BaseExecSpec;
 import org.gradle.process.ExecResult;
 import org.gradle.process.ExecSpec;
 import org.gradle.process.ProcessForkOptions;
 import org.gradle.process.ProcessExecutionException;
 import org.gradle.process.internal.ExecAction;
+import org.gradle.process.internal.ExecHandle;
 import org.gradle.process.internal.ExecHandleListener;
 import org.gradle.internal.rustbridge.SubstrateClient;
 import org.slf4j.Logger;
@@ -31,9 +33,10 @@ public class RustExecAction implements ExecAction {
     private static final Logger LOGGER = Logging.getLogger(RustExecAction.class);
 
     private final SubstrateClient client;
+    /** Holds ProcessForkOptions state (including DirectoryProperty working directory). */
+    private final ExecAction optionsHost;
     private String executable;
     private List<String> args = Collections.emptyList();
-    private File workingDir;
     private Map<String, Object> environment = new HashMap<>();
     private boolean ignoreExitValue;
     private InputStream stdin;
@@ -41,8 +44,9 @@ public class RustExecAction implements ExecAction {
     private OutputStream stderr;
     private boolean redirectErrorStream;
 
-    public RustExecAction(SubstrateClient client) {
+    public RustExecAction(SubstrateClient client, ExecAction optionsHost) {
         this.client = client;
+        this.optionsHost = optionsHost;
     }
 
     @Override
@@ -60,7 +64,7 @@ public class RustExecAction implements ExecAction {
             ExecSpawnRequest.newBuilder()
                 .setCommand(executable)
                 .addAllArgs(args)
-                .setWorkingDir(workingDir != null ? workingDir.getAbsolutePath() : System.getProperty("user.dir"))
+                .setWorkingDir(resolveWorkingDir().getAbsolutePath())
                 .putAllEnvironment(envMap)
                 .setRedirectErrorStream(redirectErrorStream)
                 .build()
@@ -87,6 +91,43 @@ public class RustExecAction implements ExecAction {
         }
 
         return new SimpleExecResult(exitCode);
+    }
+
+    @Override
+    public ExecHandle buildHandle() {
+        if (client.isNoop()) {
+            throw new RuntimeException("Rust exec is not available");
+        }
+
+        Map<String, String> envMap = new HashMap<>();
+        for (Map.Entry<String, Object> entry : environment.entrySet()) {
+            envMap.put(entry.getKey(), String.valueOf(entry.getValue()));
+        }
+
+        File workDirFile = resolveWorkingDir();
+        String workDir = workDirFile.getAbsolutePath();
+        ExecSpawnResponse spawnResp = client.getExecStub().spawn(
+            ExecSpawnRequest.newBuilder()
+                .setCommand(executable)
+                .addAllArgs(args)
+                .setWorkingDir(workDir)
+                .putAllEnvironment(envMap)
+                .setRedirectErrorStream(redirectErrorStream)
+                .build()
+        );
+
+        if (!spawnResp.getSuccess()) {
+            throw new ProcessExecutionException("Failed to spawn process: " + spawnResp.getErrorMessage());
+        }
+
+        return new RustProcessHandle(
+            client,
+            spawnResp.getPid(),
+            executable != null ? executable : "unknown",
+            args,
+            workDirFile,
+            envMap
+        );
     }
 
     // --- ExecAction ---
@@ -274,23 +315,37 @@ public class RustExecAction implements ExecAction {
 
     @Override
     public File getWorkingDir() {
-        return workingDir;
+        return optionsHost.getWorkingDir();
     }
 
     @Override
     public void setWorkingDir(File dir) {
-        this.workingDir = dir;
+        optionsHost.setWorkingDir(dir);
     }
 
     @Override
     public void setWorkingDir(Object dir) {
-        this.workingDir = dir != null ? new File(dir.toString()) : null;
+        optionsHost.setWorkingDir(dir);
     }
 
     @Override
     public ProcessForkOptions workingDir(Object dir) {
-        setWorkingDir(dir);
+        optionsHost.workingDir(dir);
         return this;
+    }
+
+    @Override
+    public DirectoryProperty getWorkingDirectory() {
+        return optionsHost.getWorkingDirectory();
+    }
+
+    private File resolveWorkingDir() {
+        DirectoryProperty directory = optionsHost.getWorkingDirectory();
+        if (directory.isPresent()) {
+            return directory.get().getAsFile();
+        }
+        File legacy = optionsHost.getWorkingDir();
+        return legacy != null ? legacy : new File(System.getProperty("user.dir"));
     }
 
     @Override
@@ -323,7 +378,7 @@ public class RustExecAction implements ExecAction {
         if (options instanceof ExecSpec) {
             ((ExecSpec) options).setArgs(this.args);
         }
-        options.setWorkingDir(this.workingDir);
+        options.setWorkingDir(resolveWorkingDir());
         options.setEnvironment(this.environment);
         if (options instanceof BaseExecSpec) {
             ((BaseExecSpec) options).setIgnoreExitValue(this.ignoreExitValue);
