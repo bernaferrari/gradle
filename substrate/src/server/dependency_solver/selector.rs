@@ -91,7 +91,6 @@ pub(crate) fn validate_rejected_versions(
 }
 
 /// Resolve a supported Maven version selector to a concrete version.
-///
 /// Unsupported dynamic selectors such as empty strings and Ivy-style wildcard
 /// selectors return `None` so callers can fail closed instead of treating them
 /// as exact versions.

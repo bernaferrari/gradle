@@ -5,7 +5,6 @@ use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 /// Generates Gradle-compatible application start scripts for the default,
 /// non-modular `CreateStartScripts` contract.
 
-// zr2e/8lk7 hygiene + sustain (Delete/StartScripts VFS cross evidence, scheduler 019e6b49ada7 recurring) per "How to Work on a Slice" AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + full directive x2x2 + "more sub-agents = more task_executor richer lowering (delete/start_scripts) + VFS cross + entire port accelerated" + "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust" + multi-year. Abs paths: this + delete.rs + fp:1229 + watch:766 + 2 Java (after 8lk7 blocks) + plan (Fresh after prior 8lk7 anchor) + PARITY + MIGRATION + .beads (8lk7) + AGENTS + scheduler 019e6b49ada7 + fleet + cargo fuel. SAFE terminal comment only in clean area (no edits to damaged lineage). 0 reg 20+. Java FIRST + differential + pilot + gov + spawn + bd children. "How to Work on a Slice". Follow exactly. Entire port accelerated.
 
 pub struct StartScriptsTaskExecutor;
 
@@ -378,12 +377,9 @@ fn split_shell_words(value: &str) -> Vec<String> {
 }
 
 
-// zr2e explorer child (substrate-8lk7, scheduler 019e6b4789ce recurring) — deeper StartScripts richer lowering + VFS DirectorySnapshot cross
-// Per "How to Work on a Slice" AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + full directive x2x2 + "more sub-agents = more task_executor richer lowering (delete/start_scripts) + VFS cross (DirectorySnapshot Merkle child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766) + entire port accelerated" + "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust" + multi-year.
-// Richer contracts: template expansion, permissions, unix/windows variants. Real VFS delta consumption (BTree child_summaries intersection). Reporter "startscripts-lowering" + "vfs-taskexec-cross" via tracing. BTree det. Java FIRST done (ENABLE after zr2e Tar/Sync blocks). 0 reg 20+ hardened. Abs paths: this + delete.rs + mod.rs + fp:1229 + watch:766 + plan Fresh for 8lk7 + PARITY + .beads (5ezk + zr2e + 8lk7) + 2 Java + AGENTS.md + scheduler 019e6b4789ce + fleet.
 pub fn apply_vfs_delta_to_start_scripts(
     output_dir: &std::path::Path,
-    delta_child_summaries: &std::collections::BTreeMap<String, String>, // from DirectorySnapshot fp:1229 child_summaries + watch:766 get_snapshot_delta
+    delta_child_summaries: &std::collections::BTreeMap<String, String>,
 ) -> bool {
     if delta_child_summaries.is_empty() {
         return false;
@@ -392,14 +388,12 @@ pub fn apply_vfs_delta_to_start_scripts(
     for (changed, _h) in delta_child_summaries.iter() {
         let cl = changed.to_lowercase();
         if dir_str.contains(&cl) || cl.contains("script") || cl.contains("src") || cl.contains("build") {
-            tracing::info!(target: "startscripts-lowering", vfs_taskexec_cross = true, dir = %output_dir.display(), changed = %changed, "VFS delta affects start scripts output — re-execution likely (shadow for 0%+54=54)");
+            tracing::info!(target: "startscripts-lowering", vfs_taskexec_cross = true, dir = %output_dir.display(), changed = %changed, "VFS delta affects start scripts output — re-execution likely");
             return true;
         }
     }
     false
 }
-
-// 8lk7 hygiene + sustain (Delete/StartScripts VFS cross evidence, scheduler 019e6b49ada7 recurring) per 'How to Work on a Slice' AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + full directive x2x2 + 'more sub-agents = more task_executor richer lowering (delete/start_scripts) + VFS cross (DirectorySnapshot Merkle child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766) + entire port accelerated' + 'more sub-agents turned VFS failure 019e6885-51c7 into more cross surface' + 'Go parallel forever. Entire port accelerated.' + 'use more sub-agents to do more work and migrate more to rust'. Abs paths: this + delete.rs + fp:1229 + watch:766 + 2 Java + plan + .beads (8lk7) + AGENTS. 0 reg <5 non-hard. Follow exactly. Cargo fuel in lineage only. 'How to Work on a Slice'.
 
 
 #[tonic::async_trait]

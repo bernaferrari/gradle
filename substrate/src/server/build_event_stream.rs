@@ -22,7 +22,6 @@ const MAX_EVENTS_PER_BUILD: usize = 10_000;
 const BROADCAST_CAPACITY: usize = 256;
 
 /// Shared inner state for `BuildEventStreamServiceImpl`.
-///
 /// Wrapped in `Arc` so that `Clone` on the service gives a shallow copy
 /// that shares the same buffers, channels, and counters.
 struct EventStreamInner {
@@ -33,25 +32,17 @@ struct EventStreamInner {
     events_sent: AtomicI64,
     events_received: AtomicI64,
     events_evicted: AtomicI64,
+    /// Monotonic clock so same-millisecond events keep insertion order.
+    last_timestamp_ms: AtomicI64,
     /// Registered event dispatchers for automatic cross-service fan-out.
     dispatchers: Vec<Arc<dyn EventDispatcher>>,
 }
 
 /// Rust-native build event streaming service.
 /// Buffers build events and streams them to subscribers (IDEs, CI systems).
-///
 /// Uses tokio broadcast channels for real-time fan-out to multiple subscribers.
 /// Events are also buffered in memory for historical queries.
-///
 /// `Clone` produces a shallow handle that shares the same underlying state.
-///
-/// === Sustain #5: part of Native Compile + Observability/Logging (cross console.rs + problem_reporting.rs + native_compile.rs) ===
-/// Sustain 019e68b1-e0c7-79b0-9bd5-7341230a2d4f #5; reporter "build-events".
-/// Java FIRST + crosses to VFS 019e68b7-e502.../019e68b8-0529.../019e68b4-39d7.../019e68ba-1b85... + rescue/hygiene/fresh 019e68b9-fd77... + "more sub-agents = more observability + native surface in Rust" (see native_compile.rs header + plan.md sustain #5 launch + RustBridgeCoreServices.java). 0% 54=54 gate delivered. Abs paths.
-/// === Evidence + 54=54 runner for full Problem Reporting + Observability/Logging (the other high-ROI slice the sustain handoff 019e68b9-fd77... just surfaced in its 'continued' append ~9199+: problem_reporting.rs + build_event_stream.rs + console.rs full ownership; all-reporter diagnostics cross every slice; high testability) ===
-/// Dedicated: reporters "problem-reporting" / "build-events" / "console" (ties all HashMismatchReporter / shadow reporters for IDE/CI diagnostics; complements every slice VFS/remote/GC/kernel/test-exec etc.).
-/// Java FIRST + gov append (abs plan after sustain handoff continued ~9199+) + PARITY with crosses to sustain handoff 019e68b9-fd77..., perpetual scheduler 019e68be8b8f, all VFS fleet (incl. 3 recovery 019e68bb-9512.../019e68bb-b0f6.../019e68bb-d19f...), new CC durable 54=54 reinforcement 019e68bf-3536... and VFS+CC cross 019e68bf-5685..., rescue 019e68b1-add4..., hygiene 019e68b2-62f2..., "more sub-agents = more problem_reporting / observability surface + cross every slice".
-/// 0% + 54=54 pilots (complete + --watch-fs + report-mismatches) on trusted3/dogfood/manifest. Differential extended. Internal todo + varied + cargo. Gate delivered on this high-ROI slice. More sub-agents velocity. All abs paths. Hygiene <5 (gov only).
 #[derive(Clone)]
 pub struct BuildEventStreamServiceImpl {
     inner: Arc<EventStreamInner>,
@@ -73,6 +64,7 @@ impl BuildEventStreamServiceImpl {
                 events_sent: AtomicI64::new(0),
                 events_received: AtomicI64::new(0),
                 events_evicted: AtomicI64::new(0),
+                last_timestamp_ms: AtomicI64::new(0),
                 dispatchers: Vec::new(),
             }),
         }
@@ -91,6 +83,7 @@ impl BuildEventStreamServiceImpl {
                     events_sent: AtomicI64::new(0),
                     events_received: AtomicI64::new(0),
                     events_evicted: AtomicI64::new(0),
+                    last_timestamp_ms: AtomicI64::new(0),
                     dispatchers: Vec::new(),
                 }
             }),
@@ -102,6 +95,23 @@ impl BuildEventStreamServiceImpl {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0)
+    }
+
+    /// Wall-clock millis, strictly increasing so same-ms bursts keep send order.
+    fn next_timestamp_ms(&self) -> i64 {
+        let now = Self::now_ms();
+        loop {
+            let prev = self.inner.last_timestamp_ms.load(Ordering::Relaxed);
+            let next = if now > prev { now } else { prev.saturating_add(1) };
+            if self
+                .inner
+                .last_timestamp_ms
+                .compare_exchange(prev, next, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+            {
+                return next;
+            }
+        }
     }
 
     fn matches_filter(event: &BuildEventMessage, filter: &[String]) -> bool {
@@ -125,7 +135,6 @@ impl BuildEventStreamServiceImpl {
         self.inner.build_channels.len()
     }
 
-    /// Remove a build's channel and buffer (cleanup after build completes).
     pub fn cleanup_build(&self, build_id: &BuildId) {
         self.inner.build_channels.remove(build_id);
         self.inner.event_buffers.remove(build_id);
@@ -276,7 +285,7 @@ impl BuildEventStreamService for BuildEventStreamServiceImpl {
 
         let event = BuildEventMessage {
             build_id: req.build_id.clone(),
-            timestamp_ms: Self::now_ms(),
+            timestamp_ms: self.next_timestamp_ms(),
             event_type: req.event_type,
             event_id: req.event_id,
             properties: req.properties,
@@ -299,10 +308,9 @@ impl BuildEventStreamService for BuildEventStreamServiceImpl {
         let events = if let Some(buf) = self.inner.event_buffers.get(&build_id) {
             let mut events: Vec<BuildEventMessage> = buf.iter().cloned().collect();
 
-            // BTree determinism for parity (sort by timestamp + event_type + event_id for deterministic problem/build-events in differential harness + 54=54 report-mismatches)
             events.sort_by(|a, b| {
-                a.timestamp_ms.cmp(&b.timestamp_ms)
-                    .then_with(|| a.event_type.cmp(&b.event_type))
+                a.timestamp_ms
+                    .cmp(&b.timestamp_ms)
                     .then_with(|| a.event_id.cmp(&b.event_id))
             });
 

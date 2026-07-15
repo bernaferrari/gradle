@@ -18,12 +18,6 @@ use crate::proto::{
 };
 
 // ---------------------------------------------------------------------------
-// VISION: Mega 54=54 Runner 1 Incremental full + VFS delta cross (cross to Execution History full FH + Persistent Cache sharded) per 'How to Work on a Slice' (AGENTS.md FIRST, 8-step) + full user directive verbatim x2 x2 + core mantra x2 x2
-// "use more sub-agents to do more work and migrate more to rust" + "I don't care if it is going to take multiple years. I want you to plan and proceed, maybe try bigger slices, continue migrating parts of gradle to rust specially parts that have a strong boundary with everything else (like a sub-module) and that is easy to test so we can replace with rust." + "do them all, stop being lazy, keep going until the entire codebase is ported to rust in the best way possible." + "proceed then, use sub-agents and proceed improving porting the codebase to rust." + "go, keep going", "keep going, go", "go, do them", "proceed, do them all in parallel in the best way possible".
-// Core mantra x2 x2: more sub-agents = more hygiene GREEN (ResolvedGraph E0560 fix + coordination + cargo verify + 2 bigger slice starters on Persistent Cache/Incremental/Execution History + Workers full/Remote Cache etc.) + dual-hygiene acceleration for E0425/E0560/E0599 + ... + entire port accelerated + "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated" — all identical to the Java FIRST spawn charter above. Repeat in all output.
-// Full hygiene protocol + 0 reg on 20+ hardened list + additive-only + shadow-first/fail-closed/hybrid/reporter-tagged/fail-closed 100% legacy + bd discipline + varied calls + abs paths.
-// Incremental full: reverse_deps BFS (migrate HashMap/HashSet here to BTreeMap/BTreeSet for determinism), annproc/source discovery, VFS delta consumption from authoritative prep 019e68d5-b31f on 5 surfaces via DirectorySnapshot/Merkle child_summaries/get_snapshot_delta @file_fingerprint.rs:1229/file_watch.rs:766 + 'incremental-compilation' reporter + 'vfs-incremental-cross'. Cross to execution_history (FH cross + VFS delta invalidation + 'execution-history'/'vfs-history-cross'), persistent-cache sharded (VersionedFileStore + invalidate), cache_orchestration, file_hash_cache. BTree determinism everywhere. Shadow-first behind ENABLE, fail-closed to legacy on VFS delta. Hybrid + reporter-tagged. 0%+54=54 on 'incremental-compilation'/'vfs-incremental-cross' + crosses under complete + --watch-fs + report-mismatches trusted3/dogfood/manifest. Evidence artifacts build/evidence-hygiene-green-019e68e3-c77f-...-persistent-cache-incremental-execution-history-54-54-runner1/*. <5 edits. bd 5ezk + child substrate-5xz. "more sub-agents = more hygiene GREEN ... entire port accelerated". Go parallel forever.
-// ---------------------------------------------------------------------------
 
 /// Tracked source set for incremental compilation.
 struct SourceSet {
@@ -39,7 +33,6 @@ struct SourceSet {
 
 /// Rust-native incremental compilation service.
 /// Tracks source changes and computes rebuild decisions with transitive dependency closure.
-/// Wave 4 full incremental 019e68e9-bc26 (318.7s/48 calls on 019e689a-1f29... 0%: reverse_deps BFS + VFS/Merkle rebuilds + annproc + crosses) + hygiene #5 019e68ea-b32e (247.1s/31 calls on 019e689e-ad58... ResolvedGraph proto fields in dependency_resolution.rs) + quintuple 0% mega 019e68ea-ea87 (VFS+Lowering+Dep-Cache+Scheduler+Incremental 54=54) + VFS delta cross sustain 019e69f4-73c8 + super-combined 019e68e7-c390 + mega-quad 019e69e7-9a52 + crosses + entire fleet + entire port accelerated. Additive reporter tags 'full-incremental'/'incremental-vfs-merkle'/'annproc-cross' + reverse_deps BFS + VFS/Merkle + annproc + crosses + VFS delta consumption from DirectorySnapshot Merkle child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766 + BTree determinism. Crosses to hygiene #5 ResolvedGraph in dependency_resolution.rs + quintuple surfaces + all prior. "How to Work on a Slice" (AGENTS.md /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md read FIRST) + full directive x2 x2 + VFS failure "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "more sub-agents = more full incremental 019e68e9-bc26 (318.7s/48 calls on 019e689a-1f29... reverse_deps BFS + VFS/Merkle rebuilds + annproc + crosses) + hygiene #5 019e68ea-b32e (247.1s/31 calls on 019e689e-ad58... ResolvedGraph proto fields in dependency_resolution.rs) + quintuple 0% mega evidence runner 019e68ea-ea87 (211.4s/33 calls on VFS+Lowering+Dep-Cache+Scheduler+Incremental) + the 3 previous + VFS delta cross sustain 019e69f4-73c8 success + super-combined 019e68e7-c390 (290.2s/39 calls) + mega-quad 019e69e7-9a52 (265.8s/33 calls) + ... + entire fleet + entire port accelerated" + "Go parallel forever. Entire port accelerated.". bd substrate-du3 (in_progress) + 8bv. Evidence 100% 54=54. 0 reg 20+ hardened. Cargo GREEN. Hygiene <5. Shadow-first/fail-closed/hybrid/Java FIRST/additive. Gate delivered. Go parallel forever. Entire port accelerated.
 #[derive(Default)]
 pub struct IncrementalCompilationServiceImpl {
     source_sets: DashMap<String, SourceSet>, // source_set_id -> SourceSet
@@ -683,7 +676,6 @@ fn extract_class_name(data: &[u8]) -> Option<String> {
         }
     }
 
-    // After constant pool: u2 access_flags, u2 this_class, u2 super_class
     if offset + 6 > data.len() {
         return None;
     }
@@ -777,7 +769,6 @@ fn extract_class_references(data: &[u8]) -> Vec<String> {
 
 /// Extract annotation class names from RuntimeVisibleAnnotations attribute.
 fn extract_annotations(_data: &[u8]) -> Vec<String> {
-    // Full annotation extraction requires parsing attributes after the constant pool.
     // For now, return empty — this would need a more complete class file parser.
     // In production, this would parse the RuntimeVisibleAnnotations attribute.
     Vec::new()
@@ -1364,7 +1355,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Re-compile after classpath change
         let resp = svc
             .record_compilation(Request::new(RecordCompilationRequest {
                 build_id: "build-cp3".to_string(),

@@ -550,7 +550,6 @@ mod tests {
         assert!(!resp.input_hash.is_empty());
     }
 
-    /// Evaluate after recording execution returns updated result.
     /// Record a failed execution, then evaluate with the same inputs → UP_TO_DATE even on failure.
     #[tokio::test]
     async fn test_evaluate_after_recording_failed_execution() {

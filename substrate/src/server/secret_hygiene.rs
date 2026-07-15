@@ -1,4 +1,3 @@
-//! Secret hygiene utilities for gradle-substrate.
 //!
 //! Provides zeroizing secret buffers, redaction policies for logs,
 //! XOR-obfuscated cache fields, and a credential store.
@@ -35,7 +34,6 @@ impl Secret {
     }
 
     /// Temporarily expose the raw bytes. The caller is responsible for
-    /// zeroizing any copies after use.
     pub fn expose(&self) -> &[u8] {
         &self.inner
     }
@@ -177,7 +175,6 @@ impl SecretField {
 // ---------------------------------------------------------------------------
 
 /// A policy that defines which field names should be redacted.
-///
 /// Field names are matched against glob-like patterns (case-insensitive,
 /// `*` matches any sequence of characters).
 #[derive(Clone)]
@@ -287,9 +284,7 @@ impl RedactingFormatter {
 // ---------------------------------------------------------------------------
 
 /// A wrapper for cache fields that should be encrypted at rest.
-///
 /// # Security Warning
-///
 /// This implementation uses **XOR-based obfuscation** which is NOT
 /// cryptographically secure. It demonstrates the pattern for
 /// encrypt/decrypt lifecycle. Production code MUST use AES-GCM or
@@ -302,9 +297,7 @@ pub struct EncryptedCacheField {
 
 impl EncryptedCacheField {
     /// Encrypt a serializable value with the given key.
-    ///
     /// The value is serialized with the compact binary codec, then XOR'd with the key.
-    /// (repeating the key as needed). A nonce is generated from the
     /// ciphertext length for demonstration purposes.
     pub fn encrypt<T: Serialize>(value: &T, key: &[u8]) -> Result<Self, SecretHygieneError> {
         if key.is_empty() {
@@ -421,7 +414,6 @@ impl Default for CredentialStore {
 // ---------------------------------------------------------------------------
 
 /// Redact credentials from a URL string.
-///
 /// `https://user:password@host.com/path` → `https://user:*****@host.com/path`
 pub fn redact_url_credentials(url: &str) -> String {
     // Find the scheme separator "://"
@@ -454,7 +446,6 @@ pub fn redact_url_credentials(url: &str) -> String {
 // Error type
 // ---------------------------------------------------------------------------
 
-/// Errors that can occur in secret hygiene operations.
 #[derive(Debug, thiserror::Error)]
 pub enum SecretHygieneError {
     #[error("encryption key must not be empty")]
@@ -517,13 +508,11 @@ mod tests {
 
     #[test]
     fn test_secret_zeroizes_on_drop() {
-        // We can't directly inspect memory after drop, but we can verify
         // the Drop impl compiles and runs without panicking.
         let secret = Secret::new(vec![0xAB; 64]);
         assert_eq!(secret.expose().len(), 64);
         assert!(secret.expose().iter().all(|&b| b == 0xAB));
         drop(secret);
-        // After drop the buffer should be zeroized — we trust the Drop impl.
     }
 
     // --- RedactionLevel tests ---

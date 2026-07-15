@@ -22,7 +22,6 @@ pub use super::selector::{
 };
 
 /// Gradle-shaped dependency graph input builder.
-///
 /// This module owns normalization of request-level dependency graph inputs before
 /// repository traversal starts. `DependencyResolutionServiceImpl` should stay a
 /// transport/API shim; selector, constraint, repository, and conflict semantics

@@ -545,7 +545,6 @@ mod tests {
         store.store("dd4444444444", b"0123456789").await.unwrap(); // 10 bytes - should trigger eviction
 
         let stats = store.get_stats();
-        // After eviction, total should be <= 30 bytes
         assert!(stats.total_bytes <= 30);
         assert!(stats.entry_count <= 3);
     }

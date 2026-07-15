@@ -15,7 +15,6 @@ use crate::server::unsafe_confinement::{
 };
 
 /// Documents the deny-by-default unsafe policy.
-///
 /// This constant serves as a compile-time marker that the crate enforces
 /// unsafe confinement. Any new unsafe code must be added to the
 /// confinement registry before it is acceptable.
@@ -36,7 +35,6 @@ pub struct AuditReport {
 }
 
 /// Run the unsafe audit and return a report.
-///
 /// This function scans [`UNSAFE_LOCATIONS`] and validates that all
 /// documented unsafe code belongs to allowed modules.
 pub fn run_unsafe_audit() -> AuditReport {

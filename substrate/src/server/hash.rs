@@ -98,7 +98,6 @@ impl HashAlgorithm {
 }
 
 /// Hash a file using the given algorithm with streaming I/O.
-///
 /// Reads in 64KB chunks for good I/O throughput without loading entire files
 /// into memory. For small files (< 64KB), reads entirely in one call.
 fn hash_file_with_algorithm(
@@ -315,7 +314,6 @@ impl HashService for HashServiceImpl {
 }
 
 /// Hash a file using MD5 with Java's DefaultStreamHasher-compatible signature prefix.
-///
 /// Java's DefaultStreamHasher prepends a signature before hashing file content.
 /// The final hash = MD5(signature_16_bytes || file_content_bytes)
 pub fn hash_file_md5(path: &Path) -> Result<Vec<u8>, SubstrateError> {

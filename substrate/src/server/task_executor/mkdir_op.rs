@@ -1,37 +1,7 @@
 use crate::server::task_executor::copy::{apply_unix_mode, dir_permission_mode};
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-
-// zr2e/8lk7 lineage explorer (symlink/mkdir richer lowering + VFS cross) per 'How to Work on a Slice' AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + full 8lk7 directive x2x2 + "more sub-agents = more task_executor richer lowering (symlink/mkdir) + VFS cross + entire port accelerated" + "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust" + multi-year.
-// Richer contracts + apply_vfs_delta_to_mkdir (BTree child_summaries from file_fingerprint.rs:1229 + get_snapshot_delta from file_watch.rs:766) + reporters 'mkdir-lowering'/'vfs-taskexec-cross' + BTree det.
-// Abs paths: this + symlink.rs + mod.rs + fp:1229 + watch:766 + 2 Java (after 8lk7 blocks) + plan (Fresh after prior 8lk7 anchor) + PARITY + .beads (8lk7) + AGENTS + scheduler + fleet. 0 reg <5 non-hard. Follow exactly. "How to Work on a Slice".
-
-// zr2e/8lk7 next (symlink/mkdir richer lowering + VFS cross, scheduler 019e6b6437ee recurring) per "How to Work on a Slice" AGENTS.md read FULL FIRST at /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md + full directive x2x2 from 8lk7 sustain + "more sub-agents = more task_executor richer lowering (symlink/mkdir) + VFS cross + entire port accelerated" + "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust" + multi-year. Abs paths: this + symlink.rs + fp:1229 + watch:766 + 2 Java + plan (Fresh after prior anchor) + PARITY + .beads (8lk7) + AGENTS + scheduler 019e6b6437ee + fleet. Safe terminal. 0 reg. Follow exactly. Entire port accelerated.
-
-// Real (additive) VFS delta consumption for mkdir targets (parents, permissions variants).
-pub fn apply_vfs_delta_to_mkdir(
-    target: &std::path::Path,
-    delta_child_summaries: &BTreeMap<String, String>, // from DirectorySnapshot fp:1229 child_summaries + watch:766 delta
-) -> bool {
-    if delta_child_summaries.is_empty() {
-        return false;
-    }
-    let target_str = target.to_string_lossy().to_lowercase();
-    for (changed, _h) in delta_child_summaries.iter() {
-        let cl = changed.to_lowercase();
-        if target_str.contains(&cl)
-            || cl.contains("dir")
-            || cl.contains("src")
-            || cl.contains("build")
-        {
-            tracing::info!(target: "mkdir-lowering", vfs_taskexec_cross = true, target = %target.display(), changed = %changed, "VFS delta affects mkdir target — re-execution likely (shadow for 0%+54=54)");
-            return true;
-        }
-    }
-    false
-}
 
 /// Creates directories.
 pub struct MkdirTaskExecutor;

@@ -107,7 +107,6 @@ use gradle_substrate_daemon::{
 const MAX_GRPC_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
 
 /// Gradle Rust Substrate Daemon
-///
 /// A sidecar process that provides high-performance execution
 /// substrate services (hashing, caching, process execution) to
 /// the Gradle JVM via gRPC over Unix domain sockets.
@@ -446,10 +445,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Phase 6: JVM Compatibility Host
     // The JVM host socket path arrives via handshake, so we spawn a background task
-    // to attempt connection after the first handshake registers the path.
     let jvm_bridge_for_connect = Arc::clone(&jvm_bridge);
     tokio::spawn(async move {
-        // Retry for a bounded period: handshake may arrive after server startup.
         for _ in 0..120 {
             if let Some(jvm_socket) = control_for_jvm.get_jvm_host_socket_path().await {
                 match JvmHostClient::connect(&jvm_socket).await {

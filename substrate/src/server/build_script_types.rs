@@ -3,7 +3,6 @@
 //! These types are produced by both the AST-based extractor (`ast_extractor`)
 //! and the string-based extractor (`build_script_parser`).
 
-// Wave 4 reinforcement header (additive): long-running build-script lowering 019e68ed-cefe-7560-8d71-b27bd681fd77 25989s+ sustain + VFS delta synergy + richer contracts for generated_sources/annotationProcessing + 'build-script-lowering'/'test-exec-lowering' reporters in lowering/kernel/scheduler/Dep-Metadata + crosses 4 VFS + 5 spawns 019e6a85-2c1f + Dep-Meta 019e68e7-a50d + parallel scheduler 019e68e8-c33e + hygiene#6/7 + evidence 0%+54=54 new corpus 100% + Java FIRST after Dep-Meta ENABLE_RUST_LONG_RUNNING_BUILD_SCRIPT_LOWERING_25989S_SYNERGY + full directive x2x2 + VFS failure + "more sub-agents = more long-running lowering 25989s+ 019e68ed-cefe + VFS delta synergy in lowering + ... + entire port accelerated" + "Go parallel forever. Entire port accelerated." + "How to Work on a Slice" (AGENTS.md read FIRST) + abs paths (this + build_script_parser.rs:1707 + ... + 2 Java + plan.md + PARITY/MIGRATION + .beads/5ezk/substrate-alee + fleet 185++ + cargo GREEN 0.13s + 0 reg 20+ + bd 1 in_progress + shadow-first/fail-closed/hybrid + support live long-running + perpetuals + gov bulk 618s+ + explorer + spawn 1+. Varied additive. Do them all. — 2026-05-27
 
 use serde::{Deserialize, Serialize};
 
@@ -60,9 +59,7 @@ pub struct ParsedTaskConfig {
     pub task_type: Option<String>,
     /// Dependencies declared on this task.
     pub depends_on: Vec<String>,
-    /// shouldRunAfter dependencies.
     pub should_run_after: Vec<String>,
-    /// mustRunAfter dependencies.
     pub must_run_after: Vec<String>,
     /// finalizedBy dependencies.
     pub finalized_by: Vec<String>,

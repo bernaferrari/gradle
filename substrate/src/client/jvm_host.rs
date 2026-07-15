@@ -157,7 +157,7 @@ mod tests {
             let mut search_from = 0;
             while search_from < content.len() {
                 if let Some(pos) = content[search_from..].find("id(\"") {
-                    let abs_pos = search_from + pos + 4; // after id("
+                    let abs_pos = search_from + pos + 4;
                     if let Some(end) = content[abs_pos..].find("\")") {
                         let plugin_id = &content[abs_pos..abs_pos + end];
                         plugins.push(crate::proto::AppliedPlugin {
@@ -170,7 +170,7 @@ mod tests {
                         break;
                     }
                 } else if let Some(pos) = content[search_from..].find("apply plugin: \"") {
-                    let abs_pos = search_from + pos + 15; // after apply plugin: "
+                    let abs_pos = search_from + pos + 15;
                     if let Some(end) = content[abs_pos..].find("\"") {
                         let plugin_id = &content[abs_pos..abs_pos + end];
                         plugins.push(crate::proto::AppliedPlugin {

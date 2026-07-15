@@ -206,7 +206,7 @@ impl TaskExecutor for DeleteTaskExecutor {
 
 pub fn apply_vfs_delta_to_delete(
     _targets: &[std::path::PathBuf],
-    delta: &BTreeMap<String, String>, // from DirectorySnapshot child_summaries fp:1229 + watch:766 get_snapshot_delta
+    delta: &BTreeMap<String, String>,
 ) -> bool {
     if delta.is_empty() {
         return false;

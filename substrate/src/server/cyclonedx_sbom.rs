@@ -287,22 +287,18 @@ pub struct CycloneDxAggregateOptions {
 }
 
 /// Deterministic CycloneDX SBOM serial/timestamp parity policy.
-///
 /// Upstream CycloneDX emits a random `serialNumber` (UUIDv4) and the current
 /// wall-clock `metadata.timestamp` on every invocation, making byte-level or
 /// hash-level parity between runs impossible. This struct encodes the decision
 /// that the Rust substrate uses fully deterministic outputs:
-///
 /// - **serial_number**: SHA-256 hash of build identity fields (build_id,
 ///   task_path, root GAV, schema_version), truncated to a UUID namespace.
 ///   Identical inputs always produce the same serial. The UUID is stamped as
 ///   version 5 (name-based) with the RFC 4122 variant bits set correctly.
-///
 /// - **timestamp**: Derived from an explicit epoch-millisecond value passed by
 ///   the Gradle build (`org.gradle.rust.substrate.cyclonedx.timestamp.ms`).
 ///   No wall-clock sampling — the timestamp is fully deterministic and
 ///   reproducible from the same inputs.
-///
 /// The combination allows the Rust side to emit CycloneDX SBOMs that achieve
 /// byte-level and hash-level parity with the upstream plugin when the
 /// `timestamp_source_policy` is `gradle-substrate-explicit-epoch-ms` and
@@ -1915,6 +1911,40 @@ fn parse_pom_component_metadata(pom: &str) -> PomComponentMetadataDocument {
                     &mut current_issue_system,
                 );
             }
+            Ok(Event::GeneralRef(event)) => {
+                let raw = String::from_utf8_lossy(event.as_ref()).into_owned();
+                let decoded = match raw.as_str() {
+                    "amp" => "&".to_string(),
+                    "lt" => "<".to_string(),
+                    "gt" => ">".to_string(),
+                    "quot" => "\"".to_string(),
+                    "apos" => "'".to_string(),
+                    other => other.to_string(),
+                };
+                let text = normalize_pom_text(&decoded);
+                if text.is_empty() {
+                    buf.clear();
+                    continue;
+                }
+                apply_pom_metadata_text(
+                    path.as_slice(),
+                    text,
+                    &mut metadata,
+                    &mut parent_relative_path,
+                    &mut parent_group,
+                    &mut parent_artifact,
+                    &mut parent_version,
+                    &mut project_group,
+                    &mut project_artifact,
+                    &mut project_version,
+                    &mut properties,
+                    &mut current_license_name,
+                    &mut current_license_url,
+                    &mut current_license_distribution,
+                    &mut current_license_comments,
+                    &mut current_issue_system,
+                );
+            }
             Ok(Event::End(_)) => {
                 if path.as_slice() == ["project", "licenses", "license"] {
                     if !current_license_name.trim().is_empty()
@@ -2026,7 +2056,12 @@ fn apply_pom_metadata_text(
             metadata.name = text;
         }
         [project, description] if project == "project" && description == "description" => {
-            metadata.description = text;
+            // quick-xml can emit multiple Text nodes for multiline elements.
+            if metadata.description.is_empty() {
+                metadata.description = text;
+            } else if !text.is_empty() {
+                metadata.description = format!("{} {}", metadata.description, text);
+            }
         }
         [project, url] if project == "project" && url == "url" => {
             metadata.url = text;

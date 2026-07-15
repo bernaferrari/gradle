@@ -142,7 +142,6 @@ fn extract_tag(bytes: &[u8], from: usize, to: usize, tag: &[u8]) -> String {
 }
 
 /// Extract an attribute value from a tag at `pos`. Returns the value between
-/// the first `"` after `attr=` and the closing `"`.
 fn extract_attr(bytes: &[u8], from: usize, to: usize, attr: &[u8]) -> Option<String> {
     let needle_len = attr.len() + 2; // attr="
     let mut pos = from;

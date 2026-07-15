@@ -237,7 +237,6 @@ pub struct LexerConfig {
 }
 
 /// The lexer produces [`Token`] values from a Groovy/Kotlin DSL source string.
-///
 /// Implements `Iterator<Item = Token>` so you can simply loop over it, or use
 /// `collect()`.
 pub struct Lexer<'src> {
@@ -1636,7 +1635,6 @@ mod tests {
     fn test_nested_block_comment() {
         let tokens = tokenize("a /* outer /* inner */ still outer */ b");
         let kinds: Vec<TokenKind> = tokens.iter().map(|t| t.kind).collect();
-        // After skipping the comment, 'a' and 'b' should remain
         assert_eq!(
             kinds,
             vec![TokenKind::Identifier, TokenKind::Identifier, TokenKind::Eof]
@@ -1678,7 +1676,6 @@ mod tests {
         let tokens = tokenize("42 § 10");
         assert_eq!(tokens[0].kind, TokenKind::IntLit);
         assert_eq!(tokens[1].kind, TokenKind::Error);
-        // Lexer should continue after the error
         assert_eq!(tokens[2].kind, TokenKind::IntLit);
     }
 
@@ -1819,7 +1816,6 @@ mod tests {
         // `1.` should be IntLit followed by Dot, not a float.
         // Actually in Groovy `1.` is a valid BigDecimal. But since we need
         // to disambiguate from `1.toString()`, we only treat it as float
-        // if there's a digit after the dot. Let's check:
         let tokens = tokenize("1.toString()");
         assert_eq!(tokens[0].kind, TokenKind::IntLit);
         assert_eq!(tokens[1].kind, TokenKind::Dot);

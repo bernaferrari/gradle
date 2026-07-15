@@ -1,7 +1,6 @@
 use crate::proto::BuildEventMessage;
 
 /// Trait for services that consume build events forwarded from the event stream.
-///
 /// When `BuildEventStreamServiceImpl` receives a build event, it dispatches to all
 /// registered `EventDispatcher` implementations. This enables automatic fan-out
 /// (e.g., build events → console logs, build events → metrics) without the JVM

@@ -1,11 +1,8 @@
 /// Compile-time unsafe confinement registry for the substrate crate.
-///
 /// This module enforces a deny-by-default policy for `unsafe` code.
 /// All unsafe blocks must be documented in [`UNSAFE_LOCATIONS`] and
 /// belong to an allowed module listed in [`ALLOWED_MODULES`].
-///
 /// # Policy
-///
 /// Unsafe code is only permitted in modules that interact with platform
 /// FFI (libc, sysctl, proc_pidinfo) or require explicit lifetime erasure
 /// for builder patterns. All other modules must be 100% safe Rust.
@@ -25,7 +22,6 @@ pub struct UnsafeLocation {
 }
 
 /// All documented unsafe locations in the crate.
-///
 /// This list is populated by audit. Every `unsafe` block in the crate
 /// must have a corresponding entry here. If you add unsafe code,
 /// you must add an entry to this list.
@@ -164,7 +160,6 @@ pub const UNSAFE_LOCATIONS: &[UnsafeLocation] = &[
 ];
 
 /// Modules that are allowed to contain unsafe code.
-///
 /// Any module not in this list is deny-by-default for unsafe.
 pub const ALLOWED_MODULES: &[&str] = &[
     "server::resource_management",
@@ -204,7 +199,6 @@ pub const fn confinement_registry() -> UnsafeConfinementRegistry {
 }
 
 /// Validate that all documented unsafe locations belong to allowed modules.
-///
 /// Returns `Ok(())` if every location in [`UNSAFE_LOCATIONS`] is in an
 /// allowed module. Returns `Err` with a list of violations otherwise.
 pub fn validate_unsafe_confinement() -> Result<(), Vec<String>> {
@@ -228,7 +222,6 @@ pub fn validate_unsafe_confinement() -> Result<(), Vec<String>> {
 }
 
 /// Macro to document unsafe usage at the call site.
-///
 /// Usage:
 /// ```ignore
 /// document_unsafe! {

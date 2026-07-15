@@ -638,7 +638,6 @@ pub(crate) async fn resolve_transitive_dependencies<T: DependencyResolverTranspo
 }
 
 /// Check if a dependency matches an exclusion pattern.
-///
 /// An exclusion with group `*` matches any group; artifactId `*` matches any
 /// artifact. Both dimensions must match for the exclusion to apply.
 pub(crate) fn matches_exclusion(

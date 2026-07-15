@@ -179,6 +179,43 @@ fn build_task_input(task_type: &str, context_json: Option<&String>) -> TaskInput
                         .collect();
                 }
             }
+            if let Some(v) = map.get("input_properties") {
+                if let Some(obj) = v.as_object() {
+                    backfill_option_from_input_properties(
+                        &mut input.options,
+                        obj,
+                        "main_class",
+                    );
+                    backfill_option_from_input_properties(
+                        &mut input.options,
+                        obj,
+                        "classpath",
+                    );
+                    backfill_option_from_input_properties(
+                        &mut input.options,
+                        obj,
+                        "java_home",
+                    );
+                    backfill_option_from_input_properties(&mut input.options, obj, "args");
+                    backfill_option_from_input_properties(&mut input.options, obj, "args_json");
+                    backfill_option_from_input_properties(&mut input.options, obj, "jvm_args");
+                    backfill_option_from_input_properties(
+                        &mut input.options,
+                        obj,
+                        "jvm_args_json",
+                    );
+                    backfill_option_from_input_properties(
+                        &mut input.options,
+                        obj,
+                        "working_dir",
+                    );
+                    backfill_option_from_input_properties(
+                        &mut input.options,
+                        obj,
+                        "executable",
+                    );
+                }
+            }
             if let Some(v) = map.get("output_files") {
                 if let Some(arr) = v.as_array() {
                     let values = arr
@@ -287,7 +324,7 @@ fn merged_task_context(
                 return Some(override_json.clone());
             };
             for (key, value) in override_obj {
-                base_obj.insert(key.clone(), value.clone());
+                merge_context_field(base_obj, key, value);
             }
             Some(base.to_string())
         }
@@ -295,6 +332,35 @@ fn merged_task_context(
         (None, Some(base_json)) => Some(base_json),
         (None, None) => None,
     }
+}
+
+fn merge_context_field(
+    base_obj: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: &serde_json::Value,
+) {
+    // Preserve hydrated shadow task options/input_properties under direct-warm
+    // metadata overlays that may carry partial or empty objects.
+    if matches!(key, "options" | "input_properties") {
+        if let Some(override_map) = value.as_object() {
+            let base_map = base_obj
+                .entry(key.to_string())
+                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            if let Some(base_map) = base_map.as_object_mut() {
+                for (nested_key, nested_value) in override_map {
+                    if nested_value.is_null() {
+                        continue;
+                    }
+                    if nested_value.as_str().is_some_and(str::is_empty) {
+                        continue;
+                    }
+                    base_map.insert(nested_key.clone(), nested_value.clone());
+                }
+                return;
+            }
+        }
+    }
+    base_obj.insert(key.to_string(), value.clone());
 }
 
 fn merged_slot_task_context(
@@ -307,6 +373,35 @@ fn merged_slot_task_context(
         Some(slot_context_json.to_string())
     };
     merged_task_context(override_json, base_json)
+}
+
+fn backfill_option_from_input_properties(
+    options: &mut HashMap<String, String>,
+    properties: &serde_json::Map<String, serde_json::Value>,
+    name: &str,
+) {
+    if options
+        .get(name)
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+    {
+        return;
+    }
+    for key in [
+        format!("input_value.{name}"),
+        format!("input.{name}"),
+        name.to_string(),
+    ] {
+        if let Some(value) = properties
+            .get(&key)
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            options.insert(name.to_string(), value.to_string());
+            return;
+        }
+    }
 }
 
 fn context_vfs_changed_paths(context_json: Option<&String>) -> Vec<String> {
@@ -854,7 +949,6 @@ impl DagExecutorServiceImpl {
             .push(ready_task);
     }
 
-    /// Try to mark dependents as ready after a task finishes.
     /// Returns list of newly ready task paths.
     fn try_unblock_dependents(execution: &mut BuildExecution, finished_task: &str) -> Vec<String> {
         let dep_count = execution
@@ -2159,10 +2253,22 @@ impl DagExecutorService for DagExecutorServiceImpl {
                                 let refreshed_meta =
                                     refreshed_work_metadata(meta, &slot.execution_context_json);
                                 let predicted = slot.predicted_outcome;
-                                let refreshed_fingerprint =
+                                // History must store the planned admission fingerprint so the
+                                // next resolve_plan can SkipUpToDate on unchanged declared inputs.
+                                // Post-execution source rehash is only for content-identity mode
+                                // when the plan had no declared input_file_fingerprints.
+                                let history_fingerprint = if meta.input_file_fingerprints.is_empty()
+                                {
                                     super::execution_plan::ExecutionPlanServiceImpl::compute_fingerprint(
                                         &refreshed_meta,
-                                    );
+                                    )
+                                } else if !slot.input_fingerprint.is_empty() {
+                                    slot.input_fingerprint.clone()
+                                } else {
+                                    super::execution_plan::ExecutionPlanServiceImpl::compute_fingerprint(
+                                        meta,
+                                    )
+                                };
                                 let prediction_correct = (predicted
                                     == PredictedOutcome::PredictedExecute as i32
                                     && actual_outcome == "EXECUTED")
@@ -2171,12 +2277,12 @@ impl DagExecutorService for DagExecutorServiceImpl {
                                 let _ = self
                                     .execution_plan
                                     .record_outcome(Request::new(RecordOutcomeRequest {
-                                        work_identity: refreshed_meta.work_identity.clone(),
+                                        work_identity: meta.work_identity.clone(),
                                         predicted_outcome: predicted,
                                         actual_outcome: actual_outcome.clone(),
                                         prediction_correct,
                                         duration_ms: duration_for_record,
-                                        input_fingerprint: refreshed_fingerprint,
+                                        input_fingerprint: history_fingerprint,
                                     }))
                                     .await;
                                 self.record_daemon_vfs_watermark_from_context(Some(
@@ -2507,7 +2613,6 @@ impl DagExecutorService for DagExecutorServiceImpl {
         let build_id = BuildId::from(req.build_id.clone());
 
         // Phase 1: All synchronous mutations under the DashMap guard.
-        // Collect data needed for async calls after dropping the guard.
         let (should_dispatch, newly_ready, build_just_finished, build_outcome_str, failure_msg) = {
             let mut execution = match self.builds.get_mut(&build_id) {
                 Some(e) => e,
@@ -4118,7 +4223,6 @@ mod tests {
                 .unwrap()
                 .into_inner();
 
-            // :d is only ready after BOTH b and c finish
             if *task == ":b" {
                 assert!(finish.newly_ready_tasks.is_empty());
             } else {
@@ -6005,7 +6109,6 @@ mod tests {
         assert_eq!(resp.total_tasks, 1);
     }
 
-    /// Test that execution plan receives record_outcome calls after task execution.
     #[tokio::test]
     async fn test_run_build_records_outcome_to_history() {
         let svc = make_svc();
@@ -6072,6 +6175,54 @@ mod tests {
             .into_inner();
 
         assert_eq!(resp2.tasks_up_to_date, 1, "second run should be UP-TO-DATE");
+    }
+
+    #[test]
+    fn test_direct_empty_options_do_not_drop_shadow_java_exec_main_class() {
+        let shadow_context = serde_json::json!({
+            "work_identity": ":runTool",
+            "options": {
+                "classpath": "/repo/build/classes/java/main",
+                "main_class": "example.Tool",
+                "java_home": "/jdk"
+            },
+            "input_properties": {
+                "input_value.main_class": "example.Tool",
+                "input_value.classpath": "/repo/build/classes/java/main"
+            }
+        })
+        .to_string();
+        let direct_context = serde_json::json!({
+            "build_graph_task": {
+                "path": ":runTool",
+                "implementation_id": "org.gradle.api.tasks.JavaExec"
+            },
+            "build_graph_dependencies": [":classes"],
+            "options": {},
+            "input_properties": {
+                "build_graph_task_path": ":runTool"
+            }
+        })
+        .to_string();
+
+        let merged = merged_slot_task_context(Some(&direct_context), &shadow_context).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&merged).unwrap();
+
+        assert_eq!(value["options"]["main_class"], "example.Tool");
+        assert_eq!(
+            value["options"]["classpath"],
+            "/repo/build/classes/java/main"
+        );
+        assert_eq!(value["options"]["java_home"], "/jdk");
+        assert_eq!(
+            value["input_properties"]["input_value.main_class"],
+            "example.Tool"
+        );
+        assert_eq!(
+            value["input_properties"]["build_graph_task_path"],
+            ":runTool"
+        );
+        assert_eq!(value["build_graph_task"]["path"], ":runTool");
     }
 
     #[test]

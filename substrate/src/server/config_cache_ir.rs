@@ -106,7 +106,6 @@ impl InvalidationTriggers {
 
 /// Phase graph envelope: wraps the JVM-serialized configuration with
 /// metadata for invalidation and scope isolation.
-///
 /// This is stored as the `serialized_config` field in `ConfigCacheEntry`.
 /// The JVM uses its own serialization; Rust validates the envelope and checks
 /// invalidation triggers.

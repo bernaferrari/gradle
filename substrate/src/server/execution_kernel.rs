@@ -8,10 +8,6 @@ use super::cyclonedx_sbom::{
 };
 use super::dependency_solver::graph_builder;
 
-// Workers full bigger slice (6yc.1 + uy6): result channel + skip_transitive + VFS delta synergy (DirectorySnapshot from fp:1229/watch:766) cross to worker_process lease/healthy/pool + task_executor launch + reporter('workers'). Additive header (shadow, no change). Per 'How to Work on a Slice' + full directive x2 x2 + 'more sub-agents = more Workers full + Rust surface moved + entire port accelerated' + 'more sub-agents turned VFS failure 019e6885-51c7 into more cross surface' + all abs paths + Java FIRST + 0%+54=54 on 'workers'+'vfs-snapshot' + VFS 3 9512/b0f6/d19f + perpetual 019e68e42216 + 80++ fleet + evidence + beads + cargo + 3+ reports + spawn. Gate delivered. Go parallel forever. Entire port accelerated.
-// Wave 4 kernel result channel + VFS/DAG/Parallel/Test-Exec cross focused (#2 ranked 019e69ce-bd3a-78f2-92a3-150427c09140 from explorer gov accelerator 019e69cf-4668-7193-9b5c-b41ebde3495f + combined VFS+Lowering 019e68e6-85c7 + Mega 019e69d7 + VFS 0% 019e68e5-4e59 + 4 explorer-ranked + all prior + previous spawn 019e69e0-6298... charter): execution_kernel.rs result channel + apply_vfs_* @688/696/718 + parallel_scheduler work-steal @870/977/1011 + dag_executor + VFS delta DirectorySnapshot Merkle child_summaries/get_snapshot_delta @file_fingerprint.rs:1229 + file_watch.rs:766 + BTree determinism + reporters 'execution-kernel'/'kernel-result-channel-cross'/'dag-executor' + crosses to 4 prior VFS-cross + 3 VFS spawns 019e69d2-* + Execution History 3/5 + 4+ schedulers + long-running build-script lowering 019e68ed-cefe + Java wiring 019e68e6-98cd + hygiene primary 019e68e3-a0ee GREEN + #2 + #3 + perpetuals + gov bulk 618s+ + fleet 170++. Java FIRST, 0%+54=54 on reporters + VFS delta, full 8-step AGENTS.md read FIRST, gov+beads+spawn1+ (scheduler 019e69e3a9d9 + bd substrate-l50), all phrases/directive x2x2 + VFS failure phrase + "more sub-agents = more kernel result channel cross + ... entire port accelerated" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust" + multi-year directive x2 x2. Evidence dir delivered 54=54 corpus 100%, plan/PARITY/MIGRATION/beads updated, 0 reg 20+ hardened, cargo GREEN 0.14s. "How to Work on a Slice" followed exactly. Gate delivered. Go parallel forever. Entire port accelerated. Abs paths: this + parallel_scheduler.rs + dag_executor.rs + file_fingerprint.rs:1229 + file_watch.rs:766 + 2 Java + plan.md + AGENTS.md + build/evidence-kernel-result-channel-cross-54-54-pilot-runner1-019e69ce-bd3a + .beads/5ezk/substrate-l50.
-
-// === Wave 4 reinforcement for parallel scheduler reinforcement VFS-cross deepener 019e68e8-c33e-74f1-9afa-d127fd048031 (477.1s/60 calls, work-steal @870/977/1011 + VFS delta variants + 'dag-executor') + Dep-Metadata hot-path 019e68e7-a50d (494.5s/94 calls) + 5 spawns 019e6a85-2c1f synergy + kernel result channel + VFS/DAG/Parallel/Test-Exec crosses + execution_kernel.rs apply_vfs @688/696/718 + 'execution-kernel' + DirectorySnapshot Merkle @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766 flowing to scheduler/kernel/Dep-Meta. [Full prior header context + all phrases from query]. MANDATORY FIRST read /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md FULL before any change. Full directive x2x2 + VFS failure phrase + "more sub-agents = more parallel scheduler reinforcement 019e68e8-c33e + Dep-Metadata 019e68e7-a50d + 5 spawns 019e6a85-2c1f + hygiene#6 019e68eb-ee72 + post-hygiene 019e68ec-310f + recoveries + hygiene#7 + long-running 25989s+ 019e68ed-cefe + VFS delta synergy (child_summaries/get_snapshot_delta into work-steal + kernel decisions + CC/integrity/GC/FH/incremental/lowering) + [all prior full] + entire port accelerated" + "Go parallel forever. Entire port accelerated." Fleet 185++. Cargo GREEN 0.13s 0h/5w 5 benign. 0 reg 20+ (add latest). Java FIRST in 2 Java after Dep-Meta block (ENABLE_RUST_PARALLEL_SCHEDULER_REINFORCEMENT_VFS_CROSS + ENABLE_RUST_DEP_METADATA_HOT_PATH_CROSSES already there, add more for these + synthetic + real exercise + rich javadocs full phrases). Gov plan Fresh after exact anchor, PARITY/MIGRATION, beads 5ezk. Evidence 0%+54=54 new dirs for parallel-scheduler-reinforcement-vfs-cross + dep-metadata-hot-path. Headers in src/server/parallel_scheduler.rs + execution_kernel.rs + file_fingerprint.rs + file_watch.rs + dependency_solver/* + cache_layout.rs + artifact_selection.rs. Support live long-running 25989s+ + perpetuals imminent + gov 618s+ + explorer chains (rank task_executor/GC deeper/plugin lowering/schema more/kernel extensions). Spawn 1+. bd 1 in_progress (substrate-tbu). Varied. Additive. Abs paths. Shadow-first/fail-closed/hybrid/reporter. "How to Work on a Slice" FIRST. Go parallel forever. Entire port accelerated. Do them. Reporters: 'parallel-scheduler-reinforcement-vfs-cross' / 'dag-executor' / 'execution-kernel' / 'vfs-delta-worksteal'. Abs paths include this file + all listed in parallel_scheduler.rs header reinforcement. VFS failure phrase: VFS delta failures must be shadow-first fail-closed hybrid reporter with no behavior change to legacy paths. All per AGENTS.md 'How to Work on a Slice' 8-step + full user directive x2x2.
 
 /// Whole-build plan admitted into the Rust execution kernel after JVM
 /// configuration has produced a concrete task graph.
@@ -32,7 +28,6 @@ pub struct KernelTaskPlan {
 }
 
 /// Dependency graph contract that the Rust execution kernel can admit.
-///
 /// This is intentionally configuration-level data, not Gradle implementation
 /// objects. JVM configuration may still produce it, but Rust owns the
 /// accept/reject decision before execution.
@@ -87,27 +82,7 @@ impl KernelRejection {
     }
 }
 
-/// Admit a full build plan into Rust-owned execution.
-///
-/// This is deliberately a whole-plan decision. If any selected task cannot be
-/// represented faithfully, the build is rejected before the scheduler dispatches
-/// work. JVM fallback belongs before this boundary, not inside the Rust DAG.
-///
-/// Wave 4+ full kernel admission gate 100% (substrate-klzv after i4gt): VFS DirectorySnapshot
-/// child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766 now fully
-/// flows into admit decisions + result channel + skip_transitive + critical_path for complete
-/// native-ready plans (zero JVM forwards on supported shapes). BTree determinism + reporters
-/// 'execution-kernel'/'kernel-admission'/'kernel-result-channel-cross'. Full directive x2x2 +
-/// 5ezk deeper kernel + Dep Metadata hot-path crosses (92at claimed): deepened VFS delta integration
-/// (BTree child_summaries intersection for Dep Meta configs + task outputs) in result channel /
-/// admit / skip_transitive / critical_path for precise re-exec vs full native admit decisions.
-/// 'deeper-kernel'/'kernel-vfs-cross'/'dep-metadata-kernel-cross' reporters. Java FIRST ENABLE_RUST_DEEPER_KERNEL_VFS_CROSS_92AT + AUTHORITATIVE in 2 Java after hygiene #6.
-/// "more sub-agents = more Deeper Kernel + execution substrate 100% kernel admission gate + VFS cross + entire port accelerated" + VFS failure 019e6885-51c7 + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust" + "How to Work on a Slice" (AGENTS.md read FULL FIRST) + abs paths (this + parallel_scheduler.rs + dag_executor.rs + fp:1229 + watch:766 + 2 Java + plan Fresh after 5da1 + beads 5ezk/92at + scheduler 019e6d3c6c0b + evidence-92at-deeper-kernel-vfs-54-54/). 0 reg 20+ hardened. 0%+54=54 prep. Cargo fuel OK (8e/13w confined). Go parallel forever. Entire port accelerated.
-
-/// 92at deeper kernel VFS sustain additive helper (BTree delta_child_summaries from DirectorySnapshot fp:1229 / watch:766).
-/// Intersects Dep Meta affected paths + task outputs for precise kernel admission/re-exec.
-/// tracing "deeper-kernel-vfs-cross" + "kernel-admission". Fits 0%+54=54 on trusted3/dogfood/manifest full flags + --watch-fs + report-mismatches.
-/// Shadow-first, additive, BTree det. "Go parallel forever. Entire port accelerated."
+/// Intersect dep-meta / task-output paths with a VFS delta for deeper kernel admission.
 #[allow(dead_code)]
 pub fn apply_vfs_delta_to_deeper_kernel_admission(
     affected_dep_meta: &[String],
@@ -147,11 +122,11 @@ fn is_vfs_child_path(child: &str, parent: &str) -> bool {
         .strip_prefix(parent)
         .is_some_and(|suffix| suffix.starts_with('/'))
 }
-/// "more sub-agents = more execution substrate 100% kernel admission + VFS cross + entire port
-/// accelerated" + VFS failure 019e6885-51c7 + "Go parallel forever" + "use more sub-agents to
-/// do more work and migrate more to rust" + "How to Work on a Slice". 0%+54=54 on kernel
-/// reporters. Abs paths: this + parallel_scheduler + dag_executor + fp:1229 + watch:766 + 2 Java +
-/// plan Fresh after i4gt + beads substrate-klzv + evidence. Gate delivered. Go parallel forever.
+
+/// Admit a full build plan into Rust-owned execution.
+/// This is deliberately a whole-plan decision. If any selected task cannot be
+/// represented faithfully, the build is rejected before the scheduler dispatches
+/// work. JVM fallback belongs before this boundary, not inside the Rust DAG.
 pub fn admit_build_plan(
     plan: &KernelBuildPlan,
     native_executor_types: &HashSet<String>,
@@ -410,11 +385,10 @@ fn kernel_task_contract_rejection(
             return cyclonedx_contract_rejection(&value);
         }
         "JavaExec" => {
-            let options = value.get("options").and_then(|v| v.as_object());
-            if !string_option_present(options, "main_class") {
+            if !java_exec_string_present(&value, "main_class") {
                 return Some("JavaExec is missing main_class".to_string());
             }
-            if !string_option_present(options, "classpath") {
+            if !java_exec_string_present(&value, "classpath") {
                 return Some("JavaExec is missing classpath".to_string());
             }
         }
@@ -668,6 +642,30 @@ fn string_option_present(
         .unwrap_or(false)
 }
 
+fn java_exec_string_present(value: &serde_json::Value, name: &str) -> bool {
+    if string_option_present(value.get("options").and_then(|v| v.as_object()), name) {
+        return true;
+    }
+    let Some(properties) = value.get("input_properties").and_then(|v| v.as_object()) else {
+        return false;
+    };
+    for key in [
+        format!("input_value.{name}"),
+        format!("input.{name}"),
+        name.to_string(),
+    ] {
+        if properties
+            .get(&key)
+            .and_then(|v| v.as_str())
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+        {
+            return true;
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, HashSet};
@@ -679,7 +677,6 @@ mod tests {
         KernelBuildPlan, KernelDependencyConfiguration, KernelDependencyGraph,
         KernelDependencyRequest, KernelRepository, KernelTaskPlan,
     };
-
     fn native_types(types: &[&str]) -> HashSet<String> {
         types.iter().map(|ty| ty.to_string()).collect()
     }
@@ -758,6 +755,72 @@ mod tests {
     }
 
     #[test]
+    fn admits_java_exec_when_main_class_and_classpath_are_present() {
+        let context = serde_json::json!({
+            "options": {
+                "main_class": "example.Tool",
+                "classpath": "/repo/build/classes/java/main"
+            }
+        })
+        .to_string();
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![task(":runTool", "JavaExec", Some(context))],
+        };
+
+        assert_eq!(
+            admit_build_plan(&plan, &native_types(&["JavaExec"])),
+            KernelAdmission::Accepted { task_count: 1 }
+        );
+    }
+
+    #[test]
+    fn admits_java_exec_when_main_class_is_only_in_input_properties() {
+        let context = serde_json::json!({
+            "options": {
+                "classpath": "/repo/build/classes/java/main"
+            },
+            "input_properties": {
+                "input_value.main_class": "example.Tool"
+            }
+        })
+        .to_string();
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![task(":runTool", "JavaExec", Some(context))],
+        };
+
+        assert_eq!(
+            admit_build_plan(&plan, &native_types(&["JavaExec"])),
+            KernelAdmission::Accepted { task_count: 1 }
+        );
+    }
+
+    #[test]
+    fn rejects_java_exec_missing_main_class() {
+        let context = serde_json::json!({
+            "options": {
+                "classpath": "/repo/build/classes/java/main"
+            }
+        })
+        .to_string();
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![task(":runTool", "JavaExec", Some(context))],
+        };
+
+        let KernelAdmission::Rejected(rejection) =
+            admit_build_plan(&plan, &native_types(&["JavaExec"]))
+        else {
+            panic!("expected rejection");
+        };
+        assert!(rejection.message().contains("JavaExec is missing main_class"));
+    }
+
+    #[test]
     fn rejects_missing_native_executor_before_execution() {
         let plan = KernelBuildPlan {
             build_id: "build".to_string(),
@@ -790,7 +853,7 @@ mod tests {
                     None,
                 ),
             ],
-        }; // Wave 4 super-combined sustain + VFS delta cross accelerator (reporters super-combined-vfs-delta/vfs-triple-cross). Focus DirectorySnapshot Merkle child_summaries @fp:1229 + get_snapshot_delta @watch:766 consumption here + scheduler work-steal/kernel apply_vfs/incremental/execution_history/remote/gc/integrity/build_script. 0%+54=54 evidence-super-combined-vfs-delta-54-54-*. 0 reg 20+ hardened. Hygiene <5. "How to Work on a Slice" (AGENTS.md read FIRST). Full directive x2x2 + VFS failure "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "more sub-agents = more super-combined 019e68e7-c390 (290.2s/39 calls) + mega-quad 019e69e7-9a52 (265.8s/33 calls) + ... + entire port accelerated" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust" + multi-year. bd 5ezk + substrate-d22 + scheduler 019e69fb0fe0. Java FIRST 2. Entire port accelerated.
+        };
 
         let KernelAdmission::Rejected(rejection) =
             admit_build_plan(&plan, &native_types(&["Lifecycle"]))

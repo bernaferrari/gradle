@@ -99,7 +99,6 @@ const MAX_INTERPOLATION_DEPTH: usize = 32;
 // ---------------------------------------------------------------------------
 
 /// Rust-native configuration service.
-///
 /// Manages project properties across multiple layers following Gradle's
 /// precedence ordering, supports convention property access patterns, and
 /// provides `${...}` interpolation.
@@ -215,7 +214,6 @@ struct ConfigCacheEntry {
 
 /// Normalise a Gradle property access expression into the underlying flat
 /// property key.
-///
 /// Supported patterns:
 /// - `project.property('name')`  ->  `name`
 /// - `project.hasProperty('name')`  ->  `name`  (used for existence check)
@@ -224,7 +222,6 @@ struct ConfigCacheEntry {
 /// - `rootProject.name`  -> convention mapping
 /// - `gradle.version`  -> convention mapping
 /// - Bare name (e.g. `foo`)  ->  `foo`
-///
 /// Returns `(normalised_key, is_ext_access)`.
 fn normalize_access_pattern(raw: &str) -> (String, bool) {
     let trimmed = raw.trim();
@@ -276,7 +273,6 @@ fn normalize_access_pattern(raw: &str) -> (String, bool) {
 
 /// Resolve `${property.name}` and `${property.name:-default}` references in
 /// a template string.
-///
 /// The `resolve_fn` closure receives a property name and returns
 /// `Some(value)` if found or `None` if missing.
 fn interpolate_template(
@@ -387,7 +383,6 @@ impl ConfigurationServiceImpl {
     // -- Internal layered resolution -----------------------------------------
 
     /// Resolve a property following Gradle's precedence ordering.
-    ///
     /// Precedence (highest first):
     ///   1. Command-line (`-P`)
     ///   2. System properties (`-D` / `org.gradle.*` env)
@@ -395,10 +390,8 @@ impl ConfigurationServiceImpl {
     ///   4. `gradle.properties`
     ///   5. Build script properties
     ///   6. Extra properties (`project.ext.*`)
-    ///
     /// Convention mappings (e.g. `project.name` -> `project`) are resolved
     /// at each layer as a fallback.
-    ///
     /// If `is_ext_access` is true the search is restricted to the Extra layer
     /// only (matching `project.ext.name` semantics).
     fn resolve_property_internal(
@@ -803,7 +796,6 @@ impl ConfigurationService for ConfigurationServiceImpl {
         }))
     }
 
-    // -- ResolveProperty (legacy, preserved for backward compat) -------------
 
     async fn resolve_property(
         &self,

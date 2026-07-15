@@ -45,7 +45,6 @@ use crate::server::scopes::{BuildId, ProjectPath};
 // ---------------------------------------------------------------------------
 
 /// A single permission granted to a capability token.
-///
 /// Each permission variant encodes the resource type and the scope of access.
 /// Path-based permissions use prefix matching; pattern-based permissions use
 /// simple glob matching with `*` wildcards.
@@ -71,7 +70,6 @@ pub enum Permission {
 
 impl Permission {
     /// Check whether this permission satisfies a required permission.
-    ///
     /// For path-based permissions, the required path must be under the
     /// granted prefix. For pattern-based permissions, the required key/host
     /// must match the granted glob pattern.
@@ -154,7 +152,6 @@ impl Permission {
 // ---------------------------------------------------------------------------
 
 /// The scope within which a capability token is valid.
-///
 /// Scopes form a hierarchy: Global > Build > Project > Task.
 /// A token scoped to a narrower scope cannot access resources outside
 /// that scope even if it holds a matching permission.
@@ -209,7 +206,6 @@ impl CapabilityScope {
 // ---------------------------------------------------------------------------
 
 /// An opaque token that grants specific permissions within a scope.
-///
 /// Tokens are identified by a `Uuid` and managed by the `CapabilityRegistry`.
 /// Callers hold only the `Uuid`; the registry stores the actual permissions.
 pub struct CapabilityToken {
@@ -280,7 +276,6 @@ pub struct CapabilityAuditEntry {
 // ---------------------------------------------------------------------------
 
 /// Central registry that issues, validates, revokes, and audits capability tokens.
-///
 /// The registry is thread-safe and designed for concurrent access from multiple
 /// executor threads.
 pub struct CapabilityRegistry {
@@ -300,7 +295,6 @@ impl CapabilityRegistry {
     }
 
     /// Issue a new capability token with the given permissions and scope.
-    ///
     /// Returns the token's `Uuid` which can be used for validation and revocation.
     pub fn issue(&self, permissions: Vec<Permission>, scope: CapabilityScope) -> Uuid {
         let id = Uuid::new_v4();
@@ -310,7 +304,6 @@ impl CapabilityRegistry {
     }
 
     /// Validate that a token grants the required permission.
-    ///
     /// Records the access attempt in the audit log regardless of outcome.
     pub fn validate(&self, token_id: &Uuid, required: &Permission) -> Result<(), CapabilityError> {
         let scope_label = self.scope_label(token_id);
@@ -422,7 +415,6 @@ impl Default for CapabilityRegistry {
 // ---------------------------------------------------------------------------
 
 /// A typed capability wrapper that provides safe filesystem operations.
-///
 /// All operations check that the target path is under an allowed prefix
 /// before proceeding.
 pub struct FileSystemCapability {
@@ -463,7 +455,6 @@ impl FileSystemCapability {
     }
 
     /// Read the contents of a file.
-    ///
     /// The path must be under an allowed read prefix.
     pub fn read_file(&self, path: &Path) -> Result<Vec<u8>, CapabilityError> {
         self.check_read(path)?;
@@ -483,7 +474,6 @@ impl FileSystemCapability {
     }
 
     /// Write data to a file.
-    ///
     /// The path must be under an allowed write prefix.
     pub fn write_file(&self, path: &Path, data: &[u8]) -> Result<(), CapabilityError> {
         self.check_write(path)?;
@@ -497,7 +487,6 @@ impl FileSystemCapability {
     }
 
     /// List entries in a directory.
-    ///
     /// The path must be under an allowed read prefix.
     pub fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>, CapabilityError> {
         self.check_read(path)?;
@@ -512,7 +501,6 @@ impl FileSystemCapability {
     }
 
     /// Check if a path exists.
-    ///
     /// The path must be under an allowed read prefix.
     pub fn exists(&self, path: &Path) -> Result<bool, CapabilityError> {
         self.check_read(path)?;
@@ -571,7 +559,6 @@ impl FileSystemCapability {
 // ---------------------------------------------------------------------------
 
 /// A typed capability wrapper that provides safe environment variable access.
-///
 /// Only environment variables matching an allowed pattern can be read.
 pub struct EnvironmentCapability {
     token_id: Uuid,
@@ -607,7 +594,6 @@ impl EnvironmentCapability {
     }
 
     /// Get a single environment variable.
-    ///
     /// Returns `Ok(None)` if the variable is not set.
     /// Returns an error if the key does not match any allowed pattern.
     pub fn get_var(&self, key: &str) -> Result<Option<String>, CapabilityError> {
@@ -635,7 +621,6 @@ impl EnvironmentCapability {
     }
 
     /// Get all environment variables that match allowed patterns.
-    ///
     /// Returns a sorted map of matching variables.
     pub fn get_vars(&self) -> Result<BTreeMap<String, String>, CapabilityError> {
         let mut result = BTreeMap::new();
@@ -667,7 +652,6 @@ impl EnvironmentCapability {
 // ---------------------------------------------------------------------------
 
 /// A typed capability wrapper for repository and network access.
-///
 /// Only URLs matching allowed host patterns can be accessed.
 pub struct RepositoryCapability {
     #[allow(dead_code)]
@@ -723,9 +707,7 @@ impl RepositoryCapability {
 // ---------------------------------------------------------------------------
 
 /// A fluent builder for creating capability token configurations.
-///
 /// # Example
-///
 /// ```rust
 /// use gradle_substrate_daemon::server::capabilities::{
 ///     CapabilityBuilder, CapabilityRegistry, CapabilityScope,
@@ -733,7 +715,6 @@ impl RepositoryCapability {
 /// use gradle_substrate_daemon::server::scopes::BuildId;
 /// use std::path::PathBuf;
 /// use std::sync::Arc;
-///
 /// let registry = Arc::new(CapabilityRegistry::new());
 /// let token_id = CapabilityBuilder::new(CapabilityScope::Build(BuildId::from(String::from("b1"))))
 ///     .allow_read(PathBuf::from("/project/src"))
@@ -823,7 +804,6 @@ impl CapabilityBuilder {
 // ---------------------------------------------------------------------------
 
 /// Check whether `path` is under (or equal to) `prefix`.
-///
 /// Both paths are canonicalized by stripping trailing separators and
 /// comparing components. A path is considered "under" a prefix if the
 /// prefix is a leading segment of the path.
@@ -852,7 +832,6 @@ fn normalize_path(path: &Path) -> PathBuf {
 
 /// Simple glob matching supporting `*` (matches any sequence of non-separator chars)
 /// and `**` (matches any sequence including separators).
-///
 /// This is a minimal implementation sufficient for environment variable
 /// and host pattern matching. It does not support character classes `[...]`
 /// or single-char wildcards `?`.
@@ -913,10 +892,8 @@ fn glob_match_recursive(pattern: &str, text: &str) -> bool {
             // Try: "*.java" vs "com/example/App.java", "example/App.java", "App.java", ""
 
             if after_trimmed.is_empty() {
-                // Pattern ends with ** after consuming some prefix -> matches everything remaining
                 return true;
             }
-            // Try at every position after a '/' separator plus the full remaining
             let mut pos = 0;
             loop {
                 if glob_match_recursive(after_trimmed, &remaining[pos..]) {
@@ -968,7 +945,6 @@ fn glob_match_single_star(pattern: &str, segment: &str) -> bool {
 }
 
 /// Extract the host portion from a URL string.
-///
 /// Handles common schemes (http, https, file, ssh) and returns the host
 /// without port or path.
 fn extract_host(url: &str) -> String {
@@ -1364,7 +1340,6 @@ mod tests {
         // Revoke
         registry.revoke(&token_id);
 
-        // Should fail after revocation
         assert!(matches!(
             registry.validate(&token_id, &required).unwrap_err(),
             CapabilityError::TokenRevoked

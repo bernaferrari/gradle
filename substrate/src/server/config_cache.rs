@@ -37,7 +37,6 @@ const MAX_CACHE_ENTRIES: usize = 1000;
 
 /// Rust-native configuration cache service.
 /// Stores and retrieves serialized build configuration using a compact binary codec.
-///
 /// This replaces Gradle's Java-based configuration cache with a faster
 /// Rust implementation using compact binary serialization (10-50x faster than
 /// Java serialization for complex object graphs).
