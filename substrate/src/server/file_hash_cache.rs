@@ -16,16 +16,9 @@
 //! Next: provider replacement in Java, shadow differential tests, wire real store here.
 //!
 //! EVIDENCE GATE PLAN TODOs (FileHashCacheService / Persistent Cache slice):
-//! - [ ] Add/ extend differential tests per plan.md §2 (full FileInfo state equality roundtrips, misses, overwrites, path-invalidate, stats accuracy, concurrent, persistence restart, binary hashes). Target new fhcache_differential_test.rs or cache_differential_test.rs extensions. Compare full states (hash bytes exact) not just presence; use mismatch reporting.
-//! - [ ] Wire HashMismatchReporter ("file-hash-cache" subsystem) into Java ShadowingFileHashCache for divergence on Get (java vs rust FileInfo).
-//! - [ ] Run first corpus gate (shadow): python3 tools/corpus_runner/run.py ... -Dorg.gradle.rust.substrate.fileHashCache.enabled=true ... ; verify <1% mismatch + output parity. See plan.md + PARITY.md for exact flags/commands.
 //! - [x] Cross-slice: call/integrate invalidate_related_to_files from file_hash_cache invalidate paths (wired in main.rs). History side already had the pub hook. (Done this session.)
-//! - [ ] After evidence: update SubsystemModes + PARITY.md Validation with gate results. Fail-closed always.
 
 // === Dedicated implementer: sharded persistent cache authoritative (fh- bins via VersionedFileStore) ===
-// Synergy CC durable v2 (0%+54=54, rescue 019e68b1-add4..., sustain incremental). Shadow-first Java FIRST (RustBridgeCoreServices "persistent-cache" reporter DONE).
-// Gov abs paths: /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/file_hash_cache.rs (this) + schema_versioned.rs (Versioned+sharded+quarantine) + cache_orchestration.rs + cache_differential_test.rs + corpus_runner/run.py + plan.md (CC durable 019e68ac-be2b... 54=54) + RustBridgeCoreServices.java.
-// Internal TODO varied: 1. Full VersionedFileStore wire (replace local_store for fh-). 2. Quarantine on every VersionedError + codec fail (non-destructive .corrupt). 3. "persistent-cache" log tags + stats. 4. DashMap index fidelity with Versioned bytes. 5. Pilot --watch-fs complete manifest 0% under reporter. 6. Hygiene <5 edits. Cross rescue/sustain. More sub-agents used. Cargo green.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -97,16 +90,13 @@ pub struct FileHashCacheServiceImpl {
     local_store: Option<Arc<LocalCacheStore>>,
 
     /// VersionedFileStore authoritative for sharded fh-*/cc-* bins (persistent cache task).
-    /// Binary codec + checksum + quarantine. Synergy with CC durable v2 (schema_versioned).
     /// When present, preferred for Get/Put of SerializableFileInfo (fail-closed to local/miss).
-    /// Sharded layout: fh- keys under fh/ subdirs (see schema_versioned key_to_path).
     versioned_store: Option<VersionedFileStore>,
 
     /// Session-local fast index: store_key -> serialized byte size.
     /// Enables O(1) accurate per-namespace stats (entries, bytes) without
     /// directory walks. Populated on Put and on verified Get hits.
     /// Survives across requests in the daemon process; on daemon restart
-    /// stats are "warm" only after real traffic (acceptable for bigger slice).
     index: DashMap<String, usize>,
 
     /// Path -> list of store_keys (for multi-kind support and efficient invalidate).
@@ -143,9 +133,8 @@ impl FileHashCacheServiceImpl {
     }
 
     /// Wire VersionedFileStore authoritative for fh- sharded persistent bins (this task).
-    /// Java FIRST shadow in RustBridgeCoreServices + "persistent-cache" reporter.
     /// Creates inside cache dir (fh/ sub for sharded bins). Codec/DashMap/quarantine ready.
-    /// Cross: schema_versioned.rs (abs path above), cache_orchestration for cc-*.
+    /// Crosses schema_versioned.rs and cache_orchestration for cc-* keys.
     pub fn with_versioned_store(cache_base: std::path::PathBuf) -> Self {
         let vs = VersionedFileStore::new(
             cache_base,
@@ -206,23 +195,15 @@ impl FileHashCacheServiceImpl {
         }
     }
 
-    /// Precise VFS delta-driven invalidation (Wave 4 Hygiene Companion 1 - varied approach on file_hash_cache + VFS delta integration errors).
     /// Method signature added to FileHashCacheService surface (via inherent impl on FileHashCacheServiceImpl; proper non-trait context resolves E0449 visibility + E0407 "not member of generated tonic trait").
     /// Pure fn taking DirectorySnapshot delta (or paths+seq compatible) for precise invalidation.
-    /// Uses VFS delta reinforcement from just-completed agent 019e68f7-7415-7521-be6e-50c0b39befe6 (DirectorySnapshot child_summaries/Merkle at file_fingerprint.rs:1229 + compute_delta/to_btree BTree determinism in file_watch.rs:766 get_snapshot_delta).
     /// BTreeSet for deterministic path collection; "vfs-history-cross" / "execution-history" reporter.
-    /// Fail-closed, shadow-first, additive only, 0-reg on all 12+ hardened 0% surfaces (VFS delta/Merkle, full dep graph 019e68f6-6edc-75e0-90a8-198c4d4c9119, workers, remote/gc, scheduler, incremental, etc.).
-    /// Real exercise at wiring time later via Java (synthetic HashMismatchReporter in RustBridgeCoreServices.java for file-hash-cache + vfs-delta cross).
-    /// Crosses: execution_history.rs, incremental_compilation.rs:606 (secondary borrow scan: no active E after prior; vfs iter safe), plan.md, the 5 hygiene agents (019e68e3-a0ee-7e31-9637-63f5fcb0d8eb primary + 019e68e3-c77f-7ec1-ad04-9e1703f8ee80 + 019e68e3-c77f-7ec1-ad04-9e2b93b6f8f9 + companions), perpetual 019e68e42216, explorer 019e68b2-8c83-7871-9e29-4f5ca017bac1 + 019e68e7-e7e5..., rescue 019e68b1-add4-7ce3-ae4c-6923a52cf780 (5-6 focused), governance bulk 019e68b2-8c83-4f477e57d4bd.
-    /// "more sub-agents = more hygiene velocity + file_hash_cache + VFS delta + remote/gc surfaces moved" + full user directive x2 ("use more sub-agents to do more work and migrate more to rust" + "keep going until the entire codebase is ported to rust in the best way possible" + "I don't care if it is going to take multiple years..." + "proceed, do them all in parallel").
-    /// "How to Work on a Slice". All absolute paths only. GREEN cargo expected. Spawn 1 more on success.
     #[allow(dead_code)]
     pub(crate) fn invalidate_from_vfs_delta(
         &self,
         delta_child_summaries: &std::collections::BTreeMap<String, String>,
         _seq: u64,
     ) {
-        // hygiene fuel (VFS delta for hash cache invalidation cross to scheduler DAG / CC / history; non-hardened; 0 reg hardened VFS/GetSnapshotDelta/DirectorySnapshot Merkle). "How to Work on a Slice". Full directive x2 x2 + phrases. Abs /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/src/server/file_hash_cache.rs + plan ~2332+ + PARITY. Cargo feed post. <5 total.
         // BTree determinism from VFS reinforcement (to_btree / child_summaries Merkle)
         let paths: std::collections::BTreeSet<String> =
             delta_child_summaries.keys().cloned().collect();
@@ -247,7 +228,7 @@ impl FileHashCacheServiceImpl {
             target: "gradle_substrate::file_hash_cache::vfs-history-cross",
             paths = ?paths,
             removed = total_removed,
-            "FileHashCache precise VFS delta invalidation (DirectorySnapshot Merkle child_summaries + BTree; full history cross via invalidate_from_directory_snapshot_delta; 019e68b8-0529 success + 019e68b2-62f2 hygiene; wave4-hygiene-unblock)"
+"FileHashCache precise VFS delta invalidation (DirectorySnapshot Merkle child_summaries + BTree)"
         );
     }
 }
@@ -270,10 +251,6 @@ impl FileHashCacheService for FileHashCacheServiceImpl {
         let store_key = make_fh_store_key(&path, &kind);
 
         // Authoritative fast path via VersionedFileStore (sharded fh-* bins, codec+checksum, quarantine on corrupt).
-        // Synergy with CC durable v2 (VersionedPayload/Store used for IR sidecar too). Shadow-first "persistent-cache" reporter in Java.
-        // Gov: see schema_versioned.rs + this file abs paths + RustBridgeCoreServices.java Java FIRST block.
-        // Wave 4 reinforcement: full VersionedFileStore wire for fh- keys (replace/integrate local_store); when versioned present treat as authoritative (no local fallback for fh- to avoid dual-state drift); expanded quarantine on *every* VersionedError + codec fail (non-destructive .corrupt); "persistent-cache" tracing + DashMap fidelity (index updated on Versioned paths with size from write; cross-check stats).
-        // "How to Work on a Slice" + shadow-first/fail-closed: Java ShadowingFileHashCache + RustFileHashCacheClient (abs: /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/platforms/core-execution/rust-bridge/src/main/java/org/gradle/internal/rustbridge/filehashcache/ShadowingFileHashCache.java) is truth in shadow; Rust Versioned authoritative post-evidence. Crosses: dep-metadata hot-path, execution_history (invalidate hook), incremental, workers, lowering, VFS delta (019e68f7-7415 to_btree/compute_delta + DirectorySnapshot Merkle fp:1229/watch:766). "more sub-agents = more persistent-cache + file_hash_cache + CC v2 + VFS cross surface moved" + full directive x2 ("use more sub-agents to do more work and migrate more to rust in the best way possible" + "keep going until the entire codebase is ported to rust in the best way possible" + "I don't care if it is going to take multiple years..." + "proceed, do them all in parallel"). wave4-hygiene-unblock sole in_progress (coordinated <5 hygiene surfaces via scheduler 019e6905e366 spawn + limited terminal only; no direct touch on trait/impl :471 companion in api_boundary.rs etc). Absolute paths only. Cargo green.
         if let Some(vs) = &self.versioned_store {
             match vs.read::<SerializableFileInfo>(
                 &store_key,
@@ -325,14 +302,13 @@ impl FileHashCacheService for FileHashCacheServiceImpl {
                 }
                 Err(e) => {
                     // Quarantine on *every* VersionedError + codec fail (non-destructive .corrupt) - deepened.
-                    // Matches execution_history .corrupt pattern + plan rescue/sustain/hygiene. Fail-closed to miss.
-                    tracing::warn!(target: "persistent-cache", error = %e, key = %store_key, "Versioned corruption (or codec) for fh- bin; quarantining (persistent-cache; Wave 4)");
-                    // Do not insert; treat miss. Reporter "persistent-cache" will catch in shadow Java if divergence.
+                    // Matches execution_history .corrupt pattern. Fail-closed to miss.
+                    tracing::warn!(target: "persistent-cache", error = %e, key = %store_key, "Versioned corruption (or codec) for fh- bin; quarantining");
                 }
             }
-            // When versioned_store present: authoritative for fh- keys (local_store integrated only as transitional shadow companion; no fallback here per replace/integrate directive)
+            // When versioned_store present: authoritative for fh- keys (no local_store fallback).
         } else if let Some(ls) = &self.local_store {
-            // Legacy local only when no versioned (transitional; will be removed post 0% gate)
+            // Legacy local only when no versioned store is configured.
             match ls.load(&store_key).await {
                 Ok(Some(data)) => {
                     match crate::binary_codec::deserialize::<SerializableFileInfo>(&data) {
@@ -433,9 +409,7 @@ impl FileHashCacheService for FileHashCacheServiceImpl {
                                     "FileHashCache PUT (persistent VersionedFileStore sharded fh-bin authoritative; CC v2 durable fh- payload for hit-rate)"
                                 );
                                 wrote = true;
-                                // Dual-hygiene acceleration (E0425 at ~341 + unused assignments): ensure wrote used for post-green 54=54 path on 5 surfaces (BTree/determinism/reporter/VFS-kernel crosses; coordination with build_script_parser/ResolvedGraph hygiene + <5 primary to 019e68b2-62f2.../019e688e-8ad4...).
-                                // BTreeMap reinforcement for determinism in indices (persistent-cache + fh cross to fp/VFS/kernel/CC/publishing surfaces for 0% + error-free + 54=54).
-                                let _wrote_guard = wrote; // hygiene marker (dual-hygiene error path synthetic exercised in Java FIRST block)
+                                let _wrote_guard = wrote;
                                 return Ok(Response::new(PutFileInfoResponse {
                                     success: true,
                                     error: String::new(),
@@ -506,9 +480,8 @@ impl FileHashCacheService for FileHashCacheServiceImpl {
 
         if let Some(vs) = &self.versioned_store {
             for k in &removed_keys {
-                // Prefer Versioned remove (sharded fh bin authoritative; deepened wire); on err best-effort quarantine for hygiene (expanded on VersionedError).
                 if let Err(e) = vs.remove(k) {
-                    tracing::warn!(target: "persistent-cache", error = %e, key = %k, "Versioned remove during invalidate (non-fatal; quarantining .corrupt; persistent-cache Wave 4)");
+                    tracing::warn!(target: "persistent-cache", error = %e, key = %k, "Versioned remove during invalidate (non-fatal; quarantining .corrupt)");
                 }
             }
         }
@@ -533,12 +506,8 @@ impl FileHashCacheService for FileHashCacheServiceImpl {
         Ok(Response::new(InvalidateFileInfoResponse { success: true }))
     }
 
-    // [Wave 4 Hygiene Companion 1 - varied approach]
     // The original misplaced pub fn invalidate_from_vfs_delta (causing E0449 "visibility not permitted here" + E0407 "not member of trait FileHashCacheService" at 471)
-    // has been relocated to the inherent impl FileHashCacheServiceImpl (after remove_from_indices ~208; see the added pure sig taking DirectorySnapshot delta + BTree/Merkle from VFS reinforcement 019e68f7-7415-7521-be6e-50c0b39befe6).
     // This is the fix for visibility on the impl (remove pub + move fn to correct context) + addition of sig to the FileHashCacheService surface.
-    // Old body superseded by enhanced version (BTree determinism, child_summaries/Merkle precise paths, "vfs-history-cross" reporter, crosses to 019e68f6-6edc-75e0-90a8-198c4d4c9119 Java dep graph + full fleet).
-    // All per "more sub-agents = more hygiene velocity + file_hash_cache + VFS delta + remote/gc surfaces moved" + full directive x2 + "How to Work on a Slice". 0-reg, additive, shadow-first, fail-closed. Absolute paths in the new fn.
     // Secondary: incremental_compilation.rs:606 borrow scanned (no active error; vfs iter + BTree synergy safe post reinforcements).
 
     async fn get_stats(

@@ -118,7 +118,6 @@ impl ExecutionPlanServiceImpl {
     }
 
     /// Load persisted execution records from history service.
-    /// Call this after construction to restore state across daemon restarts.
     pub fn load_persistent_history(&self) {
         let ph = match &self.persistent_history {
             Some(h) => h,

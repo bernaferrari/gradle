@@ -36,7 +36,6 @@ use super::scopes::{BuildId, ProjectPath, ScopeRegistry, SessionId, TreeId};
 // ---------------------------------------------------------------------------
 
 /// The root context for the entire Gradle daemon process.
-///
 /// This type has no lifetime parameter — it is the anchor of the hierarchy.
 /// All other contexts are derived from it and carry lifetimes that tie back
 /// to an instance of this type.
@@ -58,7 +57,6 @@ impl BuildProcessCtx {
     }
 
     /// Open a new build session bound to this process.
-    ///
     /// The returned `BuildSessionCtx` carries a lifetime tied to `&self`,
     /// so it cannot outlive the process context.
     pub fn open_session(&self) -> BuildSessionCtx<'_> {
@@ -80,7 +78,6 @@ impl Default for BuildProcessCtx {
 // ---------------------------------------------------------------------------
 
 /// A build session within a process (one `gradle` invocation).
-///
 /// The `'proc` lifetime ties this session to its parent `BuildProcessCtx`.
 pub struct BuildSessionCtx<'proc> {
     process: &'proc BuildProcessCtx,
@@ -94,7 +91,6 @@ impl<'proc> BuildSessionCtx<'proc> {
     }
 
     /// Open a new build tree bound to this session.
-    ///
     /// The returned `BuildTreeCtx` carries a lifetime tied to `&self`,
     /// so it cannot outlive the session context.
     pub fn open_tree(&self) -> BuildTreeCtx<'_> {
@@ -120,7 +116,6 @@ impl<'proc> BuildSessionCtx<'proc> {
 // ---------------------------------------------------------------------------
 
 /// A build tree (used for composite builds) within a session.
-///
 /// The `'sess` lifetime ties this tree to its parent `BuildSessionCtx`.
 pub struct BuildTreeCtx<'sess> {
     // Carries lifetime relationship; not directly read
@@ -136,7 +131,6 @@ impl<'sess> BuildTreeCtx<'sess> {
     }
 
     /// Open a new build bound to this tree.
-    ///
     /// The returned `BuildCtx` carries a lifetime tied to `&self`,
     /// so it cannot outlive the tree context.
     pub fn open_build(&self) -> BuildCtx<'_> {
@@ -157,7 +151,6 @@ impl<'sess> BuildTreeCtx<'sess> {
 // ---------------------------------------------------------------------------
 
 /// A single build execution within a build tree.
-///
 /// The `'tree` lifetime ties this build to its parent `BuildTreeCtx`.
 pub struct BuildCtx<'tree> {
     // Carries lifetime relationship; not directly read
@@ -168,7 +161,6 @@ pub struct BuildCtx<'tree> {
 
 impl<'tree> BuildCtx<'tree> {
     /// Create a project context for the given path.
-    ///
     /// The returned `ProjectCtx` carries a lifetime tied to `&self`,
     /// so it cannot outlive the build context.
     pub fn project(&self, path: &str) -> ProjectCtx<'_> {
@@ -189,7 +181,6 @@ impl<'tree> BuildCtx<'tree> {
 // ---------------------------------------------------------------------------
 
 /// A project within a build (a single subproject).
-///
 /// The `'build` lifetime ties this project to its parent `BuildCtx`.
 pub struct ProjectCtx<'build> {
     build: &'build BuildCtx<'build>,
@@ -213,7 +204,6 @@ impl<'build> ProjectCtx<'build> {
 // ---------------------------------------------------------------------------
 
 /// An RAII guard that calls `ScopeRegistry::cleanup_build()` when dropped.
-///
 /// This bridges the compile-time context hierarchy with the runtime
 /// `ScopeRegistry` from `scopes.rs`. When the guard is dropped (either
 /// explicitly or when it goes out of scope), the build is automatically
@@ -225,7 +215,6 @@ pub struct ScopeGuard {
 
 impl ScopeGuard {
     /// Create a new scope guard.
-    ///
     /// The guard takes ownership of the cleanup responsibility. When
     /// dropped, it will call `registry.cleanup_build(&build_id)`.
     pub fn new(registry: std::sync::Arc<ScopeRegistry>, build_id: BuildId) -> Self {
@@ -241,7 +230,6 @@ impl ScopeGuard {
     }
 
     /// Consume the guard without running cleanup.
-    ///
     /// Use this when you want to manually manage cleanup instead of
     /// relying on the RAII guard.
     pub fn into_inner(mut self) -> BuildId {
@@ -262,12 +250,9 @@ impl Drop for ScopeGuard {
 // ---------------------------------------------------------------------------
 
 /// A builder that creates the full scope hierarchy in one fluent call.
-///
 /// # Example
-///
 /// ```rust,ignore
 /// let registry = Arc::new(ScopeRegistry::new());
-///
 /// let (process, session, tree, build, project, guard) =
 ///     TypedScopeBuilder::new(registry)
 ///         .with_session("session-1")
@@ -275,7 +260,6 @@ impl Drop for ScopeGuard {
 ///         .with_build("build-1")
 ///         .with_project(":app")
 ///         .build()?;
-///
 /// // When `guard` is dropped, cleanup_build() is called automatically.
 /// ```
 pub struct TypedScopeBuilder {
@@ -323,7 +307,6 @@ impl TypedScopeBuilder {
     }
 
     /// Build the full hierarchy and return all contexts plus a cleanup guard.
-    ///
     /// Returns `(process, session, tree, build, project, guard)` where the
     /// guard will clean up the build when dropped.
     pub fn build(
@@ -350,7 +333,6 @@ impl TypedScopeBuilder {
         // returns owned contexts. In real usage, the contexts are held together
         // in the same scope so the lifetimes are valid. The builder pattern
         // is primarily for testing and demonstration.
-        //
         // For production code, use the explicit `open_*` methods which preserve
         // the lifetime hierarchy properly.
         let session = unsafe {
@@ -453,7 +435,6 @@ mod tests {
         let guard = ScopeGuard::new(registry.clone(), build_id.clone());
         drop(guard);
 
-        // After drop, the build should be cleaned up
         assert!(!registry.validate_build_in_session(&build_id, &session_id));
     }
 
@@ -549,7 +530,6 @@ mod tests {
 
     // -----------------------------------------------------------------------
     // Compile-time leakage tests
-    //
     // These tests verify that the Rust compiler enforces the lifetime
     // hierarchy. They use helper functions with explicit lifetime bounds
     // to demonstrate that data cannot escape its scope.
@@ -565,12 +545,9 @@ mod tests {
     /// This function demonstrates that a ProjectCtx is tied to its BuildCtx.
     /// The following test (commented out) would NOT compile because it tries
     /// to use a ProjectCtx outside the scope of its BuildCtx.
-    ///
     /// Uncommenting this would produce a compile error:
-    ///
     /// ```compile_fail
     /// use super::*;
-    ///
     /// fn try_leak_project() -> ProjectPath {
     ///     let process = BuildProcessCtx::new();
     ///     let session = process.open_session();
@@ -599,10 +576,8 @@ mod tests {
 
     /// This test verifies that BuildCtx cannot outlive its BuildTreeCtx.
     /// The following commented code would NOT compile:
-    ///
     /// ```compile_fail
     /// use super::*;
-    ///
     /// fn try_leak_build() -> BuildId {
     ///     let process = BuildProcessCtx::new();
     ///     let session = process.open_session();

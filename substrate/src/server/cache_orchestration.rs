@@ -432,7 +432,6 @@ mod tests {
             .unwrap();
         }
 
-        // After eviction, should be well below the max
         assert!(svc.stored_keys.len() <= MAX_STORED_KEYS);
 
         // Oldest keys should have been evicted

@@ -5,7 +5,6 @@ use crate::proto::{ResolutionStrategyConfig, ResolvedDependency};
 use super::super::super::ivyresolve::strategy::compare_versions;
 
 /// Gradle-shaped port target for `resolveengine.graph.conflicts`.
-///
 /// This is intentionally independent from `DependencyResolutionServiceImpl` so
 /// conflict behavior can grow toward Gradle's `LatestModuleConflictResolver`
 /// without deepening the gRPC service as the solver implementation.
@@ -71,7 +70,6 @@ pub fn resolve_conflicts_with_strategy(
 }
 
 /// Deduplicate resolved dependencies using the given resolution strategy.
-///
 /// This is the authoritative solver API. It fails closed for Gradle hard
 /// constraints rather than silently approximating them.
 pub fn try_resolve_conflicts_with_strategy(

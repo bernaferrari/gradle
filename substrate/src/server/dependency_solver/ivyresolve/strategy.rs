@@ -3,7 +3,6 @@ use std::cmp::Ordering;
 /// Gradle-shaped port of:
 /// - `ivyresolve.strategy.VersionParser`
 /// - `ivyresolve.strategy.StaticVersionComparator`
-///
 /// Keep this module aligned with Gradle's dependency-management package rather
 /// than the gRPC service shape. The resolver should call into this strategy
 /// layer so future solver slices can be ported package-by-package.

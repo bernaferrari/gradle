@@ -1289,7 +1289,6 @@ impl Parser {
 
         self.expect(TokenKind::RParen)?;
 
-        // Check for trailing closure after the closing paren
         let trailing_closure = if self.at(TokenKind::LBrace) {
             Some(self.parse_closure()?)
         } else {
@@ -1538,7 +1537,6 @@ impl ArgExprRef for Arg {
 }
 
 /// Parse GString interpolation markers into `StringPart` values.
-///
 /// The lexer emits GString text with `${...}` and `$ident` markers intact.
 /// We parse these into `StringPart::Literal` and `StringPart::Interpolation`.
 fn parse_gstring_parts(text: &str, base_span: Span) -> Vec<StringPart> {
@@ -1627,7 +1625,6 @@ fn parse_gstring_parts(text: &str, base_span: Span) -> Vec<StringPart> {
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /// Parse a Gradle Groovy DSL source string into a `ParseResult`.
-///
 /// Runs on a larger-than-default stack to avoid stack overflow when parsing
 /// very large build scripts (synthetic benchmarks or extremely large real
 /// scripts). The recursive-descent parser can consume significant stack

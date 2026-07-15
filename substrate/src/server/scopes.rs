@@ -16,27 +16,23 @@ use dashmap::DashMap;
 // ---------------------------------------------------------------------------
 
 /// Identifies a single build execution within a build tree.
-///
 /// Build-scoped data is created when a build starts and discarded when it completes.
 /// Multiple builds can exist within a session (e.g., composite builds).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BuildId(pub String);
 
 /// Identifies a Gradle build session (one `gradle` invocation).
-///
 /// Session-scoped data persists across multiple builds within a continuous build
 /// (e.g., `--continuous` mode).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SessionId(pub String);
 
 /// Identifies a build tree (used for composite builds).
-///
 /// A build tree contains one or more builds that execute together.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TreeId(pub String);
 
 /// Identifies a project within a build.
-///
 /// Project-scoped data is specific to a single subproject.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ProjectPath(pub String);

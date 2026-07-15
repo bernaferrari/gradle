@@ -10,7 +10,6 @@ use crate::proto::{
 
 /// Shared bridge to the JVM host, allowing multiple services to call back
 /// into the Gradle JVM. Uses interior mutability so the client can be set
-/// after the initial handshake.
 pub struct JvmHostBridge {
     client: tokio::sync::Mutex<Option<JvmHostClient>>,
 }
@@ -24,7 +23,6 @@ impl JvmHostBridge {
         }
     }
 
-    /// Set the JVM host client. Called once after the daemon connects
     /// to the JVM host socket.
     pub async fn set_client(&self, client: JvmHostClient) {
         *self.client.lock().await = Some(client);

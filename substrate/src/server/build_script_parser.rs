@@ -1,13 +1,11 @@
 use std::path::Path;
 
-// Wave 4 reinforcement long-running build-script lowering 019e68ed-cefe-7560-8d71-b27bd681fd77 (25989s+ / 29406s+ 38 calls 23% ctx positive parallel lowering theme fuel sustain) + VFS delta synergy in lowering/kernel/scheduler/Dep-Metadata (build_script_parser.rs:1707 decide_build_script_reexecution_with_vfs_delta + richer contracts generated_sources/annotationProcessing + 'build-script-lowering'/'test-exec-lowering' reporters + crosses from 4 prior VFS-cross + the 5 spawns + Dep-Meta hot-path + parallel scheduler 019e68e8-c33e) + evidence 0%+54=54 for lowering 25989s+ sustain (new evidence-long-running-lowering-25989s-019e68ed-cefe-* corpus 100%). Full directive x2x2 + VFS failure "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "more sub-agents = more long-running lowering 25989s+ 019e68ed-cefe + VFS delta synergy in lowering + hygiene#6 019e68eb-ee72 + parallel scheduler 019e68e8-c33e + 5 spawns 019e6a85-2c1f + post-hygiene 019e68ec-310f + recoveries + hygiene#7 + Dep-Metadata 019e68e7-a50d + [all prior full list] + entire port accelerated" + "Go parallel forever. Entire port accelerated." Fleet 185++. Cargo GREEN 0.13s 0h/5w 5 benign. 0 reg 20+ (add). Java FIRST in 2 Java after Dep-Meta (ENABLE_RUST_LONG_RUNNING_BUILD_SCRIPT_LOWERING_25989S_SYNERGY + synthetic + rich javadocs). Gov plan Fresh after exact anchor, PARITY/MIGRATION, beads 5ezk (substrate-alee 1 in_progress). Headers here + build_script_types.rs + execution_kernel.rs + parallel_scheduler.rs + file_fingerprint.rs:1229 + file_watch.rs:766. Support live long-running itself (this reinforcement sustains 019e68ed-cefe) + perpetuals + gov bulk 618s+ + explorer. Spawn 1+. Varied. Additive. Abs paths. Shadow-first/fail-closed/hybrid. "How to Work on a Slice" (AGENTS.md /Users/bernardoferrari/Downloads/gradle-refactor/gradle-fork/substrate/AGENTS.md read FULL FIRST before change) FIRST. Go parallel forever. Entire port accelerated. Do them all. Per 8-step. — 2026-05-27
 
 // Re-export all IR types from the shared types module.
 pub use super::build_script_types::*;
 
 /// Parse a Gradle build script (Kotlin DSL or Groovy) and extract
 /// plugins, dependencies, task configs, repositories, and subprojects.
-///
 /// Tries AST-based extraction first (structured, with line numbers).
 /// Falls back to string-based extraction when the parser reports errors.
 pub fn parse_build_script(content: &str, file_name: &str) -> BuildScriptParseResult {
@@ -302,7 +300,6 @@ fn find_brace_block(content: &str, start: usize) -> Option<String> {
 }
 
 /// Find the position of the matching closing parenthesis.
-/// `content` should start right after the opening `(`.
 fn find_matching_paren(content: &str) -> Option<usize> {
     let bytes = content.as_bytes();
     let mut depth = 1;
@@ -520,7 +517,6 @@ fn parse_dependencies_block(content: &str, result: &mut BuildScriptParseResult) 
 }
 
 /// Parse version catalog references inside a dependencies block.
-///
 /// Handles:
 /// - `implementation(libs.commons.lang3)` — Kotlin DSL
 /// - `implementation(libs.versions.java.get())` — version reference
@@ -634,7 +630,6 @@ fn parse_version_catalog_refs(content: &str, result: &mut BuildScriptParseResult
 }
 
 /// Parse the `buildscript` block to extract classpath dependencies.
-///
 /// Handles:
 /// ```kotlin
 /// buildscript {
@@ -703,7 +698,6 @@ fn parse_buildscript_block(content: &str, result: &mut BuildScriptParseResult) {
 }
 
 /// Parse `pluginManagement` block from settings.gradle(.kts).
-///
 /// Handles:
 /// ```kotlin
 /// pluginManagement {
@@ -809,7 +803,6 @@ fn parse_plugin_management(content: &str, result: &mut BuildScriptParseResult) {
 }
 
 /// Parse `dependencyResolutionManagement` block from settings.gradle(.kts).
-///
 /// Handles:
 /// ```kotlin
 /// dependencyResolutionManagement {
@@ -1274,9 +1267,8 @@ fn parse_groovy_tasks(content: &str, result: &mut BuildScriptParseResult) {
                         }
                     }
                 }
-                // shouldRunAfter 'bar' or shouldRunAfter "bar" or shouldRunAfter bar
                 for (di, _) in block.match_indices("shouldRunAfter ") {
-                    let da = di + 14; // "shouldRunAfter " = 14 chars
+                    let da = di + 14;
                     let rest = block[da..].trim_start();
                     if let Some(dep) = extract_string_literal(rest) {
                         task_config.should_run_after.push(dep);
@@ -1288,7 +1280,6 @@ fn parse_groovy_tasks(content: &str, result: &mut BuildScriptParseResult) {
                         }
                     }
                 }
-                // mustRunAfter 'bar' or mustRunAfter "bar" or mustRunAfter bar
                 for (di, _) in block.match_indices("mustRunAfter ") {
                     let da = di + 13;
                     let rest = block[da..].trim_start();

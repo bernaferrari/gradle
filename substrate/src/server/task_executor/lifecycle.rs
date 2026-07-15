@@ -1,7 +1,6 @@
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
 /// Executes no-action lifecycle aggregator tasks.
-///
 /// Gradle lifecycle tasks such as `classes` or `assemble` often only depend on
 /// real work tasks. Once dependencies have completed, the task itself is a
 /// successful no-op and should not require JVM forwarding.

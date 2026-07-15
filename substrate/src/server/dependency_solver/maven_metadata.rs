@@ -134,7 +134,6 @@ fn decode_text(event: &BytesText<'_>) -> String {
 }
 
 /// Resolve a Maven `-SNAPSHOT` selector from parsed metadata.
-///
 /// Returns `Some(raw_version)` for `<localCopy>true</localCopy>` because Maven
 /// keeps local-copy snapshots under the base SNAPSHOT coordinate. Returns
 /// `None` when the metadata does not contain enough information.

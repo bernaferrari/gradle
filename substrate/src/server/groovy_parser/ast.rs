@@ -25,7 +25,6 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 /// Source location of a syntactic element.
-///
 /// Offsets are byte offsets into the original source text. Lines and columns
 /// are 1-based for human-friendly display.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -296,7 +295,6 @@ pub enum Expr {
 // ---------------------------------------------------------------------------
 
 /// A string literal with optional interpolation parts.
-///
 /// Supports both Groovy GString interpolation (`"Hello ${name}"`) and Kotlin
 /// string templates (`"Hello $name"` / `"Hello ${expr}"`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -420,7 +418,6 @@ pub struct MapEntry {
 // ---------------------------------------------------------------------------
 
 /// A closure (Groovy) or lambda (Kotlin).
-///
 /// Examples:
 /// - Groovy: `{ x -> println(x) }`, `{ -> println("no params") }`, `{ println(it) }`
 /// - Kotlin: `{ x -> println(x) }`, `{ (a: Int, b: Int) -> a + b }`
@@ -568,7 +565,6 @@ pub struct ElvisExpr {
 }
 
 /// A type cast expression.
-///
 /// - Kotlin: `expr as Type` or `expr as? Type` (safe cast).
 /// - Groovy: `(Type) expr`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -606,7 +602,6 @@ pub struct PropertyAccess {
 }
 
 /// Safe navigation: `obj?.property` or `obj?.method()`.
-///
 /// In Groovy, `?.` returns `null` instead of throwing NPE if the receiver is null.
 /// In Kotlin, the same semantics apply.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -633,7 +628,6 @@ pub struct IndexAccess {
 // ---------------------------------------------------------------------------
 
 /// A method or function call.
-///
 /// This is the most common expression in Gradle scripts. Covers:
 /// - Top-level calls: `plugins { }`, `dependencies { }`, `repositories { }`
 /// - Configuration calls: `implementation("...")`, `testImplementation("...")`
@@ -665,7 +659,6 @@ pub enum Arg {
 }
 
 /// A named (keyword) argument.
-///
 /// - Kotlin: `name = value` or `name: value` (deprecated)
 /// - Groovy: `key: value`
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -682,7 +675,6 @@ pub struct NamedArgument {
 // ---------------------------------------------------------------------------
 
 /// An assignment expression: `target = value`.
-///
 /// The target can be a simple identifier, a property access, or an index access.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Assignment {
@@ -698,7 +690,6 @@ pub struct Assignment {
 // ---------------------------------------------------------------------------
 
 /// The spread/star operator: `*expr`.
-///
 /// Used in argument lists and collection literals to expand a collection:
 /// - `foo(*items)` — spread items as arguments
 /// - `[1, *list, 3]` — spread list into a larger list

@@ -7,7 +7,6 @@ use crate::server::task_executor::copy::{parse_copy_file_mappings, parse_unix_mo
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
 /// Native Rust JAR packaging executor.
-///
 /// Creates or updates JAR files without shelling out to the `jar` command.
 /// Supports:
 /// - Creating new JARs from a set of input files/directories
@@ -2221,12 +2220,10 @@ mod tests {
     }
 }
 
-// zr2e/8lk7 lineage next (substrate-m4ll): jar richer lowering + VFS DirectorySnapshot child_summaries cross.
-// Per "How to Work on a Slice" (AGENTS.md read FULL FIRST) + full user directive x2x2 + "more sub-agents = more task_executor richer lowering (jar) + VFS cross (DirectorySnapshot Merkle child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766) + entire port accelerated" + VFS failure "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust".
 // Additive only. BTree determinism. 0 reg on hardened VFS surfaces.
 pub fn apply_vfs_delta_to_jar(
     archive_path: &std::path::Path,
-    delta_child_summaries: &std::collections::BTreeMap<String, String>, // from DirectorySnapshot fp:1229 child_summaries + watch:766 get_snapshot_delta
+    delta_child_summaries: &std::collections::BTreeMap<String, String>,
 ) -> bool {
     if delta_child_summaries.is_empty() {
         return false;

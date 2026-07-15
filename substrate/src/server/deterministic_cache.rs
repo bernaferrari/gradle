@@ -95,7 +95,6 @@ impl DeclaredInput {
 // ---------------------------------------------------------------------------
 
 /// Normalizes filesystem paths for deterministic key computation.
-///
 /// - Converts backslashes to forward slashes
 /// - Removes trailing slashes
 /// - Resolves `.` and `..` segments
@@ -424,7 +423,6 @@ impl CacheKeyDomain {
 // ---------------------------------------------------------------------------
 
 /// A record of what inputs were declared for a cache key.
-///
 /// Enables auditing: "why did this cache key change?" by comparing
 /// declarations across builds.
 #[derive(Debug, Clone)]
@@ -559,7 +557,6 @@ mod tests {
 
     #[test]
     fn normalize_path_handles_absolute_paths() {
-        // This tests that absolute paths remain absolute after normalization.
         // The exact form (with or without double-slash) is platform-dependent
         // due to backslash conversion and drive letter handling.
         let result = normalize_path("/usr/local/bin");

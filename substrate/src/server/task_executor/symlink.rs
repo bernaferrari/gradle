@@ -1,29 +1,6 @@
 use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-
-pub fn apply_vfs_delta_to_symlink(
-    target: &std::path::Path,
-    delta_child_summaries: &BTreeMap<String, String>, // from DirectorySnapshot fp:1229 child_summaries + watch:766 delta
-) -> bool {
-    if delta_child_summaries.is_empty() {
-        return false;
-    }
-    let target_str = target.to_string_lossy().to_lowercase();
-    for (changed, _h) in delta_child_summaries.iter() {
-        let cl = changed.to_lowercase();
-        if target_str.contains(&cl)
-            || cl.contains("link")
-            || cl.contains("src")
-            || cl.contains("build")
-        {
-            tracing::info!(target: "symlink-lowering", vfs_taskexec_cross = true, target = %target.display(), changed = %changed, "VFS delta affects symlink target; re-execution likely");
-            return true;
-        }
-    }
-    false
-}
 
 /// Creates symbolic links.
 pub struct SymlinkTaskExecutor;

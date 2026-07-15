@@ -652,7 +652,6 @@ impl AstExtractor {
                                 None
                             });
                         } else if let Some(ref mut plugin) = nested_plugin {
-                            // apply after nested id() applies to the nested plugin
                             if let Some(Expr::Boolean(b)) =
                                 inner_mc.arguments.first().and_then(|a| match a {
                                     Arg::Positional { expr } => Some(expr.as_ref()),
@@ -665,7 +664,6 @@ impl AstExtractor {
                     }
                     Expr::MethodCall(inner_mc) if inner_mc.name == "version" => {
                         if found_nested_id {
-                            // version after nested id() applies to the nested plugin
                             if let Some(ref mut plugin) = nested_plugin {
                                 if let Some(ver) = inner_mc
                                     .arguments

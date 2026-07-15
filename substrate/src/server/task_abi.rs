@@ -74,7 +74,6 @@ pub struct TaskExecutionRequest {
     pub build_id: String,
 }
 
-/// Result returned after task execution completes.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TaskExecutionResult {
     pub task_path: String,
@@ -89,7 +88,6 @@ pub struct TaskExecutionResult {
 // ---------------------------------------------------------------------------
 
 /// Deterministic cache key computed from all declared inputs that affect task output.
-///
 /// Uses `BTreeMap` internally so that iteration order is always sorted,
 /// guaranteeing the same key regardless of input ordering.
 #[derive(Debug, Clone)]
@@ -164,8 +162,6 @@ impl CacheKey {
 }
 
 /// Compute a SHA-256 hex string from a `CacheKey`.
-///
-/// All components are serialized in a deterministic order (BTreeMap guarantees
 /// sorted keys) and fed into a single SHA-256 digest.
 pub fn compute_cache_key(key: &CacheKey) -> String {
     let mut hasher = Sha256::new();

@@ -79,7 +79,6 @@ pub struct ApiItem {
 // ---------------------------------------------------------------------------
 
 /// Static registry of all public API items.
-///
 /// This is the authoritative source of truth for what constitutes the
 /// public surface of the substrate. Items not listed here are considered
 /// internal or private.
@@ -414,7 +413,6 @@ impl std::error::Error for ApiViolation {}
 // ---------------------------------------------------------------------------
 
 /// Checks if a module is allowed to access a target item based on visibility rules.
-///
 /// Rules:
 /// - Public items can be accessed by any module.
 /// - Internal items can only be accessed by modules in the same platform
@@ -477,7 +475,6 @@ pub fn validate_api_boundary(source: &str, target: &str) -> Result<(), ApiViolat
 // ---------------------------------------------------------------------------
 
 /// A marker type that documents a module as internal.
-///
 /// Place a `const` of this type at the top of an internal module to
 /// make its internal status explicit and searchable.
 pub struct InternalModuleGuard {
@@ -499,9 +496,7 @@ impl InternalModuleGuard {
 // ---------------------------------------------------------------------------
 
 /// Marks a module as internal.
-///
 /// # Example
-///
 /// ```ignore
 /// declare_internal_module! {
 ///     "server::cache::internal",
@@ -518,9 +513,7 @@ macro_rules! declare_internal_module {
 }
 
 /// Documents a public API item at its definition site.
-///
 /// # Example
-///
 /// ```ignore
 /// declare_public_api! {
 ///     HashService,

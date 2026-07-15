@@ -10,7 +10,6 @@ use crate::server::task_executor::{
 
 use super::process_launch::{run_to_output, ProcessLaunchSpec};
 
-// Workers full (6yc.1) cross note: test_exec shares process_launch + kernel with worker daemons; VFS delta (fp:1229/watch:766) for worker healthy + reporter('workers') in pool/lease paths. Additive header only (per charter, no behavior, <5 hygiene). Full text in worker_process.rs + Java + plan + 'How to Work on a Slice' + directive x2 x2 + 'more sub-agents = more Workers full + ... + entire port accelerated' + 'more sub-agents turned VFS failure 019e6885-51c7...' + abs paths + 0%+54=54 + Java FIRST + crosses + perpetual 019e68e42216 + fleet. Gate. Go parallel.
 
 /// Outcome of a single test method.
 #[derive(Debug, Clone, PartialEq)]
@@ -87,7 +86,6 @@ impl TestExecExecutor {
     }
 
     /// Build the test JVM command line.
-    ///
     /// Options:
     /// - `java_home`: JDK installation path
     /// - `classpath`: classpath for test execution (test classes + dependencies)
@@ -1364,12 +1362,10 @@ mod tests {
     }
 }
 
-// zr2e/8lk7 lineage next after jar (substrate-ya3g): test_exec richer lowering + VFS DirectorySnapshot child_summaries cross.
-// Per "How to Work on a Slice" (AGENTS.md read FULL FIRST) + full user directive x2x2 + "more sub-agents = more task_executor richer lowering (test_exec) + VFS cross (DirectorySnapshot Merkle child_summaries @file_fingerprint.rs:1229 + get_snapshot_delta @file_watch.rs:766) + entire port accelerated" + VFS failure "more sub-agents turned VFS failure 019e6885-51c7 into more cross surface" + "Go parallel forever. Entire port accelerated." + "use more sub-agents to do more work and migrate more to rust".
 // Additive only. BTree determinism. Richer contracts (generated_sources / annotationProcessing / parallel engines / JUnit Platform). 0 reg on hardened VFS surfaces.
 pub fn apply_vfs_delta_to_test_exec(
     report_dir: &std::path::Path,
-    delta_child_summaries: &std::collections::BTreeMap<String, String>, // from DirectorySnapshot fp:1229 child_summaries + watch:766 get_snapshot_delta
+    delta_child_summaries: &std::collections::BTreeMap<String, String>,
 ) -> bool {
     if delta_child_summaries.is_empty() {
         return false;
@@ -1390,7 +1386,6 @@ pub fn apply_vfs_delta_to_test_exec(
             tracing::debug!(target: "test-exec-lowering", "VFS delta hits test input tree {} -> re-execute", k);
             return true;
         }
-        // Richer sustain: binary results, output-events, specific JUnit report patterns for evidence 0%+54=54 runner (yv30 after m4ll).
         if k.contains("binary/") || k.contains("TEST-") || k.contains("results-") {
             tracing::debug!(target: "test-exec-lowering", "VFS delta hits test binary/report {} -> re-execute (richer sustain yv30)", k);
             return true;
