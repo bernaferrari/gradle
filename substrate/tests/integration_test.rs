@@ -341,6 +341,7 @@ async fn test_hash_service_e2e() {
                 last_modified: 0,
             }],
             algorithm: String::new(),
+            gradle_signature: true,
         }))
         .await
         .unwrap()
@@ -767,6 +768,7 @@ async fn test_hash_batch_multiple_files() {
                 },
             ],
             algorithm: String::new(),
+            gradle_signature: false,
         }))
         .await
         .unwrap()
@@ -1201,7 +1203,7 @@ async fn test_execution_history_stats_e2e() {
 
 #[tokio::test]
 async fn test_dependency_resolution_cache_e2e() {
-    let (socket_path, _dir) = spawn_test_server().await;
+    let (socket_path, dir) = spawn_test_server().await;
     let channel = connect(&socket_path).await;
     let mut client =
         dependency_resolution_service_client::DependencyResolutionServiceClient::new(channel);
@@ -1221,6 +1223,11 @@ async fn test_dependency_resolution_cache_e2e() {
         .into_inner();
     assert!(!check.cached);
 
+    // Real file required: cache add rejects missing local paths.
+    let artifact = dir.path().join("test-lib-1.0.jar");
+    let bytes = vec![0u8; 2048];
+    std::fs::write(&artifact, &bytes).unwrap();
+
     // Add to cache
     let add_resp = client
         .add_artifact_to_cache(Request::new(AddArtifactToCacheRequest {
@@ -1228,10 +1235,10 @@ async fn test_dependency_resolution_cache_e2e() {
             name: "test-lib".to_string(),
             version: "1.0".to_string(),
             classifier: String::new(),
-            local_path: "/tmp/test-lib-1.0.jar".to_string(),
-            size: 2048,
-            sha256: "deadbeef".to_string(),
-            extension: String::new(),
+            local_path: artifact.to_string_lossy().into_owned(),
+            size: bytes.len() as i64,
+            sha256: String::new(),
+            extension: "jar".to_string(),
         }))
         .await
         .unwrap()
@@ -1246,13 +1253,13 @@ async fn test_dependency_resolution_cache_e2e() {
             version: "1.0".to_string(),
             classifier: String::new(),
             sha256: String::new(),
-            extension: String::new(),
+            extension: "jar".to_string(),
         }))
         .await
         .unwrap()
         .into_inner();
     assert!(check2.cached);
-    assert_eq!(check2.local_path, "/tmp/test-lib-1.0.jar");
+    assert!(check2.local_path.ends_with("test-lib-1.0.jar"));
     assert_eq!(check2.cached_size, 2048);
 
     // Get stats
@@ -3751,7 +3758,7 @@ async fn test_configuration_to_build_init_flow() {
 
 #[tokio::test]
 async fn test_plugin_to_dependency_resolution_chain() {
-    let (socket_path, _dir) = spawn_test_server().await;
+    let (socket_path, dir) = spawn_test_server().await;
     let channel = connect(&socket_path).await;
 
     let mut plugin_client = plugin_service_client::PluginServiceClient::new(channel.clone());
@@ -3913,33 +3920,42 @@ async fn test_plugin_to_dependency_resolution_chain() {
     assert_eq!(resolve_resp.total_artifacts, 1);
 
     // Step 6: Add artifacts to cache and check them (drives artifact_cache_hits)
-    dep_client
+    let slf4j = dir.path().join("slf4j-api-2.0.9.jar");
+    let junit = dir.path().join("junit-jupiter-api-5.10.0.jar");
+    std::fs::write(&slf4j, vec![1u8; 4096]).unwrap();
+    std::fs::write(&junit, vec![2u8; 8192]).unwrap();
+
+    let add1 = dep_client
         .add_artifact_to_cache(Request::new(AddArtifactToCacheRequest {
             group: "org.slf4j".to_string(),
             name: "slf4j-api".to_string(),
             version: "2.0.9".to_string(),
             classifier: String::new(),
-            local_path: "/tmp/slf4j-api-2.0.9.jar".to_string(),
+            local_path: slf4j.to_string_lossy().into_owned(),
             size: 4096,
-            sha256: "abcdef".to_string(),
-            extension: String::new(),
+            sha256: String::new(),
+            extension: "jar".to_string(),
         }))
         .await
-        .unwrap();
+        .unwrap()
+        .into_inner();
+    assert!(add1.accepted);
 
-    dep_client
+    let add2 = dep_client
         .add_artifact_to_cache(Request::new(AddArtifactToCacheRequest {
             group: "org.junit.jupiter".to_string(),
             name: "junit-jupiter-api".to_string(),
             version: "5.10.0".to_string(),
             classifier: String::new(),
-            local_path: "/tmp/junit-jupiter-api-5.10.0.jar".to_string(),
+            local_path: junit.to_string_lossy().into_owned(),
             size: 8192,
-            sha256: "fedcba".to_string(),
-            extension: String::new(),
+            sha256: String::new(),
+            extension: "jar".to_string(),
         }))
         .await
-        .unwrap();
+        .unwrap()
+        .into_inner();
+    assert!(add2.accepted);
 
     // Check artifact cache (should hit)
     let check1 = dep_client
@@ -3949,7 +3965,7 @@ async fn test_plugin_to_dependency_resolution_chain() {
             version: "2.0.9".to_string(),
             classifier: String::new(),
             sha256: String::new(),
-            extension: String::new(),
+            extension: "jar".to_string(),
         }))
         .await
         .unwrap()
@@ -3964,7 +3980,7 @@ async fn test_plugin_to_dependency_resolution_chain() {
             version: "5.10.0".to_string(),
             classifier: String::new(),
             sha256: String::new(),
-            extension: String::new(),
+            extension: "jar".to_string(),
         }))
         .await
         .unwrap()

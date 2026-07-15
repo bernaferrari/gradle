@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "build_id": "sample-build-1",
   "projects": [
     {
@@ -125,12 +125,18 @@
     {
       "project_path": ":app",
       "configuration": "implementation",
-      "notation": "org.slf4j:slf4j-api:2.0.13"
+      "notation": "org.slf4j:slf4j-api:2.0.13",
+      "kind": "module",
+      "repositories": [],
+      "unsupported_features": []
     },
     {
       "project_path": ":app",
       "configuration": "testImplementation",
-      "notation": "org.junit.jupiter:junit-jupiter:5.10.2"
+      "notation": "org.junit.jupiter:junit-jupiter:5.10.2",
+      "kind": "module",
+      "repositories": [],
+      "unsupported_features": []
     }
   ],
   "toolchains": [

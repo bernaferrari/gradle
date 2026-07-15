@@ -316,6 +316,7 @@ async fn test_hash_determinism_across_repeated_calls() {
     for _ in 0..5 {
         let response = client
             .hash_batch(Request::new(HashBatchRequest {
+            gradle_signature: false,
                 files: vec![FileToHash {
                     absolute_path: file_path.clone(),
                     length: 0,
@@ -359,6 +360,7 @@ async fn test_hash_different_files_produce_different_hashes() {
 
     let response = client
         .hash_batch(Request::new(HashBatchRequest {
+            gradle_signature: false,
             files: vec![
                 FileToHash {
                     absolute_path: file_a,

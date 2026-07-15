@@ -36,7 +36,7 @@ fn build_plan_ir_golden_fingerprint_is_stable_and_order_insensitive() {
 
     // Golden lock: this hash should only change when canonicalization policy or
     // fixture semantics intentionally change.
-    let expected = "38ea03cae573bb2f77cf9f13e781aee2ebecf79d6071be9d6cb115790bf1a3d8";
+    let expected = "598086b1b4f6bc757609cb4666782f01d56391b28b21d37baa187d32bcb64b64";
     assert_eq!(fp_a, expected, "unexpected canonical fingerprint drift");
 }
 
@@ -51,7 +51,7 @@ fn build_plan_ir_golden_proto_envelope_is_self_consistent() {
 
     let canonical = canonical_json(&fixture).unwrap();
     let proto = to_proto(&fixture);
-    assert_eq!(proto.schema_version, 2);
+    assert_eq!(proto.schema_version, 4);
     assert_eq!(proto.build_id, "sample-build-1");
     assert!(!canonical.is_empty());
 }

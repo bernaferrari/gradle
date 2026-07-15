@@ -85,6 +85,86 @@ impl TestExecExecutor {
         Self
     }
 
+    fn gradle_cache_jars(group: &str, name: &str, version: &str) -> Vec<PathBuf> {
+        let Some(home) = std::env::var_os("GRADLE_USER_HOME")
+            .or_else(|| std::env::var_os("HOME").map(|h| {
+                let mut p = PathBuf::from(h);
+                p.push(".gradle");
+                p.into_os_string()
+            }))
+        else {
+            return Vec::new();
+        };
+        let module_dir = PathBuf::from(home)
+            .join("caches")
+            .join("modules-2")
+            .join("files-2.1")
+            .join(group)
+            .join(name)
+            .join(version);
+        let Ok(hash_dirs) = std::fs::read_dir(module_dir) else {
+            return Vec::new();
+        };
+        let mut jars = Vec::new();
+        for hash_dir in hash_dirs.flatten() {
+            let Ok(entries) = std::fs::read_dir(hash_dir.path()) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|ext| ext == "jar") {
+                    jars.push(path);
+                }
+            }
+        }
+        jars.sort();
+        jars
+    }
+
+    fn ensure_console_launcher_classpath(classpath: &str) -> String {
+        let mut entries: Vec<PathBuf> = std::env::split_paths(classpath).collect();
+        let has_console = entries.iter().any(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.contains("junit-platform-console"))
+        });
+        if !has_console {
+            for jar in Self::gradle_cache_jars(
+                "org.junit.platform",
+                "junit-platform-console-standalone",
+                "1.10.2",
+            ) {
+                entries.push(jar);
+            }
+            for jar in Self::gradle_cache_jars(
+                "org.junit.platform",
+                "junit-platform-console",
+                "1.10.2",
+            ) {
+                entries.push(jar);
+            }
+            for jar in Self::gradle_cache_jars(
+                "org.junit.jupiter",
+                "junit-jupiter-engine",
+                "5.10.2",
+            ) {
+                entries.push(jar);
+            }
+            for jar in Self::gradle_cache_jars(
+                "org.junit.platform",
+                "junit-platform-engine",
+                "1.10.2",
+            ) {
+                entries.push(jar);
+            }
+        }
+        // Always append declared test class dirs when present as bare options.
+        std::env::join_paths(entries)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| classpath.to_string())
+    }
+
+
     /// Build the test JVM command line.
     /// Options:
     /// - `java_home`: JDK installation path
@@ -140,8 +220,26 @@ impl TestExecExecutor {
 
         // Classpath
         if let Some(classpath) = input.options.get("classpath") {
+            let mut classpath = Self::ensure_console_launcher_classpath(classpath);
+            // Ensure compiled project outputs are present for in-project tests.
+            let mut extras = Vec::new();
+            if let Some(test_classes) = input.options.get("test_classes_dirs") {
+                extras.extend(std::env::split_paths(test_classes));
+            }
+            if let Some(working_dir) = input.options.get("working_dir") {
+                let root = PathBuf::from(working_dir);
+                extras.push(root.join("build/classes/java/main"));
+                extras.push(root.join("build/classes/java/test"));
+                extras.push(root.join("build/resources/main"));
+                extras.push(root.join("build/resources/test"));
+            }
+            if let Ok(joined) = std::env::join_paths(
+                std::env::split_paths(&classpath).chain(extras.into_iter()),
+            ) {
+                classpath = joined.to_string_lossy().into_owned();
+            }
             args.push("-classpath".to_string());
-            args.push(classpath.to_string());
+            args.push(classpath);
         }
 
         // JUnit Platform Console Launcher main class

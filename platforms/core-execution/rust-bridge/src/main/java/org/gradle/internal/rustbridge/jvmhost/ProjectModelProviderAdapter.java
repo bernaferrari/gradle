@@ -704,6 +704,8 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         putIfPresent(inputs, "classpath", mergedClasspath(
             fileCollectionPathString(invokeOptional(task, taskType, "getClasspath")),
             sourceSetConfigurationClasspath(task, "compile", "Java", "CompileClasspath"),
+            configurationClasspath(task, "compileClasspath"),
+            configurationClasspath(task, "testCompileClasspath"),
             taskInputClasspath(task)
         ));
 
@@ -1135,12 +1137,20 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
 
     private static void captureTestInputs(Task task, Class<?> taskType, Map<String, String> inputs) {
         putIfPresent(inputs, "java_home", System.getProperty("java.home"));
+        // Prefer explicit resolvable configurations. Test.getClasspath() can fail or omit
+        // external runtime-only jars (e.g. junit-platform-console-standalone) when project
+        // outputs are not materialised yet during graph capture.
+        String testClassesDirs = fileCollectionPathString(invokeOptional(task, taskType, "getTestClassesDirs"));
         putIfPresent(inputs, "classpath", mergedClasspath(
             fileCollectionPathString(invokeOptional(task, taskType, "getClasspath")),
+            configurationClasspath(task, "testRuntimeClasspath"),
+            configurationClasspath(task, "testCompileClasspath"),
+            configurationClasspath(task, "runtimeClasspath"),
             sourceSetConfigurationClasspath(task, "", "", "RuntimeClasspath"),
-            taskInputClasspath(task)
+            taskInputClasspath(task),
+            testClassesDirs
         ));
-        putIfPresent(inputs, "test_classes_dirs", fileCollectionPathString(invokeOptional(task, taskType, "getTestClassesDirs")));
+        putIfPresent(inputs, "test_classes_dirs", testClassesDirs);
         putIfPresent(inputs, "working_dir", filePath(invokeOptional(task, taskType, "getWorkingDir")));
         putIfPresent(inputs, "max_heap_size", stringOrEmpty(invokeOptional(task, taskType, "getMaxHeapSize")));
         putIfPresent(inputs, "jvm_args", stringList(invokeOptional(task, taskType, "getJvmArgs")));
@@ -2268,6 +2278,19 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             Configuration configuration = configurations.findByName(configurationName);
             if (configuration == null || !configuration.isCanBeResolved()) {
                 return "";
+            }
+            // Prefer a lenient artifact view so runtime-only jars (e.g. junit console
+            // launcher) are still captured when some project outputs are missing.
+            try {
+                FileCollection lenient = configuration.getIncoming()
+                    .artifactView(view -> view.setLenient(true))
+                    .getFiles();
+                String path = fileCollectionPathString(lenient);
+                if (!path.isEmpty()) {
+                    return path;
+                }
+            } catch (RuntimeException e) {
+                LOGGER.debug("[substrate-jvmhost] Lenient classpath view failed for {}", configurationName, e);
             }
             return fileCollectionPathString(configuration);
         } catch (RuntimeException e) {
