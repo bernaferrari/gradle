@@ -66,6 +66,7 @@ public class DefaultDomainObjectCollection<T> extends AbstractCollection<T> impl
         this(type, store, new DefaultCollectionEventRegister<T>(type, callbackActionDecorator));
     }
 
+    @SuppressWarnings("this-escape")
     protected DefaultDomainObjectCollection(Class<? extends T> type, ElementSource<T> store, final CollectionEventRegister<T> eventRegister) {
         this.type = type;
         this.store = store;
@@ -202,7 +203,11 @@ public class DefaultDomainObjectCollection<T> extends AbstractCollection<T> impl
         while (iterator.hasNext()) {
             // only create an intermediate collection if there's something to copy
             if (copied == null) {
-                copied = new ArrayList<>(estimatedSize());
+                // Don't size the copy with estimatedSize(): it realizes pending elements (size() on a
+                // collection provider resolves its value), which would make configureEach eager. This copy
+                // only ever holds the realized elements yielded by iteratorNoFlush(), so a default-capacity
+                // list is correct and keeps configureEach lazy, as documented.
+                copied = new ArrayList<>();
             }
             copied.add(iterator.next());
         }
@@ -311,6 +316,11 @@ public class DefaultDomainObjectCollection<T> extends AbstractCollection<T> impl
             providerInternal = defaultListProperty;
         }
         store.addPendingCollection(providerInternal);
+    }
+
+    @Override
+    public Provider<? extends Collection<T>> getElements() {
+        return store.getElements();
     }
 
     protected void didAdd(T toAdd) {

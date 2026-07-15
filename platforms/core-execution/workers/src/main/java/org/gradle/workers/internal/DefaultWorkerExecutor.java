@@ -69,7 +69,7 @@ public class DefaultWorkerExecutor implements WorkerExecutor {
     private final ClassLoaderStructureProvider classLoaderStructureProvider;
     private final ActionExecutionSpecFactory actionExecutionSpecFactory;
     private final Instantiator instantiator;
-    private final IsolationScheme<WorkAction<?>, WorkParameters> isolationScheme = new IsolationScheme<>(Cast.uncheckedCast(WorkAction.class), WorkParameters.class, WorkParameters.None.class, WorkParameters.None.INSTANCE);
+    private final IsolationScheme<WorkAction<?>, WorkParameters> isolationScheme = new IsolationScheme<>(Cast.uncheckedCast(WorkAction.class), WorkParameters.class, WorkParameters.None.class);
     private final CachedClasspathTransformer classpathTransformer;
     private final File baseDir;
     private final ProjectCacheDir projectCacheDir;
@@ -133,24 +133,19 @@ public class DefaultWorkerExecutor implements WorkerExecutor {
     public WorkQueue processIsolation(Action<? super ProcessWorkerSpec> action) {
         DefaultProcessWorkerSpec spec = instantiator.newInstance(DefaultProcessWorkerSpec.class, forkOptionsFactory.newDecoratedJavaForkOptions());
         File defaultWorkingDir = spec.getForkOptions().getWorkingDir();
-        File workingDirectory = workerDirectoryProvider.getWorkingDirectory();
         action.execute(spec);
-
         if (!defaultWorkingDir.equals(spec.getForkOptions().getWorkingDir())) {
             throw new IllegalArgumentException("Setting the working directory of a worker is not supported.");
-        } else {
-            spec.getForkOptions().setWorkingDir(workingDirectory);
         }
+        spec.getForkOptions().getWorkingDirectory().set(workerDirectoryProvider.getWorkingDirectory());
 
         return instantiator.newInstance(DefaultWorkQueue.class, this, spec, daemonWorkerFactory);
     }
 
     private <T extends WorkParameters> AsyncWorkCompletion submitWork(Class<? extends WorkAction<T>> workActionClass, Action<? super T> parameterAction, WorkerSpec workerSpec, WorkerFactory workerFactory) {
-        Class<T> parameterType = isolationScheme.parameterTypeForOrNull(workActionClass);
-        T parameters = (parameterType == null) ? null : instantiator.newInstance(parameterType);
-        if (parameters != null) {
-            parameterAction.execute(parameters);
-        }
+        Class<T> parameterType = isolationScheme.parameterTypeFor(workActionClass);
+        T parameters = isolationScheme.instantiateParameters(parameterType, instantiator::newInstance);
+        parameterAction.execute(parameters);
 
         String description = workActionClass.getName();
         WorkerRequirement workerRequirement = getWorkerRequirement(workActionClass, workerSpec, parameters);

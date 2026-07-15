@@ -22,6 +22,7 @@ import org.gradle.plugins.ide.AbstractIdeIntegrationTest
 import org.junit.Rule
 import org.junit.Test
 import spock.lang.Issue
+import org.gradle.integtests.fixtures.modes.ToBeFixedForIsolatedProjects
 
 class IdeaModuleIntegrationTest extends AbstractIdeIntegrationTest {
     @Rule
@@ -46,6 +47,8 @@ class IdeaModuleIntegrationTest extends AbstractIdeIntegrationTest {
         expectTaskDeprecations("idea", "ideaModule", "ideaProject", "ideaWorkspace")
         expectTaskTypeDeprecations(
                 ("org.gradle.plugins.ide.idea.model.IdeaModuleIml"): 1,
+                ("org.gradle.plugins.ide.idea.model.IdeaModel.pathVariables"): 1,
+                ("org.gradle.plugins.ide.api.XmlFileContentMerger.withXml"): 1,
         )
         runTask 'idea', '''
             apply plugin: "java"
@@ -442,6 +445,7 @@ class IdeaModuleIntegrationTest extends AbstractIdeIntegrationTest {
         content.contains 'hibernate-core.jar'
     }
 
+    @ToBeFixedForIsolatedProjects(because = "IDEA plugin uses allprojects/subprojects")
     @Test
     void doesNotBreakWhenSomeDependenciesCannotBeResolved() {
         //given

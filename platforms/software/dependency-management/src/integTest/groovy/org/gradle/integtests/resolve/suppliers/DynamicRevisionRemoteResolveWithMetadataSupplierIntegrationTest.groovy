@@ -19,9 +19,9 @@ import org.gradle.api.internal.artifacts.ivyservice.CacheLayout
 import org.gradle.initialization.StartParameterBuildOptions.ConfigurationCacheRecreateOption
 import org.gradle.integtests.fixtures.GradleMetadataResolveRunner
 import org.gradle.integtests.fixtures.RequiredFeature
-import org.gradle.integtests.fixtures.ToBeFixedForIsolatedProjects
 import org.gradle.integtests.fixtures.cache.CachingIntegrationFixture
 import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
+import org.gradle.integtests.fixtures.modes.ToBeFixedForIsolatedProjects
 import org.gradle.integtests.resolve.AbstractModuleDependencyResolveTest
 import org.gradle.test.fixtures.HttpModule
 import org.gradle.test.fixtures.file.TestFile
@@ -442,7 +442,7 @@ abstract class DynamicRevisionRemoteResolveWithMetadataSupplierIntegrationTest e
         then:
         fails 'checkDeps'
         failure.assertHasCause("Could not resolve group:projectB:latest.release.")
-        failure.assertHasCause("Could not GET '${server.uri}/repo/group/projectB/2.2/status.txt'. Received status code 500 from server: broken")
+        failure.assertHasCause("Could not GET '${server.uri}/repo/group/projectB/2.2/status.txt'. Received status code 500 from server: Internal Server Error")
 
         when:
         resetExpectations()

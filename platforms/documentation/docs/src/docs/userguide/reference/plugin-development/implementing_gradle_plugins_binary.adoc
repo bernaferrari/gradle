@@ -588,6 +588,13 @@ include::{snippetsPath}/reference/plugin-development/reactingToBuildFeatures/gro
 <2> Accessing the `requested` status of a feature for reporting.
 <3> Using the `active` status of a feature to disable incompatible functionality.
 
+[WARNING]
+====
+Disabling functionality based on a feature's `active` status makes the plugin behave differently depending on whether the feature is enabled, which raises complexity and can lead to divergent build results.
+Treat such conditionals as a last resort, and prefer making the functionality compatible with the feature instead.
+For the <<isolated_projects.adoc#isolated_projects,Isolated Projects>> feature specifically, see <<isolated_projects.adoc#sec:guarding_build_logic,Guard incompatible build logic as a last resort>>.
+====
+
 [[build_feature_properties]]
 === Build feature properties
 
@@ -825,16 +832,14 @@ The following sample demonstrates how to add a variant that is compatible with G
 include::sample[dir="snippets/reference/plugin-development/pluginWithVariants/kotlin",files="build.gradle.kts[tags=add-plugin-variant]"]
 include::sample[dir="snippets/reference/plugin-development/pluginWithVariants/groovy",files="build.gradle[tags=add-plugin-variant]"]
 ====
-
-NOTE: Only Gradle versions 7 or higher can be explicitly targeted by a variant, as support for this was only added in Gradle 7.
-
-First, we declare a separate _source set_ and a _feature variant_ for our Gradle 7 plugin variant.
-Then, we do some specific wiring to turn the feature into a proper Gradle plugin variant:
-
 <1> Assign the <<component_capabilities.adoc#sec:declaring-component-capabilities,implicit capability that corresponds to the components GAV>> to the variant.
 <2> Assign the <<variant_attributes.adoc#sec:gradle-plugins-default-attributes,Gradle API version attribute>> to all <<declaring_configurations.adoc#sec:resolvable-consumable-configs,consumable configurations>> of our Gradle7 variant. Gradle uses this information to determine which variant to select during plugin resolution.
 <3> Configure the `processGradle7Resources` task to ensure the plugin descriptor file is added to the Gradle7 variant Jar.
 <4> Add a dependency to the `gradleApi()` for our new variant so that the API is visible during compilation time.
+
+The sample declares a separate _source set_ and a _feature variant_ for our Gradle 7 plugin variant, then wires the feature into a proper Gradle plugin variant.
+
+NOTE: Only Gradle versions 7 or higher can be explicitly targeted by a variant, as support for this was only added in Gradle 7.
 
 Note that there is currently no convenient way to access the API of other Gradle versions as the one you are building the plugin with.
 Ideally, every variant should be able to declare a dependency on the API of the minimal Gradle version it supports.
@@ -866,3 +871,40 @@ This snippet makes the <<#plugin-with-variants,plugin variant `gradle7` defined 
 include::sample[dir="snippets/reference/plugin-development/pluginWithVariants/kotlin",files="build.gradle.kts[tags=consume-plugin-variant]"]
 include::sample[dir="snippets/reference/plugin-development/pluginWithVariants/groovy",files="build.gradle[tags=consume-plugin-variant]"]
 ====
+
+[[plugin-dependency-conflicts]]
+== Avoiding plugin dependency conflicts
+
+When developing a plugin that relies on the API of another plugin (e.g., the Android Gradle Plugin or the Kotlin Plugin), declaring that API dependency using the standard `implementation` configuration can cause serious classpath conflicts for the end user.
+
+When applying your plugin to a project, the dependency you used may spill into the build script classpath of the project's subprojects, potentially overriding a newer version of the dependency required there.
+
+To prevent buildscript classpath leakage and maintain version flexibility for your users, use the `compileOnly` configuration for any dependency that represents an underlying plugin's API.
+
+[source,text]
+----
+dependencies {
+    // BAD: Can spill onto subproject classpaths, potentially overriding their version
+    // implementation("com.android.tools.build:gradle-api:8.0.0")
+
+    // GOOD: Only available during compilation; user's project dictates the runtime version
+    compileOnly("com.android.tools.build:gradle-api:8.0.0")
+}
+----
+
+If you need to *enforce* a specific version (e.g., for internal <<implementing_gradle_plugins_convention.adoc#implementing_convention_plugins,Convention Plugins>>), the `implementation` approach may be acceptable, but this should be done with clear awareness of the potential user conflicts.
+
+Because `compileOnly` dependencies are not available at runtime, plugin authors should:
+
+1. **Document** that the plugin requires the other plugin to be explicitly applied by the user.
+2. **Implement the plugin defensively** to avoid throwing `NoClassDefFoundError` when the dependency is missing.
+Use link:{javadocPath}/org/gradle/api/plugins/PluginManager.html#withPlugin-java.lang.String-org.gradle.api.Action-[`PluginManager.withPlugin(String, Action)`] to guard code that references classes from the `compileOnly` dependency:
++
+[source,kotlin]
+----
+project.pluginManager.withPlugin("com.android.application") {
+    // Safe to reference Android plugin classes here
+}
+----
+
+WARNING: Using the `compileOnly` configuration will cause the standard plugin testing method, `GradleRunner.withPluginClasspath()`, to fail. See <<test_kit.adoc#sub:test-kit-automatic-classpath-injection,Automatic classpath injection with the Plugin Development Plugin>> to learn more.

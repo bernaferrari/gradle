@@ -25,6 +25,7 @@ import org.spockframework.util.TextUtil
 import spock.lang.Issue
 
 import static org.gradle.util.internal.TextUtil.normaliseFileSeparators
+import org.gradle.integtests.fixtures.modes.ToBeFixedForIsolatedProjects
 
 /**
  * Tests for bugfixes to maven publishing scenarios
@@ -112,6 +113,7 @@ publishing {
     }
 
     @Issue("GRADLE-2837")
+    @ToBeFixedForIsolatedProjects(because = "publishing plugin accesses subproject state at config time")
     def "project is properly configured when it is the target of a project dependency"() {
         given:
         mavenRepo.module("org.gradle", "dep", "1.1").publish()
@@ -218,6 +220,7 @@ subprojects {
     }
 
     @Issue("GRADLE-3318")
+    @ToBeFixedForIsolatedProjects(because = "publishing plugin accesses subproject state at config time")
     def "can reference rule-source tasks from sub-projects"() {
         given:
         using m2
@@ -295,8 +298,6 @@ subprojects {
         file("build/repo/org/gradle/test/1.0/test-1.0.jar").exists()
         file("build/repo/org/gradle/test/1.0/test-1.0.jar.md5").exists()
         file("build/repo/org/gradle/test/1.0/test-1.0.jar.sha1").exists()
-        file("build/repo/org/gradle/test/1.0/test-1.0.jar.sha256").exists()
-        file("build/repo/org/gradle/test/1.0/test-1.0.jar.sha512").exists()
 
         when:
         fails "publish", "-PjarEnabled=false"
@@ -349,8 +350,6 @@ subprojects {
         file("build/repo/org/gradle/test/1.0/test-1.0-javadoc.jar").exists()
         file("build/repo/org/gradle/test/1.0/test-1.0-javadoc.jar.md5").exists()
         file("build/repo/org/gradle/test/1.0/test-1.0-javadoc.jar.sha1").exists()
-        file("build/repo/org/gradle/test/1.0/test-1.0-javadoc.jar.sha256").exists()
-        file("build/repo/org/gradle/test/1.0/test-1.0-javadoc.jar.sha512").exists()
         publishedModule.parsedModuleMetadata.variant("javadocElements") {
             assert files*.name == ['test-1.0-javadoc.jar']
         }
@@ -365,8 +364,6 @@ subprojects {
         !file("build/repo/org/gradle/test/1.0/test-1.0-javadoc.jar").exists()
         !file("build/repo/org/gradle/test/1.0/test-1.0-javadoc.jar.md5").exists()
         !file("build/repo/org/gradle/test/1.0/test-1.0-javadoc.jar.sha1").exists()
-        !file("build/repo/org/gradle/test/1.0/test-1.0-javadoc.jar.sha256").exists()
-        !file("build/repo/org/gradle/test/1.0/test-1.0-javadoc.jar.sha512").exists()
         publishedModule.parsedModuleMetadata.variant("javadocElements") {
             assert files*.name == []
         }

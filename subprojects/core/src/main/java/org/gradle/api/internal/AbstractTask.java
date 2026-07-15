@@ -168,6 +168,7 @@ public abstract class AbstractTask implements TaskInternal, DynamicObjectAware {
     private final TaskExecutionAccessChecker taskExecutionAccessChecker;
     private LoggingManagerInternal loggingManager;
 
+    @SuppressWarnings("this-escape")
     protected AbstractTask() {
         this(taskInfo());
     }
@@ -176,6 +177,7 @@ public abstract class AbstractTask implements TaskInternal, DynamicObjectAware {
         return NEXT_INSTANCE.get();
     }
 
+    @SuppressWarnings("this-escape")
     private AbstractTask(TaskInfo taskInfo) {
         if (taskInfo == null) {
             throw new TaskInstantiationException(String.format("Task of type '%s' has been instantiated directly which is not supported. Tasks can only be created using the Gradle API or DSL.", getClass().getName()));
@@ -594,6 +596,12 @@ public abstract class AbstractTask implements TaskInternal, DynamicObjectAware {
         if (loggingManager == null) {
             loggingManager = services.get(LoggingManagerFactory.class).createLoggingManager();
         }
+        return loggingManager;
+    }
+
+    @Nullable
+    @Override
+    public LoggingManagerInternal getLoggingManager() {
         return loggingManager;
     }
 

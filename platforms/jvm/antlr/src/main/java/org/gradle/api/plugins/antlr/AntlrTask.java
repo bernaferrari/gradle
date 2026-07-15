@@ -65,6 +65,7 @@ import java.util.concurrent.Callable;
 /**
  * Generates parsers from Antlr grammars.
  */
+@SuppressWarnings("this-escape")
 @NullMarked
 @CacheableTask
 public abstract class AntlrTask extends SourceTask {
@@ -265,7 +266,7 @@ public abstract class AntlrTask extends SourceTask {
         builder.sharedPackages("antlr", "org.antlr");
 
         JavaExecHandleBuilder javaCommand = builder.getJavaCommand();
-        javaCommand.setWorkingDir(projectDir());
+        javaCommand.getWorkingDirectory().set(projectDir());
         javaCommand.setMaxHeapSize(spec.getMaxHeapSize());
         javaCommand.systemProperty("ANTLR_DO_NOT_EXIT", "true");
         javaCommand.redirectErrorStream();

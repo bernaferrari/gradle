@@ -118,6 +118,7 @@ public abstract class MutableStateAccessAwareProject implements ProjectInternal,
     protected final ProjectIdentity referrer;
     private final DynamicObject dynamicObject;
 
+    @SuppressWarnings("this-escape")
     protected MutableStateAccessAwareProject(ProjectInternal delegate, ProjectIdentity referrer) {
         this.delegate = delegate;
         this.referrer = referrer;
@@ -471,6 +472,11 @@ public abstract class MutableStateAccessAwareProject implements ProjectInternal,
         return delegate.getProperties();
     }
 
+    @Override
+    public Map<String, ? extends @Nullable Object> collectPropertiesInternal() {
+        return delegate.collectPropertiesInternal();
+    }
+
     @Nullable
     @Override
     public Object property(String propertyName) throws MissingPropertyException {
@@ -701,12 +707,6 @@ public abstract class MutableStateAccessAwareProject implements ProjectInternal,
     public AntBuilder ant(Action<? super AntBuilder> configureAction) {
         onMutableStateAccess("ant");
         return delegate.ant(configureAction);
-    }
-
-    @Nullable
-    @Override
-    public ProjectIdentifier getParentIdentifier() {
-        return delegate.getParentIdentifier();
     }
 
     @Override

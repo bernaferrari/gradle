@@ -67,7 +67,6 @@ dependencies {
     integTestImplementation(testFixtures(projects.platformNative))
 
     integTestImplementation(libs.jsoup)
-    integTestImplementation(testLibs.jetty)
 
     integTestDistributionRuntimeOnly(projects.distributionsFull)
 }
@@ -100,6 +99,4 @@ sourceSets.main {
     output.dir(layout.buildDirectory.file("generated-resources/report-resources"))
 }
 
-tasks.isolatedProjectsIntegTest {
-    enabled = false
-}
+

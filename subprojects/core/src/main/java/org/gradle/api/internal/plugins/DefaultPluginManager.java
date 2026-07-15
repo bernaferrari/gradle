@@ -67,6 +67,7 @@ public class DefaultPluginManager implements PluginManagerInternal {
     private final UserCodeApplicationContext userCodeApplicationContext;
     private final DomainObjectCollectionFactory domainObjectCollectionFactory;
 
+    @SuppressWarnings("this-escape")
     public DefaultPluginManager(final PluginRegistry pluginRegistry, Instantiator instantiator, final PluginTarget target, BuildOperationRunner buildOperationRunner, UserCodeApplicationContext userCodeApplicationContext, CollectionCallbackActionDecorator callbackDecorator, DomainObjectCollectionFactory domainObjectCollectionFactory) {
         this.instantiator = instantiator;
         this.target = target;
@@ -142,7 +143,7 @@ public class DefaultPluginManager implements PluginManagerInternal {
     public void apply(String pluginId) {
         PluginImplementation<?> plugin = pluginRegistry.lookup(DefaultPluginId.unvalidated(pluginId));
         if (plugin == null) {
-            throw new UnknownPluginException("Plugin with id '" + pluginId + "' not found.");
+            throw new UnknownPluginException("Plugin with id '" + pluginId + "' not found.", pluginId);
         }
         doApply(plugin);
     }

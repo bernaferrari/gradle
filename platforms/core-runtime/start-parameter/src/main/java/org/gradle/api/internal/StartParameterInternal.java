@@ -30,6 +30,7 @@ import org.jspecify.annotations.Nullable;
 import java.io.File;
 import java.time.Duration;
 import java.util.Map;
+import java.util.function.Consumer;
 
 public class StartParameterInternal extends StartParameter {
     private WatchMode watchFileSystemMode = WatchMode.DEFAULT;
@@ -41,6 +42,7 @@ public class StartParameterInternal extends StartParameter {
     private boolean configurationCacheDebug;
     private boolean configurationCacheIgnoreInputsDuringStore = false;
     private boolean configurationCacheIgnoreUnsupportedBuildEventsListeners = false;
+    private boolean configurationCacheSkipTaskLoggingListenersSerialization = false;
     private int configurationCacheMaxProblems = 512;
     private @Nullable String configurationCacheIgnoredFileSystemCheckInputs = null;
     private boolean configurationCacheParallel;
@@ -52,6 +54,7 @@ public class StartParameterInternal extends StartParameter {
     private @Nullable String configurationCacheHeapDumpDir;
     private boolean configurationCacheFineGrainedPropertyTracking = true;
     private boolean isolatedProjectsDiagnostics = false;
+    private boolean isolatedProjectsDangerouslyIgnoreProblems = false;
     private boolean searchUpwards = true;
     private boolean useEmptySettings = false;
     private Duration continuousBuildQuietPeriod = Duration.ofMillis(250);
@@ -61,21 +64,70 @@ public class StartParameterInternal extends StartParameter {
     private Option.Value<Boolean> parallelToolingModelBuilding = Option.Value.defaultValue(false);
     private @Nullable String develocityUrl;
     private @Nullable String develocityPluginVersion;
+    // Runtime-only wiring, deliberately transient: a StartParameter captured in task state must be
+    // serializable to the configuration cache without dragging the listener (and its services) along.
+    private transient @Nullable Consumer<String> mutationListener;
 
     public StartParameterInternal() {
+        // Delegate to the protected constructor rather than the deprecated no-arg super().
+        this(new BuildLayoutParameters());
     }
 
     protected StartParameterInternal(BuildLayoutParameters layoutParameters) {
         super(layoutParameters);
     }
 
-    @Override
-    public StartParameterInternal newInstance() {
-        return (StartParameterInternal) prepareNewInstance(new StartParameterInternal());
+    /**
+     * Sets the listener invoked on every subsequent mutating call (see {@link #onMutableCall}). It is set
+     * once a build's settings have been evaluated, so that later mutations of that build's start parameter
+     * are reported as Isolated Projects violations. At most one listener may be set; setting another throws,
+     * which guards against a listener leaking from an earlier build into a reused start parameter.
+     */
+    public void setMutationListener(Consumer<String> mutationListener) {
+        if (this.mutationListener != null) {
+            throw new IllegalStateException("Mutation listener already set on StartParameterInternal");
+        }
+        this.mutationListener = mutationListener;
+    }
+
+    /**
+     * Clears the listener, so the start parameter is mutable again without reporting. Used when a start
+     * parameter outlives the build that set it, e.g. across iterations of a continuous build.
+     */
+    public void clearMutationListener() {
+        this.mutationListener = null;
     }
 
     @Override
+    protected void onMutableCall(String methodSignature) {
+        Consumer<String> listener = this.mutationListener;
+        if (listener != null) {
+            listener.accept(methodSignature);
+        }
+    }
+
+    // The public copy methods are deprecated. They are still reached at runtime via a StartParameter
+    // reference to the (internal) running build's start parameter, so the overrides must nag too;
+    // internal code calls newInstanceInternal()/newBuildInternal() instead, which do not nag.
+    @Override
+    @SuppressWarnings("deprecation")
+    public StartParameterInternal newInstance() {
+        StartParameterDeprecations.nagOnStartParameterCopy("newInstance()");
+        return newInstanceInternal();
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
     public StartParameterInternal newBuild() {
+        StartParameterDeprecations.nagOnStartParameterCopy("newBuild()");
+        return newBuildInternal();
+    }
+
+    public StartParameterInternal newInstanceInternal() {
+        return (StartParameterInternal) prepareNewInstance(new StartParameterInternal());
+    }
+
+    public StartParameterInternal newBuildInternal() {
         return prepareNewBuild(new StartParameterInternal());
     }
 
@@ -90,6 +142,7 @@ public class StartParameterInternal extends StartParameter {
         p.configurationCacheMaxProblems = configurationCacheMaxProblems;
         p.configurationCacheIgnoredFileSystemCheckInputs = configurationCacheIgnoredFileSystemCheckInputs;
         p.configurationCacheIgnoreUnsupportedBuildEventsListeners = configurationCacheIgnoreUnsupportedBuildEventsListeners;
+        p.configurationCacheSkipTaskLoggingListenersSerialization = configurationCacheSkipTaskLoggingListenersSerialization;
         p.configurationCacheDebug = configurationCacheDebug;
         p.configurationCacheParallel = configurationCacheParallel;
         p.configurationCacheReadOnly = configurationCacheReadOnly;
@@ -100,6 +153,7 @@ public class StartParameterInternal extends StartParameter {
         p.configurationCacheHeapDumpDir = configurationCacheHeapDumpDir;
         p.configurationCacheFineGrainedPropertyTracking = configurationCacheFineGrainedPropertyTracking;
         p.isolatedProjectsDiagnostics = isolatedProjectsDiagnostics;
+        p.isolatedProjectsDangerouslyIgnoreProblems = isolatedProjectsDangerouslyIgnoreProblems;
         p.searchUpwards = searchUpwards;
         p.useEmptySettings = useEmptySettings;
         p.enableProblemReportGeneration = enableProblemReportGeneration;
@@ -130,6 +184,7 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setGradleHomeDir(File gradleHomeDir) {
+        onMutableCall("setGradleHomeDir(File)");
         this.gradleHomeDir = gradleHomeDir;
     }
 
@@ -138,6 +193,7 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void doNotSearchUpwards() {
+        onMutableCall("doNotSearchUpwards()");
         this.searchUpwards = false;
     }
 
@@ -146,6 +202,7 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void useEmptySettings() {
+        onMutableCall("useEmptySettings()");
         this.useEmptySettings = true;
     }
 
@@ -154,6 +211,7 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setWatchFileSystemMode(WatchMode watchFileSystemMode) {
+        onMutableCall("setWatchFileSystemMode(WatchMode)");
         this.watchFileSystemMode = watchFileSystemMode;
     }
 
@@ -162,6 +220,7 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setVfsVerboseLogging(boolean vfsVerboseLogging) {
+        onMutableCall("setVfsVerboseLogging(boolean)");
         this.vfsVerboseLogging = vfsVerboseLogging;
     }
 
@@ -175,6 +234,7 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setConfigurationCache(Option.Value<Boolean> configurationCache) {
+        onMutableCall("setConfigurationCache(Option.Value)");
         this.configurationCache = configurationCache;
     }
 
@@ -190,6 +250,7 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setIsolatedProjects(Option.Value<Boolean> isolatedProjects) {
+        onMutableCall("setIsolatedProjects(Option.Value)");
         this.isolatedProjects = isolatedProjects;
     }
 
@@ -198,6 +259,7 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setConfigurationCacheProblems(ConfigurationCacheProblemsOption.Value configurationCacheProblems) {
+        onMutableCall("setConfigurationCacheProblems(ConfigurationCacheProblemsOption.Value)");
         this.configurationCacheProblems = configurationCacheProblems;
     }
 
@@ -206,6 +268,7 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setConfigurationCacheDebug(boolean configurationCacheDebug) {
+        onMutableCall("setConfigurationCacheDebug(boolean)");
         this.configurationCacheDebug = configurationCacheDebug;
     }
 
@@ -214,10 +277,12 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setConfigurationCacheIgnoreInputsDuringStore(boolean ignoreInputsDuringStore) {
+        onMutableCall("setConfigurationCacheIgnoreInputsDuringStore(boolean)");
         configurationCacheIgnoreInputsDuringStore = ignoreInputsDuringStore;
     }
 
     public void setConfigurationCacheIgnoreUnsupportedBuildEventsListeners(boolean configurationCacheIgnoreUnsupportedBuildEventsListeners) {
+        onMutableCall("setConfigurationCacheIgnoreUnsupportedBuildEventsListeners(boolean)");
         this.configurationCacheIgnoreUnsupportedBuildEventsListeners = configurationCacheIgnoreUnsupportedBuildEventsListeners;
     }
 
@@ -225,11 +290,21 @@ public class StartParameterInternal extends StartParameter {
         return configurationCacheIgnoreUnsupportedBuildEventsListeners;
     }
 
+    public void setConfigurationCacheSkipTaskLoggingListenersSerialization(boolean configurationCacheSkipTaskLoggingListenersSerialization) {
+        onMutableCall("setConfigurationCacheSkipTaskLoggingListenersSerialization(boolean)");
+        this.configurationCacheSkipTaskLoggingListenersSerialization = configurationCacheSkipTaskLoggingListenersSerialization;
+    }
+
+    public boolean isConfigurationCacheSkipTaskLoggingListenersSerialization() {
+        return configurationCacheSkipTaskLoggingListenersSerialization;
+    }
+
     public boolean isConfigurationCacheParallel() {
         return configurationCacheParallel;
     }
 
     public void setConfigurationCacheParallel(boolean parallel) {
+        onMutableCall("setConfigurationCacheParallel(boolean)");
         this.configurationCacheParallel = parallel;
     }
 
@@ -238,6 +313,7 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setConfigurationCacheReadOnly(boolean readOnly) {
+        onMutableCall("setConfigurationCacheReadOnly(boolean)");
         this.configurationCacheReadOnly = readOnly;
     }
 
@@ -246,6 +322,7 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setConfigurationCacheEntriesPerKey(int configurationCacheEntriesPerKey) {
+        onMutableCall("setConfigurationCacheEntriesPerKey(int)");
         this.configurationCacheEntriesPerKey = configurationCacheEntriesPerKey;
     }
 
@@ -254,6 +331,7 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setConfigurationCacheMaxProblems(int configurationCacheMaxProblems) {
+        onMutableCall("setConfigurationCacheMaxProblems(int)");
         this.configurationCacheMaxProblems = configurationCacheMaxProblems;
     }
 
@@ -263,6 +341,7 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setConfigurationCacheIgnoredFileSystemCheckInputs(@Nullable String configurationCacheIgnoredFileSystemCheckInputs) {
+        onMutableCall("setConfigurationCacheIgnoredFileSystemCheckInputs(String)");
         this.configurationCacheIgnoredFileSystemCheckInputs = configurationCacheIgnoredFileSystemCheckInputs;
     }
 
@@ -271,6 +350,7 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setConfigurationCacheRecreateCache(boolean configurationCacheRecreateCache) {
+        onMutableCall("setConfigurationCacheRecreateCache(boolean)");
         this.configurationCacheRecreateCache = configurationCacheRecreateCache;
     }
 
@@ -279,10 +359,12 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setConfigurationCacheQuiet(boolean configurationCacheQuiet) {
+        onMutableCall("setConfigurationCacheQuiet(boolean)");
         this.configurationCacheQuiet = configurationCacheQuiet;
     }
 
     public void setConfigurationCacheIntegrityCheckEnabled(boolean configurationCacheIntegrityCheck) {
+        onMutableCall("setConfigurationCacheIntegrityCheckEnabled(boolean)");
         this.configurationCacheIntegrityCheckEnabled = configurationCacheIntegrityCheck;
     }
 
@@ -291,6 +373,7 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setConfigurationCacheHeapDumpDir(@Nullable String configurationCacheHeapDumpDir) {
+        onMutableCall("setConfigurationCacheHeapDumpDir(String)");
         this.configurationCacheHeapDumpDir = configurationCacheHeapDumpDir;
     }
 
@@ -299,6 +382,7 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setConfigurationCacheFineGrainedPropertyTracking(boolean configurationCacheFineGrainedPropertyTracking) {
+        onMutableCall("setConfigurationCacheFineGrainedPropertyTracking(boolean)");
         this.configurationCacheFineGrainedPropertyTracking = configurationCacheFineGrainedPropertyTracking;
     }
 
@@ -311,10 +395,21 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setIsolatedProjectsDiagnostics(boolean isolatedProjectsDiagnostics) {
+        onMutableCall("setIsolatedProjectsDiagnostics(boolean)");
         this.isolatedProjectsDiagnostics = isolatedProjectsDiagnostics;
     }
 
+    public boolean isIsolatedProjectsDangerouslyIgnoreProblems() {
+        return isolatedProjectsDangerouslyIgnoreProblems;
+    }
+
+    public void setIsolatedProjectsDangerouslyIgnoreProblems(boolean isolatedProjectsDangerouslyIgnoreProblems) {
+        onMutableCall("setIsolatedProjectsDangerouslyIgnoreProblems(boolean)");
+        this.isolatedProjectsDangerouslyIgnoreProblems = isolatedProjectsDangerouslyIgnoreProblems;
+    }
+
     public void setContinuousBuildQuietPeriod(Duration continuousBuildQuietPeriod) {
+        onMutableCall("setContinuousBuildQuietPeriod(Duration)");
         this.continuousBuildQuietPeriod = continuousBuildQuietPeriod;
     }
 
@@ -327,10 +422,12 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setPropertyUpgradeReportEnabled(boolean propertyUpgradeReportEnabled) {
+        onMutableCall("setPropertyUpgradeReportEnabled(boolean)");
         this.propertyUpgradeReportEnabled = propertyUpgradeReportEnabled;
     }
 
     public void enableProblemReportGeneration(boolean enableProblemReportGeneration) {
+        onMutableCall("enableProblemReportGeneration(boolean)");
         this.enableProblemReportGeneration = enableProblemReportGeneration;
     }
 
@@ -343,6 +440,7 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setDaemonJvmCriteriaConfigured(boolean daemonJvmCriteriaConfigured) {
+        onMutableCall("setDaemonJvmCriteriaConfigured(boolean)");
         this.daemonJvmCriteriaConfigured = daemonJvmCriteriaConfigured;
     }
 
@@ -351,6 +449,7 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setParallelToolingModelBuilding(Option.Value<Boolean> parallelToolingModelBuilding) {
+        onMutableCall("setParallelToolingModelBuilding(Option.Value)");
         this.parallelToolingModelBuilding = parallelToolingModelBuilding;
     }
 
@@ -360,6 +459,7 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setDevelocityUrl(@Nullable String develocityUrl) {
+        onMutableCall("setDevelocityUrl(String)");
         this.develocityUrl = develocityUrl;
     }
 
@@ -369,6 +469,7 @@ public class StartParameterInternal extends StartParameter {
     }
 
     public void setDevelocityPluginVersion(@Nullable String develocityPluginVersion) {
+        onMutableCall("setDevelocityPluginVersion(String)");
         this.develocityPluginVersion = develocityPluginVersion;
     }
 

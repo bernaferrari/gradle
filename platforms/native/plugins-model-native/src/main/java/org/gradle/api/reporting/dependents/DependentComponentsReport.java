@@ -46,6 +46,8 @@ import static org.gradle.api.reporting.dependents.internal.DependentComponentsUt
 
 /**
  * Displays dependent components.
+ *
+ * @deprecated The Gradle software model is deprecated and will be removed in Gradle 10. Use the new component model (e.g. {@code cpp-application}, {@code cpp-library}, {@code swift-application}, {@code swift-library}, {@code xctest}) instead.
  */
 @Deprecated
 @DisableCachingByDefault(because = "Produces only non-cacheable console output")
@@ -55,6 +57,7 @@ public abstract class DependentComponentsReport extends DefaultTask {
     private boolean showTestSuites;
     private List<String> components;
 
+    @SuppressWarnings("this-escape")
     @Inject
     public DependentComponentsReport() {
         requireDegradation(this, "Task is not compatible with the Configuration Cache");

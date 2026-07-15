@@ -1281,6 +1281,13 @@
     "crossVersionTests": false
   },
   {
+    "name": "problems-impl",
+    "path": "platforms/ide/problems-impl",
+    "unitTests": true,
+    "functionalTests": false,
+    "crossVersionTests": false
+  },
+  {
     "name": "problems-rendering",
     "path": "platforms/ide/problems-rendering",
     "unitTests": true,
@@ -1354,6 +1361,13 @@
     "name": "publish",
     "path": "platforms/software/publish",
     "unitTests": true,
+    "functionalTests": true,
+    "crossVersionTests": false
+  },
+  {
+    "name": "reflection-services",
+    "path": "platforms/core-runtime/reflection-services",
+    "unitTests": false,
     "functionalTests": true,
     "crossVersionTests": false
   },

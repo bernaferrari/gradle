@@ -113,11 +113,13 @@ class EdgeState implements DependencyGraphEdge {
         return false;
     }
 
-    public void clearSelector() {
+    public boolean clearSelector() {
         if (this.selector != null) {
-            this.selector.release();
+            SelectorState currentSelector = this.selector;
             this.selector = null;
+            return currentSelector.release();
         }
+        return false;
     }
 
     @Override
@@ -257,20 +259,28 @@ class EdgeState implements DependencyGraphEdge {
 
             // A constraint by definition attaches to any other nodes in the component it constrains.
             for (NodeState node : targetComponent.getNodes()) {
-                while (node.getReplacement() != null) {
-                    node = node.getReplacement();
-                }
+                node = node.maybeResolveReplacement();
                 if (node.isSelected() && !node.isRoot()) {
                     targetNodes.add(node);
                 }
             }
 
             // If we couldn't attach to any nodes, try to inherit any failures that hard edges have
-            // encountered during selection.
+            // encountered during selection. Failures may originate either from target variant
+            // selection (targetNodeSelectionFailure) or from selector resolution itself - for
+            // example when a throwing eachDependency/substitution rule fired on the requested
+            // coordinate and prevented a component from ever being selected.
             if (targetNodes.isEmpty()) {
                 for (EdgeState unattachedEdge : targetComponent.getModule().getUnattachedEdges()) {
-                    if (!unattachedEdge.isConstraint() && unattachedEdge.targetNodeSelectionFailure != null) {
-                        this.targetNodeSelectionFailure = unattachedEdge.targetNodeSelectionFailure;
+                    if (unattachedEdge.isConstraint()) {
+                        continue;
+                    }
+                    ModuleVersionResolveException targetNodeFailure = unattachedEdge.targetNodeSelectionFailure;
+                    if (targetNodeFailure == null && unattachedEdge.selector != null) {
+                        targetNodeFailure = unattachedEdge.selector.getFailure();
+                    }
+                    if (targetNodeFailure != null) {
+                        this.targetNodeSelectionFailure = targetNodeFailure;
                         return;
                     }
                 }
@@ -296,11 +306,9 @@ class EdgeState implements DependencyGraphEdge {
         }
 
         for (VariantGraphResolveState targetVariant : targetVariants.getVariants()) {
-            NodeState targetNodeState = resolveState.getNode(targetComponent, targetVariant, targetVariants.isSelectedByVariantAwareResolution());
-            while (targetNodeState.getReplacement() != null) {
-                targetNodeState = targetNodeState.getReplacement();
-            }
-            this.targetNodes.add(targetNodeState);
+            NodeState requestedNode = resolveState.getNode(targetComponent, targetVariant, targetVariants.isSelectedByVariantAwareResolution());
+            NodeState resolvedNode = requestedNode.maybeResolveReplacement();
+            this.targetNodes.add(resolvedNode);
         }
     }
 
@@ -416,7 +424,7 @@ class EdgeState implements DependencyGraphEdge {
     }
 
     @Override
-    public ModuleVersionResolveException getFailure() {
+    public @Nullable ModuleVersionResolveException getFailure() {
         if (targetNodeSelectionFailure != null) {
             return targetNodeSelectionFailure;
         }

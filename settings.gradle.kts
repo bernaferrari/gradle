@@ -86,6 +86,7 @@ val core = platform("core") {
         subproject("process-services")
         subproject("process-services-base")
         subproject("process-services-api")
+        subproject("reflection-services")
         subproject("report-rendering")
         subproject("serialization")
         subproject("service-lookup")
@@ -194,6 +195,7 @@ module("ide") {
     subproject("ide-plugins")
     subproject("problems")
     subproject("problems-api")
+    subproject("problems-impl")
     subproject("problems-rendering")
     subproject("tooling-api")
     subproject("tooling-api-builders")
@@ -345,14 +347,3 @@ FeaturePreviews.Feature.entries.forEach { feature ->
     }
 }
 
-fun getBuildJavaHome() = System.getProperty("java.home")
-
-gradle.settingsEvaluated {
-    if ("true" == System.getProperty("org.gradle.ignoreBuildJavaVersionCheck")) {
-        return@settingsEvaluated
-    }
-
-    if (JavaVersion.current() != JavaVersion.VERSION_17) {
-        throw GradleException("This build requires JDK 17. It's currently ${getBuildJavaHome()}. You can ignore this check by passing '-Dorg.gradle.ignoreBuildJavaVersionCheck=true'.")
-    }
-}

@@ -56,9 +56,6 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
     private final List dependencies = []
     private Map<String, ?> mainArtifact = [:]
     private final List artifacts = []
-    private boolean extraChecksums = true
-
-    final Set<String> missingExtraChecksums = []
     final updateFormat = new SimpleDateFormat("yyyyMMddHHmmss")
     final timestampFormat = new SimpleDateFormat("yyyyMMdd.HHmmss")
 
@@ -251,8 +248,6 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
         assert parsedPom.groupId == groupId
         assert parsedPom.artifactId == artifactId
         assert parsedPom.version == version
-        def checkExtraChecksums = extraChecksums
-        Set<String> missingExtra = missingExtraChecksums
         if (getModuleMetadata().file.exists()) {
             def metadata = parsedModuleMetadata
             if (metadata.component) {
@@ -284,10 +279,6 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
                     assert artifact.file.file
                     assert artifact.file.length() == file.size
                     assert Hashing.sha1().hashFile(artifact.file) == file.sha1
-                    if (checkExtraChecksums && (!artifact.file.name in missingExtra)) {
-                        assert Hashing.sha256().hashFile(artifact.file) == file.sha256
-                        assert Hashing.sha512().hashFile(artifact.file) == file.sha512
-                    }
                     assert Hashing.md5(). hashFile(artifact.file) == file.md5
                 }
             }
@@ -330,9 +321,6 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
         TreeSet allFileNames = []
         for (name in names) {
             allFileNames.addAll([name, "${name}.sha1", "${name}.md5"]*.toString())
-            if (extraChecksums && !(name in missingExtraChecksums)) {
-                allFileNames.addAll(["${name}.sha256", "${name}.sha512"]*.toString())
-            }
         }
         def actualModuleDirFiles = moduleDir.list() as TreeSet
         assert actualModuleDirFiles == allFileNames
@@ -352,14 +340,6 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
         def sha1File = sha1File(testFile)
         sha1File.assertIsFile()
         assert HashCode.fromString(sha1File.text) == Hashing.sha1().hashFile(testFile)
-        if (extraChecksums && !(testFile.name in missingExtraChecksums)) {
-            def sha256File = sha256File(testFile)
-            sha256File.assertIsFile()
-            assert HashCode.fromString(sha256File.text) == Hashing.sha256().hashFile(testFile)
-            def sha512File = sha512File(testFile)
-            sha512File.assertIsFile()
-            assert HashCode.fromString(sha512File.text) == Hashing.sha512().hashFile(testFile)
-        }
         def md5File = md5File(testFile)
         md5File.assertIsFile()
         assert HashCode.fromString(md5File.text) == Hashing.md5().hashFile(testFile)
@@ -781,18 +761,6 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
     }
 
     @Override
-    MavenModule withoutExtraChecksums() {
-        extraChecksums = false
-        return this
-    }
-
-    @Override
-    MavenModule withExtraChecksums() {
-        extraChecksums = true
-        return this
-    }
-
-    @Override
     MavenModule withVariant(String name, @DelegatesTo(value = VariantMetadataSpec, strategy = Closure.DELEGATE_FIRST) Closure<?> action) {
         def variant = variants.find { it.name == name }
         if (variant == null) {
@@ -824,5 +792,10 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
     MavenModule withSignature(@DelegatesTo(value = File, strategy = Closure.DELEGATE_FIRST) Closure<?> signer) {
         super.withSignature(signer)
         this
+    }
+
+    @Override
+    String toString() {
+        return "\"$groupId:$artifactId:$version\""
     }
 }
