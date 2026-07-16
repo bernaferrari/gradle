@@ -170,6 +170,24 @@
         "fail_closed_diagnostic": "composite-substitution",
         "no_task_by_task_fallback": true
       }
+    },
+    {
+      "name": "unsupported-kotlin-jvm-library",
+      "path": "kotlin-jvm-library-kotlin-dsl",
+      "source": {
+        "kind": "checked-in-local",
+        "description": "Checked-in Kotlin JVM library fixture using the Kotlin Gradle plugin and .kt sources."
+      },
+      "tasks": ["clean", "build"],
+      "mode": "strict",
+      "expectation": "fail-closed",
+      "coverage_tags": ["fail-closed", "kotlin", "kotlin-jvm", "plugin-boundary"],
+      "timeout_seconds": 300,
+      "reason": "Documents the Kotlin JVM library vertical as fail-closed: Rust admits the selected plan only when every task has a native executor, and KotlinCompile still requires a Rust-controlled compiler worker contract.",
+      "checks": {
+        "fail_closed_diagnostic": "requires native Kotlin compilation support or a Rust-controlled Kotlin compiler worker contract",
+        "no_task_by_task_fallback": true
+      }
     }
   ]
 }

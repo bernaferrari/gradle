@@ -29,7 +29,7 @@ Runs an honest Rust substrate demo:
 Use --full when preparing a public demo; it runs the full stabilization mode,
 including release daemon build and release smoke coverage.
 Sample RunBuild corpus gates require GRADLE_UNDER_TEST_BIN, or GRADLE_UNDER_TEST
-pointing at a local distribution built from this fork.
+pointing at a local distribution from ./tools/install_gradle_under_test.sh.
 USAGE
 }
 
@@ -109,7 +109,7 @@ if [[ "$RUN_DIRECT_WARM" -eq 1 ]]; then
   fi
   if [[ ! -x "$GRADLE_UNDER_TEST_BIN" ]]; then
     echo "== Rust-first warm supported workflow"
-    echo "Skipping: build/gradle-under-test/bin/gradle was not found. Build :distributions-full:install or set GRADLE_UNDER_TEST_BIN."
+    echo "Skipping: build/gradle-under-test/bin/gradle was not found. Run ./tools/install_gradle_under_test.sh (or set GRADLE_UNDER_TEST_BIN)."
     echo
   else
     run_step "Build Rust direct warm binaries" \
