@@ -1286,7 +1286,18 @@ mod tests {
     }
 
     #[test]
-    fn rejects_explicit_unsupported_contract_marker() {
+    fn admits_native_kotlin_compile_when_executor_registered() {
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![task(":compileKotlin", "KotlinCompile", None)],
+        };
+        let admission = admit_build_plan(&plan, &native_types(&["KotlinCompile", "Lifecycle"]));
+        assert!(matches!(admission, KernelAdmission::Accepted { task_count: 1 }));
+    }
+
+    #[test]
+        fn rejects_explicit_unsupported_contract_marker() {
         let plan = KernelBuildPlan {
             build_id: "build".to_string(),
             dependency_graph: None,

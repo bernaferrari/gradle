@@ -1,10 +1,13 @@
 # Rust Substrate Status
 
-Last updated: 2026-07-16  
+Last updated: 2026-07-16
 Branch: `rust-substrate`  
 Scope: preview engine (not full Gradle parity)
 
 ## Product claim
+
+Kotlin JVM library warm path: native `KotlinCompile` via `kotlinc` (not full Kotlin Gradle plugin parity).
+
 
 Supported warm Java builds can:
 
@@ -20,8 +23,8 @@ Supported warm Java builds can:
 | Upstream freshness | Merged; 0 behind `upstream/master` at last integrate |
 | `cargo test -p gradle-substrate-daemon --lib` | Green (~1918 tests) |
 | Full package cargo tests | Green when run via `tools/ci/run_rust_substrate_gates.sh` |
-| Direct-warm dogfood (supported) | **7/7** zero JVM forwards |
-| Full dogfood manifest | **9/9** (7 supported + 2 fail-closed) |
+| Direct-warm dogfood (supported) | **8/8** zero JVM forwards |
+| Full dogfood manifest | **9/9** (8 supported + 1 fail-closed) |
 | Fail-closed dogfood entries | composite substitution + Kotlin JVM library |
 | Beads actionable backlog | Empty of theater; milestone beads tracked |
 
@@ -35,7 +38,7 @@ python3 tools/dogfood_runner/run.py \
   --output-dir build/dogfood-current
 ```
 
-Latest observed: **9/9 matched** (7 supported zero-forward, 2 fail-closed).
+Latest observed: **9/9 matched** (8 supported zero-forward, 1 fail-closed).
 
 ### Direct-warm evidence command
 
@@ -104,7 +107,7 @@ CI_REQUIRE_DOGFOOD=1 bash tools/ci/run_rust_substrate_gates.sh
 
 ## Roadmap (ordered)
 
-1. **Keep gates green** — CI + dogfood 7/7 on every merge
+1. **Keep gates green** — CI + dogfood 8/8 on every merge
 2. **Kotlin vertical** — move from fail-closed to native `compileKotlin` worker contract
 3. **Composite execution** — included-build task/classpath model beyond IR diagnostics
 4. **Flag collapse** — public modes `off|shadow|kernel`; hide internal knobs
@@ -128,3 +131,16 @@ cargo build -q -p gradle-substrate-daemon
 ## Honesty rule
 
 If a gate is not re-run on the current commit, do not claim it. Update this file only with commands and counts observed on HEAD.
+
+
+## Public substrate modes
+
+Prefer `-Dorg.gradle.rust.substrate.mode=`:
+
+| Value | Meaning |
+| --- | --- |
+| `off` | Disabled |
+| `shadow` | Capture/compare only |
+| `kernel` | Native-ready authoritative execution (alias of legacy `authoritative`) |
+
+Internal per-subsystem flags remain for CI/experimental matrices.

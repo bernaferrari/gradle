@@ -683,6 +683,10 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
         {
             "Lifecycle".to_string()
         }
+        ("compile", "KotlinCompile") | (_, "KotlinCompile") if kotlin_compile_contract_complete(task) => {
+            "KotlinCompile".to_string()
+        }
+        (_, "CheckKotlinGradlePluginConfigurationErrors") => "Lifecycle".to_string(),
         ("compile", "GroovyCompile") | (_, "GroovyCompile")
             if language_compile_no_source(task, &[".groovy"]) =>
         {
@@ -1625,8 +1629,36 @@ fn has_test_sources(task: &CanonicalBuildPlanTask) -> bool {
 }
 
 fn has_test_sources_under(project_root: &std::path::Path) -> bool {
-    let test_source_dir = project_root.join("src").join("test").join("java");
-    contains_java_source(&test_source_dir)
+    let test_root = project_root.join("src").join("test");
+    for language in ["java", "kotlin", "groovy", "scala"] {
+        let dir = test_root.join(language);
+        if language == "java" {
+            if contains_java_source(&dir) {
+                return true;
+            }
+            continue;
+        }
+        if dir.is_dir() {
+            let mut stack = vec![dir];
+            while let Some(current) = stack.pop() {
+                if let Ok(entries) = std::fs::read_dir(&current) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            stack.push(path);
+                        } else if path
+                            .extension()
+                            .and_then(|ext| ext.to_str())
+                            .is_some_and(|ext| matches!(ext, "kt" | "kts" | "groovy" | "scala"))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 fn contains_java_source(path: &std::path::Path) -> bool {
@@ -1814,6 +1846,7 @@ fn set_value_input(
 fn execution_context_json(task: &CanonicalBuildPlanTask, task_type: &str) -> String {
     let source_files = match task_type {
         "JavaCompile" => java_source_paths(task),
+        "KotlinCompile" => kotlin_source_paths(task),
         "Javadoc" => java_source_paths(task),
         "TestExec" => test_class_dir_paths(task),
         "Delete" => destroyable_paths(task),
@@ -2089,6 +2122,7 @@ fn up_to_date_planning_enabled(task_type: &str) -> bool {
         task_type,
         "Lifecycle"
             | "JavaCompile"
+            | "KotlinCompile"
             | "Javadoc"
             | "Copy"
             | "Sync"
@@ -2108,6 +2142,7 @@ fn no_source_task(task: &CanonicalBuildPlanTask) -> bool {
         .unwrap_or(task.implementation_id.as_str());
     match logical_gradle_task_type(simple).as_str() {
         "JavaCompile" => java_compile_no_source(task),
+        "KotlinCompile" => language_compile_no_source(task, &[".kt", ".kts"]),
         "ProcessResources" => process_resources_no_source(task),
         "Test" => test_no_source(task),
         _ => false,
@@ -2290,6 +2325,17 @@ fn java_compile_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
     !java_source_paths(task).is_empty() && has_outputs(task)
 }
 
+fn kotlin_compile_contract_complete(task: &CanonicalBuildPlanTask) -> bool {
+    !kotlin_source_paths(task).is_empty() && has_outputs(task)
+}
+
+fn kotlin_source_paths(task: &CanonicalBuildPlanTask) -> Vec<String> {
+    input_paths(task)
+        .into_iter()
+        .filter(|path| path.ends_with(".kt") || path.ends_with(".kts"))
+        .collect()
+}
+
 fn java_compile_no_source(task: &CanonicalBuildPlanTask) -> bool {
     java_source_paths(task).is_empty() && has_outputs(task)
 }
@@ -2379,7 +2425,19 @@ fn task_options(
     task_type: &str,
 ) -> serde_json::Map<String, serde_json::Value> {
     let mut options = serde_json::Map::new();
-    if task_type == "JavaCompile" {
+    if task_type == "KotlinCompile" {
+        insert_input_option(task, &mut options, "java_home", "java_home");
+        insert_input_option(task, &mut options, "kotlin_home", "kotlin_home");
+        insert_input_option(task, &mut options, "kotlinc", "kotlinc");
+        insert_input_option(task, &mut options, "classpath", "classpath");
+        insert_input_option(task, &mut options, "jvm_target", "jvm_target");
+        insert_input_option(task, &mut options, "target_version", "target_version");
+        insert_input_option(task, &mut options, "targetCompatibility", "target_version");
+        insert_input_option(task, &mut options, "compiler_args", "compiler_args");
+        insert_input_option(task, &mut options, "compiler_args_json", "compiler_args_json");
+        insert_input_option(task, &mut options, "working_dir", "working_dir");
+        insert_input_option(task, &mut options, "module_name", "module_name");
+    } else if task_type == "JavaCompile" {
         insert_input_option(task, &mut options, "java_home", "java_home");
         insert_input_option(task, &mut options, "classpath", "classpath");
         insert_input_option(task, &mut options, "processor_path", "processor_path");
@@ -3854,7 +3912,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sourceful_kotlin_compile_remains_unsupported() {
+    fn test_sourceful_kotlin_compile_lowers_to_native_executor() {
         let mut task = canonical_task(
             ":compileKotlin",
             "org.jetbrains.kotlin.gradle.tasks.KotlinCompile_Decorated",
@@ -3871,10 +3929,7 @@ mod tests {
             },
         );
 
-        assert_eq!(
-            executable_task_type(&task),
-            "org.jetbrains.kotlin.gradle.tasks.KotlinCompile_Decorated"
-        );
+        assert_eq!(executable_task_type(&task), "KotlinCompile");
     }
 
     #[test]
