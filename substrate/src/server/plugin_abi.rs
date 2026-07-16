@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::build_plan_ir::{
     CanonicalBuildPlanTask, CanonicalBuildPlanTaskDiagnostic, CanonicalBuildPlanTaskInputSpec,
 };
-use super::configuration_ir::{CanonicalConfigurationGraph, CanonicalPluginModel};
+use super::configuration_ir::{CanonicalConfigurationGraph, CanonicalDependencyConfiguration, CanonicalPluginModel};
 
 pub const NATIVE_PLUGIN_ABI_VERSION: u32 = 1;
 
@@ -242,6 +242,76 @@ pub fn materialize_native_plugin_tasks(
     tasks.sort_unstable_by(|a, b| a.path.cmp(&b.path));
     rejections.sort_unstable_by(|a, b| a.plugin_id.cmp(&b.plugin_id));
     NativePluginTaskMaterialization { tasks, rejections }
+}
+
+
+/// Project declared native-plugin dependency configuration buckets into the
+/// configuration graph so resolvable/bucket roles exist without JVM plugin code.
+pub fn project_native_plugin_dependency_configurations(
+    graph: &CanonicalConfigurationGraph,
+) -> Vec<CanonicalDependencyConfiguration> {
+    let mut projected = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    for plugin in graph.plugins.iter().filter(|plugin| plugin.apply) {
+        let Some(contract) = contract_for_plugin(plugin) else {
+            continue;
+        };
+        if !matches!(admit_native_plugin_contract(&contract), NativePluginAdmission::Accepted { .. }) {
+            continue;
+        }
+        for request in &contract.dependency_requests {
+            let key = (plugin.project_path.clone(), request.configuration.clone());
+            if !seen.insert(key.clone()) {
+                continue;
+            }
+            // Keep any already-captured dependencies for this configuration.
+            let existing = graph
+                .dependency_configurations
+                .iter()
+                .find(|cfg| cfg.project_path == plugin.project_path && cfg.name == request.configuration);
+            if let Some(cfg) = existing {
+                projected.push(cfg.clone());
+                continue;
+            }
+            projected.push(CanonicalDependencyConfiguration {
+                project_path: plugin.project_path.clone(),
+                name: request.configuration.clone(),
+                dependencies: Vec::new(),
+                constraints: Vec::new(),
+                repositories: Vec::new(),
+                unsupported_features: Vec::new(),
+            });
+        }
+    }
+
+    projected.sort_unstable_by(|a, b| {
+        (&a.project_path, &a.name).cmp(&(&b.project_path, &b.name))
+    });
+    projected
+}
+
+/// Merge native-plugin projected dependency configurations into a graph copy.
+pub fn enrich_configuration_graph_with_native_plugin_abi(
+    graph: &CanonicalConfigurationGraph,
+) -> CanonicalConfigurationGraph {
+    let mut enriched = graph.clone();
+    let projected = project_native_plugin_dependency_configurations(graph);
+    if projected.is_empty() {
+        return enriched;
+    }
+    let mut by_key = std::collections::BTreeMap::new();
+    for cfg in enriched.dependency_configurations.drain(..) {
+        by_key.insert((cfg.project_path.clone(), cfg.name.clone()), cfg);
+    }
+    for cfg in projected {
+        by_key
+            .entry((cfg.project_path.clone(), cfg.name.clone()))
+            .or_insert(cfg);
+    }
+    enriched.dependency_configurations = by_key.into_values().collect();
+    enriched.normalize_mut();
+    enriched
 }
 
 fn contract_for_plugin(plugin: &CanonicalPluginModel) -> Option<NativePluginContract> {
@@ -673,4 +743,41 @@ mod tests {
             .any(|task| task.path == ":app:build"
                 && task.depends_on == vec![":app:assemble", ":app:check"]));
     }
+
+    #[test]
+    fn projects_java_plugin_dependency_configuration_buckets() {
+        use super::super::configuration_ir::{
+            CanonicalConfigurationGraph, CanonicalPluginModel, CONFIGURATION_GRAPH_SCHEMA_VERSION,
+        };
+
+        let graph = CanonicalConfigurationGraph {
+            schema_version: CONFIGURATION_GRAPH_SCHEMA_VERSION,
+            build_id: "b1".to_string(),
+            settings: None,
+            environment: None,
+            projects: vec![],
+            source_sets: vec![],
+            tasks: vec![],
+            plugins: vec![CanonicalPluginModel {
+                project_path: ":".to_string(),
+                id: "java".to_string(),
+                version: String::new(),
+                apply: true,
+                source: "plugins-block".to_string(),
+            }],
+            plugin_classpath: vec![],
+            dependency_configurations: vec![],
+            toolchains: vec![],
+            invalidation_inputs: vec![],
+            metadata: Default::default(),
+        };
+        let projected = project_native_plugin_dependency_configurations(&graph);
+        let names: Vec<_> = projected.iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"implementation"));
+        assert!(names.contains(&"compileClasspath"));
+        assert!(names.contains(&"testRuntimeClasspath"));
+        let enriched = enrich_configuration_graph_with_native_plugin_abi(&graph);
+        assert!(enriched.dependency_configurations.len() >= projected.len());
+    }
+
 }
