@@ -184,7 +184,9 @@ impl TaskGraphServiceImpl {
             }
         };
 
-        let configuration_graph = artifact.configuration_graph.clone();
+        let configuration_graph = artifact.configuration_graph.clone().map(|graph| {
+            plugin_abi::enrich_configuration_graph_with_native_plugin_abi(&graph)
+        });
         let mut configuration_rejection_reasons = configuration_graph
             .as_ref()
             .map(configuration_shadow_rejection_reasons)
