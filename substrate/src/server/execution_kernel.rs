@@ -7,6 +7,8 @@ use super::cyclonedx_sbom::{
     CycloneDxAggregateOptions, CycloneDxResolutionGraphEvidence, CycloneDxSbomContract,
 };
 use super::dependency_solver::graph_builder;
+use super::composite_ir::{self, CanonicalIncludedBuild};
+
 
 
 /// Whole-build plan admitted into the Rust execution kernel after JVM
@@ -31,9 +33,10 @@ pub struct KernelTaskPlan {
 /// This is intentionally configuration-level data, not Gradle implementation
 /// objects. JVM configuration may still produce it, but Rust owns the
 /// accept/reject decision before execution.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct KernelDependencyGraph {
     pub configurations: Vec<KernelDependencyConfiguration>,
+    pub included_builds: Vec<CanonicalIncludedBuild>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -224,9 +227,9 @@ fn is_cyclonedx_sbom_task(task_type: &str) -> bool {
 }
 
 fn is_kotlin_compile_task(task_type: &str) -> bool {
-    task_type == "org.jetbrains.kotlin.gradle.tasks.KotlinCompile"
-        || task_type.ends_with(".KotlinCompile")
-        || task_type == "KotlinCompile"
+    let simple = task_type.rsplit('.').next().unwrap_or(task_type);
+    let logical = simple.strip_suffix("_Decorated").unwrap_or(simple);
+    logical == "KotlinCompile"
 }
 
 fn is_precompiled_kotlin_dsl_task(task_type: &str) -> bool {
@@ -250,6 +253,16 @@ fn is_kotlin_plugin_diagnostic_task(task_type: &str) -> bool {
 
 fn admit_dependency_graph(graph: &KernelDependencyGraph, reasons: &mut Vec<String>) {
     let mut seen_configurations = HashSet::new();
+    let mut composite_reason_emitted = false;
+
+    if !graph.included_builds.is_empty() {
+        let feature = composite_ir::encode_composite_substitution_feature(&graph.included_builds);
+        reasons.push(composite_ir::composite_substitution_reason(
+            "::composite-build",
+            &feature,
+        ));
+        composite_reason_emitted = true;
+    }
 
     for configuration in &graph.configurations {
         if configuration.name.trim().is_empty() {
@@ -263,10 +276,17 @@ fn admit_dependency_graph(graph: &KernelDependencyGraph, reasons: &mut Vec<Strin
             ));
         }
         for feature in &configuration.unsupported_features {
+            if composite_reason_emitted && composite_ir::is_composite_substitution_feature(feature)
+            {
+                continue;
+            }
             reasons.push(unsupported_dependency_feature_reason(
                 &configuration.name,
                 feature,
             ));
+            if composite_ir::is_composite_substitution_feature(feature) {
+                composite_reason_emitted = true;
+            }
         }
         for repository in &configuration.repositories {
             if let Some(reason) = graph_builder::unsupported_repository_reason_parts(
@@ -302,11 +322,8 @@ pub(crate) fn unsupported_dependency_feature_reason(
     configuration_name: &str,
     feature: &str,
 ) -> String {
-    if feature.trim() == "composite-substitution:settings" {
-        return format!(
-            "dependency configuration '{}' uses JVM-owned settings/includeBuild/buildSrc composite setup ('{}'); Rust cannot yet separate that configuration setup from selected root task execution, so strict Rust execution is rejected before task dispatch",
-            configuration_name, feature
-        );
+    if composite_ir::is_composite_substitution_feature(feature) {
+        return composite_ir::composite_substitution_reason(configuration_name, feature);
     }
     format!(
         "dependency configuration '{}' uses unsupported feature '{}'",
@@ -673,8 +690,8 @@ mod tests {
     use base64::Engine as _;
 
     use super::{
-        admit_build_plan, apply_vfs_delta_to_deeper_kernel_admission, KernelAdmission,
-        KernelBuildPlan, KernelDependencyConfiguration, KernelDependencyGraph,
+        admit_build_plan, apply_vfs_delta_to_deeper_kernel_admission, CanonicalIncludedBuild,
+        KernelAdmission, KernelBuildPlan, KernelDependencyConfiguration, KernelDependencyGraph,
         KernelDependencyRequest, KernelRepository, KernelTaskPlan,
     };
     fn native_types(types: &[&str]) -> HashSet<String> {
@@ -1245,6 +1262,30 @@ mod tests {
     }
 
     #[test]
+    fn rejects_decorated_kotlin_compile_with_precise_diagnostic() {
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![task(
+                ":compileKotlin",
+                "org.jetbrains.kotlin.gradle.tasks.KotlinCompile_Decorated",
+                None,
+            )],
+        };
+
+        let KernelAdmission::Rejected(rejection) =
+            admit_build_plan(&plan, &native_types(&["Lifecycle"]))
+        else {
+            panic!("expected rejection");
+        };
+        let message = rejection.message();
+        assert!(message.contains(
+            "requires native Kotlin compilation support or a Rust-controlled Kotlin compiler worker contract"
+        ));
+        assert!(!message.contains("has no Rust executor"));
+    }
+
+    #[test]
     fn rejects_explicit_unsupported_contract_marker() {
         let plan = KernelBuildPlan {
             build_id: "build".to_string(),
@@ -1485,6 +1526,7 @@ mod tests {
                     constraints: Vec::new(),
                     unsupported_features: vec!["component-metadata-rule".to_string()],
                 }],
+                included_builds: Vec::new(),
             }),
         };
 
@@ -1512,6 +1554,7 @@ mod tests {
                     constraints: Vec::new(),
                     unsupported_features: vec!["composite-substitution:settings".to_string()],
                 }],
+                included_builds: Vec::new(),
             }),
         };
 
@@ -1525,6 +1568,68 @@ mod tests {
         assert!(message.contains("settings/includeBuild/buildSrc"));
         assert!(message.contains("selected root task execution"));
         assert!(message.contains("before task dispatch"));
+    }
+
+    #[test]
+    fn rejects_composite_ir_included_builds_with_paths_in_diagnostic() {
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            tasks: vec![task(":classes", "Lifecycle", None)],
+            dependency_graph: Some(KernelDependencyGraph {
+                configurations: Vec::new(),
+                included_builds: vec![
+                    CanonicalIncludedBuild::new("included-lib", "settings.gradle.kts"),
+                    CanonicalIncludedBuild::new("plugins", "settings.gradle.kts"),
+                ],
+            }),
+        };
+
+        let KernelAdmission::Rejected(rejection) =
+            admit_build_plan(&plan, &native_types(&["Lifecycle"]))
+        else {
+            panic!("expected rejection");
+        };
+        let message = rejection.message();
+        assert!(message.contains("included-lib"));
+        assert!(message.contains("plugins"));
+        assert!(message.contains("includeBuild"));
+        assert!(message.contains("before task dispatch"));
+        assert_eq!(
+            message.matches("composite-substitution:settings").count(),
+            1,
+            "structured IR and feature marker must not double-emit"
+        );
+    }
+
+    #[test]
+    fn rejects_composite_feature_marker_with_embedded_paths() {
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            tasks: vec![task(":classes", "Lifecycle", None)],
+            dependency_graph: Some(KernelDependencyGraph {
+                configurations: vec![KernelDependencyConfiguration {
+                    name: ":runtimeClasspath".to_string(),
+                    repositories: Vec::new(),
+                    dependencies: Vec::new(),
+                    project_dependencies: Vec::new(),
+                    constraints: Vec::new(),
+                    unsupported_features: vec![
+                        "composite-substitution:settings@included-lib,plugins".to_string(),
+                    ],
+                }],
+                included_builds: Vec::new(),
+            }),
+        };
+
+        let KernelAdmission::Rejected(rejection) =
+            admit_build_plan(&plan, &native_types(&["Lifecycle"]))
+        else {
+            panic!("expected rejection");
+        };
+        let message = rejection.message();
+        assert!(message.contains("included-lib"));
+        assert!(message.contains("plugins"));
+        assert!(message.contains(":runtimeClasspath"));
     }
 
     #[test]
@@ -1557,6 +1662,7 @@ mod tests {
                     constraints: Vec::new(),
                     unsupported_features: Vec::new(),
                 }],
+                included_builds: Vec::new(),
             }),
         };
 
@@ -1589,6 +1695,7 @@ mod tests {
                     constraints: Vec::new(),
                     unsupported_features: Vec::new(),
                 }],
+                included_builds: Vec::new(),
             }),
         };
 
@@ -1615,6 +1722,7 @@ mod tests {
                     constraints: Vec::new(),
                     unsupported_features: Vec::new(),
                 }],
+                included_builds: Vec::new(),
             }),
         };
 

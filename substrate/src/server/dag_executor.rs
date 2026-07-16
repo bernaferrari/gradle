@@ -1399,7 +1399,10 @@ fn kernel_dependency_graph_from_plan_dependencies(
     }
     let mut configurations = configurations.into_values().collect::<Vec<_>>();
     configurations.sort_by(|a, b| a.name.cmp(&b.name));
-    Some(KernelDependencyGraph { configurations })
+    Some(KernelDependencyGraph {
+        configurations,
+        included_builds: Vec::new(),
+    })
 }
 
 fn unsupported_plan_dependency_reason(

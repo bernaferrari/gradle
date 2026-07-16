@@ -10,6 +10,8 @@ use super::build_plan_ir::{
     CanonicalBuildPlan, CanonicalBuildPlanDependency, CanonicalBuildPlanRepository,
     CanonicalBuildPlanToolchainRequest,
 };
+use super::composite_ir::{self, CanonicalIncludedBuild};
+
 use super::build_script_types::{
     BuildScriptParseResult, ParsedPlugin, ParsedRepository, ParsedVersionCatalogRef,
 };
@@ -41,6 +43,8 @@ pub struct CanonicalSettingsModel {
     pub settings_file: String,
     pub root_project_name: String,
     pub included_projects: Vec<String>,
+    #[serde(default)]
+    pub included_builds: Vec<CanonicalIncludedBuild>,
     pub plugin_repositories: Vec<CanonicalParsedRepository>,
     pub dependency_repositories: Vec<CanonicalParsedRepository>,
     #[serde(default)]
@@ -213,6 +217,14 @@ impl CanonicalConfigurationGraph {
         if let Some(settings) = &mut self.settings {
             settings.included_projects.sort_unstable();
             settings.included_projects.dedup();
+            settings.included_builds.sort_unstable_by(|a, b| {
+                (&a.path, &a.name_hint, &a.source_file).cmp(&(
+                    &b.path,
+                    &b.name_hint,
+                    &b.source_file,
+                ))
+            });
+            settings.included_builds.dedup();
             settings
                 .plugin_repositories
                 .sort_unstable_by(|a, b| (&a.repo_type, &a.name).cmp(&(&b.repo_type, &b.name)));
@@ -531,6 +543,11 @@ fn native_replay_rejection_reasons(graph: &CanonicalConfigurationGraph) -> Vec<S
                 ));
             }
         }
+        if let Some(reason) =
+            composite_ir::composite_settings_replay_reason(&settings.included_builds)
+        {
+            reasons.push(reason);
+        }
     }
     for project in &graph.projects {
         for warning in &project.warnings {
@@ -611,6 +628,22 @@ fn native_replay_repository_type_supported(repo_type: &str) -> bool {
     )
 }
 
+fn included_builds_from_settings_script(
+    script: &ConfigurationScript<'_>,
+) -> Vec<CanonicalIncludedBuild> {
+    // Prefer structured parser output when present; fall back to source scan of the
+    // settings file so includeBuild IR is available even for string-only extracts.
+    if Path::new(script.path).is_file() {
+        if let Ok(text) = std::fs::read_to_string(script.path) {
+            let builds = composite_ir::parse_include_build_declarations(&text, script.path);
+            if !builds.is_empty() {
+                return builds;
+            }
+        }
+    }
+    Vec::new()
+}
+
 fn settings_model(script: &ConfigurationScript<'_>) -> CanonicalSettingsModel {
     let plugin_repositories = script
         .parsed
@@ -652,6 +685,7 @@ fn settings_model(script: &ConfigurationScript<'_>) -> CanonicalSettingsModel {
             .iter()
             .map(|project| project.path.clone())
             .collect(),
+        included_builds: included_builds_from_settings_script(script),
         plugin_repositories,
         dependency_repositories,
         repositories_mode,
@@ -1449,5 +1483,47 @@ mod tests {
         assert!(validate_schema_version(&graph)
             .unwrap_err()
             .contains("unsupported configuration graph schema version"));
+    }
+
+    #[test]
+    fn settings_model_parses_multiple_include_build_entries_into_ir() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = temp.path().join("settings.gradle.kts");
+        std::fs::write(
+            &settings,
+            r#"
+                rootProject.name = "composite-root"
+                includeBuild("included-lib")
+                includeBuild("plugins")
+                include(":app")
+            "#,
+        )
+        .unwrap();
+        let settings_path = settings.to_string_lossy().into_owned();
+        let parsed = parse_build_script_file(&settings).expect("parse settings");
+        let script = ConfigurationScript {
+            kind: ConfigurationScriptKind::Settings,
+            project_path: ":",
+            path: &settings_path,
+            parsed: &parsed,
+        };
+
+        let model = settings_model(&script);
+        assert_eq!(model.included_builds.len(), 2);
+        assert_eq!(model.included_builds[0].path, "included-lib");
+        assert_eq!(model.included_builds[0].name_hint, "included-lib");
+        assert_eq!(model.included_builds[0].source_file, settings_path);
+        assert_eq!(model.included_builds[1].path, "plugins");
+
+        let mut graph = from_build_plan(&sample_plan(temp.path()));
+        graph.settings = Some(model);
+        let admission = admit_native_replay(&graph);
+        let ConfigurationReplayAdmission::Rejected(rejection) = admission else {
+            panic!("expected composite settings replay rejection");
+        };
+        let message = rejection.message();
+        assert!(message.contains("included-lib"));
+        assert!(message.contains("plugins"));
+        assert!(message.contains("includeBuild"));
     }
 }

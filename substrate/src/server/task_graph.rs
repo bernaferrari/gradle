@@ -25,6 +25,7 @@ use super::build_plan_ir::{
 };
 use super::build_plan_shadow::BuildPlanShadowStore;
 use super::configuration_ir::{self, ConfigurationReplayAdmission};
+use super::composite_ir;
 use super::cyclonedx_sbom::{
     draft_contract_from_captured_inputs, CycloneDxIdentityPolicy, CycloneDxSbomContract,
 };
@@ -197,7 +198,16 @@ impl TaskGraphServiceImpl {
         }
 
         let plan_dependencies = artifact.plan.dependencies.clone();
-        let included_build_project_paths = included_build_project_paths(&artifact.plan.projects);
+        let included_builds = included_builds_from_projects(&artifact.plan.projects);
+        let included_build_project_paths =
+            included_build_project_paths_from_ir(&artifact.plan.projects, &included_builds);
+        let composite_feature = if included_builds.is_empty() {
+            None
+        } else {
+            Some(composite_ir::encode_composite_substitution_feature(
+                &included_builds,
+            ))
+        };
         let mut plan_tasks = artifact.plan.tasks;
         if plan_tasks.is_empty() {
             if let Some(graph) = configuration_graph.as_ref() {
@@ -253,10 +263,12 @@ impl TaskGraphServiceImpl {
                     "unsupported_dependency_semantics".to_string(),
                     "true".to_string(),
                 );
-                task.inputs.insert(
-                    "unsupported_repository_features".to_string(),
-                    "composite-substitution:settings".to_string(),
-                );
+                if let Some(feature) = &composite_feature {
+                    task.inputs.insert(
+                        "unsupported_repository_features".to_string(),
+                        feature.clone(),
+                    );
+                }
             }
             enrich_task_contract_from_graph(task, &task_outputs, &plan_dependencies);
             maybe_synthesize_cyclonedx_sbom_contract(task, build_id_str);
@@ -755,10 +767,58 @@ fn executable_task_type(task: &CanonicalBuildPlanTask) -> String {
     }
 }
 
-fn included_build_project_paths(projects: &[CanonicalBuildPlanProject]) -> HashSet<String> {
+fn included_builds_from_projects(
+    projects: &[CanonicalBuildPlanProject],
+) -> Vec<composite_ir::CanonicalIncludedBuild> {
+    let mut builds = Vec::new();
+    for project in projects {
+        let dir = Path::new(&project.project_dir);
+        for name in ["settings.gradle.kts", "settings.gradle"] {
+            let settings_path = dir.join(name);
+            let Ok(text) = std::fs::read_to_string(&settings_path) else {
+                continue;
+            };
+            builds.extend(composite_ir::parse_include_build_declarations(
+                &text,
+                &settings_path.to_string_lossy(),
+            ));
+        }
+    }
+    builds.sort_unstable_by(|a, b| {
+        (&a.path, &a.name_hint, &a.source_file).cmp(&(&b.path, &b.name_hint, &b.source_file))
+    });
+    builds.dedup();
+    builds
+}
+
+fn included_build_project_paths(
+    projects: &[CanonicalBuildPlanProject],
+) -> HashSet<String> {
+    let included_builds = included_builds_from_projects(projects);
+    included_build_project_paths_from_ir(projects, &included_builds)
+}
+
+fn included_build_project_paths_from_ir(
+    projects: &[CanonicalBuildPlanProject],
+    included_builds: &[composite_ir::CanonicalIncludedBuild],
+) -> HashSet<String> {
+    if included_builds.is_empty() {
+        return HashSet::new();
+    }
     let included_dirs = projects
         .iter()
-        .flat_map(|project| included_build_dirs(&project.project_dir))
+        .flat_map(|project| {
+            let dir = Path::new(&project.project_dir);
+            included_builds
+                .iter()
+                .filter(|build| {
+                    Path::new(&build.source_file)
+                        .parent()
+                        .is_some_and(|parent| parent == dir)
+                })
+                .map(|build| dir.join(&build.path))
+                .collect::<Vec<_>>()
+        })
         .collect::<Vec<_>>();
     if included_dirs.is_empty() {
         return HashSet::new();
@@ -779,34 +839,16 @@ fn included_build_dirs(project_dir: &str) -> Vec<std::path::PathBuf> {
     ["settings.gradle.kts", "settings.gradle"]
         .iter()
         .map(|name| dir.join(name))
-        .filter_map(|path| std::fs::read_to_string(path).ok())
-        .flat_map(|text| parse_include_build_paths(&text))
-        .map(|path| dir.join(path))
-        .collect()
-}
-
-fn parse_include_build_paths(text: &str) -> Vec<String> {
-    text.lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            if !trimmed.starts_with("includeBuild") {
-                return None;
-            }
-            let rest = trimmed.trim_start_matches("includeBuild").trim();
-            let quoted = rest
-                .strip_prefix('(')
-                .and_then(|rest| rest.strip_suffix(')'))
-                .unwrap_or(rest)
-                .trim();
-            quoted
-                .strip_prefix('"')
-                .and_then(|rest| rest.split_once('"').map(|(value, _)| value.to_string()))
-                .or_else(|| {
-                    quoted
-                        .strip_prefix('\'')
-                        .and_then(|rest| rest.split_once('\'').map(|(value, _)| value.to_string()))
-                })
+        .filter_map(|path| {
+            let text = std::fs::read_to_string(&path).ok()?;
+            Some(
+                composite_ir::parse_include_build_paths(&text)
+                    .into_iter()
+                    .map(|include| dir.join(include))
+                    .collect::<Vec<_>>(),
+            )
         })
+        .flatten()
         .collect()
 }
 
@@ -3656,6 +3698,33 @@ mod tests {
             included_build_dirs(temp.path().to_string_lossy().as_ref()),
             vec![temp.path().join("included")]
         );
+    }
+
+    #[test]
+    fn test_included_builds_from_projects_parses_multiple_include_build() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(repo.join("included-lib")).unwrap();
+        std::fs::create_dir_all(repo.join("plugins")).unwrap();
+        std::fs::write(
+            repo.join("settings.gradle.kts"),
+            "includeBuild(\"included-lib\")\nincludeBuild(\"plugins\")\n",
+        )
+        .unwrap();
+        let projects = vec![CanonicalBuildPlanProject {
+            path: ":".to_string(),
+            name: "root".to_string(),
+            project_dir: repo.to_string_lossy().into_owned(),
+        }];
+
+        let builds = included_builds_from_projects(&projects);
+        assert_eq!(builds.len(), 2);
+        assert_eq!(builds[0].path, "included-lib");
+        assert_eq!(builds[1].path, "plugins");
+        let feature = composite_ir::encode_composite_substitution_feature(&builds);
+        assert!(feature.contains("included-lib"));
+        assert!(feature.contains("plugins"));
+        assert!(feature.starts_with("composite-substitution:settings@"));
     }
 
     #[test]
