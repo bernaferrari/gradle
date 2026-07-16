@@ -85,8 +85,8 @@ if passed != expected:
     raise SystemExit(
         f"direct_warm_supported_count {passed} != expected {expected}"
     )
-if expected == 7 and f"{passed}/{supported}" != "7/7":
-    raise SystemExit(f"expected 7/7 dogfood summary, got {passed}/{supported}")
+if expected == 8 and f"{passed}/{supported}" != "8/8":
+    raise SystemExit(f"expected 8/8 dogfood summary, got {passed}/{supported}")
 PY
 }
 

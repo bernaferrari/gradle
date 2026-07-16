@@ -13,6 +13,40 @@ use crate::server::task_executor::{TaskExecutor, TaskInput, TaskResult};
 /// - Updating existing JARs (adding/replacing entries)
 /// - Setting manifest attributes (Main-Class, etc.)
 /// - Preserving existing entries when updating
+fn resolve_archive_source(source: &Path) -> Option<PathBuf> {
+    if source.exists() {
+        return Some(source.to_path_buf());
+    }
+    // kotlinc CLI emits META-INF/main.kotlin_module while the Kotlin Gradle plugin
+    // captures project-qualified *.kotlin_module names in jar file mappings.
+    if source
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext == "kotlin_module")
+    {
+        if let Some(parent) = source.parent() {
+            if parent.is_dir() {
+                if let Ok(entries) = std::fs::read_dir(parent) {
+                    let mut modules: Vec<PathBuf> = entries
+                        .flatten()
+                        .map(|entry| entry.path())
+                        .filter(|path| {
+                            path.extension()
+                                .and_then(|ext| ext.to_str())
+                                .is_some_and(|ext| ext == "kotlin_module")
+                        })
+                        .collect();
+                    modules.sort();
+                    if let Some(path) = modules.into_iter().next() {
+                        return Some(path);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 pub struct JarTaskExecutor;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -343,16 +377,16 @@ impl JarTaskExecutor {
 
         let mut emitted_dirs = HashSet::new();
         for source in source_files {
-            if !source.exists() {
+            let Some(resolved) = resolve_archive_source(source) else {
                 return Err(format!("Source file not found: {}", source.display()));
-            }
+            };
             let relative = source
                 .strip_prefix(&root)
                 .map_err(|e| format!("Cannot relativize {}: {}", source.display(), e))?;
             let name = relative.to_string_lossy().replace('\\', "/");
             push_zip_parent_dirs(entries, &mut emitted_dirs, &name, dir_mode);
-            let data = std::fs::read(source)
-                .map_err(|e| format!("Cannot read {}: {}", source.display(), e))?;
+            let data = std::fs::read(&resolved)
+                .map_err(|e| format!("Cannot read {}: {}", resolved.display(), e))?;
             entries.push(ZipEntry::file(name, data, file_mode));
         }
         Ok(true)
@@ -373,7 +407,7 @@ impl JarTaskExecutor {
         let duplicate_strategy = archive_duplicate_strategy(options);
         let available_mapping_names = mappings
             .iter()
-            .filter(|mapping| mapping.source.exists())
+            .filter(|mapping| resolve_archive_source(&mapping.source).is_some())
             .map(|mapping| mapping.relative_path.to_string_lossy().replace('\\', "/"))
             .collect::<HashSet<_>>();
         let mut seen_entries = entries
@@ -382,7 +416,8 @@ impl JarTaskExecutor {
             .collect::<HashSet<_>>();
         for mapping in mappings {
             let name = mapping.relative_path.to_string_lossy().replace('\\', "/");
-            if !mapping.source.exists() {
+            let resolved_source = resolve_archive_source(&mapping.source);
+            if resolved_source.is_none() {
                 if is_manifest_entry(&name) && has_manifest_options(options) {
                     if include_empty_dirs {
                         push_zip_parent_dirs(entries, &mut emitted_dirs, &name, dir_mode);
@@ -408,8 +443,9 @@ impl JarTaskExecutor {
             if include_empty_dirs {
                 push_zip_parent_dirs(entries, &mut emitted_dirs, &name, dir_mode);
             }
-            let data = std::fs::read(&mapping.source)
-                .map_err(|e| format!("Cannot read {}: {}", mapping.source.display(), e))?;
+            let resolved_source = resolved_source.expect("archive source resolved");
+            let data = std::fs::read(&resolved_source)
+                .map_err(|e| format!("Cannot read {}: {}", resolved_source.display(), e))?;
             seen_entries.insert(name.clone());
             entries.push(ZipEntry::file(name, data, file_mode));
         }

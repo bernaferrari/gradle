@@ -4,6 +4,7 @@ mod delete;
 mod exec_task;
 mod jar;
 mod java_compile;
+mod kotlin_compile;
 mod java_exec;
 mod javadoc;
 mod lifecycle;
@@ -24,6 +25,7 @@ pub use delete::DeleteTaskExecutor;
 pub use exec_task::ExecTaskExecutor;
 pub use jar::JarTaskExecutor;
 pub use java_compile::JavaCompileExecutor;
+pub use kotlin_compile::KotlinCompileExecutor;
 pub use java_exec::JavaExecTaskExecutor;
 pub use javadoc::JavadocTaskExecutor;
 pub use lifecycle::LifecycleTaskExecutor;
@@ -222,6 +224,9 @@ impl TaskExecutorRegistry {
 
         let java_compile = JavaCompileExecutor::new();
         executors.insert(java_compile.task_type().to_string(), Box::new(java_compile));
+
+        let kotlin_compile = KotlinCompileExecutor::new();
+        executors.insert(kotlin_compile.task_type().to_string(), Box::new(kotlin_compile));
 
         let java_exec = JavaExecTaskExecutor::new();
         executors.insert(java_exec.task_type().to_string(), Box::new(java_exec));

@@ -10,10 +10,16 @@
         "kind": "checked-in-local",
         "description": "Checked-in OSS-style Java library fixture with sources JAR, Javadoc, reports, and standard lifecycle tasks."
       },
-      "tasks": ["clean", "build"],
+      "tasks": [
+        "clean",
+        "build"
+      ],
       "mode": "strict",
       "expectation": "supported",
-      "coverage_tags": ["java-library", "zero-forward"],
+      "coverage_tags": [
+        "java-library",
+        "zero-forward"
+      ],
       "timeout_seconds": 300,
       "reason": "Represents the simplest externally showable Java library shape: compile, resources, jar, sources, javadoc, tests/report-like outputs.",
       "checks": {
@@ -31,10 +37,17 @@
         "kind": "checked-in-local",
         "description": "Checked-in multi-project Java application/library fixture."
       },
-      "tasks": ["clean", "build"],
+      "tasks": [
+        "clean",
+        "build"
+      ],
       "mode": "strict",
       "expectation": "supported",
-      "coverage_tags": ["java-application", "java-library", "zero-forward"],
+      "coverage_tags": [
+        "java-application",
+        "java-library",
+        "zero-forward"
+      ],
       "timeout_seconds": 300,
       "reason": "Exercises project dependency wiring and selected DAG materialization across multiple projects.",
       "checks": {
@@ -52,10 +65,17 @@
         "kind": "checked-in-local",
         "description": "Checked-in Java application fixture with start scripts and Zip/Tar distributions."
       },
-      "tasks": ["clean", "build"],
+      "tasks": [
+        "clean",
+        "build"
+      ],
       "mode": "strict",
       "expectation": "supported",
-      "coverage_tags": ["java-application", "start-scripts", "zero-forward"],
+      "coverage_tags": [
+        "java-application",
+        "start-scripts",
+        "zero-forward"
+      ],
       "timeout_seconds": 300,
       "reason": "Exercises the application plugin vertical: Java compilation, Jar, CreateStartScripts, Zip/Tar distributions, lifecycle scheduling, and zero JVM forwards.",
       "checks": {
@@ -73,10 +93,18 @@
         "kind": "checked-in-local",
         "description": "Checked-in project using pinned JUnit Platform dependencies from Maven Central or a warm Gradle cache."
       },
-      "tasks": ["clean", "build"],
+      "tasks": [
+        "clean",
+        "build"
+      ],
       "mode": "strict",
       "expectation": "supported",
-      "coverage_tags": ["external-dependencies", "java-library", "test-execution", "zero-forward"],
+      "coverage_tags": [
+        "external-dependencies",
+        "java-library",
+        "test-execution",
+        "zero-forward"
+      ],
       "timeout_seconds": 300,
       "reason": "Visible dependency resolution plus real JUnit Platform test execution is a first-minute credibility gate.",
       "checks": {
@@ -95,10 +123,18 @@
         "kind": "checked-in-local",
         "description": "Checked-in external dependency project with a Maven BOM/platform-managed graph."
       },
-      "tasks": ["clean", "build"],
+      "tasks": [
+        "clean",
+        "build"
+      ],
       "mode": "strict",
       "expectation": "supported",
-      "coverage_tags": ["dependency-resolution", "external-dependencies", "java-library", "zero-forward"],
+      "coverage_tags": [
+        "dependency-resolution",
+        "external-dependencies",
+        "java-library",
+        "zero-forward"
+      ],
       "timeout_seconds": 300,
       "reason": "Proves a bounded but important Rust-owned dependency solver slice beyond direct static coordinates.",
       "checks": {
@@ -118,10 +154,17 @@
         "kind": "checked-in-local",
         "description": "Checked-in JavaExec fixture that compiles a Java class and invokes it through the Rust process executor."
       },
-      "tasks": ["clean", "build"],
+      "tasks": [
+        "clean",
+        "build"
+      ],
       "mode": "strict",
       "expectation": "supported",
-      "coverage_tags": ["java-application", "javaexec", "zero-forward"],
+      "coverage_tags": [
+        "java-application",
+        "javaexec",
+        "zero-forward"
+      ],
       "timeout_seconds": 300,
       "reason": "Exercises Rust DAG control across Java compilation, classes lifecycle, and native JavaExec process launch with declared output parity.",
       "checks": {
@@ -139,10 +182,17 @@
         "kind": "checked-in-local",
         "description": "Checked-in Javadoc fixture that runs the Javadoc tool through the Rust process executor."
       },
-      "tasks": ["clean", "build"],
+      "tasks": [
+        "clean",
+        "build"
+      ],
       "mode": "strict",
       "expectation": "supported",
-      "coverage_tags": ["javadoc", "java-library", "zero-forward"],
+      "coverage_tags": [
+        "javadoc",
+        "java-library",
+        "zero-forward"
+      ],
       "timeout_seconds": 300,
       "reason": "Exercises Rust DAG control across Java compilation, Jar packaging, and native Javadoc process launch with deterministic no-timestamp output.",
       "checks": {
@@ -160,10 +210,16 @@
         "kind": "checked-in-local",
         "description": "Checked-in unsupported fixture with explicit settings-level includeBuild substitution semantics."
       },
-      "tasks": ["clean", "build"],
+      "tasks": [
+        "clean",
+        "build"
+      ],
       "mode": "strict",
       "expectation": "fail-closed",
-      "coverage_tags": ["fail-closed", "unsupported-composite-build"],
+      "coverage_tags": [
+        "fail-closed",
+        "unsupported-composite-build"
+      ],
       "timeout_seconds": 300,
       "reason": "Demonstrates that the preview rejects unsupported composite substitution at admission instead of approximating included-build semantics.",
       "checks": {
@@ -172,21 +228,36 @@
       }
     },
     {
-      "name": "unsupported-kotlin-jvm-library",
+      "name": "kotlin-jvm-library",
       "path": "kotlin-jvm-library-kotlin-dsl",
       "source": {
         "kind": "checked-in-local",
         "description": "Checked-in Kotlin JVM library fixture using the Kotlin Gradle plugin and .kt sources."
       },
-      "tasks": ["clean", "build"],
+      "tasks": [
+        "clean",
+        "build"
+      ],
       "mode": "strict",
-      "expectation": "fail-closed",
-      "coverage_tags": ["fail-closed", "kotlin", "kotlin-jvm", "plugin-boundary"],
+      "expectation": "supported",
+      "coverage_tags": [
+        "kotlin",
+        "kotlin-jvm",
+        "compileKotlin",
+        "java-library"
+      ],
       "timeout_seconds": 300,
-      "reason": "Documents the Kotlin JVM library vertical as fail-closed: Rust admits the selected plan only when every task has a native executor, and KotlinCompile still requires a Rust-controlled compiler worker contract.",
+      "reason": "Kotlin JVM library warm path via native kotlinc executor for compileKotlin; CheckKotlinGradlePluginConfigurationErrors lowers to Lifecycle.",
       "checks": {
-        "fail_closed_diagnostic": "requires native Kotlin compilation support or a Rust-controlled Kotlin compiler worker contract",
-        "no_task_by_task_fallback": true
+        "task_parity": true,
+        "output_inventory": true,
+        "output_hashes": true,
+        "no_jvm_forwards": true,
+        "task_order": false,
+        "ignore_output_hash_patterns": [
+          ".*\\.class$",
+          ".*\\.kotlin_module$"
+        ]
       }
     }
   ]

@@ -294,3 +294,24 @@ jobs:
             echo "FAIL: Binary exceeds 10 MB limit"
             exit 1
           fi
+
+  install-under-test:
+    name: Install under-test (bridge-only) + gates
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[install-gate]')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: substrate
+      - name: Build daemon + runbuild
+        run: cargo build -p gradle-substrate-daemon -p gradle-substrate-runbuild
+      - name: Install bridge-only under-test
+        run: INSTALL_MODE=bridge-only bash tools/install_gradle_under_test.sh
+      - name: Run gates with dogfood when under-test present
+        env:
+          CI_REQUIRE_DOGFOOD: "1"
+        run: bash tools/ci/run_rust_substrate_gates.sh

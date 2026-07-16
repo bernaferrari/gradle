@@ -378,6 +378,9 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         if ("JavaCompile".equals(shortTaskTypeName)) {
             captureJavaCompileInputs(task, taskType, inputs);
         }
+        if ("KotlinCompile".equals(shortTaskTypeName)) {
+            captureKotlinCompileInputs(task, taskType, inputs);
+        }
         if (isArchiveTask(shortTaskTypeName)) {
             captureJarInputs(task, inputs);
         }
@@ -695,6 +698,106 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             }
         }
         return blocks;
+    }
+
+
+    private static void captureKotlinCompileInputs(Task task, Class<?> taskType, Map<String, String> inputs) {
+        putIfPresent(inputs, "java_home", javaCompilerHome(task));
+        putIfPresent(inputs, "classpath", mergedClasspath(
+            fileCollectionPathString(invokeOptional(task, taskType, "getLibraries")),
+            fileCollectionPathString(invokeOptional(task, taskType, "getClasspath")),
+            sourceSetConfigurationClasspath(task, "compile", "Kotlin", "CompileClasspath"),
+            configurationClasspath(task, "compileClasspath"),
+            configurationClasspath(task, "testCompileClasspath"),
+            taskInputClasspath(task)
+        ));
+
+        Object compilerOptions = invokeOptional(task, taskType, "getCompilerOptions");
+        if (compilerOptions != null) {
+            Object jvmTarget = invokeOptional(compilerOptions, "getJvmTarget");
+            String jvmTargetValue = providerValue(jvmTarget);
+            if (jvmTargetValue == null || jvmTargetValue.isEmpty()) {
+                jvmTargetValue = stringOrEmpty(jvmTarget);
+            }
+            String normalized = normalizeKotlinJvmTarget(jvmTargetValue);
+            putIfPresent(inputs, "jvm_target", normalized);
+            putIfPresent(inputs, "target_version", normalized);
+
+            Object freeArgs = invokeOptional(compilerOptions, "getFreeCompilerArgs");
+            String freeArgsValue = providerValue(freeArgs);
+            if (freeArgsValue == null || freeArgsValue.isEmpty()) {
+                freeArgsValue = iterableToSpaceSeparated(freeArgs);
+            }
+            if (freeArgsValue != null
+                && !freeArgsValue.isEmpty()
+                && !"[]".equals(freeArgsValue.trim())
+                && !"null".equals(freeArgsValue.trim())) {
+                putIfPresent(inputs, "compiler_args", freeArgsValue);
+            }
+        }
+
+        Object kotlinOptions = invokeOptional(task, taskType, "getKotlinOptions");
+        if (kotlinOptions != null && !inputs.containsKey("jvm_target")) {
+            putIfPresent(inputs, "jvm_target", normalizeKotlinJvmTarget(stringOrEmpty(invokeOptional(kotlinOptions, "getJvmTarget"))));
+        }
+        if (!inputs.containsKey("jvm_target")) {
+            inputs.put("jvm_target", "17");
+        }
+        try {
+            File projectDir = task.getProject().getProjectDir();
+            if (projectDir != null) {
+                inputs.put("working_dir", projectDir.getAbsolutePath());
+            }
+            String group = stringOrEmpty(task.getProject().getGroup());
+            String projectName = stringOrEmpty(task.getProject().getName());
+            if (!group.isEmpty() && !projectName.isEmpty()) {
+                String moduleName = group + "_" + projectName;
+                String taskName = task.getName();
+                if (taskName != null && taskName.toLowerCase(Locale.ROOT).contains("test")) {
+                    moduleName = moduleName + "_test";
+                }
+                putIfPresent(inputs, "module_name", moduleName);
+            }
+        } catch (RuntimeException ignored) {
+            // best-effort working directory / module name
+        }
+    }
+
+    private static String normalizeKotlinJvmTarget(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String value = raw.trim();
+        if (value.isEmpty()) {
+            return "";
+        }
+        // Handle enums/toString forms like JVM_17, "17", 1.8
+        value = value.replace("JvmTarget.", "").replace("JVM_", "").replace("JVM", "");
+        value = value.replace("_", ".").trim();
+        if (value.matches("\\d+(\\.\\d+)?")) {
+            return value;
+        }
+        String digits = value.replaceAll("[^0-9.]", "");
+        return digits.isEmpty() ? "17" : digits;
+    }
+
+    private static String iterableToSpaceSeparated(Object value) {
+        if (value == null) {
+            return "";
+        }
+        if (value instanceof Iterable<?>) {
+            List<String> parts = new ArrayList<>();
+            for (Object item : (Iterable<?>) value) {
+                if (item != null) {
+                    String text = String.valueOf(item).trim();
+                    if (!text.isEmpty()) {
+                        parts.add(text);
+                    }
+                }
+            }
+            return String.join(" ", parts);
+        }
+        return stringOrEmpty(value);
     }
 
     private static void captureJavaCompileInputs(Task task, Class<?> taskType, Map<String, String> inputs) {

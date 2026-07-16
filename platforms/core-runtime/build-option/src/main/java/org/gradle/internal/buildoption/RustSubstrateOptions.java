@@ -4,12 +4,22 @@ import java.util.Locale;
 
 /**
  * Feature flags for the Rust execution substrate.
+ *
+ * <p><b>Public product surface</b> is three modes via {@code org.gradle.rust.substrate.mode}:
+ * <ul>
+ *   <li>{@code off} — substrate disabled</li>
+ *   <li>{@code shadow} — capture/compare only; JVM remains authoritative</li>
+ *   <li>{@code kernel} (alias of {@code authoritative}) — admitted native execution when the plan is fully native-ready</li>
+ * </ul>
+ * Per-subsystem boolean flags remain for internal/experimental use and CI matrix work, but docs and demos
+ * should prefer the three-mode surface.
  */
 public final class RustSubstrateOptions {
 
     public enum SubstrateMode {
         OFF,
         SHADOW,
+        /** Prefer the public name {@code kernel}; this enum constant remains the internal value. */
         AUTHORITATIVE
     }
 
@@ -164,10 +174,35 @@ public final class RustSubstrateOptions {
         if (modeString == null || modeString.trim().isEmpty()) {
             return null;
         }
+        String normalized = modeString.trim().toUpperCase(Locale.ROOT);
+        if ("KERNEL".equals(normalized) || "ON".equals(normalized) || "DIRECT".equals(normalized)) {
+            // Public aliases for authoritative native/kernel execution.
+            return SubstrateMode.AUTHORITATIVE;
+        }
         try {
-            return SubstrateMode.valueOf(modeString.trim().toUpperCase(Locale.ROOT));
+            return SubstrateMode.valueOf(normalized);
         } catch (IllegalArgumentException e) {
             return null;
+        }
+    }
+
+    /**
+     * Stable public label for logs/docs: off | shadow | kernel.
+     */
+    public static String publicModeName(InternalOptions options) {
+        SubstrateMode mode = getMode(options);
+        if (mode == null) {
+            return isSubstrateEnabled(options) ? "legacy-flags" : "off";
+        }
+        switch (mode) {
+            case OFF:
+                return "off";
+            case SHADOW:
+                return "shadow";
+            case AUTHORITATIVE:
+                return "kernel";
+            default:
+                return mode.name().toLowerCase(Locale.ROOT);
         }
     }
 

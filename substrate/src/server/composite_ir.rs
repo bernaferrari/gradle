@@ -32,6 +32,21 @@ impl CanonicalIncludedBuild {
             source_file: source_file.into(),
         }
     }
+
+    /// Resolve the include path against the settings file's parent directory.
+    pub fn resolve_against_settings(&self) -> Option<std::path::PathBuf> {
+        let settings = Path::new(&self.source_file);
+        let base = settings.parent().unwrap_or_else(|| Path::new("."));
+        let candidate = base.join(&self.path);
+        Some(candidate)
+    }
+
+    /// True when the included build directory exists on disk.
+    pub fn directory_exists(&self) -> bool {
+        self.resolve_against_settings()
+            .map(|path| path.is_dir())
+            .unwrap_or(false)
+    }
 }
 
 /// Parse `includeBuild("…")` / `includeBuild('…')` / Groovy `includeBuild '…'` lines.
@@ -248,5 +263,16 @@ include(":app")
         assert!(reason.contains("included-lib"));
         assert!(reason.contains("plugins"));
         assert!(reason.contains("before task dispatch"));
+    }
+
+    #[test]
+    fn resolves_relative_include_path_against_settings_parent() {
+        let build = CanonicalIncludedBuild::new(
+            "included-lib",
+            "/repo/settings.gradle.kts",
+        );
+        let resolved = build.resolve_against_settings().unwrap();
+        assert_eq!(resolved, std::path::PathBuf::from("/repo/included-lib"));
+        assert_eq!(build.name_hint, "included-lib");
     }
 }
