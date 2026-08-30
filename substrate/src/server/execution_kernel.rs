@@ -375,23 +375,42 @@ fn kernel_task_contract_rejection(
         "requires_jvm_task_execution",
     ];
     for key in unsupported_keys {
-        if value.get(key).and_then(|v| v.as_bool()).unwrap_or(false) {
-            return Some(format!("unsupported contract marker '{}'", key));
-        }
+        let top_level_bool = value.get(key).and_then(|v| v.as_bool()).unwrap_or(false);
         let input_properties = value.get("input_properties").and_then(|v| v.as_object());
-        if let Some(properties) = input_properties {
-            let has_marker = properties.get(key).and_then(|v| v.as_str()) == Some("true")
-                || properties
-                    .get(&format!("input.{key}"))
-                    .and_then(|v| v.as_str())
-                    == Some("true")
-                || properties
-                    .get(&format!("input_value.{key}"))
-                    .and_then(|v| v.as_str())
-                    == Some("true");
-            if has_marker {
+        let has_marker = top_level_bool
+            || input_properties
+                .map(|properties| {
+                    properties.get(key).and_then(|v| v.as_str()) == Some("true")
+                        || properties
+                            .get(&format!("input.{key}"))
+                            .and_then(|v| v.as_str())
+                            == Some("true")
+                        || properties
+                            .get(&format!("input_value.{key}"))
+                            .and_then(|v| v.as_str())
+                            == Some("true")
+                })
+                .unwrap_or(false);
+        if !has_marker {
+            continue;
+        }
+        // Composite substitution remains unsupported until the admitted IR carries
+        // included-build producer tasks and their cross-build dependency edges.
+        if key == "unsupported_dependency_semantics" {
+            if let Some(properties) = input_properties {
+                // A classpath string does not prove which included-build producer owns
+                // it or represent the required cross-build dependency edge. The current
+                // admitted IR carries neither, so composite markers remain fail-closed.
                 return Some(unsupported_contract_marker_reason(key, properties));
             }
+            if top_level_bool {
+                // Top-level marker without feature details still fail-closed.
+                return Some(format!("unsupported contract marker '{key}'"));
+            }
+        } else if let Some(properties) = input_properties {
+            return Some(unsupported_contract_marker_reason(key, properties));
+        } else {
+            return Some(format!("unsupported contract marker '{key}'"));
         }
     }
 
@@ -1549,6 +1568,152 @@ mod tests {
         let message = rejection.message();
         assert!(message.contains("component-metadata-rule"));
         assert!(message.contains("unsupported dynamic version"));
+    }
+
+    #[test]
+    fn rejects_existing_composite_classpath_without_cross_build_provenance() {
+        let dir = tempfile::tempdir().unwrap();
+        let classpath = dir.path().join("included-lib.jar");
+        std::fs::write(&classpath, b"captured artifact").unwrap();
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![task(
+                ":compileJava",
+                "JavaCompile",
+                Some(
+                    serde_json::json!({
+                        "options": {
+                            "classpath": classpath.to_string_lossy()
+                        },
+                        "input_properties": {
+                            "input.unsupported_dependency_semantics": "true",
+                            "input.unsupported_repository_features": "composite-substitution:settings@included-lib"
+                        }
+                    })
+                    .to_string(),
+                ),
+            )],
+        };
+        let KernelAdmission::Rejected(rejection) =
+            admit_build_plan(&plan, &native_types(&["JavaCompile"]))
+        else {
+            panic!("expected rejection");
+        };
+        assert!(rejection
+            .message()
+            .contains("composite-substitution:settings@included-lib"));
+    }
+
+    #[test]
+    fn rejects_composite_classpath_tasks_without_cross_build_provenance() {
+        for task_type in [
+            "JavaCompile",
+            "KotlinCompile",
+            "GroovyCompile",
+            "ScalaCompile",
+            "TestExec",
+            "Test",
+            "JavaExec",
+            "Javadoc",
+            "CreateStartScripts",
+        ] {
+            let context = serde_json::json!({
+                "input_properties": {
+                    "input.unsupported_dependency_semantics": "true",
+                    "input.unsupported_repository_features": "composite-substitution:settings@included-lib"
+                }
+            })
+            .to_string();
+            let plan = KernelBuildPlan {
+                build_id: "build".to_string(),
+                dependency_graph: None,
+                tasks: vec![task(":selected", task_type, Some(context))],
+            };
+
+            assert!(
+                matches!(
+                    admit_build_plan(&plan, &native_types(&[task_type])),
+                    KernelAdmission::Rejected(_)
+                ),
+                "{task_type} must not exempt a composite marker without producer provenance"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_empty_and_coordinate_like_composite_classpaths() {
+        for classpath in ["", "   ", "org.example:included-lib:1.2.3"] {
+            let context = serde_json::json!({
+                "options": { "classpath": classpath },
+                "input_properties": {
+                    "unsupported_dependency_semantics": "true",
+                    "unsupported_repository_features": "composite-substitution:settings@included-lib"
+                }
+            })
+            .to_string();
+            let plan = KernelBuildPlan {
+                build_id: "build".to_string(),
+                dependency_graph: None,
+                tasks: vec![task(":compileJava", "JavaCompile", Some(context))],
+            };
+
+            assert!(matches!(
+                admit_build_plan(&plan, &native_types(&["JavaCompile"])),
+                KernelAdmission::Rejected(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn rejects_lifecycle_composite_marker_without_cross_build_provenance() {
+        let context = serde_json::json!({
+            "input_properties": {
+                "input_value.unsupported_dependency_semantics": "true",
+                "input_value.unsupported_repository_features": "composite-substitution:settings@included-lib"
+            }
+        })
+        .to_string();
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![task(":classes", "Lifecycle", Some(context))],
+        };
+
+        assert!(matches!(
+            admit_build_plan(&plan, &native_types(&["Lifecycle"])),
+            KernelAdmission::Rejected(_)
+        ));
+    }
+
+    #[test]
+    fn still_rejects_composite_when_mixed_with_other_unsupported_features() {
+        let plan = KernelBuildPlan {
+            build_id: "build".to_string(),
+            dependency_graph: None,
+            tasks: vec![task(
+                ":compileJava",
+                "JavaCompile",
+                Some(
+                    serde_json::json!({
+                        "options": {
+                            "classpath": "/repo/included-lib/build/classes/java/main"
+                        },
+                        "input_properties": {
+                            "input.unsupported_dependency_semantics": "true",
+                            "input.unsupported_repository_features": "composite-substitution:settings,component-metadata-rule"
+                        }
+                    })
+                    .to_string(),
+                ),
+            )],
+        };
+        let KernelAdmission::Rejected(rejection) =
+            admit_build_plan(&plan, &native_types(&["JavaCompile"]))
+        else {
+            panic!("expected rejection");
+        };
+        assert!(rejection.message().contains("component-metadata-rule"));
     }
 
     #[test]

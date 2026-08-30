@@ -107,11 +107,11 @@ impl TaskInput {
             task_type,
             "Copy"
                 | "Delete"
-                | "BuildScript"
                 | "Sync"
                 | "Mkdir"
                 | "Symlink"
                 | "JavaCompile"
+                | "KotlinCompile"
                 | "JavaExec"
                 | "Javadoc"
                 | "CreateStartScripts"
@@ -325,6 +325,7 @@ mod tests {
         assert!(types.contains(&"Mkdir"));
         assert!(types.contains(&"Symlink"));
         assert!(types.contains(&"JavaCompile"));
+        assert!(types.contains(&"KotlinCompile"));
         assert!(types.contains(&"JavaExec"));
         assert!(types.contains(&"Javadoc"));
         assert!(types.contains(&"CreateStartScripts"));
@@ -337,6 +338,7 @@ mod tests {
         assert!(types.contains(&"Tar"));
         assert!(types.contains(&"CycloneDxSbom"));
         assert!(types.contains(&"Lifecycle"));
+        assert!(!types.contains(&"BuildScript"));
     }
 
     #[test]
@@ -363,6 +365,7 @@ mod tests {
         assert!(TaskInput::is_native_supported("Mkdir"));
         assert!(TaskInput::is_native_supported("Symlink"));
         assert!(TaskInput::is_native_supported("JavaCompile"));
+        assert!(TaskInput::is_native_supported("KotlinCompile"));
         assert!(TaskInput::is_native_supported("Javadoc"));
         assert!(TaskInput::is_native_supported("TestExec"));
         assert!(TaskInput::is_native_supported("Exec"));
@@ -372,6 +375,7 @@ mod tests {
         assert!(TaskInput::is_native_supported("Tar"));
         assert!(TaskInput::is_native_supported("CycloneDxSbom"));
         assert!(TaskInput::is_native_supported("Lifecycle"));
+        assert!(!TaskInput::is_native_supported("BuildScript"));
         assert!(!TaskInput::is_native_supported("Test"));
     }
 

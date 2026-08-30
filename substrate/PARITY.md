@@ -37,8 +37,14 @@ Authoritative detail is only in the preview doc. Summary:
 | Resources, Copy, Sync, archives, Exec, JavaExec, Javadoc, JUnit Platform Test (fixture-backed) | Supported when represented by checked-in corpus fixtures |
 | Exact static report tasks (`writeText`, detached resolved-file, lenient artifact-view, transform marker) | Supported only for exact captured contracts |
 | External Maven / BOM / constraints / selected GMM | Supported for `testing/corpus/external-manifest.json` fixtures |
-| Local dogfood + narrow OSS slices | Supported per `testing/dogfood/manifest.json` and `oss-manifest.json` |
+| Evidence-backed local Java dogfood + narrow OSS slices | Supported per `testing/dogfood/manifest.json` and `oss-manifest.json` |
+| Kotlin JVM library `compileKotlin` via host `kotlinc` | **In flight** for one checked-in fixture; current rebased tree unverified, not general Kotlin Gradle plugin support |
 | Everything else | **Not** preview-supported until listed and evidenced |
+
+The last documented pre-rebase evidence at `7eabe3f` on 2026-07-16 reported
+8/8 supported direct-warm entries and 9/9 full-manifest entries (8 supported +
+1 fail-closed). No build or test has been run on the current rebased tree, so
+that aggregate is historical evidence rather than a current-HEAD result.
 
 ## Ownership boundaries
 
@@ -52,6 +58,11 @@ task DAG materialization; scheduling; up-to-date/cache/history decisions;
 native execution for admitted task contracts; process launch for supported
 `JavaCompile`, `Exec`, `JavaExec`, `Javadoc`, and `Test`; first-60s / no-forward
 evidence.
+
+The fixture-backed `KotlinCompile` host-`kotlinc` launcher is an in-flight
+boundary, not yet part of that durable supported set. Its target exempts
+`*.class` and `*.kotlin_module` hashes and compares archive entry inventories,
+not archive bytes.
 
 ## Module status (high level)
 
@@ -80,6 +91,7 @@ Statuses are relative to the **preview kernel path**, not “100% of Gradle.”
 | Execution history / incremental / workers | Present and exercised on supported paths; expand only with evidence |
 | Config cache IR / schema_versioned stores | Durable envelopes and IR parsers advancing; dual-path with JVM where needed |
 | Build script parsing | String-based parser is production path (102 tests); Groovy AST still bypassed for no-paren issues |
+| Kotlin task executor | In-flight single-fixture `KotlinCompile` launcher via host `kotlinc`; unverified after rebase, with class/module hash exemptions and archive entry-only parity |
 | Observability | Build events, problem reporting, console buffering — useful, not full IDE parity |
 
 ### Unsupported (fail closed; non-goals for preview)
@@ -87,6 +99,8 @@ Statuses are relative to the **preview kernel path**, not “100% of Gradle.”
 - Arbitrary task actions / unmodeled task implementations
 - DSL evaluation or `buildSrc` execution inside Rust
 - Settings-level `includeBuild(...)` composite substitution
+- Kotlin build logic, precompiled Kotlin DSL plugin generation, Kotlin compiler
+  plugins, and broader Kotlin Gradle plugin semantics
 - Rich dependency semantics outside the native contract (dynamic selectors,
   custom metadata rules, unsupported GMM fields, etc.)
 - Task-by-task JVM fallback after an admitted authoritative run
@@ -104,7 +118,13 @@ See preview **Unsupported** and **Fail-Closed** tables for diagnostics.
   `main_class`, classpath, Java home, args, working directory). Re-open only if
   a new shape loses fields on replay—add a fixture, do not weaken admission.
 - **Composite substitution:** still intentionally rejected
-  (`composite-substitution:settings`) until an included-build IR exists.
+  (`composite-substitution:settings`) until an included-build IR represents
+  producer tasks and cross-build dependency edges; concrete captured classpath
+  files are not sufficient. `testing/dogfood/manifest-composite-only.json` is
+  an experimental focused rejection gate, not support evidence.
+- **Kotlin JVM:** the host-`kotlinc` executor is a narrow, fixture-backed
+  vertical under development. The current rebased implementation is unverified,
+  and its hash/archive exemptions prevent a general byte-parity claim.
 - **Configuration / plugins:** external and custom plugins stay JVM-owned or
   fail closed; Phase 5/6 expand only built-in native contracts.
 - **Warm path polish:** endpoint freshness, dry-run validation, richer stale

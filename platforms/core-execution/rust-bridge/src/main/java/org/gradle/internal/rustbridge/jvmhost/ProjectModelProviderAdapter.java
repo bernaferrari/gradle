@@ -703,6 +703,15 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
 
     private static void captureKotlinCompileInputs(Task task, Class<?> taskType, Map<String, String> inputs) {
         putIfPresent(inputs, "java_home", javaCompilerHome(task));
+        String compilerVersion = providerValue(invokeOptional(
+            task,
+            taskType,
+            "getKotlinCompilerVersion$kotlin_gradle_plugin_common"
+        ));
+        if (!compilerVersion.isEmpty()) {
+            inputs.put("kotlin_compiler_identity", "kotlinc-jvm");
+            inputs.put("kotlin_compiler_version", compilerVersion);
+        }
         putIfPresent(inputs, "classpath", mergedClasspath(
             fileCollectionPathString(invokeOptional(task, taskType, "getLibraries")),
             fileCollectionPathString(invokeOptional(task, taskType, "getClasspath")),
@@ -724,16 +733,10 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
             putIfPresent(inputs, "target_version", normalized);
 
             Object freeArgs = invokeOptional(compilerOptions, "getFreeCompilerArgs");
-            String freeArgsValue = providerValue(freeArgs);
-            if (freeArgsValue == null || freeArgsValue.isEmpty()) {
-                freeArgsValue = iterableToSpaceSeparated(freeArgs);
-            }
-            if (freeArgsValue != null
-                && !freeArgsValue.isEmpty()
-                && !"[]".equals(freeArgsValue.trim())
-                && !"null".equals(freeArgsValue.trim())) {
-                putIfPresent(inputs, "compiler_args", freeArgsValue);
-            }
+            Object freeArgsValue = invokeOptional(freeArgs, "getOrNull");
+            Object compilerArgs = freeArgsValue == null ? freeArgs : freeArgsValue;
+            putIfPresent(inputs, "compiler_args", stringList(compilerArgs));
+            putIfPresent(inputs, "compiler_args_json", stringListJson(compilerArgs));
         }
 
         Object kotlinOptions = invokeOptional(task, taskType, "getKotlinOptions");
@@ -779,25 +782,6 @@ public class ProjectModelProviderAdapter implements JvmHostServiceImpl.ProjectMo
         }
         String digits = value.replaceAll("[^0-9.]", "");
         return digits.isEmpty() ? "17" : digits;
-    }
-
-    private static String iterableToSpaceSeparated(Object value) {
-        if (value == null) {
-            return "";
-        }
-        if (value instanceof Iterable<?>) {
-            List<String> parts = new ArrayList<>();
-            for (Object item : (Iterable<?>) value) {
-                if (item != null) {
-                    String text = String.valueOf(item).trim();
-                    if (!text.isEmpty()) {
-                        parts.add(text);
-                    }
-                }
-            }
-            return String.join(" ", parts);
-        }
-        return stringOrEmpty(value);
     }
 
     private static void captureJavaCompileInputs(Task task, Class<?> taskType, Map<String, String> inputs) {

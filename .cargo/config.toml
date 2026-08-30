@@ -1,0 +1,10 @@
+# Local cargo settings aimed at a smaller target/ tree.
+# Space-saving profiles live in the workspace Cargo.toml.
+
+[build]
+# Disable incremental compilation globally. Incremental caches were the
+# single largest consumer under target/debug (~4.4G here).
+incremental = false
+
+[term]
+quiet = false

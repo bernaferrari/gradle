@@ -221,7 +221,7 @@
         "unsupported-composite-build"
       ],
       "timeout_seconds": 300,
-      "reason": "Demonstrates that the preview rejects unsupported composite substitution at admission instead of approximating included-build semantics.",
+      "reason": "Fails closed because materialized classpath files do not represent included-build producer tasks or cross-build dependency edges; admitting this plan would approximate settings-level includeBuild substitution.",
       "checks": {
         "fail_closed_diagnostic": "composite-substitution",
         "no_task_by_task_fallback": true
@@ -247,17 +247,42 @@
         "java-library"
       ],
       "timeout_seconds": 300,
-      "reason": "Kotlin JVM library warm path via native kotlinc executor for compileKotlin; CheckKotlinGradlePluginConfigurationErrors lowers to Lifecycle.",
+      "reason": "In-flight, fixture-backed Kotlin JVM library vertical: Rust launches the host kotlinc for compileKotlin and lowers CheckKotlinGradlePluginConfigurationErrors to Lifecycle. This is not general Kotlin Gradle plugin or compiler-plugin parity. The gate exempts .class and .kotlin_module content hashes and compares archives by entry inventory only.",
       "checks": {
         "task_parity": true,
         "output_inventory": true,
         "output_hashes": true,
+        "archive_entries": true,
         "no_jvm_forwards": true,
         "task_order": false,
         "ignore_output_hash_patterns": [
           ".*\\.class$",
           ".*\\.kotlin_module$"
         ]
+      }
+    },
+    {
+      "name": "unsupported-component-metadata-rule",
+      "path": "component-metadata-rule-unsupported-kotlin-dsl",
+      "source": {
+        "kind": "checked-in-local",
+        "description": "Checked-in fixture using unsupported component metadata rules."
+      },
+      "tasks": [
+        "clean",
+        "build"
+      ],
+      "mode": "strict",
+      "expectation": "fail-closed",
+      "coverage_tags": [
+        "fail-closed",
+        "component-metadata-rule"
+      ],
+      "timeout_seconds": 300,
+      "reason": "Documents fail-closed admission for component-metadata-rule semantics.",
+      "checks": {
+        "fail_closed_diagnostic": "component-metadata",
+        "no_task_by_task_fallback": true
       }
     }
   ]

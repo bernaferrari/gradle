@@ -25,9 +25,39 @@ The runner writes:
 - `build/dogfood-current/dogfood-summary.md`
 - `build/dogfood-current/<project>/result.json`
 
-## Current Evidence
+## Evidence State After Rebase
 
-Latest checked run: 2026-06-04.
+No build, compilation, or dogfood command was run on the current rebased
+worktree. The last documented pre-rebase evidence was at `7eabe3f` on
+2026-07-16:
+
+| Gate | Last documented result |
+| --- | ---: |
+| Supported direct-warm entries | 8/8 with zero JVM forwards |
+| Full then-current manifest | 9/9: 8 supported + 1 fail-closed |
+
+Those are historical aggregates, not current-HEAD results. The checked-in main
+manifest now declares 10 entries: 8 supported targets and 2 fail-closed
+targets. These counts are derived from `testing/dogfood/manifest.json` and
+describe its inventory only; none of the 10 entries has been rerun in this
+rebased tree.
+
+The `kotlin-jvm-library` supported target is still an in-flight,
+fixture-backed vertical. Rust launches the host `kotlinc` for the captured
+`compileKotlin` task; this does not cover Kotlin build logic, Kotlin compiler
+plugins, or general Kotlin Gradle plugin behavior. The gate exempts `*.class`
+and `*.kotlin_module` content hashes and compares archive entry inventory only,
+not archive bytes, so even a future pass is a deliberately narrow parity claim.
+
+The main manifest keeps settings-level `includeBuild` substitution fail-closed
+because concrete captured classpath files do not represent included-build
+producer tasks or cross-build dependency edges. The focused
+`testing/dogfood/manifest-composite-only.json` manifest is an experimental
+fail-closed gate and is not support evidence.
+
+## Earlier Detailed Checked Run
+
+Detailed checked artifact described below: 2026-06-04.
 
 | Project | Expectation | Mode | Result | What It Proves |
 | --- | --- | --- | --- | --- |
@@ -67,7 +97,7 @@ per-project Rust daemon startup from the measured substrate path. In the
 2026-06-04 run, every supported project used the Rust RunBuild path with zero
 JVM forwards while preserving strict parity checks.
 
-The current timing split shows the remaining gap is not primarily inside the
+That timing split showed the remaining gap was not primarily inside the
 Rust task executor. The measured Rust bootstrap/RunBuild portion is about
 6.6s across the whole local dogfood manifest, while the non-Rust/Gradle
 invocation and configuration overhead is about 30.3s. The next performance
@@ -102,10 +132,10 @@ Rust `RunBuild` duration, 14 Rust-executed tasks, 6 validated input
 fingerprints, `build-plan-shadow` as the plan source, configuration skipped,
 and zero JVM forwards.
 
-Direct warm coverage has also been expanded from one fixture to the supported
-local dogfood set. `tools/dogfood_runner/direct_warm.py` performs one strict
+Direct warm coverage was also expanded from one fixture to the supported local
+dogfood set. `tools/dogfood_runner/direct_warm.py` performs one strict
 Gradle/JVM capture per supported dogfood project and then runs the cached plan
-directly through `gradle-substrate-runbuild`. The latest checked run wrote
+directly through `gradle-substrate-runbuild`. The checked 2026-06-08 run wrote
 `build/direct-warm-dogfood-20260608-postcard/direct-warm-results.json` and
 `build/direct-warm-dogfood-20260608-postcard/direct-warm-summary.md`; all
 7 supported local dogfood projects passed direct warm execution with zero JVM
@@ -120,6 +150,10 @@ The JavaExec fixture is now covered by standalone direct replay: Rust merges
 direct build-graph metadata with the hydrated shadow task context before kernel
 admission, preserving the captured `main_class`, classpath, Java home, args,
 and working directory.
+
+A later pre-rebase status snapshot at `7eabe3f` documented 8/8 supported
+direct-warm entries on 2026-07-16. That aggregate is the latest documented
+evidence, but it has not been reproduced on the current rebased tree.
 
 The direct-warm runner uses the same Gradle-under-test discovery as the main
 dogfood runner, so `--gradle-command` is optional when
@@ -149,9 +183,10 @@ precise diagnostic.
 ## Interpretation
 
 This is a showable technical preview. It is not a 100% compatibility claim and
-it does not prove a universal speedup. The current dogfood run proves that
-several realistic supported build shapes can execute with zero JVM task forwards
-and that one unsupported build fails closed.
+it does not prove a universal speedup. Historical dogfood runs showed that
+several realistic supported build shapes could execute with zero JVM task
+forwards and that unsupported builds could fail closed. The rebased tree needs
+fresh evidence before making the same claim about current HEAD.
 
 ## External OSS Gate
 

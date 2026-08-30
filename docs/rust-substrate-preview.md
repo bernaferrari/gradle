@@ -96,6 +96,13 @@ The supported preview corpus is intentionally narrow and explicit:
 - local repository fixtures and safe HTTP Maven repository fixtures used by the
   first-60s and corpus runners.
 
+One additional promotion target is in flight: the checked-in
+`kotlin-jvm-library` dogfood fixture can lower its narrow `compileKotlin` shape
+to a Rust executor that launches the host `kotlinc`. This is not general Kotlin
+Gradle plugin support. Kotlin build logic, compiler plugins, and task shapes
+outside that fixture remain unsupported, and the rebased tree has not been
+re-verified.
+
 Supported builds must pass the corpus runner with authoritative kernel mode,
 declared graph parity where applicable, resolved graph parity where applicable,
 output/hash/archive parity, and zero JVM task forwards.
@@ -114,9 +121,16 @@ proves no JVM task forwards plus the listed parity checks.
 | External Maven dependency builds with static selectors, representative BOM/platform, constraints, conflict resolution, classifier/artifact shape, JUnit runtime dependencies, and selected Gradle Module Metadata | Supported for `testing/corpus/external-manifest.json` fixtures | Authoritative RunBuild with declared and resolved dependency graph parity where requested, output/hash/archive parity, and zero JVM forwards. |
 | Real-project dogfood: OSS-style Java library, Java multiproject, Java application/start scripts/distributions, external JUnit library, external BOM/conflict | Supported strict dogfood entries | `testing/dogfood/manifest.json` execution with configured parity checks and zero JVM forwards. |
 | Real OSS dogfood: Spring guide REST `clean assemble`, Spring PetClinic `clean compileJava` | Supported narrow slices only | `testing/dogfood/oss-manifest.json` execution with task/output/hash/archive parity and zero JVM forwards. |
+| Fixture-backed Kotlin JVM library `compileKotlin` via host `kotlinc` | **In flight; unverified on the rebased tree** | The `kotlin-jvm-library` dogfood entry must pass task/output inventory and zero-forward checks. `*.class` and `*.kotlin_module` content hashes are exempt, and archives are compared by entry inventory only; this limited gate cannot establish general Kotlin Gradle plugin parity. |
 
 No other Gradle build shape is part of the supported preview contract until it
 is added to this table and backed by reproducible evidence.
+
+Evidence state: the last documented pre-rebase result at `7eabe3f` on
+2026-07-16 reported 8/8 supported direct-warm entries and 9/9 total manifest
+entries (8 supported + 1 fail-closed). The current rebased tree has not been
+built or tested, so those results must not be presented as current-HEAD
+evidence. The current manifest inventory is counted from the manifest itself.
 
 ## Unsupported Build Shapes
 
@@ -128,6 +142,9 @@ admission, or an explicit unsupported corpus gate. The preview does not support:
 - arbitrary JVM plugin behavior after the typed task/dependency contract has
   been captured;
 - arbitrary `buildSrc` execution in Rust;
+- Kotlin build logic, precompiled Kotlin DSL plugin generation, Kotlin compiler
+  plugins, and Kotlin Gradle plugin behavior outside the single in-flight
+  fixture-backed host-`kotlinc` vertical;
 - DSL evaluation in Rust;
 - rich dependency semantics not represented by the native contract, including
   unsupported dynamic selectors, non-module dependency substitution, richer
@@ -155,6 +172,7 @@ fallback would make the Rust-kernel claim false.
 | Arbitrary custom JVM task actions and unmodeled task implementations | Reject at build-plan admission unless the task matches an exact static report contract. |
 | Unsupported CopySpec behavior, unsupported copy filters, method-level or richer test filters, unsafe symlink/archive variants | Reject via unsupported corpus or focused task-graph/executor admission tests before native execution. |
 | DSL evaluation, `buildSrc`, arbitrary JVM plugins, and reflection-heavy Gradle APIs in Rust | Stay JVM-owned before the typed contract boundary; never approximate inside the Rust daemon. |
+| Kotlin build logic, precompiled Kotlin DSL plugins, compiler plugins, and Kotlin Gradle plugin semantics outside the narrow fixture contract | Stay JVM-owned or reject the selected plan with a precise Kotlin capability diagnostic. |
 | Rich dependency semantics outside the native contract: unsupported dynamic selectors, non-module dependency substitution, unsupported enforced-platform forms, unsupported component metadata rules, repository regex/configuration/attribute filters, unsupported Gradle Module Metadata fields | Reject at dependency graph or execution-kernel admission with a precise unsupported-feature reason. |
 | Explicit settings-level `includeBuild(...)` composite substitution | Reject as `composite-substitution:settings` until Rust has an included-build IR/execution model. |
 | CycloneDX SBOM tasks without a complete schema-backed SBOM contract | Reject native execution; graph/artifact/POM evidence may be captured but must not be promoted without output parity. |
@@ -184,6 +202,9 @@ Rust-owned preview surfaces after admission:
   `Javadoc`, and `Test` contracts, reported as `rust_process` task execution
   details; JVM worker/compatibility paths remain explicit sidecars rather than
   hidden in-daemon fallback;
+- an in-flight, fixture-backed `KotlinCompile` executor that launches the host
+  `kotlinc`; it is not a supported compiler or Kotlin plugin implementation and
+  remains unverified on the rebased tree;
 - first-60s metrics and no-fallback execution evidence.
 
 ## Warm Rust-First Workflow
@@ -295,7 +316,10 @@ explicit `includeBuild(...)` settings as `composite-substitution:settings`, and
 Rust kernel admission rejects that plan before scheduler dispatch. Promoting this
 requires a real included-build IR/execution model, including substituted project
 dependency edges, included-build tasks, outputs, and classpaths across build
-scopes.
+scopes. Concrete classpath files captured from a prior Gradle configuration do
+not encode those producer tasks or cross-build edges and therefore do not make
+the shape admissible. `testing/dogfood/manifest-composite-only.json` is retained
+as an experimental focused fail-closed gate, not as composite support evidence.
 
 Gate 5, one-command demo and dogfood workflow (`gradle-fork-9dh1`):
 `tools/demo/rust_substrate_demo.sh` builds or locates prerequisites, runs

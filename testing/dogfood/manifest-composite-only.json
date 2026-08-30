@@ -1,0 +1,34 @@
+{
+  "schema": "gradle-substrate.dogfood-manifest.v1",
+  "root": "../corpus",
+  "description": "Experimental focused fail-closed gate for settings-level includeBuild substitution. It is separate from the canonical dogfood run so composite rejection can be exercised in isolation without implying support.",
+  "projects": [
+    {
+      "name": "unsupported-composite-substitution",
+      "path": "composite-substitution-unsupported-kotlin-dsl",
+      "source": {
+        "kind": "checked-in-local",
+        "description": "Checked-in unsupported fixture with explicit settings-level includeBuild substitution semantics."
+      },
+      "tasks": [
+        "clean",
+        "build"
+      ],
+      "mode": "strict",
+      "expectation": "fail-closed",
+      "coverage_tags": [
+        "fail-closed",
+        "unsupported-composite-build"
+      ],
+      "timeout_seconds": 300,
+      "reason": "Demonstrates that the preview rejects unsupported composite substitution at admission: materialized classpath files do not model included-build producer tasks or cross-build dependency edges.",
+      "checks": {
+        "fail_closed_diagnostic": "composite-substitution",
+        "no_task_by_task_fallback": true
+      }
+    }
+  ],
+  "minimum_projects": 1,
+  "minimum_supported_projects": 0,
+  "minimum_fail_closed_projects": 1
+}

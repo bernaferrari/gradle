@@ -5466,19 +5466,24 @@ mod tests {
             .to_vec();
         let server = std::thread::spawn(move || {
             let started = std::time::Instant::now();
-            while requested_for_server.lock().unwrap().len() < 5
-                && started.elapsed() < std::time::Duration::from_secs(5)
+            // Keep the mock alive long enough for module miss + pom fallback traffic.
+            while requested_for_server.lock().unwrap().len() < 12
+                && started.elapsed() < std::time::Duration::from_secs(15)
             {
                 let (mut stream, _) = match listener.accept() {
                     Ok(stream) => stream,
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        std::thread::sleep(std::time::Duration::from_millis(5));
                         continue;
                     }
                     Err(error) => panic!("test server accept failed: {error}"),
                 };
-                let mut request = [0u8; 2048];
+                let _ = stream.set_nonblocking(false);
+                let mut request = [0u8; 8192];
                 let read = stream.read(&mut request).unwrap_or(0);
+                if read == 0 {
+                    continue;
+                }
                 let request_text = String::from_utf8_lossy(&request[..read]);
                 let path = request_text
                     .lines()
@@ -5488,27 +5493,37 @@ mod tests {
                     .to_string();
                 requested_for_server.lock().unwrap().push(path.clone());
                 let body = if path == "/" || path.ends_with("/root-1.0.module") {
-                    Some((&root_module, "application/json"))
+                    Some((root_module.as_slice(), "application/json"))
                 } else if path.ends_with("/runtime-child-1.0.pom") {
-                    Some((&child_pom, "application/xml"))
+                    Some((child_pom.as_slice(), "application/xml"))
                 } else if path.ends_with("/good-1.0.pom") {
-                    Some((&good_pom, "application/xml"))
+                    Some((good_pom.as_slice(), "application/xml"))
                 } else {
                     None
                 };
                 match body {
                     Some((body, content_type)) => {
                         let response = format!(
-                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: {}\r\n\r\n",
+                            "HTTP/1.1 200 OK
+Content-Length: {}
+Content-Type: {}
+Connection: close
+
+",
                             body.len(),
                             content_type
                         );
-                        stream.write_all(response.as_bytes()).unwrap();
-                        stream.write_all(body).unwrap();
+                        let _ = stream.write_all(response.as_bytes());
+                        let _ = stream.write_all(body);
                     }
                     None => {
-                        let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
-                        stream.write_all(response.as_bytes()).unwrap();
+                        let response =
+                            "HTTP/1.1 404 Not Found
+Content-Length: 0
+Connection: close
+
+";
+                        let _ = stream.write_all(response.as_bytes());
                     }
                 }
             }

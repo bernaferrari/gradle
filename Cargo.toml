@@ -28,14 +28,39 @@ criterion = { version = "0.8", features = ["html_reports"] }
 tower = "0.5"
 hex = "0.4"
 
+[profile.dev]
+# Keep local builds debuggable while cutting target/ hard.
+# Most of debug/ bulk is dep debuginfo + incremental caches.
+debug = 1
+incremental = false
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+# Dependency crates almost never need local debug symbols.
+debug = false
+opt-level = 1
+
 [profile.release]
 opt-level = "z"
 lto = true
 codegen-units = 1
 strip = true
 panic = "abort"
+incremental = false
+debug = false
+
+[profile.release.package."*"]
+debug = false
 
 [profile.test]
 opt-level = 1
 debug = 0
 lto = false
+incremental = false
+
+[profile.bench]
+incremental = false
+debug = false
+strip = true
+lto = true
+codegen-units = 1

@@ -24,7 +24,7 @@ A Rust implementation of Gradle's build execution substrate, communicating with 
 ┌─────────────────────┼─────────────────────────────────────────────┐
 │                     ▼                      Rust Substrate Daemon   │
 │  ┌──────────────────────────────────────────────────────────┐     │
-│  │                   41 gRPC Services                       │     │
+│  │                   43 gRPC Services                       │     │
 │  │                                                          │     │
 │  │  Core Services:                                          │     │
 │  │  ├── hash.rs          - File hashing (MD5/SHA1/SHA256)   │     │
@@ -36,7 +36,7 @@ A Rust implementation of Gradle's build execution substrate, communicating with 
 │  │  ├── file_watch.rs    - File watching                    │     │
 │  │  ├── toolchain.rs     - JVM toolchain management         │     │
 │  │  ├── worker_process.rs- Worker pool management           │     │
-│  │  └── ...              - 30+ more services               │     │
+│  │  └── ...              - 33 more registered services      │     │
 │  └──────────────────────────────────────────────────────────┘     │
 │                                                                     │
 │  Parsers & DSL:                                                    │
@@ -51,7 +51,7 @@ A Rust implementation of Gradle's build execution substrate, communicating with 
 │  ├── task_executor/java_compile.rs - Java compilation              │
 │  ├── task_executor/copy.rs      - File copying                     │
 │  ├── task_executor/test_exec.rs - Test execution                   │
-│  └── task_executor/*.rs       - 8 task executors total             │
+│  └── task_executor/*.rs       - 20 registered task-type keys       │
 │                                                                     │
 │  Infrastructure:                                                   │
 │  ├── dag_executor.rs      - DAG-based task scheduler (2,983 lines) │
@@ -63,6 +63,12 @@ A Rust implementation of Gradle's build execution substrate, communicating with 
 │  └── scopes.rs            - Scope identifiers (311 lines)          │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+These are static implementation-breadth counts, not Gradle parity claims.
+Several registered services are scaffold, shadow, or bounded sidecar surfaces,
+and a registered executor key may support only a narrow admitted contract or
+remain fail-closed for richer variants. The counts were verified from the
+current source tree without building or running tests.
 
 ## Quick Start
 
@@ -147,10 +153,14 @@ The Groovy/Kotlin AST parser (`groovy_parser/`) is fully implemented but current
 
 ## Proto Contract
 
-All 29 protocol buffer definitions are in `substrate/proto/v1/`. They define:
-- 41 gRPC service interfaces
+All 30 protocol buffer definitions are in `substrate/proto/v1/`. They define:
+- 43 gRPC service interfaces with 187 RPC declarations
 - 300+ message types for data exchange
 - Versioned protocol contract between JVM and Rust daemon
+
+The service/RPC inventory includes experimental, scaffold, shadow, and partial
+surfaces. Registration does not mean that the corresponding Gradle behavior is
+authoritative or parity-complete.
 
 Sync to Java: `./gradlew :rust-bridge:syncProtos`
 
@@ -199,7 +209,7 @@ The JVM compatibility host in `platforms/core-execution/rust-bridge/` provides:
 substrate/
 ├── Cargo.toml              # Workspace root
 ├── build.rs                # Proto compilation + version injection
-├── proto/v1/               # 29 .proto files
+├── proto/v1/               # 30 .proto files
 ├── src/
 │   ├── main.rs             # Daemon binary (wires substrate services)
 │   ├── lib.rs              # Library exports
@@ -207,7 +217,7 @@ substrate/
 │   ├── client/             # JVM host gRPC client
 │   └── server/             # Service implementations and infrastructure
 │       ├── groovy_parser/  # Lexer (1,800 loc) + Parser (2,274 loc) + AST
-│       └── task_executor/  # 8 task executor implementations
+│       └── task_executor/  # 20 registered native executor keys
 ├── tests/
 │   ├── integration_test.rs # gRPC integration coverage
 │   ├── parser_regression.rs# parser edge case coverage

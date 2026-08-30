@@ -595,50 +595,50 @@ impl TaskGraphServiceImpl {
 }
 
 fn task_context_has_unsupported_marker(context_json: &str) -> bool {
-    if context_json.contains("\"unsupported_dependency_semantics\":\"true\"")
-        || context_json.contains("\"input.unsupported_dependency_semantics\":\"true\"")
-        || context_json.contains("\"input_value.unsupported_dependency_semantics\":\"true\"")
-        || context_json.contains("\"unsupported_configuration_semantics\":\"true\"")
-        || context_json.contains("\"input.unsupported_configuration_semantics\":\"true\"")
-        || context_json.contains("\"input_value.unsupported_configuration_semantics\":\"true\"")
-        || context_json.contains("\"requires_jvm_task_execution\":true")
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(context_json) {
+        let properties = value.get("input_properties").and_then(|v| v.as_object());
+        let dep_marker = value
+            .get("unsupported_dependency_semantics")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+            || properties
+                .map(|properties| {
+                    [
+                        "unsupported_dependency_semantics",
+                        "input.unsupported_dependency_semantics",
+                        "input_value.unsupported_dependency_semantics",
+                    ]
+                    .iter()
+                    .any(|key| properties.get(*key).and_then(|v| v.as_str()) == Some("true"))
+                })
+                .unwrap_or(false);
+        if dep_marker {
+            // A concrete classpath string does not identify the included-build
+            // producer or encode its cross-build edge, so keep the marker until
+            // that provenance exists in the admitted task graph IR.
+            return true;
+        }
+        if let Some(properties) = properties {
+            let config_marker = [
+                "unsupported_configuration_semantics",
+                "input.unsupported_configuration_semantics",
+                "input_value.unsupported_configuration_semantics",
+            ]
+            .iter()
+            .any(|key| properties.get(*key).and_then(|v| v.as_str()) == Some("true"));
+            if config_marker {
+                return true;
+            }
+        }
+    }
+
+    context_json.contains("\"requires_jvm_task_execution\":true")
         || context_json.contains("\"copy_unsupported_custom_actions\":true")
         || context_json.contains("\"test_unsupported_filters\":true")
         || context_json.contains("\"unsupported_archive_semantics\":true")
-    {
-        return true;
-    }
-    serde_json::from_str::<serde_json::Value>(context_json)
-        .ok()
-        .and_then(|value| value.get("input_properties").cloned())
-        .and_then(|value| value.as_object().cloned())
-        .map(|properties| {
-            properties
-                .get("unsupported_dependency_semantics")
-                .and_then(|value| value.as_str())
-                == Some("true")
-                || properties
-                    .get("input.unsupported_dependency_semantics")
-                    .and_then(|value| value.as_str())
-                    == Some("true")
-                || properties
-                    .get("input_value.unsupported_dependency_semantics")
-                    .and_then(|value| value.as_str())
-                    == Some("true")
-                || properties
-                    .get("unsupported_configuration_semantics")
-                    .and_then(|value| value.as_str())
-                    == Some("true")
-                || properties
-                    .get("input.unsupported_configuration_semantics")
-                    .and_then(|value| value.as_str())
-                    == Some("true")
-                || properties
-                    .get("input_value.unsupported_configuration_semantics")
-                    .and_then(|value| value.as_str())
-                    == Some("true")
-        })
-        .unwrap_or(false)
+        || context_json.contains("\"unsupported_configuration_semantics\":\"true\"")
+        || context_json.contains("\"input.unsupported_configuration_semantics\":\"true\"")
+        || context_json.contains("\"input_value.unsupported_configuration_semantics\":\"true\"")
 }
 
 fn configuration_shadow_rejection_reasons(
@@ -3408,6 +3408,59 @@ mod tests {
             normalization: "scalar".to_string(),
             optional: false,
         }
+    }
+
+    #[test]
+    fn test_composite_marker_filter_keeps_compile_tasks_marked_without_provenance() {
+        let missing = serde_json::json!({
+            "input_properties": {
+                "unsupported_dependency_semantics": "true",
+                "unsupported_repository_features": "composite-substitution:settings@included-lib"
+            }
+        })
+        .to_string();
+        let concrete = serde_json::json!({
+            "options": {
+                "classpath": "/repo/included-lib/build/classes/java/main"
+            },
+            "input_properties": {
+                "unsupported_dependency_semantics": "true",
+                "unsupported_repository_features": "composite-substitution:settings@included-lib"
+            }
+        })
+        .to_string();
+
+        assert!(task_context_has_unsupported_marker(&missing));
+        assert!(task_context_has_unsupported_marker(&concrete));
+    }
+
+    #[test]
+    fn test_composite_marker_filter_keeps_lifecycle_marked_without_provenance() {
+        let context = serde_json::json!({
+            "input_properties": {
+                "input.unsupported_dependency_semantics": "true",
+                "input.unsupported_repository_features": "composite-substitution:settings@included-lib"
+            }
+        })
+        .to_string();
+
+        assert!(task_context_has_unsupported_marker(&context));
+    }
+
+    #[test]
+    fn test_composite_marker_filter_keeps_mixed_unsupported_features_marked() {
+        let context = serde_json::json!({
+            "options": {
+                "classpath": "/repo/included-lib/build/classes/java/main"
+            },
+            "input_properties": {
+                "unsupported_dependency_semantics": "true",
+                "unsupported_repository_features": "composite-substitution:settings,component-metadata-rule"
+            }
+        })
+        .to_string();
+
+        assert!(task_context_has_unsupported_marker(&context));
     }
 
     #[test]

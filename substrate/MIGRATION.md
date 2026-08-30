@@ -5,6 +5,12 @@ gates: [`docs/rust-substrate-preview.md`](../docs/rust-substrate-preview.md).
 Strategy: [`docs/rust-substrate-turbopack-plan.md`](../docs/rust-substrate-turbopack-plan.md).  
 Parity snapshot: [`PARITY.md`](PARITY.md).
 
+Evidence boundary: the last documented pre-rebase run at `7eabe3f` on
+2026-07-16 reported 8/8 supported direct-warm entries and 9/9 full-manifest
+entries (8 supported + 1 fail-closed). The current rebased worktree has not
+been built or tested, so migration targets added or refined here remain
+unverified until those gates are rerun.
+
 ## Model
 
 ```
@@ -55,11 +61,25 @@ and fingerprints are still valid.
 - Local up-to-date / cache pack-unpack for captured work  
 - Daemon endpoint persistence and reuse with identity checks  
 
+## In flight (not promoted)
+
+- One checked-in Kotlin JVM library fixture can lower its narrow
+  `KotlinCompile` shape to a Rust executor that launches the host `kotlinc`.
+  This target is unverified after the rebase, exempts `*.class` and
+  `*.kotlin_module` content hashes, and compares archives by entry inventory
+  only. It does not establish Kotlin Gradle plugin, compiler-plugin, or Kotlin
+  build-logic parity.
+
 ## Still JVM-owned or fail-closed
 
 - Full DSL and `buildSrc`  
 - Arbitrary and third-party plugins (until ABI or guest runtime)  
-- Composite `includeBuild` substitution  
+- Composite `includeBuild` substitution; captured classpath files do not model
+  included-build producer tasks or cross-build dependency edges. The focused
+  `testing/dogfood/manifest-composite-only.json` gate is experimental and does
+  not change this ownership boundary
+- Kotlin build logic, precompiled Kotlin DSL plugins, Kotlin compiler plugins,
+  and Kotlin Gradle plugin task shapes outside the in-flight fixture
 - Rich resolution rules, custom transforms, unsupported GMM  
 - Tooling API and IDE model breadth  
 - Anything not on the preview matrix  

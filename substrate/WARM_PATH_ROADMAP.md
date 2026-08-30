@@ -1,22 +1,31 @@
 # Rust Substrate Warm / Cached-Plan Execution Roadmap
 
-**Status (as of this session):** Highest-ROI warm path improvements partially delivered. The direct `gradle-substrate-runbuild` tool is now significantly more usable.
+**Status:** Endpoint auto-discovery and stale daemon-binary identity validation
+are implemented in `runbuild.rs`. Dry-run plan validation remains outstanding.
+This status was verified statically; the added focused tests were not run in
+this documentation pass.
 
 ## Why This Matters (Highest ROI per my assessment)
 - The unique capability no one else has: after one JVM configuration pass that produces a validated native-ready build-plan shadow, Rust can execute the entire DAG with zero JVM forwards, from a tiny daemon, with strong content fingerprint invalidation.
 - This is the "first 60 seconds" + repeated dogfood / CI / developer inner-loop killer feature.
 
-## Delivered in This Session
+## Implemented
 1. **P1 Bug Fixed** (gradle-fork-6bfn)
    - Unified HASH file fingerprint entry ID generation through a single canonical `hash_only_path(raw_content_md5_bytes)` helper.
    - Single-file vs directory-child paths now guaranteed identical for the same content.
-   - Added dedicated regression test + comments. All file_fingerprint --lib tests pass.
+   - A dedicated regression test and comments are checked in; the test was not
+     run in this documentation pass.
 
 2. **Major Warm-Path Usability Win**
    - `gradle-substrate-runbuild` now supports auto-discovery of the daemon TCP endpoint from `state_dir/substrate.tcp-endpoint` (or `state/state/...` layout).
    - `--endpoint` is now optional when `--state-dir` is supplied.
    - New `--no-endpoint-discovery` escape hatch.
-   - Added unit test for discovery.
+   - Discovered endpoint files are validated before connection: the persisted
+     daemon binary must still exist and match its recorded modification time
+     and size, otherwise runbuild fails closed with a stale-identity error.
+   - Focused unit tests cover explicit-endpoint precedence, both discovery
+     layouts, stale binary identity rejection, and the discovery opt-out. They
+     were added but not run in this documentation pass.
    - Example new short command:
      ```
      target/debug/gradle-substrate-runbuild \
@@ -30,7 +39,9 @@
 **Note (parallel slices)**: Dependency Graph slice (dependency_solver/resolved_graph + hot path wiring in dependency_resolution.rs) first milestone delivered per plan (edge materialization + selection ownership live, "resolved-graph" reporter active). See plan.md.
 
 ### Tier 1 — Make Warm Path *Excellent* (do these next)
-- [ ] Improve endpoint file freshness / binary identity validation inside runbuild (reuse more of wrapper logic, fail closed on mismatch with clear message).
+- [x] Auto-discover persisted endpoints and fail closed when the recorded daemon
+  binary identity is stale (`runbuild.rs`; focused tests added but not run this
+  pass).
 - [ ] Add `--dry-run` / plan validation mode to runbuild (load artifact + fingerprints, print what would run, exit without contacting daemon).
 - [ ] First-class support in `tools/demo/` and `tools/dogfood_runner/` for the short runbuild form (update direct_warm.py etc.).
 - [ ] Document the "one Gradle run → many pure-Rust warm executions" story prominently in substrate/README.md and docs/rust-substrate-preview.md.

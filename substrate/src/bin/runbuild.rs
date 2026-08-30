@@ -17,8 +17,13 @@ use tonic::transport::Endpoint;
 )]
 struct Args {
     /// Existing daemon endpoint, for example tcp://127.0.0.1:51234.
+    /// When omitted, discover it from --state-dir.
     #[arg(long)]
-    endpoint: String,
+    endpoint: Option<String>,
+
+    /// Require an explicit --endpoint instead of reading substrate.tcp-endpoint.
+    #[arg(long)]
+    no_endpoint_discovery: bool,
 
     /// Build-plan shadow artifact JSON written under state/config-cache/build-plan-shadow.
     #[arg(long)]
@@ -253,7 +258,18 @@ async fn run_direct_build() -> Result<i32, Box<dyn std::error::Error>> {
     let task_filter = resolve_task_filter(&artifact, &args.tasks)?;
     let task_contexts = direct_task_contexts(&artifact, &task_filter, &validation_scope);
 
-    let channel = connect_tcp(&args.endpoint).await?;
+    let endpoint = resolve_daemon_endpoint(&args)?;
+    let channel = connect_tcp(&endpoint.value).await.map_err(|error| {
+        let source = endpoint
+            .source
+            .as_ref()
+            .map(|path| format!(" discovered from '{}'", path.display()))
+            .unwrap_or_default();
+        format!(
+            "failed to connect to substrate daemon at '{}'{}: {}",
+            endpoint.value, source, error
+        )
+    })?;
     let mut bootstrap = BootstrapServiceClient::new(channel.clone());
     let mut dag = DagExecutorServiceClient::new(channel);
     let start_ms = now_ms();
@@ -419,6 +435,231 @@ fn build_plan_shadow_root(state_dir: &Path) -> PathBuf {
         .join("state")
         .join("config-cache")
         .join("build-plan-shadow")
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ResolvedDaemonEndpoint {
+    value: String,
+    source: Option<PathBuf>,
+}
+
+fn resolve_daemon_endpoint(
+    args: &Args,
+) -> Result<ResolvedDaemonEndpoint, Box<dyn std::error::Error>> {
+    if let Some(endpoint) = args.endpoint.as_deref() {
+        validate_tcp_endpoint(endpoint, false)?;
+        return Ok(ResolvedDaemonEndpoint {
+            value: endpoint.to_string(),
+            source: None,
+        });
+    }
+    if args.no_endpoint_discovery {
+        return Err("--endpoint is required when --no-endpoint-discovery is set".into());
+    }
+    let state_dir = args
+        .state_dir
+        .as_deref()
+        .ok_or("--endpoint or --state-dir is required to locate the substrate daemon")?;
+    discover_daemon_endpoint(state_dir)
+}
+
+fn discover_daemon_endpoint(
+    state_dir: &Path,
+) -> Result<ResolvedDaemonEndpoint, Box<dyn std::error::Error>> {
+    let mut candidates = vec![
+        state_dir.join("substrate.tcp-endpoint"),
+        state_dir.join("state").join("substrate.tcp-endpoint"),
+    ];
+    if state_dir.file_name().and_then(|name| name.to_str()) == Some("state") {
+        if let Some(parent) = state_dir.parent() {
+            candidates.push(parent.join("substrate.tcp-endpoint"));
+        }
+    }
+    let mut seen = HashSet::new();
+    candidates.retain(|path| seen.insert(path.clone()));
+
+    let mut invalid = Vec::new();
+    let mut found = false;
+    for path in &candidates {
+        if !path.is_file() {
+            continue;
+        }
+        found = true;
+        match read_persisted_daemon_endpoint(path) {
+            Ok(value) => {
+                return Ok(ResolvedDaemonEndpoint {
+                    value,
+                    source: Some(path.clone()),
+                });
+            }
+            Err(error) => invalid.push(format!("'{}': {}", path.display(), error)),
+        }
+    }
+
+    if found {
+        return Err(format!(
+            "no valid persisted substrate endpoint was found: {}",
+            invalid.join("; ")
+        )
+        .into());
+    }
+    let searched = candidates
+        .iter()
+        .map(|path| format!("'{}'", path.display()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(format!(
+        "no persisted substrate endpoint file was found; searched {searched}; pass --endpoint or start the substrate daemon"
+    )
+    .into())
+}
+
+fn read_persisted_daemon_endpoint(
+    path: &Path,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let contents = std::fs::read_to_string(path)?;
+    let properties = parse_endpoint_properties(&contents);
+    let endpoint = required_endpoint_property(&properties, "endpoint")?;
+    validate_tcp_endpoint(endpoint, true)?;
+
+    let launch_mode = properties
+        .get("launchMode")
+        .map(String::as_str)
+        .unwrap_or("legacy");
+    let jvm_host_mode = properties
+        .get("jvmHostMode")
+        .map(String::as_str)
+        .unwrap_or("unknown");
+    let launch_metadata_supported = matches!(
+        (launch_mode, jvm_host_mode),
+        ("legacy", "unknown")
+            | ("rust-daemon-primary", "standalone")
+            | ("rust-daemon-primary", "attached-on-demand")
+            | ("rust-wrapper-prewarm", "standalone")
+    );
+    if !launch_metadata_supported {
+        return Err(format!(
+            "inconsistent launch metadata launchMode={launch_mode}, jvmHostMode={jvm_host_mode}"
+        )
+        .into());
+    }
+
+    let daemon_binary = PathBuf::from(required_endpoint_property(
+        &properties,
+        "daemonBinary",
+    )?);
+    if !daemon_binary.is_absolute() {
+        return Err(format!(
+            "daemonBinary must be an absolute path, got '{}'",
+            daemon_binary.display()
+        )
+        .into());
+    }
+    let expected_modified = parse_endpoint_u64(&properties, "daemonBinaryLastModifiedMillis")?;
+    let expected_size = parse_endpoint_u64(&properties, "daemonBinarySize")?;
+    let metadata = daemon_binary.metadata().map_err(|error| {
+        format!(
+            "persisted daemon binary '{}' is unavailable: {}",
+            daemon_binary.display(),
+            error
+        )
+    })?;
+    let actual_modified = metadata
+        .modified()?
+        .duration_since(UNIX_EPOCH)?
+        .as_millis() as u64;
+    let actual_size = metadata.len();
+    if actual_modified != expected_modified || actual_size != expected_size {
+        return Err(format!(
+            "persisted daemon binary identity is stale for '{}': expected mtime_ms={} size={}, found mtime_ms={} size={}",
+            daemon_binary.display(),
+            expected_modified,
+            expected_size,
+            actual_modified,
+            actual_size
+        )
+        .into());
+    }
+
+    Ok(endpoint.to_string())
+}
+
+fn parse_endpoint_properties(contents: &str) -> BTreeMap<String, String> {
+    let mut properties = BTreeMap::new();
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with('!') {
+            continue;
+        }
+        let pair = line
+            .split_once('=')
+            .or_else(|| line.split_once(':'));
+        let Some((key, value)) = pair else {
+            continue;
+        };
+        properties.insert(
+            unescape_endpoint_property(key.trim()),
+            unescape_endpoint_property(value.trim()),
+        );
+    }
+    properties
+}
+
+fn unescape_endpoint_property(value: &str) -> String {
+    let mut unescaped = String::with_capacity(value.len());
+    let mut chars = value.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            if let Some(escaped) = chars.next() {
+                unescaped.push(escaped);
+            }
+        } else {
+            unescaped.push(ch);
+        }
+    }
+    unescaped
+}
+
+fn required_endpoint_property<'a>(
+    properties: &'a BTreeMap<String, String>,
+    name: &str,
+) -> Result<&'a str, Box<dyn std::error::Error>> {
+    properties
+        .get(name)
+        .map(String::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| format!("missing required {name} property").into())
+}
+
+fn parse_endpoint_u64(
+    properties: &BTreeMap<String, String>,
+    name: &str,
+) -> Result<u64, Box<dyn std::error::Error>> {
+    let value = required_endpoint_property(properties, name)?;
+    value
+        .parse::<u64>()
+        .map_err(|error| format!("invalid {name} value '{value}': {error}").into())
+}
+
+fn validate_tcp_endpoint(
+    endpoint: &str,
+    require_loopback: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let address = endpoint
+        .strip_prefix("tcp://")
+        .ok_or_else(|| format!("only tcp:// endpoints are supported: {endpoint}"))?;
+    let socket = address
+        .parse::<std::net::SocketAddr>()
+        .map_err(|error| format!("invalid persisted TCP endpoint '{endpoint}': {error}"))?;
+    if socket.port() == 0 || (require_loopback && !socket.ip().is_loopback()) {
+        return Err(format!(
+            "{}endpoint must use a non-zero {}TCP address: {endpoint}",
+            if require_loopback { "persisted " } else { "" },
+            if require_loopback { "loopback " } else { "" }
+        )
+        .into());
+    }
+    Ok(())
 }
 
 fn keyed_artifact_filename(build_id: &str) -> String {
@@ -1168,7 +1409,8 @@ mod tests {
 
     fn test_args() -> Args {
         Args {
-            endpoint: "tcp://127.0.0.1:1".to_string(),
+            endpoint: Some("tcp://127.0.0.1:1".to_string()),
+            no_endpoint_discovery: false,
             artifact: None,
             state_dir: None,
             build_id: None,
@@ -1179,6 +1421,97 @@ mod tests {
             changed_paths: Vec::new(),
             changed_paths_file: None,
         }
+    }
+
+    fn write_endpoint_file(state_dir: &Path, daemon_binary: &Path, endpoint: &str) -> PathBuf {
+        std::fs::create_dir_all(state_dir).unwrap();
+        std::fs::write(daemon_binary, "daemon bytes").unwrap();
+        let metadata = daemon_binary.metadata().unwrap();
+        let modified_ms = metadata
+            .modified()
+            .unwrap()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        let path = state_dir.join("substrate.tcp-endpoint");
+        std::fs::write(
+            &path,
+            format!(
+                "endpoint={endpoint}\nlaunchMode=rust-daemon-primary\njvmHostMode=standalone\ndaemonBinary={}\ndaemonBinaryLastModifiedMillis={modified_ms}\ndaemonBinarySize={}\n",
+                daemon_binary.display(),
+                metadata.len()
+            ),
+        )
+        .unwrap();
+        path
+    }
+
+    #[test]
+    fn explicit_endpoint_takes_precedence_without_state_dir() {
+        let args = test_args();
+
+        let resolved = resolve_daemon_endpoint(&args).unwrap();
+
+        assert_eq!(resolved.value, "tcp://127.0.0.1:1");
+        assert_eq!(resolved.source, None);
+    }
+
+    #[test]
+    fn discovers_fresh_endpoint_from_state_dir() {
+        let temp = tempfile::tempdir().unwrap();
+        let daemon = temp.path().join("gradle-substrate-daemon");
+        let endpoint_file = write_endpoint_file(temp.path(), &daemon, "tcp://127.0.0.1:51234");
+        let mut args = test_args();
+        args.endpoint = None;
+        args.state_dir = Some(temp.path().to_path_buf());
+
+        let resolved = resolve_daemon_endpoint(&args).unwrap();
+
+        assert_eq!(resolved.value, "tcp://127.0.0.1:51234");
+        assert_eq!(resolved.source.as_deref(), Some(endpoint_file.as_path()));
+    }
+
+    #[test]
+    fn discovers_endpoint_from_nested_state_layout() {
+        let temp = tempfile::tempdir().unwrap();
+        let nested_state = temp.path().join("state");
+        let daemon = temp.path().join("gradle-substrate-daemon");
+        let endpoint_file =
+            write_endpoint_file(&nested_state, &daemon, "tcp://127.0.0.1:51235");
+        let mut args = test_args();
+        args.endpoint = None;
+        args.state_dir = Some(temp.path().to_path_buf());
+
+        let resolved = resolve_daemon_endpoint(&args).unwrap();
+
+        assert_eq!(resolved.value, "tcp://127.0.0.1:51235");
+        assert_eq!(resolved.source.as_deref(), Some(endpoint_file.as_path()));
+    }
+
+    #[test]
+    fn rejects_stale_discovered_daemon_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let daemon = temp.path().join("gradle-substrate-daemon");
+        write_endpoint_file(temp.path(), &daemon, "tcp://127.0.0.1:51234");
+        std::fs::write(&daemon, "different daemon bytes").unwrap();
+        let mut args = test_args();
+        args.endpoint = None;
+        args.state_dir = Some(temp.path().to_path_buf());
+
+        let error = resolve_daemon_endpoint(&args).unwrap_err();
+
+        assert!(error.to_string().contains("identity is stale"));
+    }
+
+    #[test]
+    fn no_endpoint_discovery_requires_explicit_endpoint() {
+        let mut args = test_args();
+        args.endpoint = None;
+        args.no_endpoint_discovery = true;
+
+        let error = resolve_daemon_endpoint(&args).unwrap_err();
+
+        assert!(error.to_string().contains("--endpoint is required"));
     }
 
     fn write_shadow_artifact(root: &Path, build_id: &str, project_dir: Option<&Path>) -> PathBuf {

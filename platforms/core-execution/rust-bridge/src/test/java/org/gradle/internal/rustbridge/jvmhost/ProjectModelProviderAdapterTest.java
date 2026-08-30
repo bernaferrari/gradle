@@ -135,6 +135,37 @@ public class ProjectModelProviderAdapterTest {
             .anyMatch(input -> input.getKind().equals("source") && input.getValue().equals(sourceFile.getAbsolutePath())));
     }
 
+    @org.junit.Test
+    public void capturesKotlinCompilerArgsAsExactJsonArrayAndUnbracketedLegacyValue() throws IOException {
+        File sourceDir = temporaryFolder.newFolder("src", "main", "kotlin-compiler-args");
+        File sourceFile = new File(sourceDir, "CompilerArgs.kt");
+        assertTrue(sourceFile.createNewFile());
+        File outputDir = temporaryFolder.newFolder("build/classes/kotlin/compiler-args");
+        File classpathEntry = temporaryFolder.newFolder("build/classes/java/compiler-args");
+        File javaHome = temporaryFolder.newFolder("jdks", "kotlin-compiler-args-jdk-17");
+
+        Task compileKotlin = javaCompileTask(
+            ":compileKotlin",
+            "compileKotlin",
+            sourceFile,
+            outputDir,
+            fileCollection(classpathEntry),
+            javaHome,
+            null,
+            Arrays.asList("-Xjsr305=strict", "plugin:sample:option=value with spaces")
+        );
+
+        BuildPlanTask task = ProjectModelProviderAdapter.toBuildPlanTask(compileKotlin, KotlinCompile.class);
+        Map<String, String> inputs = task.getInputSpecsList().stream()
+            .filter(input -> input.getKind().equals("value"))
+            .collect(Collectors.toMap(BuildPlanTaskInputSpec::getName, BuildPlanTaskInputSpec::getValue));
+
+        assertEquals("-Xjsr305=strict plugin:sample:option=value with spaces", inputs.get("compiler_args"));
+        assertEquals("[\"-Xjsr305=strict\",\"plugin:sample:option=value with spaces\"]", inputs.get("compiler_args_json"));
+        assertEquals("kotlinc-jvm", inputs.get("kotlin_compiler_identity"));
+        assertEquals("2.4.0", inputs.get("kotlin_compiler_version"));
+    }
+
 
     @org.junit.Test
     public void capturesNativeReadyJarContractFromTaskModel() throws IOException {
@@ -1883,6 +1914,28 @@ public class ProjectModelProviderAdapterTest {
         File javaHome,
         ConfigurationContainer configurations
     ) {
+        return javaCompileTask(
+            path,
+            name,
+            sourceFile,
+            outputDir,
+            classpath,
+            javaHome,
+            configurations,
+            Collections.emptyList()
+        );
+    }
+
+    private static Task javaCompileTask(
+        String path,
+        String name,
+        File sourceFile,
+        File outputDir,
+        FileCollection classpath,
+        File javaHome,
+        ConfigurationContainer configurations,
+        Iterable<String> kotlinCompilerArgs
+    ) {
         FileCollection source = fileCollection(sourceFile);
         FileCollection outputs = fileCollection(outputDir);
         Project project = proxy(Project.class, (proxy, method, args) -> {
@@ -1900,7 +1953,7 @@ public class ProjectModelProviderAdapterTest {
             }
             return defaultValue(method.getReturnType());
         });
-        return proxy(new Class<?>[] {Task.class, JavaCompileContract.class}, (proxy, method, args) -> {
+        return proxy(new Class<?>[] {Task.class, JavaCompileContract.class, KotlinCompileContract.class}, (proxy, method, args) -> {
             switch (method.getName()) {
                 case "getPath":
                     return path;
@@ -1929,11 +1982,16 @@ public class ProjectModelProviderAdapterTest {
                 case "getTargetCompatibility":
                     return "17";
                 case "getClasspath":
+                case "getLibraries":
                     return classpath;
                 case "getSource":
                     return source;
                 case "getOptions":
                     return new CompileOptionsContract();
+                case "getCompilerOptions":
+                    return new KotlinCompilerOptionsContract(kotlinCompilerArgs);
+                case "getKotlinCompilerVersion$kotlin_gradle_plugin_common":
+                    return new ValueProvider("2.4.0");
                 case "getJavaCompiler":
                     return new JavaCompilerProvider(javaHome);
                 case "compareTo":
@@ -3303,6 +3361,12 @@ public class ProjectModelProviderAdapterTest {
         JavaCompilerProvider getJavaCompiler();
     }
 
+    public interface KotlinCompileContract {
+        FileCollection getLibraries();
+        KotlinCompilerOptionsContract getCompilerOptions();
+        ValueProvider getKotlinCompilerVersion$kotlin_gradle_plugin_common();
+    }
+
     public interface JarContract {
         ValueProvider getArchiveFileName();
         ValueProvider getArchiveBaseName();
@@ -3415,6 +3479,22 @@ public class ProjectModelProviderAdapterTest {
         }
     }
 
+    public static class KotlinCompilerOptionsContract {
+        private final Iterable<String> compilerArgs;
+
+        KotlinCompilerOptionsContract(Iterable<String> compilerArgs) {
+            this.compilerArgs = compilerArgs;
+        }
+
+        public ValueProvider getJvmTarget() {
+            return new ValueProvider("JVM_17");
+        }
+
+        public StringListProvider getFreeCompilerArgs() {
+            return new StringListProvider(compilerArgs);
+        }
+    }
+
     public static class JavadocOptionsContract {
         public String getEncoding() {
             return "UTF-8";
@@ -3439,6 +3519,18 @@ public class ProjectModelProviderAdapterTest {
         }
 
         public String getOrNull() {
+            return value;
+        }
+    }
+
+    public static class StringListProvider {
+        private final Iterable<String> value;
+
+        StringListProvider(Iterable<String> value) {
+            this.value = value;
+        }
+
+        public Iterable<String> getOrNull() {
             return value;
         }
     }
